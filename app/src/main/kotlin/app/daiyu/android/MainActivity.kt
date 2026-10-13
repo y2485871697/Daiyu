@@ -30,6 +30,10 @@ class MainActivity:Activity() {
     private val expandedTools=mutableSetOf<ToolCallId>()
     private val selections get()=controller.selections
     private val listener:()->Unit={refresh()}
+    private var refreshRateWindowResumed=false
+    private var previousPreferredRefreshRate:Float?=null
+    private var requestedPreferredRefreshRate:Float?=null
+    private val refreshRateRequest=Runnable {applyPreferredRefreshRate()}
     override fun onCreate(state:Bundle?) {
         super.onCreate(state)
         root=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL}
@@ -75,7 +79,34 @@ class MainActivity:Activity() {
         root.addView(actions);setContentView(root);root.requestApplyInsets()
         controller.observe(listener);refresh()
     }
+    override fun onResume() {
+        super.onResume()
+        refreshRateWindowResumed=true
+        applyPreferredRefreshRate()
+        window.decorView.post(refreshRateRequest)
+    }
+    private fun applyPreferredRefreshRate() {
+        if(!refreshRateWindowResumed || isFinishing || isDestroyed) return
+        val rate=highestSupportedRefreshRate(window.decorView.display?.supportedModes?.map {it.refreshRate}.orEmpty())
+        if(rate<=0f) return
+        val attributes=window.attributes
+        if(attributes.preferredRefreshRate==rate) return
+        if(previousPreferredRefreshRate==null) previousPreferredRefreshRate=attributes.preferredRefreshRate
+        requestedPreferredRefreshRate=rate
+        attributes.preferredRefreshRate=rate
+        window.attributes=attributes
+    }
     override fun onPause() {
+        refreshRateWindowResumed=false
+        window.decorView.removeCallbacks(refreshRateRequest)
+        val previous=previousPreferredRefreshRate
+        if(previous!=null && window.attributes.preferredRefreshRate==requestedPreferredRefreshRate) {
+            val attributes=window.attributes
+            attributes.preferredRefreshRate=previous
+            window.attributes=attributes
+        }
+        previousPreferredRefreshRate=null
+        requestedPreferredRefreshRate=null
         if(selectionReady) selections[selected?.id]=input.selectionStart to input.selectionEnd
         super.onPause()
     }

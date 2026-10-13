@@ -46,6 +46,49 @@ class ActivityTest:InstrumentationTestCase() {
                 installed=true
             }
             val first=start();activity=first
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                val expected=highestSupportedRefreshRate(first.window.decorView.display?.supportedModes?.map {it.refreshRate}.orEmpty())
+                assertTrue("The attached display must report a usable refresh rate",expected>0f)
+                assertEquals(expected,first.window.attributes.preferredRefreshRate,0f)
+                val resume=MainActivity::class.java.getDeclaredMethod("onResume").apply {isAccessible=true}
+                val pause=MainActivity::class.java.getDeclaredMethod("onPause").apply {isAccessible=true}
+                pause.invoke(first)
+                val zero=first.window.attributes
+                zero.preferredRefreshRate=0f
+                first.window.attributes=zero
+                resume.invoke(first)
+                pause.invoke(first)
+                assertEquals(0f,first.window.attributes.preferredRefreshRate,0f)
+                val attributes=first.window.attributes
+                attributes.preferredRefreshRate=13f
+                first.window.attributes=attributes
+                resume.invoke(first)
+                assertEquals(expected,first.window.attributes.preferredRefreshRate,0f)
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                val pause=MainActivity::class.java.getDeclaredMethod("onPause").apply {isAccessible=true}
+                val resume=MainActivity::class.java.getDeclaredMethod("onResume").apply {isAccessible=true}
+                val preferredMode=first.window.attributes.preferredDisplayModeId
+                pause.invoke(first)
+                assertEquals(13f,first.window.attributes.preferredRefreshRate,0f)
+                assertEquals(preferredMode,first.window.attributes.preferredDisplayModeId)
+                resume.invoke(first)
+                val external=first.window.attributes
+                external.preferredRefreshRate=17f
+                first.window.attributes=external
+                pause.invoke(first)
+                assertEquals(17f,first.window.attributes.preferredRefreshRate,0f)
+                resume.invoke(first)
+                pause.invoke(first)
+                assertEquals(17f,first.window.attributes.preferredRefreshRate,0f)
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                assertEquals(17f,first.window.attributes.preferredRefreshRate,0f)
+                MainActivity::class.java.getDeclaredMethod("onResume").apply {isAccessible=true}.invoke(first)
+            }
             instrumentation.runOnMainSync {
                 assertTrue(db.conversations().isEmpty())
                 input(first).setText("未创建草稿");input(first).setSelection(2,4)

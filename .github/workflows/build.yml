@@ -68,7 +68,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        api: [26, 37]
+        include:
+          - api: "26"
+            target: google_apis
+          - api: "37.2"
+            target: google_apis_ps16k
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -89,7 +93,7 @@ jobs:
         with:
           api-level: ${{ matrix.api }}
           arch: x86_64
-          target: google_apis
+          target: ${{ matrix.target }}
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
           script: bash scripts/smoke_boot.sh

@@ -41,7 +41,7 @@ collect_diagnostics
 adb install "$APK" 2>&1 | tee smoke/install.txt
 adb shell pm list packages > smoke/packages.txt
 ! grep -q 'package:io.github.mangi.eta$' smoke/packages.txt
-adb shell am start -W -n io.github.y2485871697.daiyu/.MainActivity > smoke/start.txt
+adb shell am start -W -n app.daiyu.android/.MainActivity > smoke/start.txt
 cat smoke/start.txt
 grep -q 'Status: ok' smoke/start.txt
 for attempt in $(seq 1 20); do

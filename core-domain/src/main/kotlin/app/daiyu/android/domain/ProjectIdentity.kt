@@ -1,4 +1,4 @@
-package io.github.y2485871697.daiyu.domain
+package app.daiyu.android.domain
 
 /** Product identity only; Android application identity belongs to the app module. */
 object ProjectIdentity {

@@ -2,7 +2,7 @@
 
 从空目录建立的 Android 独立工程，当前只交付 S1 骨架，不是完整助手。
 
-- 包名：`io.github.y2485871697.daiyu`
+- 包名：`app.daiyu.android`
 - 显示名：代鱼；工作目录：`/workspace/代鱼`
 - Android 8.0 / API 26 起；目标 API 37；构建 JDK 27（应用字节码目标17）。
 - `app`：Android 启动壳；`core-domain`：纯 Kotlin 产品领域层。

@@ -1,4 +1,4 @@
-package io.github.y2485871697.daiyu.domain
+package app.daiyu.android.domain
 
 import org.junit.Assert.assertEquals
 import org.junit.Test

@@ -1,4 +1,4 @@
-package io.github.y2485871697.daiyu
+package app.daiyu.android
 
 import android.app.Activity
 import android.os.Bundle
@@ -6,7 +6,7 @@ import android.view.View
 import android.view.WindowInsets
 import android.widget.LinearLayout
 import android.widget.TextView
-import io.github.y2485871697.daiyu.domain.ProjectIdentity
+import app.daiyu.android.domain.ProjectIdentity
 
 class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {

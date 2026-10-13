@@ -1,10 +1,10 @@
 plugins { id("com.android.application") }
 android {
-    namespace = "io.github.y2485871697.daiyu"
+    namespace = "app.daiyu.android"
     compileSdk { version = release(37) { minorApiLevel = 2 } }
     buildToolsVersion = "37.0.0"
     defaultConfig {
-        applicationId = "io.github.y2485871697.daiyu"
+        applicationId = "app.daiyu.android"
         minSdk = 26
         targetSdk = 37
         versionCode = 1

@@ -6,7 +6,7 @@ DOMAIN = ROOT / "core-domain/src"
 for path in DOMAIN.rglob("*.kt"):
     for line in path.read_text().splitlines():
         if line.startswith("import "):
-            assert not line.startswith(("import android.", "import androidx.", "import io.github.y2485871697.daiyu.MainActivity")), path
+            assert not line.startswith(("import android.", "import androidx.", "import app.daiyu.android.MainActivity")), path
 
 for folder in ("app/src", "core-domain/src"):
     for path in (ROOT / folder).rglob("*"):
@@ -14,6 +14,6 @@ for folder in ("app/src", "core-domain/src"):
             assert b"io.github.mangi.eta" not in path.read_bytes(), path
 manifest = ET.parse(ROOT / "app/src/main/AndroidManifest.xml").getroot()
 assert not manifest.findall("uses-permission"), "S1 must not claim runtime capabilities"
-assert 'applicationId = "io.github.y2485871697.daiyu"' in (ROOT / "app/build.gradle.kts").read_text()
+assert 'applicationId = "app.daiyu.android"' in (ROOT / "app/build.gradle.kts").read_text()
 assert 'rootProject.name = "代鱼"' in (ROOT / "settings.gradle.kts").read_text()
 print("Module boundary, independent identity and S1 permissions: passed")

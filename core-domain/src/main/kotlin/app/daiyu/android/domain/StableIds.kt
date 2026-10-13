@@ -1,4 +1,4 @@
-package io.github.y2485871697.daiyu.domain
+package app.daiyu.android.domain
 
 @JvmInline value class ConversationId(val value: String) {
     init { require(value.isNotBlank()) { "Conversation identity must not be blank" } }

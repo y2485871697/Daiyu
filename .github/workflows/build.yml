@@ -1,14 +1,88 @@
 name: 代鱼构建
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 执行完整构建或仅跨平台检查
+        type: choice
+        options:
+          - build
+          - checks
+        default: build
+        required: true
+env:
+  SKIP_JDK_VERSION_CHECK: "true"
 permissions:
   contents: read
 concurrency:
-  group: daiyu-build-${{ github.ref }}
+  group: daiyu-${{ inputs.mode }}-${{ github.ref }}
   cancel-in-progress: false
 jobs:
+  checks:
+    name: 只检查 ${{ matrix.os }}
+    if: inputs.mode == 'checks'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: '27'
+          check-latest: true
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: 安装检查 SDK
+        shell: bash
+        run: sdkmanager 'platforms/android-37.2' 'build-tools/37.0.0'
+      - name: 独立边界与脚本检查
+        shell: bash
+        run: |
+          python scripts/verify_boundaries.py
+          bash -n scripts/smoke_boot.sh
+      - name: Linux 单测与 Lint（不打包）
+        if: runner.os == 'Linux'
+        run: ./gradlew --no-daemon :core-domain:test :app:lintDebug
+      - name: Windows 单测与 Lint（不打包）
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          ./gradlew.bat --no-daemon :core-domain:test :app:lintDebug
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: 记录检查来源和无安装包边界
+        if: success()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          assert not any(p.suffix.lower() in ('.apk', '.aab', '.apks') for folder in ('app/build', 'core-domain/build') for p in Path(folder).rglob('*') if p.is_file())
+          Path('check-record.json').write_text(json.dumps({'source_sha': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'], 'attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'os': os.environ['RUNNER_OS'], 'scope': ['core-domain:test', 'app:lintDebug', 'boundaries', 'shell-syntax'], 'apk_built': False}))
+          PY
+      - name: 上传检查报告
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼检查报告-${{ matrix.os }}
+          path: |
+            core-domain/build/test-results
+            app/build/reports/lint-results-debug.*
+            check-record.json
+          if-no-files-found: error
   build:
     name: 单测、检查与开发包
+    if: inputs.mode != 'checks'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -28,7 +102,7 @@ jobs:
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
       - name: 安装固定 SDK
-        run: sdkmanager 'platforms;android-37.2' 'build-tools;37.0.0'
+        run: sdkmanager 'platforms/android-37.2' 'build-tools/37.0.0'
       - name: 校验独立边界
         run: python3 scripts/verify_boundaries.py
       - name: 单测与 Lint
@@ -44,7 +118,7 @@ jobs:
           cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk delivery/tests/platform-test.apk
           cp app/build/outputs/apk/debug/app-debug.apk "delivery/代鱼-0.1.0-${short}.apk"
           printf '{"source_sha":"%s","version_name":"0.1.0","version_code":1,"application_id":"app.daiyu.android","signing":"ephemeral-debug","run_id":"%s"}\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > delivery/构建记录.json
-          (cd delivery && sha256sum *.apk > SHA256SUMS)
+          (cd delivery && sha256sum *.apk tests/*.apk > SHA256SUMS)
           "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs delivery/*.apk > delivery/签名证据.txt
       - name: 上传测试报告
         if: always()

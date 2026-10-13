@@ -38,14 +38,12 @@ jobs:
           check-latest: true
       - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
-      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+      - name: 安装检查 SDK
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
         with:
           cmdline-tools-version: '16111833'
-          packages: platform-tools
+          packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
           log-accepted-android-sdk-licenses: false
-      - name: 安装检查 SDK
-        shell: bash
-        run: sdkmanager 'platforms/android-37.2' 'build-tools/37.0.0'
       - name: 独立边界与脚本检查
         shell: bash
         run: |
@@ -117,7 +115,7 @@ jobs:
           mkdir -p delivery/tests
           cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk delivery/tests/platform-test.apk
           cp app/build/outputs/apk/debug/app-debug.apk "delivery/代鱼-0.1.0-${short}.apk"
-          printf '{"source_sha":"%s","version_name":"0.1.0","version_code":1,"application_id":"app.daiyu.android","signing":"ephemeral-debug","run_id":"%s"}\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > delivery/构建记录.json
+          printf '{"source_sha":"%s","version_name":"0.1.0","version_code":1,"application_id":"app.daiyu.android","signing":"ephemeral-debug","run_id":"%s","attempt":"%s"}\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > delivery/构建记录.json
           (cd delivery && sha256sum *.apk tests/*.apk > SHA256SUMS)
           "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs delivery/*.apk > delivery/签名证据.txt
       - name: 上传测试报告

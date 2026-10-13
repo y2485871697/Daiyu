@@ -24,10 +24,11 @@ class MainActivity:Activity() {
     private lateinit var stop:Button
     private var selected:Conversation?=null
     private var editing=false
+    private var selectionReady=false
     private var shown=mutableListOf<Pair<Long,Message>>()
     private val rows=mutableMapOf<MessageId,LinearLayout>()
     private val expandedTools=mutableSetOf<ToolCallId>()
-    private val selections=mutableMapOf<ConversationId,Pair<Int,Int>>()
+    private val selections get()=controller.selections
     private val listener:()->Unit={refresh()}
     override fun onCreate(state:Bundle?) {
         super.onCreate(state)
@@ -41,7 +42,7 @@ class MainActivity:Activity() {
         root.addView(TextView(this).apply {text="代鱼 · 聊天";textSize=24f})
         val toolbar=LinearLayout(this)
         fun button(label:String,action:()->Unit)=Button(this).apply {text=label;setOnClickListener {guard(action)}}
-        toolbar.addView(button("会话") {chooseConversation()});toolbar.addView(button("新建") {if(controller.active==null) select(controller.database.create()) else toast("先停止当前运行")})
+        toolbar.addView(button("会话") {chooseConversation()});toolbar.addView(button("新建") {select(null)})
         toolbar.addView(button("模型设置") {modelSettings()});root.addView(toolbar)
         status=TextView(this);root.addView(status)
         root.addView(button("加载更早消息") {loadEarlier()})
@@ -49,20 +50,23 @@ class MainActivity:Activity() {
         scroll=ScrollView(this).apply {addView(timeline)}
         root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         input=EditText(this).apply {hint="输入消息";minLines=2;maxLines=5;inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES}
+        input.isSaveEnabled=false
         root.addView(input)
         input.addTextChangedListener(object:TextWatcher {
             override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
             override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {
-                if(!editing) guard {selected?.let {controller.database.draft(it.id,s.toString())}}
+                if(!editing) guard {val id=selected?.id;if(id==null) controller.database.draft(s.toString()) else controller.database.draft(id,s.toString())}
             }
             override fun afterTextChanged(s:Editable?) {}
         })
         val actions=LinearLayout(this)
         send=button("发送") {
-            val conversation=selected ?: return@button
-            if(controller.send(conversation,input.text.toString())) {
+            val saved=controller.send(selected,input.text.toString())
+            if(saved!=null) {
+                selected=saved
+                controller.preferences.edit().putString("selected",saved.id.value).commit()
                 editing=true;input.setText("");editing=false
-                shown=controller.database.messages(conversation.id).toMutableList();renderAll();scroll.post {scroll.fullScroll(View.FOCUS_DOWN)}
+                shown=controller.database.messages(saved.id).toMutableList();renderAll();scroll.post {scroll.fullScroll(View.FOCUS_DOWN)}
             }
         }
         stop=button("停止") {controller.stop();status.text="正在停止；不代表远端已取消"}
@@ -70,37 +74,53 @@ class MainActivity:Activity() {
         root.addView(actions);setContentView(root);root.requestApplyInsets()
         controller.observe(listener);refresh()
     }
+    override fun onPause() {
+        if(selectionReady) selections[selected?.id]=input.selectionStart to input.selectionEnd
+        super.onPause()
+    }
     override fun onDestroy() {controller.unobserve(listener);super.onDestroy()}
     private fun toast(text:String) {Toast.makeText(this,text,Toast.LENGTH_LONG).show()}
     private fun guard(action:()->Unit) {try {action()} catch (_:Exception) {toast("操作或保存失败；原数据保留")} }
-    private fun select(conversation:Conversation) {
-        selected?.let {selections[it.id]=input.selectionStart to input.selectionEnd}
-        selected=conversation
-        controller.preferences.edit().putString("selected",conversation.id.value).apply()
-        editing=true;input.setText(conversation.draft);val range=selections[conversation.id];input.setSelection((range?.first ?: input.length()).coerceIn(0,input.length()),(range?.second ?: input.length()).coerceIn(0,input.length()));editing=false
-        shown=controller.database.messages(conversation.id).toMutableList();renderAll()
+    internal fun select(conversation:Conversation?) {
+        check(controller.ready && controller.problem?.startsWith("会话恢复失败")!=true)
+        val list=controller.database.conversations()
+        var draft=if(conversation==null) controller.database.draft() else list.first {it.id==conversation.id}.draft
+        if(selectionReady) {
+            val id=selected?.id
+            if(id==null) controller.database.draft(input.text.toString())
+            else if(list.any {it.id==id}) controller.database.draft(id,input.text.toString())
+            selections[id]=input.selectionStart to input.selectionEnd
+        }
+        if(selectionReady && selected?.id==conversation?.id) draft=input.text.toString()
+        selected=conversation;selectionReady=true
+        check(controller.preferences.edit().apply {if(conversation==null) remove("selected") else putString("selected",conversation.id.value)}.commit())
+        val range=selections[conversation?.id]
+        editing=true
+        try {input.setText(draft);input.setSelection((range?.first ?: input.length()).coerceIn(0,input.length()),(range?.second ?: input.length()).coerceIn(0,input.length()))} finally {editing=false}
+        shown=if(conversation==null) mutableListOf() else controller.database.messages(conversation.id).toMutableList();renderAll()
         scroll.post {scroll.fullScroll(View.FOCUS_DOWN)};refresh()
     }
     private fun refresh() {
+        input.isEnabled=controller.ready && controller.problem?.startsWith("会话恢复失败")!=true
         send.isEnabled=controller.ready && controller.active==null && controller.problem?.startsWith("会话恢复失败")!=true
         stop.isEnabled=controller.active?.status==RunStatus.RUNNING
         if(!controller.ready) {status.text="恢复会话中";return}
         if(controller.problem?.startsWith("会话恢复失败")==true) {status.text=controller.problem;return}
         guard {
-            if(selected==null) {
+            if(!selectionReady) {
                 val list=controller.database.conversations()
                 val id=controller.preferences.getString("selected",null)
-                select(list.firstOrNull {it.id.value==id} ?: list.firstOrNull() ?: controller.database.create());return@guard
+                select(list.firstOrNull {it.id.value==id});return@guard
             }
             val active=controller.active
-            if(active!=null && active.conversationId==selected!!.id) {
+            if(active!=null && active.conversationId==selected?.id) {
                 val at=shown.indexOfFirst {it.second.id==active.id}
                 if(at>=0) shown[at]=shown[at].first to active
                 updateRow(active)
-            } else if(active==null && shown.any {it.second.status==RunStatus.RUNNING}) {
+            } else if(selected!=null && active==null && shown.any {it.second.status==RunStatus.RUNNING}) {
                 shown=controller.database.messages(selected!!.id).toMutableList();renderAll()
             }
-            status.text=controller.problem ?: "${selected!!.title} · ${if(active!=null) "运行中" else "已就绪"}"
+            status.text=controller.problem ?: "${selected?.title ?: "未创建会话"} · ${if(active!=null) if(active.conversationId==selected?.id) "运行中" else "其他会话运行中" else "已就绪"}"
         }
     }
     private fun renderAll() {timeline.removeAllViews();rows.clear();shown.forEach {updateRow(it.second)} }
@@ -131,14 +151,13 @@ class MainActivity:Activity() {
         val old=timeline.height;val y=scroll.scrollY;shown.addAll(0,earlier);renderAll();scroll.post {scroll.scrollTo(0,y+timeline.height-old)}
     }
     private fun chooseConversation() {
-        if(controller.active!=null) {toast("先停止当前运行再管理会话");return}
         val list=controller.database.conversations()
         AlertDialog.Builder(this).setTitle("会话").setItems(list.map {it.title}.toTypedArray()) {_,which ->
             val conversation=list[which]
             AlertDialog.Builder(this).setTitle(conversation.title).setItems(arrayOf("打开","重命名","删除")) {_,action -> guard {when(action) {
                 0->select(conversation)
                 1->{val edit=EditText(this).apply {setText(conversation.title)};AlertDialog.Builder(this).setTitle("重命名").setView(edit).setPositiveButton("保存") {_,_->guard {controller.database.rename(conversation.id,edit.text.toString());if(selected?.id==conversation.id) {selected=conversation.copy(title=edit.text.toString());refresh()}}}.setNegativeButton("取消",null).show()}
-                2->AlertDialog.Builder(this).setMessage("确认删除此会话及其消息？").setPositiveButton("删除") {_,_->guard {controller.database.delete(conversation.id);if(selected?.id==conversation.id) {selected=null;refresh()}}}.setNegativeButton("取消",null).show()
+                2->if(controller.active?.conversationId==conversation.id) toast("先停止此会话的运行再删除") else AlertDialog.Builder(this).setMessage("确认删除此会话及其消息？").setPositiveButton("删除") {_,_->guard {check(controller.active?.conversationId!=conversation.id) {"会话运行中，不能删除"};controller.database.delete(conversation.id);if(selected?.id==conversation.id) {select(null)}}}.setNegativeButton("取消",null).show()
             }} }.show()
         }.show()
     }

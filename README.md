@@ -4,7 +4,7 @@
 
 - 包名：`io.github.y2485871697.daiyu`
 - 显示名：代鱼；工作目录：`/workspace/代鱼`
-- Android 8.0 / API 26 起；目标 API 36；JDK 17。
+- Android 8.0 / API 26 起；目标 API 37；构建 JDK 27（应用字节码目标17）。
 - `app`：Android 启动壳；`core-domain`：纯 Kotlin 产品领域层。
 - 不依赖旧应用安装、代码、资源、数据格式或发布签名。
 - 当前无模型、工具、网络权限、会话存储；屏幕明确说明这一状态。

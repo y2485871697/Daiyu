@@ -3,7 +3,8 @@ set -euo pipefail
 APK=$(find delivery -maxdepth 1 -name '*.apk' -print -quit)
 test -n "$APK"
 mkdir -p smoke
-adb logcat -c
+adb wait-for-device
+adb logcat -c || true
 adb install "$APK"
 adb shell pm list packages > smoke/packages.txt
 ! grep -q 'package:io.github.mangi.eta$' smoke/packages.txt

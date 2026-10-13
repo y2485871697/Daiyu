@@ -1,6 +1,10 @@
 package app.daiyu.android
 
 import android.test.InstrumentationTestCase
+import android.content.Context
+import android.content.ContextWrapper
+import android.database.DatabaseErrorHandler
+import android.database.sqlite.SQLiteDatabase
 import app.daiyu.android.domain.*
 import app.daiyu.android.model.SseReader
 import app.daiyu.android.storage.*
@@ -10,8 +14,18 @@ import org.json.JSONObject
 
 @Suppress("DEPRECATION")
 class PlatformTest:InstrumentationTestCase() {
+    private fun testContext():Context=object:ContextWrapper(instrumentation.targetContext) {
+        private fun testName(name:String)="platform-test-$name"
+        override fun getDatabasePath(name:String)=baseContext.getDatabasePath(testName(name))
+        override fun deleteDatabase(name:String)=baseContext.deleteDatabase(testName(name))
+        override fun openOrCreateDatabase(name:String,mode:Int,factory:SQLiteDatabase.CursorFactory?)=
+            baseContext.openOrCreateDatabase(testName(name),mode,factory)
+        override fun openOrCreateDatabase(name:String,mode:Int,factory:SQLiteDatabase.CursorFactory?,handler:DatabaseErrorHandler?)=
+            baseContext.openOrCreateDatabase(testName(name),mode,factory,handler)
+        override fun getSharedPreferences(name:String,mode:Int)=baseContext.getSharedPreferences(testName(name),mode)
+    }
     fun testPersistenceRecoveryAndDraftIsolation() {
-        val context=instrumentation.context
+        val context=testContext()
         context.deleteDatabase("conversations.db")
         var db=ConversationDatabase(context)
         val a=db.create();val b=db.create()
@@ -40,7 +54,7 @@ class PlatformTest:InstrumentationTestCase() {
         assertTrue(result.getBoolean("ok"));assertTrue(result.getInt("percent") in 0..100)
     }
     fun testEncryptedSettingsAndSseFrames() {
-        val context=instrumentation.context
+        val context=testContext()
         val config=ModelSettings("https://example.invalid/v1/responses","fixture-model","synthetic-test-key",true)
         ModelSettingsStore(context).save(config);assertEquals(config,ModelSettingsStore(context).load())
         assertFalse(context.getSharedPreferences("model-settings",0).getString("key","")!!.contains(config.apiKey))

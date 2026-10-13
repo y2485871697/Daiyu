@@ -1,0 +1,7 @@
+gradle.taskGraph.whenReady { graph ->
+    def forbidden = graph.allTasks.findAll { t ->
+        t.name ==~ /(?i)^(assemble|sign|install|uninstall|connected|managedDevice).*/ ||
+        t.name ==~ /(?i)^(package|bundle).*(apk|debug|release|androidtest)$/
+    }
+    if (!forbidden.empty) throw new GradleException("Checks-only rejected APK/emulator tasks: " + forbidden*.path)
+}

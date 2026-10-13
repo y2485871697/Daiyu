@@ -1,4 +1,5 @@
 name: 代鱼构建
+run-name: ${{ inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || '代鱼构建' }}
 on:
   workflow_dispatch:
     inputs:
@@ -10,6 +11,19 @@ on:
           - checks
         default: build
         required: true
+      check_scope:
+        description: 仅检查模式的补检范围
+        type: choice
+        options: [all, unit, lint]
+        default: all
+      expected_sha:
+        description: 检查目标完整提交SHA（自动补检必填）
+        type: string
+        default: ''
+      check_id:
+        description: 调度去重标识（不含凭据）
+        type: string
+        default: manual
 env:
   SKIP_JDK_VERSION_CHECK: "true"
 permissions:
@@ -49,38 +63,22 @@ jobs:
         run: |
           python scripts/verify_boundaries.py
           bash -n scripts/smoke_boot.sh
-      - name: Linux 单测与 Lint（不打包）
-        if: runner.os == 'Linux'
-        run: ./gradlew --no-daemon :core-domain:test :app:lintDebug
-      - name: Windows 单测与 Lint（不打包）
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          ./gradlew.bat --no-daemon :core-domain:test :app:lintDebug
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-      - name: 记录检查来源和无安装包边界
-        if: success()
+      - name: 定向检查（不打包）
         shell: bash
-        run: |
-          python - <<'PY'
-          import json, os
-          from pathlib import Path
-          assert not any(p.suffix.lower() in ('.apk', '.aab', '.apks') for folder in ('app/build', 'core-domain/build') for p in Path(folder).rglob('*') if p.is_file())
-          Path('check-record.json').write_text(json.dumps({'source_sha': os.environ['GITHUB_SHA'], 'run_id': os.environ['GITHUB_RUN_ID'], 'attempt': os.environ['GITHUB_RUN_ATTEMPT'], 'os': os.environ['RUNNER_OS'], 'scope': ['core-domain:test', 'app:lintDebug', 'boundaries', 'shell-syntax'], 'apk_built': False}))
-          PY
+        env:
+          CHECK_SCOPE: ${{ inputs.check_scope }}
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: python scripts/cooperation/cloud_checks.py --scope "$CHECK_SCOPE"
       - name: 上传检查报告
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: 代鱼检查报告-${{ matrix.os }}
-          path: |
-            core-domain/build/test-results
-            app/build/reports/lint-results-debug.*
-            check-record.json
+          path: cooperation-reports/
           if-no-files-found: error
   build:
     name: 单测、检查与开发包
-    if: inputs.mode != 'checks'
+    if: inputs.mode == 'build'
     runs-on: ubuntu-26.04
     timeout-minutes: 25
     steps:

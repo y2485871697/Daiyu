@@ -132,6 +132,27 @@ class ResponsesTest:InstrumentationTestCase() {
         assertEquals(RunStatus.FAILED,run(listOf(Connection("",401))).status)
         assertEquals(RunStatus.FAILED,run(listOf(Connection("{}",200,"application/json"))).status)
     }
+    fun testRepetitiveStreamAbortsBeforePendingToolExecution() {
+        var executed=0
+        val body=frames(delta(0,"accepted"),event("response.output_item.done","item" to call()))+
+            (1..20).joinToString("") {frames(delta(0,"OK.\n".repeat(128)))}+completed(call(),message("ignored")).let {frames(it)}
+        val result=run(listOf(Connection(body))) {executed++;"{}"}
+        assertEquals(RunStatus.FAILED,result.status)
+        assertTrue(result.error!!.contains("高度重复"))
+        assertEquals(0,executed)
+        assertTrue((result.blocks.first() as MessageBlock.Text).text.startsWith("accepted"))
+    }
+    fun testDoneAndCompletedSnapshotsDoNotDoubleCountRepeatedShortAnswer() {
+        val text="OK.\n".repeat(800)
+        val result=run(listOf(Connection(frames(delta(0,text),done(0,text),completed(message(text))))))
+        assertEquals(RunStatus.COMPLETED,result.status)
+        assertEquals(text,(result.blocks.single() as MessageBlock.Text).text)
+    }
+    fun testCompletedOnlyRepetitiveAnswerFails() {
+        val result=run(listOf(Connection(frames(completed(message("OK.\n".repeat(2000)))))))
+        assertEquals(RunStatus.FAILED,result.status)
+        assertTrue(result.error!!.contains("高度重复"))
+    }
     fun testUnterminatedEventAndMissingTerminalFail() {
         assertEquals(RunStatus.FAILED,run(listOf(Connection("data: ${completed()}"))).status)
         val result=run(listOf(Connection(frames(delta(0,"保留"))+"data: [DONE]\n\n")))

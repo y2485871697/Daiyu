@@ -101,6 +101,7 @@ jobs:
           api-level: ${{ matrix.api }}
           arch: x86_64
           target: ${{ matrix.target }}
+          disk-size: 8192M
           ram-size: 4096M
           cores: 4
           emulator-options: -no-window -gpu software -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel

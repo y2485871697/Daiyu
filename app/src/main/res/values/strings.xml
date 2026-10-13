@@ -1,6 +1,11 @@
 <resources>
     <string name="app_name">代鱼</string>
-    <string name="bootstrap_title">代鱼 · 独立工程</string>
-    <string name="bootstrap_status">%1$s：已就绪</string>
-    <string name="bootstrap_note">当前为工程骨架，尚未接入模型、设备工具和数据存储。</string>
+    <string name="message_header">%1$s · %2$s</string>
+    <string name="message_user">你</string>
+    <string name="tool_details">参数：%1$s\n结果：%2$s</string>
+    <string name="tool_waiting">等待确认</string>
+    <string name="tool_header">工具 %1$s · %2$s</string>
+    <string name="tool_has_result">已有结果</string>
+    <string name="tool_pending">待处理</string>
+    <string name="model_protocol_note">首个协议：OpenAI Responses。仅HTTPS；密钥不写入聊天。</string>
 </resources>

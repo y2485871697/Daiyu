@@ -129,12 +129,12 @@ class MainActivity:Activity() {
         val follow=scroll.scrollY+scroll.height>=timeline.height-80
         val row=rows.getOrPut(message.id) {LinearLayout(this).apply {orientation=LinearLayout.VERTICAL;setPadding(0,12,0,12);timeline.addView(this)}}
         row.removeAllViews()
-        row.addView(TextView(this).apply {text="${if(message.role=="user") "你" else "代鱼"} · ${message.status}";textSize=12f})
+        row.addView(TextView(this).apply {text=getString(R.string.message_header,getString(if(message.role=="user") R.string.message_user else R.string.app_name),message.status);textSize=12f})
         message.blocks.forEach {block -> when(block) {
             is MessageBlock.Text -> row.addView(TextView(this).apply {text=MarkdownText.render(block.text);textSize=17f;setTextIsSelectable(true);movementMethod=android.text.method.LinkMovementMethod.getInstance()})
             is MessageBlock.Tool -> {
-                val details=TextView(this).apply {text="参数：${block.invocation.arguments}\n结果：${block.result ?: "等待确认"}";visibility=if(block.invocation.id in expandedTools) View.VISIBLE else View.GONE;setTextIsSelectable(true)}
-                row.addView(Button(this).apply {text="工具 ${block.invocation.name} · ${if(block.result!=null) "已有结果" else "待处理"}";setOnClickListener {if(details.visibility==View.GONE) {expandedTools.add(block.invocation.id);details.visibility=View.VISIBLE} else {expandedTools.remove(block.invocation.id);details.visibility=View.GONE}}})
+                val details=TextView(this).apply {text=getString(R.string.tool_details,block.invocation.arguments,block.result ?: getString(R.string.tool_waiting));visibility=if(block.invocation.id in expandedTools) View.VISIBLE else View.GONE;setTextIsSelectable(true)}
+                row.addView(Button(this).apply {text=getString(R.string.tool_header,block.invocation.name,getString(if(block.result!=null) R.string.tool_has_result else R.string.tool_pending));setOnClickListener {if(details.visibility==View.GONE) {expandedTools.add(block.invocation.id);details.visibility=View.VISIBLE} else {expandedTools.remove(block.invocation.id);details.visibility=View.GONE}}})
                 row.addView(details)
             }
         } }
@@ -170,7 +170,7 @@ class MainActivity:Activity() {
         val model=EditText(this).apply {hint="模型标识";setText(saved.model)}
         val key=EditText(this).apply {hint="API密钥（加密保存）";inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD;setText(saved.apiKey)}
         val battery=CheckBox(this).apply {text="允许模型查询只读电量";isChecked=saved.batteryEnabled}
-        fields.addView(TextView(this).apply {text="首个协议：OpenAI Responses。仅HTTPS；密钥不写入聊天。"})
+        fields.addView(TextView(this).apply {setText(R.string.model_protocol_note)})
         fields.addView(endpoint);fields.addView(model);fields.addView(key);fields.addView(battery)
         val dialog=AlertDialog.Builder(this).setTitle("模型设置").setView(fields).setPositiveButton("保存",null).setNegativeButton("取消",null).create()
         key.importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS

@@ -168,6 +168,15 @@ jobs:
           cmdline-tools-version: '16111833'
           packages: platform-tools
           log-accepted-android-sdk-licenses: false
+      - name: 统一模拟器命令行工具
+        run: |
+          tools="$ANDROID_HOME/cmdline-tools"
+          test -x "$tools/16111833/bin/avdmanager"
+          rm -rf "$tools/latest"
+          ln -s "$tools/16111833" "$tools/latest"
+          mkdir -p smoke
+          cat "$tools/latest/source.properties" | tee smoke/commandline-tools.txt
+          "$tools/latest/bin/sdkmanager" --version
       - name: 预启动 ADB
         run: adb start-server
       - name: 安装并检查启动
@@ -180,6 +189,11 @@ jobs:
           ram-size: 4096M
           cores: 4
           emulator-options: -no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel
+          pre-emulator-launch-script: |
+            cp "$ANDROID_AVD_HOME/test.ini" smoke/avd.ini
+            cp "$ANDROID_AVD_HOME/test.avd/config.ini" smoke/avd-config.ini
+            cat smoke/avd.ini
+            grep -Fx 'target=android-${{ matrix.api }}' smoke/avd.ini
           disable-animations: true
           script: bash scripts/smoke_boot.sh
       - name: 上传启动证据

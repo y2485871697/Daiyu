@@ -293,4 +293,80 @@ class ResponsesTest:InstrumentationTestCase() {
         assertEquals(listOf("second","firstsecond","other"),snapshots.map {it.text})
         assertEquals(listOf("rs","rs","other-item"),snapshots.map {it.itemId})
     }
+    fun testSyntheticAccountRequestsRemainIsolated() {
+        val a=ModelSettings("https://account-a.example.invalid/v1/responses","fixture-a","synthetic-key-a",true)
+        val b=ModelSettings("https://account-b.example.invalid/v1/responses","fixture-b","synthetic-key-b",false)
+        val firstA=Connection(frames(completed(message("a-only"))))
+        val firstB=Connection(frames(completed(message("b-only"))))
+        val nextA=Connection(frames(completed(message("a-next"))))
+        val urls=mutableListOf<String>();var openedA=0;var openedB=0
+        val sessionA=ResponsesModel(a) {url ->
+            urls.add(url.toExternalForm())
+            when(openedA++) {0->firstA;1->nextA;else->throw AssertionError("unexpected A request")}
+        }.open(emptyList())
+        val sessionB=ResponsesModel(b) {url ->urls.add(url.toExternalForm());assertEquals(0,openedB++);firstB}.open(emptyList())
+        try {sessionA.next(emptyList()) {};sessionB.next(emptyList()) {};sessionA.next(emptyList()) {}}
+        finally {sessionA.cancel();sessionB.cancel()}
+        assertEquals(listOf(a.endpoint,b.endpoint,a.endpoint),urls)
+        assertEquals(2,openedA);assertEquals(1,openedB)
+        for((connection,config) in listOf(firstA to a,firstB to b,nextA to a)) {
+            assertEquals(config.model,connection.json().getString("model"))
+            assertEquals("Bearer ${config.apiKey}",connection.getRequestProperty("Authorization"))
+            assertEquals("POST",connection.requestMethod)
+            assertEquals("application/json",connection.getRequestProperty("Content-Type"))
+            assertEquals("text/event-stream",connection.getRequestProperty("Accept"))
+            assertFalse(connection.instanceFollowRedirects);assertTrue(connection.disconnected)
+            assertEquals(config.batteryEnabled,connection.json().has("tools"))
+        }
+        assertEquals(0,firstA.json().getJSONArray("input").length())
+        assertEquals(0,firstB.json().getJSONArray("input").length())
+        val input=nextA.json().getJSONArray("input");assertEquals(1,input.length())
+        assertEquals("a-only",input.getJSONObject(0).getJSONArray("content").getJSONObject(0).getString("text"))
+    }
+    fun testDistinctSameToolCallsKeepExecutionAndOutputOrder() {
+        val a=call("call-a").put("id","fc-a");val b=call("call-b").put("id","fc-b")
+        val first=Connection(frames(event("response.output_item.done","item" to a),event("response.output_item.done","item" to b),completed(a,b)))
+        val second=Connection(frames(completed(message("finished"))))
+        val executed=mutableListOf<String>();val outputs=listOf("fixture-a","fixture-b")
+        val result=run(listOf(first,second)) {invocation ->
+            assertEquals("get_battery_status",invocation.name)
+            executed.add(invocation.id.value)
+            when(invocation.id.value) {"call-a"->outputs[0];"call-b"->outputs[1];else->throw AssertionError("unexpected call")}
+        }
+        assertEquals(RunStatus.COMPLETED,result.status);assertEquals(listOf("call-a","call-b"),executed)
+        val blocks=result.blocks.filterIsInstance<MessageBlock.Tool>()
+        assertEquals(executed,blocks.map {it.invocation.id.value});assertEquals(outputs,blocks.map {it.result})
+        val input=second.json().getJSONArray("input");assertEquals(4,input.length())
+        for(index in 0..1) {
+            val invocation=input.getJSONObject(index);val output=input.getJSONObject(index+2)
+            assertEquals("function_call",invocation.getString("type"));assertEquals(executed[index],invocation.getString("call_id"))
+            assertEquals("get_battery_status",invocation.getString("name"));assertEquals("{}",invocation.getString("arguments"))
+            assertEquals("function_call_output",output.getString("type"));assertEquals(executed[index],output.getString("call_id"))
+            assertEquals(outputs[index],output.getString("output"))
+        }
+    }
+    fun testInvalidCompleteCallsReturnPlatformValidationErrors() {
+        val backend=app.daiyu.android.platform.AndroidBatteryTool(instrumentation.targetContext,true)
+        for(arguments in listOf("{\"extra\":true}","[]","null","\"text\"","0","true","{")) {
+            val invocation=call().put("arguments",arguments)
+            val first=Connection(frames(event("response.output_item.done","item" to invocation),completed(invocation)))
+            val second=Connection(frames(completed(message("invalid request rejected"))))
+            var successes=0;var validations=0
+            val result=run(listOf(first,second)) {
+                validations++
+                backend.execute(it).also {output ->if(JSONObject(output).getBoolean("ok")) successes++}
+            }
+            assertEquals(RunStatus.COMPLETED,result.status);assertEquals(1,validations);assertEquals(0,successes)
+            val output=JSONObject((result.blocks.first() as MessageBlock.Tool).result!!)
+            assertFalse(output.getBoolean("ok"));assertEquals("invalid_arguments",output.getString("error"))
+            val input=second.json().getJSONArray("input");assertEquals(2,input.length())
+            val replay=input.getJSONObject(1)
+            assertEquals("function_call_output",replay.getString("type"))
+            assertEquals("call",replay.getString("call_id"))
+            assertEquals((result.blocks.first() as MessageBlock.Tool).result,replay.getString("output"))
+            assertFalse(JSONObject(replay.getString("output")).getBoolean("ok"))
+            assertEquals("invalid_arguments",JSONObject(replay.getString("output")).getString("error"))
+        }
+    }
+
 }

@@ -64,9 +64,10 @@ class MainActivity:Activity() {
             val saved=controller.send(selected,input.text.toString())
             if(saved!=null) {
                 selected=saved
-                controller.preferences.edit().putString("selected",saved.id.value).commit()
+                val selectionSaved=controller.preferences.edit().putString("selected",saved.id.value).commit()
                 editing=true;input.setText("");editing=false
                 shown=controller.database.messages(saved.id).toMutableList();renderAll();scroll.post {scroll.fullScroll(View.FOCUS_DOWN)}
+                if(!selectionSaved) toast("消息已保存；最后选中会话未保存")
             }
         }
         stop=button("停止") {controller.stop();status.text="正在停止；不代表远端已取消"}

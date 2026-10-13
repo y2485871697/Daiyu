@@ -22,6 +22,7 @@ class ActivityTest:InstrumentationTestCase() {
         val application=instrumentation.targetContext.applicationContext as ChatApplication
         val original=application.controller
         val context=testContext(instrumentation.targetContext)
+        context.getSharedPreferences("model-settings",0).edit().clear().commit()
         context.deleteDatabase("conversations.db");context.getSharedPreferences("conversation-ui",0).edit().clear().commit()
         val db=ConversationDatabase(context);val settings=ModelSettingsStore(context)
         val entered=CountDownLatch(1);val release=CountDownLatch(1);val terminal=CountDownLatch(1)
@@ -77,10 +78,15 @@ class ActivityTest:InstrumentationTestCase() {
             }
         } finally {
             release.countDown()
-            instrumentation.runOnMainSync {activity?.finish()}
-            instrumentation.waitForIdleSync()
-            controller.close()
-            instrumentation.runOnMainSync {application.controller=original}
+            try {
+                try {
+                    instrumentation.runOnMainSync {activity?.finish()}
+                    instrumentation.waitForIdleSync()
+                } finally {controller.close()}
+            } finally {
+                instrumentation.runOnMainSync {application.controller=original}
+                context.getSharedPreferences("model-settings",0).edit().clear().commit()
+            }
         }
     }
 }

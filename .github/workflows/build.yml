@@ -1,0 +1,96 @@
+name: 代鱼构建
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: daiyu-build-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  build:
+    name: 单测、检查与开发包
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/wrapper-validation@48b5f213c81028ace310571dc5ec0fbbca0b2947
+      - uses: gradle/actions/setup-gradle@48b5f213c81028ace310571dc5ec0fbbca0b2947
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+      - name: 安装固定 SDK
+        run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
+      - name: 校验独立边界
+        run: python3 scripts/verify_boundaries.py
+      - name: 单测与 Lint
+        run: ./gradlew --no-daemon :core-domain:test :app:lintDebug
+      - name: 构建开发 APK
+        run: ./gradlew --no-daemon :app:assembleDebug
+      - name: 打包版本与摘要
+        shell: bash
+        run: |
+          mkdir delivery
+          short=${GITHUB_SHA:0:8}
+          cp app/build/outputs/apk/debug/app-debug.apk "delivery/代鱼-0.1.0-${short}.apk"
+          printf '{"source_sha":"%s","version_name":"0.1.0","version_code":1,"application_id":"io.github.y2485871697.daiyu","signing":"ephemeral-debug","run_id":"%s"}\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > delivery/构建记录.json
+          (cd delivery && sha256sum *.apk > SHA256SUMS)
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --print-certs delivery/*.apk > delivery/签名证据.txt
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: 代鱼测试报告
+          path: |
+            core-domain/build/test-results
+            core-domain/build/reports/tests
+            app/build/reports/lint-results-debug.*
+          if-no-files-found: ignore
+      - name: 上传开发包
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: 代鱼开发包
+          path: delivery/
+          if-no-files-found: error
+  smoke:
+    name: 启动验证 API ${{ matrix.api }}
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [26, 36]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: 代鱼开发包
+          path: delivery
+      - name: 校验 APK 摘要
+        run: cd delivery && sha256sum -c SHA256SUMS
+      - name: 启用模拟器加速
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: 安装并检查启动
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: ${{ matrix.api }}
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          script: bash scripts/smoke_boot.sh
+      - name: 上传启动证据
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: 代鱼启动证据-API${{ matrix.api }}
+          path: smoke/
+          if-no-files-found: ignore

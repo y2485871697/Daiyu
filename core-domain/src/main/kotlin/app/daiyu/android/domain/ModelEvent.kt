@@ -3,6 +3,8 @@ package app.daiyu.android.domain
 sealed interface ModelEvent {
     data class TextDelta(val itemId: String, val text: String) : ModelEvent
     data class TextFinal(val itemId: String, val text: String) : ModelEvent
+    data class ReasoningDelta(val itemId: String, val text: String) : ModelEvent
+    data class ReasoningFinal(val itemId: String, val text: String) : ModelEvent
     data class ProtocolOutput(val items: List<String>) : ModelEvent
     data class ToolReady(val invocation: ToolInvocation) : ModelEvent
 }

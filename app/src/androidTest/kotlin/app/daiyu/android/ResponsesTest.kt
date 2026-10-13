@@ -3,6 +3,7 @@ package app.daiyu.android
 import android.test.InstrumentationTestCase
 import app.daiyu.android.domain.*
 import app.daiyu.android.model.ResponsesModel
+import app.daiyu.android.model.ResponsesStream
 import app.daiyu.android.storage.ModelSettings
 import org.json.JSONArray
 import org.json.JSONObject
@@ -27,6 +28,19 @@ class ResponsesTest:InstrumentationTestCase() {
     private fun completed(vararg items:JSONObject)=event("response.completed","response" to JSONObject().put("status","completed").put("output",JSONArray(items.toList())))
     private fun delta(index:Int,text:String)=event("response.output_text.delta","item_id" to "m","content_index" to index,"delta" to text)
     private fun done(index:Int,text:String)=event("response.output_text.done","item_id" to "m","content_index" to index,"text" to text)
+    private fun reasoning(vararg summaries:String, id:String="rs", encrypted:String="synthetic-encrypted-content")=
+        event("reasoning","id" to id,"encrypted_content" to encrypted,
+            "summary" to JSONArray(summaries.map {event("summary_text","text" to it)}))
+    private fun reasoningDelta(index:Int,text:String,id:String="rs",sequence:Int=1)=
+        event("response.reasoning_summary_text.delta","item_id" to id,"output_index" to 0,
+            "summary_index" to index,"sequence_number" to sequence,"delta" to text)
+    private fun reasoningDone(index:Int,text:String,id:String="rs",sequence:Int=2)=
+        event("response.reasoning_summary_text.done","item_id" to id,"output_index" to 0,
+            "summary_index" to index,"sequence_number" to sequence,"text" to text)
+    private fun reasoningPart(index:Int,text:String,status:String="completed",sequence:Int=3)=
+        event("response.reasoning_summary_part.done","item_id" to "rs","output_index" to 0,
+            "summary_index" to index,"sequence_number" to sequence,"status" to status,
+            "part" to event("summary_text","text" to text))
     private class Connection(body:String,private val code:Int=200,private val mime:String="text/event-stream"):HttpsURLConnection(URL("https://example.invalid/v1/responses")) {
         val request=ByteArrayOutputStream()
         private val response=ByteArrayInputStream(body.toByteArray(Charsets.UTF_8))
@@ -157,5 +171,126 @@ class ResponsesTest:InstrumentationTestCase() {
         assertEquals(RunStatus.FAILED,run(listOf(Connection("data: ${completed()}"))).status)
         val result=run(listOf(Connection(frames(delta(0,"保留"))+"data: [DONE]\n\n")))
         assertEquals(RunStatus.FAILED,result.status);assertEquals("保留",(result.blocks.single() as MessageBlock.Text).text)
+    }
+    fun testReasoningLifecycleSnapshotsAreIdempotentAndNeverBody() {
+        val text="OK.\n".repeat(800)
+        val item=reasoning(text)
+        val connection=Connection(frames(reasoningDelta(0,text),reasoningDone(0,text),reasoningPart(0,text),
+            event("response.output_item.done","output_index" to 0,"sequence_number" to 4,"item" to item),
+            completed(item,message("answer")).put("sequence_number",5)))
+        val result=run(listOf(connection))
+        assertEquals(RunStatus.COMPLETED,result.status)
+        assertEquals("answer",(result.blocks.single() as MessageBlock.Text).text)
+        assertEquals("synthetic-encrypted-content",JSONObject(result.protocolItems.first()).getString("encrypted_content"))
+        assertFalse(connection.json().has("reasoning"))
+    }
+    fun testRepetitiveReasoningStopsBeforeToolsAndKeepsBody() {
+        var executed=0
+        val body=frames(delta(0,"accepted"),event("response.output_item.done","item" to call()))+
+            (1..20).joinToString("") {frames(reasoningDelta(0,"OK.\n".repeat(128),sequence=it))}+
+            frames(completed(reasoning("ignored"),call(),message("ignored")))
+        val result=run(listOf(Connection(body))) {executed++;"{}"}
+        assertEquals(RunStatus.FAILED,result.status)
+        assertTrue(result.error!!.contains("思考摘要"))
+        assertEquals(0,executed)
+        assertEquals("accepted",(result.blocks.first() as MessageBlock.Text).text)
+    }
+    fun testDonePartItemAndCompletedOnlyReasoningAreDetected() {
+        val text="OK.\n".repeat(2000)
+        val bodies=listOf(
+            frames(reasoningDone(0,text),completed()),
+            frames(reasoningPart(0,text),completed()),
+            frames(event("response.output_item.done","item" to reasoning(text)),completed()),
+            frames(completed(reasoning(text))))
+        for(body in bodies) {
+            val result=run(listOf(Connection(body)))
+            assertEquals(RunStatus.FAILED,result.status)
+            assertTrue(result.error!!.contains("思考摘要"))
+            assertTrue(result.blocks.isEmpty())
+        }
+    }
+    fun testReasoningIndicesCorrectionsAndDuplicateSequenceDoNotDoubleCount() {
+        val a="Draft.\n".repeat(200)
+        val b="Final.\n".repeat(200)
+        val repeated=reasoningDelta(1,b,sequence=1)
+        val item=reasoning(b,b)
+        val result=run(listOf(Connection(frames(repeated,repeated,reasoningDelta(0,a,sequence=2),
+            reasoningDone(0,b,sequence=3),reasoningDone(1,b,sequence=4),
+            event("response.output_item.done","item" to item,"sequence_number" to 5),
+            completed(item,message("answer")).put("sequence_number",6)))))
+        assertEquals(RunStatus.COMPLETED,result.status)
+        assertEquals("answer",(result.blocks.single() as MessageBlock.Text).text)
+    }
+    fun testReasoningRepetitionAcrossIndicesAndItemsIsNotReset() {
+        val text="OK.\n".repeat(800)
+        val parts=run(listOf(Connection(frames(reasoningDelta(0,text,sequence=1),
+            reasoningDelta(1,text,sequence=2),completed(reasoning(text,text))))))
+        assertEquals(RunStatus.FAILED,parts.status)
+        val items=run(listOf(Connection(frames(reasoningDelta(0,text,id="first",sequence=1),
+            reasoningDelta(0,text,id="second",sequence=2),completed()))))
+        assertEquals(RunStatus.FAILED,items.status)
+    }
+    fun testEmptyOrMissingFinalSummaryDoesNotResetObservedWindow() {
+        val text="OK.\n".repeat(800)
+        val absent=reasoning().also {it.remove("summary")}
+        for(item in listOf(reasoning(),absent,reasoning().put("summary",JSONObject.NULL))) {
+            val result=run(listOf(Connection(frames(reasoningDelta(0,text,sequence=1),
+                event("response.output_item.done","item" to item,"sequence_number" to 2),
+                reasoningDelta(0,text,sequence=3),completed(item)))))
+            assertEquals(RunStatus.FAILED,result.status)
+            assertTrue(result.error!!.contains("思考摘要"))
+        }
+        val missingAtTerminal=run(listOf(Connection(frames(reasoningDelta(0,text),completed(message("answer"))))))
+        assertEquals(RunStatus.COMPLETED,missingAtTerminal.status)
+    }
+    fun testEncryptedReasoningAndToolDataRemainExcludedAndReplayUnchanged() {
+        val encrypted="OK.\n".repeat(2000)
+        val item=reasoning(id="rs",encrypted=encrypted)
+        val invocation=call().put("arguments",JSONObject().put("ignored",encrypted).toString())
+        val first=Connection(frames(event("response.output_item.done","item" to invocation),completed(item,invocation)))
+        val second=Connection(frames(reasoningDelta(0,"observable summary"),completed(reasoning("observable summary"),message("answer"))))
+        val result=run(listOf(first,second)) {encrypted}
+        assertEquals(RunStatus.COMPLETED,result.status)
+        assertEquals(encrypted,second.json().getJSONArray("input").getJSONObject(0).getString("encrypted_content"))
+        assertEquals(encrypted,second.json().getJSONArray("input").getJSONObject(2).getString("output"))
+        assertEquals(invocation.getString("arguments"),second.json().getJSONArray("input").getJSONObject(1).getString("arguments"))
+        assertEquals(1,result.blocks.filterIsInstance<MessageBlock.Text>().size)
+        val third=Connection(frames(completed(message("later"))))
+        val session=ResponsesModel(settings) {third}.open(listOf(result))
+        session.next(emptyList()) {};session.cancel()
+        assertEquals(encrypted,third.json().getJSONArray("input").getJSONObject(0).getString("encrypted_content"))
+        assertEquals(invocation.getString("arguments"),third.json().getJSONArray("input").getJSONObject(1).getString("arguments"))
+    }
+    fun testIncompleteSummaryDoesNotAuthorizeToolsAndMalformedIndexFails() {
+        var executed=0
+        val result=run(listOf(Connection(frames(event("response.output_item.done","item" to call()),
+            reasoningPart(0,"partial",status="incomplete"),event("response.incomplete"))))) {executed++;"{}"}
+        assertEquals(RunStatus.FAILED,result.status);assertEquals(0,executed)
+        assertNull((result.blocks.single() as MessageBlock.Tool).result)
+        assertEquals(RunStatus.FAILED,run(listOf(Connection(frames(reasoningDelta(-1,"bad"),completed())))).status)
+        val malformed=event("response.reasoning_summary_part.done","item_id" to "rs","summary_index" to 0,
+            "part" to event("summary_text"))
+        assertEquals(RunStatus.FAILED,run(listOf(Connection(frames(malformed,completed())))).status)
+    }
+    fun testVisibleProgressResetsSummaryButRepeatedFinalDoesNot() {
+        val text="OK.\n".repeat(800)
+        val accepted=run(listOf(Connection(frames(reasoningDelta(0,text),delta(0,"answer"),
+            reasoningDone(0,text,sequence=2),reasoningDelta(0,text,sequence=3),
+            completed(reasoning(text+text),message("answer"))))))
+        assertEquals(RunStatus.COMPLETED,accepted.status)
+        val rejected=run(listOf(Connection(frames(delta(0,"answer"),reasoningDelta(0,text),
+            done(0,"answer"),reasoningDelta(0,text,sequence=2),completed()))))
+        assertEquals(RunStatus.FAILED,rejected.status)
+    }
+    fun testSummarySnapshotOrderAndItemIsolationDirectly() {
+        val snapshots=mutableListOf<ModelEvent.ReasoningFinal>()
+        val body=frames(reasoningDelta(1,"second",sequence=1),reasoningDelta(0,"first",sequence=2),
+            reasoningDelta(0,"other",id="other-item",sequence=3),completed())
+        ResponsesStream.read(body.byteInputStream().bufferedReader(),{false}) {
+            assertFalse(it is ModelEvent.TextDelta || it is ModelEvent.TextFinal)
+            if(it is ModelEvent.ReasoningFinal) snapshots.add(it)
+        }
+        assertEquals(listOf("second","firstsecond","other"),snapshots.map {it.text})
+        assertEquals(listOf("rs","rs","other-item"),snapshots.map {it.itemId})
     }
 }

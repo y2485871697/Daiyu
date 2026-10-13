@@ -9,7 +9,7 @@ class ChatRunner(private val model: ModelPort, private val store: ConversationSt
     private val terminalLock = Any()
     private var terminal = false
     @Volatile private var session: ModelSession? = null
-    fun stop() { synchronized(terminalLock) { if (terminal) return; stopped.set(true) }; session?.cancel() }
+    fun stop() { synchronized(terminalLock) { if (terminal) return; stopped.set(true) }; cancelSession(session) }
     fun run(initial: Message, history: List<Message>): Message {
         require(initial.status == RunStatus.RUNNING && initial.role == "assistant")
         var current = initial
@@ -24,38 +24,59 @@ class ChatRunner(private val model: ModelPort, private val store: ConversationSt
             if (stopped.get()) throw InterruptedException()
             val active = model.open(history)
             session = active
-            if (stopped.get()) { active.cancel(); throw InterruptedException() }
+            if (stopped.get()) { cancelSession(active); throw InterruptedException() }
             var outputs = emptyList<ToolOutput>()
             for (round in 1..12) {
                 val pending = mutableListOf<ToolInvocation>()
                 val repetition = ReasoningRepetitionGuard()
+                val reasoningRepetition = ReasoningRepetitionGuard()
                 val responseText = linkedMapOf<String, String>()
-                var repetitive = false
-                fun checkText(itemId: String, text: String, final: Boolean) {
-                    val previous = responseText[itemId].orEmpty()
-                    repetitive = if (!final) {
-                        repetition.append(text)
-                    } else if (text.startsWith(previous)) {
-                        repetition.append(text.substring(previous.length))
+                val reasoningText = linkedMapOf<String, String>()
+                var reasoningBaseline: Map<String, String> = emptyMap()
+                var repetitiveSurface: String? = null
+                fun checkText(itemId: String, text: String, final: Boolean, reasoning: Boolean = false): Boolean {
+                    val texts = if (reasoning) reasoningText else responseText
+                    val guard = if (reasoning) reasoningRepetition else repetition
+                    val previous = texts[itemId].orEmpty()
+                    val next = if (final) text else previous + text
+                    fun uncounted(id: String, value: String): String {
+                        val baseline = if (reasoning) reasoningBaseline[id].orEmpty() else ""
+                        return value.substring(value.commonPrefixWith(baseline).length)
+                    }
+                    val before = uncounted(itemId, previous)
+                    val after = uncounted(itemId, next)
+                    val repetitive = if (after.startsWith(before)) {
+                        guard.append(after.substring(before.length))
                     } else {
-                        repetition.reset()
-                        val corrected = LinkedHashMap(responseText)
-                        corrected[itemId] = text
-                        corrected.values.any { repetition.append(it) }
+                        guard.reset()
+                        val corrected = LinkedHashMap(texts)
+                        corrected[itemId] = next
+                        corrected.any { (id, value) -> guard.append(uncounted(id, value)) }
                     }
                     if (repetitive) {
-                        active.cancel()
-                        throw RepetitiveOutputException()
+                        val surface = if (reasoning) "思考摘要" else "正文"
+                        repetitiveSurface = surface
+                        cancelSession(active)
+                        throw RepetitiveOutputException(surface)
                     }
-                    responseText[itemId] = if (final) text else previous + text
+                    texts[itemId] = next
+                    return next.substring(next.commonPrefixWith(previous).length).isNotBlank()
+                }
+                fun bodyProgress(changed: Boolean) {
+                    if (changed) {
+                        reasoningRepetition.reset()
+                        reasoningBaseline = reasoningText.toMap()
+                    }
                 }
                 active.next(outputs) { event ->
                     if (stopped.get()) throw InterruptedException()
-                    if (repetitive) throw RepetitiveOutputException()
+                    repetitiveSurface?.let { throw RepetitiveOutputException(it) }
                     when (event) {
+                        is ModelEvent.ReasoningDelta -> { checkText(event.itemId, event.text, final = false, reasoning = true) }
+                        is ModelEvent.ReasoningFinal -> { checkText(event.itemId, event.text, final = true, reasoning = true) }
                         is ModelEvent.ProtocolOutput -> apply(current.copy(protocolItems = event.items))
                         is ModelEvent.TextDelta -> {
-                            checkText(event.itemId, event.text, final = false)
+                            bodyProgress(checkText(event.itemId, event.text, final = false))
                             val blocks = current.blocks.toMutableList()
                             val at = blocks.indexOfFirst { it is MessageBlock.Text && it.itemId == event.itemId }
                             if (at < 0) blocks.add(MessageBlock.Text(event.itemId, event.text))
@@ -66,7 +87,7 @@ class ChatRunner(private val model: ModelPort, private val store: ConversationSt
                             apply(current.copy(blocks = blocks))
                         }
                         is ModelEvent.TextFinal -> {
-                            checkText(event.itemId, event.text, final = true)
+                            bodyProgress(checkText(event.itemId, event.text, final = true))
                             val blocks = current.blocks.toMutableList()
                             val at = blocks.indexOfFirst { it is MessageBlock.Text && it.itemId == event.itemId }
                             val text = MessageBlock.Text(event.itemId, event.text)
@@ -87,7 +108,7 @@ class ChatRunner(private val model: ModelPort, private val store: ConversationSt
                     }
                 }
                 if (stopped.get()) throw InterruptedException()
-                if (repetitive) throw RepetitiveOutputException()
+                repetitiveSurface?.let { throw RepetitiveOutputException(it) }
                 if (pending.isEmpty()) {
                     synchronized(terminalLock) {
                         if (stopped.get()) throw InterruptedException()
@@ -110,12 +131,16 @@ class ChatRunner(private val model: ModelPort, private val store: ConversationSt
             val status = synchronized(terminalLock) { terminal = true; if (stopped.get()) RunStatus.STOPPED else RunStatus.FAILED }
             val next = current.copy(status = status, error = if (status == RunStatus.STOPPED) null else
                 if (failure is PersistenceException) "保存失败，已显示内容可能未落盘" else
-                if (failure is RepetitiveOutputException) "检测到模型正文持续高度重复，已中止本次请求；已接收内容和工具结果已保留" else "请求失败，请检查模型设置或网络")
+                if (failure is RepetitiveOutputException) "检测到模型${failure.surface}持续高度重复，已中止本次请求；已接收内容和工具结果已保留" else "请求失败，请检查模型设置或网络")
             try { apply(next) } catch (_: Exception) { current = next.copy(error = "保存失败，已显示内容可能未落盘"); publish(current) }
             return current
-        } finally { session?.cancel(); session = null }
+        } finally { cancelSession(session); session = null }
     }
 }
 class PersistenceException(cause: Throwable) : RuntimeException("Conversation persistence failed", cause)
 
-private class RepetitiveOutputException : RuntimeException("Repetitive model output")
+private fun cancelSession(session: ModelSession?) {
+    try { session?.cancel() } catch (_: Exception) { }
+}
+
+private class RepetitiveOutputException(val surface: String) : RuntimeException("Repetitive model output")

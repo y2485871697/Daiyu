@@ -42,7 +42,14 @@ adb install "$APK" 2>&1 | tee smoke/install.txt
 adb install delivery/tests/platform-test.apk > smoke/test-install.txt
 adb shell am instrument -w app.daiyu.android.test/android.test.InstrumentationTestRunner > smoke/platform-tests.txt
 cat smoke/platform-tests.txt
-grep -q 'OK (3 tests)' smoke/platform-tests.txt
+expected=$(python3 - <<'PYCOUNT'
+from pathlib import Path
+import re
+print(sum(len(re.findall(r"^\s*fun test\w+\(",p.read_text(),re.M)) for p in Path("app/src/androidTest").rglob("*.kt")))
+PYCOUNT
+)
+test "$expected" -gt 0
+grep -q "OK ($expected tests)" smoke/platform-tests.txt
 ! grep -q 'FAILURES!!!' smoke/platform-tests.txt
 adb shell pm list packages > smoke/packages.txt
 ! grep -q 'package:io.github.mangi.eta$' smoke/packages.txt

@@ -11,7 +11,7 @@ import org.json.JSONObject
 @Suppress("DEPRECATION")
 class PlatformTest:InstrumentationTestCase() {
     fun testPersistenceRecoveryAndDraftIsolation() {
-        val context=instrumentation.targetContext
+        val context=instrumentation.context
         context.deleteDatabase("conversations.db")
         var db=ConversationDatabase(context)
         val a=db.create();val b=db.create()
@@ -40,7 +40,7 @@ class PlatformTest:InstrumentationTestCase() {
         assertTrue(result.getBoolean("ok"));assertTrue(result.getInt("percent") in 0..100)
     }
     fun testEncryptedSettingsAndSseFrames() {
-        val context=instrumentation.targetContext
+        val context=instrumentation.context
         val config=ModelSettings("https://example.invalid/v1/responses","fixture-model","synthetic-test-key",true)
         ModelSettingsStore(context).save(config);assertEquals(config,ModelSettingsStore(context).load())
         assertFalse(context.getSharedPreferences("model-settings",0).getString("key","")!!.contains(config.apiKey))

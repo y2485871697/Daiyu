@@ -34,12 +34,14 @@ jobs:
       - name: 单测与 Lint
         run: ./gradlew --no-daemon :core-domain:test :app:lintDebug
       - name: 构建开发 APK
-        run: ./gradlew --no-daemon :app:assembleDebug
+        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
       - name: 打包版本与摘要
         shell: bash
         run: |
           mkdir delivery
           short=${GITHUB_SHA:0:8}
+          mkdir -p delivery/tests
+          cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk delivery/tests/platform-test.apk
           cp app/build/outputs/apk/debug/app-debug.apk "delivery/代鱼-0.1.0-${short}.apk"
           printf '{"source_sha":"%s","version_name":"0.1.0","version_code":1,"application_id":"app.daiyu.android","signing":"ephemeral-debug","run_id":"%s"}\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" > delivery/构建记录.json
           (cd delivery && sha256sum *.apk > SHA256SUMS)

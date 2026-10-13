@@ -39,6 +39,11 @@ done
 test "$stable" -ge 15
 collect_diagnostics
 adb install "$APK" 2>&1 | tee smoke/install.txt
+adb install delivery/tests/platform-test.apk > smoke/test-install.txt
+adb shell am instrument -w app.daiyu.android.test/android.test.InstrumentationTestRunner > smoke/platform-tests.txt
+cat smoke/platform-tests.txt
+grep -q 'OK (3 tests)' smoke/platform-tests.txt
+! grep -q 'FAILURES!!!' smoke/platform-tests.txt
 adb shell pm list packages > smoke/packages.txt
 ! grep -q 'package:io.github.mangi.eta$' smoke/packages.txt
 adb shell am start -W -n app.daiyu.android/.MainActivity > smoke/start.txt
@@ -47,11 +52,11 @@ grep -q 'Status: ok' smoke/start.txt
 for attempt in $(seq 1 20); do
   adb shell uiautomator dump /sdcard/boot.xml >/dev/null 2>&1 || true
   adb pull /sdcard/boot.xml smoke/boot.xml >/dev/null 2>&1 || true
-  if test -f smoke/boot.xml && grep -q '代鱼 · 独立工程' smoke/boot.xml; then break; fi
+  if test -f smoke/boot.xml && grep -q '代鱼 · 聊天' smoke/boot.xml; then break; fi
   sleep 1
 done
-grep -q '代鱼 · 独立工程' smoke/boot.xml
-grep -q '代鱼：已就绪' smoke/boot.xml
+grep -q '代鱼 · 聊天' smoke/boot.xml
+grep -q '发送' smoke/boot.xml
 adb shell dumpsys activity activities > smoke/activity.txt
 adb logcat -d > smoke/logcat.txt
 ! grep -q 'FATAL EXCEPTION' smoke/logcat.txt

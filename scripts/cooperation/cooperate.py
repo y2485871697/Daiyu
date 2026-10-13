@@ -1,7 +1,11 @@
 """Durable checks coordinator. State/evidence live outside the source checkout."""
 import argparse
 from contextlib import contextmanager
-import fcntl
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+    import msvcrt
 import hashlib
 import json
 from pathlib import Path, PurePosixPath
@@ -33,9 +37,25 @@ def remote_quote(text):
 @contextmanager
 def locked(state):
     state.mkdir(parents=True, exist_ok=True)
-    with (state / 'coordinator.lock').open('w') as f:
-        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        yield
+    with (state / 'coordinator.lock').open('a+b') as f:
+        if fcntl is not None:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        else:
+            f.seek(0)
+            if not f.read(1):
+                f.write(b'0')
+                f.flush()
+            f.seek(0)
+            try:
+                msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError as e:
+                raise BlockingIOError('coordinator_locked') from e
+        try:
+            yield
+        finally:
+            if fcntl is None:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def snapshot(state, sha, config):

@@ -17,3 +17,5 @@ python scripts/cooperation/cooperate.py offline --state /workspace/daiyu-coopera
 云端报告离线复用：保留GitHub准确run/attempt/job终态元数据、artifact ID及API摘要、artifact ZIP和单项记录/日志/报告。联网接收时验证GitHub摘要，离线重新校验保存摘要及记录/XML；不同SHA/配置或被篡改报告拒绝。旧已有APK run可由主代理按同样完整证据规范导入，不拿未知旧报告自动套用；本自动入口仅调度可识别checks-only run，不取消APK。
 
 验收包括：正常同步/回收、边界断线缺项补检、同SHA离线成功、不同SHA或配置拒绝、篡改证据拒绝、进程重启不重复派发、云端不打包。任务中间网络丢失把远端状态标未知，不盲重启；已回收报告保留，未可靠回收交云端。
+
+离线云端覆盖必须逐次复验同一run/attempt的Linux与Windows两份原始artifact和bundle，不能仅信任complete标记或保留单平台。来源仅允许github/windows-pc；平台、job、artifact、record身份交叉绑定。协作unittest纳入两平台checks及build门禁。known_hosts目标名称缺失时，仅在观测密钥与已确认信任键完全一致后补齐该目标名称；新密钥或变化不得自动信任。

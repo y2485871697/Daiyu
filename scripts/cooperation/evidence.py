@@ -55,7 +55,10 @@ def verify_xml(archive, scope):
         if scope == 'unit':
             reports = [ET.fromstring(z.read(n)) for n in z.namelist()
                        if n.replace('\\', '/').split('/')[-1].startswith('TEST-') and n.endswith('.xml')]
-            if not reports or any(int(t.get(k, '0')) for t in reports for k in ('failures', 'errors', 'skipped')):
+            if (not reports or any(t.tag != 'testsuite' for t in reports)
+                    or any(int(t.get(k, '0')) for t in reports for k in ('failures', 'errors', 'skipped'))
+                    or any(t.findall('.//failure') or t.findall('.//error') or t.findall('.//skipped') for t in reports)
+                    or any(len(t.findall('testcase')) != int(t.get('tests', '0')) for t in reports)):
                 raise ValueError('unit_report_failed_or_missing')
             count = sum(int(t.get('tests', '0')) for t in reports)
             if count < 1:
@@ -64,7 +67,10 @@ def verify_xml(archive, scope):
         names = [n for n in z.namelist() if n.endswith('lint-results-debug.xml')]
         if len(names) != 1:
             raise ValueError('lint_report_missing')
-        issues = ET.fromstring(z.read(names[0])).findall('issue')
+        report = ET.fromstring(z.read(names[0]))
+        if report.tag != 'issues':
+            raise ValueError('invalid_lint_report_structure')
+        issues = report.findall('issue')
         if any(i.get('severity') in ('Error', 'Fatal') for i in issues):
             raise ValueError('lint_report_failed')
         return {'lint_errors': 0, 'lint_warnings': sum(i.get('severity') == 'Warning' for i in issues)}
@@ -73,6 +79,8 @@ def verify_xml(archive, scope):
 def verify_bundle(directory, sha, config, scope, receiving=False):
     directory = Path(directory)
     proof = read_json(directory / 'proof.json')
+    if proof.get('origin') not in {'github', 'windows-pc'}:
+        raise ValueError('unsupported_evidence_origin')
     for filename, expected in proof['files'].items():
         if filename not in ('record.json', 'reports.zip', 'check.log') or digest(directory / filename) != expected:
             raise ValueError('evidence_hash_mismatch')
@@ -84,6 +92,15 @@ def verify_bundle(directory, sha, config, scope, receiving=False):
             complete = read_json(base / 'complete.json')
             if complete['source_sha'] != sha or complete['attempt'] != proof['attempt'] or scope not in complete['scopes'] or set(complete['platforms']) != {'ubuntu-26.04','windows-latest'}:
                 raise ValueError('cloud_matrix_not_complete')
+            for platform in ('ubuntu-26.04', 'windows-latest'):
+                sibling = directory.parents[1] / f'github-{proof["run_id"]}-{proof["attempt"]}-{platform}' / scope
+                sibling_proof = read_json(sibling / 'proof.json')
+                if (sibling_proof.get('origin') != 'github' or sibling_proof.get('run_id') != proof['run_id']
+                        or sibling_proof.get('attempt') != proof['attempt']):
+                    raise ValueError('cloud_matrix_source_mismatch')
+                member = verify_bundle(sibling, sha, config, scope, receiving=True)
+                if member['environment']['os'] != {'ubuntu-26.04': 'Linux', 'windows-latest': 'Windows'}[platform]:
+                    raise ValueError('cloud_matrix_platform_mismatch')
         artifact = read_json(base / (str(proof['artifact_id']) + '.json'))
         archive = base / (str(proof['artifact_id']) + '.zip')
         run = read_json(base / 'run.json')
@@ -103,6 +120,16 @@ def verify_bundle(directory, sha, config, scope, receiving=False):
                 if len(names) != 1 or hashlib.sha256(z.read(names[0])).hexdigest() != proof['files'][filename]:
                     raise ValueError('cloud_bundle_not_in_verified_artifact')
     record = read_json(directory / 'record.json')
+    if proof['origin'] == 'github':
+        platform = {'Linux': 'ubuntu-26.04', 'Windows': 'windows-latest'}.get(record.get('environment', {}).get('os'))
+        if (not platform or artifact['name'] != '代鱼检查报告-' + platform
+                or artifact['id'] != proof['artifact_id'] or run['status'] != 'completed'
+                or record['check_id'] != f'github-{proof["run_id"]}-{record["environment"]["os"]}'
+                or record['check_attempt'] != proof['attempt']
+                or record.get('apk_built') is not False or record.get('package_scan') != 'passed'
+                or not any(j['id'] == proof['job_id'] and j['name'] == '只检查 ' + platform
+                           and j['status'] == 'completed' for j in jobs)):
+            raise ValueError('cloud_platform_identity_mismatch')
     if proof['origin'] == 'windows-pc':
         status = read_json(directory / 'status.json')
         if status.get('source_sha') != sha or status.get('config_id') != config or status.get('check_attempt') != record['check_attempt']:

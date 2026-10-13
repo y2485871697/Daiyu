@@ -61,6 +61,7 @@ jobs:
       - name: 独立边界与脚本检查
         shell: bash
         run: |
+          python -B -m unittest discover -s tests -q
           python scripts/verify_boundaries.py
           bash -n scripts/smoke_boot.sh
       - name: 定向检查（不打包）
@@ -100,7 +101,9 @@ jobs:
       - name: 安装固定 SDK
         run: sdkmanager 'platforms/android-37.2' 'build-tools/37.0.0'
       - name: 校验独立边界
-        run: python3 scripts/verify_boundaries.py
+        run: |
+          python3 -B -m unittest discover -s tests -q
+          python3 scripts/verify_boundaries.py
       - name: 单测与 Lint
         run: ./gradlew --no-daemon :core-domain:test :app:lintDebug
       - name: 构建开发 APK

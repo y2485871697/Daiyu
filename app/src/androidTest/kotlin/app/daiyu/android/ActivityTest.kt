@@ -20,7 +20,9 @@ class ActivityTest:InstrumentationTestCase() {
     private fun start()=instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
     fun testDraftSlotsRunningSwitchAndActivityRecreation() {
         val application=instrumentation.targetContext.applicationContext as ChatApplication
-        val original=application.controller
+        val controllerField=ChatApplication::class.java.getDeclaredField("controller").apply {isAccessible=true}
+        var original:ChatController?=null
+        var installed=false
         val context=testContext(instrumentation.targetContext)
         context.getSharedPreferences("model-settings",0).edit().clear().commit()
         context.deleteDatabase("conversations.db");context.getSharedPreferences("conversation-ui",0).edit().clear().commit()
@@ -38,7 +40,11 @@ class ActivityTest:InstrumentationTestCase() {
             val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
             while(!controller.ready && System.nanoTime()<deadline) Thread.sleep(10)
             assertTrue(controller.ready)
-            instrumentation.runOnMainSync {application.controller=controller}
+            instrumentation.runOnMainSync {
+                original=controllerField.get(application) as? ChatController
+                application.controller=controller
+                installed=true
+            }
             val first=start();activity=first
             instrumentation.runOnMainSync {
                 assertTrue(db.conversations().isEmpty())
@@ -84,7 +90,7 @@ class ActivityTest:InstrumentationTestCase() {
                     instrumentation.waitForIdleSync()
                 } finally {controller.close()}
             } finally {
-                instrumentation.runOnMainSync {application.controller=original}
+                instrumentation.runOnMainSync {if(installed) controllerField.set(application,original)}
                 context.getSharedPreferences("model-settings",0).edit().clear().commit()
             }
         }

@@ -66,7 +66,7 @@ class CloudEvidenceTests(unittest.TestCase):
 
     def test_unknown_origin_rejects(self):
         path = self.linux / 'proof.json'
-        proof = json.loads(path.read_text()); proof['origin'] = 'untrusted'
+        proof = json.loads(path.read_text(encoding='utf-8')); proof['origin'] = 'untrusted'
         atomic_json(path, proof)
         with self.assertRaisesRegex(ValueError, 'unsupported_evidence_origin'):
             verify_bundle(self.linux, self.sha, self.config, 'unit')
@@ -74,18 +74,18 @@ class CloudEvidenceTests(unittest.TestCase):
 
     def test_job_platform_mismatch_rejects(self):
         path = self.base / 'jobs.json'
-        jobs = json.loads(path.read_text()); jobs[1]['name'] = '只检查 ubuntu-26.04'
+        jobs = json.loads(path.read_text(encoding='utf-8')); jobs[1]['name'] = '只检查 ubuntu-26.04'
         atomic_json(path, jobs)
         self.assertEqual(coverage(self.state, self.sha, self.config), {})
 
     def test_wrong_attempt_rejects(self):
         path = self.base / 'run.json'
-        run = json.loads(path.read_text()); run['run_attempt'] = 2
+        run = json.loads(path.read_text(encoding='utf-8')); run['run_attempt'] = 2
         atomic_json(path, run)
         self.assertEqual(coverage(self.state, self.sha, self.config), {})
 
     def test_peer_cannot_change_origin(self):
         path = self.windows / 'proof.json'
-        proof = json.loads(path.read_text()); proof['origin'] = 'windows-pc'
+        proof = json.loads(path.read_text(encoding='utf-8')); proof['origin'] = 'windows-pc'
         atomic_json(path, proof)
         self.assertEqual(coverage(self.state, self.sha, self.config), {})

@@ -41,8 +41,8 @@ def locked(state):
         if fcntl is not None:
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
         else:
-            f.seek(0)
-            if not f.read(1):
+            f.seek(0, 2)
+            if f.tell() == 0:
                 f.write(b'0')
                 f.flush()
             f.seek(0)

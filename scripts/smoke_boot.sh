@@ -11,6 +11,13 @@ collect_diagnostics() {
 }
 trap collect_diagnostics EXIT
 adb wait-for-device
+api=$(adb shell getprop ro.build.version.sdk | tr -d '\r')
+# Current gfxstream images crash in gesture-bar region sampling before app install.
+if test "$api" -ge 36; then
+  adb shell cmd overlay enable com.android.internal.systemui.navbar.threebutton
+  adb shell cmd overlay disable com.android.internal.systemui.navbar.gestural
+  adb shell cmd overlay list > smoke/navigation-overlays.txt
+fi
 # Boot-completed can precede a framework restart on a freshly created AVD.
 stable=0
 previous=""
@@ -48,4 +55,15 @@ grep -q '代鱼：已就绪' smoke/boot.xml
 adb shell dumpsys activity activities > smoke/activity.txt
 adb logcat -d > smoke/logcat.txt
 ! grep -q 'FATAL EXCEPTION' smoke/logcat.txt
-adb exec-out screencap -p > smoke/启动.png
+if test "$api" -ge 36; then
+  adb emu screenrecord screenshot "$(pwd)/smoke"
+  screenshot=$(find smoke -maxdepth 1 -name 'Screenshot_*.png' -print -quit)
+  test -n "$screenshot"
+  mv "$screenshot" smoke/启动.png
+else
+  adb exec-out screencap -p > smoke/启动.png
+fi
+python3 - <<'PYPNG'
+from pathlib import Path
+assert Path('smoke/启动.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n'), 'Invalid screenshot evidence'
+PYPNG

@@ -22,6 +22,9 @@ jobs:
       - uses: gradle/actions/wrapper-validation@48b5f213c81028ace310571dc5ec0fbbca0b2947
       - uses: gradle/actions/setup-gradle@48b5f213c81028ace310571dc5ec0fbbca0b2947
       - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407
+        with:
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
       - name: 安装固定 SDK
         run: sdkmanager 'platforms;android-36' 'build-tools;35.0.0'
       - name: 校验独立边界

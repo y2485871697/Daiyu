@@ -7,3 +7,5 @@ local.properties
 *.aab
 .idea/
 更新说明.md
+
+__pycache__/

@@ -23,7 +23,7 @@ description: 用于独立代鱼项目 y2485871697/Daiyu 开发、检查和交付
 | 主代理 | SSH、集成、摘要/真实退出码核验、去重、验收与交付 |
 | 子代理 | 同轮并行独立阅读/审查，不接收凭据、不建分支 |
 
-1. 使用 `scripts/cooperation/cooperate.py run --state <仓库外持久证据目录> --known-hosts <已核验信任文件>`。Python需paramiko，仅SSH部分用；所选Linux环境执行，不在Android下载工具。确认main工作树干净、远端SHA；git archive不可变提交、逐文件摘要，电脑二次核验后才执行入口。
+1. 使用 `uv run --locked --script scripts/cooperation/cooperate.py run --state <仓库外持久证据目录> --known-hosts <已核验信任文件>`。电脑run入口用PEP 723与cooperate.py.lock准备独立的固定依赖环境，不用裸python3或旧venv；cloud/offline及证据测试仍只需标准库，纯离线不通过uv；所选Linux环境执行，不在Android下载工具。确认main工作树干净、远端SHA；git archive不可变提交、逐文件摘要，电脑二次核验后才执行入口。
 2. 每个单测/Lint记录CHECK_ID、attempt、SHA、配置指纹、精确命令/范围、缓存基线、环境、真实退出码、日志/报告摘要。逐项回收核验，失败保留并修复，不当缺项抹去。未知远端执行不重启、不乱杀进程。
 3. 电脑掉线仅补缺项。`mode=checks`的`check_scope=unit|lint|all`不打包；唯一check_id写入run-name，dispatch前持久记录，结果未知只查询不重发。准确SHA已有排队/运行/成功则绑定复用，不触发APK。远端main变更则停止派发，不猜revision。
 4. `cooperate.py offline --state <目录>`完全不联网、不SSH、不dispatch；重新核对SHA、配置、attempt、终态、文件摘要和XML，不只读passed标记。新SHA不得复用旧报告；离线缺项退出3，证据错误不冒充通过。

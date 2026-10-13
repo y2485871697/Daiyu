@@ -7,6 +7,7 @@ collect_diagnostics() {
   timeout 10 adb devices -l > smoke/devices.txt 2>&1 || true
   timeout 10 adb shell getprop > smoke/properties.txt 2>&1 || true
   timeout 10 adb shell df -h /data > smoke/storage.txt 2>&1 || true
+  timeout 10 adb shell cat /proc/meminfo > smoke/memory-exit.txt 2>&1 || true
   timeout 15 adb logcat -d -b all > smoke/logcat.txt 2>&1 || true
 }
 trap collect_diagnostics EXIT
@@ -38,6 +39,10 @@ for attempt in $(seq 1 60); do
 done
 test "$stable" -ge 15
 collect_diagnostics
+adb shell cat /proc/meminfo > smoke/memory-start.txt
+if test -n "${EMULATOR_RAM_MB:-}"; then
+  awk -v expected="$EMULATOR_RAM_MB" '/^MemTotal:/ {found=1; if ($2 < expected * 1024 * 0.9) exit 1} END {if (!found) exit 1}' smoke/memory-start.txt
+fi
 adb install "$APK" 2>&1 | tee smoke/install.txt
 adb install delivery/tests/platform-test.apk > smoke/test-install.txt
 adb shell am instrument -w app.daiyu.android.test/android.test.InstrumentationTestRunner > smoke/platform-tests.txt

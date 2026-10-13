@@ -1,14 +1,16 @@
 # 持久电脑/云端检查协作
 
-源文件：仓库`scripts/cooperation/`；证据和凭据均放仓库外。凭据唯一入口`/workspace/ssh账户密码`，known_hosts必须由既有核验得到，不能禁用校验。依赖paramiko固定在已授权Linux虚拟环境，脚本不自动安装工具。
+源文件：仓库`scripts/cooperation/`；证据和凭据均放仓库外。凭据唯一入口`/workspace/ssh账户密码`，known_hosts必须由既有核验得到，不能禁用校验。手机端电脑检查必须使用已选Linux环境的锁定uv脚本入口：`cooperate.py`内PEP 723声明paramiko 4.0.0，`cooperate.py.lock`固定传递依赖及发行包摘要。uv为该脚本准备独立环境，不复用裸python3或依赖会话激活的旧venv；不向系统Python全局安装包。当前已验证Python 3.14.7。
 
-命令（实际SHA/路径现场核对）：
+命令从仓库根目录运行（实际SHA/路径现场核对）：
 
 ```sh
-python scripts/cooperation/cooperate.py run --state /workspace/daiyu-cooperation-state --known-hosts <已核验信任文件>
-python scripts/cooperation/cooperate.py cloud --state /workspace/daiyu-cooperation-state
-python scripts/cooperation/cooperate.py offline --state /workspace/daiyu-cooperation-state
+uv run --locked --script scripts/cooperation/cooperate.py run --state /workspace/daiyu-cooperation-state --known-hosts <已核验信任文件>
+python3 -B scripts/cooperation/cooperate.py cloud --state /workspace/daiyu-cooperation-state
+python3 -B scripts/cooperation/cooperate.py offline --state /workspace/daiyu-cooperation-state
 ```
+
+`run`首次由uv按锁文件准备本机依赖；依赖更新必须显式运行`uv lock --script scripts/cooperation/cooperate.py`并一并审阅、提交锁文件，不在日常运行时解锁。`cloud`、`offline`和标准库测试不导入SSH依赖；纯离线校验直接使用上面的python3命令，不用可能准备依赖/联网的uv入口。缺依赖报告`local_dependency_unavailable`与固定调用提示，和SSH网络/认证失败区分，保留既定云端补缺，不自动删除旧迁移标记或重派旧任务。
 
 状态文件记录dispatch前意图与run绑定；协调器独占锁阻止并发派发。未知请求不重发，先读状态/云端查询。电脑每个scope在独立报告目录持久锁，只派一次；错误修复后如需新attempt必须先确认旧执行停止，不能改编号绕过未知执行。
 

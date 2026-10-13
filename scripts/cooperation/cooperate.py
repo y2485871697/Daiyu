@@ -1,3 +1,7 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = ["paramiko==4.0.0"]
+# ///
 """Durable checks coordinator. State/evidence live outside the source checkout."""
 import argparse
 from contextlib import contextmanager
@@ -138,14 +142,14 @@ def collect_pc(client, state, manifest, remote, scope, attempt=1):
 
 
 def run_pc(state, manifest, known_hosts, interrupt_after=None):
+    if (state / 'pc-unavailable.json').exists():
+        raise RuntimeError('pc_already_migrated_no_redispatch')
     from ssh_transport import connect, execute
     client = connect(known_hosts)
     remote = 'E:/daiyu/checks/cooperate-' + manifest['source_sha'][:12]
     journal = state / 'pc-dispatch.json'
     old = read_json(journal) if journal.exists() else {}
     try:
-        if (state / 'pc-unavailable.json').exists():
-            raise RuntimeError('pc_already_migrated_no_redispatch')
         sync_pc(client, state, manifest, remote)
         # Execute only the hash-verified entry inside the immutable source snapshot.
         for scope in SCOPES:
@@ -332,6 +336,11 @@ def main():
                     run_pc(state, manifest, a.known_hosts, a.interrupt_after)
                 except ValueError:
                     raise  # real failed checks or integrity faults must not become passes
+                except ImportError as e:
+                    atomic_json(state / 'pc-unavailable.json', dict(error_type=type(e).__name__, state='local_dependency_unavailable',
+                                incomplete=[s for s in SCOPES if s not in coverage(state, sha, config)]))
+                    print('PC_LOCAL_DEPENDENCY_UNAVAILABLE: use uv run --locked --script '
+                          'scripts/cooperation/cooperate.py run with the same arguments', file=sys.stderr)
                 except Exception as e:
                     atomic_json(state / 'pc-unavailable.json', dict(error_type=type(e).__name__, state='unknown_or_unavailable',
                                 incomplete=[s for s in SCOPES if s not in coverage(state, sha, config)]))

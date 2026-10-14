@@ -79,7 +79,7 @@ jobs:
           if-no-files-found: error
   build:
     name: 单测、检查与开发包
-    if: inputs.mode == 'build'
+    if: inputs.mode == 'build' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     timeout-minutes: 25
     steps:
@@ -106,8 +106,24 @@ jobs:
           python3 scripts/verify_boundaries.py
       - name: 单测与 Lint
         run: ./gradlew --no-daemon :core-domain:test :app:lintDebug
+      - name: 准备固定签名
+        env:
+          DAIYU_RELEASE_KEYSTORE_BASE64: ${{ secrets.DAIYU_RELEASE_KEYSTORE_BASE64 }}
+          DAIYU_RELEASE_KEY_ALIAS: ${{ secrets.DAIYU_RELEASE_KEY_ALIAS }}
+          DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
+          DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
+        run: python3 scripts/prepare_signing.py
       - name: 构建开发 APK
+        env:
+          DAIYU_REQUIRE_SIGNING: 'true'
+          DAIYU_RELEASE_STORE_FILE: ${{ runner.temp }}/daiyu-release.p12
+          DAIYU_RELEASE_KEY_ALIAS: ${{ secrets.DAIYU_RELEASE_KEY_ALIAS }}
+          DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
+          DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
         run: ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: 清理临时签名文件
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/daiyu-release.p12"
       - name: 打包版本与摘要
         shell: bash
         run: |
@@ -116,9 +132,8 @@ jobs:
           mkdir -p delivery/tests
           cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk delivery/tests/platform-test.apk
           cp app/build/outputs/apk/debug/app-debug.apk "delivery/代鱼-0.1.0-${short}.apk"
-          printf '{"source_sha":"%s","version_name":"0.1.0","version_code":1,"application_id":"app.daiyu.android","signing":"ephemeral-debug","run_id":"%s","attempt":"%s"}\n' "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > delivery/构建记录.json
+          python3 scripts/verify_signing.py --apksigner "$ANDROID_HOME/build-tools/37.0.0/apksigner" --delivery delivery
           (cd delivery && sha256sum *.apk tests/*.apk > SHA256SUMS)
-          "$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs delivery/*.apk > delivery/签名证据.txt
       - name: 上传测试报告
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

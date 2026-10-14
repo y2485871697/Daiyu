@@ -35,6 +35,6 @@ description: 用于独立代鱼项目 y2485871697/Daiyu 开发、检查和交付
 - 工作流383377276/代鱼构建，APK artifact代鱼开发包；执行前核对真实YAML、main、所有未结束run。先复用准确目标，不因电脑掉线或缺检查cancel/rerun APK。
 - 真需不同APK目标：旧构建实际运行>540秒等完成；<=540秒取消准确run并确认终态后重查。来源明确本任务失败默认读日志修复、验证、推送后调度；非自身/来源不明失败先ask_user。不对未知dispatch重发。
 - 保留OWN_SHA、最新REQUIRED_SHA、实际BUILD_SHA及run/attempt；替代run必须包含OWN与REQUIRED，核验后跟进，不包含则停止。不以同actor/SHA推断自己发起，不以build成功代替所有必需smoke成功。
-- 用户要求交付时持续跟进至全部门禁通过，准确run/attempt artifact下载校验至`/storage/emulated/0/Download/代鱼/代鱼-<版本>-<短SHA>.apk`，不安装、不从电脑取包，不覆盖不同内容同名包。签名目前debug开发签名，不冒称正式版；更新说明记录实际证据和剩余项，仅清理本任务副本。
+- 用户要求交付时持续跟进至全部门禁通过，准确run/attempt artifact下载校验至`/storage/emulated/0/Download/代鱼/代鱼-<版本>-<短SHA>.apk`，不安装、不从电脑取包，不覆盖不同内容同名包。签名经用户授权固定使用其自有原代鱼证书（SHA-256 `1e1c8731bd2a7fab53b941cd9869884e7756bed96fadd10f322e70d760d1d193`），仍是Debug开发变体，不冒称正式Release。四项DAIYU_RELEASE_* Actions Secrets只在新仓库注入，主包与测试包证书均须核验，材料缺失或证书不符停止交付；包名不变、旧项目与原签名文件不动。首次切换临时签名需另行授权备份重装，不自动安装或卸载；更新说明记录实际证据和剩余项，仅清理本任务副本。
 
 详见 [电脑协作](references/pc-workflow.md)。

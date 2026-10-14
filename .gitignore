@@ -6,6 +6,7 @@ local.properties
 *.p12
 *.pfx
 keystore.properties
+signing-credentials.json
 *.apk
 *.aab
 .idea/

@@ -57,6 +57,11 @@ class SigningTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 verify_certificate(bad)
 
+    def test_original_certificate_rejected(self):
+        old_cert = '1e1c8731bd2a7fab53b941cd9869884e7756bed96fadd10f322e70d760d1d193'
+        with self.assertRaises(ValueError):
+            verify_certificate(GOOD.replace(EXPECTED_CERT, old_cert))
+
     def test_build_tools_37_scheme_prefixed_signer(self):
         # Exact scheme-prefixed label observed in Actions 38532534059/build-tools 37.
         scheme = GOOD.replace('Signer #1 certificate', 'V2 Signer: certificate')
@@ -87,8 +92,9 @@ class SigningTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, GOOD, '')
             record = verify_delivery('apksigner', root, env, run)
             self.assertEqual(len(commands), 2)
-            self.assertEqual(record['signing'], 'owner-fixed')
+            self.assertEqual(record['signing'], 'daiyu-fixed')
             self.assertEqual(record['certificate_sha256'], EXPECTED_CERT)
+            self.assertEqual(record['certificate_subject'], 'CN=daiyu,OU=daiyu,O=daiyu')
             self.assertIn('--min-sdk-version', commands[1])
             def wrong_test(command, **kwargs):
                 text = GOOD.replace(EXPECTED_CERT, '0' * 64) if command[-1].endswith('platform-test.apk') else GOOD

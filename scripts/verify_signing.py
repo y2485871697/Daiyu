@@ -1,4 +1,4 @@
-"""Require the owner's fixed certificate on both application and test APKs."""
+"""Require the independent daiyu certificate on application and test APKs."""
 import argparse
 import json
 import os
@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import subprocess
 
-EXPECTED_CERT = '1e1c8731bd2a7fab53b941cd9869884e7756bed96fadd10f322e70d760d1d193'
+EXPECTED_CERT = 'ec06e1e10666c09d8cdc17411a626b9bc92e61a7e1dc49abd3989b7eee8576e5'
 
 
 def verify_certificate(output):
@@ -38,8 +38,9 @@ def verify_delivery(apksigner, delivery, env, run=subprocess.run):
         evidence.append(f'APK: {apk.relative_to(delivery)}\n{result.stdout}')
     (delivery / '签名证据.txt').write_text('\n'.join(evidence), encoding='utf-8')
     record = dict(source_sha=env['GITHUB_SHA'], version_name='0.1.0', version_code=1,
-                  application_id='app.daiyu.android', signing='owner-fixed',
-                  certificate_sha256=EXPECTED_CERT, variant='debug', debuggable=True,
+                  application_id='app.daiyu.android', signing='daiyu-fixed',
+                  certificate_sha256=EXPECTED_CERT, certificate_subject='CN=daiyu,OU=daiyu,O=daiyu',
+                  variant='debug', debuggable=True,
                   run_id=env['GITHUB_RUN_ID'], attempt=env['GITHUB_RUN_ATTEMPT'])
     record_path.write_text(json.dumps(record, ensure_ascii=False) + '\n', encoding='utf-8')
     return record

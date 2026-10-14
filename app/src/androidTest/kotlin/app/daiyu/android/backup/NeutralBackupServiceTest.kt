@@ -20,7 +20,6 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
         val files = File(base.cacheDir, "backup-${UUID.randomUUID()}").apply { mkdirs() }
         val context = object : ContextWrapper(base) { override fun getFilesDir(): File = files }
         val db = ConversationDatabase(context); databases.add(context to db)
-        DatabaseTransactions { db.writableDatabase }.run { ContextStorage.installSchema(it) }
         return Triple(context, db, NeutralBackupService(context, db))
     }
     override fun tearDown() {

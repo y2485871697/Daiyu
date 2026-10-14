@@ -21,8 +21,6 @@ class ContextServiceTest : InstrumentationTestCase() {
         val files = File(base.cacheDir, "context-${UUID.randomUUID()}").apply { mkdirs() }
         context = object : ContextWrapper(base) { override fun getFilesDir(): File = files }
         db = ConversationDatabase(context)
-        // Explicit install until the owning agent wires onCreate/version4 migration. No service DDL.
-        DatabaseTransactions { db.writableDatabase }.run { ContextStorage.installSchema(it) }
         service = ContextService(context, db)
     }
     override fun tearDown() {

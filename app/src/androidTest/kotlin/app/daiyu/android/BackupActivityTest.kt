@@ -52,6 +52,23 @@ class BackupActivityTest:InstrumentationTestCase() {
     private class FixtureApplication(base:Context,private val resolver:MockContentResolver):Application() {
         init {attachBaseContext(base)}
         override fun getContentResolver()=resolver
+        var failNextRestoreCommit=false
+        override fun getSharedPreferences(name:String,mode:Int):android.content.SharedPreferences {
+            val raw=super.getSharedPreferences(name,mode)
+            if(name!="model-settings") return raw
+            return object:android.content.SharedPreferences by raw {
+                override fun edit():android.content.SharedPreferences.Editor {
+                    val editor=raw.edit()
+                    return object:android.content.SharedPreferences.Editor by editor {
+                        override fun commit():Boolean {
+                            val committed=editor.commit()
+                            if(failNextRestoreCommit) {failNextRestoreCommit=false;return false}
+                            return committed
+                        }
+                    }
+                }
+            }
+        }
     }
     private lateinit var application:ChatApplication
     private lateinit var fixtureApp:FixtureApplication
@@ -114,6 +131,10 @@ class BackupActivityTest:InstrumentationTestCase() {
             main {original?.let {application.controller=it}}
             controller.close();fixtureApp.deleteDatabase("conversations.db")
             fixtureApp.getSharedPreferences("conversation-ui",0).edit().clear().commit()
+            fixtureApp.getSharedPreferences("model-settings",0).getString("key-alias",null)?.let {alias->
+                if(alias.startsWith("unused-activity-")) java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null)}.deleteEntry(alias)
+            }
+            fixtureApp.getSharedPreferences("model-settings",0).edit().clear().commit()
             directory.deleteRecursively()
         } finally {super.tearDown()}
     }
@@ -305,6 +326,120 @@ class BackupActivityTest:InstrumentationTestCase() {
             assertNotNull("recreated Activity must resume",recreated);activity=recreated
             instrumentation.waitForIdleSync()
         } finally {instrumentation.removeMonitor(monitor)}
+    }
+    private fun restoreDialog():AlertDialog?=MainActivity::class.java.getDeclaredField("configurationRestoreDialog").apply {isAccessible=true}.get(activity) as? AlertDialog
+    private fun restorePress(which:Int) {
+        main {restoreDialog()!!.getButton(which).performClick()}
+        instrumentation.waitForIdleSync()
+    }
+    private fun restorePreview() {
+        click("备份与导入");choose(2)
+        main {assertNotNull("manual restore preview must be visible",restoreDialog())}
+    }
+    private fun modelPreferences()=fixtureApp.getSharedPreferences("model-settings",0)
+    private fun seedRestoreMetadata() {
+        assertTrue(modelPreferences().edit().putString("endpoint","https://current.invalid").putString("model","current-model")
+            .putString("responses-path","").putBoolean("battery",true).putBoolean("device-status",true)
+            .putString("key","SECRET_ciphertext").putString("iv","SECRET_iv").putString("key-alias","SECRET_alias").commit())
+        NeutralBackupService(fixtureApp,controller.database).setNonSecretConfiguration(mapOf(
+            "endpoint" to "https://imported.invalid","model" to "imported-model","responses-path" to "/responses",
+            "battery" to true,"device-status" to true))
+    }
+    fun testRealCompleteImportDoesNotApplyConfigurationThenMenuPreviewsAndConfirms() {
+        seedRestoreMetadata()
+        // Export metadata into a real complete backup, then clear it so the production import must fill it.
+        val backup=NeutralBackupService(fixtureApp,controller.database)
+        provider.file(completeUri).writeText(backup.exportPackage())
+        backup.setNonSecretConfiguration(emptyMap())
+        val before=HashMap(modelPreferences().all)
+        start(opened(completeUri));choose(0);press(AlertDialog.BUTTON_POSITIVE)
+        awaitState {!controller.dataBusy && controller.dataRevision==1L}
+        assertEquals(before,modelPreferences().all);assertEquals(1,provider.opens.get())
+        restorePreview()
+        main {
+            val previewText=views(restoreDialog()!!.window!!.decorView).filterIsInstance<android.widget.TextView>().joinToString("\n") {it.text.toString()}
+            assertTrue(previewText.contains("https://current.invalid"));assertTrue(previewText.contains("https://imported.invalid"))
+            assertTrue(previewText.contains("重新输入"));assertTrue(previewText.contains("不启用工具"))
+            assertFalse(previewText.contains("SECRET_"));assertEquals(before,modelPreferences().all)
+        }
+        restorePress(AlertDialog.BUTTON_POSITIVE)
+        assertEquals("https://imported.invalid",modelPreferences().getString("endpoint",null))
+        assertEquals("imported-model",modelPreferences().getString("model",null))
+        assertFalse(modelPreferences().getBoolean("battery",true));assertFalse(modelPreferences().getBoolean("device-status",true))
+        for(name in listOf("key","iv","key-alias")) assertEquals(before[name],modelPreferences().all[name])
+        assertTrue(modelPreferences().getBoolean("credential-rebind-required",false))
+        try {controller.settings.load();fail("must not read/reuse old key")} catch(_:CredentialUnavailableException) {}
+        assertEquals("",controller.settings.loadForEditing().settings.apiKey)
+        main {assertNull(restoreDialog())}
+        recreate()
+        assertEquals("imported-model",modelPreferences().getString("model",null))
+        main {assertNull(restoreDialog())};assertEquals(1,provider.opens.get());assertEquals(0,modelCalls.get())
+        // Real settings dialog must not prefill the old credential; only an explicit new key save clears the gate.
+        click("模型设置")
+        main {
+            val settingsDialog=MainActivity::class.java.getDeclaredField("settingsDialog").apply {isAccessible=true}.get(activity) as AlertDialog
+            val key=views(settingsDialog.window!!.decorView).filterIsInstance<android.widget.EditText>().single {it.hint.toString().startsWith("API密钥")}
+            assertEquals("",key.text.toString());key.setText("synthetic-new-key")
+            settingsDialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+        }
+        instrumentation.waitForIdleSync()
+        assertFalse(modelPreferences().getBoolean("credential-rebind-required",false))
+        assertEquals("synthetic-new-key",controller.settings.load().apiKey)
+        assertFalse(controller.settings.load().batteryEnabled);assertFalse(controller.settings.load().deviceStatusEnabled)
+        assertEquals(0,modelCalls.get())
+    }
+    fun testRestoreCancelAndRecreationDropConfirmationWithoutApplyingOrReplaying() {
+        seedRestoreMetadata();start();val before=HashMap(modelPreferences().all)
+        restorePreview();restorePress(AlertDialog.BUTTON_NEGATIVE)
+        assertEquals(before,modelPreferences().all);main {assertNull(restoreDialog())}
+        restorePreview();recreate()
+        main {assertNull(restoreDialog())}
+        assertEquals(before,modelPreferences().all)
+        restorePreview();main {restoreDialog()!!.cancel()}
+        instrumentation.waitForIdleSync();assertEquals(before,modelPreferences().all)
+        assertEquals(0,modelCalls.get());assertEquals(0,provider.opens.get());assertEquals(0L,controller.dataRevision)
+    }
+    fun testRestoreFinalConfirmationRechecksRuntimeGatesInRealActivity() {
+        seedRestoreMetadata();start();val before=HashMap(modelPreferences().all)
+        for(state in listOf("active","busy","recovery","not-ready")) {
+            restorePreview();main {gate(state)}
+            try {restorePress(AlertDialog.BUTTON_POSITIVE)} finally {main {gate(null)}}
+            main {assertNull(restoreDialog())};assertEquals(before,modelPreferences().all)
+        }
+        assertEquals(0,provider.opens.get());assertEquals(0,modelCalls.get());assertEquals(0L,controller.dataRevision)
+    }
+    fun testRestoreStaleSettingsAndMetadataFailWithoutApplying() {
+        seedRestoreMetadata();start();val before=HashMap(modelPreferences().all)
+        restorePreview()
+        NeutralBackupService(fixtureApp,controller.database).setNonSecretConfiguration(mapOf("model" to "replacement"))
+        restorePress(AlertDialog.BUTTON_POSITIVE);assertEquals(before,modelPreferences().all)
+        restorePreview();assertTrue(modelPreferences().edit().putString("model","user-edit").commit())
+        val changed=HashMap(modelPreferences().all)
+        restorePress(AlertDialog.BUTTON_POSITIVE);assertEquals(changed,modelPreferences().all)
+        assertEquals(0,provider.opens.get());assertEquals(0,modelCalls.get())
+    }
+    fun testRestoreCommitFailureInRealActivityPreservesOriginalAndRequiresNewPreview() {
+        seedRestoreMetadata();start();val before=HashMap(modelPreferences().all)
+        restorePreview();fixtureApp.failNextRestoreCommit=true
+        restorePress(AlertDialog.BUTTON_POSITIVE)
+        main {assertNull(restoreDialog())};assertEquals(before,modelPreferences().all)
+        recreate();main {assertNull(restoreDialog())};assertEquals(before,modelPreferences().all)
+        restorePreview();restorePress(AlertDialog.BUTTON_POSITIVE)
+        assertEquals("imported-model",modelPreferences().getString("model",null))
+        assertEquals(0,modelCalls.get());assertEquals(0,provider.opens.get());assertEquals(0L,controller.dataRevision)
+    }
+    fun testRestoreEmptyMetadataOnlyShowsNoOpAndInvalidMetadataNeverShowsConfirm() {
+        start();val before=HashMap(modelPreferences().all)
+        restorePreview()
+        main {
+            assertFalse(restoreDialog()!!.getButton(AlertDialog.BUTTON_POSITIVE)?.isShown==true)
+            assertTrue(views(restoreDialog()!!.window!!.decorView).filterIsInstance<android.widget.TextView>().any {it.text.toString().contains("没有已导入")})
+        }
+        restorePress(AlertDialog.BUTTON_NEGATIVE)
+        NeutralBackupService(fixtureApp,controller.database).setNonSecretConfiguration(mapOf("model" to "m".repeat(201)))
+        click("备份与导入");choose(2)
+        main {assertNull(restoreDialog())};assertEquals(before,modelPreferences().all)
+        assertEquals(0,modelCalls.get());assertEquals(0,provider.opens.get())
     }
     fun testManifestOnlyResolvesContentJsonView() {
         val pm=instrumentation.targetContext.packageManager

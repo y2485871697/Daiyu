@@ -23,12 +23,23 @@ class ControllerBackupTest:InstrumentationTestCase() {
     private class FixtureApplication(base:Context):Application() {
         init {attachBaseContext(base)}
         val database=ConversationDatabase(this)
+        var failNextRestoreCommit=false
         val projectionContext=object:ContextWrapper(this) {
             override fun getSharedPreferences(name:String,mode:Int):SharedPreferences {
                 val raw=baseContext.getSharedPreferences(name,mode)
                 if(name!="model-settings") return raw
                 return object:SharedPreferences by raw {
-                    override fun getAll():MutableMap<String,*> = error("export must not read all preferences")
+                    override fun edit():SharedPreferences.Editor {
+                        val editor=raw.edit()
+                        return object:SharedPreferences.Editor by editor {
+                            override fun commit():Boolean {
+                                val committed=editor.commit()
+                                if(failNextRestoreCommit) {failNextRestoreCommit=false;return false}
+                                return committed
+                            }
+                        }
+                    }
+                    override fun getAll():MutableMap<String,*> = error("export/restore must not read all preferences")
                     override fun getString(key:String?,default:String?):String? {
                         check(key in setOf("endpoint","model","responses-path")) {"export must not read credentials"}
                         return raw.getString(key,default)
@@ -174,6 +185,116 @@ class ControllerBackupTest:InstrumentationTestCase() {
         try {assertTrue(entered.await(5,TimeUnit.SECONDS));rejects(f);assertTrue(f.controller.dataBusy)}
         finally {release.countDown();awaitState(f) {!f.controller.dataBusy && f.controller.dataNotice=="fixture task finished"}}
         assertEquals(0,f.calls.get())
+    }
+    private fun restoreRejected(work:()->Unit) {
+        try {work();fail("manual restore must reject")} catch(_:IllegalArgumentException) {} catch(_:IllegalStateException) {}
+    }
+    fun testImportedConfigurationOnlyAppliesAfterManualConfirmationWithoutCredentialReads() {
+        val source=fresh();settings(source);val input=export(source)
+        val f=fresh();settings(f,"current-model")
+        assertTrue(f.preferences.edit().putString("endpoint","https://current.invalid").putBoolean("device-status",true).commit())
+        val before=HashMap(f.preferences.all)
+        task(f) {f.controller.importUserBackup(Uri.fromFile(input),true)}
+        assertEquals(before,f.preferences.all)
+        val metadata=f.backup.importedConfiguration().toString()
+        main {
+            val preview=f.controller.previewImportedConfiguration()
+            assertEquals(before,f.preferences.all)
+            assertTrue(preview.plan.credentialRebindRequired)
+            assertEquals("source-model",preview.plan.after["model"])
+            assertEquals(false,preview.plan.after["battery"])
+            assertEquals(false,preview.plan.after["device-status"])
+            assertFalse(preview.plan.before.toString().contains("SECRET_"))
+            f.controller.restoreImportedConfiguration(preview,true)
+            assertEquals("source-model",f.preferences.getString("model",null))
+            assertEquals("https://example.invalid/gateway",f.preferences.getString("endpoint",null))
+            assertFalse(f.preferences.getBoolean("battery",true));assertFalse(f.preferences.getBoolean("device-status",true))
+            for(name in listOf("key","iv","key-alias","cookie")) assertEquals(before[name],f.preferences.all[name])
+            assertTrue(f.preferences.getBoolean("credential-rebind-required",false))
+            // ProjectionContext rejects getAll and every credential getString: the gate must run first.
+            try {f.app.settings.load();fail("old key must not bind to new endpoint")} catch(_:CredentialUnavailableException) {}
+            assertEquals("",f.app.settings.loadForEditing().settings.apiKey)
+            assertNull(f.controller.send(null,"must not use the previous key"))
+            assertTrue(f.controller.problem?.contains("未发起网络请求")==true)
+            restoreRejected {f.controller.restoreImportedConfiguration(preview,true)}
+        }
+        assertEquals(metadata,f.backup.importedConfiguration().toString())
+        assertEquals(1L,f.controller.dataRevision);assertEquals(0,f.calls.get())
+    }
+    fun testRestoreCancelAuthorizationAndReplacedPreviewAreSingleUse() {
+        val f=fresh();settings(f);f.backup.setNonSecretConfiguration(mapOf("model" to "imported"))
+        val before=HashMap(f.preferences.all)
+        main {
+            val canceled=f.controller.previewImportedConfiguration();f.controller.cancelConfigurationRestore(canceled)
+            restoreRejected {f.controller.restoreImportedConfiguration(canceled,true)}
+            val unauthorized=f.controller.previewImportedConfiguration()
+            restoreRejected {f.controller.restoreImportedConfiguration(unauthorized,false)}
+            restoreRejected {f.controller.restoreImportedConfiguration(unauthorized,true)}
+            val old=f.controller.previewImportedConfiguration();val newer=f.controller.previewImportedConfiguration()
+            restoreRejected {f.controller.restoreImportedConfiguration(old,true)}
+            restoreRejected {f.controller.restoreImportedConfiguration(newer,true)}
+        }
+        assertEquals(before,f.preferences.all);assertEquals(0,f.calls.get());assertEquals(0L,f.controller.dataRevision)
+    }
+    fun testRestoreRechecksAllRuntimeGatesAtFinalConfirmation() {
+        val f=fresh();settings(f);f.backup.setNonSecretConfiguration(mapOf("model" to "imported"))
+        val before=HashMap(f.preferences.all)
+        val gates=listOf("ready" to false,"active" to Message(MessageId("restore-gate"),ConversationId("restore-gate"),RunId("restore-gate"),"assistant",emptyList(),RunStatus.RUNNING),
+            "dataBusy" to true,"problem" to "会话恢复失败，原数据已保留")
+        main {
+            for((name,value) in gates) {
+                val preview=f.controller.previewImportedConfiguration()
+                field(f,name,value)
+                try {
+                    restoreRejected {f.controller.restoreImportedConfiguration(preview,true)}
+                    restoreRejected {f.controller.previewImportedConfiguration()}
+                } finally {field(f,name,when(name) {"ready"->true;"dataBusy"->false;else->null})}
+                restoreRejected {f.controller.restoreImportedConfiguration(preview,true)}
+                assertEquals(before,f.preferences.all)
+            }
+        }
+        assertEquals(0,f.calls.get())
+    }
+    fun testRestoreRejectsChangedMetadataAndChangedCurrentSettingsWithoutPartialWrite() {
+        val f=fresh();settings(f);f.backup.setNonSecretConfiguration(mapOf("model" to "imported"))
+        val before=HashMap(f.preferences.all)
+        main {
+            val staleMetadata=f.controller.previewImportedConfiguration()
+            f.backup.setNonSecretConfiguration(mapOf("model" to "new-imported"))
+            restoreRejected {f.controller.restoreImportedConfiguration(staleMetadata,true)}
+            assertEquals(before,f.preferences.all)
+            val staleSettings=f.controller.previewImportedConfiguration()
+            assertTrue(f.preferences.edit().putString("model","user-changed").commit())
+            val changed=HashMap(f.preferences.all)
+            restoreRejected {f.controller.restoreImportedConfiguration(staleSettings,true)}
+            assertEquals(changed,f.preferences.all)
+        }
+        assertEquals(0,f.calls.get())
+    }
+    fun testRestoreCommitFailureCompensatesOriginalConfigurationAndCannotReplay() {
+        val f=fresh();settings(f);f.backup.setNonSecretConfiguration(mapOf("model" to "imported"))
+        val before=HashMap(f.preferences.all)
+        main {
+            val preview=f.controller.previewImportedConfiguration();f.app.failNextRestoreCommit=true
+            restoreRejected {f.controller.restoreImportedConfiguration(preview,true)}
+            assertEquals(before,f.preferences.all)
+            restoreRejected {f.controller.restoreImportedConfiguration(preview,true)}
+            val retry=f.controller.previewImportedConfiguration();f.controller.restoreImportedConfiguration(retry,true)
+            assertEquals("imported",f.preferences.getString("model",null))
+        }
+        assertEquals(0,f.calls.get());assertEquals(0L,f.controller.dataRevision)
+    }
+    fun testRestoreEmptyMetadataIsTrueNoOpAndInvalidMetadataPreservesSettings() {
+        val f=fresh();settings(f);val before=HashMap(f.preferences.all)
+        main {
+            val empty=f.controller.previewImportedConfiguration();assertTrue(empty.plan.isNoOp)
+            f.controller.restoreImportedConfiguration(empty,true);assertEquals(before,f.preferences.all)
+            // Backup metadata allows model names over 200 chars; active settings must reject them.
+            f.backup.setNonSecretConfiguration(mapOf("model" to "m".repeat(201)))
+            restoreRejected {f.controller.previewImportedConfiguration()}
+            assertEquals(before,f.preferences.all)
+        }
+        assertEquals(0,f.calls.get());assertEquals(0L,f.controller.dataRevision)
     }
     fun testBoundedReadAndCloseFailureOccurBeforeImport() {
         val f=fresh();val source=fresh();seed(source);val text=source.db.exportBackup();val before=f.db.exportBackup()

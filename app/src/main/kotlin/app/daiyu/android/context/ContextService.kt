@@ -68,12 +68,40 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         }
         return archive
     }
-    fun archivePage(archiveId: String, offset: Int = 0, limit: Int = 50): ArchivePage {
+    /** Registry authorization and payload reads share one SQLite snapshot; no table writes. */
+    internal fun <T> readQuery(query: () -> T): T = transactions.run { query() }
+
+    /** Archive IDs are not capabilities. Resolve the persisted, still-existing conversation owner. */
+    fun archiveOwner(archiveId: String): ConversationId? = transactions.run { db ->
+        db.rawQuery("SELECT a.conversation_id FROM context_archives a JOIN conversations c ON c.id=a.conversation_id WHERE a.id=?",
+            arrayOf(archiveId)).use { c -> if (c.moveToFirst()) ConversationId(c.getString(0)) else null }
+    }
+
+    /**
+     * branch_id is a conversation ID, not its parent. Runs can exist only in provider receipts
+     * (e.g. summary/title tasks), so consult both sources. Missing or ambiguous ownership fails
+     * closed, even if a syntactically valid ID or a host grant was supplied.
+     */
+    fun isUsageOwner(branchId: String, runId: String? = null): Boolean = transactions.run { db ->
+        val exists = db.rawQuery("SELECT id FROM conversations WHERE id=?", arrayOf(branchId)).use { it.moveToFirst() }
+        exists && (runId == null || db.rawQuery(
+            "SELECT conversation_id FROM messages WHERE run_id=? UNION SELECT branch_id FROM context_usage WHERE run_id=?",
+            arrayOf(runId, runId)).use { c ->
+            c.moveToFirst() && c.getString(0) == branchId && !c.moveToNext()
+        })
+    }
+
+    /** expectedOwner comes from trusted registry authorization, never tool JSON. Validate the
+     * complete archive before slicing, including when the requested page will be empty. */
+    fun archivePage(archiveId: String, offset: Int = 0, limit: Int = 50,
+        expectedOwner: ConversationId? = null): ArchivePage {
         require(offset >= 0 && limit in 1..200)
         val messages = transactions.run { db ->
             db.rawQuery("SELECT blob_hash,revision FROM context_archives WHERE id=?", arrayOf(archiveId)).use { c ->
                 require(c.moveToFirst()) { "档案不存在" }; val m = ArchiveCodec.decode(blobs.read(c.getString(0)))
-                require(ContextRevision.digest(m) == c.getString(1)); m
+                require(ContextRevision.digest(m) == c.getString(1))
+                if (expectedOwner != null) require(m.all { it.conversationId == expectedOwner }) { "档案消息归属不一致" }
+                m
             }
         }
         val page = messages.drop(offset).take(limit); val end = offset.toLong() + page.size

@@ -23,7 +23,14 @@ class ChatController internal constructor(private val application:Application,
     constructor(application:Application):this(application,ConversationDatabase(application),ModelSettingsStore(application),application.getSharedPreferences("conversation-ui",0),{ResponsesModel(it)})
     private val executor=Executors.newSingleThreadExecutor()
     private val handler=Handler(Looper.getMainLooper())
-    private val listeners=mutableSetOf<()->Unit>()
+    // Entry points and callback commits share this controller's monitor. Runner control and
+    // shutdown waits stay outside it, so a worker can always finish its last publication.
+    private val listeners=mutableMapOf<()->Unit,Any>()
+    private var closed=false
+    private var preparing=false
+    private var recoveryFailed=false
+    private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
+        !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
     internal val selections=mutableMapOf<ConversationId?,Pair<Int,Int>>()
     @Volatile var active:Message?=null;private set
     @Volatile var problem:String?=null;private set
@@ -31,14 +38,37 @@ class ChatController internal constructor(private val application:Application,
     @Volatile var dataBusy=false;private set
     var dataRevision=0L;private set
     var dataNotice:String?=null;private set
-    internal fun consumeDataNotice():String? = dataNotice.also {dataNotice=null}
+    @Synchronized internal fun consumeDataNotice():String? = dataNotice.also {dataNotice=null}
     @Volatile var ready=false;private set
-    init {executor.execute {try {database.recover()} catch (_:Exception) {problem="会话恢复失败，原数据已保留"};ready=true;notifyChanged()} }
-    fun observe(listener:()->Unit) {listeners.add(listener)}
-    fun unobserve(listener:()->Unit) {listeners.remove(listener)}
-    private fun notifyChanged() {handler.post {listeners.toList().forEach {it()} } }
-    fun send(conversation:Conversation?,text:String):Conversation? {
-        if(!ready || dataBusy || active!=null || problem?.startsWith("会话恢复失败")==true || text.isBlank()) return null
+    init {executor.execute {
+        val failed=try {database.recover();false} catch (_:Exception) {true}
+        synchronized(this) {
+            if(!closed) {
+                recoveryFailed=failed
+                if(failed) problem="会话恢复失败，原数据已保留"
+                ready=true;notifyChanged()
+            }
+        }
+    }}
+    @Synchronized fun observe(listener:()->Unit) {
+        if(!closed && listener !in listeners) listeners[listener]=Any()
+    }
+    @Synchronized fun unobserve(listener:()->Unit) {listeners.remove(listener)}
+    private fun dispatchChanged() {
+        val snapshot=synchronized(this) {if(closed) emptyList() else listeners.map {it.key to it.value}}
+        snapshot.forEach {(listener,registration)->
+            val current=synchronized(this) {!closed && listeners[listener]===registration}
+            if(current) try {listener()} catch (_:Exception) { /* One observer cannot suppress the others. */ }
+        }
+    }
+    private fun notifyChanged() {handler.post {dispatchChanged()} }
+    @Synchronized fun send(conversation:Conversation?,text:String):Conversation? {
+        if(!idleAvailable() || text.isBlank()) return null
+        // Reserve before settings/history reads (also protects against reentrant entry).
+        preparing=true
+        return try {sendPrepared(conversation,text)} finally {preparing=false}
+    }
+    private fun sendPrepared(conversation:Conversation?,text:String):Conversation? {
         val config=try {settings.load().also {it.validate()}} catch (_:CredentialUnavailableException) {
             problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
         } catch (_:Exception) {problem="请在模型设置里配置Responses地址、模型与密钥";notifyChanged();return null}
@@ -53,16 +83,21 @@ class ChatController internal constructor(private val application:Application,
         problem=null;active=assistant
         val tools=config.enabledTools()
         val owned=ChatRunner(ModelPort { history -> model(config).open(history,tools) },database,AndroidReadOnlyTools(application,tools)) {
-            if(active?.id==assistant.id && active?.runId==run && it.id==assistant.id && it.runId==run && it.conversationId==conversationId) {active=it;notifyChanged()}
+            synchronized(this) {
+                if(!closed && active?.id==assistant.id && active?.runId==run && active?.conversationId==conversationId &&
+                    it.id==assistant.id && it.runId==run && it.conversationId==conversationId) {active=it;notifyChanged()}
+            }
         }
         runner=owned
         executor.execute {
             val result=owned.run(assistant,prior+user)
-            if(runner===owned && active?.id==assistant.id && active?.runId==run) {
-                runner=null
-                if (result.error?.startsWith("保存失败")==true) { active=result;problem=result.error }
-                else active=null
-                notifyChanged()
+            synchronized(this) {
+                if(!closed && runner===owned && active?.id==assistant.id && active?.runId==run && active?.conversationId==conversationId) {
+                    runner=null
+                    if (result.error?.startsWith("保存失败")==true) { active=result;problem=result.error }
+                    else active=null
+                    notifyChanged()
+                }
             }
         }
         notifyChanged();return saved
@@ -74,12 +109,12 @@ class ChatController internal constructor(private val application:Application,
     private var configurationRestorePreview:ConfigurationRestorePreview?=null
     private fun checkConfigurationRestoreAvailable() {
         check(Looper.myLooper()==Looper.getMainLooper())
-        check(ready && active==null && !dataBusy && problem?.startsWith("会话恢复失败")!=true) {
+        check(idleAvailable()) {
             "请等待会话恢复、运行或数据操作结束后再恢复配置"
         }
     }
     /** Only reads imported metadata and the five non-secret current fields. Never loads a credential. */
-    internal fun previewImportedConfiguration():ConfigurationRestorePreview {
+    @Synchronized internal fun previewImportedConfiguration():ConfigurationRestorePreview {
         checkConfigurationRestoreAvailable()
         configurationRestorePreview=null
         val metadata=neutralBackup.importedConfiguration()
@@ -87,11 +122,11 @@ class ChatController internal constructor(private val application:Application,
             configurationRestorePreview=it
         }
     }
-    internal fun cancelConfigurationRestore(preview:ConfigurationRestorePreview) {
+    @Synchronized internal fun cancelConfigurationRestore(preview:ConfigurationRestorePreview) {
         if(configurationRestorePreview===preview) configurationRestorePreview=null
     }
     /** Single-use manual confirmation. Recheck runtime gates AND both snapshots at the actual commit. */
-    internal fun restoreImportedConfiguration(preview:ConfigurationRestorePreview,authorized:Boolean) {
+    @Synchronized internal fun restoreImportedConfiguration(preview:ConfigurationRestorePreview,authorized:Boolean) {
         val current=configurationRestorePreview
         configurationRestorePreview=null
         checkConfigurationRestoreAvailable()
@@ -143,8 +178,8 @@ class ChatController internal constructor(private val application:Application,
             .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
             .decode(java.nio.ByteBuffer.wrap(out.toByteArray())).toString()
     }
-    internal fun dataTask(importing:Boolean=false,work:()->String) {
-        check(ready && active==null && !dataBusy && problem?.startsWith("会话恢复失败")!=true)
+    @Synchronized internal fun dataTask(importing:Boolean=false,work:()->String) {
+        check(idleAvailable())
         dataBusy=true;notifyChanged()
         try {executor.execute {
             var value=if(importing) "导入失败；原会话保留，格式、校验或身份冲突" else "导出失败；目标文件可能不完整，原会话保留"
@@ -160,10 +195,32 @@ class ChatController internal constructor(private val application:Application,
             }
             finally {
                 val notice=value;val changed=success && importing
-                handler.post {if(changed) dataRevision++;dataNotice=notice;dataBusy=false;listeners.toList().forEach {it()}}
+                handler.post {
+                    val committed=synchronized(this) {
+                        if(closed) false else {
+                            if(changed) dataRevision++
+                            dataNotice=notice;dataBusy=false;true
+                        }
+                    }
+                    if(committed) dispatchChanged()
+                }
             }
         }} catch(failure:java.util.concurrent.RejectedExecutionException) {dataBusy=false;notifyChanged();throw failure}
     }
-    fun stop() {runner?.stop()}
-    internal fun close() {stop();executor.shutdown();check(executor.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS));database.close()}
+    fun stop() {val owned=synchronized(this) {runner};owned?.stop()}
+    internal fun close() {
+        val owned=synchronized(this) {
+            if(closed) null else {
+                closed=true;ready=false;dataBusy=false;active=null
+                configurationRestorePreview=null;dataNotice=null;listeners.clear()
+                runner.also {runner=null}
+            }
+        }
+        handler.removeCallbacksAndMessages(null)
+        owned?.stop()
+        executor.shutdown()
+        // Never close storage while an accepted run/data task can still be using it.
+        check(executor.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS))
+        database.close()
+    }
 }

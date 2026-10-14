@@ -69,7 +69,11 @@ class MainActivity:Activity() {
     private var refreshRateWindowResumed=false
     private var previousPreferredRefreshRate:Float?=null
     private var requestedPreferredRefreshRate:Float?=null
+    /** Delayed controller/UI callbacks must not mutate a destroyed Activity. */
+    private var activityCallbacksAllowed=false
     private val refreshRateRequest=Runnable {applyPreferredRefreshRate()}
+    private fun activityUsable():Boolean = activityCallbacksAllowed && !isFinishing && !isDestroyed
+    private fun requireActivityUsable() {check(activityUsable()) {"页面已关闭；未执行操作"}}
     override fun onCreate(state:Bundle?) {
         super.onCreate(state)
         root=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL}
@@ -135,6 +139,7 @@ class MainActivity:Activity() {
         stop=button("停止") {controller.stop();status.text="正在停止；不代表远端已取消"}
         actions.addView(send);actions.addView(stop);actions.addView(button("回到底部") {jumpToBottom()})
         root.addView(actions);setContentView(root);root.requestApplyInsets()
+        activityCallbacksAllowed=true
         controller.observe(listener);refresh()
         pendingBackupRequest=state?.getInt("pending-backup-request",0)?.takeIf {it!=0}
         // A restored Activity never replays a VIEW prompt or an import confirmation.
@@ -150,6 +155,7 @@ class MainActivity:Activity() {
         offerOpenedBackup(intent)
     }
     private fun checkBackupAvailable() {
+        requireActivityUsable()
         check(controller.ready && controller.active==null && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true) {
             "会话尚未就绪、运行中、备份任务进行中或恢复失败；未打开备份，请稍后重新选择文件"
         }
@@ -221,6 +227,7 @@ class MainActivity:Activity() {
         super.onPause()
     }
     override fun onDestroy() {
+        activityCallbacksAllowed=false
         refreshRateWindowResumed=false
         scroll.removeCallbacks(initialBottom);cancelBottomFollow();cancelTurnJump()
         window.decorView.removeCallbacks(refreshRateRequest)
@@ -230,8 +237,9 @@ class MainActivity:Activity() {
         controller.unobserve(listener);super.onDestroy()
     }
     private fun toast(text:String) {Toast.makeText(this,text,Toast.LENGTH_LONG).show()}
-    private fun guard(action:()->Unit) {try {check(!controller.dataBusy);action()} catch (_:Exception) {toast("操作或保存失败；原数据保留")} }
+    private fun guard(action:()->Unit) {try {requireActivityUsable();check(!controller.dataBusy);action()} catch (_:Exception) {toast("操作或保存失败；原数据保留")} }
     internal fun select(conversation:Conversation?) {
+        requireActivityUsable()
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true)
         val list=controller.database.conversations()
         var draft=if(conversation==null) controller.database.draft() else list.first {it.id==conversation.id}.draft
@@ -242,8 +250,10 @@ class MainActivity:Activity() {
             selections[id]=input.selectionStart to input.selectionEnd
         }
         if(selectionReady && selected?.id==conversation?.id) draft=input.text.toString()
-        selected=conversation;selectionReady=true
+        // Do not change the draft owner until the selection preference has been accepted.
+        // Otherwise a failed commit leaves the previous input writing into the target conversation.
         check(controller.preferences.edit().apply {if(conversation==null) remove("selected") else putString("selected",conversation.id.value)}.commit())
+        selected=conversation;selectionReady=true
         val range=selections[conversation?.id]
         editing=true
         try {input.setText(draft);input.setSelection((range?.first ?: input.length()).coerceIn(0,input.length()),(range?.second ?: input.length()).coerceIn(0,input.length()))} finally {editing=false}
@@ -251,6 +261,7 @@ class MainActivity:Activity() {
         jumpToBottom();refresh()
     }
     private fun refresh() {
+        if(!activityUsable()) return
         input.isEnabled=controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true
         send.isEnabled=controller.ready && !controller.dataBusy && controller.active==null && controller.problem?.startsWith("会话恢复失败")!=true
         stop.isEnabled=controller.active?.status==RunStatus.RUNNING
@@ -452,9 +463,16 @@ class MainActivity:Activity() {
             "不覆盖已有会话；重复整包不会再次追加。非秘密配置只保存为备份元数据，不替换当前模型设置、密钥或系统授权。不会自动执行历史模型请求或工具。"
         else "仅追加文本格式v1。会话ID、消息ID或独立草稿冲突将整包回滚，不覆盖已有数据，不自动执行历史模型请求或工具。"+
             "此入口不接受完整备份；完整包请选择完整中立备份入口。"
-        showBackupDialog(AlertDialog.Builder(this).setTitle(if(complete) "确认导入完整中立备份" else "确认导入文本备份").setMessage(explanation)
-            .setPositiveButton("导入") {_,_->backupGuard {controller.importUserBackup(uri,complete)}}
-            .setNegativeButton("取消",null).create())
+        lateinit var confirmation:AlertDialog
+        confirmation=AlertDialog.Builder(this).setTitle(if(complete) "确认导入完整中立备份" else "确认导入文本备份").setMessage(explanation)
+            .setPositiveButton("导入") {_,_->backupGuard {
+                check(backupDialog===confirmation && confirmation.isShowing) {"导入确认已失效；请重新选择文件"}
+                // Consume before dispatch: a replaced, cancelled or repeated callback has no authority.
+                backupDialog=null
+                controller.importUserBackup(uri,complete)
+            }}
+            .setNegativeButton("取消",null).create()
+        showBackupDialog(confirmation)
     }
     private fun chooseConversation(query:String="",folder:String?=null) {
         val list=controller.database.conversations(query,folder)
@@ -507,7 +525,7 @@ class MainActivity:Activity() {
             if(!plan.isNoOp) dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
                 try {
                     // The Controller rechecks ready/active/dataBusy/recovery failure immediately before commit.
-                    check(!isFinishing && !isDestroyed)
+                    requireActivityUsable()
                     controller.restoreImportedConfiguration(preview,authorized=true)
                     dialog.dismiss()
                     toast(if(plan.credentialRebindRequired) "配置已恢复；请重新输入并保存密钥，工具保持关闭" else "非秘密配置已恢复；工具保持关闭")
@@ -536,7 +554,7 @@ class MainActivity:Activity() {
         val dialog=AlertDialog.Builder(this).setTitle("模型设置").setView(fields).setPositiveButton("保存",null).setNegativeButton("取消",null).create()
         key.importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         dialog.setOnShowListener {dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            try {check(controller.active==null && !controller.dataBusy);controller.settings.save(ModelSettings(endpoint.text.toString().trim(),model.text.toString().trim(),key.text.toString(),battery.isChecked,path.text.toString().trim(),deviceStatus.isChecked));dialog.dismiss();toast("模型设置已保存")}
+            try {requireActivityUsable();check(settingsDialog===dialog && dialog.isShowing);check(controller.active==null && !controller.dataBusy);controller.settings.save(ModelSettings(endpoint.text.toString().trim(),model.text.toString().trim(),key.text.toString(),battery.isChecked,path.text.toString().trim(),deviceStatus.isChecked));dialog.dismiss();toast("模型设置已保存")}
             catch (_:Exception) {toast("设置未保存；请检查HTTPS地址、模型与密钥")}
         }}
         settingsDialog=dialog

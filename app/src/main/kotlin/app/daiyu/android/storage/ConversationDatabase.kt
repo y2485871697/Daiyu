@@ -122,22 +122,22 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     private fun parseBackup(text:String):Triple<List<Conversation>,List<Message>,String> {
         require(text.toByteArray(Charsets.UTF_8).size<=16*1024*1024)
         val envelope=backupObject(text)
-        require(envelope.keySet()==setOf("format","version","conversation_count","message_count","sha256","payload"))
+        require(envelope.keys().asSequence().toSet()==setOf("format","version","conversation_count","message_count","sha256","payload"))
         require(string(envelope,"format")=="daiyu-neutral-text" && integer(envelope,"version")==1L)
         val payload=string(envelope,"payload");require(backupDigest(payload)==string(envelope,"sha256"))
-        val data=backupObject(payload);require(data.keySet()==setOf("conversations","messages","draft"))
+        val data=backupObject(payload);require(data.keys().asSequence().toSet()==setOf("conversations","messages","draft"))
         val conversations=data.getJSONArray("conversations");val messages=data.getJSONArray("messages")
         require(conversations.length()<=1000 && messages.length()<=50000)
         require(conversations.length().toLong()==integer(envelope,"conversation_count") && messages.length().toLong()==integer(envelope,"message_count"))
         val ids=mutableSetOf<String>();val messageIds=mutableSetOf<String>()
         fun identity(value:String):String {require(value.isNotBlank() && value.length<=200);return value}
         val imported=(0 until conversations.length()).map {i->val c=conversations.getJSONObject(i)
-            require(c.keySet()==setOf("id","title","draft","updated","folder","pinned"))
+            require(c.keys().asSequence().toSet()==setOf("id","title","draft","updated","folder","pinned"))
             val id=identity(string(c,"id"));require(ids.add(id));val folder=string(c,"folder");require(folder.length<=200)
             Conversation(ConversationId(id),string(c,"title"),string(c,"draft"),integer(c,"updated"),folder,boolean(c,"pinned"))
         }
         val restored=(0 until messages.length()).map {i->val m=messages.getJSONObject(i)
-            require(m.keySet()==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol"))
+            require(m.keys().asSequence().toSet()==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol"))
             val id=identity(string(m,"id"));require(messageIds.add(id));val conversation=identity(string(m,"conversation_id"));require(conversation in ids)
             val role=string(m,"role");require(role in setOf("user","assistant"))
             val status=RunStatus.valueOf(string(m,"status"));val encoded=m.getJSONArray("blocks");validateBlocks(encoded);val blocks=decode(encoded)
@@ -188,8 +188,8 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     private fun validateBlocks(array:JSONArray) {
         repeat(array.length()) {i->val block=array.getJSONObject(i)
             when(string(block,"type")) {
-                "text"->{require(block.keySet()==setOf("type","item","text"));string(block,"item");string(block,"text")}
-                "tool"->{require(block.keySet()==setOf("type","id","name","arguments","result"));string(block,"id");string(block,"name");string(block,"arguments");if(!block.isNull("result")) string(block,"result")}
+                "text"->{require(block.keys().asSequence().toSet()==setOf("type","item","text"));string(block,"item");string(block,"text")}
+                "tool"->{require(block.keys().asSequence().toSet()==setOf("type","id","name","arguments","result"));string(block,"id");string(block,"name");string(block,"arguments");if(!block.isNull("result")) string(block,"result")}
                 else->error("文本备份不支持此消息块")
             }
         }
@@ -199,7 +199,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             val raw=array.get(i);require(raw is String)
             val item=backupObject(raw)
             fun fields(required:Set<String>,optional:Set<String> = emptySet()) {
-                require(item.keySet().containsAll(required) && item.keySet().all {it in required || it in optional}) {"文本备份不支持此协议字段"}
+                require(item.keys().asSequence().toSet().containsAll(required) && item.keys().asSequence().toSet().all {it in required || it in optional}) {"文本备份不支持此协议字段"}
             }
             if(item.has("id")) string(item,"id")
             if(item.has("status")) require(string(item,"status") in setOf("completed","in_progress","incomplete"))
@@ -210,11 +210,11 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                     val content=item.getJSONArray("content")
                     repeat(content.length()) {j->val part=content.getJSONObject(j)
                         when(string(part,"type")) {
-                            "output_text"->{require(part.keySet().containsAll(setOf("type","text")) && part.keySet().all {it in setOf("type","text","annotations","logprobs")});string(part,"text")
+                            "output_text"->{require(part.keys().asSequence().toSet().containsAll(setOf("type","text")) && part.keys().asSequence().toSet().all {it in setOf("type","text","annotations","logprobs")});string(part,"text")
                                 // Nonempty metadata is preserved by the protocol layer, but not supported by this text format.
                                 for(key in listOf("annotations","logprobs")) if(part.has(key)) require(part.getJSONArray(key).length()==0)
                             }
-                            "refusal"->{require(part.keySet()==setOf("type","refusal"));string(part,"refusal")}
+                            "refusal"->{require(part.keys().asSequence().toSet()==setOf("type","refusal"));string(part,"refusal")}
                             else->error("文本备份不支持附件或此内容类型")
                         }
                     }
@@ -226,7 +226,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                     if(item.has("encrypted_content") && !item.isNull("encrypted_content")) string(item,"encrypted_content")
                     for(key in listOf("summary","content")) if(item.has(key)) {
                         val parts=item.getJSONArray(key)
-                        repeat(parts.length()) {j->val part=parts.getJSONObject(j);require(part.keySet()==setOf("type","text"));require(string(part,"type")==if(key=="summary") "summary_text" else "reasoning_text");string(part,"text")}
+                        repeat(parts.length()) {j->val part=parts.getJSONObject(j);require(part.keys().asSequence().toSet()==setOf("type","text"));require(string(part,"type")==if(key=="summary") "summary_text" else "reasoning_text");string(part,"text")}
                     }
                 }
                 else->error("文本备份不支持此协议类型")

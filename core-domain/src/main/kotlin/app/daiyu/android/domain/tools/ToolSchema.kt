@@ -5,8 +5,8 @@ import java.util.Collections
 
 /** Strict, platform-independent JSON schema subset for registered adapters. */
 sealed interface ArgumentType {
-    data class Text(val maxLength: Int = 4096, val choices: Set<String> = emptySet()) : ArgumentType {
-        init { require(maxLength > 0) }
+    data class Text(val maxLength: Int = 4096, val choices: Set<String> = emptySet(), val minimumLength: Int = 0) : ArgumentType {
+        init { require(maxLength > 0 && minimumLength >= 0 && minimumLength <= maxLength) }
     }
     data class Integer(val minimum: Long = Long.MIN_VALUE, val maximum: Long = Long.MAX_VALUE) : ArgumentType {
         init { require(minimum <= maximum) }
@@ -70,7 +70,7 @@ private fun freezeType(type: ArgumentType): ArgumentType = when (type) {
 }
 private fun validateType(type: ArgumentType, value: Any): Any = when (type) {
     is ArgumentType.Text -> {
-        require(value is String && wellFormedUnicode(value) && value.codePointCount(0, value.length) <= type.maxLength && (type.choices.isEmpty() || value in type.choices))
+        require(value is String && wellFormedUnicode(value) && value.codePointCount(0, value.length) in type.minimumLength..type.maxLength && (type.choices.isEmpty() || value in type.choices))
         value
     }
     is ArgumentType.Integer -> { require(value is Long && value in type.minimum..type.maximum); value }
@@ -93,7 +93,7 @@ private fun validateType(type: ArgumentType, value: Any): Any = when (type) {
     }
 }
 private fun typeSchema(type: ArgumentType): String = when (type) {
-    is ArgumentType.Text -> "{\"type\":\"string\",\"maxLength\":${type.maxLength}" +
+    is ArgumentType.Text -> "{\"type\":\"string\",\"minLength\":${type.minimumLength},\"maxLength\":${type.maxLength}" +
         (if (type.choices.isEmpty()) "" else ",\"enum\":[${type.choices.sorted().joinToString(",", transform = ::jsonQuote)}]") + "}"
     is ArgumentType.Integer -> "{\"type\":\"integer\",\"minimum\":${type.minimum},\"maximum\":${type.maximum}}"
     is ArgumentType.Decimal -> "{\"type\":\"number\"" +

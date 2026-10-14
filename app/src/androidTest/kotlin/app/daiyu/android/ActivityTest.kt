@@ -14,6 +14,15 @@ import java.util.concurrent.TimeUnit
 
 @Suppress("DEPRECATION")
 class ActivityTest:InstrumentationTestCase() {
+    private val keyAliasPrefix="app.daiyu.android.test.credentials.${java.util.UUID.randomUUID()}"
+    private fun settingsStore(context:android.content.Context)=ModelSettingsStore(context,keyAliasPrefix)
+    override fun tearDown() {
+        try {
+            val keys=java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
+            java.util.Collections.list(keys.aliases()).filter {it==keyAliasPrefix || it.startsWith("$keyAliasPrefix.")}.forEach {keys.deleteEntry(it)}
+        } finally {super.tearDown()}
+    }
+
     private fun views(view:View):List<View> = listOf(view)+if(view is ViewGroup) (0 until view.childCount).flatMap {views(view.getChildAt(it))} else emptyList()
     private fun input(activity:MainActivity)=views(activity.window.decorView).filterIsInstance<EditText>().single()
     private fun button(activity:MainActivity,text:String)=views(activity.window.decorView).filterIsInstance<Button>().single {it.text.toString()==text}
@@ -45,7 +54,7 @@ class ActivityTest:InstrumentationTestCase() {
             val assistant=Message(MessageId("sa-$i"),conversation.id,run,"assistant",listOf(MessageBlock.Text("a",("历史正文 $i\n").repeat(12))),RunStatus.RUNNING)
             db.send(user,assistant);db.save(assistant.copy(status=RunStatus.COMPLETED))
         }
-        val controller=ChatController(application,db,ModelSettingsStore(context),context.getSharedPreferences("conversation-ui",0),{error("no model request")})
+        val controller=ChatController(application,db,settingsStore(context),context.getSharedPreferences("conversation-ui",0),{error("no model request")})
         val field=ChatApplication::class.java.getDeclaredField("controller").apply {isAccessible=true}
         var original:ChatController?=null
         var activity:MainActivity?=null
@@ -92,6 +101,8 @@ class ActivityTest:InstrumentationTestCase() {
             val rowField=MainActivity::class.java.getDeclaredField("rows").apply {isAccessible=true}
             instrumentation.runOnMainSync {
                 @Suppress("UNCHECKED_CAST") val rows=rowField.get(current) as Map<MessageId,android.widget.LinearLayout>
+                val stableRow=rows.values.toList()[8]
+                scroll.scrollTo(0,stableRow.top+10)
                 val visible=rows.entries.first {it.value.bottom>scroll.scrollY}
                 anchor=visible.key;anchorOffset=visible.value.top-scroll.scrollY
                 button(current,"加载更早消息").performClick()
@@ -207,6 +218,51 @@ class ActivityTest:InstrumentationTestCase() {
         @Suppress("UNCHECKED_CAST") val shown=field.get(activity) as List<Pair<Long,Message>>
         return shown.filter {it.second.role=="user"}[1].second.id
     }
+    fun testCredentialFailureCanBeReenteredFromSettings() {
+        val application=instrumentation.targetContext.applicationContext as ChatApplication
+        val context=testContext(instrumentation.targetContext,"credential-ui-${java.util.UUID.randomUUID()}-")
+        val store=settingsStore(context)
+        val config=ModelSettings("https://example.invalid/gateway","fixture","synthetic-key",false,"/responses",true)
+        store.save(config)
+        val prefs=context.getSharedPreferences("model-settings",0);prefs.edit().remove("iv").commit()
+        val db=ConversationDatabase(context)
+        val calls=java.util.concurrent.atomic.AtomicInteger()
+        val controller=ChatController(application,db,store,context.getSharedPreferences("conversation-ui",0),{calls.incrementAndGet();error("no network")})
+        var original:ChatController?=null
+        var activity:MainActivity?=null
+        try {
+            val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
+            while(!controller.ready && System.nanoTime()<deadline) Thread.sleep(10)
+            assertTrue(controller.ready)
+            instrumentation.runOnMainSync {original=application.controller;application.controller=controller}
+            val current=start();activity=current
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                input(current).setText("保留草稿");button(current,"发送").performClick()
+                assertEquals("保留草稿",input(current).text.toString());assertTrue(db.conversations().isEmpty());assertEquals(0,calls.get())
+                button(current,"模型设置").performClick()
+                val dialogField=MainActivity::class.java.getDeclaredField("settingsDialog").apply {isAccessible=true}
+                val dialog=dialogField.get(current) as android.app.AlertDialog
+                assertTrue(dialog.isShowing)
+                val edits=views(dialog.window!!.decorView).filterIsInstance<EditText>()
+                assertEquals(config.endpoint,edits[0].text.toString());assertEquals(config.responsesPath,edits[1].text.toString())
+                assertEquals(config.model,edits[2].text.toString());assertEquals("",edits[3].text.toString())
+                assertTrue(views(dialog.window!!.decorView).filterIsInstance<TextView>().any {it.text.toString().contains("已保存密钥不可用")})
+                edits[3].setText("replacement-key");dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick()
+                assertFalse(dialog.isShowing);assertEquals(config.copy(apiKey="replacement-key"),settingsStore(context).load())
+                assertEquals("保留草稿",input(current).text.toString());assertEquals("保留草稿",db.draft());assertEquals(0,calls.get())
+            }
+        } finally {
+            try {
+                instrumentation.runOnMainSync {activity?.finish()}
+                instrumentation.waitForIdleSync();controller.close()
+            } finally {
+                instrumentation.runOnMainSync {original?.let {application.controller=it}}
+                prefs.edit().clear().commit();context.getSharedPreferences("conversation-ui",0).edit().clear().commit()
+                context.deleteDatabase("conversations.db")
+            }
+        }
+    }
     fun testDraftSlotsRunningSwitchAndActivityRecreation() {
         val application=instrumentation.targetContext.applicationContext as ChatApplication
         val controllerField=ChatApplication::class.java.getDeclaredField("controller").apply {isAccessible=true}
@@ -215,7 +271,7 @@ class ActivityTest:InstrumentationTestCase() {
         val context=testContext(instrumentation.targetContext)
         context.getSharedPreferences("model-settings",0).edit().clear().commit()
         context.deleteDatabase("conversations.db");context.getSharedPreferences("conversation-ui",0).edit().clear().commit()
-        val db=ConversationDatabase(context);val settings=ModelSettingsStore(context)
+        val db=ConversationDatabase(context);val settings=settingsStore(context)
         val entered=CountDownLatch(1);val release=CountDownLatch(1);val terminal=CountDownLatch(1)
         val model=ModelPort {object:ModelSession {
             override fun next(outputs:List<ToolOutput>,sink:(ModelEvent)->Unit) {

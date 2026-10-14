@@ -33,7 +33,9 @@ class ChatController internal constructor(private val application:Application,
     private fun notifyChanged() {handler.post {listeners.toList().forEach {it()} } }
     fun send(conversation:Conversation?,text:String):Conversation? {
         if(!ready || active!=null || problem?.startsWith("会话恢复失败")==true || text.isBlank()) return null
-        val config=try {settings.load().also {it.validate()}} catch (_:Exception) {problem="请在模型设置里配置Responses地址、模型与密钥";notifyChanged();return null}
+        val config=try {settings.load().also {it.validate()}} catch (_:CredentialUnavailableException) {
+            problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
+        } catch (_:Exception) {problem="请在模型设置里配置Responses地址、模型与密钥";notifyChanged();return null}
         val conversationId=conversation?.id ?: ConversationId(UUID.randomUUID().toString())
         val run=RunId(UUID.randomUUID().toString())
         val user=Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)

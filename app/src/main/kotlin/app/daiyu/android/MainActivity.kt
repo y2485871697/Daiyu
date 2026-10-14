@@ -25,6 +25,7 @@ class MainActivity:Activity() {
     private lateinit var status:TextView
     private lateinit var send:Button
     private lateinit var stop:Button
+    private var settingsDialog:AlertDialog?=null
     private var jumpTarget:MessageId?=null
     private var turnMotion:ConversationTurnMotion?=null
     private var jumpTime=0L
@@ -158,6 +159,7 @@ class MainActivity:Activity() {
         refreshRateWindowResumed=false
         scroll.removeCallbacks(initialBottom);cancelBottomFollow();cancelTurnJump()
         window.decorView.removeCallbacks(refreshRateRequest)
+        settingsDialog?.dismiss()
         controller.unobserve(listener);super.onDestroy()
     }
     private fun toast(text:String) {Toast.makeText(this,text,Toast.LENGTH_LONG).show()}
@@ -332,7 +334,8 @@ class MainActivity:Activity() {
     }
     private fun modelSettings() {
         if(controller.active!=null) {toast("当前运行使用冻结配置，请结束后修改");return}
-        val saved=controller.settings.load()
+        val editingSettings=controller.settings.loadForEditing()
+        val saved=editingSettings.settings
         val fields=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL}
         val endpoint=EditText(this).apply {hint="HTTPS 服务基础地址或完整 Responses 地址";setText(saved.endpoint);inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI}
         val path=EditText(this).apply {hint="可选 Responses 路径，如 /responses";setText(saved.responsesPath);inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI}
@@ -341,6 +344,7 @@ class MainActivity:Activity() {
         val battery=CheckBox(this).apply {text="允许模型查询只读电量";isChecked=saved.batteryEnabled}
         val deviceStatus=CheckBox(this).apply {text="允许模型查询只读设备状态（电量、内存、应用存储所在卷、系统与开机时长；结果发送给模型服务，不含设备标识）";isChecked=saved.deviceStatusEnabled}
         fields.addView(TextView(this).apply {setText(R.string.model_protocol_note)})
+        if(editingSettings.credentialUnavailable) fields.addView(TextView(this).apply {text="已保存密钥不可用；原配置已保留，请重新输入密钥"})
         fields.addView(endpoint);fields.addView(path);fields.addView(model);fields.addView(key);fields.addView(battery);fields.addView(deviceStatus)
         val dialog=AlertDialog.Builder(this).setTitle("模型设置").setView(fields).setPositiveButton("保存",null).setNegativeButton("取消",null).create()
         key.importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
@@ -348,6 +352,8 @@ class MainActivity:Activity() {
             try {controller.settings.save(ModelSettings(endpoint.text.toString().trim(),model.text.toString().trim(),key.text.toString(),battery.isChecked,path.text.toString().trim(),deviceStatus.isChecked));dialog.dismiss();toast("模型设置已保存")}
             catch (_:Exception) {toast("设置未保存；请检查HTTPS地址、模型与密钥")}
         }}
+        settingsDialog=dialog
+        dialog.setOnDismissListener {if(settingsDialog===dialog) settingsDialog=null}
         dialog.show()
     }
 }

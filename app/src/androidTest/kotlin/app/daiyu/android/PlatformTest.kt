@@ -11,6 +11,15 @@ import org.json.JSONObject
 
 @Suppress("DEPRECATION")
 class PlatformTest:InstrumentationTestCase() {
+    private val keyAliasPrefix="app.daiyu.android.test.credentials.${java.util.UUID.randomUUID()}"
+    private fun settingsStore(context:android.content.Context)=ModelSettingsStore(context,keyAliasPrefix)
+    override fun tearDown() {
+        try {
+            val keys=java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
+            java.util.Collections.list(keys.aliases()).filter {it==keyAliasPrefix || it.startsWith("$keyAliasPrefix.")}.forEach {keys.deleteEntry(it)}
+        } finally {super.tearDown()}
+    }
+
     private fun testContext()=testContext(instrumentation.targetContext)
     fun testPersistenceRecoveryAndDraftIsolation() {
         val context=testContext()
@@ -81,7 +90,7 @@ class PlatformTest:InstrumentationTestCase() {
     fun testDeviceStatusSettingsDefaultAndSnapshot() {
         val context=testContext();val prefs=context.getSharedPreferences("model-settings",0)
         prefs.edit().clear().commit()
-        val store=ModelSettingsStore(context)
+        val store=settingsStore(context)
         prefs.edit().putBoolean("battery",true).commit()
         assertFalse(store.load().deviceStatusEnabled)
         val config=ModelSettings("https://example.invalid","fixture","synthetic-key",false,deviceStatusEnabled=true)
@@ -95,8 +104,8 @@ class PlatformTest:InstrumentationTestCase() {
     fun testEncryptedSettingsAndSseFrames() {
         val context=testContext()
         val config=ModelSettings("https://example.invalid/gateway","fixture-model","synthetic-test-key",true,"/responses")
-        ModelSettingsStore(context).save(config);assertEquals(config,ModelSettingsStore(context).load())
-        assertEquals("https://example.invalid/gateway/responses",ModelSettingsStore(context).load().requestEndpoint())
+        settingsStore(context).save(config);assertEquals(config,settingsStore(context).load())
+        assertEquals("https://example.invalid/gateway/responses",settingsStore(context).load().requestEndpoint())
         assertFalse(context.getSharedPreferences("model-settings",0).getString("key","")!!.contains(config.apiKey))
         val stoppedFrames=mutableListOf<String>()
         SseReader.read(StringReader("data: complete\n\ndata: should-not-read\n\n").buffered()) {stoppedFrames.add(it);false}
@@ -106,6 +115,50 @@ class PlatformTest:InstrumentationTestCase() {
         assertEquals(listOf("一\n二","三"),frames)
         try {SseReader.read(StringReader("data: partial").buffered()) {true};fail("must reject unterminated event")} catch (failure:ModelRequestException) {assertEquals(ModelFailure.INCOMPLETE,failure.failure)}
         context.getSharedPreferences("model-settings",0).edit().clear().commit()
+    }
+    fun testCredentialFailuresPreserveConfigurationAndRejectSend() {
+        for(kind in listOf("iv","ciphertext","missing-key","partial")) {
+            val context=testContext(instrumentation.targetContext,"credential-${java.util.UUID.randomUUID()}-")
+            val store=settingsStore(context)
+            val prefs=context.getSharedPreferences("model-settings",0)
+            val config=ModelSettings("https://example.invalid/gateway","fixture-model","synthetic-key",false,"/responses",true)
+            store.save(config)
+            val alias=prefs.getString("key-alias",null)!!
+            when(kind) {
+                "iv"->prefs.edit().remove("iv").commit()
+                "ciphertext"->{
+                    val bytes=android.util.Base64.decode(prefs.getString("key",null),android.util.Base64.NO_WRAP)
+                    bytes[0]=(bytes[0].toInt() xor 1).toByte()
+                    prefs.edit().putString("key",android.util.Base64.encodeToString(bytes,android.util.Base64.NO_WRAP)).commit()
+                }
+                "missing-key"->java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null);deleteEntry(alias)}
+                "partial"->prefs.edit().remove("key").commit()
+            }
+            val before=prefs.all.toMap()
+            val editing=settingsStore(context).loadForEditing()
+            assertTrue(editing.credentialUnavailable);assertEquals(config.copy(apiKey=""),editing.settings)
+            try {store.load();fail("damaged credentials must be rejected")} catch (_:CredentialUnavailableException) {}
+            assertEquals(before,prefs.all)
+            val keys=java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
+            if(kind=="missing-key") assertFalse(keys.containsAlias(alias))
+            val db=ConversationDatabase(context);val a=db.create();val b=db.create()
+            db.draft("new draft");db.draft(a.id,"A draft");db.draft(b.id,"B draft")
+            val conversations=db.conversations()
+            val requests=java.util.concurrent.atomic.AtomicInteger()
+            val controller=ChatController(instrumentation.targetContext.applicationContext as android.app.Application,db,store,
+                context.getSharedPreferences("conversation-ui",0),{requests.incrementAndGet();error("no model request")})
+            try {
+                val deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
+                while(!controller.ready && System.nanoTime()<deadline) Thread.sleep(10)
+                assertTrue(controller.ready)
+                instrumentation.runOnMainSync {assertNull(controller.send(null,"attempt"));assertNull(controller.send(a,"attempt"))}
+                assertEquals(0,requests.get());assertNull(controller.active);assertEquals(conversations,db.conversations())
+                assertEquals("new draft",db.draft());assertTrue(db.messages(a.id).isEmpty());assertTrue(db.messages(b.id).isEmpty())
+                val repaired=config.copy(apiKey="replacement-key")
+                store.save(repaired);assertEquals(repaired,settingsStore(context).load())
+                assertFalse(keys.containsAlias(alias));assertEquals(conversations,db.conversations());assertEquals("new draft",db.draft())
+            } finally {controller.close();prefs.edit().clear().commit();context.deleteDatabase("conversations.db")}
+        }
     }
     private fun pair(id:ConversationId,suffix:String):Pair<Message,Message> {
         val run=RunId("run-$suffix")
@@ -176,7 +229,7 @@ class PlatformTest:InstrumentationTestCase() {
         val context=testContext();context.deleteDatabase("conversations.db")
         val db=ConversationDatabase(context)
         val config=ModelSettings("https://example.invalid/v1/responses","fixture","synthetic-key",false)
-        val settings=ModelSettingsStore(context);settings.save(config)
+        val settings=settingsStore(context);settings.save(config)
         val entered=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
         val terminal=java.util.concurrent.CountDownLatch(1)
         val model=ModelPort {object:ModelSession {

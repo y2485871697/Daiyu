@@ -10,8 +10,12 @@ EXPECTED_CERT = '1e1c8731bd2a7fab53b941cd9869884e7756bed96fadd10f322e70d760d1d19
 
 
 def verify_certificate(output):
-    fingerprints = re.findall(r'^Signer #\d+ certificate SHA-256 digest: ([0-9a-fA-F]+)$', output, re.M)
-    if fingerprints != [EXPECTED_CERT]:
+    fingerprints = re.findall(
+        r'^Signer (?:#\d+|\(minSdkVersion=\d+(?: \(dev release=true\))?, maxSdkVersion=\d+\))'
+        r' certificate SHA-256 digest: ([0-9a-fA-F]{64})$', output, re.M)
+    signer_count = re.findall(r'^Number of signers: (\d+)$', output, re.M)
+    # apksigner prints separate SDK-range records for v3.1, even for one certificate.
+    if signer_count != ['1'] or not fingerprints or {value.lower() for value in fingerprints} != {EXPECTED_CERT}:
         raise ValueError('APK 签名证书与固定证书不一致')
     if not re.search(r'^Verified using v2 scheme .*: true$', output, re.M):
         raise ValueError('APK 缺少通过验证的 v2 签名')
@@ -29,6 +33,7 @@ def verify_delivery(apksigner, delivery, env, run=subprocess.run):
     for apk in main_apks + test_apks:
         result = run([str(apksigner), 'verify', '--verbose', '--print-certs', '--min-sdk-version', '26', str(apk)],
                      capture_output=True, text=True, check=True)
+        print(f'APK: {apk.relative_to(delivery)}\n{result.stdout}', flush=True)
         verify_certificate(result.stdout)
         evidence.append(f'APK: {apk.relative_to(delivery)}\n{result.stdout}')
     (delivery / '签名证据.txt').write_text('\n'.join(evidence), encoding='utf-8')

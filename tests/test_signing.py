@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from prepare_signing import prepare
 from verify_signing import EXPECTED_CERT, verify_certificate, verify_delivery
 
-GOOD = f'Verified using v2 scheme (APK Signature Scheme v2): true\nSigner #1 certificate SHA-256 digest: {EXPECTED_CERT}\n'
+GOOD = f'Number of signers: 1\nVerified using v2 scheme (APK Signature Scheme v2): true\nSigner #1 certificate SHA-256 digest: {EXPECTED_CERT}\n'
 
 
 class SigningTests(unittest.TestCase):
@@ -53,9 +53,18 @@ class SigningTests(unittest.TestCase):
     def test_exact_certificate_and_v2_required(self):
         verify_certificate(GOOD)
         for bad in (GOOD.replace(EXPECTED_CERT, '0' * 64), GOOD.replace(': true', ': false'),
-                    GOOD + f'Signer #2 certificate SHA-256 digest: {EXPECTED_CERT}\n', ''):
+                    GOOD.replace('Number of signers: 1', 'Number of signers: 2'), ''):
             with self.assertRaises(ValueError):
                 verify_certificate(bad)
+
+    def test_sdk_range_certificates(self):
+        ranged = GOOD.replace('Signer #1', 'Signer (minSdkVersion=33, maxSdkVersion=2147483647)')
+        verify_certificate(ranged)
+        verify_certificate(ranged + f'Signer (minSdkVersion=28, maxSdkVersion=32) certificate SHA-256 digest: {EXPECTED_CERT}\n')
+        with self.assertRaises(ValueError):
+            verify_certificate(ranged + 'Signer (minSdkVersion=28, maxSdkVersion=32) certificate SHA-256 digest: ' + '0' * 64 + '\n')
+        with self.assertRaises(ValueError):
+            verify_certificate(GOOD.replace('Number of signers: 1\n', ''))
 
     def test_both_apks_checked_before_record(self):
         with tempfile.TemporaryDirectory() as tmp:

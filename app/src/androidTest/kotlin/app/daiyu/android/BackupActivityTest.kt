@@ -232,7 +232,11 @@ class BackupActivityTest:InstrumentationTestCase() {
             picker(if(code==104) 103 else 101,uri=output);awaitState {!controller.dataBusy}
             val text=provider.file(output).readText()
             assertTrue(text.contains("historical answer"))
-            assertEquals(code==104,text.contains("\"payload\""))
+            val envelope=org.json.JSONObject(text)
+            assertEquals(if(code==104) "daiyu-neutral-complete" else "daiyu-neutral-text",envelope.getString("format"))
+            assertEquals(1,envelope.getInt("version"))
+            if(code==104) NeutralBackupService(fixtureApp,controller.database).preflight(text)
+            else assertEquals(controller.database.exportBackup(),text)
             controller.database.conversations().forEach {controller.database.delete(it.id)}
             // Reset only revision for the second independent UI route; format fixtures stay tiny.
             main {setField("dataRevision",0L)}

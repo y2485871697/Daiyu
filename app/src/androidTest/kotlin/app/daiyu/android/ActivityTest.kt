@@ -17,6 +17,20 @@ class ActivityTest:InstrumentationTestCase() {
     private fun views(view:View):List<View> = listOf(view)+if(view is ViewGroup) (0 until view.childCount).flatMap {views(view.getChildAt(it))} else emptyList()
     private fun input(activity:MainActivity)=views(activity.window.decorView).filterIsInstance<EditText>().single()
     private fun button(activity:MainActivity,text:String)=views(activity.window.decorView).filterIsInstance<Button>().single {it.text.toString()==text}
+    private fun awaitFrames(count:Int=2) {
+        val ready=CountDownLatch(1)
+        instrumentation.runOnMainSync {
+            var remaining=count
+            val callback=object:android.view.Choreographer.FrameCallback {
+                override fun doFrame(time:Long) {
+                    if(--remaining==0) ready.countDown() else android.view.Choreographer.getInstance().postFrameCallback(this)
+                }
+            }
+            android.view.Choreographer.getInstance().postFrameCallback(callback)
+        }
+        assertTrue("frame callbacks must run",ready.await(5,TimeUnit.SECONDS))
+        instrumentation.waitForIdleSync()
+    }
     private fun start()=instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
     fun testStreamingFollowStopsOnTouchAndEarlierHistory() {
         val application=instrumentation.targetContext.applicationContext as ChatApplication
@@ -50,12 +64,17 @@ class ActivityTest:InstrumentationTestCase() {
             val tail=db.messages(conversation.id).last().second
             instrumentation.runOnMainSync {
                 assertTrue(scroll.scrollY>0)
+                val firstUser=db.messages(conversation.id).map {it.second}.first {it.role=="user"}
+                current.jumpToMessage(firstUser.id)
+                assertFalse(following.getBoolean(current))
                 val now=android.os.SystemClock.uptimeMillis()
                 val down=android.view.MotionEvent.obtain(now,now,android.view.MotionEvent.ACTION_DOWN,10f,10f,0)
                 scroll.dispatchTouchEvent(down);down.recycle()
                 scroll.scrollTo(0,0)
                 update.invoke(current,tail.copy(blocks=listOf(MessageBlock.Text("a","新内容\n".repeat(40)))))
                 assertFalse(following.getBoolean(current));assertFalse(scheduled.getBoolean(current));assertEquals(0,scroll.scrollY)
+                val jump=MainActivity::class.java.getDeclaredField("jumpTarget").apply {isAccessible=true}
+                assertNull(jump.get(current))
             }
             instrumentation.waitForIdleSync()
             instrumentation.runOnMainSync {
@@ -68,10 +87,22 @@ class ActivityTest:InstrumentationTestCase() {
                 update.invoke(current,tail.copy(blocks=listOf(MessageBlock.Text("a","更多内容\n".repeat(80)))))
             }
             instrumentation.waitForIdleSync()
+            lateinit var anchor:MessageId
+            var anchorOffset=0
+            val rowField=MainActivity::class.java.getDeclaredField("rows").apply {isAccessible=true}
             instrumentation.runOnMainSync {
+                @Suppress("UNCHECKED_CAST") val rows=rowField.get(current) as Map<MessageId,android.widget.LinearLayout>
+                val visible=rows.entries.first {it.value.bottom>scroll.scrollY}
+                anchor=visible.key;anchorOffset=visible.value.top-scroll.scrollY
                 button(current,"加载更早消息").performClick()
                 assertFalse(following.getBoolean(current));assertFalse(scheduled.getBoolean(current))
                 assertTrue(views(current.window.decorView).filterIsInstance<TextView>().any {it.text.toString().contains("历史用户 45")})
+
+            }
+            awaitFrames()
+            instrumentation.runOnMainSync {
+                @Suppress("UNCHECKED_CAST") val rows=rowField.get(current) as Map<MessageId,android.widget.LinearLayout>
+                assertEquals("prepend must preserve visible message offset",anchorOffset,rows.getValue(anchor).top-scroll.scrollY)
                 val shownField=MainActivity::class.java.getDeclaredField("shown").apply {isAccessible=true}
                 @Suppress("UNCHECKED_CAST")
                 val shown=shownField.get(current) as MutableList<Pair<Long,Message>>
@@ -86,9 +117,6 @@ class ActivityTest:InstrumentationTestCase() {
                 assertEquals(count,refreshed.size)
                 assertEquals(RunStatus.COMPLETED,refreshed[index].second.status)
                 assertEquals(before,scroll.scrollY)
-            }
-            instrumentation.waitForIdleSync()
-            instrumentation.runOnMainSync {
                 assertFalse(following.getBoolean(current))
                 val copy=views(scroll).filterIsInstance<Button>().first {it.text.toString()=="复制"}
                 assertTrue(copy.width>0 && copy.height>0)
@@ -108,12 +136,76 @@ class ActivityTest:InstrumentationTestCase() {
                 button(current,"回到底部").performClick()
                 assertTrue(following.getBoolean(current))
             }
+            lateinit var firstUser:MessageId
+            var startY=0
+            instrumentation.runOnMainSync {firstUser=shownUserId(current);startY=scroll.scrollY;current.jumpToMessage(firstUser)}
+            val jump=MainActivity::class.java.getDeclaredField("jumpTarget").apply {isAccessible=true}
+            val movingDeadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
+            var moved=false
+            var cancelledY=0
+            while(!moved && System.nanoTime()<movingDeadline) {
+                instrumentation.runOnMainSync {
+                    moved=scroll.scrollY!=startY && jump.get(current)!=null
+                    if(moved) {
+                        val now=android.os.SystemClock.uptimeMillis()
+                        val down=android.view.MotionEvent.obtain(now,now,android.view.MotionEvent.ACTION_DOWN,10f,10f,0)
+                        scroll.dispatchTouchEvent(down);down.recycle()
+                        val cancel=android.view.MotionEvent.obtain(now,now,android.view.MotionEvent.ACTION_CANCEL,10f,10f,0)
+                        scroll.dispatchTouchEvent(cancel);cancel.recycle()
+                        cancelledY=scroll.scrollY;assertNull(jump.get(current))
+                    }
+                }
+                if(!moved) Thread.sleep(10)
+            }
+            assertTrue("navigation must move before cancellation",moved)
+            awaitFrames(3)
+            instrumentation.runOnMainSync {assertEquals(cancelledY,scroll.scrollY);current.jumpToMessage(firstUser)}
+            var distance=0
+            var viewport=1
+            instrumentation.runOnMainSync {distance=scroll.scrollY;viewport=scroll.height.coerceAtLeast(1)}
+            val timeoutSeconds=(5L+distance.toLong()/(viewport*5L)).coerceAtMost(30L)
+            val deadlineJump=System.nanoTime()+TimeUnit.SECONDS.toNanos(timeoutSeconds)
+            var finished=false
+            while(!finished && System.nanoTime()<deadlineJump) {
+                instrumentation.runOnMainSync {finished=jump.get(current)==null}
+                if(!finished) Thread.sleep(10)
+            }
+            assertTrue("user message navigation must reach measured target",finished)
+            instrumentation.runOnMainSync {
+                @Suppress("UNCHECKED_CAST") val rows=rowField.get(current) as Map<MessageId,android.widget.LinearLayout>
+                assertTrue(rows.getValue(firstUser).top>0)
+                assertEquals(rows.getValue(firstUser).top,scroll.scrollY)
+                assertFalse(following.getBoolean(current))
+                try {current.jumpToMessage(tail.id);fail("assistant cannot be navigation target")} catch (_:IllegalStateException) {}
+                button(current,"加载更早消息").performClick()
+                current.select(null)
+                val pending=MainActivity::class.java.getDeclaredField("pendingScrollLayout").apply {isAccessible=true}
+                assertNull(pending.get(current))
+            }
+            awaitFrames(3)
+            instrumentation.runOnMainSync {assertEquals("cancelled prepend must not affect next conversation",0,scroll.scrollY)}
+            instrumentation.runOnMainSync {
+                current.select(conversation)
+                button(current,"加载更早消息").performClick()
+                current.jumpToMessage(shownUserId(current))
+                val pending=MainActivity::class.java.getDeclaredField("pendingScrollLayout").apply {isAccessible=true}
+                assertNull(pending.get(current))
+                val pause=MainActivity::class.java.getDeclaredMethod("onPause").apply {isAccessible=true}
+                pause.invoke(current)
+                assertNull(jump.get(current))
+                assertNull(pending.get(current))
+            }
         } finally {
             instrumentation.runOnMainSync {activity?.finish()}
             instrumentation.waitForIdleSync()
             controller.close()
             instrumentation.runOnMainSync {field.set(application,original)}
         }
+    }
+    private fun shownUserId(activity:MainActivity):MessageId {
+        val field=MainActivity::class.java.getDeclaredField("shown").apply {isAccessible=true}
+        @Suppress("UNCHECKED_CAST") val shown=field.get(activity) as List<Pair<Long,Message>>
+        return shown.filter {it.second.role=="user"}[1].second.id
     }
     fun testDraftSlotsRunningSwitchAndActivityRecreation() {
         val application=instrumentation.targetContext.applicationContext as ChatApplication

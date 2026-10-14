@@ -11,6 +11,7 @@ import android.text.InputType
 import android.view.View
 import android.view.Choreographer
 import android.view.MotionEvent
+import android.view.ViewTreeObserver
 import android.widget.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ModelSettings
@@ -24,6 +25,12 @@ class MainActivity:Activity() {
     private lateinit var status:TextView
     private lateinit var send:Button
     private lateinit var stop:Button
+    private var jumpTarget:MessageId?=null
+    private var turnMotion:ConversationTurnMotion?=null
+    private var jumpTime=0L
+    private var jumpRemainder=0f
+    private var pendingScrollLayout:ViewTreeObserver.OnPreDrawListener?=null
+    private val turnFrame=Choreographer.FrameCallback {time -> advanceTurnJump(time)}
     private val bottomMotion=BottomFollowMotion()
     private var followsBottom=true
     private var followScheduled=false
@@ -70,10 +77,12 @@ class MainActivity:Activity() {
         toolbar.addView(button("模型设置") {modelSettings()});root.addView(toolbar)
         status=TextView(this);root.addView(status)
         root.addView(button("加载更早消息") {loadEarlier()})
+        root.addView(button("定位用户消息") {chooseUserMessage()})
         timeline=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL}
         scroll=object:ScrollView(this) {
             override fun dispatchTouchEvent(event:MotionEvent):Boolean {
                 if(event.actionMasked==MotionEvent.ACTION_DOWN) {
+                    cancelTurnJump()
                     followsBottom=false
                     removeCallbacks(initialBottom)
                     cancelBottomFollow()
@@ -132,6 +141,7 @@ class MainActivity:Activity() {
         refreshRateWindowResumed=false
         scroll.removeCallbacks(initialBottom)
         cancelBottomFollow()
+        cancelTurnJump()
         window.decorView.removeCallbacks(refreshRateRequest)
         val previous=previousPreferredRefreshRate
         if(previous!=null && window.attributes.preferredRefreshRate==requestedPreferredRefreshRate) {
@@ -144,7 +154,12 @@ class MainActivity:Activity() {
         if(selectionReady) selections[selected?.id]=input.selectionStart to input.selectionEnd
         super.onPause()
     }
-    override fun onDestroy() {controller.unobserve(listener);super.onDestroy()}
+    override fun onDestroy() {
+        refreshRateWindowResumed=false
+        scroll.removeCallbacks(initialBottom);cancelBottomFollow();cancelTurnJump()
+        window.decorView.removeCallbacks(refreshRateRequest)
+        controller.unobserve(listener);super.onDestroy()
+    }
     private fun toast(text:String) {Toast.makeText(this,text,Toast.LENGTH_LONG).show()}
     private fun guard(action:()->Unit) {try {action()} catch (_:Exception) {toast("操作或保存失败；原数据保留")} }
     internal fun select(conversation:Conversation?) {
@@ -194,7 +209,7 @@ class MainActivity:Activity() {
             status.text=controller.problem ?: "${selected?.title ?: "未创建会话"} · ${if(active!=null) if(active.conversationId==selected?.id) "运行中" else "其他会话运行中" else "已就绪"}"
         }
     }
-    private fun renderAll() {timeline.removeAllViews();rows.clear();shown.forEach {updateRow(it.second)} }
+    private fun renderAll() {cancelTurnJump();timeline.removeAllViews();rows.clear();shown.forEach {updateRow(it.second)} }
     private fun updateRow(message:Message) {
         val row=rows.getOrPut(message.id) {LinearLayout(this).apply {orientation=LinearLayout.VERTICAL;setPadding(0,12,0,12);timeline.addView(this)}}
         row.removeAllViews()
@@ -214,6 +229,63 @@ class MainActivity:Activity() {
         }})
         scheduleBottomFollow()
     }
+    private fun chooseUserMessage() {
+        val messages=shown.map {it.second}.filter {it.role=="user"}
+        if(messages.isEmpty()) {toast("当前已加载历史中没有用户消息");return}
+        val labels=messages.map {it.blocks.filterIsInstance<MessageBlock.Text>().joinToString(" ") {block->block.text}.take(100)}
+        AlertDialog.Builder(this).setTitle("定位已加载的用户消息（更早内容请先加载）")
+            .setItems(labels.toTypedArray()) {_,index->guard {jumpToMessage(messages[index].id)}}.show()
+    }
+    internal fun jumpToMessage(id:MessageId) {
+        check(shown.any {it.second.id==id && it.second.role=="user"})
+        cancelTurnJump();followsBottom=false;scroll.removeCallbacks(initialBottom);cancelBottomFollow()
+        if(!refreshRateWindowResumed) return
+        jumpTarget=id;jumpTime=0L
+        Choreographer.getInstance().postFrameCallback(turnFrame)
+    }
+    private fun cancelScrollLayout() {
+        pendingScrollLayout?.let {if(scroll.viewTreeObserver.isAlive) scroll.viewTreeObserver.removeOnPreDrawListener(it)}
+        pendingScrollLayout=null
+    }
+    private fun afterScrollLayout(action:()->Boolean) {
+        cancelScrollLayout()
+        val listener=ViewTreeObserver.OnPreDrawListener {
+            if(!refreshRateWindowResumed || isFinishing || isDestroyed || action()) cancelScrollLayout()
+            true
+        }
+        pendingScrollLayout=listener
+        scroll.viewTreeObserver.addOnPreDrawListener(listener)
+    }
+    private fun cancelTurnJump() {
+        cancelScrollLayout()
+        Choreographer.getInstance().removeFrameCallback(turnFrame)
+        jumpTarget=null;turnMotion=null;jumpTime=0L;jumpRemainder=0f
+    }
+    private fun advanceTurnJump(time:Long) {
+        val id=jumpTarget ?: return
+        val row=rows[id]
+        if(!refreshRateWindowResumed || isFinishing || isDestroyed || row==null) {cancelTurnJump();return}
+        if(row.height<=0 || scroll.height<=0 || root.isLayoutRequested || timeline.isLayoutRequested || scroll.isLayoutRequested) {
+            afterScrollLayout {
+                if(row.height>0 && scroll.height>0 && !root.isLayoutRequested && !timeline.isLayoutRequested && !scroll.isLayoutRequested) {
+                    advanceTurnJump(Choreographer.getInstance().frameTimeNanos);true
+                } else false
+            }
+            return
+        }
+        val motion=turnMotion ?: ConversationTurnMotion(scroll.height.toFloat()).also {turnMotion=it}
+        val maximum=(timeline.height-scroll.height+scroll.paddingTop+scroll.paddingBottom).coerceAtLeast(0)
+        val target=row.top.coerceIn(0,maximum)
+        val distance=target-scroll.scrollY
+        if(kotlin.math.abs(distance)<=1) {scroll.scrollTo(0,target);cancelTurnJump();return}
+        val elapsed=if(jumpTime==0L) 0f else (time-jumpTime).coerceAtLeast(0)/1_000_000_000f
+        jumpTime=time
+        val movement=motion.advance(elapsed,kotlin.math.abs(distance).toFloat())+jumpRemainder
+        val pixels=movement.toInt().coerceAtMost(kotlin.math.abs(distance))
+        jumpRemainder=movement-pixels
+        scroll.scrollBy(0,if(distance<0) -pixels else pixels)
+        Choreographer.getInstance().postFrameCallback(turnFrame)
+    }
     private fun isAtBottom()=scroll.scrollY+scroll.height-scroll.paddingTop-scroll.paddingBottom>=timeline.height-2
     private fun cancelBottomFollow() {
         Choreographer.getInstance().removeFrameCallback(followFrame)
@@ -226,6 +298,7 @@ class MainActivity:Activity() {
         }
     }
     private fun jumpToBottom() {
+        cancelTurnJump()
         followsBottom=true
         cancelBottomFollow()
         scroll.removeCallbacks(initialBottom)
@@ -236,7 +309,15 @@ class MainActivity:Activity() {
         val earlier=controller.database.messages(id,shown.firstOrNull()?.first ?: Long.MAX_VALUE)
         if(earlier.isEmpty()) {toast("没有更早消息");return}
         followsBottom=false;scroll.removeCallbacks(initialBottom);cancelBottomFollow()
-        val old=timeline.height;val y=scroll.scrollY;shown.addAll(0,earlier);renderAll();scroll.post {scroll.scrollTo(0,y+timeline.height-old)}
+        val anchor=shown.firstOrNull {rows[it.second.id]?.bottom?.let {bottom->bottom>scroll.scrollY}==true}?.second?.id
+        val offset=anchor?.let {rows.getValue(it).top-scroll.scrollY} ?: 0
+        shown.addAll(0,earlier);renderAll()
+        if(anchor!=null) afterScrollLayout {
+            val row=rows[anchor]
+            if(row!=null && row.height>0 && scroll.height>0 && !root.isLayoutRequested && !timeline.isLayoutRequested && !scroll.isLayoutRequested) {
+                scroll.scrollTo(0,row.top-offset);true
+            } else false
+        }
     }
     private fun chooseConversation() {
         val list=controller.database.conversations()

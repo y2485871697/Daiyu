@@ -40,9 +40,10 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
                 .put("parameters",JSONObject().put("type","object").put("properties",JSONObject()).put("required",JSONArray()).put("additionalProperties",false)).put("strict",true)
             val request=JSONObject().put("model",settings.model).put("input",input).put("stream",true).put("store",false).put("include",JSONArray().put("reasoning.encrypted_content"))
             if(settings.batteryEnabled) request.put("tools",JSONArray().put(tool))
-            val conn=connect(URL(settings.requestEndpoint()))
-            connection=conn
+            var ownedConnection:HttpsURLConnection?=null
             try {
+                val conn=connect(URL(settings.requestEndpoint()))
+                ownedConnection=conn;connection=conn
                 if(cancelled.get()) throw InterruptedException()
                 conn.requestMethod="POST";conn.doOutput=true;conn.instanceFollowRedirects=false
                 conn.connectTimeout=20_000;conn.readTimeout=60_000
@@ -72,7 +73,7 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
                 throw ModelRequestException(ModelFailure.TLS)
             } catch(failure:java.io.IOException) {
                 throw ModelRequestException(ModelFailure.NETWORK)
-            } finally {conn.disconnect();connection=null}
+            } finally {try {ownedConnection?.disconnect()} finally {connection=null}}
         }
         override fun cancel() {cancelled.set(true);connection?.disconnect()}
     }

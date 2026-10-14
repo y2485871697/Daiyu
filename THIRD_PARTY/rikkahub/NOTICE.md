@@ -5,6 +5,8 @@
 许可：GNU Affero General Public License version 3，原文见 LICENSE。
 版权归原项目及各贡献者；保留上游的许可、署名与适用通知。
 
+修改者：代鱼项目；修改日期：2026-10-14。
+
 本次改编：
 - `ai/src/main/java/me/rerere/ai/provider/ProviderSetting.kt` 的 OpenAI.baseUrl / responsesPath 分离配置。
 - `ai/src/main/java/me/rerere/ai/provider/providers/openai/ResponseAPI.kt` 的 `"${providerSetting.baseUrl}${providerSetting.responsesPath}"` 地址组合。

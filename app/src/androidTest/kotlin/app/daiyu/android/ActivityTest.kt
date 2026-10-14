@@ -72,6 +72,32 @@ class ActivityTest:InstrumentationTestCase() {
                 button(current,"加载更早消息").performClick()
                 assertFalse(following.getBoolean(current));assertFalse(scheduled.getBoolean(current))
                 assertTrue(views(current.window.decorView).filterIsInstance<TextView>().any {it.text.toString().contains("历史用户 45")})
+                val shownField=MainActivity::class.java.getDeclaredField("shown").apply {isAccessible=true}
+                @Suppress("UNCHECKED_CAST")
+                val shown=shownField.get(current) as MutableList<Pair<Long,Message>>
+                val count=shown.size
+                assertTrue(count>50)
+                val index=shown.indexOfFirst {it.second.id==tail.id}
+                shown[index]=shown[index].first to shown[index].second.copy(status=RunStatus.RUNNING)
+                val before=scroll.scrollY
+                MainActivity::class.java.getDeclaredMethod("refresh").apply {isAccessible=true}.invoke(current)
+                @Suppress("UNCHECKED_CAST")
+                val refreshed=shownField.get(current) as MutableList<Pair<Long,Message>>
+                assertEquals(count,refreshed.size)
+                assertEquals(RunStatus.COMPLETED,refreshed[index].second.status)
+                assertEquals(before,scroll.scrollY)
+                val copy=views(scroll).filterIsInstance<Button>().first {it.text.toString()=="复制"}
+                scroll.scrollTo(0,copy.top)
+                val location=IntArray(2);copy.getLocationOnScreen(location)
+                val scrollLocation=IntArray(2);scroll.getLocationOnScreen(scrollLocation)
+                following.setBoolean(current,true)
+                val now=android.os.SystemClock.uptimeMillis()
+                val down=android.view.MotionEvent.obtain(now,now,android.view.MotionEvent.ACTION_DOWN,
+                    (location[0]-scrollLocation[0]+copy.width/2).toFloat(),(location[1]-scrollLocation[1]+copy.height/2).toFloat(),0)
+                scroll.dispatchTouchEvent(down);down.recycle()
+                assertFalse(following.getBoolean(current));assertFalse(scheduled.getBoolean(current))
+                val cancel=android.view.MotionEvent.obtain(now,now,android.view.MotionEvent.ACTION_CANCEL,10f,10f,0)
+                scroll.dispatchTouchEvent(cancel);cancel.recycle()
             }
         } finally {
             instrumentation.runOnMainSync {activity?.finish()}

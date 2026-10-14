@@ -114,6 +114,25 @@ class ResponsesTest:InstrumentationTestCase() {
             assertEquals(1,opened);assertTrue(disconnected);assertFalse(result.error!!.contains("synthetic-secret"))
         }
     }
+    fun testConnectionFactoryFailuresAndMalformedEventsAreClassified() {
+        for((exception,expected) in listOf(
+            java.net.SocketTimeoutException("synthetic-secret") to ModelFailure.TIMEOUT,
+            javax.net.ssl.SSLException("synthetic-secret") to ModelFailure.TLS,
+            java.io.IOException("synthetic-secret") to ModelFailure.NETWORK)) {
+            var opened=0
+            val result=ChatRunner(ResponsesModel(settings) {opened++;throw exception},
+                object:ConversationStore {override fun save(message:Message) {}},BatteryTool {error("unused")},{})
+                .run(initial(),emptyList())
+            assertEquals(expected.userMessage,result.error);assertEquals(1,opened)
+        }
+        for(event in listOf(
+            event("response.output_text.delta","content_index" to 0,"delta" to "x"),
+            delta(-1,"x"),delta(0,"x").put("sequence_number","bad"),
+            event("response.completed","response" to JSONObject().put("status","completed")))) {
+            assertEquals(ModelFailure.PROTOCOL.userMessage,run(listOf(Connection(frames(event)))).error)
+        }
+        assertEquals(ModelFailure.INCOMPLETE.userMessage,run(listOf(Connection("data: ${completed()}"))).error)
+    }
     fun testTwoRoundRequestAndEncryptedReasoningReplay() {
         val reasoning=event("reasoning","id" to "reason","encrypted_content" to "synthetic-encrypted-content","summary" to JSONArray())
         val call=call()

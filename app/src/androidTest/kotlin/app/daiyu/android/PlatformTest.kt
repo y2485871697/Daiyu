@@ -53,7 +53,7 @@ class PlatformTest:InstrumentationTestCase() {
         val frames=mutableListOf<String>()
         SseReader.read(StringReader(": comment\r\ndata: 一\r\ndata: 二\r\n\r\ndata: 三\n\n").buffered()) {frames.add(it);true}
         assertEquals(listOf("一\n二","三"),frames)
-        try {SseReader.read(StringReader("data: partial").buffered()) {true};fail("must reject unterminated event")} catch (_:IllegalArgumentException) {}
+        try {SseReader.read(StringReader("data: partial").buffered()) {true};fail("must reject unterminated event")} catch (failure:ModelRequestException) {assertEquals(ModelFailure.INCOMPLETE,failure.failure)}
         context.getSharedPreferences("model-settings",0).edit().clear().commit()
     }
     private fun pair(id:ConversationId,suffix:String):Pair<Message,Message> {

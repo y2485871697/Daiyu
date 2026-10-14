@@ -37,11 +37,11 @@ class MainActivity:Activity() {
                 val pixels=movement.toInt().coerceAtMost(distance)
                 followRemainder=movement-pixels
                 scroll.scrollBy(0,pixels)
-                scheduleBottomFollow()
+                if(isAtBottom()) cancelBottomFollow() else scheduleBottomFollow()
             } else cancelBottomFollow()
         }
     }
-    private val initialBottom=Runnable {if(followsBottom && refreshRateWindowResumed) scroll.fullScroll(View.FOCUS_DOWN)}
+    private val initialBottom=Runnable {if(followsBottom && refreshRateWindowResumed) scroll.scrollTo(0,(timeline.height-scroll.height+scroll.paddingTop+scroll.paddingBottom).coerceAtLeast(0))}
     private var selected:Conversation?=null
     private var editing=false
     private var selectionReady=false
@@ -71,19 +71,20 @@ class MainActivity:Activity() {
         status=TextView(this);root.addView(status)
         root.addView(button("加载更早消息") {loadEarlier()})
         timeline=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL}
-        scroll=ScrollView(this).apply {
-            addView(timeline)
-            setOnTouchListener {_,event ->
+        scroll=object:ScrollView(this) {
+            override fun dispatchTouchEvent(event:MotionEvent):Boolean {
                 if(event.actionMasked==MotionEvent.ACTION_DOWN) {
                     followsBottom=false
                     removeCallbacks(initialBottom)
                     cancelBottomFollow()
-                } else if(event.actionMasked==MotionEvent.ACTION_UP || event.actionMasked==MotionEvent.ACTION_CANCEL) {
-                    followsBottom=isAtBottom()
                 }
-                false
+                return super.dispatchTouchEvent(event)
             }
+        }.apply {addView(timeline);isSmoothScrollingEnabled=false}
+        scroll.setOnScrollChangeListener {_,_,_,_,_ ->
+            if(!followsBottom && isAtBottom()) followsBottom=true
         }
+        scroll.addOnLayoutChangeListener {_,_,_,_,_,_,_,_,_ -> scheduleBottomFollow()}
         timeline.addOnLayoutChangeListener {_,_,_,_,_,_,_,_,_ -> scheduleBottomFollow()}
         root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         input=EditText(this).apply {hint="输入消息";minLines=2;maxLines=5;inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES}
@@ -186,7 +187,12 @@ class MainActivity:Activity() {
                 if(at>=0) shown[at]=shown[at].first to active
                 updateRow(active)
             } else if(selected!=null && active==null && shown.any {it.second.status==RunStatus.RUNNING}) {
-                shown=controller.database.messages(selected!!.id).toMutableList();renderAll()
+                shown=shown.map {entry ->
+                    if(entry.second.status==RunStatus.RUNNING) {
+                        val saved=controller.database.messages(selected!!.id,entry.first+1,1).singleOrNull()
+                        if(saved?.second?.id==entry.second.id) {updateRow(saved.second);saved} else entry
+                    } else entry
+                }.toMutableList()
             }
             status.text=controller.problem ?: "${selected?.title ?: "未创建会话"} · ${if(active!=null) if(active.conversationId==selected?.id) "运行中" else "其他会话运行中" else "已就绪"}"
         }

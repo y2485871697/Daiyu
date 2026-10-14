@@ -23,4 +23,18 @@ class ResponsesEndpointTest {
             try { responsesEndpoint("https://example.invalid", path);fail(path) } catch (_: IllegalArgumentException) { }
         }
     }
+    @Test fun finalPathAndMalformedUrisAreRejectedWithoutInputLeak() {
+        for(path in listOf("/chat/completions","/chat/completions/","/chat/%63ompletions")) {
+            try {responsesEndpoint("https://example.invalid/v1",path);fail("wrong protocol accepted")}
+            catch(_:IllegalArgumentException) {}
+        }
+        for(address in listOf("https://example.invalid:65536","https://example.invalid/%synthetic-secret","https://example.invalid/with space")) {
+            try {responsesEndpoint(address);fail("invalid URI accepted")}
+            catch(failure:IllegalArgumentException) {assertFalse(failure.message.orEmpty().contains("synthetic-secret"))}
+        }
+        try {responsesEndpoint("https://example.invalid","/responses?key=synthetic-secret%");fail("invalid path accepted")}
+        catch(failure:IllegalArgumentException) {assertFalse(failure.message.orEmpty().contains("synthetic-secret"))}
+        assertEquals("HTTPS://example.invalid/v1/responses",responsesEndpoint("HTTPS://example.invalid"))
+    }
+
 }

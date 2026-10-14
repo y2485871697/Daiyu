@@ -86,7 +86,12 @@ class ActivityTest:InstrumentationTestCase() {
                 assertEquals(count,refreshed.size)
                 assertEquals(RunStatus.COMPLETED,refreshed[index].second.status)
                 assertEquals(before,scroll.scrollY)
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                assertFalse(following.getBoolean(current))
                 val copy=views(scroll).filterIsInstance<Button>().first {it.text.toString()=="复制"}
+                assertTrue(copy.width>0 && copy.height>0)
                 scroll.scrollTo(0,copy.top)
                 val location=IntArray(2);copy.getLocationOnScreen(location)
                 val scrollLocation=IntArray(2);scroll.getLocationOnScreen(scrollLocation)

@@ -133,6 +133,21 @@ class ResponsesTest:InstrumentationTestCase() {
         }
         assertEquals(ModelFailure.INCOMPLETE.userMessage,run(listOf(Connection("data: ${completed()}"))).error)
     }
+    fun testSinkIoFailuresKeepTheirIdentity() {
+        for(exception in listOf(java.io.IOException("sink"),java.net.SocketTimeoutException("sink"),javax.net.ssl.SSLException("sink"))) {
+            for(protocol in listOf(false,true)) {
+                val connection=Connection(frames(delta(0,"text"),completed(message("text"))))
+                val session=ResponsesModel(settings) {connection}.open(emptyList())
+                try {
+                    session.next(emptyList()) {event ->
+                        if((event is ModelEvent.ProtocolOutput)==protocol) throw exception
+                    }
+                    fail("sink must fail")
+                } catch(failure:java.io.IOException) {assertSame(exception,failure)}
+                assertTrue(connection.disconnected)
+            }
+        }
+    }
     fun testTwoRoundRequestAndEncryptedReasoningReplay() {
         val reasoning=event("reasoning","id" to "reason","encrypted_content" to "synthetic-encrypted-content","summary" to JSONArray())
         val call=call()

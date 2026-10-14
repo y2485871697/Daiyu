@@ -40,6 +40,10 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
                 .put("parameters",JSONObject().put("type","object").put("properties",JSONObject()).put("required",JSONArray()).put("additionalProperties",false)).put("strict",true)
             val request=JSONObject().put("model",settings.model).put("input",input).put("stream",true).put("store",false).put("include",JSONArray().put("reasoning.encrypted_content"))
             if(settings.batteryEnabled) request.put("tools",JSONArray().put(tool))
+            var deliveryFailure:Exception?=null
+            val deliver:(ModelEvent)->Unit={event ->
+                try {sink(event)} catch(failure:Exception) {deliveryFailure=failure;throw failure}
+            }
             var ownedConnection:HttpsURLConnection?=null
             try {
                 val conn=connect(URL(settings.requestEndpoint()))
@@ -63,15 +67,18 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
                 if(conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream",ignoreCase=true)!=true)
                     throw ModelRequestException(ModelFailure.PROTOCOL)
                 conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-                    val items=ResponsesStream.read(reader,cancelled::get,sink)
+                    val items=ResponsesStream.read(reader,cancelled::get,deliver)
                     items.forEach {input.put(JSONObject(it));ownItems.add(it)}
-                    sink(ModelEvent.ProtocolOutput(ownItems.toList()))
+                    deliver(ModelEvent.ProtocolOutput(ownItems.toList()))
                 }
             } catch(failure:java.net.SocketTimeoutException) {
+                if(failure===deliveryFailure) throw failure
                 throw ModelRequestException(ModelFailure.TIMEOUT)
             } catch(failure:javax.net.ssl.SSLException) {
+                if(failure===deliveryFailure) throw failure
                 throw ModelRequestException(ModelFailure.TLS)
             } catch(failure:java.io.IOException) {
+                if(failure===deliveryFailure) throw failure
                 throw ModelRequestException(ModelFailure.NETWORK)
             } finally {try {ownedConnection?.disconnect()} finally {connection=null}}
         }

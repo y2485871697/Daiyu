@@ -87,7 +87,7 @@ class ActivityTest:InstrumentationTestCase() {
                 update.invoke(current,tail.copy(blocks=listOf(MessageBlock.Text("a","更多内容\n".repeat(80)))))
             }
             instrumentation.waitForIdleSync()
-            lateinit var anchor:MessageId
+            var anchor=MessageId("not-selected")
             var anchorOffset=0
             val rowField=MainActivity::class.java.getDeclaredField("rows").apply {isAccessible=true}
             instrumentation.runOnMainSync {
@@ -136,7 +136,7 @@ class ActivityTest:InstrumentationTestCase() {
                 button(current,"回到底部").performClick()
                 assertTrue(following.getBoolean(current))
             }
-            lateinit var firstUser:MessageId
+            var firstUser=MessageId("not-selected")
             var startY=0
             instrumentation.runOnMainSync {firstUser=shownUserId(current);startY=scroll.scrollY;current.jumpToMessage(firstUser)}
             val jump=MainActivity::class.java.getDeclaredField("jumpTarget").apply {isAccessible=true}

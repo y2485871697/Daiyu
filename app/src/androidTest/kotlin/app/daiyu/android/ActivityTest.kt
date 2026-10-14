@@ -386,4 +386,71 @@ class ActivityTest:InstrumentationTestCase() {
             }
         }
     }
+    fun testImportDraftSurvivesBusyActivityReplacementAndSelection() {
+        val application=instrumentation.targetContext.applicationContext as ChatApplication
+        val context=testContext(instrumentation.targetContext,"backup-ui-${java.util.UUID.randomUUID()}-")
+        val source=testContext(instrumentation.targetContext,"backup-ui-source-${java.util.UUID.randomUUID()}-")
+        val db=ConversationDatabase(context);val from=ConversationDatabase(source)
+        from.draft("导入的未创建草稿");val backup=from.exportBackup()
+        val calls=java.util.concurrent.atomic.AtomicInteger()
+        val controller=ChatController(application,db,settingsStore(context),context.getSharedPreferences("conversation-ui",0),{calls.incrementAndGet();error("no network")})
+        val entered=CountDownLatch(1);val release=CountDownLatch(1);val done=CountDownLatch(1)
+        var original:ChatController?=null;var activity:MainActivity?=null
+        try {
+            val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
+            while(!controller.ready && System.nanoTime()<deadline) Thread.sleep(10)
+            assertTrue(controller.ready)
+            instrumentation.runOnMainSync {original=application.controller;application.controller=controller}
+            val first=start();activity=first
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                assertEquals("",input(first).text.toString())
+                controller.observe {if(!controller.dataBusy && controller.dataRevision>0) done.countDown()}
+                controller.dataTask(importing=true,work={entered.countDown();check(release.await(10,TimeUnit.SECONDS));db.importBackup(backup);"合成导入完成"})
+            }
+            assertTrue(entered.await(5,TimeUnit.SECONDS));instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                assertFalse(input(first).isEnabled)
+                assertNull(controller.send(null,"busy attempt"))
+                try {first.select(null);fail("busy selection must reject")} catch(_:IllegalStateException) {}
+                first.finish()
+            }
+            instrumentation.waitForIdleSync()
+            val replacement=start();activity=replacement
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                assertFalse(input(replacement).isEnabled)
+                controller.observe {if(!controller.dataBusy && controller.dataRevision>0) {
+                    assertEquals("导入的未创建草稿",input(replacement).text.toString())
+                    replacement.select(null)
+                    assertEquals("导入的未创建草稿",db.draft())
+                }}
+            }
+            release.countDown();assertTrue(done.await(5,TimeUnit.SECONDS));instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                assertTrue(input(replacement).isEnabled)
+                assertEquals("导入的未创建草稿",input(replacement).text.toString())
+                button(replacement,"新建").performClick()
+                assertEquals("导入的未创建草稿",input(replacement).text.toString())
+                val conversation=db.create();db.organize(conversation.id,"测试文件夹",true)
+                replacement.select(conversation);replacement.select(null)
+                assertEquals("导入的未创建草稿",input(replacement).text.toString())
+                assertTrue(db.conversations().single().pinned);assertEquals("测试文件夹",db.conversations().single().folder)
+                assertEquals(0,calls.get())
+            }
+            val failed=CountDownLatch(1)
+            instrumentation.runOnMainSync {
+                controller.observe {if(!controller.dataBusy) failed.countDown()}
+                controller.dataTask(work={error("synthetic failure")})
+            }
+            assertTrue(failed.await(5,TimeUnit.SECONDS));assertFalse(controller.dataBusy)
+        } finally {
+            release.countDown()
+            instrumentation.runOnMainSync {activity?.finish()};instrumentation.waitForIdleSync()
+            controller.close();from.close()
+            instrumentation.runOnMainSync {application.controller=original!!}
+            context.deleteDatabase("conversations.db");source.deleteDatabase("conversations.db")
+        }
+    }
+
 }

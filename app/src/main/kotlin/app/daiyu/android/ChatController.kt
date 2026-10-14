@@ -26,13 +26,17 @@ class ChatController internal constructor(private val application:Application,
     @Volatile var active:Message?=null;private set
     @Volatile var problem:String?=null;private set
     @Volatile private var runner:ChatRunner?=null
+    @Volatile var dataBusy=false;private set
+    var dataRevision=0L;private set
+    var dataNotice:String?=null;private set
+    internal fun consumeDataNotice():String? = dataNotice.also {dataNotice=null}
     @Volatile var ready=false;private set
     init {executor.execute {try {database.recover()} catch (_:Exception) {problem="会话恢复失败，原数据已保留"};ready=true;notifyChanged()} }
     fun observe(listener:()->Unit) {listeners.add(listener)}
     fun unobserve(listener:()->Unit) {listeners.remove(listener)}
     private fun notifyChanged() {handler.post {listeners.toList().forEach {it()} } }
     fun send(conversation:Conversation?,text:String):Conversation? {
-        if(!ready || active!=null || problem?.startsWith("会话恢复失败")==true || text.isBlank()) return null
+        if(!ready || dataBusy || active!=null || problem?.startsWith("会话恢复失败")==true || text.isBlank()) return null
         val config=try {settings.load().also {it.validate()}} catch (_:CredentialUnavailableException) {
             problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
         } catch (_:Exception) {problem="请在模型设置里配置Responses地址、模型与密钥";notifyChanged();return null}
@@ -60,6 +64,19 @@ class ChatController internal constructor(private val application:Application,
             }
         }
         notifyChanged();return saved
+    }
+    internal fun dataTask(importing:Boolean=false,work:()->String) {
+        check(ready && active==null && !dataBusy)
+        dataBusy=true;notifyChanged()
+        try {executor.execute {
+            var value=if(importing) "导入失败；原会话保留，格式、校验或身份冲突" else "导出失败；目标文件可能不完整，原会话保留"
+            var success=false
+            try {value=work();success=true} catch (_:Exception) {}
+            finally {
+                val notice=value;val changed=success && importing
+                handler.post {if(changed) dataRevision++;dataNotice=notice;dataBusy=false;listeners.toList().forEach {it()}}
+            }
+        }} catch(failure:java.util.concurrent.RejectedExecutionException) {dataBusy=false;notifyChanged();throw failure}
     }
     fun stop() {runner?.stop()}
     internal fun close() {stop();executor.shutdown();check(executor.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS));database.close()}

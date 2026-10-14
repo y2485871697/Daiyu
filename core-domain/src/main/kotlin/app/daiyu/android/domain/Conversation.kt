@@ -1,7 +1,7 @@
 package app.daiyu.android.domain
 
 enum class RunStatus { RUNNING, COMPLETED, STOPPED, FAILED, INTERRUPTED }
-data class Conversation(val id: ConversationId, val title: String, val draft: String, val updatedAt: Long)
+data class Conversation(val id: ConversationId, val title: String, val draft: String, val updatedAt: Long, val folder: String = "", val pinned: Boolean = false)
 data class ToolInvocation(val id: ToolCallId, val name: String, val arguments: String)
 sealed interface MessageBlock {
     data class Text(val itemId: String, val text: String) : MessageBlock

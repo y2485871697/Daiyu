@@ -53,6 +53,7 @@ class MainActivity:Activity() {
     private var selected:Conversation?=null
     private var editing=false
     private var selectionReady=false
+    private var dataRevision=-1L
     private var shown=mutableListOf<Pair<Long,Message>>()
     private val rows=mutableMapOf<MessageId,LinearLayout>()
     private val expandedTools=mutableSetOf<ToolCallId>()
@@ -73,9 +74,18 @@ class MainActivity:Activity() {
         }
         root.addView(TextView(this).apply {text="代鱼 · 聊天";textSize=24f})
         val toolbar=LinearLayout(this)
-        fun button(label:String,action:()->Unit)=Button(this).apply {text=label;setOnClickListener {guard(action)}}
+        fun button(label:String,action:()->Unit)=Button(this).apply {text=label;setOnClickListener {guard {check(!controller.dataBusy);action()}}}
         toolbar.addView(button("会话") {chooseConversation()});toolbar.addView(button("新建") {select(null)})
         toolbar.addView(button("模型设置") {modelSettings()});root.addView(toolbar)
+        root.addView(button("备份与导入") {backupMenu()})
+        root.addView(button("搜索会话") {
+            val query=EditText(this).apply {hint="标题、草稿或消息关键词"}
+            AlertDialog.Builder(this).setTitle("搜索会话").setView(query).setPositiveButton("搜索") {_,_->guard {chooseConversation(query.text.toString())}}.setNegativeButton("取消",null).show()
+        })
+        root.addView(button("按文件夹浏览") {
+            val folders=controller.database.conversations().map {it.folder}.distinct().sorted()
+            AlertDialog.Builder(this).setTitle("文件夹").setItems(folders.map {if(it.isEmpty()) "未分类" else it}.toTypedArray()) {_,index->guard {chooseConversation(folder=folders[index])}}.show()
+        })
         status=TextView(this);root.addView(status)
         root.addView(button("加载更早消息") {loadEarlier()})
         root.addView(button("定位用户消息") {chooseUserMessage()})
@@ -100,7 +110,7 @@ class MainActivity:Activity() {
         input.addTextChangedListener(object:TextWatcher {
             override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
             override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {
-                if(!editing) guard {val id=selected?.id;if(id==null) controller.database.draft(s.toString()) else controller.database.draft(id,s.toString())}
+                if(!editing && !controller.dataBusy) guard {val id=selected?.id;if(id==null) controller.database.draft(s.toString()) else controller.database.draft(id,s.toString())}
             }
             override fun afterTextChanged(s:Editable?) {}
         })
@@ -163,9 +173,9 @@ class MainActivity:Activity() {
         controller.unobserve(listener);super.onDestroy()
     }
     private fun toast(text:String) {Toast.makeText(this,text,Toast.LENGTH_LONG).show()}
-    private fun guard(action:()->Unit) {try {action()} catch (_:Exception) {toast("操作或保存失败；原数据保留")} }
+    private fun guard(action:()->Unit) {try {check(!controller.dataBusy);action()} catch (_:Exception) {toast("操作或保存失败；原数据保留")} }
     internal fun select(conversation:Conversation?) {
-        check(controller.ready && controller.problem?.startsWith("会话恢复失败")!=true)
+        check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true)
         val list=controller.database.conversations()
         var draft=if(conversation==null) controller.database.draft() else list.first {it.id==conversation.id}.draft
         if(selectionReady) {
@@ -184,12 +194,21 @@ class MainActivity:Activity() {
         jumpToBottom();refresh()
     }
     private fun refresh() {
-        input.isEnabled=controller.ready && controller.problem?.startsWith("会话恢复失败")!=true
-        send.isEnabled=controller.ready && controller.active==null && controller.problem?.startsWith("会话恢复失败")!=true
+        input.isEnabled=controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true
+        send.isEnabled=controller.ready && !controller.dataBusy && controller.active==null && controller.problem?.startsWith("会话恢复失败")!=true
         stop.isEnabled=controller.active?.status==RunStatus.RUNNING
+        if(controller.dataBusy) {status.text="处理文本备份中";return}
         if(!controller.ready) {status.text="恢复会话中";return}
         if(controller.problem?.startsWith("会话恢复失败")==true) {status.text=controller.problem;return}
         guard {
+            if(dataRevision!=controller.dataRevision) {
+                dataRevision=controller.dataRevision
+                if(selectionReady && selected==null) {
+                    editing=true
+                    try {input.setText(controller.database.draft());input.setSelection(input.length())} finally {editing=false}
+                }
+            }
+            if(!isFinishing && !isDestroyed) controller.consumeDataNotice()?.let {toast(it)}
             if(!selectionReady) {
                 val list=controller.database.conversations()
                 val id=controller.preferences.getString("selected",null)
@@ -321,13 +340,54 @@ class MainActivity:Activity() {
             } else false
         }
     }
-    private fun chooseConversation() {
-        val list=controller.database.conversations()
-        AlertDialog.Builder(this).setTitle("会话").setItems(list.map {it.title}.toTypedArray()) {_,which ->
+    private fun backupMenu() {
+        check(controller.ready && controller.active==null && !controller.dataBusy)
+        AlertDialog.Builder(this).setTitle("文本会话备份").setMessage("仅包含会话、文本、工具结果、协议历史及草稿，不包含API密钥、Cookie或系统授权。含聊天隐私，请选择可信位置。附件及其他版本格式不支持，不会静默丢弃。导入追加，不覆盖已有身份。")
+            .setPositiveButton("导出") {_,_->startActivityForResult(android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(android.content.Intent.CATEGORY_OPENABLE);type="application/json"
+            },101)}
+            .setNeutralButton("导入") {_,_->startActivityForResult(android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {addCategory(android.content.Intent.CATEGORY_OPENABLE);type="application/json"},102)}
+            .setNegativeButton("取消",null).show()
+    }
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode:Int,resultCode:Int,data:android.content.Intent?) {
+        super.onActivityResult(requestCode,resultCode,data)
+        if(requestCode !in setOf(101,102) || resultCode!=RESULT_OK) return
+        val uri=data?.data ?: return
+        guard {
+            check(controller.active==null && !controller.dataBusy)
+            val resolver=applicationContext.contentResolver
+            val database=controller.database
+            if(requestCode==101) controller.dataTask(work={
+                val backup=database.exportBackup()
+                resolver.openOutputStream(uri,"wt")?.use {it.write(backup.toByteArray(Charsets.UTF_8))} ?: error("无法打开目标")
+                "文本备份已导出；请妥善保管"
+            })
+            else AlertDialog.Builder(this).setTitle("确认导入文本备份").setMessage("追加会话；会话ID、消息ID或独立草稿冲突将整包回滚，不覆盖已有数据，不自动执行原运行。")
+                .setPositiveButton("导入") {_,_->guard {
+                    controller.dataTask(importing=true,work={
+                        val bytes=resolver.openInputStream(uri)?.use {stream->
+                            val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192)
+                            while(true) {val count=stream.read(buffer);if(count<0) break;require(out.size()+count<=16*1024*1024);out.write(buffer,0,count)}
+                            out.toByteArray()
+                        } ?: error("无法打开备份")
+                        val text=Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT).onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes)).toString()
+                        val counts=database.importBackup(text)
+                        "已导入${counts.first}个会话、${counts.second}条消息；未执行历史请求"
+                    })
+                }}.setNegativeButton("取消",null).show()
+        }
+    }
+    private fun chooseConversation(query:String="",folder:String?=null) {
+        val list=controller.database.conversations(query,folder)
+        AlertDialog.Builder(this).setTitle("会话").setItems(list.map {"${if(it.pinned) "★ " else ""}${if(it.folder.isNotEmpty()) "[${it.folder}] " else ""}${it.title}"}.toTypedArray()) {_,which ->
+            if(controller.dataBusy) {toast("文本备份任务进行中");return@setItems}
             val conversation=list[which]
-            AlertDialog.Builder(this).setTitle(conversation.title).setItems(arrayOf("打开","重命名","删除")) {_,action -> guard {when(action) {
+            AlertDialog.Builder(this).setTitle(conversation.title).setItems(arrayOf("打开","重命名","删除",if(conversation.pinned) "取消置顶" else "置顶","移动到文件夹")) {_,action -> guard {when(action) {
                 0->select(conversation)
                 1->{val edit=EditText(this).apply {setText(conversation.title)};AlertDialog.Builder(this).setTitle("重命名").setView(edit).setPositiveButton("保存") {_,_->guard {controller.database.rename(conversation.id,edit.text.toString());if(selected?.id==conversation.id) {selected=conversation.copy(title=edit.text.toString());refresh()}}}.setNegativeButton("取消",null).show()}
+                3->{controller.database.organize(conversation.id,conversation.folder,!conversation.pinned);chooseConversation(query,folder)}
+                4->{val edit=EditText(this).apply {hint="文件夹名称；留空移出";setText(conversation.folder)};AlertDialog.Builder(this).setTitle("移动到文件夹").setView(edit).setPositiveButton("保存") {_,_->guard {controller.database.organize(conversation.id,edit.text.toString().trim(),conversation.pinned);chooseConversation(query,folder)}}.setNegativeButton("取消",null).show()}
                 2->if(controller.active?.conversationId==conversation.id) toast("先停止此会话的运行再删除") else AlertDialog.Builder(this).setMessage("确认删除此会话及其消息？").setPositiveButton("删除") {_,_->guard {check(controller.active?.conversationId!=conversation.id) {"会话运行中，不能删除"};controller.database.delete(conversation.id);if(selected?.id==conversation.id) {select(null)}}}.setNegativeButton("取消",null).show()
             }} }.show()
         }.show()

@@ -81,9 +81,6 @@ class MainActivity:Activity() {
                 return super.dispatchTouchEvent(event)
             }
         }.apply {addView(timeline);isSmoothScrollingEnabled=false}
-        scroll.setOnScrollChangeListener {_,_,_,_,_ ->
-            if(!followsBottom && isAtBottom()) followsBottom=true
-        }
         scroll.addOnLayoutChangeListener {_,_,_,_,_,_,_,_,_ -> scheduleBottomFollow()}
         timeline.addOnLayoutChangeListener {_,_,_,_,_,_,_,_,_ -> scheduleBottomFollow()}
         root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))

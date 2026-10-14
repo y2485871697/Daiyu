@@ -98,6 +98,10 @@ class ActivityTest:InstrumentationTestCase() {
                 assertFalse(following.getBoolean(current));assertFalse(scheduled.getBoolean(current))
                 val cancel=android.view.MotionEvent.obtain(now,now,android.view.MotionEvent.ACTION_CANCEL,10f,10f,0)
                 scroll.dispatchTouchEvent(cancel);cancel.recycle()
+                scroll.scrollTo(0,Int.MAX_VALUE)
+                assertFalse(following.getBoolean(current))
+                button(current,"回到底部").performClick()
+                assertTrue(following.getBoolean(current))
             }
         } finally {
             instrumentation.runOnMainSync {activity?.finish()}

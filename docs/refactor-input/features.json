@@ -1,0 +1,330 @@
+[
+  {
+    "id": "F01",
+    "title": "会话组织与草稿",
+    "stage": "M0",
+    "required": true,
+    "scope": "新建/切换/重命名/删除确认；会话和未创建会话草稿隔离；M1补齐文件夹/置顶/搜索",
+    "evidence": [
+      "E-UI",
+      "E-DATA"
+    ]
+  },
+  {
+    "id": "F02",
+    "title": "模型配置与协议",
+    "stage": "M0",
+    "required": true,
+    "scope": "一个供应商文本协议；M1补齐现有供应商协议族、模型能力/参数覆盖和会话配置快照",
+    "evidence": [
+      "E-MODEL",
+      "E-DATA"
+    ]
+  },
+  {
+    "id": "F03",
+    "title": "流式展示与停止",
+    "stage": "M0",
+    "required": true,
+    "scope": "正文与工具有序；迟到事件隔离；终态一致",
+    "evidence": [
+      "E-MODEL",
+      "E-RUNTIME"
+    ]
+  },
+  {
+    "id": "F04",
+    "title": "可信只读工具闭环",
+    "stage": "M0",
+    "required": true,
+    "scope": "先实现设备状态查询；参数校验、批次顺序、工具结果进下一轮",
+    "evidence": [
+      "E-TOOLS",
+      "E-DEVICE"
+    ]
+  },
+  {
+    "id": "F05",
+    "title": "持久化与稳定身份",
+    "stage": "M0",
+    "required": true,
+    "scope": "消息/轮次/调用身份稳定，保存失败可见，恢复幂等",
+    "evidence": [
+      "E-DATA",
+      "E-RUNTIME"
+    ]
+  },
+  {
+    "id": "F06",
+    "title": "长列表、IME与Markdown",
+    "stage": "M0",
+    "required": true,
+    "scope": "尾部首屏/浏览不强拉；M1完整导航、代码表格图片及外观触感",
+    "evidence": [
+      "E-UI"
+    ]
+  },
+  {
+    "id": "F07",
+    "title": "权限与敏感数据",
+    "stage": "M0",
+    "required": true,
+    "scope": "权限分层、读取脱敏和凭据隔离；GUI和写入权限在相应阶段生效",
+    "evidence": [
+      "E-TOOLS",
+      "E-DATA"
+    ]
+  },
+  {
+    "id": "F08",
+    "title": "副作用去重和未知结果",
+    "stage": "M0",
+    "required": true,
+    "scope": "所有阶段硬门禁；未知不重放，M1实测有副作用工具",
+    "evidence": [
+      "E-MODEL",
+      "E-RUNTIME",
+      "E-TOOLS"
+    ]
+  },
+  {
+    "id": "F09",
+    "title": "重连、暂停、补充与恢复",
+    "stage": "M1",
+    "required": true,
+    "scope": "按用户策略重连；暂停不解除；执行中补充边界；进程死亡不假装续跑",
+    "evidence": [
+      "E-RUNTIME",
+      "E-MODEL"
+    ]
+  },
+  {
+    "id": "F10",
+    "title": "关键提问",
+    "stage": "M1",
+    "required": true,
+    "scope": "单问题屏障、选项/其他/暂交/备注按合同、答案幂等",
+    "evidence": [
+      "E-QUESTION"
+    ]
+  },
+  {
+    "id": "F11",
+    "title": "分支、压缩与用量",
+    "stage": "M1",
+    "required": true,
+    "scope": "分支有效前缀/修订上下文一致；安全压缩原文可查；M2自动压缩和完整用量",
+    "evidence": [
+      "E-MODEL",
+      "E-DATA"
+    ]
+  },
+  {
+    "id": "F12",
+    "title": "设备读写与上下文",
+    "stage": "M1",
+    "required": true,
+    "scope": "时间位置/通知/日历/联系人/媒体/订单等按能力读取；系统控制用专用路径",
+    "evidence": [
+      "E-DEVICE",
+      "E-TOOLS"
+    ]
+  },
+  {
+    "id": "F13",
+    "title": "执行位置及自身边界",
+    "stage": "M1",
+    "required": true,
+    "scope": "前台/后台/询问偏好；自身前台片段不改变普通基础偏好",
+    "evidence": [
+      "E-TOOLS",
+      "E-VD"
+    ]
+  },
+  {
+    "id": "F14",
+    "title": "GUI观察和屏幕所有权",
+    "stage": "M1",
+    "required": true,
+    "scope": "新观察绑定动作；视觉才补截图；忙和失联不抢占",
+    "evidence": [
+      "E-TOOLS",
+      "E-DEVICE"
+    ]
+  },
+  {
+    "id": "F15",
+    "title": "副屏交付与释放",
+    "stage": "M1",
+    "required": true,
+    "scope": "标记后核对交付及关闭；失败现场保留；已开应用复用",
+    "evidence": [
+      "E-VD"
+    ]
+  },
+  {
+    "id": "F16",
+    "title": "离屏浏览器",
+    "stage": "M1",
+    "required": true,
+    "scope": "独立标签、正文/结构/视觉/交互/下载、外部URI边界、Cookie脱敏",
+    "evidence": [
+      "E-BROWSER"
+    ]
+  },
+  {
+    "id": "F17",
+    "title": "Android/Linux终端及长期服务",
+    "stage": "M1",
+    "required": true,
+    "scope": "明确环境/身份、共享映射、异步作业和守护服务",
+    "evidence": [
+      "E-TERMINAL"
+    ]
+  },
+  {
+    "id": "F18",
+    "title": "文件、共享与视觉附件",
+    "stage": "M1",
+    "required": true,
+    "scope": "明确路径与会话归属；读取图片视频真文件；不能找其他会话最新图",
+    "evidence": [
+      "E-TOOLS",
+      "E-MEDIA"
+    ]
+  },
+  {
+    "id": "F19",
+    "title": "迁移与备份",
+    "stage": "M1",
+    "required": true,
+    "scope": "中立包、非秘密配置、数量与附件核对；原子导入/回滚，旧源不动",
+    "evidence": [
+      "E-DATA"
+    ]
+  },
+  {
+    "id": "F20",
+    "title": "子代理调度与后台生命周期",
+    "stage": "M2",
+    "required": true,
+    "scope": "独立阅读并行、角色匹配、冻结旧任务与新配置分开、监督暂停继续",
+    "evidence": [
+      "E-DELEGATION"
+    ]
+  },
+  {
+    "id": "F21",
+    "title": "子代理有证据交付",
+    "stage": "M2",
+    "required": true,
+    "scope": "完成/真实产物/审查/测试/验收分别记录；不得空改动凑证据",
+    "evidence": [
+      "E-DELEGATION"
+    ]
+  },
+  {
+    "id": "F22",
+    "title": "Skills发现读取和安装",
+    "stage": "M2",
+    "required": true,
+    "scope": "启用快照、根内资源、有界读取、固定commit、冲突和事务恢复",
+    "evidence": [
+      "E-SKILLS"
+    ]
+  },
+  {
+    "id": "F23",
+    "title": "持久记忆",
+    "stage": "M2",
+    "required": true,
+    "scope": "核心索引/按需读、版本冲突、不存秘密与瞬态请求",
+    "evidence": [
+      "E-MEMORY"
+    ]
+  },
+  {
+    "id": "F24",
+    "title": "MCP扩展工具",
+    "stage": "M2",
+    "required": true,
+    "scope": "连接与目录缩放、秘密隔离、结果未知与未执行分开",
+    "evidence": [
+      "E-MCP",
+      "E-TOOLS"
+    ]
+  },
+  {
+    "id": "F25",
+    "title": "听写、语音对话与朗读",
+    "stage": "M2",
+    "required": true,
+    "scope": "听写/串联语音/实时双工分别标记，配置与音频owner隔离",
+    "evidence": [
+      "E-VOICE"
+    ]
+  },
+  {
+    "id": "F26",
+    "title": "双工插话与文字流",
+    "stage": "M2",
+    "required": true,
+    "scope": "有效文字确认一次，delta保留空格，done语义正确",
+    "evidence": [
+      "E-VOICE"
+    ]
+  },
+  {
+    "id": "F27",
+    "title": "个人音色与离线识别",
+    "stage": "M2",
+    "required": true,
+    "scope": "试听/合成/训练/购买分开；项目权限；离线包校验",
+    "evidence": [
+      "E-VOICE"
+    ]
+  },
+  {
+    "id": "F28",
+    "title": "系统入口与范围边界",
+    "stage": "M2",
+    "required": true,
+    "scope": "仅保留用户显式发起的独立入口与语音识别；不实现小布/小爱兼容及/agent接管、Gemini/Google助手自动检测与自动语音、Google App系统化、一圈即搜触发",
+    "evidence": [
+      "E-SYSTEM"
+    ]
+  },
+  {
+    "id": "F29",
+    "title": "悬浮层、桌宠与触感",
+    "stage": "M2",
+    "required": true,
+    "scope": "后台无操作浮层、宠物独立状态和模型，装饰也有调用成本",
+    "evidence": [
+      "E-SYSTEM",
+      "E-PET"
+    ]
+  },
+  {
+    "id": "F30",
+    "title": "诊断与性能",
+    "stage": "M0",
+    "required": true,
+    "scope": "脱敏诊断；首屏/输入/滚动/资源/迁移基准跨阶段",
+    "evidence": [
+      "E-UI",
+      "E-RUNTIME"
+    ]
+  },
+  {
+    "id": "F31",
+    "title": "独立身份、实现与依赖来源",
+    "stage": "M0",
+    "required": true,
+    "scope": "新包可并存；不调用旧包/专有服务；所有源码资源和依赖来源可追溯",
+    "evidence": [
+      "E-IDENTITY",
+      "E-LICENSE"
+    ]
+  }
+]

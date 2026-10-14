@@ -1,0 +1,1513 @@
+{
+  "schema_version": 1,
+  "status": "specification_only",
+  "tests_executed": false,
+  "cases": [
+    {
+      "id": "AC-001",
+      "feature_id": "F01",
+      "title": "草稿隔离",
+      "stage": "M0",
+      "given": "A/B分别有不同草稿和光标",
+      "when": "A→设置→B→A",
+      "then": "各自文字及进程内选区正确，打字不新增消息或改变会话排序",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-UI",
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-002",
+      "feature_id": "F01",
+      "title": "冷启动草稿",
+      "stage": "M0",
+      "given": "草稿已确认保存",
+      "when": "强杀进程再开",
+      "then": "草稿文本和最后选中会话恢复，未创建会话槽独立；光标跨进程无保证需明确",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-UI",
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-003",
+      "feature_id": "F01",
+      "title": "发送回执与编辑竞态",
+      "stage": "M0",
+      "given": "提交文字后用户又编辑",
+      "when": "迟到回执到达或发送校验失败",
+      "then": "失败保留草稿；回执不清除更新后的内容或另一个会话草稿",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-UI",
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-004",
+      "feature_id": "F01",
+      "title": "会话管理",
+      "stage": "M1",
+      "given": "多会话含置顶和文件夹",
+      "when": "搜索/重命名/移动/确认删除",
+      "then": "结果定位正确；取消删除不改数据；不删除其他会话",
+      "method": "UI自动化+存储核对",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-UI",
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-005",
+      "feature_id": "F02",
+      "title": "配置最小闭环",
+      "stage": "M0",
+      "given": "空配置或无效模型",
+      "when": "用户发送；再填合成合法配置",
+      "then": "无配置时明确阻止；合法配置请求对应地址和实际模型，不夹带其他账户密钥",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-MODEL",
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-006",
+      "feature_id": "F02",
+      "title": "配置快照",
+      "stage": "M1",
+      "given": "A运行中，B可编辑",
+      "when": "修改B模型/能力/子代理配置",
+      "then": "A启动快照不变，B变化不改A并行额度",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-MODEL",
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-007",
+      "feature_id": "F02",
+      "title": "协议族适配",
+      "stage": "M1",
+      "given": "供应商协议样本覆盖OpenAI兼容聊天/Responses、Anthropic、Gemini及实际需保留扩展",
+      "when": "文本/工具/用量/终止事件输入适配器",
+      "then": "适配为统一可观察行为；未知字段不伪造用量/工具；各协议逐项列支持矩阵",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-MODEL",
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-008",
+      "feature_id": "F03",
+      "title": "流式块顺序",
+      "stage": "M0",
+      "given": "正文→工具→正文事件",
+      "when": "逐块流式到达",
+      "then": "块按顺序显示，不将后段正文拼到工具之前",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-MODEL",
+        "E-RUNTIME"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-009",
+      "feature_id": "F03",
+      "title": "迟到事件",
+      "stage": "M0",
+      "given": "旧请求已被替换",
+      "when": "旧delta或用量迟到",
+      "then": "不污染新回复，最终修正只应用一次",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-MODEL",
+        "E-RUNTIME"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-010",
+      "feature_id": "F03",
+      "title": "停止完成竞态",
+      "stage": "M0",
+      "given": "停止与完成同时竞争",
+      "when": "收口",
+      "then": "仅一个终态；已确认结果保留，取消请求不冒充远端取消成功",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-MODEL",
+        "E-RUNTIME"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-011",
+      "feature_id": "F04",
+      "title": "真实设备查询",
+      "stage": "M0",
+      "given": "用户问当前电量且能力允许",
+      "when": "模型调用设备状态工具",
+      "then": "数值来自实际后端，回复引用此次结果；无能力返回错误不编造",
+      "method": "合成协议+Android真机",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TOOLS",
+        "E-DEVICE"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-012",
+      "feature_id": "F04",
+      "title": "截断及非法参数",
+      "stage": "M0",
+      "given": "工具响应输出截断或参数不合法",
+      "when": "尝试收口执行",
+      "then": "零副作用；每个调用有明确未执行原因",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TOOLS",
+        "E-DEVICE"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-013",
+      "feature_id": "F04",
+      "title": "工具批次顺序",
+      "stage": "M0",
+      "given": "两个合法查询",
+      "when": "串行执行",
+      "then": "按照请求顺序交付结果；不因相同工具名混淆不同调用",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TOOLS",
+        "E-DEVICE"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-014",
+      "feature_id": "F05",
+      "title": "消息稳定身份",
+      "stage": "M0",
+      "given": "消息流式输出且工具可折叠",
+      "when": "折叠/滚出/结束/重启",
+      "then": "同一消息身份不变；复制编辑指向原目标，列表无重复身份",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-DATA",
+        "E-RUNTIME"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-015",
+      "feature_id": "F05",
+      "title": "重复投递",
+      "stage": "M0",
+      "given": "结果落盘但确认丢失",
+      "when": "重开重复取回同一结果",
+      "then": "只应用一次，不重复最终回复或重执行工具",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-DATA",
+        "E-RUNTIME"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-016",
+      "feature_id": "F05",
+      "title": "保存故障",
+      "stage": "M0",
+      "given": "保存期间空间不足或事务失败",
+      "when": "提交新消息",
+      "then": "错误可见，不宣称保存成功；重试不被旧快照覆盖，不丢唯一用户输入",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-DATA",
+        "E-RUNTIME"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-017",
+      "feature_id": "F05",
+      "title": "M0完整闭环",
+      "stage": "M0",
+      "given": "新装开发包和合法模型配置",
+      "when": "发问→真实只读工具→答复→杀进程重开",
+      "then": "消息/工具状态/结果一致，重开不自动执行任何旧调用",
+      "method": "Android真机端到端",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-DATA",
+        "E-RUNTIME"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-018",
+      "feature_id": "F06",
+      "title": "历史首屏",
+      "stage": "M0",
+      "given": "10000条混合合成消息",
+      "when": "首次打开长会话",
+      "then": "首个有效视口在尾部，无顶部闪现；用户立即拖动或搜索时取消强制尾部",
+      "method": "真机UI+录像/帧记录",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-UI"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-019",
+      "feature_id": "F06",
+      "title": "流式跟底",
+      "stage": "M0",
+      "given": "底部正在流式增高",
+      "when": "用户拖向历史再回底部",
+      "then": "阅读时不强拉；回底部恢复跟随，输入框不遮尾部",
+      "method": "真机UI+帧记录",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-UI"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-020",
+      "feature_id": "F06",
+      "title": "IME与附件菜单",
+      "stage": "M0",
+      "given": "键盘打开且输入多行",
+      "when": "打开非输入菜单/附件；改变视口",
+      "then": "不无故丢焦点，输入和尾部可见；抽屉收键盘行为明确",
+      "method": "真机IME矩阵",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-UI"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-021",
+      "feature_id": "F06",
+      "title": "长列表身份及导航",
+      "stage": "M1",
+      "given": "代码/图片/工具组/中途追加混合",
+      "when": "往返滚动与上一/下一用户消息导航",
+      "then": "不漏行重排，不重播已读动画；追加是导航目标，自动续接不是",
+      "method": "真机UI自动化",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-UI"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-022",
+      "feature_id": "F06",
+      "title": "Markdown和外观",
+      "stage": "M1",
+      "given": "代码/表格/链接/本地图片合成消息",
+      "when": "渲染/复制/换主题及触感配置",
+      "then": "语义正确、复制不夹UI文本；主题不改消息和执行状态，触感开关生效",
+      "method": "UI自动化+视觉核对",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-UI"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-023",
+      "feature_id": "F07",
+      "title": "能力不是授权",
+      "stage": "M0",
+      "given": "工具能力开但当前任务只读",
+      "when": "模型请求删除或跨范围写入",
+      "then": "拒绝越界，无副作用，不以能力开关替代具体授权",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TOOLS",
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-024",
+      "feature_id": "F07",
+      "title": "秘密不泄露",
+      "stage": "M0",
+      "given": "合成API密钥/OAuth/MCP token/含秘密自定义头",
+      "when": "聊天复制/诊断/普通导出/恢复",
+      "then": "这些值不出现在持久展示和产物；运行鉴权与会话内容分开",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TOOLS",
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-025",
+      "feature_id": "F08",
+      "title": "重复调用身份",
+      "stage": "M0",
+      "given": "已执行调用ID或批次重复ID",
+      "when": "模型重现",
+      "then": "不再次执行，已有结果保留；不能生成新ID规避等价操作的未知结果保护",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-MODEL",
+        "E-RUNTIME",
+        "E-TOOLS"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-026",
+      "feature_id": "F08",
+      "title": "未知不能换路重做",
+      "stage": "M1",
+      "given": "发送/支付/安装/删除动作请求已发而结果未知",
+      "when": "重连或切换GUI/HTTP/本地执行方式",
+      "then": "先只读核验；无法确认明确待核验，不重放等价副作用",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-MODEL",
+        "E-RUNTIME",
+        "E-TOOLS"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-027",
+      "feature_id": "F09",
+      "title": "断线恢复",
+      "stage": "M1",
+      "given": "已显示正文且一次工具完成",
+      "when": "模型断线后策略允许重连",
+      "then": "已完成工具不重放，正文不重复，未知操作不重发",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-RUNTIME",
+        "E-MODEL"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-028",
+      "feature_id": "F09",
+      "title": "暂停补充",
+      "stage": "M1",
+      "given": "已暂停",
+      "when": "用户补充再显式继续",
+      "then": "补充只排队，未继续不启动模型；继续保留逻辑轮次并按序消费",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约；旧文档与代码有差异",
+      "evidence": [
+        "E-RUNTIME",
+        "E-MODEL"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-029",
+      "feature_id": "F09",
+      "title": "批次中补充",
+      "stage": "M1",
+      "given": "正文流或工具批次进行中",
+      "when": "提交补充",
+      "then": "正文可打断，工具批次不被补充重开；批次结束再应用",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-RUNTIME",
+        "E-MODEL"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-030",
+      "feature_id": "F09",
+      "title": "进程死亡",
+      "stage": "M1",
+      "given": "检查点存在但运行已失去所有者",
+      "when": "重启恢复",
+      "then": "显示中断；半截助手输出不伪装完成；旧工具不自动重放",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-RUNTIME",
+        "E-MODEL"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-031",
+      "feature_id": "F10",
+      "title": "提问屏障",
+      "stage": "M1",
+      "given": "关键参数确实缺失",
+      "when": "提交澄清或与其他工具混合批次",
+      "then": "合法单问题显示2–8互斥选项；推荐不代选；混合批次不执行",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-QUESTION"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-032",
+      "feature_id": "F10",
+      "title": "答案及恢复",
+      "stage": "M1",
+      "given": "问题等待用户且身份已绑定",
+      "when": "重复/不同/迟到答案或失主恢复",
+      "then": "相同答案幂等；不同或过期答案拒绝；失主显示中断不编造答案",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-QUESTION"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-033",
+      "feature_id": "F11",
+      "title": "分支和修订",
+      "stage": "M1",
+      "given": "从已完成消息分支",
+      "when": "建立副本或删除后续",
+      "then": "原会话不变；副本前缀正确；显示与下轮模型上下文同步截断",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-MODEL",
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-034",
+      "feature_id": "F11",
+      "title": "压缩与历史缺档",
+      "stage": "M1",
+      "given": "历史含工具批次、受保护尾部和压缩档案",
+      "when": "压缩失败/不缩小/历史改变；修订原档缺失",
+      "then": "不替换原文；缺档拒绝修订；成功摘要保持事实状态并可查询原文",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-MODEL",
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-035",
+      "feature_id": "F11",
+      "title": "自动压缩和可信用量",
+      "stage": "M2",
+      "given": "接近容量且存在安全边界",
+      "when": "触发自动压缩/显示用量",
+      "then": "不拆半个工具单元；估算与实测分开，未知窗口保持未知，任务用量不混加",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-MODEL",
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-036",
+      "feature_id": "F12",
+      "title": "真实上下文与有界读取",
+      "stage": "M1",
+      "given": "用户问近况且多源能力可用",
+      "when": "有界读取多个代表性来源",
+      "then": "仅据真实记录区分事实推测，空来源换其他；权限缺失明确，原始敏感内容不进日志",
+      "method": "合成记录+真机只读",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-DEVICE",
+        "E-TOOLS"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-037",
+      "feature_id": "F12",
+      "title": "系统专用操作",
+      "stage": "M1",
+      "given": "参数明确的闹钟/计时/音量/媒体/联网控制",
+      "when": "执行",
+      "then": "优先专用后端；成功有实况证据，失败/只打开页面不宣称已设置",
+      "method": "Android真机，非生产测试参数",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-DEVICE",
+        "E-TOOLS"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-038",
+      "feature_id": "F13",
+      "title": "自身例外",
+      "stage": "M1",
+      "given": "普通基础位置为后台或询问",
+      "when": "打开代鱼自身后操作另一应用",
+      "then": "自身不启动副屏或询问位置；普通应用恢复原基础偏好",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TOOLS",
+        "E-VD"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-039",
+      "feature_id": "F13",
+      "title": "后台不回退",
+      "stage": "M1",
+      "given": "用户选后台且工具不支持",
+      "when": "尝试GUI/系统面板",
+      "then": "明确拒绝、不偷切主屏；提示操作期间不要清理目标应用",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TOOLS",
+        "E-VD"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-040",
+      "feature_id": "F14",
+      "title": "观察身份和未知动作",
+      "stage": "M1",
+      "given": "节点观察已过期或动作返回UNKNOWN/方向不符",
+      "when": "执行下一步",
+      "then": "先新观察，不重放旧动作；新截图与节点来自同一快照",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TOOLS",
+        "E-DEVICE"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-041",
+      "feature_id": "F14",
+      "title": "屏幕忙和服务失联",
+      "stage": "M1",
+      "given": "其他任务占有屏幕或无障碍不可用",
+      "when": "请求动作",
+      "then": "未执行明确；不等待抢占、不用shell/坐标绕过失联",
+      "method": "Android故障注入",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TOOLS",
+        "E-DEVICE"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-042",
+      "feature_id": "F15",
+      "title": "正常副屏交付",
+      "stage": "M1",
+      "given": "副屏有最终应用任务",
+      "when": "标记并finish",
+      "then": "交付和释放均确认才报成功；复用已开应用不强停",
+      "method": "Android真机后台任务",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-VD"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-043",
+      "feature_id": "F15",
+      "title": "无结果和失败",
+      "stage": "M1",
+      "given": "无可交付任务或收尾失败",
+      "when": "finish",
+      "then": "无结果清理并释放；失败保留副屏，不杀进程或shell模拟关闭",
+      "method": "Android故障注入",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-VD"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-044",
+      "feature_id": "F16",
+      "title": "网页与会话边界",
+      "stage": "M1",
+      "given": "两个任务各有浏览器页且登录可共享",
+      "when": "导航/读正文/点击/下载/外部URI",
+      "then": "标签不串；不宣称账户隔离；URI只显式外交时使用，下载有文件证据",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-BROWSER"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-045",
+      "feature_id": "F16",
+      "title": "Cookie及空集合",
+      "stage": "M1",
+      "given": "需要Cookie或滚动收集返回0",
+      "when": "读取Cookie摘要/核对页面结构",
+      "then": "不把Cookie明文写日志回复；0不等于页面无内容；本地文件访问按角色权限",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-BROWSER"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-046",
+      "feature_id": "F17",
+      "title": "环境缺失与命令选择",
+      "stage": "M1",
+      "given": "Android系统命令和Linux开发命令；Linux未就绪",
+      "when": "调用",
+      "then": "选择对应环境；缺工具给准确安装入口，不跨环境重放副作用",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TERMINAL"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-047",
+      "feature_id": "F17",
+      "title": "作业和守护",
+      "stage": "M1",
+      "given": "长命令与需跨任务服务",
+      "when": "异步读取/守护启动/结束助手任务",
+      "then": "作业输出有界可读；守护生命周期独立，可查日志停止；不把shell后台化当守护",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TERMINAL"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-048",
+      "feature_id": "F18",
+      "title": "附件真实归属",
+      "stage": "M1",
+      "given": "A/B不同附件及用户指定共享路径",
+      "when": "读取/显示/发送/分支/清理",
+      "then": "先确认共享映射，按明确文件读；不串会话；缺失明确；模型无视觉能力不假装看图",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TOOLS",
+        "E-MEDIA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-049",
+      "feature_id": "F18",
+      "title": "付费媒体未知结果",
+      "stage": "M2",
+      "given": "媒体生成请求已发且返回不确定",
+      "when": "恢复/重试提示",
+      "then": "不重新派发、不改渠道重做；有真实文件才交付，无文件明确未交付",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TOOLS",
+        "E-MEDIA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-050",
+      "feature_id": "F19",
+      "title": "坏包与强杀",
+      "stage": "M1",
+      "given": "已有可用数据",
+      "when": "导入坏格式/越界路径/重复身份/缺附件/超限包；提交时强杀",
+      "then": "拒绝时源库和附件不变；重启收敛完整旧/新状态，无半写",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-051",
+      "feature_id": "F19",
+      "title": "重复导入和对账",
+      "stage": "M1",
+      "given": "含分支/超长历史/压缩档/草稿/附件的合成旧包",
+      "when": "预检并两次导入",
+      "then": "重复可检测；所有数量/关系/字节/散列一致，剔除项显式列原因，不串凭据",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-052",
+      "feature_id": "F19",
+      "title": "凭据不迁移",
+      "stage": "M1",
+      "given": "旧包含合成秘密及非秘密配置",
+      "when": "生成新迁移包并导入",
+      "then": "秘密值不进入包/日志/新存储；配置保留并标需重新授权，不自动换账户",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-053",
+      "feature_id": "F20",
+      "title": "新旧配置独立",
+      "stage": "M2",
+      "given": "旧任务使用A，新配置为B",
+      "when": "查询/继续旧任务并新派发",
+      "then": "旧任务不换模型；新任务用当前B；跨会话不能查询旧任务",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-DELEGATION"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-054",
+      "feature_id": "F20",
+      "title": "父结束孩子继续",
+      "stage": "M2",
+      "given": "子任务运行中且父正常结束",
+      "when": "父答复完成",
+      "then": "已派任务继续后台；仅显式暂停/取消或失败策略改变状态，不假装完成",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约；旧源码/文档存在差异",
+      "evidence": [
+        "E-DELEGATION"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-055",
+      "feature_id": "F20",
+      "title": "有效进展及接替",
+      "stage": "M2",
+      "given": "子任务只有心跳或供应商不可用",
+      "when": "保护/继续/替换请求",
+      "then": "心跳不算进展；保留上下文，接替前确认停旧与结果证据；不可用不即刻同供应商重派",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-DELEGATION"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-056",
+      "feature_id": "F21",
+      "title": "空改动和真实产物",
+      "stage": "M2",
+      "given": "实现任务声称完成",
+      "when": "核对工作区/基线/提交/净diff",
+      "then": "空改动失败；有产物仍待独立审查及要求核验，不自动说测试通过",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-DELEGATION"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-057",
+      "feature_id": "F21",
+      "title": "并行角色与授权",
+      "stage": "M2",
+      "given": "两个独立源码阅读路径及一项需实机的任务",
+      "when": "调度",
+      "then": "兼容只读任务同轮派；主代理留实机和集成；孩子不得因缺能力扩大权限",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-DELEGATION"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-058",
+      "feature_id": "F22",
+      "title": "技能读取边界",
+      "stage": "M2",
+      "given": "技能未启用或资源含绝对路径/../symlink/超限",
+      "when": "读取正文资源",
+      "then": "未启用拒绝；根外/二进制/非法UTF8拒绝；阅读不授权执行脚本",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-SKILLS"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-059",
+      "feature_id": "F22",
+      "title": "安装冲突与回滚",
+      "stage": "M2",
+      "given": "固定commit包或ZIP含冲突",
+      "when": "安装/摘要变化/中途失败",
+      "then": "内置不可覆盖；替换绑定精确ID版本/摘要；坏包和失败保留旧目录/注册表",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-SKILLS"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-060",
+      "feature_id": "F23",
+      "title": "记忆关闭和截断",
+      "stage": "M2",
+      "given": "关闭或核心超预算",
+      "when": "生成上下文",
+      "then": "关闭不注入；截断有标记，可按需检索，不编造缺失事实",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-MEMORY"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-061",
+      "feature_id": "F23",
+      "title": "记忆冲突",
+      "stage": "M2",
+      "given": "r1读取后其他写者已到r2",
+      "when": "用r1写入",
+      "then": "返回冲突再读，不盲覆盖；秘密/验证码/一次性请求不写长期记忆",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约；当前写入冲突实现未在该调查范围核实",
+      "evidence": [
+        "E-MEMORY"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-062",
+      "feature_id": "F24",
+      "title": "MCP调用未知",
+      "stage": "M2",
+      "given": "调用已发而服务超时",
+      "when": "重新连接或取消",
+      "then": "未知不当未执行，不自动重放有副作用调用；停用后目录和授权一致",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-MCP",
+        "E-TOOLS"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-063",
+      "feature_id": "F25",
+      "title": "语音配置隔离",
+      "stage": "M2",
+      "given": "对话快照A且听写/朗读配置B",
+      "when": "更改B或关闭对应模式",
+      "then": "A不混配，关闭停止对应会话；旧回调不清新状态",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-VOICE"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-064",
+      "feature_id": "F25",
+      "title": "麦克风和音频资源",
+      "stage": "M2",
+      "given": "旧录音或播放器释放中",
+      "when": "新播放/录音请求或缺权限",
+      "then": "无未授权录音及资源重叠；冲突明确，旧结束事件不影响新owner",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-VOICE"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-065",
+      "feature_id": "F25",
+      "title": "云端第二句失败",
+      "stage": "M2",
+      "given": "第一句已播、第二句请求未知或失败",
+      "when": "恢复",
+      "then": "不重发第一句或整次聊天；以实际HTTP次数验证，不只查应用循环",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-VOICE"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-066",
+      "feature_id": "F26",
+      "title": "有效插话",
+      "stage": "M2",
+      "given": "有旧待播音频",
+      "when": "ASR started/空白后出现有效单字“停”",
+      "then": "started/空值不清；有效字确认一次，后续假设不再清；空final不抹已有假设",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-VOICE"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-067",
+      "feature_id": "F26",
+      "title": "双工文字流",
+      "stage": "M2",
+      "given": "delta含独立空格换行",
+      "when": "收到非空或空done",
+      "then": "原样追加；非空全文替换，空done保留，不用逐字动画假装网络流",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-VOICE"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-068",
+      "feature_id": "F27",
+      "title": "音色试听边界",
+      "stage": "M2",
+      "given": "某提供商已有demo，A准备中",
+      "when": "切B/停止/尾部结束",
+      "then": "已存在demo不发合成训练；旧回调不改B；其他需合成协议明确成本，不泛化无费用",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-VOICE"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-069",
+      "feature_id": "F27",
+      "title": "项目与离线包",
+      "stage": "M2",
+      "given": "项目分页失败或无权限；离线模型包待装",
+      "when": "查询/选择/下载",
+      "then": "不默认挑首项、不把部分当完整；包固定版本大小摘要，下载不启麦克风",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-VOICE"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-070",
+      "feature_id": "F28",
+      "title": "入口权限与排除范围",
+      "stage": "M2",
+      "given": "保留入口缺权限；旧配置包含已排除的助手集成",
+      "when": "检查新包组件、设置、后台服务、导入结果并显式调用保留入口",
+      "then": "缺权明确且不干扰系统；不存在小布/小爱自定义模型及/agent接管、息屏Hey Google检测、锁屏/亮屏唤起自动语音、Google App系统化、手势条长按/双指长按一圈即搜入口和后台逻辑；导入不启用这些旧配置；普通模型协议、手动语音与诊断保留",
+      "method": "静态组件检查+支持设备实机+合成迁移包",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-SYSTEM"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-071",
+      "feature_id": "F29",
+      "title": "悬浮边界和宠物隔离",
+      "stage": "M2",
+      "given": "后台执行任务、宠物独立开关",
+      "when": "工具事件/宠物反应",
+      "then": "后台不出操作浮层；关闭无残余窗口；宠物不改Agent核心记忆，模型调用可追踪",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-SYSTEM",
+        "E-PET"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-072",
+      "feature_id": "F30",
+      "title": "性能候选门槛",
+      "stage": "M0",
+      "given": "固定release设备60Hz，合成1000会话/目标10000消息、10MB文本、100附件、500工具步骤",
+      "when": "至少20次冷启/进入/输入/停止，30秒滚动+流式+IME",
+      "then": "冷启输入可用p95≤1.5s、长会话尾部可操作≤1s、输入/停止反馈p95≤100ms；>16.7ms帧≤5%、>50ms≤1%，无>700ms冻结/ANR",
+      "method": "真机性能采样；候选门槛待S1设备基准冻结",
+      "basis": "新性能目标，非现有实测",
+      "evidence": [
+        "E-UI",
+        "E-RUNTIME"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-073",
+      "feature_id": "F30",
+      "title": "内存与迁移响应",
+      "stage": "M1",
+      "given": "同上环境及100MB合成迁移包",
+      "when": "切会话100次，稳定回收后；M1迁移",
+      "then": "内存增长候选≤20MB且无增长趋势；迁移候选≤30s并显示进度，完整性100%；诊断开/关分别报告额外开销",
+      "method": "真机资源采样；候选门槛待基准冻结",
+      "basis": "新性能目标，非现有实测",
+      "evidence": [
+        "E-UI",
+        "E-RUNTIME"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-074",
+      "feature_id": "F31",
+      "title": "并存与旧包不存在",
+      "stage": "M0",
+      "given": "新工程身份独立，旧应用装/不装两种环境",
+      "when": "启动并执行M0闭环",
+      "then": "两环境均可运行；组件/权限/更新不依赖旧包或原项目服务；旧数据不动",
+      "method": "构建静态检查+Android并存/隔离实机",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-IDENTITY",
+        "E-LICENSE"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-075",
+      "feature_id": "F31",
+      "title": "来源和发布门禁",
+      "stage": "M0",
+      "given": "准备发布新工程",
+      "when": "审查源码/资源/依赖/包签名/回调/产物",
+      "then": "无旧源码和资源直接复制；每依赖有版本来源许可；旧许可通知不擅删，新发布配置不沿用旧身份",
+      "method": "源码/依赖/构建产物审查",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-IDENTITY",
+        "E-LICENSE"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-076",
+      "feature_id": "F01",
+      "title": "M0重命名与删除确认",
+      "stage": "M0",
+      "given": "A/B两会话均有消息和草稿",
+      "when": "重命名A；取消删除A；再明确确认删除A",
+      "then": "重命名仅改A；取消不动数据；确认仅删除A及其所属引用，B和B草稿保持",
+      "method": "UI自动化+存储核对",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-UI",
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-077",
+      "feature_id": "F07",
+      "title": "权限与数据空集分开",
+      "stage": "M1",
+      "given": "无Root或通知未授权/监听断连",
+      "when": "查询能力和通知",
+      "then": "基础能力继续可用；权限、连接、无记录分别表达，不将拒绝当零条成功",
+      "method": "Android权限矩阵",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TOOLS",
+        "E-DATA"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-078",
+      "feature_id": "F13",
+      "title": "ASK取消保持",
+      "stage": "M1",
+      "given": "普通应用位置为每次询问",
+      "when": "首次取消后本轮再次请求普通GUI",
+      "then": "取消状态本轮保留，不重复弹框不默认前台；自身例外仍不改此状态",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TOOLS",
+        "E-VD"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-079",
+      "feature_id": "F15",
+      "title": "副屏只读探针",
+      "stage": "M1",
+      "given": "未认证未启动副屏",
+      "when": "查询预览/inventory",
+      "then": "只读不启动认领迁移关闭，不提供变更授权；没有明确keep不自动交付",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-VD"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-080",
+      "feature_id": "F17",
+      "title": "停止所有权与固定环境",
+      "stage": "M1",
+      "given": "终端创建于环境A后设置切B，PID被复用",
+      "when": "后续命令/文件操作/停止旧进程",
+      "then": "任务和文件绑定明确环境A；停止核实所有权，不伤复用PID；不重放命令",
+      "method": "自动化故障注入/合成数据",
+      "basis": "新行为契约",
+      "evidence": [
+        "E-TERMINAL"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    },
+    {
+      "id": "AC-081",
+      "feature_id": "F12",
+      "title": "最近位置权限最小化",
+      "stage": "M1",
+      "given": "前台授权与后台授权两种场景",
+      "when": "在前台/后台读取已有位置",
+      "then": "按实际执行位置检查所需权限，返回年龄精度，不主动唤醒GPS；后台无权明确拒绝",
+      "method": "Android权限矩阵",
+      "basis": "新最小权限目标；旧实现一律要求后台位置权限",
+      "evidence": [
+        "E-DEVICE",
+        "E-TOOLS"
+      ],
+      "status": "not_run",
+      "build_sha": null,
+      "actual": null,
+      "evidence_artifact": null
+    }
+  ]
+}

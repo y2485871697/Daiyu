@@ -85,6 +85,70 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
         val count = target.readableDatabase.rawQuery("SELECT count(*) FROM neutral_imports", null).use { it.moveToFirst(); it.getInt(0) }
         assertEquals(0, count)
     }
+    fun testConfigurationCaptureReplacesSnapshotAndClearsRemovedPreferences() {
+        val (context, db, backup) = fresh()
+        assertEquals(4, db.writableDatabase.version)
+        val preferences = context.getSharedPreferences("model-settings", Context.MODE_PRIVATE)
+        val full = linkedMapOf<String, Any>("endpoint" to "https://example.org", "model" to "model",
+            "responses-path" to "/v1/responses", "battery" to true, "device-status" to false)
+        fun checkSnapshot(expected: Map<String, Any>) {
+            val captured = backup.importedConfiguration()
+            val text = backup.exportPackage()
+            val exported = JSONObject(JSONObject(text).getString("payload")).getJSONObject("config")
+            assertEquals(expected.size, captured.length()); assertEquals(expected.size, exported.length())
+            expected.forEach { (key, value) -> assertEquals(value, captured.get(key)); assertEquals(value, exported.get(key)) }
+            assertEquals(expected.size, backup.preflight(text).configEntries)
+            assertEquals(expected.size, db.readableDatabase.rawQuery("SELECT count(*) FROM neutral_config", null).use { it.moveToFirst(); it.getInt(0) })
+        }
+        assertTrue(preferences.edit().clear().putString("endpoint", "https://example.org").putString("model", "model")
+            .putString("responses-path", "/v1/responses").putBoolean("battery", true).putBoolean("device-status", false).commit())
+        assertEquals(5, preferences.all.size)
+        assertTrue(backup.captureNonSecretConfiguration(context).isEmpty()); checkSnapshot(full)
+        assertTrue(preferences.edit().clear().putString("model", "remaining").commit())
+        assertEquals(1, preferences.all.size)
+        assertTrue(backup.captureNonSecretConfiguration(context).isEmpty()); checkSnapshot(mapOf("model" to "remaining"))
+        assertTrue(preferences.edit().clear().commit()); assertEquals(0, preferences.all.size)
+        assertTrue(backup.captureNonSecretConfiguration(context).isEmpty()); checkSnapshot(emptyMap())
+    }
+    fun testInvalidConfigurationLeavesPreviousSnapshotUnchanged() {
+        val (_, db, backup) = fresh()
+        backup.setNonSecretConfiguration(mapOf("model" to "existing", "battery" to false))
+        val old = backup.importedConfiguration().toString(); val before = backup.exportPackage()
+        val invalid = listOf(
+            mapOf("endpoint" to "https://user:secret@example.org"),
+            mapOf("battery" to "true"),
+            mapOf("model" to "invalid\nmodel"))
+        invalid.forEach { settings ->
+            reject { backup.setNonSecretConfiguration(settings) }
+            assertEquals(old, backup.importedConfiguration().toString()); assertEquals(before, backup.exportPackage())
+            assertEquals(2, db.readableDatabase.rawQuery("SELECT count(*) FROM neutral_config", null).use { it.moveToFirst(); it.getInt(0) })
+        }
+    }
+    fun testSecondConfigurationInsertFailureRollsBackSnapshotAfterReopen() {
+        val (context, db, backup) = fresh(); seed(db, 1)
+        assertEquals(4, db.writableDatabase.version)
+        backup.setNonSecretConfiguration(mapOf("model" to "existing", "battery" to false))
+        val old = backup.importedConfiguration().toString(); val before = backup.exportPackage()
+        db.writableDatabase.execSQL("""CREATE TRIGGER fail_second_configuration_insert BEFORE INSERT ON neutral_config
+            WHEN (SELECT count(*) FROM neutral_config)=1
+            BEGIN SELECT RAISE(ABORT,'injected second configuration insert'); END""")
+        try {
+            backup.setNonSecretConfiguration(mapOf("model" to "replacement", "battery" to true))
+            fail("must reject second configuration insert")
+        } catch (failure: android.database.sqlite.SQLiteConstraintException) {
+            assertTrue(failure.message.orEmpty().contains("injected second configuration insert"))
+        }
+        assertEquals(old, backup.importedConfiguration().toString()); assertEquals(before, backup.exportPackage())
+        assertEquals(2, db.readableDatabase.rawQuery("SELECT count(*) FROM neutral_config", null).use { it.moveToFirst(); it.getInt(0) })
+        db.close()
+        val reopened = ConversationDatabase(context)
+        try {
+            assertEquals(4, reopened.readableDatabase.version)
+            val restored = NeutralBackupService(context, reopened)
+            assertEquals(old, restored.importedConfiguration().toString()); assertEquals(before, restored.exportPackage())
+            assertEquals(2, reopened.readableDatabase.rawQuery("SELECT count(*) FROM neutral_config", null).use { it.moveToFirst(); it.getInt(0) })
+        } finally { reopened.close() }
+    }
     fun testTransactionFailureHasNoHalfReferencesAfterReopen() {
         val (context, db, _) = fresh(); val old = db.exportBackup()
         try { DatabaseTransactions { db.writableDatabase }.run { sql ->

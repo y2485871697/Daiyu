@@ -57,6 +57,15 @@ class SigningTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 verify_certificate(bad)
 
+    def test_build_tools_37_scheme_prefixed_signer(self):
+        # Exact scheme-prefixed label observed in Actions 38532534059/build-tools 37.
+        scheme = GOOD.replace('Signer #1 certificate', 'V2 Signer: certificate')
+        verify_certificate(scheme)
+        with self.assertRaises(ValueError):
+            verify_certificate(scheme.replace(EXPECTED_CERT, '0' * 64))
+        with self.assertRaises(ValueError):
+            verify_certificate(scheme + 'V3 Signer: certificate SHA-256 digest: ' + '0' * 64 + '\n')
+
     def test_sdk_range_certificates(self):
         ranged = GOOD.replace('Signer #1', 'Signer (minSdkVersion=33, maxSdkVersion=2147483647)')
         verify_certificate(ranged)

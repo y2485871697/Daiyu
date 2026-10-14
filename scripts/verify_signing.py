@@ -11,7 +11,7 @@ EXPECTED_CERT = '1e1c8731bd2a7fab53b941cd9869884e7756bed96fadd10f322e70d760d1d19
 
 def verify_certificate(output):
     fingerprints = re.findall(
-        r'^Signer (?:#\d+|\(minSdkVersion=\d+(?: \(dev release=true\))?, maxSdkVersion=\d+\))'
+        r'^(?:V[1-4](?:\.[1-9])? Signer:|Signer (?:#\d+|\(minSdkVersion=\d+(?: \(dev release=true\))?, maxSdkVersion=\d+\)))'
         r' certificate SHA-256 digest: ([0-9a-fA-F]{64})$', output, re.M)
     signer_count = re.findall(r'^Number of signers: (\d+)$', output, re.M)
     # apksigner prints separate SDK-range records for v3.1, even for one certificate.

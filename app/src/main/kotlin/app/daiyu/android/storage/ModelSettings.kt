@@ -4,17 +4,17 @@ import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
-import java.net.URI
+import app.daiyu.android.domain.responsesEndpoint
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-data class ModelSettings(val endpoint: String, val model: String, val apiKey: String, val batteryEnabled: Boolean) {
+data class ModelSettings(val endpoint: String, val model: String, val apiKey: String, val batteryEnabled: Boolean, val responsesPath: String = "") {
+    fun requestEndpoint(): String = responsesEndpoint(endpoint, responsesPath)
     fun validate() {
-        val uri=URI(endpoint)
-        require(uri.scheme=="https" && !uri.host.isNullOrBlank() && uri.userInfo==null && uri.fragment==null && uri.query==null) {"请输入无查询参数的HTTPS Responses完整地址"}
+        requestEndpoint()
         require(model.isNotBlank() && model.length<=200 && apiKey.isNotBlank() && apiKey.length<=8192) {"请填写模型和密钥"}
         require(!apiKey.contains('\n') && !apiKey.contains('\r')) {"密钥含非法换行"}
     }
@@ -34,13 +34,13 @@ class ModelSettingsStore(context:Context) {
             cipher.init(Cipher.DECRYPT_MODE,key(),GCMParameterSpec(128,Base64.decode(preferences.getString("iv",null),Base64.NO_WRAP)))
             String(cipher.doFinal(Base64.decode(encrypted,Base64.NO_WRAP)),Charsets.UTF_8)
         }
-        return ModelSettings(preferences.getString("endpoint","")!!,preferences.getString("model","")!!,apiKey,preferences.getBoolean("battery",false))
+        return ModelSettings(preferences.getString("endpoint","")!!,preferences.getString("model","")!!,apiKey,preferences.getBoolean("battery",false),preferences.getString("responses-path","")!!)
     }
     fun save(settings:ModelSettings) {
         settings.validate()
         val cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,key())
         check(preferences.edit().putString("endpoint",settings.endpoint).putString("model",settings.model)
-            .putBoolean("battery",settings.batteryEnabled).putString("iv",Base64.encodeToString(cipher.iv,Base64.NO_WRAP))
+            .putString("responses-path",settings.responsesPath).putBoolean("battery",settings.batteryEnabled).putString("iv",Base64.encodeToString(cipher.iv,Base64.NO_WRAP))
             .putString("key",Base64.encodeToString(cipher.doFinal(settings.apiKey.toByteArray(Charsets.UTF_8)),Base64.NO_WRAP)).commit()) {"模型设置保存失败"}
     }
 }

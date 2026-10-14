@@ -16,7 +16,7 @@
 
 ## 权利状态
 
-本阶段尚未选择新项目许可证，不表示放弃版权或允许任意再分发。官方 Gradle wrapper 的适用许可与来源单独记录。
+本项目按 GNU Affero General Public License version 3 发布，见 [LICENSE](LICENSE)。对应源码公开于 https://github.com/y2485871697/Daiyu ，APK 的精确源码提交见构建记录。RikkaHub 复用来源、固定版本和修改说明见 [THIRD_PARTY/rikkahub/NOTICE.md](THIRD_PARTY/rikkahub/NOTICE.md)；其他第三方保留各自适用许可及署名。官方 Gradle wrapper 的适用许可与来源单独记录。
 
 ## 已确认的范围删减
 

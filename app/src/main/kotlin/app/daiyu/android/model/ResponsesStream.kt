@@ -52,7 +52,8 @@ internal object ResponsesStream {
         SseReader.read(reader) { data ->
             if(cancelled()) throw InterruptedException()
             if(data=="[DONE]") return@read false
-            val event=JSONObject(data)
+            val event=try {JSONObject(data)} catch (_:org.json.JSONException) {throw ModelRequestException(ModelFailure.PROTOCOL)}
+            if(!event.has("type")) throw ModelRequestException(ModelFailure.PROTOCOL)
             if(event.has("sequence_number") && !sequence.add(event.getLong("sequence_number"))) return@read true
             when(event.getString("type")) {
                 "response.reasoning_summary_text.delta" -> {
@@ -113,10 +114,11 @@ internal object ResponsesStream {
                     }
                     output=(0 until out.length()).map {out.getJSONObject(it).toString()}
                 }
-                "response.failed","response.incomplete","error" -> throw IllegalStateException("模型未成功完成")
+                "response.failed","error" -> throw ModelRequestException(ModelFailure.REQUEST)
+                "response.incomplete" -> throw ModelRequestException(ModelFailure.INCOMPLETE)
             }
             output==null
         }
-        return checkNotNull(output) {"事件流未收到成功终态"}
+        return output ?: throw ModelRequestException(ModelFailure.INCOMPLETE)
     }
 }

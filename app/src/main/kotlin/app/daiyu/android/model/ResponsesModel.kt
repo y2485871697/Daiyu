@@ -40,7 +40,7 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
                 .put("parameters",JSONObject().put("type","object").put("properties",JSONObject()).put("required",JSONArray()).put("additionalProperties",false)).put("strict",true)
             val request=JSONObject().put("model",settings.model).put("input",input).put("stream",true).put("store",false).put("include",JSONArray().put("reasoning.encrypted_content"))
             if(settings.batteryEnabled) request.put("tools",JSONArray().put(tool))
-            val conn=connect(URL(settings.endpoint))
+            val conn=connect(URL(settings.requestEndpoint()))
             connection=conn
             try {
                 if(cancelled.get()) throw InterruptedException()
@@ -49,13 +49,29 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
                 conn.setRequestProperty("Authorization","Bearer ${settings.apiKey}")
                 conn.setRequestProperty("Content-Type","application/json");conn.setRequestProperty("Accept","text/event-stream")
                 conn.outputStream.use {it.write(request.toString().toByteArray(Charsets.UTF_8))}
-                if(conn.responseCode !in 200..299) throw IllegalStateException("HTTP ${conn.responseCode}")
-                require(conn.contentType?.startsWith("text/event-stream")==true) {"服务未返回事件流"}
+                val status = conn.responseCode
+                if(status !in 200..299) throw ModelRequestException(when(status) {
+                    401 -> ModelFailure.AUTHENTICATION
+                    403 -> ModelFailure.PERMISSION
+                    404,405 -> ModelFailure.ENDPOINT
+                    429 -> ModelFailure.RATE_LIMIT
+                    in 300..399 -> ModelFailure.REDIRECT
+                    in 500..599 -> ModelFailure.SERVER
+                    else -> ModelFailure.REQUEST
+                })
+                if(conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream",ignoreCase=true)!=true)
+                    throw ModelRequestException(ModelFailure.PROTOCOL)
                 conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                     val items=ResponsesStream.read(reader,cancelled::get,sink)
                     items.forEach {input.put(JSONObject(it));ownItems.add(it)}
                     sink(ModelEvent.ProtocolOutput(ownItems.toList()))
                 }
+            } catch(failure:java.net.SocketTimeoutException) {
+                throw ModelRequestException(ModelFailure.TIMEOUT)
+            } catch(failure:javax.net.ssl.SSLException) {
+                throw ModelRequestException(ModelFailure.TLS)
+            } catch(failure:java.io.IOException) {
+                throw ModelRequestException(ModelFailure.NETWORK)
             } finally {conn.disconnect();connection=null}
         }
         override fun cancel() {cancelled.set(true);connection?.disconnect()}

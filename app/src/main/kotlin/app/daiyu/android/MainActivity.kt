@@ -197,16 +197,17 @@ class MainActivity:Activity() {
         if(controller.active!=null) {toast("当前运行使用冻结配置，请结束后修改");return}
         val saved=controller.settings.load()
         val fields=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL}
-        val endpoint=EditText(this).apply {hint="HTTPS Responses完整地址";setText(saved.endpoint);inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI}
+        val endpoint=EditText(this).apply {hint="HTTPS 服务基础地址或完整 Responses 地址";setText(saved.endpoint);inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI}
+        val path=EditText(this).apply {hint="可选 Responses 路径，如 /responses";setText(saved.responsesPath);inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI}
         val model=EditText(this).apply {hint="模型标识";setText(saved.model)}
         val key=EditText(this).apply {hint="API密钥（加密保存）";inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD;setText(saved.apiKey)}
         val battery=CheckBox(this).apply {text="允许模型查询只读电量";isChecked=saved.batteryEnabled}
         fields.addView(TextView(this).apply {setText(R.string.model_protocol_note)})
-        fields.addView(endpoint);fields.addView(model);fields.addView(key);fields.addView(battery)
+        fields.addView(endpoint);fields.addView(path);fields.addView(model);fields.addView(key);fields.addView(battery)
         val dialog=AlertDialog.Builder(this).setTitle("模型设置").setView(fields).setPositiveButton("保存",null).setNegativeButton("取消",null).create()
         key.importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         dialog.setOnShowListener {dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            try {controller.settings.save(ModelSettings(endpoint.text.toString().trim(),model.text.toString().trim(),key.text.toString(),battery.isChecked));dialog.dismiss();toast("模型设置已保存")}
+            try {controller.settings.save(ModelSettings(endpoint.text.toString().trim(),model.text.toString().trim(),key.text.toString(),battery.isChecked,path.text.toString().trim()));dialog.dismiss();toast("模型设置已保存")}
             catch (_:Exception) {toast("设置未保存；请检查HTTPS地址、模型与密钥")}
         }}
         dialog.show()

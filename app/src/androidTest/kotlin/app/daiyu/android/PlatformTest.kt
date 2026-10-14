@@ -43,8 +43,9 @@ class PlatformTest:InstrumentationTestCase() {
     }
     fun testEncryptedSettingsAndSseFrames() {
         val context=testContext()
-        val config=ModelSettings("https://example.invalid/v1/responses","fixture-model","synthetic-test-key",true)
+        val config=ModelSettings("https://example.invalid/gateway","fixture-model","synthetic-test-key",true,"/responses")
         ModelSettingsStore(context).save(config);assertEquals(config,ModelSettingsStore(context).load())
+        assertEquals("https://example.invalid/gateway/responses",ModelSettingsStore(context).load().requestEndpoint())
         assertFalse(context.getSharedPreferences("model-settings",0).getString("key","")!!.contains(config.apiKey))
         val stoppedFrames=mutableListOf<String>()
         SseReader.read(StringReader("data: complete\n\ndata: should-not-read\n\n").buffered()) {stoppedFrames.add(it);false}

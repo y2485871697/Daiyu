@@ -8,6 +8,30 @@ import java.util.concurrent.TimeUnit
 
 class ChatRunnerTest {
     private fun initial() = Message(MessageId("a"), ConversationId("c"), RunId("r"), "assistant", emptyList(), RunStatus.RUNNING)
+    @Test fun classifiedFailuresRemainSafeAndNeverExecutePendingTools() {
+        for (failure in ModelFailure.entries) {
+            val saved=mutableListOf<Message>();var executed=0;var opened=0
+            val port=ModelPort { opened++;object:ModelSession {
+                override fun next(outputs:List<ToolOutput>,sink:(ModelEvent)->Unit) {
+                    sink(ModelEvent.TextDelta("t","accepted"))
+                    sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("pending"),"get_battery_status","{}")))
+                    throw ModelRequestException(failure)
+                }
+                override fun cancel() {throw IllegalStateException("synthetic-secret")}
+            }}
+            val result=ChatRunner(port,object:ConversationStore {override fun save(message:Message) {saved.add(message)}},BatteryTool {executed++;"{}"},{}).run(initial(),emptyList())
+            assertEquals(RunStatus.FAILED,result.status);assertEquals(failure.userMessage,result.error)
+            assertEquals("accepted",(result.blocks.first() as MessageBlock.Text).text)
+            assertEquals(0,executed);assertEquals(1,opened)
+            assertEquals(1,saved.count {it.status==RunStatus.FAILED});assertFalse(result.error!!.contains("synthetic-secret"))
+        }
+    }
+    @Test fun unknownFailureDoesNotExposeServiceSecrets() {
+        val port=ModelPort {throw IllegalStateException("synthetic-key https://example.invalid/?secret=value")}
+        val result=ChatRunner(port,object:ConversationStore {override fun save(message:Message) {}},BatteryTool {error("unused")},{}).run(initial(),emptyList())
+        assertEquals(RunStatus.FAILED,result.status)
+        assertEquals("请求失败，请检查模型设置或网络",result.error)
+    }
     @Test fun orderedToolContinuationAndDuplicateIdentity() {
         val writes = mutableListOf<Message>(); var executions = 0; var rounds = 0
         val call = ToolInvocation(ToolCallId("call"), "get_battery_status", "{}")

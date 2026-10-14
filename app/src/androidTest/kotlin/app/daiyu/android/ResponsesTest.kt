@@ -65,6 +65,55 @@ class ResponsesTest:InstrumentationTestCase() {
         assertTrue(connections.all {it.disconnected})
         return result
     }
+    fun testBaseAddressAndCustomPathUseOneResolvedRequest() {
+        for((config,expected) in listOf(
+            settings.copy(endpoint="https://example.invalid") to "https://example.invalid/v1/responses",
+            settings.copy(endpoint="https://example.invalid/v1/") to "https://example.invalid/v1/responses",
+            settings.copy(endpoint="https://example.invalid/gateway",responsesPath="/responses") to "https://example.invalid/gateway/responses")) {
+            var opened=0
+            val connection=Connection(frames(completed(message("answer"))))
+            val model=ResponsesModel(config) {url -> opened++;assertEquals(expected,url.toString());connection}
+            val result=ChatRunner(model,object:ConversationStore {override fun save(message:Message) {}},BatteryTool {error("unused")},{}).run(initial(),emptyList())
+            assertEquals(RunStatus.COMPLETED,result.status);assertEquals(1,opened);assertTrue(connection.disconnected)
+        }
+    }
+    fun testHttpFailureCategoriesAndMimeAreSafe() {
+        val expected=mapOf(401 to ModelFailure.AUTHENTICATION,403 to ModelFailure.PERMISSION,
+            404 to ModelFailure.ENDPOINT,405 to ModelFailure.ENDPOINT,302 to ModelFailure.REDIRECT,
+            429 to ModelFailure.RATE_LIMIT,500 to ModelFailure.SERVER,400 to ModelFailure.REQUEST)
+        for((code,failure) in expected) {
+            val result=run(listOf(Connection("synthetic-secret",code)))
+            assertEquals(RunStatus.FAILED,result.status);assertEquals(failure.userMessage,result.error)
+            assertFalse(result.error!!.contains("synthetic-secret"))
+        }
+        assertEquals(RunStatus.COMPLETED,run(listOf(Connection(frames(completed(message("answer"))),200,"Text/Event-Stream; charset=UTF-8"))).status)
+        assertEquals(ModelFailure.PROTOCOL.userMessage,run(listOf(Connection("{}",200,"text/event-streamXYZ"))).error)
+        assertEquals(ModelFailure.PROTOCOL.userMessage,run(listOf(Connection(frames(JSONObject().put("choices",JSONArray()))))).error)
+        assertEquals(ModelFailure.INCOMPLETE.userMessage,run(listOf(Connection("data: [DONE]\n\n"))).error)
+    }
+    fun testTransportFailuresAreClassifiedWithoutRetriesOrLeaks() {
+        for ((exception, expected) in listOf(
+            java.net.SocketTimeoutException("synthetic-secret") to ModelFailure.TIMEOUT,
+            javax.net.ssl.SSLException("synthetic-secret") to ModelFailure.TLS,
+            java.io.IOException("synthetic-secret") to ModelFailure.NETWORK)) {
+            var opened=0
+            var disconnected=false
+            val connection=object:HttpsURLConnection(URL(settings.endpoint)) {
+                override fun connect() {}
+                override fun disconnect() {disconnected=true}
+                override fun usingProxy()=false
+                override fun getCipherSuite()="fixture"
+                override fun getLocalCertificates():Array<Certificate>?=null
+                override fun getServerCertificates():Array<Certificate> = emptyArray()
+                override fun getOutputStream():java.io.OutputStream {throw exception}
+            }
+            val result=ChatRunner(ResponsesModel(settings) {opened++;connection},
+                object:ConversationStore {override fun save(message:Message) {}},BatteryTool {error("unused")},{})
+                .run(initial(),emptyList())
+            assertEquals(RunStatus.FAILED,result.status);assertEquals(expected.userMessage,result.error)
+            assertEquals(1,opened);assertTrue(disconnected);assertFalse(result.error!!.contains("synthetic-secret"))
+        }
+    }
     fun testTwoRoundRequestAndEncryptedReasoningReplay() {
         val reasoning=event("reasoning","id" to "reason","encrypted_content" to "synthetic-encrypted-content","summary" to JSONArray())
         val call=call()

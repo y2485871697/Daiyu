@@ -131,7 +131,7 @@ class ChatRunner(private val model: ModelPort, private val store: ConversationSt
             val status = synchronized(terminalLock) { terminal = true; if (stopped.get()) RunStatus.STOPPED else RunStatus.FAILED }
             val next = current.copy(status = status, error = if (status == RunStatus.STOPPED) null else
                 if (failure is PersistenceException) "保存失败，已显示内容可能未落盘" else
-                if (failure is RepetitiveOutputException) "检测到模型${failure.surface}持续高度重复，已中止本次请求；已接收内容和工具结果已保留" else "请求失败，请检查模型设置或网络")
+                if (failure is RepetitiveOutputException) "检测到模型${failure.surface}持续高度重复，已中止本次请求；已接收内容和工具结果已保留" else if (failure is ModelRequestException) failure.failure.userMessage else "请求失败，请检查模型设置或网络")
             try { apply(next) } catch (_: Exception) { current = next.copy(error = "保存失败，已显示内容可能未落盘"); publish(current) }
             return current
         } finally { cancelSession(session); session = null }

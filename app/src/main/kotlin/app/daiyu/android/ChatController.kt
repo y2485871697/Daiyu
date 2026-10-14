@@ -43,7 +43,7 @@ class ChatController internal constructor(private val application:Application,
             database.send(user,assistant,conversation==null)
         } catch (_:Exception) {problem="发送内容保存失败；草稿保留，未发起网络请求";notifyChanged();return null}
         problem=null;active=assistant
-        val owned=ChatRunner(model(config),database,AndroidBatteryTool(application,config.batteryEnabled)) {
+        val owned=ChatRunner(ModelPort { history -> model(config).open(history) },database,AndroidBatteryTool(application,config.batteryEnabled)) {
             if(active?.id==assistant.id && active?.runId==run && it.id==assistant.id && it.runId==run && it.conversationId==conversationId) {active=it;notifyChanged()}
         }
         runner=owned

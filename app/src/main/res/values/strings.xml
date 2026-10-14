@@ -7,5 +7,5 @@
     <string name="tool_header">工具 %1$s · %2$s</string>
     <string name="tool_has_result">已有结果</string>
     <string name="tool_pending">待处理</string>
-    <string name="model_protocol_note">首个协议：OpenAI Responses。仅HTTPS；密钥不写入聊天。</string>
+    <string name="model_protocol_note">协议：OpenAI Responses。仅HTTPS；基础域名自动使用 /v1/responses，/v1 地址追加 /responses；完整接口地址保持原样。自定义路径按“地址＋路径”组合。密钥不写入聊天。</string>
 </resources>

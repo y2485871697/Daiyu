@@ -2,6 +2,8 @@ package app.daiyu.android
 
 import android.app.Application
 import android.content.SharedPreferences
+import android.net.Uri
+import app.daiyu.android.backup.NeutralBackupService
 import android.os.Handler
 import android.os.Looper
 import app.daiyu.android.domain.*
@@ -65,13 +67,64 @@ class ChatController internal constructor(private val application:Application,
         }
         notifyChanged();return saved
     }
+    private val neutralBackup by lazy { NeutralBackupService(application, database) }
+    internal fun exportUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver) {
+        dataTask(work={
+            val text=if(complete) {
+                neutralBackup.exportPackage(settings.nonSecretConfiguration())
+            } else database.exportBackup()
+            resolver.openOutputStream(uri,"wt")?.use {
+                it.write(text.toByteArray(Charsets.UTF_8))
+            } ?: throw java.io.IOException("无法打开目标")
+            if(complete) "完整中立备份已导出；不含凭据或系统授权，请妥善保管"
+            else "纯文本兼容备份已导出；不含附件、归档与分支元数据"
+        })
+    }
+    internal fun importUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver) {
+        dataTask(importing=true,work={
+            val stream=resolver.openInputStream(uri)
+                ?: throw java.io.IOException("无法打开备份")
+            val text=stream.use { readBackupText(it,if(complete) 112L*1024*1024 else 16L*1024*1024) }
+            if(complete) {
+                val result=neutralBackup.importPackage(text)
+                val inventory=result.inventory
+                if(result.alreadyImported) "此完整备份已导入过；未重复追加，未执行历史请求"
+                else "已导入${inventory.conversations}个会话、${inventory.messages}条消息、"+
+                    "${inventory.branches}个分支、${inventory.archives}个归档、${inventory.attachments}个附件；"+
+                    "非秘密配置仅保存为备份元数据，未执行历史请求"
+            } else {
+                val counts=database.importBackup(text)
+                "已导入${counts.first}个会话、${counts.second}条消息；未执行历史请求"
+            }
+        })
+    }
+    internal fun readBackupText(stream:java.io.InputStream,limit:Long):String {
+        val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192)
+        while(true) {
+            val count=stream.read(buffer);if(count<0) break
+            require(out.size().toLong()+count<=limit)
+            out.write(buffer,0,count)
+        }
+        return Charsets.UTF_8.newDecoder()
+            .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+            .decode(java.nio.ByteBuffer.wrap(out.toByteArray())).toString()
+    }
     internal fun dataTask(importing:Boolean=false,work:()->String) {
-        check(ready && active==null && !dataBusy)
+        check(ready && active==null && !dataBusy && problem?.startsWith("会话恢复失败")!=true)
         dataBusy=true;notifyChanged()
         try {executor.execute {
             var value=if(importing) "导入失败；原会话保留，格式、校验或身份冲突" else "导出失败；目标文件可能不完整，原会话保留"
             var success=false
-            try {value=work();success=true} catch (_:Exception) {}
+            try {value=work();success=true} catch(failure:Exception) {
+                value=when(failure) {
+                    is SecurityException -> "备份文件访问权限不足或已失效；请重新选择文件。原会话保留，导出目标可能不完整"
+                    is java.nio.charset.CharacterCodingException -> "导入失败；备份不是有效UTF-8文本。原会话保留，未执行历史请求"
+                    is java.io.IOException -> if(importing) "导入失败；读取备份或写入附件失败。原会话保留，未执行历史请求"
+                        else "导出失败；读取附件或写入目标失败。目标文件可能不完整，请勿作为有效备份；原会话保留"
+                    else -> value
+                }
+            }
             finally {
                 val notice=value;val changed=success && importing
                 handler.post {if(changed) dataRevision++;dataNotice=notice;dataBusy=false;listeners.toList().forEach {it()}}

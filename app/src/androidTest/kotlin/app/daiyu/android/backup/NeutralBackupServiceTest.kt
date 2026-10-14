@@ -149,6 +149,18 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
             assertEquals(2, reopened.readableDatabase.rawQuery("SELECT count(*) FROM neutral_config", null).use { it.moveToFirst(); it.getInt(0) })
         } finally { reopened.close() }
     }
+    fun testExplicitExportConfigurationDoesNotMutateImportedMetadata() {
+        val (_, _, backup) = fresh()
+        backup.setNonSecretConfiguration(mapOf("model" to "imported", "battery" to true))
+        val before = backup.importedConfiguration().toString(); val previous = backup.exportPackage()
+        val explicit = backup.exportPackage(mapOf("model" to "current", "key" to "synthetic-secret"))
+        val config = JSONObject(JSONObject(explicit).getString("payload")).getJSONObject("config")
+        assertEquals(1, config.length()); assertEquals("current", config.getString("model"))
+        assertFalse(explicit.contains("synthetic-secret")); assertEquals(1, backup.preflight(explicit).configEntries)
+        assertEquals(0, backup.preflight(backup.exportPackage(emptyMap())).configEntries)
+        reject { backup.exportPackage(mapOf("battery" to "invalid")) }
+        assertEquals(before, backup.importedConfiguration().toString()); assertEquals(previous, backup.exportPackage())
+    }
     fun testTransactionFailureHasNoHalfReferencesAfterReopen() {
         val (context, db, _) = fresh(); val old = db.exportBackup()
         try { DatabaseTransactions { db.writableDatabase }.run { sql ->

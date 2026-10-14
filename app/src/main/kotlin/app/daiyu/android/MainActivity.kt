@@ -197,7 +197,7 @@ class MainActivity:Activity() {
         input.isEnabled=controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true
         send.isEnabled=controller.ready && !controller.dataBusy && controller.active==null && controller.problem?.startsWith("会话恢复失败")!=true
         stop.isEnabled=controller.active?.status==RunStatus.RUNNING
-        if(controller.dataBusy) {status.text="处理文本备份中";return}
+        if(controller.dataBusy) {status.text="处理备份中";return}
         if(!controller.ready) {status.text="恢复会话中";return}
         if(controller.problem?.startsWith("会话恢复失败")==true) {status.text=controller.problem;return}
         guard {
@@ -341,47 +341,57 @@ class MainActivity:Activity() {
         }
     }
     private fun backupMenu() {
-        check(controller.ready && controller.active==null && !controller.dataBusy)
-        AlertDialog.Builder(this).setTitle("文本会话备份").setMessage("仅包含会话、文本、工具结果、协议历史及草稿，不包含API密钥、Cookie或系统授权。含聊天隐私，请选择可信位置。附件及其他版本格式不支持，不会静默丢弃。导入追加，不覆盖已有身份。")
-            .setPositiveButton("导出") {_,_->startActivityForResult(android.content.Intent(android.content.Intent.ACTION_CREATE_DOCUMENT).apply {
-                addCategory(android.content.Intent.CATEGORY_OPENABLE);type="application/json"
-            },101)}
-            .setNeutralButton("导入") {_,_->startActivityForResult(android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT).apply {addCategory(android.content.Intent.CATEGORY_OPENABLE);type="application/json"},102)}
+        check(controller.ready && controller.active==null && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true)
+        AlertDialog.Builder(this).setTitle("备份与导入")
+            .setItems(arrayOf("完整中立备份（推荐）","纯文本兼容备份")) {_,index->guard {backupFormatMenu(index==0)}}
             .setNegativeButton("取消",null).show()
+    }
+    private fun backupFormatMenu(complete:Boolean) {
+        check(controller.ready && controller.active==null && !controller.dataBusy)
+        val description=if(complete) "包含会话、草稿、工具结果、协议历史、分支、压缩原文归档、用量、附件及非秘密配置。"+
+            "不含API密钥、Cookie、授权令牌或系统授权。配置导入后仅保存为备份元数据，不替换当前模型设置或启用授权。"+
+            "完整格式v1，包上限112MiB。含聊天隐私，请选择可信位置。"
+        else "文本格式v1，包含会话、文本、工具结果、协议历史及草稿。"+
+            "不含附件、压缩原文归档、分支、用量或模型配置，不能替代完整备份。文件上限16MiB。含聊天隐私，请选择可信位置。"
+        AlertDialog.Builder(this).setTitle(if(complete) "完整中立备份" else "纯文本兼容备份").setMessage(description)
+            .setPositiveButton("导出") {_,_->guard {pickBackup(true,complete)}}
+            .setNeutralButton("导入") {_,_->guard {pickBackup(false,complete)}}
+            .setNegativeButton("取消",null).show()
+    }
+    @Suppress("DEPRECATION")
+    private fun pickBackup(exporting:Boolean,complete:Boolean) {
+        check(controller.ready && controller.active==null && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true)
+        val code=if(complete) {if(exporting) 103 else 104} else {if(exporting) 101 else 102}
+        val action=if(exporting) android.content.Intent.ACTION_CREATE_DOCUMENT else android.content.Intent.ACTION_OPEN_DOCUMENT
+        startActivityForResult(android.content.Intent(action).apply {
+            addCategory(android.content.Intent.CATEGORY_OPENABLE);type="application/json"
+            if(exporting) putExtra(android.content.Intent.EXTRA_TITLE,if(complete) "daiyu-complete-v1.json" else "daiyu-text-v1.json")
+        },code)
     }
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:android.content.Intent?) {
         super.onActivityResult(requestCode,resultCode,data)
-        if(requestCode !in setOf(101,102) || resultCode!=RESULT_OK) return
+        if(requestCode !in setOf(101,102,103,104) || resultCode!=RESULT_OK) return
         val uri=data?.data ?: return
+        val complete=requestCode==103 || requestCode==104
         guard {
-            check(controller.active==null && !controller.dataBusy)
-            val resolver=applicationContext.contentResolver
-            val database=controller.database
-            if(requestCode==101) controller.dataTask(work={
-                val backup=database.exportBackup()
-                resolver.openOutputStream(uri,"wt")?.use {it.write(backup.toByteArray(Charsets.UTF_8))} ?: error("无法打开目标")
-                "文本备份已导出；请妥善保管"
-            })
-            else AlertDialog.Builder(this).setTitle("确认导入文本备份").setMessage("追加会话；会话ID、消息ID或独立草稿冲突将整包回滚，不覆盖已有数据，不自动执行原运行。")
-                .setPositiveButton("导入") {_,_->guard {
-                    controller.dataTask(importing=true,work={
-                        val bytes=resolver.openInputStream(uri)?.use {stream->
-                            val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192)
-                            while(true) {val count=stream.read(buffer);if(count<0) break;require(out.size()+count<=16*1024*1024);out.write(buffer,0,count)}
-                            out.toByteArray()
-                        } ?: error("无法打开备份")
-                        val text=Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT).onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT).decode(java.nio.ByteBuffer.wrap(bytes)).toString()
-                        val counts=database.importBackup(text)
-                        "已导入${counts.first}个会话、${counts.second}条消息；未执行历史请求"
-                    })
-                }}.setNegativeButton("取消",null).show()
+            check(controller.ready && controller.active==null && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true)
+            if(requestCode==101 || requestCode==103) controller.exportUserBackup(uri,complete)
+            else {
+                val explanation=if(complete) "仅追加完整格式v1。会话、消息、分支、附件身份、独立草稿或备份配置冲突将整包回滚，"+
+                    "不覆盖已有会话；重复整包不会再次追加。非秘密配置只保存为备份元数据，不替换当前模型设置、密钥或系统授权。不会自动执行历史模型请求或工具。"
+                else "仅追加文本格式v1。会话ID、消息ID或独立草稿冲突将整包回滚，不覆盖已有数据，不自动执行历史模型请求或工具。"+
+                    "此入口不接受完整备份；完整包请选择完整中立备份入口。"
+                AlertDialog.Builder(this).setTitle(if(complete) "确认导入完整中立备份" else "确认导入文本备份").setMessage(explanation)
+                    .setPositiveButton("导入") {_,_->guard {controller.importUserBackup(uri,complete)}}
+                    .setNegativeButton("取消",null).show()
+            }
         }
     }
     private fun chooseConversation(query:String="",folder:String?=null) {
         val list=controller.database.conversations(query,folder)
         AlertDialog.Builder(this).setTitle("会话").setItems(list.map {"${if(it.pinned) "★ " else ""}${if(it.folder.isNotEmpty()) "[${it.folder}] " else ""}${it.title}"}.toTypedArray()) {_,which ->
-            if(controller.dataBusy) {toast("文本备份任务进行中");return@setItems}
+            if(controller.dataBusy) {toast("备份任务进行中");return@setItems}
             val conversation=list[which]
             AlertDialog.Builder(this).setTitle(conversation.title).setItems(arrayOf("打开","重命名","删除",if(conversation.pinned) "取消置顶" else "置顶","移动到文件夹")) {_,action -> guard {when(action) {
                 0->select(conversation)
@@ -409,7 +419,7 @@ class MainActivity:Activity() {
         val dialog=AlertDialog.Builder(this).setTitle("模型设置").setView(fields).setPositiveButton("保存",null).setNegativeButton("取消",null).create()
         key.importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         dialog.setOnShowListener {dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            try {controller.settings.save(ModelSettings(endpoint.text.toString().trim(),model.text.toString().trim(),key.text.toString(),battery.isChecked,path.text.toString().trim(),deviceStatus.isChecked));dialog.dismiss();toast("模型设置已保存")}
+            try {check(controller.active==null && !controller.dataBusy);controller.settings.save(ModelSettings(endpoint.text.toString().trim(),model.text.toString().trim(),key.text.toString(),battery.isChecked,path.text.toString().trim(),deviceStatus.isChecked));dialog.dismiss();toast("模型设置已保存")}
             catch (_:Exception) {toast("设置未保存；请检查HTTPS地址、模型与密钥")}
         }}
         settingsDialog=dialog

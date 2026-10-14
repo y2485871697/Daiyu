@@ -2,6 +2,7 @@ plugins { id("com.android.application") }
 android {
     useLibrary("android.test.runner")
     useLibrary("android.test.base")
+    useLibrary("android.test.mock")
     namespace = "app.daiyu.android"
     compileSdk { version = release(37) { minorApiLevel = 2 } }
     buildToolsVersion = "37.0.0"

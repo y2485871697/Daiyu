@@ -9,6 +9,8 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.text.InputType
 import android.view.View
+import android.view.Choreographer
+import android.view.MotionEvent
 import android.widget.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ModelSettings
@@ -22,6 +24,24 @@ class MainActivity:Activity() {
     private lateinit var status:TextView
     private lateinit var send:Button
     private lateinit var stop:Button
+    private val bottomMotion=BottomFollowMotion()
+    private var followsBottom=true
+    private var followScheduled=false
+    private var followRemainder=0f
+    private val followFrame=Choreographer.FrameCallback {time ->
+        followScheduled=false
+        if(followsBottom && refreshRateWindowResumed) {
+            val distance=(timeline.height-scroll.height+scroll.paddingTop+scroll.paddingBottom-scroll.scrollY).coerceAtLeast(0)
+            if(distance>0) {
+                val movement=bottomMotion.step(distance.toFloat(),time,resources.displayMetrics.density)+followRemainder
+                val pixels=movement.toInt().coerceAtMost(distance)
+                followRemainder=movement-pixels
+                scroll.scrollBy(0,pixels)
+                scheduleBottomFollow()
+            } else cancelBottomFollow()
+        }
+    }
+    private val initialBottom=Runnable {if(followsBottom && refreshRateWindowResumed) scroll.fullScroll(View.FOCUS_DOWN)}
     private var selected:Conversation?=null
     private var editing=false
     private var selectionReady=false
@@ -51,7 +71,20 @@ class MainActivity:Activity() {
         status=TextView(this);root.addView(status)
         root.addView(button("加载更早消息") {loadEarlier()})
         timeline=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL}
-        scroll=ScrollView(this).apply {addView(timeline)}
+        scroll=ScrollView(this).apply {
+            addView(timeline)
+            setOnTouchListener {_,event ->
+                if(event.actionMasked==MotionEvent.ACTION_DOWN) {
+                    followsBottom=false
+                    removeCallbacks(initialBottom)
+                    cancelBottomFollow()
+                } else if(event.actionMasked==MotionEvent.ACTION_UP || event.actionMasked==MotionEvent.ACTION_CANCEL) {
+                    followsBottom=isAtBottom()
+                }
+                false
+            }
+        }
+        timeline.addOnLayoutChangeListener {_,_,_,_,_,_,_,_,_ -> scheduleBottomFollow()}
         root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
         input=EditText(this).apply {hint="输入消息";minLines=2;maxLines=5;inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES}
         input.isSaveEnabled=false
@@ -70,12 +103,12 @@ class MainActivity:Activity() {
                 selected=saved
                 val selectionSaved=controller.preferences.edit().putString("selected",saved.id.value).commit()
                 editing=true;input.setText("");editing=false
-                shown=controller.database.messages(saved.id).toMutableList();renderAll();scroll.post {scroll.fullScroll(View.FOCUS_DOWN)}
+                shown=controller.database.messages(saved.id).toMutableList();renderAll();jumpToBottom()
                 if(!selectionSaved) toast("消息已保存；最后选中会话未保存")
             }
         }
         stop=button("停止") {controller.stop();status.text="正在停止；不代表远端已取消"}
-        actions.addView(send);actions.addView(stop);actions.addView(button("回到底部") {scroll.fullScroll(View.FOCUS_DOWN)})
+        actions.addView(send);actions.addView(stop);actions.addView(button("回到底部") {jumpToBottom()})
         root.addView(actions);setContentView(root);root.requestApplyInsets()
         controller.observe(listener);refresh()
     }
@@ -84,6 +117,7 @@ class MainActivity:Activity() {
         refreshRateWindowResumed=true
         applyPreferredRefreshRate()
         window.decorView.post(refreshRateRequest)
+        scheduleBottomFollow()
     }
     private fun applyPreferredRefreshRate() {
         if(!refreshRateWindowResumed || isFinishing || isDestroyed) return
@@ -98,6 +132,8 @@ class MainActivity:Activity() {
     }
     override fun onPause() {
         refreshRateWindowResumed=false
+        scroll.removeCallbacks(initialBottom)
+        cancelBottomFollow()
         window.decorView.removeCallbacks(refreshRateRequest)
         val previous=previousPreferredRefreshRate
         if(previous!=null && window.attributes.preferredRefreshRate==requestedPreferredRefreshRate) {
@@ -130,7 +166,7 @@ class MainActivity:Activity() {
         editing=true
         try {input.setText(draft);input.setSelection((range?.first ?: input.length()).coerceIn(0,input.length()),(range?.second ?: input.length()).coerceIn(0,input.length()))} finally {editing=false}
         shown=if(conversation==null) mutableListOf() else controller.database.messages(conversation.id).toMutableList();renderAll()
-        scroll.post {scroll.fullScroll(View.FOCUS_DOWN)};refresh()
+        jumpToBottom();refresh()
     }
     private fun refresh() {
         input.isEnabled=controller.ready && controller.problem?.startsWith("会话恢复失败")!=true
@@ -157,7 +193,6 @@ class MainActivity:Activity() {
     }
     private fun renderAll() {timeline.removeAllViews();rows.clear();shown.forEach {updateRow(it.second)} }
     private fun updateRow(message:Message) {
-        val follow=scroll.scrollY+scroll.height>=timeline.height-80
         val row=rows.getOrPut(message.id) {LinearLayout(this).apply {orientation=LinearLayout.VERTICAL;setPadding(0,12,0,12);timeline.addView(this)}}
         row.removeAllViews()
         row.addView(TextView(this).apply {text=getString(R.string.message_header,getString(if(message.role=="user") R.string.message_user else R.string.app_name),message.status);textSize=12f})
@@ -174,12 +209,30 @@ class MainActivity:Activity() {
             val text=message.blocks.joinToString("\n") {when(it) {is MessageBlock.Text->it.text;is MessageBlock.Tool->"${it.invocation.name}: ${it.result ?: "未完成"}"}}
             (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("代鱼消息",text))
         }})
-        if(follow) scroll.post {scroll.fullScroll(View.FOCUS_DOWN)}
+        scheduleBottomFollow()
+    }
+    private fun isAtBottom()=scroll.scrollY+scroll.height-scroll.paddingTop-scroll.paddingBottom>=timeline.height-2
+    private fun cancelBottomFollow() {
+        Choreographer.getInstance().removeFrameCallback(followFrame)
+        followScheduled=false;followRemainder=0f;bottomMotion.reset()
+    }
+    private fun scheduleBottomFollow() {
+        if(followsBottom && refreshRateWindowResumed && !followScheduled && !isAtBottom()) {
+            followScheduled=true
+            Choreographer.getInstance().postFrameCallback(followFrame)
+        }
+    }
+    private fun jumpToBottom() {
+        followsBottom=true
+        cancelBottomFollow()
+        scroll.removeCallbacks(initialBottom)
+        scroll.post(initialBottom)
     }
     private fun loadEarlier() {
         val id=selected?.id ?: return
         val earlier=controller.database.messages(id,shown.firstOrNull()?.first ?: Long.MAX_VALUE)
         if(earlier.isEmpty()) {toast("没有更早消息");return}
+        followsBottom=false;scroll.removeCallbacks(initialBottom);cancelBottomFollow()
         val old=timeline.height;val y=scroll.scrollY;shown.addAll(0,earlier);renderAll();scroll.post {scroll.scrollTo(0,y+timeline.height-old)}
     }
     private fun chooseConversation() {

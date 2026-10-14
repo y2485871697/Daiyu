@@ -18,6 +18,68 @@ class ActivityTest:InstrumentationTestCase() {
     private fun input(activity:MainActivity)=views(activity.window.decorView).filterIsInstance<EditText>().single()
     private fun button(activity:MainActivity,text:String)=views(activity.window.decorView).filterIsInstance<Button>().single {it.text.toString()==text}
     private fun start()=instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+    fun testStreamingFollowStopsOnTouchAndEarlierHistory() {
+        val application=instrumentation.targetContext.applicationContext as ChatApplication
+        val context=testContext(instrumentation.targetContext)
+        context.deleteDatabase("conversations.db")
+        context.getSharedPreferences("conversation-ui",0).edit().clear().commit()
+        val db=ConversationDatabase(context)
+        val conversation=db.create()
+        repeat(70) {i ->
+            val run=RunId("scroll-$i")
+            val user=Message(MessageId("su-$i"),conversation.id,run,"user",listOf(MessageBlock.Text("u","历史用户 $i")),RunStatus.COMPLETED)
+            val assistant=Message(MessageId("sa-$i"),conversation.id,run,"assistant",listOf(MessageBlock.Text("a",("历史正文 $i\n").repeat(12))),RunStatus.RUNNING)
+            db.send(user,assistant);db.save(assistant.copy(status=RunStatus.COMPLETED))
+        }
+        val controller=ChatController(application,db,ModelSettingsStore(context),context.getSharedPreferences("conversation-ui",0),{error("no model request")})
+        val field=ChatApplication::class.java.getDeclaredField("controller").apply {isAccessible=true}
+        var original:ChatController?=null
+        var activity:MainActivity?=null
+        try {
+            val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
+            while(!controller.ready && System.nanoTime()<deadline) Thread.sleep(10)
+            assertTrue(controller.ready)
+            instrumentation.runOnMainSync {original=field.get(application) as? ChatController;application.controller=controller}
+            val current=start();activity=current
+            instrumentation.runOnMainSync {current.select(conversation)}
+            instrumentation.waitForIdleSync()
+            val scroll=views(current.window.decorView).filterIsInstance<android.widget.ScrollView>().single()
+            val following=MainActivity::class.java.getDeclaredField("followsBottom").apply {isAccessible=true}
+            val scheduled=MainActivity::class.java.getDeclaredField("followScheduled").apply {isAccessible=true}
+            val update=MainActivity::class.java.getDeclaredMethod("updateRow",Message::class.java).apply {isAccessible=true}
+            val tail=db.messages(conversation.id).last().second
+            instrumentation.runOnMainSync {
+                assertTrue(scroll.scrollY>0)
+                val now=android.os.SystemClock.uptimeMillis()
+                val down=android.view.MotionEvent.obtain(now,now,android.view.MotionEvent.ACTION_DOWN,10f,10f,0)
+                scroll.dispatchTouchEvent(down);down.recycle()
+                scroll.scrollTo(0,0)
+                update.invoke(current,tail.copy(blocks=listOf(MessageBlock.Text("a","新内容\n".repeat(40)))))
+                assertFalse(following.getBoolean(current));assertFalse(scheduled.getBoolean(current));assertEquals(0,scroll.scrollY)
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                assertEquals(0,scroll.scrollY)
+                button(current,"回到底部").performClick()
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                assertTrue(following.getBoolean(current));assertTrue(scroll.scrollY>0)
+                update.invoke(current,tail.copy(blocks=listOf(MessageBlock.Text("a","更多内容\n".repeat(80)))))
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                button(current,"加载更早消息").performClick()
+                assertFalse(following.getBoolean(current));assertFalse(scheduled.getBoolean(current))
+                assertTrue(views(current.window.decorView).filterIsInstance<TextView>().any {it.text.toString().contains("历史用户 45")})
+            }
+        } finally {
+            instrumentation.runOnMainSync {activity?.finish()}
+            instrumentation.waitForIdleSync()
+            controller.close()
+            instrumentation.runOnMainSync {field.set(application,original)}
+        }
+    }
     fun testDraftSlotsRunningSwitchAndActivityRecreation() {
         val application=instrumentation.targetContext.applicationContext as ChatApplication
         val controllerField=ChatApplication::class.java.getDeclaredField("controller").apply {isAccessible=true}

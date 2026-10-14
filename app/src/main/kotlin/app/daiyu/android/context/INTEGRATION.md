@@ -1,6 +1,6 @@
 # F11/F19 接缝（接口冻结）
 
-来源：当前重写项目 `ConversationDatabase.kt`（生产 SQLite schema4；中立文本备份格式仍 version3）、`ModelSettings.kt`、`ResponsesModel.kt`；验收 `docs/refactor-input/acceptance.json` AC-033–035/050–052，features F11/F19。Context 最终来源 `f7f51c10`、配置人工恢复来源 `faa1a1d2`，随本次集成提交；进度与证据统一见 `docs/重构清单.md` 的 R03/R11/R12 三项成品集成记录。没有读取工作树外旧策略或复用 Eta 源码。保留候选压缩策略由父代理提供；这里的保守默认边界不能作为旧策略被取代的审查证据。
+来源：当前重写项目 `ConversationDatabase.kt`（生产 SQLite schema4；中立文本备份 format version1（沿用历史 schema3 契约））、`ModelSettings.kt`、`ResponsesModel.kt`；验收 `docs/refactor-input/acceptance.json` AC-033–035/050–052，features F11/F19。Context 最终来源 `f7f51c10`、配置人工恢复来源 `faa1a1d2`，随本次集成提交；进度与证据统一见 `docs/重构清单.md` 的 R03/R11/R12 三项成品集成记录。没有读取工作树外旧策略或复用 Eta 源码。保留候选压缩策略由父代理提供；这里的保守默认边界不能作为旧策略被取代的审查证据。
 
 ## 主数据库唯一接线（v4 已实现；Context 生产分派仍未接通）
 
@@ -61,3 +61,8 @@
 - 父提供 Context/Responses 来源 host 编译 exit0、独立静态 review 无确定代码阻断；Config 来源 CHECK_SHA=`faa1a1d2`，全部 domain/app/androidTest host 编译 exit0，独立 review `794eda30` completed、六文件无源码 blocking。组合 dirty-tree host 47个 Kotlin 输入编译 exit0，执行时 HEAD 仍为基线加 seed 差异；输入 sha256 manifest 在父报告 `/workspace/daiyu-provider-handoff/next-step/integration-host/check.json`，不将该结果绑成基线或未来集成 SHA 的 host 验证。
 - 基线 Python CHECK_SHA=`f0b5b8e` 第二 attempt 完成65项/69.430秒/exit0，父报告 `/workspace/daiyu-provider-handoff/next-step/baseline-python-check.json`；保留首 attempt 30秒命令 timeout，不将其当源码失败或 pass。这是基线工具测试，不证明本次 Kotlin 业务或仪器通过。
 - 上述仓库外证据由父提供，本任务仅能核授权树源码/文档，未重跑构建或测试。下一步父以同次代码+清单提交经集成门禁合流，唯一既有 workflow 对实际集成 SHA 跑完整构建与 API26/API37.2；尚无本集成新 run。生产 Context dispatcher/发送/usage 接线及必要 kill/restart、真实业务验证仍待完成。保持 minSdk26，不改 workflow、runner/history 候选或其它范围。
+
+
+### 本次云端回归补证
+
+精确源码708ac280的run38621624723/attempt1已success，API26/API37.2各138项通过，包含Context范围8、配置Store15与Controller/Activity新增6+6、Responses取消13；既有Context/Responses回归同时通过。提交时“尚未执行”段为历史状态，现已由此执行证据核销。JVM128、Python65、Lint/build成功。生产Context dispatcher/发送/usage接线仍未完成；真实网络中断、强杀重启等不因synthetic或顺序回归计为完成。后续仅文档补记不生成新APK。本轮仅下载报告、不下载或安装APK。

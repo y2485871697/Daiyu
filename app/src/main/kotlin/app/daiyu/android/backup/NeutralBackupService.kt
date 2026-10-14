@@ -52,9 +52,12 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             else excluded.add("非白名单配置已剔除（可能含凭据）")
         }
         validateConfig(safe)
-        transactions.run { db -> safe.keys().forEach { key ->
-            db.insertWithOnConflict("neutral_config", null, ContentValues().apply { put("name", key); put("value", safe.get(key).toString()) }, SQLiteDatabase.CONFLICT_REPLACE)
-        } }
+        transactions.run { db ->
+            db.delete("neutral_config", null, null)
+            safe.keys().forEach { key ->
+                db.insertOrThrow("neutral_config", null, ContentValues().apply { put("name", key); put("value", safe.get(key).toString()) })
+            }
+        }
         return excluded.distinct()
     }
     /** Reads model preferences without decrypting keys or touching keystore. */

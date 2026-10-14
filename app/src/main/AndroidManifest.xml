@@ -4,10 +4,16 @@
     <application android:name=".ChatApplication" android:usesCleartextTraffic="false" android:dataExtractionRules="@xml/data_extraction_rules" android:allowBackup="false" android:fullBackupContent="false" android:label="@string/app_name"
         android:icon="@drawable/ic_launcher" android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:supportsRtl="true">
-        <activity android:name=".MainActivity" android:exported="true">
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Only JSON documents with content grants; no file/http or wildcard MIME capture. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" android:mimeType="application/json" />
             </intent-filter>
         </activity>
     </application>

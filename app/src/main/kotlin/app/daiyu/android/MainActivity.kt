@@ -4,6 +4,8 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -26,6 +28,9 @@ class MainActivity:Activity() {
     private lateinit var send:Button
     private lateinit var stop:Button
     private var settingsDialog:AlertDialog?=null
+    private var backupDialog:AlertDialog?=null
+    private var lastOpenedBackupUri:String?=null
+    private var pendingBackupRequest:Int?=null
     private var jumpTarget:MessageId?=null
     private var turnMotion:ConversationTurnMotion?=null
     private var jumpTime=0L
@@ -129,6 +134,54 @@ class MainActivity:Activity() {
         actions.addView(send);actions.addView(stop);actions.addView(button("回到底部") {jumpToBottom()})
         root.addView(actions);setContentView(root);root.requestApplyInsets()
         controller.observe(listener);refresh()
+        pendingBackupRequest=state?.getInt("pending-backup-request",0)?.takeIf {it!=0}
+        // A restored Activity never replays a VIEW prompt or an import confirmation.
+        if(state==null) offerOpenedBackup(intent)
+    }
+    override fun onSaveInstanceState(state:Bundle) {
+        state.putInt("pending-backup-request",pendingBackupRequest ?: 0)
+        super.onSaveInstanceState(state)
+    }
+    override fun onNewIntent(intent:Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        offerOpenedBackup(intent)
+    }
+    private fun checkBackupAvailable() {
+        check(controller.ready && controller.active==null && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true) {
+            "会话尚未就绪、运行中、备份任务进行中或恢复失败；未打开备份，请稍后重新选择文件"
+        }
+    }
+    private fun backupGuard(action:()->Unit) {
+        try {checkBackupAvailable();action()}
+        catch(failure:Exception) {
+            toast(if(failure is IllegalStateException || failure is IllegalArgumentException)
+                failure.message ?: "备份操作失败；原数据保留"
+            else "备份操作失败；原数据保留，请重新选择文件")
+        }
+    }
+    private fun showBackupDialog(dialog:AlertDialog) {
+        backupDialog?.dismiss()
+        backupDialog=dialog
+        dialog.setOnDismissListener {if(backupDialog===dialog) backupDialog=null}
+        dialog.show()
+    }
+    private fun offerOpenedBackup(open:Intent?) {
+        if(open?.action!=Intent.ACTION_VIEW) return
+        backupGuard {
+            val uri=open.data
+            require(uri!=null && uri.scheme=="content" && open.type=="application/json") {"请选择content类型的JSON备份文件"}
+            require(open.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION!=0) {"备份文件未授予读取权限；请重新选择文件"}
+            checkBackupAvailable()
+            // Suppress duplicate delivery only while its choice/confirmation is visible.
+            // A later deliberate open can retry; recreation itself never replays the intent.
+            if(lastOpenedBackupUri==uri.toString() && backupDialog?.isShowing==true) return@backupGuard
+            lastOpenedBackupUri=uri.toString()
+            showBackupDialog(AlertDialog.Builder(this).setTitle("打开备份：选择格式后确认导入")
+                .setItems(arrayOf("完整中立备份（推荐）","纯文本兼容备份")) {_,index->backupGuard {
+                    confirmBackupImport(uri,index==0)
+                }}.setNegativeButton("取消",null).create())
+        }
     }
     override fun onResume() {
         super.onResume()
@@ -169,7 +222,7 @@ class MainActivity:Activity() {
         refreshRateWindowResumed=false
         scroll.removeCallbacks(initialBottom);cancelBottomFollow();cancelTurnJump()
         window.decorView.removeCallbacks(refreshRateRequest)
-        settingsDialog?.dismiss()
+        settingsDialog?.dismiss();backupDialog?.dismiss()
         controller.unobserve(listener);super.onDestroy()
     }
     private fun toast(text:String) {Toast.makeText(this,text,Toast.LENGTH_LONG).show()}
@@ -341,52 +394,61 @@ class MainActivity:Activity() {
         }
     }
     private fun backupMenu() {
-        check(controller.ready && controller.active==null && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true)
-        AlertDialog.Builder(this).setTitle("备份与导入")
-            .setItems(arrayOf("完整中立备份（推荐）","纯文本兼容备份")) {_,index->guard {backupFormatMenu(index==0)}}
-            .setNegativeButton("取消",null).show()
+        checkBackupAvailable()
+        lastOpenedBackupUri=null
+        showBackupDialog(AlertDialog.Builder(this).setTitle("备份与导入")
+            .setItems(arrayOf("完整中立备份（推荐）","纯文本兼容备份")) {_,index->backupGuard {backupFormatMenu(index==0)}}
+            .setNegativeButton("取消",null).create())
     }
     private fun backupFormatMenu(complete:Boolean) {
-        check(controller.ready && controller.active==null && !controller.dataBusy)
+        checkBackupAvailable()
         val description=if(complete) "包含会话、草稿、工具结果、协议历史、分支、压缩原文归档、用量、附件及非秘密配置。"+
             "不含API密钥、Cookie、授权令牌或系统授权。配置导入后仅保存为备份元数据，不替换当前模型设置或启用授权。"+
             "完整格式v1，包上限112MiB。含聊天隐私，请选择可信位置。"
         else "文本格式v1，包含会话、文本、工具结果、协议历史及草稿。"+
             "不含附件、压缩原文归档、分支、用量或模型配置，不能替代完整备份。文件上限16MiB。含聊天隐私，请选择可信位置。"
-        AlertDialog.Builder(this).setTitle(if(complete) "完整中立备份" else "纯文本兼容备份").setMessage(description)
-            .setPositiveButton("导出") {_,_->guard {pickBackup(true,complete)}}
-            .setNeutralButton("导入") {_,_->guard {pickBackup(false,complete)}}
-            .setNegativeButton("取消",null).show()
+        showBackupDialog(AlertDialog.Builder(this).setTitle(if(complete) "完整中立备份" else "纯文本兼容备份").setMessage(description)
+            .setPositiveButton("导出") {_,_->backupGuard {pickBackup(true,complete)}}
+            .setNeutralButton("导入") {_,_->backupGuard {pickBackup(false,complete)}}
+            .setNegativeButton("取消",null).create())
     }
     @Suppress("DEPRECATION")
     private fun pickBackup(exporting:Boolean,complete:Boolean) {
-        check(controller.ready && controller.active==null && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true)
+        checkBackupAvailable()
+        check(pendingBackupRequest==null) {"文件选择尚未返回；请先完成或取消选择"}
         val code=if(complete) {if(exporting) 103 else 104} else {if(exporting) 101 else 102}
         val action=if(exporting) android.content.Intent.ACTION_CREATE_DOCUMENT else android.content.Intent.ACTION_OPEN_DOCUMENT
-        startActivityForResult(android.content.Intent(action).apply {
-            addCategory(android.content.Intent.CATEGORY_OPENABLE);type="application/json"
-            if(exporting) putExtra(android.content.Intent.EXTRA_TITLE,if(complete) "daiyu-complete-v1.json" else "daiyu-text-v1.json")
-        },code)
+        pendingBackupRequest=code
+        try {
+            startActivityForResult(android.content.Intent(action).apply {
+                addCategory(android.content.Intent.CATEGORY_OPENABLE);type="application/json"
+                if(exporting) putExtra(android.content.Intent.EXTRA_TITLE,if(complete) "daiyu-complete-v1.json" else "daiyu-text-v1.json")
+            },code)
+        } catch(failure:Exception) {pendingBackupRequest=null;throw failure}
     }
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode:Int,resultCode:Int,data:android.content.Intent?) {
         super.onActivityResult(requestCode,resultCode,data)
-        if(requestCode !in setOf(101,102,103,104) || resultCode!=RESULT_OK) return
-        val uri=data?.data ?: return
+        if(requestCode !in setOf(101,102,103,104) || pendingBackupRequest!=requestCode) return
+        pendingBackupRequest=null
+        if(resultCode!=RESULT_OK) return
+        val uri=data?.data ?: run {toast("文件选择未返回URI；原数据保留，请重新选择");return}
         val complete=requestCode==103 || requestCode==104
-        guard {
-            check(controller.ready && controller.active==null && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true)
+        backupGuard {
+            require(uri.scheme=="content") {"文件选择未返回content URI；原数据保留，请重新选择"}
             if(requestCode==101 || requestCode==103) controller.exportUserBackup(uri,complete)
-            else {
-                val explanation=if(complete) "仅追加完整格式v1。会话、消息、分支、附件身份、独立草稿或备份配置冲突将整包回滚，"+
-                    "不覆盖已有会话；重复整包不会再次追加。非秘密配置只保存为备份元数据，不替换当前模型设置、密钥或系统授权。不会自动执行历史模型请求或工具。"
-                else "仅追加文本格式v1。会话ID、消息ID或独立草稿冲突将整包回滚，不覆盖已有数据，不自动执行历史模型请求或工具。"+
-                    "此入口不接受完整备份；完整包请选择完整中立备份入口。"
-                AlertDialog.Builder(this).setTitle(if(complete) "确认导入完整中立备份" else "确认导入文本备份").setMessage(explanation)
-                    .setPositiveButton("导入") {_,_->guard {controller.importUserBackup(uri,complete)}}
-                    .setNegativeButton("取消",null).show()
-            }
+            else confirmBackupImport(uri,complete)
         }
+    }
+    private fun confirmBackupImport(uri:Uri,complete:Boolean) {
+        checkBackupAvailable()
+        val explanation=if(complete) "仅追加完整格式v1。会话、消息、分支、附件身份、独立草稿或备份配置冲突将整包回滚，"+
+            "不覆盖已有会话；重复整包不会再次追加。非秘密配置只保存为备份元数据，不替换当前模型设置、密钥或系统授权。不会自动执行历史模型请求或工具。"
+        else "仅追加文本格式v1。会话ID、消息ID或独立草稿冲突将整包回滚，不覆盖已有数据，不自动执行历史模型请求或工具。"+
+            "此入口不接受完整备份；完整包请选择完整中立备份入口。"
+        showBackupDialog(AlertDialog.Builder(this).setTitle(if(complete) "确认导入完整中立备份" else "确认导入文本备份").setMessage(explanation)
+            .setPositiveButton("导入") {_,_->backupGuard {controller.importUserBackup(uri,complete)}}
+            .setNegativeButton("取消",null).create())
     }
     private fun chooseConversation(query:String="",folder:String?=null) {
         val list=controller.database.conversations(query,folder)

@@ -29,6 +29,8 @@ class MainActivity:Activity() {
     private lateinit var stop:Button
     private var settingsDialog:AlertDialog?=null
     private var backupDialog:AlertDialog?=null
+    private var configurationRestoreDialog:AlertDialog?=null
+    private var configurationRestorePreview:ChatController.ConfigurationRestorePreview?=null
     private var lastOpenedBackupUri:String?=null
     private var pendingBackupRequest:Int?=null
     private var jumpTarget:MessageId?=null
@@ -222,7 +224,9 @@ class MainActivity:Activity() {
         refreshRateWindowResumed=false
         scroll.removeCallbacks(initialBottom);cancelBottomFollow();cancelTurnJump()
         window.decorView.removeCallbacks(refreshRateRequest)
-        settingsDialog?.dismiss();backupDialog?.dismiss()
+        configurationRestorePreview?.let {controller.cancelConfigurationRestore(it)}
+        configurationRestorePreview=null
+        settingsDialog?.dismiss();backupDialog?.dismiss();configurationRestoreDialog?.dismiss()
         controller.unobserve(listener);super.onDestroy()
     }
     private fun toast(text:String) {Toast.makeText(this,text,Toast.LENGTH_LONG).show()}
@@ -397,7 +401,9 @@ class MainActivity:Activity() {
         checkBackupAvailable()
         lastOpenedBackupUri=null
         showBackupDialog(AlertDialog.Builder(this).setTitle("备份与导入")
-            .setItems(arrayOf("完整中立备份（推荐）","纯文本兼容备份")) {_,index->backupGuard {backupFormatMenu(index==0)}}
+            .setItems(arrayOf("完整中立备份（推荐）","纯文本兼容备份","人工恢复已导入的模型配置")) {_,index->backupGuard {
+                if(index==2) previewConfigurationRestore() else backupFormatMenu(index==0)
+            }}
             .setNegativeButton("取消",null).create())
     }
     private fun backupFormatMenu(complete:Boolean) {
@@ -463,6 +469,55 @@ class MainActivity:Activity() {
                 2->if(controller.active?.conversationId==conversation.id) toast("先停止此会话的运行再删除") else AlertDialog.Builder(this).setMessage("确认删除此会话及其消息？").setPositiveButton("删除") {_,_->guard {check(controller.active?.conversationId!=conversation.id) {"会话运行中，不能删除"};controller.database.delete(conversation.id);if(selected?.id==conversation.id) {select(null)}}}.setNegativeButton("取消",null).show()
             }} }.show()
         }.show()
+    }
+    private fun previewConfigurationRestore() {
+        checkBackupAvailable()
+        configurationRestoreDialog?.dismiss()
+        val preview=controller.previewImportedConfiguration()
+        val plan=preview.plan
+        fun value(values:Map<String,Any?>,name:String):String = when {
+            !values.containsKey(name) -> "（未设置）"
+            values[name]=="" -> "（空）"
+            values[name] is Boolean -> if(values[name]==true) "允许" else "关闭"
+            else -> values[name]?.toString() ?: "（空）"
+        }
+        val labels=listOf("endpoint" to "服务地址","responses-path" to "Responses 路径","model" to "模型",
+            "battery" to "只读电量工具","device-status" to "只读设备状态工具")
+        val message=if(plan.isNoOp) "没有已导入的非秘密配置；不会修改当前设置。" else
+            labels.joinToString("\n\n") {(name,label)->"$label：\n当前：${value(plan.before,name)}\n恢复后：${value(plan.after,name)}"}+
+                "\n\n仅恢复已导入完整备份的非秘密配置，不执行历史请求，不启用工具或系统授权。"+
+                (if(plan.credentialRebindRequired) "\n服务地址、路径或模型发生变化：当前加密密钥保留但不会读取或用于新配置。恢复后必须在模型设置中重新输入并保存密钥，才可发送。"
+                else "\n当前密钥不读取、不展示、不修改；已有密钥重绑要求不会解除。")+
+                "\n取消或页面重建不恢复、不重放。恢复失败时原配置保留；若存储补偿也失败，将阻止发送并要求重新保存。"
+        val dialog=AlertDialog.Builder(this).setTitle("预览人工恢复模型配置").setMessage(message)
+            .setNegativeButton("取消") {_,_->controller.cancelConfigurationRestore(preview)}.apply {
+                if(!plan.isNoOp) setPositiveButton("确认恢复",null)
+            }.create()
+        configurationRestoreDialog=dialog
+        configurationRestorePreview=preview
+        dialog.setOnDismissListener {
+            controller.cancelConfigurationRestore(preview)
+            if(configurationRestoreDialog===dialog) {
+                configurationRestoreDialog=null
+                configurationRestorePreview=null
+            }
+        }
+        dialog.setOnCancelListener {controller.cancelConfigurationRestore(preview)}
+        dialog.setOnShowListener {
+            if(!plan.isNoOp) dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                try {
+                    // The Controller rechecks ready/active/dataBusy/recovery failure immediately before commit.
+                    check(!isFinishing && !isDestroyed)
+                    controller.restoreImportedConfiguration(preview,authorized=true)
+                    dialog.dismiss()
+                    toast(if(plan.credentialRebindRequired) "配置已恢复；请重新输入并保存密钥，工具保持关闭" else "非秘密配置已恢复；工具保持关闭")
+                } catch (_:Exception) {
+                    dialog.dismiss()
+                    toast("配置未恢复；原配置保留，若存储补偿失败须重新保存。请等待操作结束并重新预览")
+                }
+            }
+        }
+        dialog.show()
     }
     private fun modelSettings() {
         if(controller.active!=null) {toast("当前运行使用冻结配置，请结束后修改");return}

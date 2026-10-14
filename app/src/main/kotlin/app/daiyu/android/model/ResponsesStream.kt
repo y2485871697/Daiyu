@@ -12,6 +12,7 @@ internal object ResponsesStream {
         var deliveryFailure:Exception?=null
         try {
             return decode(reader,cancelled) {event ->
+                if(cancelled()) throw InterruptedException()
                 try {sink(event)} catch(failure:Exception) {deliveryFailure=failure;throw failure}
             }
         } catch(failure:org.json.JSONException) {
@@ -133,6 +134,7 @@ internal object ResponsesStream {
             }
             output==null
         }
+        if(cancelled()) throw InterruptedException()
         return output ?: throw ModelRequestException(ModelFailure.INCOMPLETE)
     }
 }

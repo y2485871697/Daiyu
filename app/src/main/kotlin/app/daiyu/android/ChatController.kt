@@ -68,6 +68,39 @@ class ChatController internal constructor(private val application:Application,
         notifyChanged();return saved
     }
     private val neutralBackup by lazy { NeutralBackupService(application, database) }
+    internal class ConfigurationRestorePreview internal constructor(
+        val plan:NonSecretRestorePlan, internal val metadata:String
+    )
+    private var configurationRestorePreview:ConfigurationRestorePreview?=null
+    private fun checkConfigurationRestoreAvailable() {
+        check(Looper.myLooper()==Looper.getMainLooper())
+        check(ready && active==null && !dataBusy && problem?.startsWith("会话恢复失败")!=true) {
+            "请等待会话恢复、运行或数据操作结束后再恢复配置"
+        }
+    }
+    /** Only reads imported metadata and the five non-secret current fields. Never loads a credential. */
+    internal fun previewImportedConfiguration():ConfigurationRestorePreview {
+        checkConfigurationRestoreAvailable()
+        configurationRestorePreview=null
+        val metadata=neutralBackup.importedConfiguration()
+        return ConfigurationRestorePreview(settings.prepareNonSecretRestore(metadata),metadata.toString()).also {
+            configurationRestorePreview=it
+        }
+    }
+    internal fun cancelConfigurationRestore(preview:ConfigurationRestorePreview) {
+        if(configurationRestorePreview===preview) configurationRestorePreview=null
+    }
+    /** Single-use manual confirmation. Recheck runtime gates AND both snapshots at the actual commit. */
+    internal fun restoreImportedConfiguration(preview:ConfigurationRestorePreview,authorized:Boolean) {
+        val current=configurationRestorePreview
+        configurationRestorePreview=null
+        checkConfigurationRestoreAvailable()
+        require(authorized && current===preview) {"恢复预览已失效；请重新预览并确认"}
+        check(neutralBackup.importedConfiguration().toString()==preview.metadata) {"备份配置已变化；请重新预览"}
+        checkConfigurationRestoreAvailable()
+        settings.applyNonSecretRestore(preview.plan,authorized=true)
+        notifyChanged()
+    }
     internal fun exportUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver) {
         dataTask(work={
             val text=if(complete) {

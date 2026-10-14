@@ -34,8 +34,9 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
                 }
             }
         }
+        private fun checkCancelled() {if(cancelled.get()) throw InterruptedException()}
         override fun next(outputs:List<ToolOutput>,sink:(ModelEvent)->Unit) {
-            if(cancelled.get()) throw InterruptedException()
+            checkCancelled()
             outputs.forEach {val item=JSONObject().put("type","function_call_output").put("call_id",it.callId.value).put("output",it.output);input.put(item);ownItems.add(item.toString())}
             val schemas=JSONArray()
             tools.forEach { definition ->
@@ -46,19 +47,23 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
             if(schemas.length()>0) request.put("tools",schemas)
             var deliveryFailure:Exception?=null
             val deliver:(ModelEvent)->Unit={event ->
+                checkCancelled()
                 try {sink(event)} catch(failure:Exception) {deliveryFailure=failure;throw failure}
             }
             var ownedConnection:HttpsURLConnection?=null
             try {
+                checkCancelled()
                 val conn=connect(URL(settings.requestEndpoint()))
                 ownedConnection=conn;connection=conn
-                if(cancelled.get()) throw InterruptedException()
+                checkCancelled()
                 conn.requestMethod="POST";conn.doOutput=true;conn.instanceFollowRedirects=false
                 conn.connectTimeout=20_000;conn.readTimeout=60_000
                 conn.setRequestProperty("Authorization","Bearer ${settings.apiKey}")
                 conn.setRequestProperty("Content-Type","application/json");conn.setRequestProperty("Accept","text/event-stream")
                 conn.outputStream.use {it.write(request.toString().toByteArray(Charsets.UTF_8))}
+                checkCancelled()
                 val status = conn.responseCode
+                checkCancelled()
                 if(status !in 200..299) throw ModelRequestException(when(status) {
                     401 -> ModelFailure.AUTHENTICATION
                     403 -> ModelFailure.PERMISSION
@@ -72,19 +77,28 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
                     throw ModelRequestException(ModelFailure.PROTOCOL)
                 conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                     val items=ResponsesStream.read(reader,cancelled::get,deliver)
+                    checkCancelled()
                     items.forEach {input.put(JSONObject(it));ownItems.add(it)}
                     deliver(ModelEvent.ProtocolOutput(ownItems.toList()))
+                    checkCancelled()
                 }
-            } catch(failure:java.net.SocketTimeoutException) {
+                checkCancelled()
+            } catch(failure:Exception) {
+                // A sink failure belongs to the caller, even if it also cancelled the session.
                 if(failure===deliveryFailure) throw failure
-                throw ModelRequestException(ModelFailure.TIMEOUT)
-            } catch(failure:javax.net.ssl.SSLException) {
-                if(failure===deliveryFailure) throw failure
-                throw ModelRequestException(ModelFailure.TLS)
-            } catch(failure:java.io.IOException) {
-                if(failure===deliveryFailure) throw failure
-                throw ModelRequestException(ModelFailure.NETWORK)
-            } finally {try {ownedConnection?.disconnect()} finally {connection=null}}
+                checkCancelled()
+                throw when(failure) {
+                    is java.net.SocketTimeoutException -> ModelRequestException(ModelFailure.TIMEOUT)
+                    is javax.net.ssl.SSLException -> ModelRequestException(ModelFailure.TLS)
+                    is java.io.IOException -> ModelRequestException(ModelFailure.NETWORK)
+                    else -> failure
+                }
+            } finally {
+                // Best-effort cleanup must not replace a sink or transport failure.
+                try {ownedConnection?.disconnect()} catch(_:Exception) {} finally {connection=null}
+            }
+            // Cleanup may cancel too. Only check on success so the original failure stays primary.
+            checkCancelled()
         }
         override fun cancel() {cancelled.set(true);connection?.disconnect()}
     }

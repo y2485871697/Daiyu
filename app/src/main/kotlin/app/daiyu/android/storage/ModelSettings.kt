@@ -31,6 +31,16 @@ data class EditingSettings(val settings:ModelSettings,val credentialUnavailable:
 class ModelSettingsStore internal constructor(context:Context,private val keyAliasPrefix:String) {
     constructor(context:Context):this(context,"model-api-key")
     private val preferences=context.getSharedPreferences("model-settings",Context.MODE_PRIVATE)
+    internal fun nonSecretConfiguration(): Map<String, Any?> = synchronized(lock) {
+        buildMap {
+            listOf("endpoint", "model", "responses-path").forEach { key ->
+                if(preferences.contains(key)) put(key, preferences.getString(key, null))
+            }
+            listOf("battery", "device-status").forEach { key ->
+                if(preferences.contains(key)) put(key, preferences.getBoolean(key, false))
+            }
+        }
+    }
     private fun keyStore()=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
     private fun existingKey(alias:String)=keyStore().getKey(alias,null) as? SecretKey
     private fun newKey(alias:String):SecretKey=KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES,"AndroidKeyStore").apply {

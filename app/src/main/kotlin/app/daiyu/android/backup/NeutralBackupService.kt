@@ -46,12 +46,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
     }
     /** Allowlist projection. Unknown/secret keys are not serialized; only key names have fixed reasons. */
     fun setNonSecretConfiguration(settings: Map<String, Any?>): List<String> {
-        val safe = JSONObject(); val excluded = mutableListOf<String>()
-        settings.forEach { (key, value) ->
-            if (key in CONFIG_KEYS) { require(value is String || value is Boolean); safe.put(key, value) }
-            else excluded.add("非白名单配置已剔除（可能含凭据）")
-        }
-        validateConfig(safe)
+        val (safe, excluded) = projectConfiguration(settings)
         transactions.run { db ->
             db.delete("neutral_config", null, null)
             safe.keys().forEach { key ->
@@ -60,16 +55,26 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         }
         return excluded.distinct()
     }
+    private fun projectConfiguration(settings: Map<String, Any?>): Pair<JSONObject, List<String>> {
+        val safe = JSONObject(); val excluded = mutableListOf<String>()
+        settings.forEach { (key, value) ->
+            if (key in CONFIG_KEYS) { require(value is String || value is Boolean); safe.put(key, value) }
+            else excluded.add("非白名单配置已剔除（可能含凭据）")
+        }
+        validateConfig(safe)
+        return safe to excluded.distinct()
+    }
     /** Reads model preferences without decrypting keys or touching keystore. */
     fun captureNonSecretConfiguration(context: Context): List<String> =
         setNonSecretConfiguration(context.getSharedPreferences("model-settings", Context.MODE_PRIVATE).all)
     fun importedConfiguration(): JSONObject = transactions.run { db -> readConfig(db) }
 
-    fun exportPackage(): String = transactions.run { db ->
+    fun exportPackage(configuration: Map<String, Any?>? = null): String = transactions.run { db ->
         val text = store.exportBackup()
         val tables = JSONObject()
         COLUMNS.forEach { (table, _) -> tables.put(table, readTable(db, table)) }
-        val config = readConfig(db); validateConfig(config)
+        val config = if (configuration == null) readConfig(db) else projectConfiguration(configuration).first
+        validateConfig(config)
         val hashes = mutableSetOf<String>()
         val archives = tables.getJSONArray("context_archives"); val assets = tables.getJSONArray("neutral_assets")
         repeat(archives.length()) { hashes.add(archives.getJSONObject(it).getString("blob_hash")) }

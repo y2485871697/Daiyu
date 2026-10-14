@@ -14,8 +14,16 @@ interface ModelSession {
     fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit)
     fun cancel()
 }
-fun interface ModelPort { fun open(history: List<Message>): ModelSession }
+fun interface ModelPort {
+    fun open(history: List<Message>): ModelSession
+    fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = open(history)
+}
 fun interface BatteryTool { fun execute(invocation: ToolInvocation): String }
+enum class ReadOnlyTool(val toolName: String, val description: String) {
+    BATTERY("get_battery_status", "读取当前设备电量和充电状态；无写入能力"),
+    DEVICE_STATUS("device_status", "读取设备电量、内存、应用所在存储空间、Android版本与开机时长；无标识和写入能力")
+}
+
 interface ConversationStore {
     fun save(message: Message)
 }

@@ -10,8 +10,9 @@ import javax.net.ssl.HttpsURLConnection
 
 class ResponsesModel internal constructor(private val settings:ModelSettings, private val connect:(URL)->HttpsURLConnection):ModelPort {
     constructor(settings:ModelSettings):this(settings,{it.openConnection() as HttpsURLConnection})
-    override fun open(history:List<Message>):ModelSession = Session(settings,history,connect)
-    private class Session(private val settings:ModelSettings,history:List<Message>,private val connect:(URL)->HttpsURLConnection):ModelSession {
+    override fun open(history:List<Message>):ModelSession = open(history,settings.enabledTools())
+    override fun open(history:List<Message>,tools:Set<ReadOnlyTool>):ModelSession = Session(settings,history,connect,tools.toSet())
+    private class Session(private val settings:ModelSettings,history:List<Message>,private val connect:(URL)->HttpsURLConnection,private val tools:Set<ReadOnlyTool>):ModelSession {
         private val cancelled=AtomicBoolean(false)
         @Volatile private var connection:HttpsURLConnection?=null
         private val input=JSONArray()
@@ -36,10 +37,13 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
         override fun next(outputs:List<ToolOutput>,sink:(ModelEvent)->Unit) {
             if(cancelled.get()) throw InterruptedException()
             outputs.forEach {val item=JSONObject().put("type","function_call_output").put("call_id",it.callId.value).put("output",it.output);input.put(item);ownItems.add(item.toString())}
-            val tool=JSONObject().put("type","function").put("name","get_battery_status").put("description","读取当前设备电量和充电状态；无写入能力")
-                .put("parameters",JSONObject().put("type","object").put("properties",JSONObject()).put("required",JSONArray()).put("additionalProperties",false)).put("strict",true)
+            val schemas=JSONArray()
+            tools.forEach { definition ->
+                schemas.put(JSONObject().put("type","function").put("name",definition.toolName).put("description",definition.description)
+                    .put("parameters",JSONObject().put("type","object").put("properties",JSONObject()).put("required",JSONArray()).put("additionalProperties",false)).put("strict",true))
+            }
             val request=JSONObject().put("model",settings.model).put("input",input).put("stream",true).put("store",false).put("include",JSONArray().put("reasoning.encrypted_content"))
-            if(settings.batteryEnabled) request.put("tools",JSONArray().put(tool))
+            if(schemas.length()>0) request.put("tools",schemas)
             var deliveryFailure:Exception?=null
             val deliver:(ModelEvent)->Unit={event ->
                 try {sink(event)} catch(failure:Exception) {deliveryFailure=failure;throw failure}

@@ -6,7 +6,7 @@ import android.os.Handler
 import android.os.Looper
 import app.daiyu.android.domain.*
 import app.daiyu.android.model.ResponsesModel
-import app.daiyu.android.platform.AndroidBatteryTool
+import app.daiyu.android.platform.AndroidReadOnlyTools
 import app.daiyu.android.storage.*
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -43,7 +43,8 @@ class ChatController internal constructor(private val application:Application,
             database.send(user,assistant,conversation==null)
         } catch (_:Exception) {problem="发送内容保存失败；草稿保留，未发起网络请求";notifyChanged();return null}
         problem=null;active=assistant
-        val owned=ChatRunner(ModelPort { history -> model(config).open(history) },database,AndroidBatteryTool(application,config.batteryEnabled)) {
+        val tools=config.enabledTools()
+        val owned=ChatRunner(ModelPort { history -> model(config).open(history,tools) },database,AndroidReadOnlyTools(application,tools)) {
             if(active?.id==assistant.id && active?.runId==run && it.id==assistant.id && it.runId==run && it.conversationId==conversationId) {active=it;notifyChanged()}
         }
         runner=owned

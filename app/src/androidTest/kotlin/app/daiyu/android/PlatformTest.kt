@@ -5,6 +5,7 @@ import app.daiyu.android.domain.*
 import app.daiyu.android.model.SseReader
 import app.daiyu.android.storage.*
 import app.daiyu.android.platform.AndroidBatteryTool
+import app.daiyu.android.platform.AndroidReadOnlyTools
 import java.io.StringReader
 import org.json.JSONObject
 
@@ -40,6 +41,56 @@ class PlatformTest:InstrumentationTestCase() {
         assertEquals("invalid_arguments",JSONObject(AndroidBatteryTool(context,true).execute(call.copy(arguments="{\"write\":true}"))).getString("error"))
         val result=JSONObject(AndroidBatteryTool(context,true).execute(call))
         assertTrue(result.getBoolean("ok"));assertTrue(result.getInt("percent") in 0..100)
+    }
+    fun testDeviceStatusPermissionArgumentsAndRealBackend() {
+        val context=instrumentation.targetContext
+        val call=ToolInvocation(ToolCallId("device"),"device_status","{}")
+        val disabled=AndroidReadOnlyTools(context,emptySet())
+        assertEquals("capability_disabled",JSONObject(disabled.execute(call)).getString("error"))
+        val enabled=mutableSetOf(ReadOnlyTool.DEVICE_STATUS)
+        val tools=AndroidReadOnlyTools(context,enabled);enabled.clear()
+        for(arguments in listOf("", "[]", "null", "{}junk", "{}{}", "{/*comment*/}", "{\"extra\":1}", "{;}", "{\u00a0}")) {
+            assertEquals(arguments,"invalid_arguments",JSONObject(tools.execute(call.copy(arguments=arguments))).getString("error"))
+            assertEquals("invalid_arguments",JSONObject(AndroidBatteryTool(context,true).execute(call.copy(name="get_battery_status",arguments=arguments))).getString("error"))
+        }
+        assertEquals("unknown_tool",JSONObject(tools.execute(call.copy(name="set_volume"))).getString("error"))
+        assertEquals("capability_disabled",JSONObject(tools.execute(call.copy(name="get_battery_status"))).getString("error"))
+        val result=JSONObject(tools.execute(call.copy(arguments=" \n{ \t}\r")))
+        assertTrue(result.getBoolean("ok"));assertTrue(result.getLong("observed_at")>0)
+        assertEquals(android.os.Build.VERSION.SDK_INT,result.getJSONObject("android").getInt("api_level"))
+        assertTrue(result.getLong("uptime_ms")>=0)
+        val memory=result.getJSONObject("memory");assertTrue(memory.getBoolean("ok"));assertTrue(memory.getLong("total_bytes")>0)
+        val storage=result.getJSONObject("storage");assertTrue(storage.getBoolean("ok"));assertEquals("app_data_volume",storage.getString("scope"))
+        assertTrue(storage.getLong("available_bytes") in 0..storage.getLong("total_bytes"))
+        assertTrue(result.getJSONObject("battery").getBoolean("ok"))
+        for(secret in listOf("serial", "fingerprint", "android_id", "apiKey")) assertFalse(result.has(secret))
+    }
+    fun testDeviceStatusPartialUnavailableDoesNotHideOtherReadings() {
+        val context=object:android.content.ContextWrapper(instrumentation.targetContext) {
+            override fun getSystemService(name:String):Any? {
+                if(name==android.content.Context.ACTIVITY_SERVICE) throw SecurityException("synthetic-private-detail")
+                return super.getSystemService(name)
+            }
+        }
+        val result=JSONObject(AndroidReadOnlyTools(context,setOf(ReadOnlyTool.DEVICE_STATUS)).execute(
+            ToolInvocation(ToolCallId("partial"),"device_status","{}")))
+        assertTrue(result.getBoolean("ok"));assertEquals("permission_denied",result.getJSONObject("memory").getString("error"))
+        assertTrue(result.getJSONObject("storage").getBoolean("ok"));assertTrue(result.getJSONObject("battery").getBoolean("ok"))
+        assertFalse(result.toString().contains("synthetic-private-detail"))
+    }
+    fun testDeviceStatusSettingsDefaultAndSnapshot() {
+        val context=testContext();val prefs=context.getSharedPreferences("model-settings",0)
+        prefs.edit().clear().commit()
+        val store=ModelSettingsStore(context)
+        prefs.edit().putBoolean("battery",true).commit()
+        assertFalse(store.load().deviceStatusEnabled)
+        val config=ModelSettings("https://example.invalid","fixture","synthetic-key",false,deviceStatusEnabled=true)
+        store.save(config);val snapshot=store.load()
+        assertEquals(setOf(ReadOnlyTool.DEVICE_STATUS),snapshot.enabledTools())
+        store.save(config.copy(deviceStatusEnabled=false,batteryEnabled=true))
+        assertEquals(setOf(ReadOnlyTool.DEVICE_STATUS),snapshot.enabledTools())
+        assertEquals(setOf(ReadOnlyTool.BATTERY),store.load().enabledTools())
+        prefs.edit().clear().commit()
     }
     fun testEncryptedSettingsAndSseFrames() {
         val context=testContext()

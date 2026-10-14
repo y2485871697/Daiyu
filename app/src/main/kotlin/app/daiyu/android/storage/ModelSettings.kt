@@ -5,13 +5,18 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import app.daiyu.android.domain.responsesEndpoint
+import app.daiyu.android.domain.ReadOnlyTool
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-data class ModelSettings(val endpoint: String, val model: String, val apiKey: String, val batteryEnabled: Boolean, val responsesPath: String = "") {
+data class ModelSettings(val endpoint: String, val model: String, val apiKey: String, val batteryEnabled: Boolean, val responsesPath: String = "", val deviceStatusEnabled: Boolean = false) {
+    fun enabledTools(): Set<ReadOnlyTool> = buildSet {
+        if (batteryEnabled) add(ReadOnlyTool.BATTERY)
+        if (deviceStatusEnabled) add(ReadOnlyTool.DEVICE_STATUS)
+    }
     fun requestEndpoint(): String = responsesEndpoint(endpoint, responsesPath)
     fun validate() {
         requestEndpoint()
@@ -34,13 +39,13 @@ class ModelSettingsStore(context:Context) {
             cipher.init(Cipher.DECRYPT_MODE,key(),GCMParameterSpec(128,Base64.decode(preferences.getString("iv",null),Base64.NO_WRAP)))
             String(cipher.doFinal(Base64.decode(encrypted,Base64.NO_WRAP)),Charsets.UTF_8)
         }
-        return ModelSettings(preferences.getString("endpoint","")!!,preferences.getString("model","")!!,apiKey,preferences.getBoolean("battery",false),preferences.getString("responses-path","")!!)
+        return ModelSettings(preferences.getString("endpoint","")!!,preferences.getString("model","")!!,apiKey,preferences.getBoolean("battery",false),preferences.getString("responses-path","")!!,preferences.getBoolean("device-status",false))
     }
     fun save(settings:ModelSettings) {
         settings.validate()
         val cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,key())
         check(preferences.edit().putString("endpoint",settings.endpoint).putString("model",settings.model)
-            .putString("responses-path",settings.responsesPath).putBoolean("battery",settings.batteryEnabled).putString("iv",Base64.encodeToString(cipher.iv,Base64.NO_WRAP))
+            .putString("responses-path",settings.responsesPath).putBoolean("device-status",settings.deviceStatusEnabled).putBoolean("battery",settings.batteryEnabled).putString("iv",Base64.encodeToString(cipher.iv,Base64.NO_WRAP))
             .putString("key",Base64.encodeToString(cipher.doFinal(settings.apiKey.toByteArray(Charsets.UTF_8)),Base64.NO_WRAP)).commit()) {"模型设置保存失败"}
     }
 }

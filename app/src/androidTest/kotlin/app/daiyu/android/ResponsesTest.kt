@@ -5,6 +5,7 @@ import app.daiyu.android.domain.*
 import app.daiyu.android.model.ResponsesModel
 import app.daiyu.android.model.ResponsesStream
 import app.daiyu.android.storage.ModelSettings
+import app.daiyu.android.platform.AndroidReadOnlyTools
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
@@ -64,6 +65,69 @@ class ResponsesTest:InstrumentationTestCase() {
         assertEquals(connections.size,opened)
         assertTrue(connections.all {it.disconnected})
         return result
+    }
+    fun testDeviceStatusCatalogSchemaAndPersistedContinuation() {
+        for(battery in listOf(false,true)) for(device in listOf(false,true)) {
+            val config=settings.copy(batteryEnabled=battery,deviceStatusEnabled=device)
+            val connection=Connection(frames(completed(message("answer"))))
+            ResponsesModel(config) {connection}.open(emptyList()).next(emptyList()) {}
+            val request=connection.json()
+            val names=if(request.has("tools")) (0 until request.getJSONArray("tools").length()).map {
+                val tool=request.getJSONArray("tools").getJSONObject(it)
+                assertTrue(tool.getBoolean("strict"));val parameters=tool.getJSONObject("parameters")
+                assertFalse(parameters.getBoolean("additionalProperties"));assertEquals(0,parameters.getJSONObject("properties").length())
+                tool.getString("name")
+            }.toSet() else emptySet()
+            assertEquals(config.enabledTools().map {it.toolName}.toSet(),names)
+        }
+        val config=settings.copy(batteryEnabled=false,deviceStatusEnabled=true)
+        val item=call().put("name","device_status")
+        val first=Connection(frames(event("response.output_item.done","item" to item),completed(item)));val second=Connection(frames(completed(message("设备信息已读取"))))
+        var opened=0;val connections=listOf(first,second)
+        val context=testContext(instrumentation.targetContext);context.deleteDatabase("conversations.db")
+        var db=app.daiyu.android.storage.ConversationDatabase(context)
+        try {
+            val c=db.create();val initial=initial().copy(conversationId=c.id)
+            val user=initial.copy(id=MessageId("u-device"),role="user",status=RunStatus.COMPLETED,blocks=listOf(MessageBlock.Text("u","设备状态")))
+            db.send(user,initial)
+            val model=ResponsesModel(config) {connections[opened++]}
+            val result=ChatRunner(model,db,AndroidReadOnlyTools(instrumentation.targetContext,config.enabledTools()),{}).run(initial,listOf(user))
+            assertEquals(RunStatus.COMPLETED,result.status);assertEquals(2,opened)
+            val block=result.blocks.filterIsInstance<MessageBlock.Tool>().single()
+            assertTrue(JSONObject(block.result!!).getBoolean("ok"))
+            val sent=second.json().getJSONArray("input")
+            val output=(0 until sent.length()).map {sent.getJSONObject(it)}.single {it.optString("type")=="function_call_output"}
+            assertEquals(block.invocation.id.value,output.getString("call_id"));assertEquals(block.result,output.getString("output"))
+            db.close();db=app.daiyu.android.storage.ConversationDatabase(context);db.recover()
+            assertEquals(result,db.messages(c.id).last().second);assertEquals(2,opened)
+        } finally {db.close()}
+    }
+    fun testConfirmedDisabledOrInvalidDeviceStatusReturnsSafeResult() {
+        for((enabled,arguments,expected) in listOf(
+            Triple(false,"{}","capability_disabled"),Triple(true,"{} trailing","invalid_arguments"))) {
+            val config=settings.copy(batteryEnabled=false,deviceStatusEnabled=enabled)
+            val item=call().put("name","device_status").put("arguments",arguments)
+            val connections=listOf(Connection(frames(event("response.output_item.done","item" to item),completed(item))),Connection(frames(completed(message("拒绝读取")))))
+            var opened=0
+            val context=object:android.content.ContextWrapper(instrumentation.targetContext) {
+                override fun getSystemService(name:String):Any?=error("must not read disabled or invalid tool")
+                override fun registerReceiver(receiver:android.content.BroadcastReceiver?,filter:android.content.IntentFilter?):android.content.Intent?=error("must not read battery")
+                override fun getFilesDir():java.io.File=error("must not read storage")
+            }
+            val result=ChatRunner(ResponsesModel(config) {connections[opened++]},object:ConversationStore {override fun save(message:Message) {}},
+                AndroidReadOnlyTools(context,config.enabledTools()),{}).run(initial(),emptyList())
+            assertEquals(RunStatus.COMPLETED,result.status)
+            val output=result.blocks.filterIsInstance<MessageBlock.Tool>().single().result!!
+            assertEquals(expected,JSONObject(output).getString("error"));assertEquals(2,opened)
+        }
+    }
+    fun testIncompleteDeviceStatusNeverExecutes() {
+        val config=settings.copy(batteryEnabled=false,deviceStatusEnabled=true)
+        val connection=Connection(frames(event("response.output_item.done","item" to call().put("name","device_status"))))
+        var executions=0
+        val result=ChatRunner(ResponsesModel(config) {connection},object:ConversationStore {override fun save(message:Message) {}},
+            BatteryTool {executions++;"{}"},{}).run(initial(),emptyList())
+        assertEquals(RunStatus.FAILED,result.status);assertEquals(0,executions)
     }
     fun testBaseAddressAndCustomPathUseOneResolvedRequest() {
         for((config,expected) in listOf(

@@ -268,7 +268,7 @@ class MainActivity:Activity() {
         if(row.height<=0 || scroll.height<=0 || root.isLayoutRequested || timeline.isLayoutRequested || scroll.isLayoutRequested) {
             afterScrollLayout {
                 if(row.height>0 && scroll.height>0 && !root.isLayoutRequested && !timeline.isLayoutRequested && !scroll.isLayoutRequested) {
-                    advanceTurnJump(Choreographer.getInstance().frameTimeNanos);true
+                    advanceTurnJump(System.nanoTime());true
                 } else false
             }
             return

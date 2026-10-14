@@ -19,7 +19,7 @@ class SourceTests(unittest.TestCase):
         record = dict(source_sha='a' * 40, run_id='123', attempt='1', application_id='app.daiyu.android')
         run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main', workflow_id=383377276, status='completed')
         jobs = [dict(name='单测、检查与开发包', conclusion='success')]
-        source.verify(env, record, run, jobs, ['scripts/smoke_boot.sh'])
+        source.verify(env, record, run, jobs, ['scripts/smoke_boot.sh', 'docs/重构清单.md'])
         for changed in (['app/build.gradle.kts'], ['core-domain/src/main/Foo.kt'], ['scripts/prepare_signing.py']):
             with self.assertRaises(ValueError):
                 source.verify(env, record, run, jobs, changed)

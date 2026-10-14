@@ -1,5 +1,5 @@
 name: 代鱼构建
-run-name: ${{ inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || '代鱼构建' }}
+run-name: ${{ inputs.mode == 'smoke' && format('代鱼API26补检 {0}', inputs.check_id) || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || '代鱼构建' }}
 on:
   workflow_dispatch:
     inputs:
@@ -9,6 +9,7 @@ on:
         options:
           - build
           - checks
+          - smoke
         default: build
         required: true
       check_scope:
@@ -24,10 +25,19 @@ on:
         description: 调度去重标识（不含凭据）
         type: string
         default: manual
+      source_run_id:
+        description: API26补检使用的既有开发包run ID（不重新打包）
+        type: string
+        default: ''
+      source_sha:
+        description: API26补检开发包的完整源码SHA
+        type: string
+        default: ''
 env:
   SKIP_JDK_VERSION_CHECK: "true"
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: daiyu-${{ inputs.mode }}-${{ github.ref }}
   cancel-in-progress: false
@@ -153,26 +163,31 @@ jobs:
   smoke:
     name: 启动验证 API ${{ matrix.api }}
     needs: build
+    if: always() && github.ref == 'refs/heads/main' && ((inputs.mode == 'build' && needs.build.result == 'success') || inputs.mode == 'smoke')
     runs-on: ubuntu-26.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - api: "26"
-            target: google_apis
-            ram: 4096
-          - api: "37.2"
-            target: google_apis_ps16k
-            ram: 6144
+        include: ${{ fromJSON(inputs.mode == 'smoke' && '[{"api":"26","target":"google_apis","ram":4096}]' || '[{"api":"26","target":"google_apis","ram":4096},{"api":"37.2","target":"google_apis_ps16k","ram":6144}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: 代鱼开发包
           path: delivery
+          run-id: ${{ inputs.mode == 'smoke' && inputs.source_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: 核对补检开发包与源码身份
+        if: inputs.mode == 'smoke'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: python3 scripts/verify_smoke_source.py
       - name: 校验 APK 摘要
         run: cd delivery && sha256sum -c SHA256SUMS
       - name: 启用模拟器加速
@@ -198,6 +213,7 @@ jobs:
       - name: 预启动 ADB
         run: adb start-server
       - name: 安装并检查启动
+        timeout-minutes: 15
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
           EMULATOR_RAM_MB: ${{ matrix.ram }}
@@ -209,7 +225,9 @@ jobs:
           ram-size: ${{ matrix.ram }}M
           cores: 4
           emulator-options: -memory ${{ matrix.ram }} -no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel
+          emulator-boot-timeout: 60
           pre-emulator-launch-script: |
+            bash scripts/install_bounded_adb.sh
             cp "$ANDROID_AVD_HOME/test.ini" smoke/avd.ini
             cp "$ANDROID_AVD_HOME/test.avd/config.ini" smoke/avd-config.ini
             cat smoke/avd.ini

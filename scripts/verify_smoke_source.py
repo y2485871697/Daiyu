@@ -42,7 +42,7 @@ def main():
     source_run = get(base)
     jobs = get(base + '/attempts/1/jobs?per_page=100')['jobs']
     subprocess.run(['git', 'merge-base', '--is-ancestor', env['SOURCE_SHA'], env['GITHUB_SHA']], check=True)
-    changed = subprocess.check_output(['git', 'diff', '--no-renames', '--name-only', env['SOURCE_SHA'], env['GITHUB_SHA']], text=True).splitlines()
+    changed = subprocess.check_output(['git', 'diff', '--no-renames', '--name-only', '-z', env['SOURCE_SHA'], env['GITHUB_SHA']], text=True).split('\0')[:-1]
     record = json.loads(Path('delivery/构建记录.json').read_text())
     verify(env, record, source_run, jobs, changed)
     Path('smoke').mkdir(exist_ok=True)

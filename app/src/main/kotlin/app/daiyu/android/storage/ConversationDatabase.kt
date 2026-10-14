@@ -5,26 +5,31 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import app.daiyu.android.domain.*
+import app.daiyu.android.context.ContextStorage
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 3), ConversationStore {
+class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 4), ConversationStore {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL,role TEXT NOT NULL,blocks TEXT NOT NULL,status TEXT NOT NULL,error TEXT,protocol TEXT NOT NULL)")
         db.execSQL("CREATE INDEX messages_tail ON messages(conversation_id,seq)")
         createComposer(db)
+        ContextStorage.installSchema(db)
     }
     private fun createComposer(db:SQLiteDatabase) {
         db.execSQL("CREATE TABLE composer(id INTEGER PRIMARY KEY CHECK(id=1),draft TEXT NOT NULL)")
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..2 && newVersion==3) {"不支持此数据库版本，保留原数据"}
+        check(oldVersion in 1..3 && newVersion==4) {"不支持此数据库版本，保留原数据"}
         if(oldVersion==1) createComposer(db)
-        db.execSQL("ALTER TABLE conversations ADD COLUMN folder TEXT NOT NULL DEFAULT ''")
-        db.execSQL("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+        if(oldVersion<=2) {
+            db.execSQL("ALTER TABLE conversations ADD COLUMN folder TEXT NOT NULL DEFAULT ''")
+            db.execSQL("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+        }
+        ContextStorage.installSchema(db)
     }
     fun draft():String=readableDatabase.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
     fun draft(text:String) {check(writableDatabase.update("composer",ContentValues().apply {put("draft",text)},"id=1",null)==1)}
@@ -61,7 +66,14 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     }
     fun draft(id: ConversationId, text: String) {check(writableDatabase.update("conversations",ContentValues().apply {put("draft",text)},"id=?",arrayOf(id.value))==1) {"会话不存在"}}
     fun rename(id: ConversationId, title: String) { require(title.isNotBlank());check(writableDatabase.update("conversations",ContentValues().apply {put("title",title)},"id=?",arrayOf(id.value))==1) {"会话不存在"}}
-    fun delete(id: ConversationId) { transaction { db -> db.delete("messages","conversation_id=?",arrayOf(id.value));db.delete("conversations","id=?",arrayOf(id.value)) } }
+    fun delete(id: ConversationId) { transaction { db ->
+        db.execSQL("DELETE FROM neutral_assets WHERE message_id IN (SELECT id FROM messages WHERE conversation_id=?)", arrayOf(id.value))
+        db.delete("context_archives","conversation_id=?",arrayOf(id.value))
+        db.delete("context_branches","conversation_id=?",arrayOf(id.value))
+        db.delete("context_usage","branch_id=?",arrayOf(id.value))
+        db.delete("messages","conversation_id=?",arrayOf(id.value))
+        db.delete("conversations","id=?",arrayOf(id.value))
+    } }
     fun send(user:Message,assistant:Message,newConversation:Boolean=false):Conversation {
         require(user.conversationId==assistant.conversationId && user.runId==assistant.runId)
         require(user.role=="user" && user.status==RunStatus.COMPLETED && assistant.role=="assistant" && assistant.status==RunStatus.RUNNING)

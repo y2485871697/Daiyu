@@ -241,6 +241,9 @@ class ActivityTest:InstrumentationTestCase() {
                 input(current).setText("保留草稿");button(current,"发送").performClick()
                 assertEquals("保留草稿",input(current).text.toString());assertTrue(db.conversations().isEmpty());assertEquals(0,calls.get())
                 button(current,"模型设置").performClick()
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
                 val dialogField=MainActivity::class.java.getDeclaredField("settingsDialog").apply {isAccessible=true}
                 val dialog=dialogField.get(current) as android.app.AlertDialog
                 assertTrue(dialog.isShowing)

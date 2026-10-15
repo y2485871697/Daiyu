@@ -196,7 +196,7 @@ internal object MessagesRequest {
     }
 
     /** Raw items remain authoritative wire data; blocks supply only missing completed results. */
-    private fun replayHistory(owner: Message, validateOnly: Boolean = false): List<JSONObject> {
+    internal fun replayHistory(owner: Message, validateOnly: Boolean = false): List<JSONObject> {
         val items = owner.protocolItems.map { raw ->
             val item = jsonObject(raw, MAX_MESSAGE_CONTAINER_DEPTH)
             require(item.optString("role") in setOf("user", "assistant") &&
@@ -261,19 +261,23 @@ internal object MessagesRequest {
     }
 
     private fun validateContent(message: JSONObject) {
+        // Android JSONObject.getString coerces non-string values.
+        fun JSONObject.strictString(key: String): String =
+            get(key) as? String ?: throw JSONException("Invalid Messages history string")
+        val role = message.strictString("role")
         val content = message.getJSONArray("content")
         require(content.length() > 0) { "Empty Messages protocol content" }
         for (i in 0 until content.length()) {
             val block = content.getJSONObject(i)
-            when (block.getString("type")) {
-                "text" -> block.getString("text")
+            when (block.strictString("type")) {
+                "text" -> block.strictString("text")
                 "tool_use" -> {
-                    require(message.getString("role") == "assistant")
-                    block.getString("id"); block.getString("name"); block.getJSONObject("input")
+                    require(role == "assistant")
+                    block.strictString("id"); block.strictString("name"); block.getJSONObject("input")
                 }
                 "tool_result" -> {
-                    require(message.getString("role") == "user")
-                    block.getString("tool_use_id"); block.getString("content")
+                    require(role == "user")
+                    block.strictString("tool_use_id"); block.strictString("content")
                 }
                 else -> throw IllegalArgumentException("Unsupported Messages history content")
             }

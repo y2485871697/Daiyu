@@ -6,6 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import app.daiyu.android.domain.*
 import app.daiyu.android.context.ContextStorage
+import app.daiyu.android.model.MessagesRequest
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -183,15 +184,17 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             val messages=JSONArray()
             db.rawQuery("SELECT id,conversation_id,run_id,role,blocks,status,error,protocol,history_segments FROM messages ORDER BY seq",null).use {c->while(c.moveToNext()) {
                 val blocks=JSONArray(c.getString(4));validateBlocks(blocks)
-                val protocol=JSONArray(c.getString(7));validateProtocol(protocol)
+                val protocol=JSONArray(c.getString(7))
                 val value=JSONObject().put("id",c.getString(0)).put("conversation_id",c.getString(1)).put("run_id",c.getString(2)).put("role",c.getString(3)).put("blocks",blocks).put("status",c.getString(5)).put("error",c.getString(6) ?: JSONObject.NULL).put("protocol",protocol)
                 val rawSegments=c.getString(8)
                 if (JSONArray(rawSegments).length()!=0) {
                     val segments=MessageHistoryCodec.decode(JSONArray(rawSegments))
                     val projection=Message(MessageId(c.getString(0)),ConversationId(c.getString(1)),RunId(c.getString(2)),c.getString(3),decode(blocks),RunStatus.valueOf(c.getString(5)),c.getString(6),jsonStrings(protocol),historySegments=segments)
                     MessageHistoryCodec.validate(projection)
+                    segments.forEach { validateProtocol(JSONArray(it.protocolItems), it.blocks, it.role) }
                     value.put("history_segments", JSONArray(rawSegments))
                 }
+                validateProtocol(protocol, if (JSONArray(rawSegments).length()==0) decode(blocks) else emptyList(), c.getString(3))
                 reserve(value);messages.put(value)
             }}
             val draft=db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
@@ -225,7 +228,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             val id=identity(string(m,"id"));require(messageIds.add(id));val conversation=identity(string(m,"conversation_id"));require(conversation in ids)
             val role=string(m,"role");require(role in setOf("user","assistant"))
             val status=RunStatus.valueOf(string(m,"status"));val encoded=m.getJSONArray("blocks");validateBlocks(encoded);val blocks=decode(encoded)
-            val protocol=m.getJSONArray("protocol");validateProtocol(protocol)
+            val protocol=m.getJSONArray("protocol")
             blocks.forEach {b->when(b) {
                 is MessageBlock.Text->identity(b.itemId)
                 is MessageBlock.Tool->{require(role=="assistant");identity(b.invocation.id.value);identity(b.invocation.name)}
@@ -235,8 +238,9 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             val segments = if (m.has("history_segments")) {
                 val encodedSegments = m.getJSONArray("history_segments")
                 require(encodedSegments.length() > 0)
-                MessageHistoryCodec.decode(encodedSegments).also { rows -> rows.forEach { validateProtocol(JSONArray(it.protocolItems)) } }
+                MessageHistoryCodec.decode(encodedSegments).also { rows -> rows.forEach { validateProtocol(JSONArray(it.protocolItems), it.blocks, it.role) } }
             } else emptyList()
+            validateProtocol(protocol, if (segments.isEmpty()) blocks else emptyList(), role)
             val restored = Message(MessageId(id),ConversationId(conversation),RunId(identity(string(m,"run_id"))),role,blocks,
                 if(status==RunStatus.RUNNING) RunStatus.INTERRUPTED else status,
                 if(status==RunStatus.RUNNING) "导入时原运行未结束；未自动重发请求或工具" else originalError,jsonStrings(protocol),
@@ -288,10 +292,29 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             }
         }
     }
-    private fun validateProtocol(array:JSONArray) {
+    private fun validateProtocol(array:JSONArray, blocks:List<MessageBlock>, role:String) {
+        if(array.length()==0) return
+        val rawItems=(0 until array.length()).map { array.get(it).also { value -> require(value is String) } as String }
+        val items=rawItems.map { raw ->
+            val item=try {
+                backupObject(raw)
+            } catch(_:IllegalArgumentException) {
+                MessagesRequest.jsonObject(raw, MessagesRequest.MAX_MESSAGE_CONTAINER_DEPTH)
+                    .also { require(!it.has("type")) { "Responses 协议结构过深" } }
+            }
+            if(item.has("type")) item
+            else MessagesRequest.jsonObject(raw, MessagesRequest.MAX_MESSAGE_CONTAINER_DEPTH)
+        }
+        if(items.any { !it.has("type") }) {
+            require(items.all { !it.has("type") }) { "同一协议数组不可混用供应商格式" }
+            // Validate wire history without changing the imported status or the saved raw items.
+            val owner=Message(MessageId("backup-validation"), ConversationId("backup-validation"),
+                RunId("backup-validation"), role, blocks, RunStatus.COMPLETED, protocolItems=rawItems)
+            MessagesRequest.replayHistory(owner, validateOnly = true)
+            return
+        }
         repeat(array.length()) {i->
-            val raw=array.get(i);require(raw is String)
-            val item=backupObject(raw)
+            val item=items[i]
             fun fields(required:Set<String>,optional:Set<String> = emptySet()) {
                 require(item.keys().asSequence().toSet().containsAll(required) && item.keys().asSequence().toSet().all {it in required || it in optional}) {"文本备份不支持此协议字段"}
             }

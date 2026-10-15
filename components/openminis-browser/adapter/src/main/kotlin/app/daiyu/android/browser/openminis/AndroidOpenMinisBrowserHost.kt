@@ -1,6 +1,7 @@
 package app.daiyu.android.browser.openminis
 
 import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.net.http.SslError
 import android.view.ViewGroup
@@ -48,7 +49,13 @@ class AndroidOpenMinisBrowserHost(
     private val delegate = LeaseBrowserHost(
         sessions, ui, Dispatchers.Main,
         { lease, reject, live ->
-            AndroidBlankResource(context.applicationContext, sessions, ui, lease, reject, live, historyApproval, requestOverride, operationTimeoutMillis)
+            val application = context.applicationContext
+            val cache = application.cacheDir.canonicalFile
+            // Normalize the trusted app-cache alias before the pinned producer appends its filename.
+            val browserContext = object : ContextWrapper(application) {
+                override fun getCacheDir() = cache
+            }
+            AndroidBlankResource(browserContext, sessions, ui, lease, reject, live, historyApproval, requestOverride, operationTimeoutMillis)
         },
         createTimeoutMillis, operationTimeoutMillis,
     )

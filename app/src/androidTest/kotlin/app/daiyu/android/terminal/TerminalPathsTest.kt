@@ -66,11 +66,13 @@ class TerminalPathsTest : InstrumentationTestCase() {
         val paths = TerminalPaths(root, "/guest/shared")
         val resolved = paths.resolveAttachment("/guest/shared/notes.txt")
 
-        assertTrue(file.delete())
+        // Keep the original inode alive so replacement cannot reuse its identity.
+        assertTrue(file.renameTo(File(root, "old-notes.txt")))
         file.writeText("replacement")
         val result = paths.validate(resolved)
         assertFalse(result.authorized)
         assertEquals(TerminalPaths.PATH_CHANGED_NOT_AUTHORIZED, result.reason)
+        assertThrows<SecurityException> { resolved.openRead().close() }
     }
 
     fun testRejectsSymlinkAttachmentInsteadOfFollowingIt() {

@@ -96,20 +96,22 @@ class MainActivity:Activity() {
         fun button(label:String,action:()->Unit)=Button(this).apply {text=label;setOnClickListener {guard {check(!controller.dataBusy);action()}}}
         toolbar.addView(button("会话") {chooseConversation()});toolbar.addView(button("新建") {select(null)})
         toolbar.addView(button("模型设置") {modelSettings()});root.addView(toolbar)
-        root.addView(button("备份与导入") {backupMenu()})
-        root.addView(button("技能管理") {
+        val utilities=LinearLayout(this)
+        utilities.addView(button("备份与导入") {backupMenu()})
+        utilities.addView(button("技能管理") {
             skillManagementDialog?.dismiss()
             val owner=controller
             skillManagementDialog=SkillManagementDialog(this) {owner.skillManagement()}.also {it.show()}
         })
-        root.addView(button("搜索会话") {
+        utilities.addView(button("搜索会话") {
             val query=EditText(this).apply {hint="标题、草稿或消息关键词"}
             AlertDialog.Builder(this).setTitle("搜索会话").setView(query).setPositiveButton("搜索") {_,_->guard {chooseConversation(query.text.toString())}}.setNegativeButton("取消",null).show()
         })
-        root.addView(button("按文件夹浏览") {
+        utilities.addView(button("按文件夹浏览") {
             val folders=controller.database.conversations().map {it.folder}.distinct().sorted()
             AlertDialog.Builder(this).setTitle("文件夹").setItems(folders.map {if(it.isEmpty()) "未分类" else it}.toTypedArray()) {_,index->guard {chooseConversation(folder=folders[index])}}.show()
         })
+        root.addView(HorizontalScrollView(this).apply {addView(utilities)})
         status=TextView(this);root.addView(status)
         root.addView(button("加载更早消息") {loadEarlier()})
         root.addView(button("定位用户消息") {chooseUserMessage()})

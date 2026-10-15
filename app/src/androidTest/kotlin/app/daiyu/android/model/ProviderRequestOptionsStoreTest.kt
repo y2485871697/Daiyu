@@ -62,6 +62,7 @@ class ProviderRequestOptionsStoreTest : InstrumentationTestCase() {
         assertEquals(settings(), store.load())
     }
     fun testDecodableButInvalidPolicyRequiresExplicitReplacement() {
+        val store = this.store
         val prefs = context.getSharedPreferences("model-settings", 0)
         val cases = listOf(
             ProviderRequestOptions("""{"input":[]}""") to ProviderProtocol.RESPONSES,
@@ -98,6 +99,7 @@ class ProviderRequestOptionsStoreTest : InstrumentationTestCase() {
     }
 
     fun testRebindAndUnknownProtocolEditingPreservePolicyWithoutCredential() {
+        val store = this.store
         val options = ProviderRequestOptions("""{"temperature":0.2}""", GptSpeedMode.FAST)
         store.save(settings().copy(requestOptions = options))
         val prefs = context.getSharedPreferences("model-settings", 0)

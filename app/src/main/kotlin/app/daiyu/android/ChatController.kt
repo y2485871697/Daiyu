@@ -32,6 +32,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 
 class ChatApplication:Application() {
+    val shizuku by lazy { app.daiyu.android.shizuku.ShizukuAuthorization(this) }
     lateinit var controller:ChatController
     override fun onCreate() {super.onCreate();controller=ChatController(this)}
 }

@@ -21,7 +21,7 @@ androidComponents.onVariants { variant ->
 }
 
 android {
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; aidl = true }
     useLibrary("android.test.runner")
     useLibrary("android.test.base")
     useLibrary("android.test.mock")
@@ -74,6 +74,8 @@ android {
 kotlin { jvmToolchain(27) }
 dependencies {
     implementation(project(":core-domain"))
+    implementation("dev.rikka.shizuku:api:13.1.5")
+    implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.4-rc01")
     implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.4-rc01")
     implementation("top.yukonga.miuix.kmp:miuix-preference-android:0.9.4-rc01")

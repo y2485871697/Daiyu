@@ -5,12 +5,16 @@ import android.content.SharedPreferences
 import android.net.Uri
 import app.daiyu.android.backup.NeutralBackupService
 import app.daiyu.android.context.ContextService
+import app.daiyu.android.context.ContextRegistry
+import app.daiyu.android.context.ContextRegistryScope
+import app.daiyu.android.integration.tools.*
+import app.daiyu.android.domain.tools.SessionCapabilities
+import app.daiyu.android.domain.tools.ToolLedger
 import android.os.Handler
 import android.os.Looper
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.RunnerOptions
 import app.daiyu.android.model.ModelFactory
-import app.daiyu.android.platform.AndroidReadOnlyTools
 import app.daiyu.android.storage.*
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -32,6 +36,7 @@ class ChatController internal constructor(private val application:Application,
     private var preparing=false
     private var recoveryFailed=false
     private var runtimeStore:SQLiteRuntimeStore?=null
+    private val toolLedger = ToolLedger(SQLiteToolLedgerStore(database))
     private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
     internal val selections=mutableMapOf<ConversationId?,Pair<Int,Int>>()
@@ -83,22 +88,39 @@ class ChatController internal constructor(private val application:Application,
         val run=RunId(UUID.randomUUID().toString())
         val user=Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
         val assistant=Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
-        val prior=try {if(conversation==null) emptyList() else ContextService(application,database).prepareSend(conversationId).messages} catch(_:Exception) {problem="读取历史失败；草稿保留，未发起网络请求";notifyChanged();return null}
+        val contextService = ContextService(application, database)
+        val preparedContext = try {
+            if (conversation == null) null else contextService.prepareSend(conversationId)
+        } catch (_: Exception) {
+            problem="读取历史失败；草稿保留，未发起网络请求";notifyChanged();return null
+        }
+        val prior = preparedContext?.messages.orEmpty()
         val preparedModel=try {model(config)} catch (_:Exception) {
             problem="模型初始化失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
+        val owned = try {
+            val contextTools = ScopedContextTools.create(
+                ContextRegistry(contextService), ContextRegistryScope(conversationId),
+                run, preparedContext?.archiveId)
+            val catalog = AndroidToolRegistry.create(application, contextTools).snapshot()
+            val capabilities = SessionCapabilities(run.value,
+                AndroidToolRegistry.capabilitiesFor(config.enabledTools()) + contextTools.map { it.definition.capability })
+            val tools = CatalogModelBridge(catalog, capabilities, toolLedger, conversationId, run)
+            ChatRunner(preparedModel, database, tools,
+                RunnerOptions(runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools)) {
+                synchronized(this) {
+                    if(!closed && active?.id==assistant.id && active?.runId==run && active?.conversationId==conversationId &&
+                        it.id==assistant.id && it.runId==run && it.conversationId==conversationId) {active=it;notifyChanged()}
+                }
+            }
+        } catch (_: Exception) {
+            problem="运行准备失败；草稿保留，未发起网络请求";notifyChanged();return null
+        }
+        if (closed) return null
         val saved=try {
             database.send(user,assistant,conversation==null)
         } catch (_:Exception) {problem="发送内容保存失败；草稿保留，未发起网络请求";notifyChanged();return null}
         problem=null;active=assistant
-        val tools=config.enabledTools()
-        val owned=ChatRunner(ModelPort { history -> preparedModel.open(history,tools) },database,AndroidReadOnlyTools(application,tools),
-            RunnerOptions(runtimeStore=checkNotNull(runtimeStore))) {
-            synchronized(this) {
-                if(!closed && active?.id==assistant.id && active?.runId==run && active?.conversationId==conversationId &&
-                    it.id==assistant.id && it.runId==run && it.conversationId==conversationId) {active=it;notifyChanged()}
-            }
-        }
         runner=owned
         executor.execute {
             val result=owned.run(assistant,prior+user)

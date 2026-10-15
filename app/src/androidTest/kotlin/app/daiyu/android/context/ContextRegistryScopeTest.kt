@@ -235,4 +235,50 @@ class ContextRegistryScopeTest : InstrumentationTestCase() {
             assertFalse("scope" in keys); assertFalse("conversation_id" in keys); assertFalse("owner" in keys)
         }
     }
+    fun testCentralContextCatalogKeepsSchemaAndRunOnlyArchiveRestriction() {
+        val a=seed()
+        fun tools(scope:ContextRegistryScope, locator:String?=a.archive)=
+            app.daiyu.android.integration.tools.ScopedContextTools.create(registry,scope,a.runs.first(),locator)
+        val full=tools(ContextRegistryScope(a.owner))
+        assertEquals(setOf("context_archive_page","context_usage"),full.map {it.definition.name}.toSet())
+        val archive=full.single {it.definition.name=="context_archive_page"}.definition
+        val parameters=JSONObject(archive.schema.jsonSchema())
+        assertFalse(parameters.getBoolean("additionalProperties"))
+        assertEquals(1,parameters.getJSONArray("required").length())
+        assertEquals("archive_id",parameters.getJSONArray("required").getString(0))
+        val properties=parameters.getJSONObject("properties")
+        assertEquals(1,properties.getJSONObject("archive_id").getInt("minLength"))
+        assertEquals(200,properties.getJSONObject("archive_id").getInt("maxLength"))
+        assertEquals(0,properties.getJSONObject("offset").getInt("minimum"))
+        assertEquals(200,properties.getJSONObject("limit").getInt("maximum"))
+        for(scope in listOf(ContextRegistryScope(a.owner,authorizedRuns=emptySet()),
+            ContextRegistryScope(a.owner,authorizedRuns=setOf(ContextRunOwner(a.owner,a.runs.first()))))) {
+            assertEquals(listOf("context_usage"),tools(scope).map {it.definition.name})
+        }
+        assertEquals(listOf("context_usage"),tools(ContextRegistryScope(a.owner),null).map {it.definition.name})
+    }
+    fun testCentralScopedContextUsesOriginalOwnerChecksAndWholeBatchValidation() {
+        val a=seed();val b=seed()
+        val registryTools=app.daiyu.android.integration.tools.ScopedContextTools.create(
+            registry,ContextRegistryScope(a.owner,authorizedRuns=setOf(ContextRunOwner(a.owner,a.runs.first()))),
+            a.runs.first(),a.archive)
+        val central=app.daiyu.android.domain.tools.ToolRegistry()
+        registryTools.forEach {central.register(it)}
+        val catalog=central.snapshot()
+        val session=app.daiyu.android.domain.tools.SessionCapabilities("scoped-test",catalog.definitions.map {it.capability}.toSet())
+        val dispatcher=app.daiyu.android.domain.tools.ToolDispatcher(catalog,session,
+            app.daiyu.android.domain.tools.ToolLedger(app.daiyu.android.domain.tools.InMemoryToolLedgerStore()))
+        val task=app.daiyu.android.domain.tools.TaskAuthorization("scoped-test","task")
+        fun execute(id:String,args:JSONObject)=dispatcher.dispatch(task,listOf(
+            ToolInvocation(ToolCallId(id),"context_usage",args.toString()))).single().outcome
+        val permitted=execute("permitted",usage(a.owner,a.runs.first())) as app.daiyu.android.domain.tools.DispatchOutcome.Confirmed
+        assertFalse(permitted.isError);assertTrue(JSONObject(permitted.payload).getBoolean("ok"))
+        for((index,args) in listOf(usage(a.owner),usage(a.owner,a.runs.last()),usage(b.owner,b.runs.first())).withIndex()) {
+            val receipt=execute("denied-$index",args) as app.daiyu.android.domain.tools.DispatchOutcome.Confirmed
+            assertTrue(receipt.isError);denied(JSONObject(receipt.payload))
+        }
+        val invalid=execute("invalid",usage(a.owner,a.runs.first()).put("scope",JSONObject()))
+        assertTrue(invalid is app.daiyu.android.domain.tools.DispatchOutcome.NotExecuted)
+    }
+
 }

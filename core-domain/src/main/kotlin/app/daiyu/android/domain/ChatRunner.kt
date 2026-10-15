@@ -3,6 +3,8 @@ package app.daiyu.android.domain
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.LockSupport
 import app.daiyu.android.domain.runtime.*
+import app.daiyu.android.domain.tools.DispatchOutcome
+import app.daiyu.android.domain.tools.jsonQuote
 
 /** One owner thread applies events. Cancellation only signals and closes transport. */
 class ChatRunner private constructor(private val model: ModelPort, private val store: ConversationStore,
@@ -437,7 +439,55 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 synchronized(terminalLock) { setPhase(ExecutionPhase.TOOL_EXECUTING) }
                 checkpoint()
                 val batch = options.batchExecutor
-                if (batch != null) {
+                val receiptBatch = options.receiptBatchExecutor
+                if (receiptBatch != null) {
+                    pending.forEach { records[it.id] = ToolRecord(it, ToolDisposition.IN_FLIGHT) }
+                    checkpoint()
+                    if (stopped.get() || terminalReserved) throw InterruptedException()
+                    val receipts = try {
+                        receiptBatch.execute(current, pending.toList(), stopped::get).also {
+                            check(it.map { receipt -> receipt.callId } == pending.map { call -> call.id }) {
+                                "批次结果身份或顺序错误"
+                            }
+                        }
+                    } catch (_: Exception) {
+                        pending.forEach {
+                            records[it.id] = ToolRecord(it, ToolDisposition.UNKNOWN)
+                            unknownOperations.add(it.name to it.arguments)
+                        }
+                        checkpoint()
+                        throw UnknownToolOutcomeException()
+                    }
+                    val known = linkedMapOf<ToolCallId, String>()
+                    var uncertain = false
+                    pending.zip(receipts).forEach { (call, receipt) ->
+                        when (val outcome = receipt.outcome) {
+                            is DispatchOutcome.Confirmed -> {
+                                records[call.id] = ToolRecord(call,
+                                    if (outcome.isError) ToolDisposition.FAILED else ToolDisposition.SUCCEEDED,
+                                    outcome.payload)
+                                known[call.id] = outcome.payload
+                            }
+                            is DispatchOutcome.NotExecuted -> {
+                                val result = "{\"ok\":false,\"executed\":false,\"error\":" + jsonQuote(outcome.code) + "}"
+                                records[call.id] = ToolRecord(call, ToolDisposition.NOT_EXECUTED, result)
+                                known[call.id] = result
+                            }
+                            is DispatchOutcome.Unknown -> {
+                                records[call.id] = ToolRecord(call, ToolDisposition.UNKNOWN)
+                                unknownOperations.add(call.name to call.arguments)
+                                uncertain = true
+                            }
+                        }
+                    }
+                    results.putAll(known)
+                    outputs = known.map { ToolOutput(it.key, it.value) }
+                    apply(current.copy(blocks = current.blocks.map {
+                        if (it is MessageBlock.Tool && it.invocation.id in known)
+                            it.copy(result = known.getValue(it.invocation.id)) else it
+                    }))
+                    if (uncertain) throw UnknownToolOutcomeException()
+                } else if (batch != null) {
                     pending.forEach { records[it.id] = ToolRecord(it, ToolDisposition.IN_FLIGHT) }
                     checkpoint()
                     if (stopped.get() || terminalReserved) throw InterruptedException()

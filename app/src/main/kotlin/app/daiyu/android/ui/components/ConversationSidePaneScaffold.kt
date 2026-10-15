@@ -150,7 +150,7 @@ private object DrawerMetrics {
 }
 
 @Composable
-fun ConversationSidePaneScaffold(
+internal fun ConversationSidePaneScaffold(
     state: ConversationPaneUiState,
     visible: Boolean,
     backHandlerEnabled: Boolean,

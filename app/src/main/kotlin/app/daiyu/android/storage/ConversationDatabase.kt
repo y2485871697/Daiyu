@@ -10,7 +10,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 6), ConversationStore {
+class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 7), ConversationStore {
     internal val runtimeLockFile = java.io.File(context.getDatabasePath("conversations.db").canonicalPath + ".runtime-owner")
     /** A message row keeps the v4 columns as the legacy projection.  This column is an
      * append-only, lossless history of the provider attempts.  Empty means an old row and
@@ -24,6 +24,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL,role TEXT NOT NULL,blocks TEXT NOT NULL,status TEXT NOT NULL,error TEXT,protocol TEXT NOT NULL,history_segments TEXT NOT NULL DEFAULT '[]')")
         db.execSQL("CREATE INDEX messages_tail ON messages(conversation_id,seq)")
+        createUiFolders(db)
         createComposer(db)
         ContextStorage.installSchema(db)
         SQLiteRuntimeStore.installSchema(db)
@@ -33,7 +34,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..5 && newVersion==6) {"不支持此数据库版本，保留原数据"}
+        check(oldVersion in 1..6 && newVersion==7) {"不支持此数据库版本，保留原数据"}
         if(oldVersion==1) createComposer(db)
         if(oldVersion<=2) {
             db.execSQL("ALTER TABLE conversations ADD COLUMN folder TEXT NOT NULL DEFAULT ''")
@@ -42,6 +43,11 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         if(oldVersion<=4) db.execSQL("ALTER TABLE messages ADD COLUMN history_segments TEXT NOT NULL DEFAULT '[]'")
         ContextStorage.installSchema(db)
         SQLiteRuntimeStore.installSchema(db)
+        createUiFolders(db)
+    }
+    private fun createUiFolders(db: SQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS conversation_folders(name TEXT PRIMARY KEY NOT NULL CHECK(length(name)>0 AND length(name)<=200))")
+        db.execSQL("INSERT OR IGNORE INTO conversation_folders(name) SELECT DISTINCT folder FROM conversations WHERE folder<>''")
     }
     fun draft():String=readableDatabase.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
     fun draft(text:String) {check(writableDatabase.update("composer",ContentValues().apply {put("draft",text)},"id=1",null)==1)}

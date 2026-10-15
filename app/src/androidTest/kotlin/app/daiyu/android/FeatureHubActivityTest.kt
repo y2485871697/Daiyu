@@ -8,6 +8,8 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.ScrollView
 import android.widget.TextView
+import app.daiyu.android.ui.FeatureDetails
+import app.daiyu.android.ui.FeatureControlKind
 import app.daiyu.android.ui.FeatureCatalog
 import java.util.concurrent.TimeUnit
 
@@ -33,6 +35,50 @@ class FeatureHubActivityTest : android.test.InstrumentationTestCase() {
         lateinit var window: AlertDialog
         controlMain { window = dialog() }
         return window
+    }
+    private val entries get() = FeatureCatalog.groups.flatMap { it.entries }
+    private fun tagged(window: AlertDialog, tag: String) = views(window.window!!.decorView).single { it.tag == tag }
+    private fun action(window: AlertDialog, id: String) = tagged(window, "feature-control:$id:open") as Button
+    private fun walkDetails(window: AlertDialog, verify: () -> Unit = {}) {
+        entries.forEach { entry ->
+            controlMain {
+                assertTrue(slot(window, entry.id).performClick())
+                assertTrue(window.isShowing)
+                val body = tagged(window, "feature-detail:${entry.id}")
+                val expected = FeatureDetails.sections(entry.id)
+                val all = views(window.window!!.decorView)
+                assertFalse(all.any { it.tag?.toString()?.startsWith("feature:") == true })
+                assertEquals(expected.sumOf { it.controls.size }, all.count { it.tag?.toString()?.startsWith("feature-control:") == true })
+                assertTrue(views(body).filterIsInstance<EditText>().isEmpty())
+                expected.forEach { section ->
+                    assertEquals(section.title, (tagged(window, "feature-section:${entry.id}:${section.id}") as TextView).text.toString())
+                    section.controls.forEach { control ->
+                        val row = tagged(window, "feature-control:${entry.id}:${control.id}") as TextView
+                        assertEquals(control.title, row.text.toString())
+                        assertEquals(control.kind == FeatureControlKind.ACTION, row is Button)
+                        if (control.kind != FeatureControlKind.ACTION) {
+                            val parent = row.parent as ViewGroup
+                            val label = parent.getChildAt(parent.indexOfChild(row) + 1) as TextView
+                            assertEquals(control.kind.label, label.text.toString())
+                        }
+                        if (control.route == null) {
+                            assertFalse(row.hasOnClickListeners()); assertFalse(row.performClick())
+                        } else assertTrue(row.hasOnClickListeners())
+                    }
+                }
+                assertFalse(all.filterIsInstance<TextView>().any { text ->
+                    listOf("尚未接入", "未实现", "占位", "开发中").any { it in text.text.toString() }
+                })
+                verify()
+            }
+            instrumentation.waitForIdleSync()
+            controlMain {
+                assertTrue(window.isShowing); verify()
+                window.getButton(AlertDialog.BUTTON_NEUTRAL).performClick()
+                assertNotNull(tagged(window, "feature-overview"))
+                assertEquals(entries.size, views(window.window!!.decorView).count { it.tag?.toString()?.startsWith("feature:") == true })
+            }
+        }
     }
     override fun setUp() {
         super.setUp()
@@ -75,20 +121,11 @@ class FeatureHubActivityTest : android.test.InstrumentationTestCase() {
         val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
         val window = openHub()
-        controlMain {
-            FeatureCatalog.groups.flatMap { it.entries }.filter { it.route == null }.forEach { entry ->
-                val button = slot(window, entry.id)
-                assertFalse(entry.id, button.hasOnClickListeners())
-                assertFalse(entry.id, button.performClick())
-                assertTrue(window.isShowing)
-            }
-        }
-        instrumentation.waitForIdleSync()
-        controlMain {
-            assertTrue(window.isShowing)
+        walkDetails(window) {
             assertEquals("Gemini UI 草稿", input().text.toString())
             assertNull(fixture.controller.active)
         }
+        controlMain { assertTrue(window.isShowing) }
         assertEquals(0, fixture.opens.get())
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(settings, fixture.settings.loadForEditing().settings)
@@ -97,7 +134,7 @@ class FeatureHubActivityTest : android.test.InstrumentationTestCase() {
         controlMain { input().setText("原草稿") }
         val settings = fixture.settings.loadForEditing().settings
         val window = openHub()
-        controlMain { slot(window, "P02").performClick() }
+        controlMain { slot(window, "P02").performClick(); assertTrue(window.isShowing); action(window, "P02").performClick() }
         instrumentation.waitForIdleSync()
         controlMain {
             assertFalse(window.isShowing)
@@ -115,7 +152,8 @@ class FeatureHubActivityTest : android.test.InstrumentationTestCase() {
         val oldActivity = checkNotNull(activity)
         val window = openHub()
         lateinit var oldButton: Button
-        controlMain { oldButton = slot(window, "R03") }
+        lateinit var oldAction: Button
+        controlMain { oldButton = slot(window, "R03"); oldButton.performClick(); oldAction = action(window, "R03") }
         val monitor = instrumentation.addMonitor(MainActivity::class.java.name, null, false)
         try {
             controlMain { checkNotNull(activity).recreate() }
@@ -126,7 +164,7 @@ class FeatureHubActivityTest : android.test.InstrumentationTestCase() {
             instrumentation.waitForIdleSync()
         } finally { instrumentation.removeMonitor(monitor) }
         controlMain {
-            assertFalse(window.isShowing); oldButton.performClick()
+            assertFalse(window.isShowing); oldButton.performClick(); oldAction.performClick()
         }
         instrumentation.waitForIdleSync()
         controlMain {
@@ -138,32 +176,84 @@ class FeatureHubActivityTest : android.test.InstrumentationTestCase() {
         assertEquals(0, fixture.opens.get())
     }
     fun testChatControlNavigationDoesNotSendPauseOrStopAnActiveRun() {
-        val session = fixture.session()
+        val session = fixture.session(holdSeconds = 120)
         controlMain { input().setText("运行正文"); mainButton("发送").performClick(); input().setText("保留追加草稿") }
         assertTrue(session.entered.await(5, TimeUnit.SECONDS))
         val owner = checkNotNull(fixture.controller.active)
-        val window = openHub()
-        controlMain {
-            FeatureCatalog.groups.flatMap { it.entries }.filter { it.route == null }.forEach { entry ->
-                assertFalse(entry.id, slot(window, entry.id).performClick())
-            }
-        }
-        instrumentation.waitForIdleSync()
-        controlMain {
-            assertTrue(window.isShowing)
+        val unchanged: () -> Unit = {
             assertEquals(owner.id, fixture.controller.active!!.id)
             assertFalse(fixture.controller.runState(owner)!!.pauseRequested)
             assertEquals(1L, session.cancelled.count)
             assertEquals("保留追加草稿", input().text.toString())
-            slot(window, "P13").performClick()
+            assertEquals(1, fixture.opens.get())
+        }
+        try {
+            val window = openHub()
+            walkDetails(window, unchanged)
+            controlMain { window.dismiss() }
+            listOf("P11", "P12", "P13", "P23").forEach { id ->
+                val nav = openHub()
+                controlMain { slot(nav, id).performClick(); unchanged(); assertTrue(nav.isShowing); action(nav, id).performClick() }
+                instrumentation.waitForIdleSync()
+                controlMain { assertFalse(nav.isShowing); unchanged() }
+            }
+        } finally { session.release.countDown() }
+        awaitControl("original run finishes") { fixture.controller.active == null }
+        assertEquals(1, fixture.opens.get())
+    }
+    fun testButtonsFromPreviousDetailPageAreInert() {
+        val window = openHub()
+        controlMain {
+            val entry = slot(window, "R03"); entry.performClick()
+            val oldOpen = action(window, "R03")
+            window.getButton(AlertDialog.BUTTON_NEUTRAL).performClick()
+            entry.performClick(); oldOpen.performClick()
+            assertTrue(window.isShowing); assertNotNull(tagged(window, "feature-overview"))
+            slot(window, "P01").performClick(); oldOpen.performClick()
+            assertTrue(window.isShowing); assertNotNull(tagged(window, "feature-detail:P01"))
+            window.dismiss()
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+
+    private fun awaitSemanticText(text: String) {
+        val deadline = android.os.SystemClock.uptimeMillis() + 5000
+        while (android.os.SystemClock.uptimeMillis() < deadline) {
+            val root = instrumentation.uiAutomation.rootInActiveWindow
+            if (root?.findAccessibilityNodeInfosByText(text)?.any { it.isVisibleToUser } == true) return
+            android.os.SystemClock.sleep(50)
+        }
+        fail("Original Compose text missing: $text")
+    }
+    fun testOriginalManageAndUsagePagesOpenAndBackRestoresRealChatDraft() {
+        controlMain { input().setText("原聊天草稿") }
+        listOf("P22" to R.string.history_page_title, "P21" to R.string.stats_page_title).forEach { (id, title) ->
+            val window = openHub()
+            controlMain { slot(window, id).performClick(); action(window, id).performClick() }
+            instrumentation.waitForIdleSync()
+            awaitSemanticText(instrumentation.targetContext.getString(title))
+            controlMain { assertFalse(window.isShowing); checkNotNull(activity).onBackPressedDispatcher.onBackPressed() }
+            instrumentation.waitForIdleSync()
+            controlMain { assertEquals("原聊天草稿", input().text.toString()) }
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testOriginalSidebarOpensOverChatAndBackDoesNotLoseOrSendDraft() {
+        controlMain { input().setText("抽屉草稿") }
+        val window = openHub()
+        controlMain { slot(window, "P07").performClick(); action(window, "P07").performClick() }
+        instrumentation.waitForIdleSync()
+        awaitSemanticText(instrumentation.targetContext.getString(R.string.app_name))
+        controlMain {
+            assertFalse(window.isShowing)
+            val sidebar = MainActivity::class.java.getDeclaredField("sidebarVisible\$delegate")
+                .apply { isAccessible = true }.get(activity) as androidx.compose.runtime.State<*>
+            assertEquals(true, sidebar.value)
+            checkNotNull(activity).onBackPressedDispatcher.onBackPressed()
         }
         instrumentation.waitForIdleSync()
-        controlMain {
-            assertFalse(window.isShowing); assertEquals(owner.id, fixture.controller.active!!.id)
-            assertFalse(fixture.controller.runState(owner)!!.pauseRequested)
-            assertEquals(1L, session.cancelled.count); assertEquals("保留追加草稿", input().text.toString())
-        }
-        assertEquals(1, fixture.opens.get())
-        session.release.countDown(); awaitControl("original run finishes") { fixture.controller.active == null }
+        controlMain { assertEquals("抽屉草稿", input().text.toString()); assertTrue(input().isEnabled) }
+        assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
     }
 }

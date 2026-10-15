@@ -32,19 +32,19 @@ internal class RunControlFixture(base:Context) : AutoCloseable {
             }
         })
     }
-    class Session(val text:String,held:Boolean) : ModelSession {
+    class Session(val text:String,held:Boolean,private val holdSeconds:Long=10) : ModelSession {
         val entered=CountDownLatch(1)
         val release=CountDownLatch(if(held) 1 else 0)
         val cancelled=CountDownLatch(1)
         val sink=AtomicReference<((ModelEvent)->Unit)?>()
         override fun next(outputs:List<ToolOutput>,sink:(ModelEvent)->Unit) {
             this.sink.set(sink);entered.countDown()
-            check(release.await(10,TimeUnit.SECONDS))
+            check(release.await(holdSeconds,TimeUnit.SECONDS))
             sink(ModelEvent.TextDelta("body",text))
         }
         override fun cancel() {cancelled.countDown();release.countDown()}
     }
-    fun session(text:String="answer",held:Boolean=true)=Session(text,held).also {
+    fun session(text:String="answer",held:Boolean=true,holdSeconds:Long=10)=Session(text,held,holdSeconds).also {
         synchronized(queued) {sessions.add(it);queued.addLast(it)}
     }
     override fun close() {

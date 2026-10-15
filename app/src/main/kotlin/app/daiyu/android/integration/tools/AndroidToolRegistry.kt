@@ -10,14 +10,17 @@ import org.json.JSONObject
 
 /** Central registration only, not replacements for existing domain backends or ModelPort. */
 object AndroidToolRegistry {
+    const val ASK_USER_CAPABILITY = AskUserPlanTool.CAPABILITY
     const val BATTERY_CAPABILITY = "device.battery.read"
     const val DEVICE_STATUS_CAPABILITY = "device.status.read"
 
     fun capabilitiesFor(allowed: Set<ReadOnlyTool>): Set<String> = allowed.map { capability(it) }.toSet()
 
-    fun create(context: Context, additionalTools: Iterable<RegisteredTool> = emptyList()): ToolRegistry {
+    fun create(context: Context, additionalTools: Iterable<RegisteredTool> = emptyList(),
+        enableUserBarrier: Boolean = false): ToolRegistry {
         val registry = ToolRegistry()
         registerReadOnlyTools(registry, context)
+        if (enableUserBarrier) registry.register(AskUserPlanTool)
         additionalTools.forEach { registry.register(it) }
         return registry
     }

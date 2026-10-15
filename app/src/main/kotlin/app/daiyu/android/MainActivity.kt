@@ -365,8 +365,20 @@ class MainActivity:Activity() {
                 val details=TextView(this).apply {text=getString(R.string.tool_details,block.invocation.arguments,block.result ?: getString(R.string.tool_waiting));visibility=if(block.invocation.id in expandedTools) View.VISIBLE else View.GONE;setTextIsSelectable(true)}
                 row.addView(Button(this).apply {text=getString(R.string.tool_header,block.invocation.name,getString(if(block.result!=null) R.string.tool_has_result else R.string.tool_pending));setOnClickListener {if(details.visibility==View.GONE) {expandedTools.add(block.invocation.id);details.visibility=View.VISIBLE} else {expandedTools.remove(block.invocation.id);details.visibility=View.GONE}}})
                 row.addView(details)
+                controller.questionProjection(message,block.invocation)?.let {question ->
+                    row.addView(app.daiyu.android.question.QuestionCardView(this).apply {
+                        val binding=question.binding
+                        if(binding!=null) bind(question.identity,question.record,question.canAnswer,binding)
+                        else bind(question.identity,question.record,false) {_,_,complete ->
+                            complete(app.daiyu.android.question.QuestionCardView.Reply.STOPPED)
+                        }
+                    })
+                }
             }
         } }
+        if(controller.canRetryQuestionCleanup(message)) row.addView(Button(this).apply {
+            text="重试停止清理";setOnClickListener {controller.stop(message)}
+        })
         message.error?.let {row.addView(TextView(this).apply {text=it})}
         row.addView(Button(this).apply {text="复制";setOnClickListener {
             val text=message.blocks.joinToString("\n") {when(it) {is MessageBlock.Text->it.text;is MessageBlock.Tool->"${it.invocation.name}: ${it.result ?: "未完成"}"}}

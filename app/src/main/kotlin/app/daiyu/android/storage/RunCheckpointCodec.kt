@@ -3,6 +3,7 @@ package app.daiyu.android.storage
 import app.daiyu.android.context.ArchiveCodec
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
+import app.daiyu.android.domain.question.ASK_USER_TOOL_NAME
 import org.json.JSONArray
 import org.json.JSONObject
 import org.json.JSONTokener
@@ -17,7 +18,7 @@ internal object RunCheckpointCodec {
     fun encode(value: RunCheckpoint): String {
         validate(value)
         fun messages(rows: List<Message>) = JSONArray(String(ArchiveCodec.encode(rows), Charsets.UTF_8))
-        return JSONObject().put("version", 1).put("message", messages(listOf(value.message)))
+        return JSONObject().put("version", 2).put("message", messages(listOf(value.message)))
             .put("history", messages(value.history)).put("phase", value.phase.name)
             .put("tools", JSONArray().apply { value.tools.forEach { record -> put(JSONObject()
                 .put("id", record.invocation.id.value).put("name", record.invocation.name)
@@ -27,7 +28,9 @@ internal object RunCheckpointCodec {
                 .put("id", it.callId.value).put("output", it.output)) } })
             .put("supplements", messages(value.supplements)).put("round", value.round)
             .put("request_unconfirmed", value.requestUnconfirmed).put("message_reconciled", value.messageReconciled)
-            .put("owner", value.owner).put("revision", value.revision).toString().also {
+            .put("owner", value.owner).put("revision", value.revision)
+            .put("pending", value.pending?.let { JSONObject().put("call_id", it.callId.value) }
+                ?: JSONObject.NULL).toString().also {
                 checkEncodedSize(it.toByteArray(Charsets.UTF_8).size, value.message.status == RunStatus.RUNNING)
             }
     }
@@ -36,9 +39,16 @@ internal object RunCheckpointCodec {
         val parser = JSONTokener(text)
         val value = parser.nextValue()
         require(value is JSONObject && parser.nextClean() == '\u0000')
-        fields(value, "version", "message", "history", "phase", "tools", "outputs", "supplements", "round",
+        val version = integer(value, "version")
+        require(version == 1L || version == 2L)
+        val keys = arrayOf("version", "message", "history", "phase", "tools", "outputs", "supplements", "round",
             "request_unconfirmed", "message_reconciled", "owner", "revision")
-        require(integer(value, "version") == 1L)
+        fields(value, *(if (version == 1L) keys else keys + "pending"))
+        val pending = if (version == 1L || value.isNull("pending")) null else {
+            val p = value.get("pending"); require(p is JSONObject)
+            fields(p, "call_id")
+            PendingToolCheckpoint(ToolCallId(string(p, "call_id")))
+        }
         fun messages(key: String) = ArchiveCodec.decode(value.getJSONArray(key).toString().toByteArray(Charsets.UTF_8))
         val message = messages("message").single()
         val tools = value.getJSONArray("tools")
@@ -53,7 +63,7 @@ internal object RunCheckpointCodec {
             (0 until outputs.length()).map { i -> val o = outputs.getJSONObject(i)
                 fields(o, "id", "output"); ToolOutput(ToolCallId(string(o, "id")), string(o, "output")) },
             messages("supplements"), round.toInt(), boolean(value, "request_unconfirmed"), boolean(value, "message_reconciled"),
-            string(value, "owner"), integer(value, "revision")).also(::validate)
+            string(value, "owner"), integer(value, "revision"), pending).also(::validate)
     }
     private fun validate(value: RunCheckpoint) {
         require(value.owner.isNotBlank() && value.owner.length <= 200 && value.revision in 1 until Long.MAX_VALUE)
@@ -70,6 +80,13 @@ internal object RunCheckpointCodec {
         value.tools.forEach { require(it.invocation.id.value.isNotBlank() && it.invocation.id.value.length <= 200 &&
             it.invocation.name.isNotBlank() && it.invocation.name.length <= 200)
             require(hasResult(it.disposition) == (it.result != null)) }
+        require((value.phase == ExecutionPhase.WAITING_USER) == (value.pending != null))
+        value.pending?.let { pending ->
+            val record = value.tools.singleOrNull { it.invocation.id == pending.callId }
+            require(record != null && record.invocation.name == ASK_USER_TOOL_NAME &&
+                record.disposition == ToolDisposition.IN_FLIGHT)
+            require(value.tools.count { it.disposition == ToolDisposition.IN_FLIGHT } == 1)
+        }
         require(value.outputs.map { it.callId }.distinct().size == value.outputs.size)
         value.outputs.forEach { out -> require(value.tools.any { it.invocation.id == out.callId &&
             hasResult(it.disposition) && it.result == out.output }) }

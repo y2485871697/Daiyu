@@ -14,6 +14,12 @@ import android.os.Handler
 import android.os.Looper
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.RunnerOptions
+import app.daiyu.android.domain.question.*
+import app.daiyu.android.domain.tools.BarrierOffer
+import app.daiyu.android.domain.tools.ExecutionReceipt
+import app.daiyu.android.question.*
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import app.daiyu.android.domain.runtime.ExecutionState
 import app.daiyu.android.skills.SkillRunSession
 import app.daiyu.android.skills.SkillToolRegistry
@@ -42,6 +48,56 @@ class ChatController internal constructor(private val application:Application,
     private var preparing=false
     private var recoveryFailed=false
     private var runtimeStore:SQLiteRuntimeStore?=null
+    private var questionStore:PrivateQuestionStore?=null
+    private val closeDone=CountDownLatch(1)
+    private var closingStorage=false
+    private class RunResources(val initial:Message,val runner:ChatRunner,val tools:RunCatalogTools) {
+        val writer=Executors.newSingleThreadExecutor()
+        val waiter=Executors.newSingleThreadExecutor()
+        var question:QuestionRunSession?=null
+        var offer:BarrierOffer?=null
+        var busy=false
+        var waiting=false
+        var fenced=false
+        var cleaning=false
+        var cleanupConfirmed=false
+        var cleanupFailed=false
+        var result:Message?=null
+    }
+    private var resources:RunResources?=null
+    internal data class QuestionProjection(val identity:QuestionIdentity,val record:QuestionRecord,
+        val binding:QuestionCardBinding?,val canAnswer:Boolean)
+    private val questionHistory=linkedMapOf<String,Pair<QuestionIdentity,QuestionRecord>>()
+    private fun questionIdentity(key:String):QuestionIdentity? = try {
+        require(key.startsWith("q1:"))
+        var offset=3
+        val parts=(0 until 4).map {
+            val colon=key.indexOf(':',offset)
+            require(colon>offset)
+            val length=key.substring(offset,colon).toInt()
+            require(length in 1..256 && colon+1+length<=key.length)
+            key.substring(colon+1,colon+1+length).also {offset=colon+1+length}
+        }
+        require(offset==key.length)
+        QuestionIdentity(parts[0],parts[1],parts[2],parts[3]).also {require(it.storageKey==key)}
+    } catch (_:IllegalArgumentException) {null}
+    private fun rememberQuestions(records:List<QuestionRecord>) {
+        records.forEach { record -> questionIdentity(record.callId)?.let {questionHistory[record.callId]=it to record} }
+    }
+    @Synchronized internal fun questionProjection(message:Message,call:ToolInvocation):QuestionProjection? {
+        if(call.name!=ASK_USER_TOOL_NAME || message.role!=Message.ASSISTANT_ROLE) return null
+        val (identity,record)=questionHistory.values.singleOrNull {
+            it.first.conversationId==message.conversationId.value && it.first.runId==message.runId.value &&
+                it.first.callId==call.id.value
+        } ?: return null
+        val current=resources?.takeIf {it.initial.id==message.id && it.initial.runId==message.runId &&
+            it.initial.conversationId==message.conversationId}
+        val session=current?.question
+        val writable=!closed && current!=null && !current.fenced && current.waiting &&
+            current.offer?.context?.owner?.ownerId==identity.ownerId &&
+            current.offer?.pending?.callId==call.id && record.answer==null && !record.interrupted
+        return QuestionProjection(identity,record,session?.binding,writable)
+    }
     private val toolLedger = ToolLedger(SQLiteToolLedgerStore(database))
     private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
@@ -59,7 +115,12 @@ class ChatController internal constructor(private val application:Application,
         val failed=try {
             val runtime=SQLiteRuntimeStore.acquire(database)
             runtimeStore=runtime
-            runtime.recoverPending();false
+            val questions=PrivateQuestionStore(application)
+            questionStore=questions
+            runtime.recoverPending {questions.interruptPending(it.ownerPrefix)}
+            val history=questions.records()
+            synchronized(this) {rememberQuestions(history)}
+            false
         } catch (_:Exception) {true}
         synchronized(this) {
             if(!closed) {
@@ -122,10 +183,10 @@ class ChatController internal constructor(private val application:Application,
             val contextTools = ScopedContextTools.create(
                 ContextRegistry(contextService), ContextRegistryScope(conversationId),
                 run, preparedContext?.archiveId)
-            val registry = AndroidToolRegistry.create(application, contextTools)
+            val registry = AndroidToolRegistry.create(application, contextTools, enableUserBarrier=true)
             val capabilities = SessionCapabilities(run.value,
                 AndroidToolRegistry.capabilitiesFor(config.enabledTools()) + contextTools.map { it.definition.capability } +
-                    setOf(SkillRunSession.READ, SkillRunSession.RESOURCE))
+                    setOf(SkillRunSession.READ, SkillRunSession.RESOURCE, AndroidToolRegistry.ASK_USER_CAPABILITY))
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run) { grants, authorization ->
                 SkillToolRegistry(application).captureForRun(grants, authorization)
             }
@@ -149,18 +210,148 @@ class ChatController internal constructor(private val application:Application,
         } catch (_:Exception) {tools.close();problem="发送内容保存失败；草稿保留，未发起网络请求";notifyChanged();return null}
         problem=null;active=assistant
         runner=owned;runTools=tools
+        val lifetime=RunResources(assistant,owned,tools)
+        resources=lifetime
+        enqueueSlice(lifetime,allowStopped=true) {owned.startSlice(assistant,prior+user)}
+        notifyChanged();return saved
+    }
+    private fun enqueueSlice(lifetime:RunResources,allowStopped:Boolean=false,work:()->RunSlice) {
+        check(!lifetime.busy)
+        lifetime.busy=true
         executor.execute {
-            val result=try {owned.run(assistant,prior+user)} finally {tools.close()}
-            synchronized(this) {
-                if(!closed && runner===owned && active?.id==assistant.id && active?.runId==run && active?.conversationId==conversationId) {
-                    runner=null;runTools=null
-                    if (result.error?.startsWith("保存失败")==true) { active=result;problem=result.error }
-                    else active=null
-                    notifyChanged()
+            val allowed=synchronized(this) {resources===lifetime && (allowStopped || !lifetime.fenced)}
+            val result=if(allowed) runCatching(work) else null
+            handler.post {synchronized(this) {
+                if(resources!==lifetime) return@synchronized
+                lifetime.busy=false
+                // A fenced queued resume has not consumed the Runner continuation.
+                if(result==null && lifetime.offer!=null) lifetime.waiting=true
+                if(result!=null) result.fold(
+                    onSuccess={slice -> when(slice) {
+                        is RunSlice.Completed -> {lifetime.waiting=false;lifetime.offer=null;lifetime.result=slice.message}
+                        is RunSlice.Suspended -> {lifetime.offer=slice.offer;lifetime.waiting=true}
+                    }},
+                    onFailure={
+                        if(lifetime.fenced && lifetime.runner.state().phase==app.daiyu.android.domain.runtime.ExecutionPhase.WAITING_USER) {
+                            // stop may win after the queue gate but before resumeSlice takes its continuation.
+                            lifetime.waiting=true
+                        } else {
+                            lifetime.waiting=false
+                            lifetime.result=(active ?: lifetime.initial).copy(error="保存失败，运行已停止；原检查点保留，重新打开后仅恢复历史")
+                            problem=lifetime.result?.error
+                            lifetime.fenced=true
+                            lifetime.runner.stop()
+                        }
+                    })
+                if(lifetime.result!=null || lifetime.fenced) cleanupRun(lifetime)
+                else if(lifetime.waiting) beginQuestion(lifetime,checkNotNull(lifetime.offer))
+            }}
+        }
+    }
+    private fun beginQuestion(lifetime:RunResources,offer:BarrierOffer) {
+        val original=offer.context.owner
+        if(!offer.waitingCommitted || !original.owns(lifetime.initial) || lifetime.fenced) {
+            stopRun(lifetime);return
+        }
+        if(lifetime.question==null) {
+            val scope=QuestionIdentity(original.conversationId.value,original.runId.value,original.ownerId,offer.pending.callId.value)
+            val registry=QuestionRegistry(checkNotNull(questionStore),scope)
+            lifetime.question=QuestionRunSession(registry,scope,lifetime.writer,lifetime.waiter,
+                {synchronized(this) {resources===lifetime && !lifetime.fenced && !closed}},
+                {_,_->handler.post {synchronized(this) {
+                    if(resources===lifetime) {problem="提问清理未确认；请重试停止";stopRun(lifetime)}
+                }}},original,
+                {synchronized(this) {lifetime.offer.takeIf {resources===lifetime && lifetime.waiting && !lifetime.fenced && !closed}}})
+        }
+        val accepted=checkNotNull(lifetime.question).begin(offer,
+            onPending={record -> synchronized(this) {
+                if(resources===lifetime && lifetime.offer===offer && !lifetime.fenced && !closed) {
+                    rememberQuestions(listOf(record));notifyChanged()
+                }
+            }},
+            onResult={result -> synchronized(this) {
+                if(resources!==lifetime || lifetime.offer!==offer || !lifetime.waiting || lifetime.fenced || closed) return@synchronized
+                val identity=result.identity
+                if(identity.ownerId!=original.ownerId || identity.runId!=original.runId.value ||
+                    identity.conversationId!=original.conversationId.value || identity.callId!=offer.pending.callId.value) {
+                    stopRun(lifetime);return@synchronized
+                }
+                val receipt=when(result) {
+                    is QuestionRunResult.Answered -> {
+                        questionHistory[identity.storageKey]?.let {questionHistory[identity.storageKey]=identity to it.second.copy(answer=result.answer)}
+                        ExecutionReceipt.Confirmed(org.json.JSONObject().put("ok",true).put("call_id",identity.callId)
+                            .put("answer",result.answer.json()).toString())
+                    }
+                    is QuestionRunResult.Stopped -> {stopRun(lifetime);return@synchronized}
+                    is QuestionRunResult.Rejected -> ExecutionReceipt.Unknown("question_rejected")
+                    is QuestionRunResult.Unconfirmed -> ExecutionReceipt.Unknown("question_unconfirmed")
+                }
+                lifetime.waiting=false
+                enqueueSlice(lifetime) {lifetime.runner.resumeSlice(offer,receipt)}
+            }})
+        if(!accepted) stopRun(lifetime)
+        notifyChanged()
+    }
+    private fun stopRun(lifetime:RunResources) {
+        lifetime.fenced=true
+        lifetime.runner.stop()
+        lifetime.tools.close()
+        cleanupRun(lifetime)
+    }
+    private fun cleanupRun(lifetime:RunResources) {
+        if(resources!==lifetime) return
+        lifetime.fenced=true
+        if(!lifetime.cleanupConfirmed && !lifetime.cleaning) {
+            val question=lifetime.question
+            if(question==null) lifetime.cleanupConfirmed=true
+            else {
+                lifetime.cleaning=true;lifetime.cleanupFailed=false
+                question.stop { confirmed ->
+                    if(confirmed) lifetime.writer.execute {
+                        val history=runCatching {checkNotNull(questionStore).records()}
+                        handler.post {synchronized(this) {
+                            if(resources===lifetime) {
+                                lifetime.cleaning=false
+                                history.fold(onSuccess={rememberQuestions(it);lifetime.cleanupConfirmed=true},
+                                    onFailure={lifetime.cleanupFailed=true;problem="提问清理状态读取失败；请重试停止"})
+                                if(lifetime.cleanupConfirmed) cleanupRun(lifetime) else notifyChanged()
+                            }
+                        }}
+                    } else synchronized(this) {
+                        lifetime.cleaning=false;lifetime.cleanupFailed=true
+                        problem="提问停止尚未持久确认；请重试停止，原资源保留";notifyChanged()
+                    }
                 }
             }
         }
-        notifyChanged();return saved
+        if(!lifetime.cleanupConfirmed || lifetime.busy) return
+        if(lifetime.waiting) {
+            lifetime.waiting=false
+            enqueueSlice(lifetime,allowStopped=true) {lifetime.runner.drainStoppedSlice()}
+            return
+        }
+        if(lifetime.result==null) return
+        lifetime.tools.close();lifetime.writer.shutdown();lifetime.waiter.shutdown()
+        resources=null;runner=null;runTools=null
+        val result=checkNotNull(lifetime.result)
+        if(!closed) {
+            if(result.error?.startsWith("保存失败")==true) {active=result;problem=result.error}
+            else {active=null;if(problem?.startsWith("提问")==true) problem=null}
+            notifyChanged()
+        }
+        if(closed) closeStorageWhenIdle()
+    }
+    @Synchronized internal fun canRetryQuestionCleanup(message:Message):Boolean = resources?.let {
+        it.initial.id==message.id && it.initial.runId==message.runId &&
+            it.initial.conversationId==message.conversationId && it.cleanupFailed && !it.cleaning
+    }==true
+    private fun closeStorageWhenIdle() {
+        if(resources!=null || closingStorage) return
+        closingStorage=true
+        executor.execute {
+            try {questionStore?.close();database.close();runtimeStore?.close();runtimeStore=null}
+            finally {executor.shutdown();closeDone.countDown()}
+        }
     }
     internal fun skillManagement():SkillManagement = SkillManagement.create {SkillToolRegistry(application)}
     private val neutralBackup by lazy { NeutralBackupService(application, database) }
@@ -289,31 +480,33 @@ class ChatController internal constructor(private val application:Application,
     }
     // True acknowledges the matching control target, not a persisted terminal outcome.
     internal fun stop(owner:Message):Boolean {
-        val (owned,tools)=synchronized(this) {
-            val current=ownedRunner(owner) ?: return false
-            current to runTools
-        }
-        owned.stop();tools?.close()
+        val lifetime=synchronized(this) {
+            resources?.takeIf {!closed && it.initial.id==owner.id && it.initial.runId==owner.runId &&
+                it.initial.conversationId==owner.conversationId && owner.role==Message.ASSISTANT_ROLE}
+                ?.also {it.fenced=true}
+        } ?: return false
+        lifetime.runner.stop();lifetime.tools.close()
+        handler.post {synchronized(this) {cleanupRun(lifetime)}}
         return true
     }
     fun stop() {
-        val (owned, tools)=synchronized(this) {runner to runTools}
-        owned?.stop();tools?.close()
+        val lifetime=synchronized(this) {resources?.also {it.fenced=true}} ?: return
+        lifetime.runner.stop();lifetime.tools.close()
+        handler.post {synchronized(this) {cleanupRun(lifetime)}}
     }
     internal fun close() {
-        val owned=synchronized(this) {
-            if(closed) null else {
+        val lifetime=synchronized(this) {
+            if(!closed) {
                 closed=true;ready=false;dataBusy=false;active=null
                 configurationRestorePreview=null;dataNotice=null;listeners.clear()
-                (runner to runTools).also {runner=null;runTools=null}
             }
+            resources?.also {it.fenced=true}
         }
-        handler.removeCallbacksAndMessages(null)
-        owned?.first?.stop();owned?.second?.close()
-        executor.shutdown()
-        // Never close storage while an accepted run/data task can still be using it.
-        check(executor.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS))
-        database.close()
-        runtimeStore?.close();runtimeStore=null
+        lifetime?.runner?.stop();lifetime?.tools?.close()
+        handler.post {synchronized(this) {
+            if(lifetime!=null && resources===lifetime) cleanupRun(lifetime) else closeStorageWhenIdle()
+        }}
+        // The control loop must remain available for stop acknowledgments and continuation drain.
+        if(Looper.myLooper()!=Looper.getMainLooper()) check(closeDone.await(10,TimeUnit.SECONDS))
     }
 }

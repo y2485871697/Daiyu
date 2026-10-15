@@ -42,4 +42,12 @@ internal class CatalogModelBridge(
         require(bound.owns(message)) { "tool_run_owner_mismatch" }
         return dispatcher.dispatchOwned(task, invocations, bound, cancelled)
     }
+    override fun start(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): ReceiptBatchStart {
+        require(message.conversationId == conversationId && message.runId == runId &&
+            message.role == Message.ASSISTANT_ROLE) { "tool_run_owner_mismatch" }
+        val bound = checkNotNull(owner) { "tool_owner_not_bound" }
+        require(bound.owns(message)) { "tool_run_owner_mismatch" }
+        return dispatcher.start(task, invocations, bound, cancelled)
+    }
+
 }

@@ -116,8 +116,8 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
                 override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = error("legacy enums must not swallow catalog")
                 override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
                     opens.incrementAndGet()
-                    assertEquals(setOf(ReadOnlyTool.BATTERY.toolName, "context_usage"), definitions.map { it.name }.toSet())
-                    assertTrue(definitions.all { !it.sideEffect })
+                    assertEquals(setOf(ReadOnlyTool.BATTERY.toolName, "context_usage", "ask_user"), definitions.map { it.name }.toSet())
+                    assertEquals(setOf("ask_user"), definitions.filter {it.sideEffect}.map {it.name}.toSet())
                     assertEquals("fixture-model", config.model)
                     assertEquals("fixture-key", config.apiKey)
                     val runTools = ChatController::class.java.getDeclaredField("runTools").apply { isAccessible = true }
@@ -219,8 +219,8 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             f.settings.save(config.copy(batteryEnabled=false,deviceStatusEnabled=true));probe
         }
         val c=f.db.create();finish(f,c)
-        assertEquals(setOf("get_battery_status","context_usage"),probe.definitions.map {it.name}.toSet())
-        assertTrue(probe.definitions.none {it.sideEffect})
+        assertEquals(setOf("get_battery_status","context_usage","ask_user"),probe.definitions.map {it.name}.toSet())
+        assertEquals(setOf("ask_user"),probe.definitions.filter {it.sideEffect}.map {it.name}.toSet())
         val usage=probe.definitions.single {it.name=="context_usage"}
         val reply=f.db.messages(c.id).last().second
         assertTrue(usage.description.contains(c.id.value));assertTrue(usage.description.contains(reply.runId.value))
@@ -311,7 +311,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         }
         finish(f,c)
         assertEquals(setOf("skills_list","skills_read","skills_read_resource"),probe.definitions.filter {it.name.startsWith("skills_")}.map {it.name}.toSet())
-        assertTrue(probe.definitions.none {it.sideEffect})
+        assertEquals(setOf("ask_user"),probe.definitions.filter {it.sideEffect}.map {it.name}.toSet())
         assertTrue(probe.definitions.single {it.name=="skills_list"}.description.contains(old.revision))
         val outputs=probe.returned.single();assertEquals(3,outputs.size)
         val index=org.json.JSONObject(outputs[0].output);assertTrue(index.getBoolean("ok"))

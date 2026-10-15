@@ -74,7 +74,7 @@ class ResponsesTest:InstrumentationTestCase() {
             val request=connection.json()
             val names=if(request.has("tools")) (0 until request.getJSONArray("tools").length()).map {
                 val tool=request.getJSONArray("tools").getJSONObject(it)
-                assertTrue(tool.getBoolean("strict"));val parameters=tool.getJSONObject("parameters")
+                assertFalse(tool.getBoolean("strict"));val parameters=tool.getJSONObject("parameters")
                 assertFalse(parameters.getBoolean("additionalProperties"));assertEquals(0,parameters.getJSONObject("properties").length())
                 tool.getString("name")
             }.toSet() else emptySet()
@@ -447,13 +447,22 @@ class ResponsesTest:InstrumentationTestCase() {
         val firstB=Connection(frames(completed(message("b-only"))))
         val nextA=Connection(frames(completed(message("a-next"))))
         val urls=mutableListOf<String>();var openedA=0;var openedB=0
-        val sessionA=ResponsesModel(a) {url ->
+        val modelA=ResponsesModel(a) {url ->
             urls.add(url.toExternalForm())
             when(openedA++) {0->firstA;1->nextA;else->throw AssertionError("unexpected A request")}
-        }.open(emptyList())
+        }
+        val sessionA=modelA.open(emptyList())
         val sessionB=ResponsesModel(b) {url ->urls.add(url.toExternalForm());assertEquals(0,openedB++);firstB}.open(emptyList())
-        try {sessionA.next(emptyList()) {};sessionB.next(emptyList()) {};sessionA.next(emptyList()) {}}
-        finally {sessionA.cancel();sessionB.cancel()}
+        var nextSessionA:ModelSession?=null
+        try {
+            sessionA.next(emptyList()) {};sessionB.next(emptyList()) {}
+            try {sessionA.next(emptyList()) {};fail("terminal session must not repost")}
+            catch(_:IllegalStateException) {}
+            assertEquals(1,openedA)
+            nextSessionA=modelA.open(listOf(initial().copy(status=RunStatus.COMPLETED,
+                blocks=listOf(MessageBlock.Text("answer","a-only")),protocolItems=listOf(message("a-only").toString()))))
+            nextSessionA.next(emptyList()) {}
+        } finally {sessionA.cancel();sessionB.cancel();nextSessionA?.cancel()}
         assertEquals(listOf(a.endpoint,b.endpoint,a.endpoint),urls)
         assertEquals(2,openedA);assertEquals(1,openedB)
         for((connection,config) in listOf(firstA to a,firstB to b,nextA to a)) {

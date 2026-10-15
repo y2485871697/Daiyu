@@ -35,6 +35,7 @@ on:
         default: ''
 env:
   SKIP_JDK_VERSION_CHECK: "true"
+  PYTHONUTF8: "1"
 permissions:
   contents: read
   actions: read

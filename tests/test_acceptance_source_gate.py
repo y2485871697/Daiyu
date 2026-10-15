@@ -267,11 +267,15 @@ class BoundaryTests(unittest.TestCase):
         self.addCleanup(stream.close)
         return process
 
-    def test_bounded_reader_success_error_and_limit(self):
+    @patch.object(gate.selectors, "DefaultSelector")
+    def test_bounded_reader_success_error_and_limit(self, selector_factory):
+        # Readiness is synthetic; keep real pipe reads and byte/exit bounds.
+        selector = selector_factory.return_value.__enter__.return_value
         for data, returncode, limit, code in ((b"ok", 0, 10, None),
                                               (b"PRIVATE", 1, 10, "git_error"),
                                               (b"overflow", 0, 2, "git_output_limit")):
             process = self.fake_process(data, returncode)
+            selector.select.return_value = [(process.stdout, gate.selectors.EVENT_READ)]
             with patch.object(gate.subprocess, "Popen", return_value=process), \
                     patch.object(gate, "MAX_OUTPUT_BYTES", limit):
                 if code:
@@ -279,6 +283,8 @@ class BoundaryTests(unittest.TestCase):
                         gate.run_git(Path("/"), "head")
                 else:
                     self.assertEqual(gate.run_git(Path("/"), "head"), data)
+            selector.register.assert_called_with(process.stdout, gate.selectors.EVENT_READ)
+            selector.select.assert_called()
 
     def test_deadline_kills_and_reaps(self):
         process = self.fake_process()

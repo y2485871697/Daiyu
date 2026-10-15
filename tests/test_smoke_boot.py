@@ -32,6 +32,7 @@ class SourceTests(unittest.TestCase):
             source.verify(env, dict(record, attempt='2'), run, jobs, [])
 
 
+@unittest.skipIf(os.name == 'nt', 'POSIX executable/shebang fixtures; smoke runs on Ubuntu')
 class ProcessTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -43,7 +44,7 @@ class ProcessTests(unittest.TestCase):
 
     def executable(self, name, body):
         path = self.bin / name
-        path.write_text(body)
+        path.write_text(body, encoding='utf-8', newline='\n')
         path.chmod(0o755)
         return path
 
@@ -99,7 +100,7 @@ elif a[:3]==['shell','am','instrument']:
  sys.exit(9 if case=='instrument-fail' else 0)
 elif a[:3]==['shell','am','start']: print('Status: ok')
 elif a[:3]==['shell','pm','list']: print('package:io.github.mangi.eta' if case=='old-package' else 'package:app.daiyu.android')
-elif a[0]=='pull': Path(a[-1]).write_text('代鱼 · 聊天 发送')
+elif a[0]=='pull': Path(a[-1]).write_text('代鱼 · 聊天 发送', encoding='utf-8')
 elif a[0]=='logcat': print('FATAL EXCEPTION' if case=='crash' else '')
 elif a[0]=='exec-out': sys.stdout.buffer.write(b'bad' if case=='png' else b'\\x89PNG\\r\\n\\x1a\\n')
 elif a[:3]==['emu','screenrecord','screenshot']: Path(a[-1],'Screenshot_fake.png').write_bytes(b'\\x89PNG\\r\\n\\x1a\\n')

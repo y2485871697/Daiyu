@@ -1,5 +1,6 @@
 package app.daiyu.android
 
+import androidx.compose.ui.semantics.getOrNull
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize

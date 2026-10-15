@@ -69,11 +69,13 @@ internal object RunCheckpointCodec {
         require(value.tools.map { it.invocation.id }.distinct().size == value.tools.size)
         value.tools.forEach { require(it.invocation.id.value.isNotBlank() && it.invocation.id.value.length <= 200 &&
             it.invocation.name.isNotBlank() && it.invocation.name.length <= 200)
-            require((it.disposition == ToolDisposition.SUCCEEDED) == (it.result != null)) }
+            require(hasResult(it.disposition) == (it.result != null)) }
         require(value.outputs.map { it.callId }.distinct().size == value.outputs.size)
         value.outputs.forEach { out -> require(value.tools.any { it.invocation.id == out.callId &&
-            it.disposition == ToolDisposition.SUCCEEDED && it.result == out.output }) }
+            hasResult(it.disposition) && it.result == out.output }) }
     }
+    private fun hasResult(disposition: ToolDisposition) = disposition in setOf(
+        ToolDisposition.SUCCEEDED, ToolDisposition.FAILED, ToolDisposition.NOT_EXECUTED)
     private fun fields(value: JSONObject, vararg keys: String) { require(value.keys().asSequence().toSet() == keys.toSet()) }
     private fun string(value: JSONObject, key: String) = (value.get(key) as? String) ?: error("checkpoint text required")
     private fun integer(value: JSONObject, key: String): Long {

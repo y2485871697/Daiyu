@@ -50,4 +50,16 @@ class RunCheckpointCodecTest {
         assertTrue(growth in 1 until RunCheckpointCodec.RECOVERY_RESERVE)
     }
 
+    @Test fun confirmedErrorAndRejectionRoundTripWithoutBecomingSuccess() {
+        for (disposition in listOf(ToolDisposition.FAILED, ToolDisposition.NOT_EXECUTED)) {
+            val value=checkpoint().copy(tools=listOf(ToolRecord(call,disposition,"done")))
+            assertEquals(value,RunCheckpointCodec.decode(RunCheckpointCodec.encode(value)))
+            val recovered=ProcessRecovery.interrupt(value).copy(messageReconciled=true)
+            assertEquals(disposition,recovered.tools.single().disposition)
+            assertEquals("done",recovered.tools.single().result)
+            reject {RunCheckpointCodec.encode(value.copy(tools=listOf(ToolRecord(call,disposition))))}
+            reject {RunCheckpointCodec.encode(value.copy(outputs=listOf(ToolOutput(call.id,"wrong"))))}
+        }
+    }
+
 }

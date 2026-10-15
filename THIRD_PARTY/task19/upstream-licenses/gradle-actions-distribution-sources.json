@@ -1,0 +1,20 @@
+[
+  {
+    "source_url": "https://raw.githubusercontent.com/gradle/actions/3f5f9adaf7d9fecd50b5935e54106014257a94e6/DISTRIBUTION.md",
+    "path": "THIRD_PARTY/task19/upstream-licenses/gradle-actions-3f5f9ada-DISTRIBUTION.md",
+    "bytes": 3795,
+    "sha256": "aeb215d0de98d91d10e828c9b912cde64d8e77dae7c13168a498a672c74da754"
+  },
+  {
+    "source_url": "https://raw.githubusercontent.com/gradle/actions/3f5f9adaf7d9fecd50b5935e54106014257a94e6/NOTICE",
+    "path": "THIRD_PARTY/task19/upstream-licenses/gradle-actions-3f5f9ada-NOTICE",
+    "bytes": 723,
+    "sha256": "2561fd23b2fad87f81662932d5eb6e976f0ec78a8e3fafbc728d1fa0b82e1cbd"
+  },
+  {
+    "source_url": "https://raw.githubusercontent.com/gradle/actions/3f5f9adaf7d9fecd50b5935e54106014257a94e6/licenses/gradle-actions-caching-license.txt",
+    "path": "THIRD_PARTY/task19/upstream-licenses/gradle-actions-3f5f9ada-licenses_gradle-actions-caching-license.txt",
+    "bytes": 1591,
+    "sha256": "f48d6af9f15d2e618e15f839296c10b59e40a21a75417367ca7d94762ec59cc0"
+  }
+]

@@ -474,10 +474,13 @@ class ActivityTest:InstrumentationTestCase() {
             instrumentation.runOnMainSync {
                 input(current).setText("协议切换保留草稿")
                 button(current,"模型设置").performClick()
-                val dialogField=MainActivity::class.java.getDeclaredField("settingsDialog").apply {isAccessible=true}
-                var dialog=dialogField.get(current) as android.app.AlertDialog
-                var nodes=views(dialog.window!!.decorView)
-                var edits=nodes.filterIsInstance<EditText>()
+            }
+            instrumentation.waitForIdleSync()
+            val dialogField=MainActivity::class.java.getDeclaredField("settingsDialog").apply {isAccessible=true}
+            instrumentation.runOnMainSync {
+                val dialog=dialogField.get(current) as android.app.AlertDialog
+                val nodes=views(dialog.window!!.decorView)
+                val edits=nodes.filterIsInstance<EditText>()
                 assertEquals(4,edits.size)
                 assertEquals(config.apiKey,edits[3].text.toString())
                 nodes.filterIsInstance<android.widget.RadioButton>().single {it.text.toString()=="Anthropic Messages"}.performClick()
@@ -495,8 +498,12 @@ class ActivityTest:InstrumentationTestCase() {
                 assertTrue(app.daiyu.android.model.ModelFactory.create(messages) is app.daiyu.android.model.MessagesModel)
                 assertEquals(messages,settingsStore(context).load())
                 button(current,"模型设置").performClick()
-                dialog=dialogField.get(current) as android.app.AlertDialog
-                nodes=views(dialog.window!!.decorView);edits=nodes.filterIsInstance<EditText>()
+            }
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                val dialog=dialogField.get(current) as android.app.AlertDialog
+                val nodes=views(dialog.window!!.decorView)
+                val edits=nodes.filterIsInstance<EditText>()
                 assertTrue(nodes.filterIsInstance<android.widget.RadioButton>().single {it.text.toString()=="Anthropic Messages"}.isChecked)
                 assertFalse(edits[1].isEnabled)
                 nodes.filterIsInstance<android.widget.RadioButton>().single {it.text.toString()=="OpenAI Responses"}.performClick()

@@ -502,7 +502,7 @@ class ActivityTest:InstrumentationTestCase() {
                 val dialog=dialogField.get(current) as android.app.AlertDialog
                 val nodes=views(dialog.window!!.decorView)
                 val edits=nodes.filterIsInstance<EditText>()
-                assertEquals(4,edits.size)
+                assertEquals(5,edits.size)
                 assertEquals(config.apiKey,edits[3].text.toString())
                 nodes.filterIsInstance<android.widget.RadioButton>().single {it.text.toString()=="Anthropic Messages"}.performClick()
                 assertEquals("",edits[3].text.toString());assertEquals("",edits[1].text.toString())

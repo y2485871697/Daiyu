@@ -17,6 +17,7 @@ import app.daiyu.android.domain.runtime.RunnerOptions
 import app.daiyu.android.domain.runtime.ExecutionState
 import app.daiyu.android.skills.SkillRunSession
 import app.daiyu.android.skills.SkillToolRegistry
+import app.daiyu.android.skills.SkillManagement
 import app.daiyu.android.model.ModelFactory
 import app.daiyu.android.storage.*
 import java.util.UUID
@@ -144,6 +145,7 @@ class ChatController internal constructor(private val application:Application,
         }
         notifyChanged();return saved
     }
+    internal fun skillManagement():SkillManagement = SkillManagement.create {SkillToolRegistry(application)}
     private val neutralBackup by lazy { NeutralBackupService(application, database) }
     internal class ConfigurationRestorePreview internal constructor(
         val plan:NonSecretRestorePlan, internal val metadata:String

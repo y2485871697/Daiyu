@@ -73,3 +73,16 @@ Use one `SkillRunSession` per trusted run. `availableTools` contains only `skill
 Parent executed 59 host-shim JUnit fixtures (42 inherited plus 17 added), including real Registry factory paths, frozen IDs/bodies, resource tampering/revision rejection, child permissions and closure, escaped index size and cumulative accounting, and concurrent parent/child budget contention. Exact source hashes, commands and logs are in `/workspace/daiyu-coordination/task-11/platform-scope-v1/check-index-fix/`. A failed first multi-skill fixture and a fixture compilation mistake are retained in earlier check directories; they are not passing evidence. No Android instrumentation, real network or crash-durability execution is claimed.
 
 Same-change ledger proposal for 01: R10/P33 gains this reviewed read-only run-scope candidate; centralized advertising/Dispatcher, trusted send/child lifecycle, settings/UI, install approval/ledger and API26/API37.2 acceptance remain pending. T02 checker provenance remains unchanged. This increment changes only the Skills package and its tests/integration note; no shared ledger, Controller, Registry/Dispatcher, Manifest, build or CI file is edited. It is not a business-complete declaration.
+
+## Trusted settings management
+
+`SkillManagementDialog(activity).show()` creates a settings dialog without a new Activity,
+permission, or model tool. Dismiss it from the host Activity lifecycle. Registry construction,
+metadata reads, toggles and read-back use a dedicated worker. Settings contain no installation,
+inspection or script execution action. Individual toggles pin the displayed content revision;
+that revision is not a concurrent toggle version. A failure after mutation is not rollback:
+refresh state before deciding another action, and never automatically repeat a write.
+
+Global disable affects later run captures; existing captured bodies/results are not withdrawn.
+Individual disable rejects later non-body resource reads while preserving the captured body.
+The settings module does not close active runs or broaden their grants.

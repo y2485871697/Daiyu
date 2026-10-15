@@ -43,6 +43,7 @@ class TerminalRegistryTest:InstrumentationTestCase() {
     private fun fakeRegistry(context:Context,scope:String):TerminalRegistry=TerminalRegistry(context).apply {
         configure(scope,TerminalConfiguration(),scope)
         backendOverride=SelectedBackend("android",12345,false,listOf("not-executed"),emptyMap(),context.filesDir,true)
+        processPidReader={ 4242L }
     }
     private fun open(registry:TerminalRegistry,id:String="open")=registry.execute("terminal_open",JSONObject().put("request_id",id)).getString("session_id")
     private fun command(session:String,id:String="exec",mode:String="async")=JSONObject().put("request_id",id).put("session_id",session).put("command","printf test").put("mode",mode)
@@ -269,6 +270,21 @@ class TerminalRegistryTest:InstrumentationTestCase() {
         assertEquals("owner_process_handle_unavailable_not_stopped",stopped.getString("error"))
         assertTrue(registry.execute("terminal_list",JSONObject()).getJSONArray("jobs").length()==0)
         assertEquals("invalid_arguments",registry.execute("terminal_poll",JSONObject().put("job_id","x").put("limit",100000)).getString("error"))
+    }
+    fun testUnknownProcessPidCannotReadStartIdentityOrStop() {
+        val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
+        val process=FakeProcess(waiting=CountDownLatch(1))
+        val registry=fakeRegistry(isolatedContext(root),UUID.randomUUID().toString())
+        try {
+            registry.processPidReader={ -1L }
+            registry.processStartReader={ throw AssertionError("unknown PID must not read process identity") }
+            registry.startProcess={ process }
+            val id=registry.execute("terminal_exec",command(open(registry))).getString("job_id")
+            val result=registry.execute("terminal_stop",JSONObject().put("request_id","stop").put("job_id",id))
+            assertEquals("process_owner_unverified_not_stopped",result.getString("error"))
+            assertEquals("unknown",result.getString("execution")); assertTrue(process.isAlive)
+            registry.close(); assertTrue(process.isAlive)
+        } finally { process.destroy(); registry.close(); root.deleteRecursively() }
     }
     fun testRunJournalCannotExposeCachedResultToDifferentOwnerOrConfiguration() {
         val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }

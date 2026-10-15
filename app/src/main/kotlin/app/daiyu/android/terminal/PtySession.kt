@@ -116,11 +116,15 @@ class PtySession internal constructor(private val process: Process, private val 
     }
 
     override fun close() {
-        synchronized(lock) { if (closed) return; closed = true }
+        synchronized(lock) { closed = true }
         writer.shutdownNow()
-        // Helper catches TERM and cleans its owned foreground/session group, then reaps the shell.
-        process.destroy()
-        try { process.outputStream.close() } catch (_: Exception) { }
+        // Keep retrying the owned Process after a failed close; closed only fences new input.
+        var failure: Exception? = null
+        try { process.destroy() } catch (close: Exception) { failure = close }
+        try { process.outputStream.close() } catch (close: Exception) {
+            if (failure == null) failure = close else if (failure !== close) failure.addSuppressed(close)
+        }
+        failure?.let { throw it }
     }
 
     /** Worker-only join. close is non-waiting; a Linux lease cannot be released before true. */
@@ -135,7 +139,9 @@ class PtySession internal constructor(private val process: Process, private val 
             openBound(helper, argv, environment, cwd, journalDirectory, sessionScope, rows, columns, null)
 
         internal fun openBound(helper: File, argv: List<String>, environment: Map<String, String>, cwd: File,
-                 journalDirectory: File, sessionScope: String, rows: Int, columns: Int, binding: JSONObject?): PtySession {
+                 journalDirectory: File, sessionScope: String, rows: Int, columns: Int, binding: JSONObject?,
+                 startProcess: (ProcessBuilder) -> Process = { it.start() },
+                 createSession: (Process, OperationJournal) -> PtySession = ::PtySession): PtySession {
             val frozenArgv = argv.toList()
             val frozenEnvironment = environment.toMap()
             require(helper.isAbsolute && helper.isFile && helper.canExecute()) { "pty_native_unavailable" }
@@ -146,30 +152,43 @@ class PtySession internal constructor(private val process: Process, private val 
                 key.matches(Regex("[A-Za-z_][A-Za-z0-9_]{0,127}")) && value.length <= 8192 && '\u0000' !in value })
             val journal = OperationJournal(journalDirectory, sessionScope, binding = binding)
             var created: PtySession? = null
+            var cleanup: PtyStartupCleanup? = null
+            var startupCause: Exception? = null
+            fun failed(error: String, cause: Throwable? = startupCause): IllegalStateException {
+                val owned = cleanup ?: return IllegalStateException(error, cause)
+                val failure = PtyStartupFailure(error, owned, cause)
+                try { owned.requestClose() } catch (close: Exception) { failure.addSuppressed(close) }
+                return failure
+            }
             val args = JSONObject().put("helper", helper.canonicalPath).put("argv", org.json.JSONArray(frozenArgv))
                 .put("cwd", cwd.canonicalPath).put("environment", JSONObject(frozenEnvironment)).put("rows", rows).put("columns", columns)
-            val result = journal.once("open", "pty_open", args) {
-                var process: Process? = null
+            val result = try { journal.once("open", "pty_open", args) {
                 try {
-                    process = ProcessBuilder(listOf(helper.path, rows.toString(), columns.toString(), "--") + frozenArgv)
+                    val builder = ProcessBuilder(listOf(helper.path, rows.toString(), columns.toString(), "--") + frozenArgv)
                         .directory(cwd).redirectError(File("/dev/null")).apply {
                             environment().clear(); environment().putAll(frozenEnvironment)
-                        }.start()
-                    val session = PtySession(process, journal)
+                        }
+                    val process = startProcess(builder)
+                    cleanup = PtyStartupCleanup(process) {
+                        val session = created
+                        if (session == null) process.destroy() else session.close()
+                    }
+                    val session = createSession(process, journal)
                     created = session
                     if (!session.ready.await(3, TimeUnit.SECONDS) || !session.started || session.failure != null) {
-                        session.close()
                         JSONObject().put("ok", false).put("execution", "unknown").put("error", "pty_startup_unknown_not_replayed")
                     } else JSONObject().put("ok", true).put("execution", "executed").put("session_scope", sessionScope)
                 } catch (error: Exception) {
-                    created?.close(); process?.destroy()
+                    startupCause = error
                     if (error is InterruptedException) Thread.currentThread().interrupt()
                     JSONObject().put("ok", false).put("execution", "unknown").put("error", "pty_startup_unknown_not_replayed")
                 }
+            } } catch (failure: Throwable) {
+                if (cleanup == null) throw failure
+                throw failed("pty_startup_unknown_not_replayed", failure)
             }
             if (!result.optBoolean("ok") || created == null) {
-                created?.close()
-                throw IllegalStateException(result.optString("error", "pty_session_expired_not_reopened"))
+                throw failed(result.optString("error", "pty_session_expired_not_reopened"))
             }
             return created!!
         }

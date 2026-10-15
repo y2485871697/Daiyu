@@ -6,7 +6,6 @@ import com.openminis.app.browser.BrowserAction
 import com.openminis.app.browser.BrowserActionInput
 import com.openminis.app.browser.BrowserActionResult
 import com.openminis.app.browser.ScrollDirection
-import com.openminis.app.browser.UserAgentProfile
 
 /** Translation to the fixed manager, not to its global tab pool. No authority arguments. */
 internal object OpenMinisCommandMapper {
@@ -146,8 +145,7 @@ internal object OpenMinisCommandMapper {
             "scroll" -> BrowserActionInput(BrowserAction.SCROLL, selector = args["selector"] as String?,
                 direction = ScrollDirection.fromString(args["direction"] as String), amount = args["amount"] as Int?)
             "execute_js" -> BrowserActionInput(BrowserAction.EXECUTE_JS, script = args["script"] as String)
-            "set_user_agent" -> BrowserActionInput(BrowserAction.SET_USER_AGENT,
-                userAgent = UserAgentProfile.fromString(args["user_agent"] as String))
+            "set_user_agent" -> error("BROWSER_OPENMINIS_USER_AGENT_UNSUPPORTED")
             "wait_for_dom_stable" -> {
                 val timeout = args["timeout_ms"] as Int?
                 require(timeout == null || timeout >= 1000) { "BROWSER_OPENMINIS_DOM_TIMEOUT_UNSUPPORTED" }

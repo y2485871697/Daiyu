@@ -18,6 +18,8 @@ import app.daiyu.android.domain.runtime.ExecutionState
 import app.daiyu.android.skills.SkillRunSession
 import app.daiyu.android.skills.SkillToolRegistry
 import app.daiyu.android.skills.SkillManagement
+import app.daiyu.android.model.catalog.ModelCatalogService
+import app.daiyu.android.model.catalog.RemoteModel
 import app.daiyu.android.model.ModelFactory
 import app.daiyu.android.storage.*
 import java.util.UUID
@@ -67,6 +69,18 @@ class ChatController internal constructor(private val application:Application,
             }
         }
     }}
+    internal var modelCatalog=ModelCatalogService(settings)
+    internal fun fetchModelCatalog(draft:ModelSettings,cancelled:()->Boolean,
+        complete:(List<RemoteModel>?)->Unit) = synchronized(this) {
+        if(closed || !ready || active!=null || dataBusy) return@synchronized false
+        val service=modelCatalog
+        executor.execute {
+            fun revoked() = synchronized(this) {closed} || cancelled()
+            val models=try {service.fetchDraft(draft,::revoked)} catch (_:Exception) {null}
+            if(!revoked()) handler.post {if(!revoked()) complete(models)}
+        }
+        true
+    }
     @Synchronized fun observe(listener:()->Unit) {
         if(!closed && listener !in listeners) listeners[listener]=Any()
     }

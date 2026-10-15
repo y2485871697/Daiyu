@@ -31,9 +31,11 @@ class QuestionCardBinding(
         check(Looper.myLooper() == Looper.getMainLooper())
         val token = attachment.incrementAndGet()
         fun refresh() {
+            if (attachment.get() != token) return
             try {
                 writer.execute {
                     workerOnly()
+                    if (attachment.get() != token) return@execute
                     val result = runCatching { registry.records().toList() }
                     main.post {
                         if (attachment.get() == token) result.fold(onRecords) { onUnavailable() }
@@ -44,6 +46,7 @@ class QuestionCardBinding(
         try {
             writer.execute {
                 workerOnly()
+                if (attachment.get() != token) return@execute
                 try { registry.barrier.attach { refresh() } }
                 catch (_: Exception) { main.post { if (attachment.get() == token) onUnavailable() } }
             }

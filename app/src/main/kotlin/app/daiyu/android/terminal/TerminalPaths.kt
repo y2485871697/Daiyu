@@ -13,14 +13,14 @@ import java.nio.file.attribute.BasicFileAttributes
  *
  * This class deliberately keeps the host side as a canonical, absolute path.  A
  * [ResolvedAttachment] is not a permission to look up the name again: it is a
- * frozen name together with the file-system identities observed while resolving
- * it.  Callers which retain an attachment across an operation must call
- * [validate] (or [ResolvedAttachment.revalidate]) before using it.
+ * frozen name whose root and descendant objects stay pinned by descriptors.
+ * Close each attachment after use and this run-owned boundary at run teardown.
+ * Authorized reads must use [ResolvedAttachment.openRead], not its display path.
  */
 class TerminalPaths(
     hostRoot: File,
     guestRoot: String
-) {
+) : AutoCloseable {
     constructor(hostRoot: Path, guestRoot: String) : this(hostRoot.toFile(), guestRoot)
     constructor(hostRoot: String, guestRoot: String) : this(File(hostRoot), guestRoot)
 
@@ -28,6 +28,10 @@ class TerminalPaths(
     private val canonicalHostRoot: Path
     private val hostRootIdentity: NodeIdentity
     private val guestRootPath: Path
+    private val rootDescriptor: android.os.ParcelFileDescriptor
+    private val lifecycle = Any()
+    private val attachments = mutableSetOf<ResolvedAttachment>()
+    private var closed = false
     internal var afterDescriptorOpened: ((Int) -> Unit)? = null
 
     /** The normalized, absolute host root. */
@@ -51,55 +55,73 @@ class TerminalPaths(
             throw IllegalArgumentException("host root must be a directory")
         }
         canonicalHostRoot = realRoot.normalize()
-        hostRootIdentity = readIdentity(canonicalHostRoot)
-
         guestRootPath = parseAbsoluteGuestPath(guestRoot, "guest root")
+        val descriptor = openDescriptor(canonicalHostRoot.toString(), true)
+        try {
+            hostRootIdentity = descriptorIdentity(descriptor)
+            if (hostRootIdentity.fileKey == null ||
+                !readIdentity(canonicalHostRoot).sameIdentity(hostRootIdentity) ||
+                hostAnchor.toRealPath().normalize() != canonicalHostRoot) {
+                throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED)
+            }
+        } catch (failure: Throwable) {
+            try { descriptor.close() } catch (close: Exception) { failure.addSuppressed(close) }
+            throw failure
+        }
+        rootDescriptor = descriptor
     }
 
-    /**
-     * Resolve an absolute guest attachment below [guestRoot].  The result is
-     * only a snapshot; it must be revalidated before a later use.
-     */
-    fun resolveAttachment(guestPath: String): ResolvedAttachment {
+    /** Resolve and pin every object; the caller owns the returned closeable attachment. */
+    fun resolveAttachment(guestPath: String): ResolvedAttachment = synchronized(lifecycle) {
+        resolvePinned(guestPath)
+    }
+
+    private fun resolvePinned(guestPath: String): ResolvedAttachment {
+        if (closed) throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED)
         val requested = parseAbsoluteGuestPath(guestPath, "guest path")
-        if (!requested.startsWith(guestRootPath)) {
+        if (!requested.startsWith(guestRootPath) || !rootIsUnchanged()) {
             throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED)
         }
-        if (!rootIsUnchanged()) {
-            throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED)
-        }
-
         val relative = guestRootPath.relativize(requested)
-        val hostPath = canonicalHostRoot.resolve(relative).normalize()
-        if (!hostPath.startsWith(canonicalHostRoot)) {
-            throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED)
-        }
-
-        val nodes = try {
-            captureDescendants(hostPath)
-        } catch (error: Exception) {
-            throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED, error)
-        }
-        val finalNode = nodes.lastOrNull()
-        if (finalNode == null || !finalNode.regularFile) {
+        val parts = relative.map { it.toString() }
+        if (parts.isEmpty() || parts.singleOrNull() == "") {
             throw IllegalArgumentException("attachment must be an existing regular file")
         }
-        if (!rootIsUnchanged()) {
-            throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED)
+        val hostPath = canonicalHostRoot.resolve(relative).normalize()
+        val pins = mutableListOf<android.os.ParcelFileDescriptor>()
+        try {
+            val nodes = mutableListOf<NodeIdentity>()
+            var parent = rootDescriptor
+            for ((index, part) in parts.withIndex()) {
+                val next = openDescriptor("/proc/self/fd/${parent.fd}/$part", index < parts.lastIndex)
+                pins += next
+                afterDescriptorOpened?.invoke(index)
+                val identity = descriptorIdentity(next)
+                if (identity.fileKey == null) throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED)
+                nodes += identity
+                parent = next
+            }
+            val snapshot = AttachmentSnapshot(hostPath.toString(), requested.toString(), hostRootIdentity, nodes)
+            val attachment = ResolvedAttachment(this, hostPath.toFile(), snapshot, pins.toList())
+            if (!validatePinned(attachment).authorized) throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED)
+            attachments += attachment
+            return attachment
+        } catch (failure: Throwable) {
+            try { closeDescriptors(pins) } catch (close: Exception) { failure.addSuppressed(close) }
+            if (failure is Exception && failure !is SecurityException) {
+                throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED, failure)
+            }
+            throw failure
         }
-
-        val snapshot = AttachmentSnapshot(
-            hostPath = hostPath.toString(),
-            guestPath = requested.toString(),
-            rootIdentity = hostRootIdentity,
-            nodes = nodes
-        )
-        return ResolvedAttachment(this, hostPath.toFile(), snapshot)
     }
 
     /** Check that a previously resolved attachment still refers to the same path. */
-    fun validate(attachment: ResolvedAttachment): PathValidation {
-        if (attachment.owner !== this) return PathValidation.pathChangedNotAuthorized()
+    fun validate(attachment: ResolvedAttachment): PathValidation = synchronized(lifecycle) {
+        validatePinned(attachment)
+    }
+
+    private fun validatePinned(attachment: ResolvedAttachment): PathValidation {
+        if (closed || attachment.closed || attachment.owner !== this) return PathValidation.pathChangedNotAuthorized()
         if (!rootIsUnchanged()) return PathValidation.pathChangedNotAuthorized()
 
         val path = Paths.get(attachment.snapshot.hostPath)
@@ -121,8 +143,14 @@ class TerminalPaths(
     }
 
     /** Opens and verifies each descriptor, then reads the very same leaf object. */
-    fun openRead(attachment: ResolvedAttachment): java.io.InputStream {
-        if (attachment.owner !== this || !rootIsUnchanged()) throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED)
+    fun openRead(attachment: ResolvedAttachment): java.io.InputStream = synchronized(lifecycle) {
+        openPinned(attachment)
+    }
+
+    private fun openPinned(attachment: ResolvedAttachment): java.io.InputStream {
+        if (closed || attachment.closed || attachment.owner !== this || !rootIsUnchanged()) {
+            throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED)
+        }
         val parts = canonicalHostRoot.relativize(Paths.get(attachment.snapshot.hostPath)).map { it.toString() }
         if (parts.size != attachment.snapshot.nodes.size || parts.isEmpty() ||
             parts.any { it.isEmpty() || it == "." || it == ".." || '/' in it || '\u0000' in it }) {
@@ -144,8 +172,9 @@ class TerminalPaths(
                 parent.close()
             }
             val leaf = held!!
-            held = null // Ownership passes to the stream, not to a pathname reopened later.
-            return android.os.ParcelFileDescriptor.AutoCloseInputStream(leaf)
+            val input = android.os.ParcelFileDescriptor.AutoCloseInputStream(leaf)
+            held = null // Ownership passes only after stream construction succeeds.
+            return input
         } catch (error: Exception) {
             throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED, error)
         } finally { held?.close() }
@@ -155,6 +184,7 @@ class TerminalPaths(
         val flags = android.system.OsConstants.O_RDONLY or LINUX_O_CLOEXEC or
             android.system.OsConstants.O_NOFOLLOW or android.system.OsConstants.O_NONBLOCK
         val raw = android.system.Os.open(path, flags, 0)
+        var adopted: android.os.ParcelFileDescriptor? = null
         try {
             val stat = android.system.Os.fstat(raw)
             if (if (directory) !android.system.OsConstants.S_ISDIR(stat.st_mode) else !android.system.OsConstants.S_ISREG(stat.st_mode)) {
@@ -167,13 +197,21 @@ class TerminalPaths(
                     Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
                     .invoke(null, raw, LINUX_F_DUPFD_CLOEXEC, 0) as Int
             }
-            return android.os.ParcelFileDescriptor.adoptFd(duplicate)
-        } finally { android.system.Os.close(raw) }
+            return android.os.ParcelFileDescriptor.adoptFd(duplicate).also { adopted = it }
+        } finally {
+            try { android.system.Os.close(raw) } catch (failure: Exception) {
+                try { adopted?.close() } catch (close: Exception) { failure.addSuppressed(close) }
+                throw failure
+            }
+        }
     }
 
+    private fun descriptorIdentity(fd: android.os.ParcelFileDescriptor): NodeIdentity = NodeIdentity.from(
+        Files.readAttributes(Paths.get("/proc/self/fd/${fd.fd}"), BasicFileAttributes::class.java)
+    )
+
     private fun requireDescriptor(fd: android.os.ParcelFileDescriptor, expected: NodeIdentity) {
-        val attributes = Files.readAttributes(Paths.get("/proc/self/fd/${fd.fd}"), BasicFileAttributes::class.java)
-        val current = NodeIdentity.from(attributes)
+        val current = descriptorIdentity(fd)
         if (expected.fileKey == null || current.fileKey == null || !current.sameIdentity(expected)) {
             throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED)
         }
@@ -190,11 +228,42 @@ class TerminalPaths(
         if (!result.authorized) throw SecurityException(result.reason ?: PATH_CHANGED_NOT_AUTHORIZED)
     }
 
+    private fun release(attachment: ResolvedAttachment): Unit = synchronized(lifecycle) {
+        if (attachment.closed) return@synchronized
+        attachment.closed = true
+        attachments.remove(attachment)
+        closeDescriptors(attachment.pins)
+    }
+
+    override fun close(): Unit = synchronized(lifecycle) {
+        if (closed) return@synchronized
+        closed = true
+        val descriptors = mutableListOf(rootDescriptor)
+        attachments.forEach { attachment ->
+            attachment.closed = true
+            descriptors += attachment.pins
+        }
+        attachments.clear()
+        closeDescriptors(descriptors)
+    }
+
+    private fun closeDescriptors(descriptors: List<android.os.ParcelFileDescriptor>) {
+        var failure: Exception? = null
+        for (descriptor in descriptors.asReversed()) {
+            try { descriptor.close() } catch (close: Exception) {
+                if (failure == null) failure = close else failure.addSuppressed(close)
+            }
+        }
+        failure?.let { throw it }
+    }
+
     class ResolvedAttachment internal constructor(
         internal val owner: TerminalPaths,
         file: File,
-        val snapshot: AttachmentSnapshot
-    ) {
+        val snapshot: AttachmentSnapshot,
+        internal val pins: List<android.os.ParcelFileDescriptor>
+    ) : AutoCloseable {
+        internal var closed = false
         /** Display/legacy path only. Use openRead() for authorized reads, never reopen this File. */
         val file: File = File(file.path)
         val frozenFile: File
@@ -204,6 +273,8 @@ class TerminalPaths(
 
         fun revalidate(): PathValidation = owner.validate(this)
         fun openRead(): java.io.InputStream = owner.openRead(this)
+        /** Releases identity pins. Streams already admitted retain their own descriptors. */
+        override fun close() = owner.release(this)
     }
 
     class AttachmentSnapshot internal constructor(
@@ -268,29 +339,17 @@ class TerminalPaths(
 
     internal data class NodeIdentity(
         val fileKey: String?,
-        val creationTimeMillis: Long,
-        val modifiedTimeMillis: Long,
-        val size: Long,
         val directory: Boolean,
         val regularFile: Boolean
     ) {
         fun sameIdentity(other: NodeIdentity): Boolean {
             if (directory != other.directory || regularFile != other.regularFile) return false
-            return if (fileKey != null && other.fileKey != null) {
-                fileKey == other.fileKey
-            } else {
-                creationTimeMillis == other.creationTimeMillis &&
-                    modifiedTimeMillis == other.modifiedTimeMillis &&
-                    size == other.size
-            }
+            return fileKey != null && other.fileKey != null && fileKey == other.fileKey
         }
 
         companion object {
             fun from(attributes: BasicFileAttributes) = NodeIdentity(
                 fileKey = attributes.fileKey()?.toString(),
-                creationTimeMillis = attributes.creationTime().toMillis(),
-                modifiedTimeMillis = attributes.lastModifiedTime().toMillis(),
-                size = attributes.size(),
                 directory = attributes.isDirectory,
                 regularFile = attributes.isRegularFile
             )

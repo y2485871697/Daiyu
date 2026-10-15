@@ -134,6 +134,8 @@ internal class LeaseBrowserHost(
 
     override fun execute(command: BrowserCommand, lease: BrowserTabLease): CompletableFuture<BrowserExecutionResult> {
         check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
+        // Pure support validation must precede slot mutation and UI enqueue.
+        val input = OpenMinisCommandMapper.map(command)
         // Called UNDER the registry's admission lock: state + enqueue ONLY. Never launch here.
         val pending = CompletableFuture<BrowserExecutionResult>()
         val slot = synchronized(lock) {
@@ -146,7 +148,7 @@ internal class LeaseBrowserHost(
             value
         }
         try {
-            ui.post { start(slot, command, pending) }
+            ui.post { start(slot, command, input, pending) }
         } catch (failure: Exception) {
             // No WebView work even on rejection. Retire via another bounded enqueue;
             // if the dispatcher is permanently dead, disposal cannot be guaranteed.
@@ -158,12 +160,12 @@ internal class LeaseBrowserHost(
         return pending
     }
 
-    private fun start(slot: Slot, command: BrowserCommand, pending: CompletableFuture<BrowserExecutionResult>) {
+    private fun start(slot: Slot, command: BrowserCommand, input: BrowserActionInput,
+                      pending: CompletableFuture<BrowserExecutionResult>) {
         // Never read the mutable execution lease from a late continuation.
         val (lease, operation) = synchronized(lock) { slot.lease to slot.operation }
         try {
             check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
-            val input = OpenMinisCommandMapper.map(command)
             val timeout = (command.arguments["timeout_ms"] as Int?)?.toLong()
                 ?.coerceAtMost(operationTimeoutMillis) ?: operationTimeoutMillis
             // The native prefix through its first suspension runs UNDER the same reentrant fence

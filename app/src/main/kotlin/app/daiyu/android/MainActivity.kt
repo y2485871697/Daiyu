@@ -20,6 +20,8 @@ import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.ProviderRequestOptions
 import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.skills.SkillManagementDialog
+import app.daiyu.android.ui.FeatureHubDialog
+import app.daiyu.android.ui.FeatureRoute
 
 class MainActivity:Activity() {
     private val controller get()=(application as ChatApplication).controller
@@ -37,6 +39,7 @@ class MainActivity:Activity() {
     private var settingsDialog:AlertDialog?=null
     private var modelCatalogDialog:AlertDialog?=null
     private var skillManagementDialog:SkillManagementDialog?=null
+    private var featureHubDialog:FeatureHubDialog?=null
     private var backupDialog:AlertDialog?=null
     private var configurationRestoreDialog:AlertDialog?=null
     private var configurationRestorePreview:ChatController.ConfigurationRestorePreview?=null
@@ -99,19 +102,10 @@ class MainActivity:Activity() {
         toolbar.addView(button("模型设置") {modelSettings()});root.addView(toolbar)
         val utilities=LinearLayout(this)
         utilities.addView(button("备份与导入") {backupMenu()})
-        utilities.addView(button("技能管理") {
-            skillManagementDialog?.dismiss()
-            val owner=controller
-            skillManagementDialog=SkillManagementDialog(this) {owner.skillManagement()}.also {it.show()}
-        })
-        utilities.addView(button("搜索会话") {
-            val query=EditText(this).apply {hint="标题、草稿或消息关键词"}
-            AlertDialog.Builder(this).setTitle("搜索会话").setView(query).setPositiveButton("搜索") {_,_->guard {chooseConversation(query.text.toString())}}.setNegativeButton("取消",null).show()
-        })
-        utilities.addView(button("按文件夹浏览") {
-            val folders=controller.database.conversations().map {it.folder}.distinct().sorted()
-            AlertDialog.Builder(this).setTitle("文件夹").setItems(folders.map {if(it.isEmpty()) "未分类" else it}.toTypedArray()) {_,index->guard {chooseConversation(folder=folders[index])}}.show()
-        })
+        utilities.addView(button("技能管理") {openSkillManagement()})
+        utilities.addView(button("搜索会话") {searchConversations()})
+        utilities.addView(button("按文件夹浏览") {browseFolders()})
+        utilities.addView(button("功能总览") {openFeatureHub()})
         root.addView(HorizontalScrollView(this).apply {addView(utilities)})
         status=TextView(this);root.addView(status)
         root.addView(button("加载更早消息") {loadEarlier()})
@@ -282,7 +276,43 @@ class MainActivity:Activity() {
         modelCatalogDialog?.dismiss();modelCatalogDialog=null
         settingsDialog?.dismiss();backupDialog?.dismiss();configurationRestoreDialog?.dismiss()
         skillManagementDialog?.dismiss();skillManagementDialog=null
+        featureHubDialog?.dismiss();featureHubDialog=null
         controller.unobserve(listener);super.onDestroy()
+    }
+    private fun openSkillManagement() {
+        skillManagementDialog?.dismiss()
+        val owner=controller
+        skillManagementDialog=SkillManagementDialog(this) {owner.skillManagement()}.also {it.show()}
+    }
+    private fun searchConversations() {
+        val query=EditText(this).apply {hint="标题、草稿或消息关键词"}
+        AlertDialog.Builder(this).setTitle("搜索会话").setView(query)
+            .setPositiveButton("搜索") {_,_->guard {chooseConversation(query.text.toString())}}
+            .setNegativeButton("取消",null).show()
+    }
+    private fun browseFolders() {
+        val folders=controller.database.conversations().map {it.folder}.distinct().sorted()
+        AlertDialog.Builder(this).setTitle("文件夹")
+            .setItems(folders.map {if(it.isEmpty()) "未分类" else it}.toTypedArray()) {_,index->
+                guard {chooseConversation(folder=folders[index])}
+            }.show()
+    }
+    private fun openFeatureHub() {
+        featureHubDialog?.dismiss()
+        featureHubDialog=FeatureHubDialog(this) {route ->
+            if(activityUsable()) guard {
+                when(route) {
+                    FeatureRoute.CONVERSATIONS -> chooseConversation()
+                    FeatureRoute.MODEL_SETTINGS -> modelSettings()
+                    FeatureRoute.SKILLS -> openSkillManagement()
+                    FeatureRoute.BACKUP -> backupMenu()
+                    FeatureRoute.CONVERSATION_SEARCH -> searchConversations()
+                    FeatureRoute.FOLDERS -> browseFolders()
+                    FeatureRoute.CHAT -> Unit
+                    FeatureRoute.USER_MESSAGE -> chooseUserMessage()
+                }
+            }
+        }.also {it.show()}
     }
     private fun toast(text:String) {Toast.makeText(this,text,Toast.LENGTH_LONG).show()}
     private fun guard(action:()->Unit) {try {requireActivityUsable();check(!controller.dataBusy);action()} catch (_:Exception) {toast("操作或保存失败；原数据保留")} }

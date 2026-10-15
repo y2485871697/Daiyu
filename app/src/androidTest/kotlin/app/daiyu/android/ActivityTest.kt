@@ -55,9 +55,13 @@ class ActivityTest:InstrumentationTestCase() {
             onMain {
                 ready=scroll.height>0 && pending.get(activity)==null && !scroll.isLayoutRequested &&
                     !scroll.getChildAt(0).isLayoutRequested && !activity.window.decorView.isLayoutRequested
+                val visible = android.graphics.Rect()
+                activity.window.decorView.getWindowVisibleDisplayFrame(visible)
                 lastState="height=${scroll.height}, pending=${pending.get(activity)!=null}, " +
                     "scrollLayout=${scroll.isLayoutRequested}, childLayout=${scroll.getChildAt(0).isLayoutRequested}, " +
-                    "decorLayout=${activity.window.decorView.isLayoutRequested}"
+                    "decorLayout=${activity.window.decorView.isLayoutRequested}, " +
+                    "decorHeight=${activity.window.decorView.height}, visible=$visible, " +
+                    "focus=${activity.currentFocus?.javaClass?.simpleName}"
             }
         }
         assertTrue("scroll layout and pending anchor restoration must finish: $phase, $lastState",ready)
@@ -86,9 +90,17 @@ class ActivityTest:InstrumentationTestCase() {
             assertTrue(controller.ready)
             onMain {original=field.get(application) as? ChatController;application.controller=controller}
             val current=start();activity=current
-            onMain {current.select(conversation)}
+            onMain {
+                // This test measures reading gestures, not the keyboard-resized composer viewport.
+                input(current).showSoftInputOnFocus=false
+                (current.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as
+                    android.view.inputmethod.InputMethodManager)
+                    .hideSoftInputFromWindow(current.window.decorView.windowToken,0)
+                current.select(conversation)
+            }
             instrumentation.waitForIdleSync()
             val scroll=views(current.window.decorView).filterIsInstance<android.widget.ScrollView>().single()
+            awaitScrollLayout(current,scroll,"reading viewport before touch")
             val following=MainActivity::class.java.getDeclaredField("followsBottom").apply {isAccessible=true}
             val scheduled=MainActivity::class.java.getDeclaredField("followScheduled").apply {isAccessible=true}
             val update=MainActivity::class.java.getDeclaredMethod("updateRow",Message::class.java).apply {isAccessible=true}

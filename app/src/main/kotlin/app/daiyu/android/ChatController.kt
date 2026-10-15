@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.Looper
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.RunnerOptions
+import app.daiyu.android.domain.runtime.ExecutionState
 import app.daiyu.android.skills.SkillRunSession
 import app.daiyu.android.skills.SkillToolRegistry
 import app.daiyu.android.model.ModelFactory
@@ -247,6 +248,34 @@ class ChatController internal constructor(private val application:Application,
                 }
             }
         }} catch(failure:java.util.concurrent.RejectedExecutionException) {dataBusy=false;notifyChanged();throw failure}
+    }
+    private fun ownedRunner(owner:Message):ChatRunner? {
+        val current=active ?: return null
+        return if(!closed && ready && !dataBusy && current.status==RunStatus.RUNNING &&
+            owner.id==current.id && owner.runId==current.runId && owner.conversationId==current.conversationId &&
+            owner.role==Message.ASSISTANT_ROLE) runner else null
+    }
+    @Synchronized internal fun runState(owner:Message):ExecutionState? = ownedRunner(owner)?.state()
+    internal fun pause(owner:Message):Boolean {
+        val owned=synchronized(this) {ownedRunner(owner)} ?: return false
+        val accepted=owned.pause()
+        if(accepted) synchronized(this) {if(ownedRunner(owner)===owned) notifyChanged()}
+        return accepted
+    }
+    internal fun resume(owner:Message):Boolean {
+        val owned=synchronized(this) {ownedRunner(owner)} ?: return false
+        val accepted=owned.resume()
+        if(accepted) synchronized(this) {if(ownedRunner(owner)===owned) notifyChanged()}
+        return accepted
+    }
+    // True acknowledges the matching control target, not a persisted terminal outcome.
+    internal fun stop(owner:Message):Boolean {
+        val (owned,tools)=synchronized(this) {
+            val current=ownedRunner(owner) ?: return false
+            current to runTools
+        }
+        owned.stop();tools?.close()
+        return true
     }
     fun stop() {
         val (owned, tools)=synchronized(this) {runner to runTools}

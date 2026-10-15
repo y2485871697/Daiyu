@@ -52,7 +52,7 @@ class ActivityTest:InstrumentationTestCase() {
         while(!ready && System.nanoTime()<deadline) {
             awaitFrames()
             onMain {
-                ready=pending.get(activity)==null && !scroll.isLayoutRequested &&
+                ready=scroll.height>0 && pending.get(activity)==null && !scroll.isLayoutRequested &&
                     !scroll.getChildAt(0).isLayoutRequested && !activity.window.decorView.isLayoutRequested
             }
         }

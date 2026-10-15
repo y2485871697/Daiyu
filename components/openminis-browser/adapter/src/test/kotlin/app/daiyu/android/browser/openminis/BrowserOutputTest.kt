@@ -7,6 +7,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import java.nio.file.Files
 
 class BrowserOutputTest {
     @get:Rule val temporary = TemporaryFolder()
@@ -47,6 +48,31 @@ class BrowserOutputTest {
         rejected(command("screenshot"), BrowserActionResult("ok", imageFilePath = wrongName.absolutePath))
         val valid = jpeg()
         rejected(command("screenshot"), BrowserActionResult("ok", imageFilePath = valid.parent + "/../browser_screenshots/" + valid.name))
+    }
+
+    @Test fun cacheAliasIsNormalizedBeforeSnapshotProductionWithoutAllowingImageLinks() {
+        val realCache = temporary.newFolder("real-cache")
+        val directory = File(realCache, "browser_screenshots").apply { check(mkdirs()) }
+        val file = File(directory, "snapshot_456.jpg").apply {
+            writeBytes(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xd9.toByte()))
+        }
+        val alias = File(temporary.root, "cache-alias")
+        try { Files.createSymbolicLink(alias.toPath(), realCache.toPath()) }
+        catch (error: UnsupportedOperationException) { org.junit.Assume.assumeNoException(error) }
+        catch (error: java.nio.file.FileSystemException) { org.junit.Assume.assumeNoException(error) }
+        val aliasedImage = File(alias, "browser_screenshots/${file.name}")
+        rejected(command("navigate", "url" to "https://example.invalid/"), BrowserActionResult("ok", imageFilePath = aliasedImage.absolutePath))
+        val produced = File(alias.canonicalFile, "browser_screenshots/${file.name}")
+        val output = OpenMinisCommandMapper.result(command("navigate", "url" to "https://example.invalid/"),
+            BrowserActionResult("ok", imageFilePath = produced.absolutePath))
+        assertEquals(file.canonicalPath, output.filePath)
+        val linkedImage = File(directory, "snapshot_457.jpg")
+        Files.createSymbolicLink(linkedImage.toPath(), file.toPath())
+        rejected(command("screenshot"), BrowserActionResult("ok", imageFilePath = linkedImage.absolutePath))
+        val linkedDirectory = File(temporary.newFolder("linked-cache"), "browser_screenshots")
+        Files.createSymbolicLink(linkedDirectory.toPath(), directory.toPath())
+        rejected(command("screenshot"), BrowserActionResult("ok",
+            imageFilePath = File(linkedDirectory, file.name).absolutePath))
     }
 
     @Test fun autoSnapshotIsAlsoAFileAndSharesTheSingleTotalBudget() {

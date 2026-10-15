@@ -73,6 +73,7 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
         val file = java.nio.file.Paths.get(requireNotNull(capture.filePath))
         screenshots.add(file)
         assertTrue(Files.isRegularFile(file))
+        assertEquals(file.toRealPath().toString(), file.toString())
         val bitmap = BitmapFactory.decodeFile(file.toString())
         assertNotNull("capture must be a decodable image, not just an invented path", bitmap)
         assertTrue(bitmap.width > 0 && bitmap.height > 0)

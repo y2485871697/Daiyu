@@ -115,6 +115,7 @@ class IntegrationSettingsActivityTest:android.test.InstrumentationTestCase() {
         var old:AlertDialog?=null
         controlMain {old=skillDialog();activity!!.finish()}
         instrumentation.waitForIdleSync()
+        awaitControl("activity destroyed before checking skill dialog closure") {checkNotNull(activity).isDestroyed}
         controlMain {assertFalse(checkNotNull(old).isShowing)}
         start();controlMain {activityButton("技能管理").performClick()}
         awaitControl("reopened settings keep both switches") {

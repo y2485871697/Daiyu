@@ -68,10 +68,11 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         transactions.run { db ->
             ensureIdle(db, id); require(ContextRevision.digest(read(db, id)) == ContextRevision.digest(snapshot)) { "历史已改变；摘要未应用" }
             db.execSQL("UPDATE context_archives SET active=0 WHERE conversation_id=?", arrayOf(id.value))
-            db.insertOrThrow("context_archives", null, ContentValues().apply {
+            val inserted = db.insertOrThrow("context_archives", null, ContentValues().apply {
                 put("id", archive); put("conversation_id", id.value); put("prefix_count", count); put("revision", revision)
                 put("summary", summary); put("blob_hash", hash); put("created", System.currentTimeMillis()); put("active", 1)
             })
+            check(inserted != -1L) { "压缩档案未持久化；保留原上下文" }
         }
         return archive
     }

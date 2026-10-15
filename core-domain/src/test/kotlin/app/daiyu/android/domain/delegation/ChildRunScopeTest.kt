@@ -8,7 +8,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ChildRunScopeTest {
-    private val owner = ChildRunOwner("conversation", "parent", "group", 2, "child")
+    private val owner = ChildRunOwner("conversation", "parent", "group", 2, "child", "assistant")
     private val grant = WriteEffect("file", "replace", "known", "exact")
     private fun rejected(work: () -> Unit) { try { work(); fail("accepted") } catch (_: IllegalArgumentException) { } }
     @Test fun capabilitiesAreIntersectionNotUnion() {
@@ -32,7 +32,12 @@ class ChildRunScopeTest {
         rejected { ChildRunScope.capture(owner, SessionCapabilities("session", emptySet()), TaskAuthorization("other", "parent"), emptySet()) }
         rejected { ChildRunScope.capture(owner, SessionCapabilities("session", emptySet()), TaskAuthorization("session", "wrong"), emptySet()) }
     }
-    @Test fun childCannotUseParentRunIdentity() { rejected { owner.copy(childRunId = "parent") } }
+    @Test fun childIdentityMustBeValidAndDistinctFromParentRun() {
+        rejected { owner.copy(childRunId = "parent") }
+        rejected { owner.copy(assistantMessageId = "") }
+        rejected { owner.copy(assistantMessageId = " ".repeat(3)) }
+        rejected { owner.copy(assistantMessageId = "a".repeat(201)) }
+    }
     @Test fun inputMutationCannotBroadenCapture() {
         val caps = mutableSetOf("read"); val writes = mutableSetOf(grant)
         val child = ChildRunScope.capture(owner, SessionCapabilities("session", caps), TaskAuthorization("session", "parent", writes), caps, writes)
@@ -50,12 +55,13 @@ class ChildRunScopeTest {
         assertEquals(setOf("read"), descendant.session.enabled)
         assertTrue(descendant.authorization.allowedWrites.isEmpty())
     }
-    @Test fun messageMustBelongToExactChildConversationRunAndAssistant() {
+    @Test fun messageMustBelongToExactChildConversationRunAssistantIdAndRole() {
         val scope = ChildRunScope.capture(owner, SessionCapabilities("session", emptySet()),
             TaskAuthorization("session", "parent"), emptySet())
         val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("child"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
         scope.requireOwner(message)
+        rejected { scope.requireOwner(message.copy(id = MessageId("other-assistant"))) }
         rejected { scope.requireOwner(message.copy(conversationId = ConversationId("other"))) }
         rejected { scope.requireOwner(message.copy(runId = RunId("parent"))) }
         rejected { scope.requireOwner(message.copy(role = Message.USER_ROLE)) }

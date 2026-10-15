@@ -6,6 +6,7 @@ import android.security.keystore.KeyProperties
 import android.util.Base64
 import app.daiyu.android.domain.responsesEndpoint
 import app.daiyu.android.domain.ReadOnlyTool
+import app.daiyu.android.model.ProviderSnapshot
 import java.security.KeyStore
 import java.util.UUID
 import android.content.SharedPreferences
@@ -23,6 +24,10 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
         if (deviceStatusEnabled) add(ReadOnlyTool.DEVICE_STATUS)
     }
     fun requestEndpoint(): String = responsesEndpoint(endpoint, responsesPath)
+    fun requestSnapshot(): ProviderSnapshot = ProviderSnapshot.capture(this)
+    override fun toString(): String =
+        "ModelSettings(endpoint=$endpoint, model=$model, apiKey=<redacted>, batteryEnabled=$batteryEnabled, " +
+            "responsesPath=$responsesPath, deviceStatusEnabled=$deviceStatusEnabled)"
     fun validate() {
         requestEndpoint()
         require(model.isNotBlank() && model.length<=200 && apiKey.isNotBlank() && apiKey.length<=8192) {"请填写模型和密钥"}

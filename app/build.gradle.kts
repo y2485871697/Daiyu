@@ -32,7 +32,7 @@ android {
         applicationId = "app.daiyu.android"
         minSdk = 26
         targetSdk = 37
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunner = "android.test.InstrumentationTestRunner"
         versionCode = 1
         versionName = "0.1.0"
     }

@@ -1,6 +1,8 @@
 package app.daiyu.android
 
 import android.content.Intent
+import android.os.Bundle
+import androidx.test.platform.app.InstrumentationRegistry
 import android.test.InstrumentationTestCase
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -10,13 +12,15 @@ import org.junit.runner.Description
 import org.junit.runners.model.Statement
 
 /** Keeps the existing JUnit3 fixture lifecycle, with Compose's root registry around the whole test.
- * AndroidJUnitRunner runs both the legacy suite and this rule-backed adapter.
+ * The suite still runs under android.test.InstrumentationTestRunner (smoke scripts parse its output),
+ * so the androidx registry is populated here before the Compose rule needs it.
  */
 @Suppress("DEPRECATION")
 abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     protected val ui = createEmptyComposeRule()
     private fun runLegacy() = super.runBare()
     override fun runBare() {
+        InstrumentationRegistry.registerInstance(instrumentation, Bundle())
         ui.apply(object : Statement() { override fun evaluate() { runLegacy() } },
             Description.createTestDescription(javaClass, name)).evaluate()
     }

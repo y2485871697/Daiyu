@@ -152,7 +152,7 @@ class TerminalPaths(
     }
 
     private fun openDescriptor(path: String, directory: Boolean): android.os.ParcelFileDescriptor {
-        val flags = android.system.OsConstants.O_RDONLY or android.system.OsConstants.O_CLOEXEC or
+        val flags = android.system.OsConstants.O_RDONLY or LINUX_O_CLOEXEC or
             android.system.OsConstants.O_NOFOLLOW or android.system.OsConstants.O_NONBLOCK
         val raw = android.system.Os.open(path, flags, 0)
         try {
@@ -160,11 +160,14 @@ class TerminalPaths(
             if (if (directory) !android.system.OsConstants.S_ISDIR(stat.st_mode) else !android.system.OsConstants.S_ISREG(stat.st_mode)) {
                 throw SecurityException(PATH_CHANGED_NOT_AUTHORIZED)
             }
-            val held = android.os.ParcelFileDescriptor.dup(raw)
-            try {
-                android.system.Os.fcntlInt(held.fileDescriptor, android.system.OsConstants.F_SETFD, android.system.OsConstants.FD_CLOEXEC)
-                return held
-            } catch (error: Throwable) { held.close(); throw error }
+            val duplicate = if (android.os.Build.VERSION.SDK_INT >= 30) {
+                android.system.Os.fcntlInt(raw, LINUX_F_DUPFD_CLOEXEC, 0)
+            } else {
+                android.system.Os::class.java.getMethod("fcntlInt", java.io.FileDescriptor::class.java,
+                    Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                    .invoke(null, raw, LINUX_F_DUPFD_CLOEXEC, 0) as Int
+            }
+            return android.os.ParcelFileDescriptor.adoptFd(duplicate)
         } finally { android.system.Os.close(raw) }
     }
 
@@ -295,6 +298,9 @@ class TerminalPaths(
     }
 
     companion object {
+        // Android bionic UAPI values, including API26 where the SDK omits these fields.
+        private const val LINUX_O_CLOEXEC = 0x80000
+        private const val LINUX_F_DUPFD_CLOEXEC = 1030
         const val PATH_CHANGED_NOT_AUTHORIZED = "path_changed_not_authorized"
 
         @JvmStatic

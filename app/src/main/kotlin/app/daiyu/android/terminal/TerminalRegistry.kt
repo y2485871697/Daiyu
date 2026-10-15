@@ -29,6 +29,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     internal var startProcess:(ProcessBuilder)->Process={ it.start() }
     internal var beforeJobSave:(()->Unit)?=null
     internal var processStartReader: (Long) -> String? = { processStart(it) }
+    internal var processPidReader: (Process) -> Long = { processPid(it) }
     @Synchronized fun configure(sessionId:String, configuration:TerminalConfiguration, conversationOwnerId:String=sessionId) {
         check(scope==null) { "Registry configuration is immutable; create a new registry for a new run" }
         require(conversationOwnerId.matches(Regex("[A-Za-z0-9_-]{1,128}")))
@@ -174,8 +175,8 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             val startedAt=System.nanoTime()
             val process=try { startProcess(b.builder(argv).redirectErrorStream(true).redirectInput(job.script)) }
             catch(_:Exception) { job.state="start_failed"; saveJob(job); return error("process_start_failed").put("job_id",id) }
-            val pid=try { process.pid() } catch(_:LinkageError) { -1L } catch(_:UnsupportedOperationException) { -1L }
-            val start=try { processStartReader(pid) } catch(_:Exception) { null }
+            val pid=try { processPidReader(process) } catch(_:Exception) { -1L } catch(_:LinkageError) { -1L }
+            val start=if (pid > 0L) try { processStartReader(pid) } catch(_:Exception) { null } else null
             synchronized(job) {
                 job.handle=OwnedProcess(process, pid, start); job.state="dispatched"
             }
@@ -360,6 +361,9 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         private const val MAX_LOG_BYTES=262144
         private const val MAX_TOTAL_LOG_BYTES=16L*1024*1024
         private val jobs=mutableMapOf<String,Job>() // bounded, fail closed; no unresolved ledger deletion
+        private fun processPid(process: Process): Long = try {
+            (Process::class.java.getMethod("pid").invoke(process) as? Long)?.takeIf { it > 0L } ?: -1L
+        } catch (_: Exception) { -1L } catch (_: LinkageError) { -1L }
         private fun processStart(pid:Long):String?=try {
             val stat=File("/proc/$pid/stat").readText(); stat.substring(stat.lastIndexOf(')')+2).split(' ')[19]
         } catch(_:Exception) { null }

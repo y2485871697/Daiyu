@@ -1,0 +1,187 @@
+package app.daiyu.android.ui.app
+
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import app.daiyu.android.data.model.AppearanceAccentColor
+import app.daiyu.android.data.model.AppearancePaletteStyle
+import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
+import top.yukonga.miuix.kmp.theme.ColorSchemeMode
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.theme.ThemeColorSpec
+import top.yukonga.miuix.kmp.theme.ThemeController
+import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
+import top.yukonga.miuix.kmp.theme.platformDynamicColors
+
+@Composable
+fun AgentAppTheme(
+    appearance: AppearanceSettings,
+    applyInterfaceScale: Boolean,
+    onResolvedDarkModeChange: (Boolean) -> Unit = {},
+    content: @Composable () -> Unit,
+) {
+    val systemDark = isSystemInDarkTheme()
+    val isDark = when (appearance.themeMode) {
+        AppearanceThemeMode.SYSTEM -> systemDark
+        AppearanceThemeMode.LIGHT -> false
+        AppearanceThemeMode.DARK -> true
+    }
+    val colorSchemeMode = when (appearance.themeMode) {
+        AppearanceThemeMode.LIGHT -> ColorSchemeMode.MonetLight
+        AppearanceThemeMode.DARK -> ColorSchemeMode.MonetDark
+        AppearanceThemeMode.SYSTEM -> ColorSchemeMode.MonetSystem
+    }
+    val keyColor = if (appearance.accentColor == AppearanceAccentColor.SYSTEM) {
+        platformDynamicColors(isDark).primary
+    } else {
+        appearance.accentColor.seedColor()
+    }
+    val controller = remember(
+        colorSchemeMode,
+        keyColor.value,
+        appearance.paletteStyle,
+        isDark,
+    ) {
+        ThemeController(
+            colorSchemeMode = colorSchemeMode,
+            keyColor = keyColor,
+            colorSpec = ThemeColorSpec.Spec2025,
+            paletteStyle = appearance.paletteStyle.toMiuixPaletteStyle(),
+            isDark = isDark,
+        )
+    }
+    val colors = controller.currentColors()
+    val themedColors = remember(colors, isDark, appearance.pureBlackEnabled) {
+        if (appearance.pureBlackEnabled && isDark) {
+            colors.copy(
+                background = Color.Black,
+                surface = Color.Black,
+            )
+        } else {
+            colors
+        }
+    }
+
+    LaunchedEffect(isDark) { onResolvedDarkModeChange(isDark) }
+
+    MiuixTheme(colors = themedColors) {
+        val platformDensity = LocalDensity.current
+        val appDensity = remember(platformDensity, appearance.interfaceScale, applyInterfaceScale) {
+            if (applyInterfaceScale) {
+                Density(
+                    density = platformDensity.density * appearance.interfaceScale,
+                    fontScale = platformDensity.fontScale,
+                )
+            } else {
+                platformDensity
+            }
+        }
+        val miuixColors = MiuixTheme.colorScheme
+        val materialColors = if (isDark) {
+            darkColorScheme(
+                primary = miuixColors.primary,
+                onPrimary = miuixColors.onPrimary,
+                primaryContainer = miuixColors.primaryContainer,
+                onPrimaryContainer = miuixColors.onPrimaryContainer,
+                secondary = miuixColors.secondary,
+                onSecondary = miuixColors.onSecondary,
+                secondaryContainer = miuixColors.secondaryContainer,
+                onSecondaryContainer = miuixColors.onSecondaryContainer,
+                background = miuixColors.background,
+                onBackground = miuixColors.onBackground,
+                surface = miuixColors.surface,
+                onSurface = miuixColors.onSurface,
+                surfaceVariant = miuixColors.surfaceVariant,
+                onSurfaceVariant = miuixColors.onSurfaceSecondary,
+                error = miuixColors.error,
+                onError = miuixColors.onError,
+                errorContainer = miuixColors.errorContainer,
+                onErrorContainer = miuixColors.onErrorContainer,
+                outline = miuixColors.outline,
+                outlineVariant = miuixColors.outline,
+                surfaceTint = miuixColors.primary,
+                surfaceContainer = miuixColors.surfaceContainer,
+                surfaceContainerHigh = miuixColors.surfaceContainerHigh,
+                surfaceContainerHighest = miuixColors.surfaceContainerHigh,
+                surfaceContainerLow = miuixColors.surface,
+                surfaceContainerLowest = miuixColors.surface,
+            )
+        } else {
+            lightColorScheme(
+                primary = miuixColors.primary,
+                onPrimary = miuixColors.onPrimary,
+                primaryContainer = miuixColors.primaryContainer,
+                onPrimaryContainer = miuixColors.onPrimaryContainer,
+                secondary = miuixColors.secondary,
+                onSecondary = miuixColors.onSecondary,
+                secondaryContainer = miuixColors.secondaryContainer,
+                onSecondaryContainer = miuixColors.onSecondaryContainer,
+                background = miuixColors.background,
+                onBackground = miuixColors.onBackground,
+                surface = miuixColors.surface,
+                onSurface = miuixColors.onSurface,
+                surfaceVariant = miuixColors.surfaceVariant,
+                onSurfaceVariant = miuixColors.onSurfaceSecondary,
+                error = miuixColors.error,
+                onError = miuixColors.onError,
+                errorContainer = miuixColors.errorContainer,
+                onErrorContainer = miuixColors.onErrorContainer,
+                outline = miuixColors.outline,
+                outlineVariant = miuixColors.outline,
+                surfaceTint = miuixColors.primary,
+                surfaceContainer = miuixColors.surfaceContainer,
+                surfaceContainerHigh = miuixColors.surfaceContainerHigh,
+                surfaceContainerHighest = miuixColors.surfaceContainerHigh,
+                surfaceContainerLow = miuixColors.surface,
+                surfaceContainerLowest = miuixColors.surface,
+            )
+        }
+
+        CompositionLocalProvider(
+            LocalAppearanceSettings provides appearance,
+            LocalBlurEnabled provides appearance.blurEnabled,
+            LocalTopBarBlurStyle provides appearance.topBarBlurStyle,
+            LocalPlatformDensity provides platformDensity,
+            LocalDensity provides appDensity,
+        ) {
+            // MaterialTheme 仅向 markdown-renderer-m3 提供与 Miuix 一致的颜色上下文。
+            MaterialTheme(
+                colorScheme = materialColors,
+            ) {
+                content()
+            }
+        }
+    }
+}
+
+private fun AppearancePaletteStyle.toMiuixPaletteStyle(): ThemePaletteStyle = when (this) {
+    AppearancePaletteStyle.TONAL_SPOT -> ThemePaletteStyle.TonalSpot
+    AppearancePaletteStyle.NEUTRAL -> ThemePaletteStyle.Neutral
+    AppearancePaletteStyle.VIBRANT -> ThemePaletteStyle.Vibrant
+    AppearancePaletteStyle.EXPRESSIVE -> ThemePaletteStyle.Expressive
+    AppearancePaletteStyle.RAINBOW -> ThemePaletteStyle.Rainbow
+    AppearancePaletteStyle.FRUIT_SALAD -> ThemePaletteStyle.FruitSalad
+    AppearancePaletteStyle.MONOCHROME -> ThemePaletteStyle.Monochrome
+    AppearancePaletteStyle.FIDELITY -> ThemePaletteStyle.Fidelity
+    AppearancePaletteStyle.CONTENT -> ThemePaletteStyle.Content
+}
+
+private fun AppearanceAccentColor.seedColor(): Color = when (this) {
+    AppearanceAccentColor.SYSTEM, AppearanceAccentColor.BLUE -> Color(0xFF3482FF)
+    AppearanceAccentColor.PURPLE -> Color(0xFF6750A4)
+    AppearanceAccentColor.PINK -> Color(0xFFB0006D)
+    AppearanceAccentColor.RED -> Color(0xFFBA1A1A)
+    AppearanceAccentColor.ORANGE -> Color(0xFFB65D00)
+    AppearanceAccentColor.YELLOW -> Color(0xFF7D5700)
+    AppearanceAccentColor.GREEN -> Color(0xFF006D3B)
+    AppearanceAccentColor.TEAL -> Color(0xFF006A6A)
+}

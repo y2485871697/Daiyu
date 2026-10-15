@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="ui_enable_memory_4b69b7">启用记忆</string>
+  <string name="ui_copy_4edd1d">复制</string>
+  <string name="ui_no_skills_installed_yet_4e960f">尚未安装任何 Skill</string>
+  <string name="ui_edit_a7f814">编辑</string>
+  <string name="ui_memory_b55ff5">记忆</string>
+  <string name="skills_no_description">无描述</string>
+  <string name="memory_over_limit">已超过 1 MiB 上限，请删减</string>
+  <string name="assistant_list_title">助手</string>
+  <string name="assistant_edit_title">人格</string>
+  <string name="assistant_search">搜索助手</string>
+  <string name="assistant_current">当前使用</string>
+  <string name="assistant_empty">没有匹配的助手</string>
+  <string name="assistant_delete_title">删除助手</string>
+  <string name="assistant_delete_body">确定删除 %1$s？此操作无法撤销。</string>
+  <string name="assistant_preview">预览</string>
+  <string name="assistant_identity">身份</string>
+  <string name="assistant_name">名称</string>
+  <string name="assistant_unnamed">未命名</string>
+  <string name="assistant_prompt_title">人格提示词</string>
+  <string name="assistant_crop_title">裁切头像</string>
+  <string name="assistant_memory_summary">只对当前助手生效。MEMORY.md 为所有助手共用。关闭后不注入、不允许读写，已有内容会保留。</string>
+  <string name="assistant_skills_summary">只对当前助手生效。三个内置 Skills 默认开启，新安装的需要在这里手动打开。</string>
+</resources>

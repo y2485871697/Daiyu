@@ -21,6 +21,39 @@ class BrowserHostContractTest {
     private fun registry(access: BrowserAccess = BrowserAccess.FULL) = BrowserSessionRegistry().apply { open(BrowserGrant(main, access)) }
     private fun rejects(block: () -> Unit) { try { block(); fail("expected rejection") } catch (e: IllegalStateException) {} catch (e: IllegalArgumentException) {} }
 
+    @Test fun closeBeforeOpenKeepsOnlyTheExactOwnerClosedWithoutExtraCleanup() {
+        for (owner in listOf(main, child)) {
+            val released = mutableListOf<BrowserTabLease>()
+            val r = BrowserSessionRegistry { released.add(it) }
+            repeat(2) { r.close(owner) }
+            assertTrue(released.isEmpty())
+            for (access in listOf(BrowserAccess.READ_ONLY, BrowserAccess.FULL)) {
+                try {
+                    r.open(BrowserGrant(owner, access))
+                    fail("closed owner reopened")
+                } catch (e: IllegalStateException) {
+                    assertEquals("BROWSER_SESSION_CLOSED", e.message)
+                }
+            }
+            val others = listOf(
+                if (owner == main) child else main,
+                BrowserOwner("other", owner.kind),
+            )
+            var cleaned = 0
+            val leases = others.map {
+                r.open(BrowserGrant(it, BrowserAccess.FULL))
+                r.newTab(it).also { lease -> r.registerCleanup(lease) { cleaned++ } }
+            }
+            repeat(2) { r.close(owner) }
+            assertEquals(0, cleaned)
+            assertTrue(released.isEmpty())
+            leases.forEach { r.assertCurrent(it) }
+            others.forEach { other -> repeat(2) { r.close(other) } }
+            assertEquals(2, cleaned)
+            assertEquals(leases, released)
+        }
+    }
+
     @Test fun grantsStayFrozenAcrossOpenAndClose() {
         val r = registry(BrowserAccess.READ_ONLY)
         r.open(BrowserGrant(main, BrowserAccess.READ_ONLY))

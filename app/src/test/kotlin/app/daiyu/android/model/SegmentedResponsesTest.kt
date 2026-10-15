@@ -73,4 +73,23 @@ class SegmentedResponsesTest {
         cases.forEach {try {model.open(listOf(it));fail("accepted invalid history")} catch(_:IllegalArgumentException) {}}
         assertEquals(0,calls)
     }
+    @Test fun messagesProtocolInFlatOrSegmentedHistoryRejectsBeforeConnection() {
+        var connections=0
+        val model=ResponsesModel(config) {connections++;Connection()}
+        val o=owner()
+        for(raw in listOf(
+            """{"role":"assistant","content":[{"type":"text","text":"saved"}]}""",
+            """{"role":"assistant","content":[{"type":"tool_use","id":"call","name":"lookup","input":{}}]}""",
+            """{"role":"user","content":[{"type":"tool_result","tool_use_id":"call","content":"done"}]}""")) {
+            val display=listOf(MessageBlock.Text("visible","must not replace raw"))
+            for(history in listOf(
+                o.copy(blocks=display,protocolItems=listOf(raw)),
+                o.copy(historySegments=listOf(MessageHistorySegment(o.id,"assistant",display,listOf(raw)))))) {
+                try {model.open(listOf(history));fail("Messages raw accepted by Responses")}
+                catch (_:IllegalArgumentException) {}
+            }
+        }
+        assertEquals(0,connections)
+    }
+
 }

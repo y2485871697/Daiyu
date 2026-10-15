@@ -7,6 +7,7 @@ import android.util.Base64
 import app.daiyu.android.context.*
 import app.daiyu.android.domain.context.ContextRevision
 import app.daiyu.android.storage.ConversationDatabase
+import app.daiyu.android.domain.messagesEndpoint
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.InputStream
@@ -234,12 +235,17 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         config.keys().forEach { key ->
             if (key in BOOLEAN_KEYS) require(config.get(key) is Boolean)
             else { val value = string(config, key); require(value.length <= 2000)
+                if(key == "protocol") require(value == "responses" || value == "messages") { "模型协议无效" }
                 if (key == "endpoint" && value.isNotEmpty()) {
                     val uri = URI(value); require(uri.scheme == "https" && uri.host != null && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null)
                 }
                 if (key == "responses-path" && value.isNotEmpty()) require(value.startsWith("/") && !value.contains('?') && !value.contains('#') && !value.contains(".."))
                 require(!value.contains('\n') && !value.contains('\r'))
             }
+        }
+        if(config.optString("protocol") == "messages") {
+            require(!config.has("responses-path") || config.get("responses-path") == "")
+            if(config.has("endpoint") && config.getString("endpoint").isNotEmpty()) messagesEndpoint(config.getString("endpoint"))
         }
     }
     private fun uniqueIds(rows: JSONArray, key: String): Set<String> = mutableSetOf<String>().apply {
@@ -260,7 +266,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         const val MAX_BYTES = 64L * 1024 * 1024
         const val MAX_PACKAGE = 112L * 1024 * 1024
         private val BOOLEAN_KEYS = setOf("battery", "device-status")
-        private val CONFIG_KEYS = setOf("endpoint", "model", "responses-path") + BOOLEAN_KEYS
+        private val CONFIG_KEYS = setOf("endpoint", "model", "responses-path", "protocol") + BOOLEAN_KEYS
         private val COLUMNS = linkedMapOf(
             "context_branches" to listOf("conversation_id", "parent_id", "through_message", "parent_revision"),
             "context_archives" to listOf("id", "conversation_id", "prefix_count", "revision", "summary", "blob_hash", "created", "active"),

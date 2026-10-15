@@ -17,6 +17,7 @@ import android.view.ViewTreeObserver
 import android.widget.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ModelSettings
+import app.daiyu.android.model.ProviderProtocol
 
 class MainActivity:Activity() {
     private val controller get()=(application as ChatApplication).controller
@@ -494,17 +495,18 @@ class MainActivity:Activity() {
         val preview=controller.previewImportedConfiguration()
         val plan=preview.plan
         fun value(values:Map<String,Any?>,name:String):String = when {
+            name == "protocol" -> when(values[name]) { null, "responses" -> "Responses"; "messages" -> "Messages"; else -> "无效（须修复）" }
             !values.containsKey(name) -> "（未设置）"
             values[name]=="" -> "（空）"
             values[name] is Boolean -> if(values[name]==true) "允许" else "关闭"
             else -> values[name]?.toString() ?: "（空）"
         }
-        val labels=listOf("endpoint" to "服务地址","responses-path" to "Responses 路径","model" to "模型",
+        val labels=listOf("protocol" to "协议","endpoint" to "服务地址","responses-path" to "Responses 路径","model" to "模型",
             "battery" to "只读电量工具","device-status" to "只读设备状态工具")
         val message=if(plan.isNoOp) "没有已导入的非秘密配置；不会修改当前设置。" else
             labels.joinToString("\n\n") {(name,label)->"$label：\n当前：${value(plan.before,name)}\n恢复后：${value(plan.after,name)}"}+
                 "\n\n仅恢复已导入完整备份的非秘密配置，不执行历史请求，不启用工具或系统授权。"+
-                (if(plan.credentialRebindRequired) "\n服务地址、路径或模型发生变化：当前加密密钥保留但不会读取或用于新配置。恢复后必须在模型设置中重新输入并保存密钥，才可发送。"
+                (if(plan.credentialRebindRequired) "\n协议、服务地址、路径或模型发生变化：当前加密密钥保留但不会读取或用于新配置。恢复后必须在模型设置中重新输入并保存密钥，才可发送。"
                 else "\n当前密钥不读取、不展示、不修改；已有密钥重绑要求不会解除。")+
                 "\n取消或页面重建不恢复、不重放。恢复失败时原配置保留；若存储补偿也失败，将阻止发送并要求重新保存。"
         val dialog=AlertDialog.Builder(this).setTitle("预览人工恢复模型配置").setMessage(message)
@@ -548,14 +550,51 @@ class MainActivity:Activity() {
         val key=EditText(this).apply {hint="API密钥（加密保存）";inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD;setText(saved.apiKey)}
         val battery=CheckBox(this).apply {text="允许模型查询只读电量";isChecked=saved.batteryEnabled}
         val deviceStatus=CheckBox(this).apply {text="允许模型查询只读设备状态（电量、内存、应用存储所在卷、系统与开机时长；结果发送给模型服务，不含设备标识）";isChecked=saved.deviceStatusEnabled}
+        val protocols=RadioGroup(this)
+        val responses=RadioButton(this).apply {id=View.generateViewId();text="OpenAI Responses"}
+        val messages=RadioButton(this).apply {id=View.generateViewId();text="Anthropic Messages"}
+        protocols.addView(responses);protocols.addView(messages)
+        protocols.check(when(saved.protocol) {
+            ProviderProtocol.RESPONSES -> responses.id
+            ProviderProtocol.MESSAGES -> messages.id
+            ProviderProtocol.UNKNOWN -> -1
+        })
+        var selectedProtocol=saved.protocol
+        val rebind=CheckBox(this).apply {text="我已重新输入密钥，确认将其绑定到所选协议";visibility=View.GONE}
+        path.isEnabled=saved.protocol != ProviderProtocol.MESSAGES
+        if(saved.protocol == ProviderProtocol.MESSAGES) endpoint.hint="HTTPS 基础地址或完整 Messages 地址"
+        protocols.setOnCheckedChangeListener { _, id ->
+            val chosen=when(id) {
+                responses.id -> ProviderProtocol.RESPONSES
+                messages.id -> ProviderProtocol.MESSAGES
+                else -> ProviderProtocol.UNKNOWN
+            }
+            if(chosen != selectedProtocol) {key.setText("");rebind.isChecked=false}
+            selectedProtocol=chosen
+            path.isEnabled=chosen != ProviderProtocol.MESSAGES
+            if(chosen == ProviderProtocol.MESSAGES) path.setText("")
+            endpoint.hint=if(chosen == ProviderProtocol.MESSAGES) "HTTPS 基础地址或完整 Messages 地址" else "HTTPS 基础地址或完整 Responses 地址"
+            rebind.visibility=if(chosen != saved.protocol) View.VISIBLE else View.GONE
+        }
+        key.isSaveEnabled=false
+        fields.addView(protocols);fields.addView(rebind)
         fields.addView(TextView(this).apply {setText(R.string.model_protocol_note)})
         if(editingSettings.credentialUnavailable) fields.addView(TextView(this).apply {text="已保存密钥不可用；原配置已保留，请重新输入密钥"})
+        if(saved.protocol == ProviderProtocol.UNKNOWN) fields.addView(TextView(this).apply {text="已保存协议无效；请选择协议并重新输入密钥"})
         fields.addView(endpoint);fields.addView(path);fields.addView(model);fields.addView(key);fields.addView(battery);fields.addView(deviceStatus)
-        val dialog=AlertDialog.Builder(this).setTitle("模型设置").setView(fields).setPositiveButton("保存",null).setNegativeButton("取消",null).create()
+        val dialog=AlertDialog.Builder(this).setTitle("模型设置").setView(ScrollView(this).apply {addView(fields)}).setPositiveButton("保存",null).setNegativeButton("取消",null).create()
         key.importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         dialog.setOnShowListener {dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            try {requireActivityUsable();check(settingsDialog===dialog && dialog.isShowing);check(controller.active==null && !controller.dataBusy);controller.settings.save(ModelSettings(endpoint.text.toString().trim(),model.text.toString().trim(),key.text.toString(),battery.isChecked,path.text.toString().trim(),deviceStatus.isChecked));dialog.dismiss();toast("模型设置已保存")}
-            catch (_:Exception) {toast("设置未保存；请检查HTTPS地址、模型与密钥")}
+            try {
+                requireActivityUsable();check(settingsDialog === dialog && dialog.isShowing)
+                check(controller.active == null && !controller.dataBusy)
+                require(selectedProtocol == saved.protocol || rebind.isChecked)
+                controller.settings.save(ModelSettings(endpoint.text.toString().trim(),model.text.toString().trim(),
+                    key.text.toString(),battery.isChecked,path.text.toString().trim(),deviceStatus.isChecked,selectedProtocol),
+                    protocolChangeAuthorized=rebind.isChecked)
+                dialog.dismiss();toast("模型设置已保存")
+            }
+            catch (_:Exception) {toast("设置未保存；检查协议、HTTPS地址、路径、模型与密钥；切换协议须重输密钥并勾选确认")}
         }}
         settingsDialog=dialog
         dialog.setOnDismissListener {if(settingsDialog===dialog) settingsDialog=null}

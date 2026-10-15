@@ -5,6 +5,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.storage.MessageHistoryCodec
+import app.daiyu.android.storage.SQLiteText
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.context.*
 import org.json.JSONArray
@@ -216,14 +217,17 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             add(UsageRecord(c.getString(0), c.getString(1), c.getString(2), n(3), n(4), n(5), n(6))) } }
     }
     companion object {
-        fun read(db: SQLiteDatabase, id: ConversationId): List<Message> = db.rawQuery("SELECT id,run_id,role,blocks,status,error,protocol,history_segments FROM messages WHERE conversation_id=? ORDER BY seq", arrayOf(id.value)).use { c ->
-            buildList { while (c.moveToNext()) { val p = JSONArray(c.getString(6))
-                val message = Message(MessageId(c.getString(0)), id, RunId(c.getString(1)), c.getString(2), ArchiveCodec.decodeBlocks(JSONArray(c.getString(3))),
-                    RunStatus.valueOf(c.getString(4)), c.getString(5), (0 until p.length()).map { p.getString(it) },
-                    MessageHistoryCodec.decode(JSONArray(c.getString(7))))
-                MessageHistoryCodec.validate(message)
-                add(message)
-            } }.also { MessageHistory.expand(it) } // whole-list supplement identity/content checks
+        fun read(db: SQLiteDatabase, id: ConversationId): List<Message> = DatabaseTransactions {db}.run {
+            val rows=db.rawQuery("SELECT id,run_id,role,status FROM messages WHERE conversation_id=? ORDER BY seq", arrayOf(id.value)).use { c ->
+                buildList { while(c.moveToNext()) add(listOf(c.getString(0),c.getString(1),c.getString(2),c.getString(3))) }
+            }
+            rows.map { row ->
+                fun text(column:String)=SQLiteText.read(db,"messages",column,"id",row[0])
+                val p=JSONArray(requireNotNull(text("protocol")))
+                Message(MessageId(row[0]),id,RunId(row[1]),row[2],ArchiveCodec.decodeBlocks(JSONArray(requireNotNull(text("blocks")))),
+                    RunStatus.valueOf(row[3]),text("error"),(0 until p.length()).map {p.getString(it)},
+                    MessageHistoryCodec.decode(JSONArray(requireNotNull(text("history_segments"))))).also {MessageHistoryCodec.validate(it)}
+            }.also {MessageHistory.expand(it)}
         }
         private fun messageValues(m: Message): ContentValues {
             MessageHistoryCodec.validate(m)

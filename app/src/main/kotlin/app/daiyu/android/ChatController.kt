@@ -8,6 +8,7 @@ import app.daiyu.android.context.ContextService
 import android.os.Handler
 import android.os.Looper
 import app.daiyu.android.domain.*
+import app.daiyu.android.domain.runtime.RunnerOptions
 import app.daiyu.android.model.ResponsesModel
 import app.daiyu.android.platform.AndroidReadOnlyTools
 import app.daiyu.android.storage.*
@@ -30,6 +31,7 @@ class ChatController internal constructor(private val application:Application,
     private var closed=false
     private var preparing=false
     private var recoveryFailed=false
+    private var runtimeStore:SQLiteRuntimeStore?=null
     private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
     internal val selections=mutableMapOf<ConversationId?,Pair<Int,Int>>()
@@ -42,7 +44,11 @@ class ChatController internal constructor(private val application:Application,
     @Synchronized internal fun consumeDataNotice():String? = dataNotice.also {dataNotice=null}
     @Volatile var ready=false;private set
     init {executor.execute {
-        val failed=try {database.recover();false} catch (_:Exception) {true}
+        val failed=try {
+            val runtime=SQLiteRuntimeStore.acquire(database)
+            runtimeStore=runtime
+            runtime.recoverPending();false
+        } catch (_:Exception) {true}
         synchronized(this) {
             if(!closed) {
                 recoveryFailed=failed
@@ -83,7 +89,8 @@ class ChatController internal constructor(private val application:Application,
         } catch (_:Exception) {problem="发送内容保存失败；草稿保留，未发起网络请求";notifyChanged();return null}
         problem=null;active=assistant
         val tools=config.enabledTools()
-        val owned=ChatRunner(ModelPort { history -> model(config).open(history,tools) },database,AndroidReadOnlyTools(application,tools)) {
+        val owned=ChatRunner(ModelPort { history -> model(config).open(history,tools) },database,AndroidReadOnlyTools(application,tools),
+            RunnerOptions(runtimeStore=checkNotNull(runtimeStore))) {
             synchronized(this) {
                 if(!closed && active?.id==assistant.id && active?.runId==run && active?.conversationId==conversationId &&
                     it.id==assistant.id && it.runId==run && it.conversationId==conversationId) {active=it;notifyChanged()}
@@ -223,5 +230,6 @@ class ChatController internal constructor(private val application:Application,
         // Never close storage while an accepted run/data task can still be using it.
         check(executor.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS))
         database.close()
+        runtimeStore?.close();runtimeStore=null
     }
 }

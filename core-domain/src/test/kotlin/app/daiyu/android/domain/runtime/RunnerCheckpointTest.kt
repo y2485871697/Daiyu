@@ -194,6 +194,12 @@ class RunnerCheckpointTest {
                 throw PersistenceException(IllegalStateException("receipt lost"))
             }
         }
+        var readCalls = 0
+        override fun readCommittedCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint? {
+            readCalls++; val prior=latest ?: return null
+            check(prior.owner == checkpoint.owner)
+            return prior
+        }
         override fun reconcileCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
             reconcileCalls++
             val prior = latest
@@ -245,13 +251,13 @@ class RunnerCheckpointTest {
         assertEquals(runtime.commits.indices.map { it.toLong() + 1L }, runtime.commits.map { it.revision })
         assertEquals(1, runtime.commitAttempts.count { it.phase == ExecutionPhase.TERMINAL })
         assertEquals(runtime.commits.size, runtime.commitAttempts.size)
-        assertEquals(1, runtime.reconcileCalls); assertEquals(0, runtime.reconciliationWrites)
+        assertEquals(1, runtime.readCalls); assertEquals(0, runtime.reconcileCalls); assertEquals(0, runtime.reconciliationWrites)
         val attemptsBefore = runtime.commitAttempts.size
         val recovered = ProcessRecovery.recover(runtime.commits.first(), messages, runtime)
         assertEquals(completed, recovered)
         assertEquals(completed, ProcessRecovery.recover(recovered, messages, runtime))
         assertEquals(completed, runtime.latest); assertEquals(attemptsBefore, runtime.commitAttempts.size)
-        assertEquals(0, runtime.reconciliationWrites); assertEquals(3, runtime.reconcileCalls)
+        assertEquals(0, runtime.reconciliationWrites); assertEquals(2, runtime.reconcileCalls)
     }
     @Test fun atomicRecoveryAcquiresOwnerAndDoesNotCommitAgainOnRepeatedRecovery() {
         val runtime = StatefulAtomicStore()

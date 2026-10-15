@@ -524,41 +524,38 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             val next = current.copy(status = status, error = if (status == RunStatus.STOPPED || status == RunStatus.COMPLETED) null else baseError)
             val runtime = options.runtimeStore
             val terminalCommitWasAttempted = wasReserved && status == RunStatus.COMPLETED
-            var commitFailure: Exception? = null
             // A terminal write may have succeeded before throwing. Never replace it with
             // a second unconditional terminal write, including on legacy stores.
-            if (!terminalCommitWasAttempted) {
+            if (!terminalCommitWasAttempted && !(runtime is AtomicRuntimeStore && failure is PersistenceException)) {
                 try {
                     apply(next)
                     return current
-                } catch (persist: Exception) {
-                    commitFailure = persist
-                }
+                } catch (_: Exception) { /* A failed terminal receipt is confirmed only by reading. */ }
             }
             if (runtime is AtomicRuntimeStore) {
-                // reconcileCheckpoint is the only available read-after-uncertain-commit hook.
+                // Read only: a live owner's uncertain receipt never authorizes process recovery.
                 // Do not issue a second unconditional terminal commit.
                 try {
-                    val reconciled = runtime.reconcileCheckpoint(snapshot(next))
-                    val actual = reconciled.message
-                    val confirmed = if (status == RunStatus.COMPLETED) actual.status == RunStatus.COMPLETED
-                    else actual.status != RunStatus.RUNNING
-                    if (confirmed) {
+                    val committed = runtime.readCommittedCheckpoint(snapshot(next))
+                    if (committed != null) {
+                        val actual = committed.message
+                        check(actual.id == current.id && actual.conversationId == current.conversationId &&
+                            actual.runId == current.runId && committed.owner == owner &&
+                            committed.revision in 1..(revision + 1))
+                        check((committed.phase == ExecutionPhase.TERMINAL) == (actual.status != RunStatus.RUNNING))
                         current = actual
-                        try { publish(current) } catch (_: Exception) { }
-                        return current
+                        if (committed.phase == ExecutionPhase.TERMINAL) {
+                            try { publish(current) } catch (_: Exception) { }
+                            return current
+                        }
                     }
-                } catch (reconcileFailure: Exception) {
-                    if (commitFailure == null) commitFailure = reconcileFailure
-                }
+                } catch (_: Exception) { /* No write or recovery follows an uncertain receipt. */ }
             }
-            val detail = (commitFailure?.cause ?: commitFailure)?.message?.takeIf { it.isNotBlank() }
             val persistenceError = if (runtime !is AtomicRuntimeStore) "保存失败，已显示内容可能未落盘"
-            else if (detail == null) "保存失败，无法确认终态是否已落盘" else
-                "保存失败，无法确认终态是否已落盘：$detail"
+            else "保存失败，无法确认终态是否已落盘；未重发请求或工具"
             // In particular, a reserved COMPLETED state is not returned as success unless the
             // atomic reconciliation read actually confirms it.
-            current = next.copy(status = if (status == RunStatus.COMPLETED) RunStatus.FAILED else status,
+            current = current.copy(status = if (status == RunStatus.COMPLETED) RunStatus.FAILED else status,
                 error = persistenceError)
             try { publish(current) } catch (_: Exception) { }
             return current

@@ -5,7 +5,8 @@ from pathlib import Path, PurePosixPath
 import xml.etree.ElementTree as ET
 import zipfile
 
-SCOPES = {'unit': ':core-domain:test', 'lint': ':app:lintDebug'}
+SCOPES = {'unit': ':core-domain:test :app:testDebugUnitTest', 'lint': ':app:lintDebug'}
+UNIT_REPORTS = ('core-domain/build/test-results/test', 'app/build/test-results/testDebugUnitTest')
 
 
 def digest(path):
@@ -53,16 +54,19 @@ def verify_xml(archive, scope):
             if p.is_absolute() or '..' in p.parts or ':' in n:
                 raise ValueError('unsafe_report_path')
         if scope == 'unit':
-            reports = [ET.fromstring(z.read(n)) for n in z.namelist()
-                       if n.replace('\\', '/').split('/')[-1].startswith('TEST-') and n.endswith('.xml')]
+            named_reports = [(n.replace('\\', '/'), ET.fromstring(z.read(n))) for n in z.namelist()
+                             if n.replace('\\', '/').split('/')[-1].startswith('TEST-') and n.endswith('.xml')]
+            reports = [t for _, t in named_reports]
             if (not reports or any(t.tag != 'testsuite' for t in reports)
                     or any(int(t.get(k, '0')) for t in reports for k in ('failures', 'errors', 'skipped'))
                     or any(t.findall('.//failure') or t.findall('.//error') or t.findall('.//skipped') for t in reports)
                     or any(len(t.findall('testcase')) != int(t.get('tests', '0')) for t in reports)):
                 raise ValueError('unit_report_failed_or_missing')
+            for prefix in UNIT_REPORTS:
+                module = [t for name, t in named_reports if name.startswith(prefix + '/')]
+                if not module or sum(int(t.get('tests', '0')) for t in module) < 1:
+                    raise ValueError('unit_module_report_missing')
             count = sum(int(t.get('tests', '0')) for t in reports)
-            if count < 1:
-                raise ValueError('empty_test_suite')
             return {'tests_passed': count}
         names = [n for n in z.namelist() if n.endswith('lint-results-debug.xml')]
         if len(names) != 1:

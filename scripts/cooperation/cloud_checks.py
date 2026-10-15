@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import zipfile
-from evidence import SCOPES, atomic_json, configuration, digest
+from evidence import SCOPES, UNIT_REPORTS, atomic_json, configuration, digest, verify_xml
 
 
 def run(scope):
@@ -28,14 +28,21 @@ def run(scope):
         folder.mkdir(exist_ok=True)
         command = [str(root / ('gradlew.bat' if os.name == 'nt' else 'gradlew')),
                    '--no-daemon', '--parallel', '--build-cache', '--warning-mode=fail',
-                   '--console=plain', '-I', 'scripts/cooperation/checks_only.init.gradle', SCOPES[item]]
+                   '--console=plain', '-I', 'scripts/cooperation/checks_only.init.gradle', *SCOPES[item].split()]
         with (folder / 'check.log').open('wb') as log:
             code = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT).returncode
-        reports = (root / 'core-domain/build/test-results/test' if item == 'unit'
-                   else root / 'app/build/reports')
+        report_roots = [root / p for p in UNIT_REPORTS] if item == 'unit' else [root / 'app/build/reports']
         with zipfile.ZipFile(folder / 'reports.zip', 'w', zipfile.ZIP_DEFLATED) as z:
-            for p in reports.rglob('*.xml'):
-                z.write(p, str(p.relative_to(reports)).replace('\\', '/'))
+            for reports in report_roots:
+                for p in reports.rglob('*.xml'):
+                    base = root if item == 'unit' else reports
+                    z.write(p, p.relative_to(base).as_posix())
+        if code == 0:
+            try:
+                verify_xml(folder / 'reports.zip', item)
+            except ValueError as error:
+                print(item, 'report_validation_failed', str(error), flush=True)
+                code = 1
         packages = packages_found()
         source_changed = [n for n, expected in source_hashes.items() if not (root / n).is_file() or digest(root / n) != expected]
         if source_changed: code = code or 1

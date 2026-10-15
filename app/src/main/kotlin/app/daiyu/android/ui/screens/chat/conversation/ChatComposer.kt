@@ -1,6 +1,13 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,6 +28,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,14 +48,14 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     var attachments by remember { mutableStateOf(false) }
     val hasText = state.text.isNotBlank()
     val primaryIcon = when {
-        state.phase == ComposerPhase.PAUSED -> DaiyuIcons.Resume
+        state.phase == ComposerPhase.PAUSED && !hasText -> DaiyuIcons.Resume
         hasText && state.phase == ComposerPhase.RUNNING -> DaiyuIcons.Steer
         hasText -> DaiyuIcons.Send
         state.phase == ComposerPhase.RUNNING -> DaiyuIcons.Pause
         else -> DaiyuIcons.Send
     }
     val primaryLabel = when {
-        state.phase == ComposerPhase.PAUSED -> "继续"
+        state.phase == ComposerPhase.PAUSED && !hasText -> "继续"
         hasText && state.phase == ComposerPhase.RUNNING -> "追加消息"
         hasText -> "发送"
         state.phase == ComposerPhase.RUNNING -> "暂停"
@@ -58,9 +66,13 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
             .border(1.dp, colors.onSurfaceVariantSummary.copy(alpha = 0.15f), RoundedCornerShape(24.dp))) {
             Column {
                 BasicTextField(
-                    value = state.text, onValueChange = actions.onTextChange,
+                    value = TextFieldValue(state.text, TextRange(state.selectionStart.coerceIn(0, state.text.length), state.selectionEnd.coerceIn(0, state.text.length))),
+                    onValueChange = { value ->
+                        actions.onTextChange(value.text)
+                        actions.onSelectionChange(value.selection.start, value.selection.end)
+                    },
                     enabled = state.enabled,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 160.dp)
+                    modifier = Modifier.testTag("chat-draft").fillMaxWidth().heightIn(min = 48.dp, max = 160.dp)
                         .padding(horizontal = 16.dp, vertical = 12.dp),
                     maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = colors.onSurface),
                     cursorBrush = SolidColor(colors.primary),
@@ -77,11 +89,16 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically) {
                         ChatIconButton(DaiyuIcons.Attach, "附件", { actions.onAttach(); attachments = true }, enabled = state.enabled)
+                        if (hasText && state.phase != ComposerPhase.IDLE) {
+                            ChatIconButton(if (state.phase == ComposerPhase.PAUSED) DaiyuIcons.Resume else DaiyuIcons.Pause,
+                                if (state.phase == ComposerPhase.PAUSED) "继续" else "暂停", actions.onPrimaryTap,
+                                Modifier.testTag("chat-control").controlGesture(actions), enabled = state.enabled,
+                                onLongClick = actions.onPrimaryLongPress)
+                        }
                         ChatIconButton(primaryIcon, primaryLabel, {
-                            if (state.phase == ComposerPhase.PAUSED) actions.onPrimaryTap()
-                            else if (hasText) actions.onSend(state.text)
-                            else actions.onPrimaryTap()
-                        }, Modifier.background(
+                            if (hasText) actions.onSend(state.text) else actions.onPrimaryTap()
+                        }, Modifier.testTag(if (hasText || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
+                            .controlGesture(actions).background(
                             if (state.phase == ComposerPhase.PAUSED || (!hasText && state.phase == ComposerPhase.RUNNING)) colors.onSurface else colors.primary,
                             CircleShape,
                         ),
@@ -101,7 +118,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            ComposerChip(DaiyuIcons.Model, state.modelLabel, state.enabled, actions.onModelClick)
+            ComposerChip(DaiyuIcons.Model, state.modelLabel, state.enabled, actions.onModelClick, Modifier.testTag("chat-model"))
             ComposerChip(DaiyuIcons.Reasoning, state.reasoningLabel, state.enabled, actions.onOpenReasoning)
             ComposerChip(DaiyuIcons.Assistant, state.assistantLabel, state.enabled, actions.onOpenAssistant)
             Row(Modifier.clip(RoundedCornerShape(50)).background(colors.surfaceContainerHigh)
@@ -122,8 +139,22 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
 }
 
 @Composable
-internal fun ComposerChip(icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit) {
-    Row(Modifier.clip(RoundedCornerShape(50)).background(MiuixTheme.colorScheme.surfaceContainerHigh)
+private fun Modifier.controlGesture(actions: ChatScreenActions): Modifier {
+    val latest by rememberUpdatedState(actions)
+    return pointerInput(Unit) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            latest.onControlPress()
+            try {
+                do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
+            } finally { latest.onControlRelease() }
+        }
+    }
+}
+
+@Composable
+internal fun ComposerChip(icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.clip(RoundedCornerShape(50)).background(MiuixTheme.colorScheme.surfaceContainerHigh)
         .clickable(enabled = enabled, onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(14.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)

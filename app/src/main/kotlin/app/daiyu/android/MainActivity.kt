@@ -1,215 +1,137 @@
 package app.daiyu.android
 
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.activity.compose.BackHandler
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.ui.Modifier
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.ui.viewinterop.AndroidView
-import app.daiyu.android.context.ContextService
-import app.daiyu.android.data.model.AppearanceSettings
-import app.daiyu.android.ui.RetainedConversationData
-import app.daiyu.android.ui.app.AgentAppTheme
-import app.daiyu.android.ui.components.ConversationSidePaneScaffold
-import app.daiyu.android.ui.model.ConversationPaneUiState
-import app.daiyu.android.ui.model.ConversationSummaryUi
-import app.daiyu.android.ui.model.MessageSearchHit
-import app.daiyu.android.ui.screens.chat.ManageChatsScreen
-import app.daiyu.android.ui.screens.stats.UsageStatsScreen
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
-import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
-import android.text.InputType
-import android.view.View
-import android.view.Choreographer
-import android.view.MotionEvent
-import android.view.ViewTreeObserver
-import android.widget.*
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.viewinterop.AndroidView
+import app.daiyu.android.assistants.AssistantSkill
+import app.daiyu.android.assistants.FileAssistantAssets
+import app.daiyu.android.assistants.SharedPreferencesAssistantStore
+import app.daiyu.android.context.ContextService
+import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
+import app.daiyu.android.delegation.ConversationSubAgentPreferences
+import app.daiyu.android.delegation.ReasoningEffort
 import app.daiyu.android.domain.*
-import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.ProviderRequestOptions
-import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.skills.SkillManagementDialog
-import app.daiyu.android.ui.FeatureHubDialog
+import app.daiyu.android.storage.EditingSettings
+import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.ui.FeatureRoute
+import app.daiyu.android.ui.RetainedConversationData
+import app.daiyu.android.ui.SubAgentSettingsScreen
+import app.daiyu.android.ui.app.AgentAppTheme
+import app.daiyu.android.ui.components.*
+import app.daiyu.android.ui.components.subagent.SubAgentThinkingEffortPickerDialog
+import app.daiyu.android.ui.model.ConversationPaneUiState
+import app.daiyu.android.ui.model.ConversationSummaryUi
+import app.daiyu.android.ui.model.MessageSearchHit
+import app.daiyu.android.ui.screens.assistants.AssistantEditScreen
+import app.daiyu.android.ui.screens.assistants.AssistantPickerDialog
+import app.daiyu.android.ui.screens.chat.ManageChatsScreen
+import app.daiyu.android.ui.screens.chat.conversation.*
+import app.daiyu.android.ui.screens.settings.*
+import app.daiyu.android.ui.screens.stats.UsageStatsScreen
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.util.concurrent.atomic.AtomicBoolean
 
-class MainActivity:ComponentActivity() {
-    private val controller get()=(application as ChatApplication).controller
+class MainActivity : ComponentActivity() {
+    private val controller get() = (application as ChatApplication).controller
+    private val retainedData by lazy { RetainedConversationData(controller.database, ContextService(this, controller.database)) }
+    private val assistantStore by lazy { SharedPreferencesAssistantStore(applicationContext) }
+    private val assistantAssets by lazy { FileAssistantAssets(applicationContext) }
+    private val subAgentRepository by lazy {
+        ConversationSubAgentPreferences(getSharedPreferences("subagent_configuration", MODE_PRIVATE))
+    }
     private var sidebarVisible by mutableStateOf(false)
     private var retainedPage by mutableStateOf("chat")
     private var paneState by mutableStateOf(ConversationPaneUiState(emptyList(), null, ""))
-    private val retainedData by lazy { RetainedConversationData(controller.database, ContextService(this, controller.database)) }
-    private lateinit var root:LinearLayout
-    private lateinit var timeline:LinearLayout
-    private lateinit var scroll:ScrollView
-    private lateinit var input:EditText
-    private lateinit var status:TextView
-    private lateinit var send:Button
-    private lateinit var stop:Button
-    private var controlOwner:Message?=null
-    private var controlTouchOwner:Message?=null
-    private var controlTouchActive=false
-    private var controlTouchGeneration=0L
-    private var settingsDialog:AlertDialog?=null
-    private var modelCatalogDialog:AlertDialog?=null
-    private var skillManagementDialog:SkillManagementDialog?=null
-    private var featureHubDialog:FeatureHubDialog?=null
-    private var backupDialog:AlertDialog?=null
-    private var configurationRestoreDialog:AlertDialog?=null
-    private var configurationRestorePreview:ChatController.ConfigurationRestorePreview?=null
-    private var lastOpenedBackupUri:String?=null
-    private var pendingBackupRequest:Int?=null
-    private var jumpTarget:MessageId?=null
-    private var turnMotion:ConversationTurnMotion?=null
-    private var jumpTime=0L
-    private var jumpRemainder=0f
-    private var pendingScrollLayout:ViewTreeObserver.OnPreDrawListener?=null
-    private val turnFrame=Choreographer.FrameCallback {time -> advanceTurnJump(time)}
-    private val bottomMotion=BottomFollowMotion()
-    private var followsBottom=true
-    private var followScheduled=false
-    private var followRemainder=0f
-    private val followFrame=Choreographer.FrameCallback {time ->
-        followScheduled=false
-        if(followsBottom && refreshRateWindowResumed) {
-            val distance=(timeline.height-scroll.height+scroll.paddingTop+scroll.paddingBottom-scroll.scrollY).coerceAtLeast(0)
-            if(distance>0) {
-                val movement=bottomMotion.step(distance.toFloat(),time,resources.displayMetrics.density)+followRemainder
-                val pixels=movement.toInt().coerceAtMost(distance)
-                followRemainder=movement-pixels
-                scroll.scrollBy(0,pixels)
-                if(isAtBottom()) cancelBottomFollow() else scheduleBottomFollow()
-            } else cancelBottomFollow()
-        }
-    }
-    private val initialBottom=Runnable {if(followsBottom && refreshRateWindowResumed) scroll.scrollTo(0,(timeline.height-scroll.height+scroll.paddingTop+scroll.paddingBottom).coerceAtLeast(0))}
-    private var selected:Conversation?=null
-    private var editing=false
-    private var selectionReady=false
-    private var dataRevision=-1L
-    private var shown=mutableListOf<Pair<Long,Message>>()
-    private val rows=mutableMapOf<MessageId,LinearLayout>()
-    private val expandedTools=mutableSetOf<ToolCallId>()
-    private val selections get()=controller.selections
-    private val listener:()->Unit={refresh()}
-    private var refreshRateWindowResumed=false
-    private var previousPreferredRefreshRate:Float?=null
-    private var requestedPreferredRefreshRate:Float?=null
-    /** Delayed controller/UI callbacks must not mutate a destroyed Activity. */
-    private var activityCallbacksAllowed=false
-    private val refreshRateRequest=Runnable {applyPreferredRefreshRate()}
-    private fun activityUsable():Boolean = activityCallbacksAllowed && !isFinishing && !isDestroyed
-    private fun requireActivityUsable() {check(activityUsable()) {"页面已关闭；未执行操作"}}
-    override fun onCreate(state:Bundle?) {
+    private var chatState by mutableStateOf(ChatScreenState("代鱼"))
+    private var selected: Conversation? = null
+    private var draft by mutableStateOf("")
+    private var selectionStart = 0
+    private var selectionEnd = 0
+    private var selectionReady = false
+    private val selections get() = controller.selections
+    private var shown = mutableListOf<Pair<Long, Message>>()
+    private var dataRevision = -1L
+    private var scrollSerial = 0L
+    private var controlOwner: Message? = null
+    private var controlTouchOwner: Message? = null
+    private var controlTouchActive = false
+    private var controlTouchGeneration = 0L
+    private val listener: () -> Unit = { refresh() }
+    private var activityCallbacksAllowed = false
+    private var refreshRateWindowResumed = false
+    private var previousPreferredRefreshRate: Float? = null
+    private var requestedPreferredRefreshRate: Float? = null
+    private val refreshRateRequest = Runnable { applyPreferredRefreshRate() }
+    private var skillManagementDialog: SkillManagementDialog? = null
+
+    // Prompts are one-shot capabilities, not saved state. A replaced/dismissed prompt cannot commit.
+    private sealed interface Prompt { val backup: Boolean }
+    private class InputPrompt(val title: String, val initial: String, val hint: String,
+        val confirm: String, val action: (String) -> Unit, override val backup: Boolean = false) : Prompt
+    private class ChoicePrompt(val title: String, val options: List<String>, val action: (Int) -> Unit,
+        override val backup: Boolean = false) : Prompt
+    private class ConfirmPrompt(val title: String, val message: String, val confirm: String,
+        val destructive: Boolean = false, val action: () -> Unit, override val backup: Boolean = false) : Prompt
+    private var prompt by mutableStateOf<Prompt?>(null)
+    private var lastOpenedBackupUri: String? = null
+    private var pendingBackupRequest: Int? = null
+    private var configurationRestorePreview by mutableStateOf<ChatController.ConfigurationRestorePreview?>(null)
+    private var restorePreviewText by mutableStateOf("")
+    private var backupBusy by mutableStateOf(false)
+    private var editingSettings: EditingSettings? = null
+    private var modelDraft by mutableStateOf<ModelSettingsDraftUi?>(null)
+    private var modelError by mutableStateOf<String?>(null)
+    private var catalog by mutableStateOf(emptyList<ModelCatalogEntryUi>())
+    private var catalogForDraft by mutableStateOf<ModelSettingsDraftUi?>(null)
+    private var catalogBusy by mutableStateOf(false)
+    private var catalogStatus by mutableStateOf<String?>(null)
+    private var catalogGeneration = 0L
+    private var catalogCancelled = AtomicBoolean(false)
+    private var assistantPicker by mutableStateOf(false)
+    private var assistantEditingId by mutableStateOf<String?>(null)
+    private var collaborationOwner by mutableStateOf<String?>(null)
+    private var collaborationVisible by mutableStateOf(false)
+    private var thinkingPicker by mutableStateOf(false)
+    private var appearance by mutableStateOf(AppearanceSettings())
+
+    private fun activityUsable() = activityCallbacksAllowed && !isFinishing && !isDestroyed
+    private fun requireActivityUsable() { check(activityUsable()) { "页面已关闭；未执行操作" } }
+
+    override fun onCreate(state: Bundle?) {
         super.onCreate(state)
-        root=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL}
-        val padding=(12*resources.displayMetrics.density).toInt()
-        root.setPadding(padding,padding,padding,padding)
-        root.setOnApplyWindowInsetsListener {v,insets ->
-            @Suppress("DEPRECATION")
-            v.setPadding(padding+insets.systemWindowInsetLeft,padding+insets.systemWindowInsetTop,padding+insets.systemWindowInsetRight,padding+insets.systemWindowInsetBottom);insets
-        }
-        root.addView(TextView(this).apply {text="代鱼 · 聊天";textSize=24f})
-        val toolbar=LinearLayout(this)
-        fun button(label:String,action:()->Unit)=Button(this).apply {text=label;setOnClickListener {guard {check(!controller.dataBusy);action()}}}
-        toolbar.addView(button("会话") {openSidebar()});toolbar.addView(button("新建") {select(null)})
-        toolbar.addView(button("模型设置") {modelSettings()});root.addView(toolbar)
-        val utilities=LinearLayout(this)
-        utilities.addView(button("备份与导入") {backupMenu()})
-        utilities.addView(button("技能管理") {openSkillManagement()})
-        utilities.addView(button("搜索会话") {searchConversations()})
-        utilities.addView(button("按文件夹浏览") {browseFolders()})
-        utilities.addView(button("功能总览") {openFeatureHub()})
-        root.addView(HorizontalScrollView(this).apply {addView(utilities)})
-        status=TextView(this);root.addView(status)
-        root.addView(button("加载更早消息") {loadEarlier()})
-        root.addView(button("定位用户消息") {chooseUserMessage()})
-        timeline=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL}
-        scroll=object:ScrollView(this) {
-            override fun dispatchTouchEvent(event:MotionEvent):Boolean {
-                if(event.actionMasked==MotionEvent.ACTION_DOWN) {
-                    cancelTurnJump()
-                    followsBottom=false
-                    removeCallbacks(initialBottom)
-                    cancelBottomFollow()
-                }
-                return super.dispatchTouchEvent(event)
-            }
-        }.apply {addView(timeline);isSmoothScrollingEnabled=false}
-        scroll.addOnLayoutChangeListener {_,_,_,_,_,_,_,_,_ -> scheduleBottomFollow()}
-        timeline.addOnLayoutChangeListener {_,_,_,_,_,_,_,_,_ -> scheduleBottomFollow()}
-        root.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
-        input=EditText(this).apply {hint="输入消息";minLines=2;maxLines=5;inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES}
-        input.isSaveEnabled=false
-        root.addView(input)
-        input.addTextChangedListener(object:TextWatcher {
-            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
-            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {
-                if(!editing && !controller.dataBusy) guard {val id=selected?.id;if(id==null) controller.database.draft(s.toString()) else controller.database.draft(id,s.toString())}
-            }
-            override fun afterTextChanged(s:Editable?) {}
-        })
-        val actions=LinearLayout(this)
-        send=button("发送") {
-            val saved=controller.send(selected,input.text.toString())
-            if(saved!=null) {
-                selected=saved
-                val selectionSaved=controller.preferences.edit().putString("selected",saved.id.value).commit()
-                editing=true;input.setText("");editing=false
-                shown=controller.database.messages(saved.id).toMutableList();renderAll();jumpToBottom()
-                if(!selectionSaved) toast("消息已保存；最后选中会话未保存")
-            }
-        }
-        stop=object:Button(this) {
-            override fun dispatchTouchEvent(event:MotionEvent):Boolean {
-                if(event.actionMasked==MotionEvent.ACTION_DOWN) {
-                    controlTouchGeneration++;controlTouchActive=true;controlTouchOwner=controlOwner
-                }
-                val handled=super.dispatchTouchEvent(event)
-                if(event.actionMasked==MotionEvent.ACTION_UP || event.actionMasked==MotionEvent.ACTION_CANCEL) {
-                    val generation=controlTouchGeneration
-                    post {if(controlTouchGeneration==generation) {controlTouchActive=false;controlTouchOwner=null}}
-                }
-                return handled
-            }
-        }.apply {
-            text="暂停"
-            setOnClickListener {guard {
-                currentControlOwner()?.let {owner ->
-                    controller.runState(owner)?.let {state ->
-                        val accepted=if(state.pauseRequested) controller.resume(owner) else controller.pause(owner)
-                        if(accepted) refresh()
-                    }
-                }
-            }}
-        }
-        stop.setOnLongClickListener {
-            guard {
-                currentControlOwner()?.let {owner ->
-                    if(controller.stop(owner)) status.text="正在停止；不代表远端已取消"
-                }
-            }
-            true
-        }
-        actions.addView(send);actions.addView(stop);actions.addView(button("回到底部") {jumpToBottom()})
-        root.addView(actions)
+        appearance = loadAppearance()
+        activityCallbacksAllowed = true
+        pendingBackupRequest = state?.getInt("pending-backup-request", 0)?.takeIf { it != 0 }
         setContent {
-            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
-                BackHandler(enabled = retainedPage != "chat") { retainedPage = "chat" }
+            AgentAppTheme(appearance, applyInterfaceScale = true) {
+                val focus = LocalFocusManager.current
+                val chatPageState = rememberSaveableStateHolder()
+                val assistantProfiles by assistantStore.assistants.collectAsState()
+                val activeAssistant by assistantStore.selectedId.collectAsState()
+                LaunchedEffect(assistantProfiles, activeAssistant) { if (activityUsable()) publishChat() }
+                LaunchedEffect(sidebarVisible, retainedPage) {
+                    if (sidebarVisible || retainedPage != "chat") focus.clearFocus()
+                }
+                BackHandler(enabled = retainedPage != "chat") { returnToChat() }
                 when (retainedPage) {
                     "manage" -> ManageChatsScreen(
                         conversations = paneState.historyConversations,
-                        onBack = { retainedPage = "chat" },
+                        onBack = { returnToChat() },
                         onOpenConversation = { id -> guard { openRetainedConversation(id) } },
                         onTogglePin = { id -> guard { toggleRetainedPin(id) } },
                         onDeleteConversation = { item -> guard { deleteRetainedConversation(item.id) } },
@@ -220,22 +142,74 @@ class MainActivity:ComponentActivity() {
                         onSearchHistory = { query -> withContext(Dispatchers.IO) { retainedData.search(query) } },
                         onOpenHistoryHit = { hit -> guard { openHistoryHit(hit) } },
                     )
-                    "usage" -> UsageStatsScreen(onBack = { retainedPage = "chat" }, load = { retainedData.stats() })
+                    "usage" -> UsageStatsScreen(onBack = { returnToChat() }, load = { retainedData.stats() })
+                    "settings" -> DaiyuSettingsScreen(
+                        onBack = { returnToChat() }, onRoute = { route ->
+                            if (activityUsable() && retainedPage == "settings") guard { openSettingsRoute(route) }
+                        },
+                        onOpenEntry = { entry ->
+                            if (activityUsable() && retainedPage == "settings" && entry.id in setOf("P24", "P29", "P30", "P31", "P35", "P36", "P40")) retainedPage = "appearance"
+                        },
+                        onOpenSubAgents = { retainedPage = "subagents" },
+                        onOpenAssistants = { assistantPicker = true },
+                    )
+                    "models" -> modelDraft?.let { value ->
+                        ModelSettingsScreen(
+                            draft = value, onDraftChange = { changeModelDraft(it) },
+                            onSave = { saveModelSettings(it) }, onFetchCatalog = { fetchCatalog(it) },
+                            onBack = { returnToChat() }, errorText = modelError,
+                            credentialUnavailable = editingSettings?.credentialUnavailable == true,
+                            requestOptionsUnavailable = editingSettings?.requestOptionsUnavailable == true,
+                            catalog = catalog, isFetchingCatalog = catalogBusy,
+                            catalogStatusText = catalogStatus, catalogForDraft = catalogForDraft,
+                        )
+                    }
+                    "backup" -> BackupScreen(
+                        onBack = { returnToChat() },
+                        onExportCompact = { backupGuard { pickBackup(true, false) } },
+                        onExportComplete = { backupGuard { pickBackup(true, true) } },
+                        onImportCompact = { backupGuard { pickBackup(false, false) } },
+                        onImportComplete = { backupGuard { pickBackup(false, true) } },
+                        restorePreviewText = restorePreviewText,
+                        onPreviewRestore = { backupGuard { previewConfigurationRestore() } },
+                        onRestoreConfiguration = { confirmConfigurationRestore() },
+                        canRestoreConfiguration = configurationRestorePreview?.plan?.isNoOp == false,
+                        busy = backupBusy,
+                    )
+                    "appearance" -> AppearanceSettingsScreen(
+                        state = AppearanceSettingsUi(SettingsThemeMode.valueOf(appearance.themeMode.name),
+                            appearance.interfaceScale, appearance.messageTimestampsEnabled),
+                        onThemeModeChange = { saveAppearance(appearance.copy(themeMode = AppearanceThemeMode.valueOf(it.name))) },
+                        onInterfaceScaleChange = { saveAppearance(appearance.copy(interfaceScale = it)) },
+                        onMessageTimestampsChange = { saveAppearance(appearance.copy(messageTimestampsEnabled = it)) },
+                        onOpenAppIcon = {}, onOpenIconAppearance = {}, onOpenPet = {}, onOpenVibration = {},
+                        onOpenRefreshRate = {}, onBack = { returnToChat() },
+                    )
+                    "subagents" -> SubAgentSettingsScreen(onBack = { returnToChat() },
+                        repositoryFactory = { subAgentRepository }, isCurrentRoute = retainedPage == "subagents")
+                    "assistant-edit" -> assistantEditingId?.let { id ->
+                        var skills by remember(id) { mutableStateOf(emptyList<AssistantSkill>()) }
+                        LaunchedEffect(id) {
+                            skills = withContext(Dispatchers.IO) {
+                                try { controller.skillManagement().snapshot().entries.map { entry ->
+                                    AssistantSkill(entry.id, entry.skill.name, entry.skill.description)
+                                } } catch (_: Exception) { emptyList() }
+                            }
+                        }
+                        AssistantEditScreen(assistantId = id, onBack = { returnToChat() },
+                            store = assistantStore, assets = assistantAssets, installedSkills = skills,
+                            onSaved = { refresh() })
+                    }
                     else -> ConversationSidePaneScaffold(
                         state = paneState, visible = sidebarVisible, backHandlerEnabled = true,
                         onOpen = { openSidebar() }, onDismiss = { dismissSidebar() },
                         onSearchChange = { paneState = paneState.copy(searchQuery = it) },
                         onConversationSelected = { id -> guard { openRetainedConversation(id) } },
                         onConversationRename = { item -> editRetainedConversation(item, false) },
-                        onConversationDelete = { item ->
-                            AlertDialog.Builder(this).setMessage("确认删除此会话及其消息？")
-                                .setNegativeButton("取消", null).setPositiveButton("删除") { _, _ ->
-                                    guard { deleteRetainedConversation(item.id) }
-                                }.show()
-                        },
+                        onConversationDelete = { item -> confirmDelete(item.id) },
                         onMoveConversationToFolder = { item -> editRetainedConversation(item, true) },
                         onConversationTogglePin = { item -> guard { toggleRetainedPin(item.id) } },
-                        onConversationExport = { openFeatureHub("P38.files") },
+                        onConversationExport = {},
                         onNewConversation = { guard { dismissSidebar(); select(null) } },
                         onOpenManageChats = { guard { dismissSidebar(); updatePane(); retainedPage = "manage" } },
                         onSelectFolder = { id -> paneState = paneState.copy(selectedFolderId = id); updatePane() },
@@ -250,190 +224,190 @@ class MainActivity:ComponentActivity() {
                             if (paneState.selectedFolderId == name) paneState = paneState.copy(selectedFolderId = null)
                             updatePane()
                         } },
-                        onSelectAssistant = {}, onEditAssistant = { openFeatureHub("P01") },
-                        onOpenAssistants = { dismissSidebar(); openFeatureHub("P01") },
-                        onOpenSettings = { dismissSidebar(); openFeatureHub() },
+                        onSelectAssistant = {}, onEditAssistant = { assistantPicker = true },
+                        onOpenAssistants = { dismissSidebar(); assistantPicker = true },
+                        onOpenSettings = { dismissSidebar(); retainedPage = "settings" },
                         onOpenModelProviders = { dismissSidebar(); guard { modelSettings() } },
                         onOpenUsageStats = { dismissSidebar(); retainedPage = "usage" },
                         onOpenSkills = { dismissSidebar(); guard { openSkillManagement() } },
-                        onOpenPermissions = { dismissSidebar(); openFeatureHub("R06") },
+                        onOpenPermissions = { dismissSidebar(); retainedPage = "settings" },
                     ) {
-                        AndroidView(factory = { root }, modifier = Modifier.fillMaxSize())
+                        chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
+                            DaiyuChatScreen(chatState, chatActions(), turnExtras = { id -> QuestionExtras(id) })
+                        }
                     }
                 }
+                PromptSurface()
+                AssistantPickerDialog(show = assistantPicker, store = assistantStore, assets = assistantAssets,
+                    onSelect = { id -> guard { assistantStore.select(id); refresh() } },
+                    onEdit = { id -> assistantPicker = false; assistantEditingId = id; retainedPage = "assistant-edit" },
+                    onDismiss = { assistantPicker = false })
+                val owner = collaborationOwner
+                ConversationCollaborationDialog(show = collaborationVisible, conversationId = owner,
+                    onDismiss = { collaborationVisible = false; collaborationOwner = null }, taskRunning = controller.active != null || backupBusy,
+                    ownerMatches = { activityUsable() && selected?.id?.value == owner && retainedPage == "chat" && !controller.dataBusy },
+                    repositoryFactory = { subAgentRepository })
+                // No runtime reasoning-capability contract exists yet. Do not write arbitrary request JSON.
+                SubAgentThinkingEffortPickerDialog(show = thinkingPicker, effort = ReasoningEffort.DEFAULT,
+                    options = listOf(ReasoningEffort.DEFAULT), onDismiss = { thinkingPicker = false }, onEffortChange = {})
             }
         }
-        root.requestApplyInsets()
-        activityCallbacksAllowed=true
-        controller.observe(listener);refresh()
-        pendingBackupRequest=state?.getInt("pending-backup-request",0)?.takeIf {it!=0}
-        // A restored Activity never replays a VIEW prompt or an import confirmation.
-        if(state==null) offerOpenedBackup(intent)
+        controller.observe(listener)
+        refresh()
+        // Recreating an Activity never replays an external VIEW/import confirmation.
+        if (state == null) offerOpenedBackup(intent)
     }
-    override fun onSaveInstanceState(state:Bundle) {
-        state.putInt("pending-backup-request",pendingBackupRequest ?: 0)
+
+    private fun chatActions(): ChatScreenActions {
+        val renderedOwner = controlOwner
+        fun gestureOwner() = currentControlOwner()?.takeIf {
+            renderedOwner != null && it.id == renderedOwner.id && it.runId == renderedOwner.runId && it.conversationId == renderedOwner.conversationId
+        }
+        return ChatScreenActions(
+        onOpenSidebar = { openSidebar() }, onTextChange = { updateDraft(it) },
+        onSelectionChange = { start, end -> selectionStart = start; selectionEnd = end; publishChat() },
+        onSend = { text -> guard { sendDraft(text) } },
+        onPrimaryTap = { guard {
+            gestureOwner()?.let { owner -> controller.runState(owner)?.let { state ->
+                val accepted = if (state.pauseRequested) controller.resume(owner) else controller.pause(owner)
+                if (accepted) refresh()
+            } }
+        } },
+        onPrimaryLongPress = { guard { gestureOwner()?.let { owner -> controller.stop(owner); refresh() } } },
+        onControlPress = {
+            controlTouchGeneration++; controlTouchActive = true; controlTouchOwner = controlOwner
+        },
+        onControlRelease = {
+            val generation = controlTouchGeneration
+            window.decorView.post { if (controlTouchGeneration == generation) { controlTouchActive = false; controlTouchOwner = null } }
+        },
+        onModelClick = { guard { modelSettings() } }, onReasoningClick = { thinkingPicker = true },
+        onAssistantClick = { assistantPicker = true }, onCopy = { id -> copyMessage(id) },
+        onMenuAction = { action -> guard { when (action) {
+            ChatMenuAction.NEW_CHAT -> select(null)
+            ChatMenuAction.RENAME -> selected?.let { conversation ->
+                editConversation(conversation.id.value, false)
+            }
+            ChatMenuAction.SUB_AGENT -> { collaborationOwner = selected?.id?.value; collaborationVisible = true }
+            ChatMenuAction.LOAD_EARLIER -> loadEarlier()
+            ChatMenuAction.LOCATE_USER -> chooseUserMessage()
+            ChatMenuAction.BOTTOM -> jumpToBottom()
+            ChatMenuAction.SEARCH -> searchConversations()
+            ChatMenuAction.SETTINGS -> retainedPage = "settings"
+            ChatMenuAction.CONVERSATION_ID -> selected?.let {
+                (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("会话 ID", it.id.value))
+            }
+            else -> Unit
+        } } },
+        )
+    }
+
+    @Composable private fun PromptSurface() {
+        val current = prompt ?: return
+        fun valid() = activityUsable() && prompt === current
+        when (current) {
+            is InputPrompt -> DaiyuTextInputDialog(current.title, current.initial, current.hint, current.confirm,
+                onConfirm = { value -> if (valid()) { prompt = null; current.action(value) } }, onDismiss = { if (valid()) prompt = null })
+            is ChoicePrompt -> DaiyuChoiceSheet(current.title, current.options,
+                onSelect = { index -> if (valid()) { prompt = null; current.action(index) } }, onDismiss = { if (valid()) prompt = null })
+            is ConfirmPrompt -> DaiyuConfirmDialog(current.title, current.message, current.confirm, current.destructive,
+                onConfirm = { if (valid()) { prompt = null; current.action() } }, onDismiss = { if (valid()) prompt = null })
+        }
+    }
+
+    @Composable private fun QuestionExtras(id: String) {
+        val message = shown.firstOrNull { it.second.id.value == id }?.second ?: return
+        message.blocks.filterIsInstance<MessageBlock.Tool>().forEach { tool ->
+            val question = controller.questionProjection(message, tool.invocation)
+            if (question != null) key(question.identity) {
+                // The existing question binding owns durable replies and stop races; keep its adapter.
+                AndroidView(factory = { app.daiyu.android.question.QuestionCardView(it) }, update = { view ->
+                    val binding = question.binding
+                    if (binding != null) view.bind(question.identity, question.record, question.canAnswer, binding)
+                    else view.bind(question.identity, question.record, false) { _, _, complete ->
+                        complete(app.daiyu.android.question.QuestionCardView.Reply.STOPPED)
+                    }
+                })
+            }
+        }
+        if (controller.canRetryQuestionCleanup(message)) {
+            top.yukonga.miuix.kmp.basic.TextButton(text = "重试停止清理", onClick = { guard { controller.stop(message) } })
+        }
+    }
+
+    override fun onSaveInstanceState(state: Bundle) {
+        state.putInt("pending-backup-request", pendingBackupRequest ?: 0)
         super.onSaveInstanceState(state)
     }
-    override fun onNewIntent(intent:Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        offerOpenedBackup(intent)
-    }
-    private fun checkBackupAvailable() {
-        requireActivityUsable()
-        check(controller.ready && controller.active==null && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true) {
-            "会话尚未就绪、运行中、备份任务进行中或恢复失败；未打开备份，请稍后重新选择文件"
-        }
-    }
-    private fun backupGuard(action:()->Unit) {
-        try {checkBackupAvailable();action()}
-        catch(failure:Exception) {
-            toast(if(failure is IllegalStateException || failure is IllegalArgumentException)
-                failure.message ?: "备份操作失败；原数据保留"
-            else "备份操作失败；原数据保留，请重新选择文件")
-        }
-    }
-    private fun showBackupDialog(dialog:AlertDialog) {
-        backupDialog?.dismiss()
-        backupDialog=dialog
-        dialog.setOnDismissListener {if(backupDialog===dialog) backupDialog=null}
-        dialog.show()
-    }
-    private fun offerOpenedBackup(open:Intent?) {
-        if(open?.action!=Intent.ACTION_VIEW) return
-        backupGuard {
-            val uri=open.data
-            require(uri!=null && uri.scheme=="content" && open.type=="application/json") {"请选择content类型的JSON备份文件"}
-            require(open.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION!=0) {"备份文件未授予读取权限；请重新选择文件"}
-            checkBackupAvailable()
-            // Suppress duplicate delivery only while its choice/confirmation is visible.
-            // A later deliberate open can retry; recreation itself never replays the intent.
-            if(lastOpenedBackupUri==uri.toString() && backupDialog?.isShowing==true) return@backupGuard
-            lastOpenedBackupUri=uri.toString()
-            showBackupDialog(AlertDialog.Builder(this).setTitle("打开备份：选择格式后确认导入")
-                .setItems(arrayOf("完整中立备份（推荐）","纯文本兼容备份")) {_,index->backupGuard {
-                    confirmBackupImport(uri,index==0)
-                }}.setNegativeButton("取消",null).create())
-        }
-    }
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); offerOpenedBackup(intent) }
     override fun onResume() {
-        super.onResume()
-        refreshRateWindowResumed=true
-        applyPreferredRefreshRate()
+        super.onResume(); refreshRateWindowResumed = true; applyPreferredRefreshRate()
         window.decorView.post(refreshRateRequest)
-        scheduleBottomFollow()
     }
     private fun applyPreferredRefreshRate() {
-        if(!refreshRateWindowResumed || isFinishing || isDestroyed) return
-        val rate=highestSupportedRefreshRate(window.decorView.display?.supportedModes?.map {it.refreshRate}.orEmpty())
-        if(rate<=0f) return
-        val attributes=window.attributes
-        if(attributes.preferredRefreshRate==rate) return
-        if(previousPreferredRefreshRate==null) previousPreferredRefreshRate=attributes.preferredRefreshRate
-        requestedPreferredRefreshRate=rate
-        attributes.preferredRefreshRate=rate
-        window.attributes=attributes
+        if (!refreshRateWindowResumed || isFinishing || isDestroyed) return
+        val rate = highestSupportedRefreshRate(window.decorView.display?.supportedModes?.map { it.refreshRate }.orEmpty())
+        if (rate <= 0f) return
+        val attributes = window.attributes
+        if (attributes.preferredRefreshRate == rate) return
+        if (previousPreferredRefreshRate == null) previousPreferredRefreshRate = attributes.preferredRefreshRate
+        requestedPreferredRefreshRate = rate; attributes.preferredRefreshRate = rate; window.attributes = attributes
     }
     override fun onPause() {
-        refreshRateWindowResumed=false
-        scroll.removeCallbacks(initialBottom)
-        cancelBottomFollow()
-        cancelTurnJump()
-        window.decorView.removeCallbacks(refreshRateRequest)
-        val previous=previousPreferredRefreshRate
-        if(previous!=null && window.attributes.preferredRefreshRate==requestedPreferredRefreshRate) {
-            val attributes=window.attributes
-            attributes.preferredRefreshRate=previous
-            window.attributes=attributes
+        refreshRateWindowResumed = false; window.decorView.removeCallbacks(refreshRateRequest)
+        val previous = previousPreferredRefreshRate
+        if (previous != null && window.attributes.preferredRefreshRate == requestedPreferredRefreshRate) {
+            val attributes = window.attributes; attributes.preferredRefreshRate = previous; window.attributes = attributes
         }
-        previousPreferredRefreshRate=null
-        requestedPreferredRefreshRate=null
-        if(selectionReady) selections[selected?.id]=input.selectionStart to input.selectionEnd
+        previousPreferredRefreshRate = null; requestedPreferredRefreshRate = null
+        if (selectionReady) selections[selected?.id] = selectionStart to selectionEnd
         super.onPause()
     }
     override fun onDestroy() {
-        activityCallbacksAllowed=false
-        refreshRateWindowResumed=false
-        scroll.removeCallbacks(initialBottom);cancelBottomFollow();cancelTurnJump()
-        window.decorView.removeCallbacks(refreshRateRequest)
-        configurationRestorePreview?.let {controller.cancelConfigurationRestore(it)}
-        configurationRestorePreview=null
-        modelCatalogDialog?.dismiss();modelCatalogDialog=null
-        settingsDialog?.dismiss();backupDialog?.dismiss();configurationRestoreDialog?.dismiss()
-        skillManagementDialog?.dismiss();skillManagementDialog=null
-        featureHubDialog?.dismiss();featureHubDialog=null
-        controller.unobserve(listener);super.onDestroy()
+        activityCallbacksAllowed = false; refreshRateWindowResumed = false
+        window.decorView.removeCallbacks(refreshRateRequest); invalidateCatalog()
+        cancelRestorePreview(); prompt = null
+        skillManagementDialog?.dismiss(); skillManagementDialog = null
+        controller.unobserve(listener); super.onDestroy()
+    }
+    private fun returnToChat() {
+        invalidateCatalog(); modelDraft = null; editingSettings = null; modelError = null
+        cancelRestorePreview(); prompt = null; retainedPage = "chat"
+        if (activityUsable()) refresh()
     }
     private fun openSkillManagement() {
         skillManagementDialog?.dismiss()
-        val owner=controller
-        skillManagementDialog=SkillManagementDialog(this) {owner.skillManagement()}.also {it.show()}
+        val owner = controller
+        skillManagementDialog = SkillManagementDialog(this) { owner.skillManagement() }.also { it.show() }
     }
-    private fun searchConversations() {
-        val query=EditText(this).apply {hint="标题、草稿或消息关键词"}
-        AlertDialog.Builder(this).setTitle("搜索会话").setView(query)
-            .setPositiveButton("搜索") {_,_->guard {chooseConversation(query.text.toString())}}
-            .setNegativeButton("取消",null).show()
-    }
-    private fun browseFolders() {
-        val folders=controller.database.conversations().map {it.folder}.distinct().sorted()
-        AlertDialog.Builder(this).setTitle("文件夹")
-            .setItems(folders.map {if(it.isEmpty()) "未分类" else it}.toTypedArray()) {_,index->
-                guard {chooseConversation(folder=folders[index])}
-            }.show()
-    }
-    private fun openFeatureHub(entryId: String? = null) {
-        featureHubDialog?.dismiss()
-        featureHubDialog=FeatureHubDialog(this) {route ->
-            if(activityUsable()) guard {
-                when(route) {
-                    FeatureRoute.SIDEBAR -> { retainedPage = "chat"; openSidebar() }
-                    FeatureRoute.MANAGE_CHATS -> { updatePane(); retainedPage = "manage" }
-                    FeatureRoute.USAGE_STATS -> { retainedPage = "usage" }
-                    FeatureRoute.CONVERSATIONS -> chooseConversation()
-                    FeatureRoute.MODEL_SETTINGS -> modelSettings()
-                    FeatureRoute.SKILLS -> openSkillManagement()
-                    FeatureRoute.BACKUP -> backupMenu()
-                    FeatureRoute.CONVERSATION_SEARCH -> searchConversations()
-                    FeatureRoute.FOLDERS -> browseFolders()
-                    FeatureRoute.CHAT -> Unit
-                    FeatureRoute.USER_MESSAGE -> chooseUserMessage()
-                }
-            }
-        }.also {it.show(entryId)}
-    }
-    private fun openSidebar() {
-        guard {
-            updatePane()
-            input.clearFocus()
-            (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
-                .hideSoftInputFromWindow(input.windowToken, 0)
-            sidebarVisible = true
-            input.isEnabled = false
+    private fun openSettingsRoute(route: FeatureRoute) {
+        when (route) {
+            FeatureRoute.MODEL_SETTINGS -> modelSettings()
+            FeatureRoute.BACKUP -> backupMenu()
+            FeatureRoute.SIDEBAR -> { returnToChat(); openSidebar() }
+            FeatureRoute.MANAGE_CHATS -> { updatePane(); retainedPage = "manage" }
+            FeatureRoute.USAGE_STATS -> retainedPage = "usage"
+            FeatureRoute.CONVERSATIONS -> chooseConversation()
+            FeatureRoute.CONVERSATION_SEARCH -> searchConversations()
+            FeatureRoute.FOLDERS -> browseFolders()
+            FeatureRoute.SKILLS -> openSkillManagement()
+            // Settings entries are navigation, never implicit execution/send/stop operations.
+            FeatureRoute.CHAT, FeatureRoute.USER_MESSAGE -> Unit
         }
     }
-    private fun dismissSidebar() {
-        sidebarVisible = false
-        if (activityUsable()) refresh()
-    }
+    private fun openSidebar() { guard { updatePane(); sidebarVisible = true; publishChat() } }
+    private fun dismissSidebar() { sidebarVisible = false; if (activityUsable()) refresh() }
     private fun updatePane() {
         if (!controller.ready || controller.dataBusy) return
         val all = retainedData.summaries(controller.active)
-        paneState = paneState.copy(
-            conversations = all.filter { it.folderId == paneState.selectedFolderId },
-            historyConversations = all, selectedConversationId = selected?.id?.value,
-            folders = retainedData.folders(),
-        )
+        paneState = paneState.copy(conversations = all.filter { it.folderId == paneState.selectedFolderId },
+            historyConversations = all, selectedConversationId = selected?.id?.value, folders = retainedData.folders())
     }
     private fun retainedConversation(id: String) = controller.database.conversations().single { it.id.value == id }
-    private fun openRetainedConversation(id: String) {
-        val conversation = retainedConversation(id)
-        dismissSidebar(); retainedPage = "chat"; select(conversation)
-    }
+    private fun openRetainedConversation(id: String) { val conversation = retainedConversation(id); dismissSidebar(); returnToChat(); select(conversation) }
     private fun toggleRetainedPin(id: String) {
         val conversation = retainedConversation(id)
-        controller.database.organize(conversation.id, conversation.folder, !conversation.pinned)
-        updatePane()
+        controller.database.organize(conversation.id, conversation.folder, !conversation.pinned); updatePane()
     }
     private fun deleteRetainedConversation(id: String) {
         val conversation = retainedConversation(id)
@@ -442,496 +416,342 @@ class MainActivity:ComponentActivity() {
         if (selected?.id == conversation.id) select(null)
         updatePane()
     }
-    private fun editRetainedConversation(item: ConversationSummaryUi, folder: Boolean) {
-        guard {
-            val current = retainedConversation(item.id)
-            val editor = EditText(this).apply { setText(if (folder) current.folder else current.title) }
-            AlertDialog.Builder(this).setTitle(if (folder) "移动到文件夹" else "重命名")
-                .setView(editor).setNegativeButton("取消", null).setPositiveButton("保存") { _, _ -> guard {
-                    val latest = retainedConversation(item.id)
-                    if (folder) controller.database.organize(latest.id, editor.text.toString(), latest.pinned)
-                    else controller.database.rename(latest.id, editor.text.toString())
-                    if (selected?.id == latest.id) selected = retainedConversation(item.id)
-                    updatePane(); refresh()
-                } }.show()
-        }
+    private fun confirmDelete(id: String) {
+        prompt = ConfirmPrompt("删除会话", "确认删除此会话及其消息？", "删除", true,
+            action = { guard { deleteRetainedConversation(id) } })
+    }
+    private fun editRetainedConversation(item: ConversationSummaryUi, folder: Boolean) { guard { editConversation(item.id, folder) } }
+    private fun editConversation(id: String, folder: Boolean) {
+        val current = retainedConversation(id)
+        prompt = InputPrompt(if (folder) "移动到文件夹" else "重命名", if (folder) current.folder else current.title,
+            if (folder) "文件夹" else "名称", "保存", { value -> guard {
+                val latest = retainedConversation(id)
+                if (folder) controller.database.organize(latest.id, value, latest.pinned) else controller.database.rename(latest.id, value)
+                if (selected?.id == latest.id) selected = retainedConversation(id)
+                updatePane(); refresh()
+            } })
+    }
+    private fun searchConversations() {
+        prompt = InputPrompt("搜索会话", "", "标题、草稿或消息关键词", "搜索", { query -> guard { chooseConversation(query) } })
+    }
+    private fun browseFolders() {
+        val folders = controller.database.conversations().map { it.folder }.distinct().sorted()
+        prompt = ChoicePrompt("文件夹", folders.map { it.ifEmpty { "未分类" } }, { index -> guard { chooseConversation(folder = folders[index]) } })
+    }
+    private fun chooseConversation(query: String = "", folder: String? = null) {
+        val list = controller.database.conversations(query, folder)
+        prompt = ChoicePrompt("会话", list.map { "${if (it.pinned) "★ " else ""}${if (it.folder.isNotEmpty()) "[${it.folder}] " else ""}${it.title}" },
+            { index -> guard {
+                val id = list[index].id.value
+                val conversation = retainedConversation(id)
+                prompt = ChoicePrompt(conversation.title, listOf("打开", "重命名", "删除", if (conversation.pinned) "取消置顶" else "置顶", "移动到文件夹"),
+                    { action -> guard { when (action) {
+                        0 -> openRetainedConversation(id)
+                        1 -> editConversation(id, false)
+                        2 -> confirmDelete(id)
+                        3 -> { toggleRetainedPin(id); chooseConversation(query, folder) }
+                        4 -> editConversation(id, true)
+                    } } })
+            } })
     }
     private fun openHistoryHit(hit: MessageSearchHit) {
         val conversation = retainedConversation(hit.conversationId)
         openRetainedConversation(hit.conversationId)
-        // Load the owner row, not an arbitrary most-recent page.
-        val db = controller.database.readableDatabase
-        val sequence = db.rawQuery("SELECT seq FROM messages WHERE conversation_id=? AND id=?",
-            arrayOf(conversation.id.value, hit.ownerMessageId)).use { cursor ->
-            check(cursor.moveToFirst()) { "命中消息已不存在" }; cursor.getLong(0)
-        }
+        val sequence = controller.database.readableDatabase.rawQuery("SELECT seq FROM messages WHERE conversation_id=? AND id=?",
+            arrayOf(conversation.id.value, hit.ownerMessageId)).use { cursor -> check(cursor.moveToFirst()) { "命中消息已不存在" }; cursor.getLong(0) }
         shown = controller.database.messages(conversation.id, sequence + 1, 50).toMutableList()
-        renderAll(); followsBottom = false; scroll.removeCallbacks(initialBottom); cancelBottomFollow()
-        root.post {
-            if (activityUsable() && selected?.id == conversation.id) afterScrollLayout {
-                if (scroll.height == 0 || timeline.isLayoutRequested) false else {
-                    rows[MessageId(hit.ownerMessageId)]?.let { row -> scroll.smoothScrollTo(0, row.top) }
-                    true
-                }
-            }
-        }
+        publishChat(); requestScroll(hit.ownerMessageId, false)
     }
-    private fun toast(text:String) {Toast.makeText(this,text,Toast.LENGTH_LONG).show()}
-    private fun guard(action:()->Unit) {try {requireActivityUsable();check(!controller.dataBusy);action()} catch (_:Exception) {toast("操作或保存失败；原数据保留")} }
-    internal fun select(conversation:Conversation?) {
-        requireActivityUsable()
-        check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true)
-        val list=controller.database.conversations()
-        var draft=if(conversation==null) controller.database.draft() else list.first {it.id==conversation.id}.draft
-        if(selectionReady) {
-            val id=selected?.id
-            if(id==null) controller.database.draft(input.text.toString())
-            else if(list.any {it.id==id}) controller.database.draft(id,input.text.toString())
-            selections[id]=input.selectionStart to input.selectionEnd
-        }
-        if(selectionReady && selected?.id==conversation?.id) draft=input.text.toString()
-        // Do not change the draft owner until the selection preference has been accepted.
-        // Otherwise a failed commit leaves the previous input writing into the target conversation.
-        check(controller.preferences.edit().apply {if(conversation==null) remove("selected") else putString("selected",conversation.id.value)}.commit())
-        selected=conversation;selectionReady=true
-        val range=selections[conversation?.id]
-        editing=true
-        try {input.setText(draft);input.setSelection((range?.first ?: input.length()).coerceIn(0,input.length()),(range?.second ?: input.length()).coerceIn(0,input.length()))} finally {editing=false}
-        shown=if(conversation==null) mutableListOf() else controller.database.messages(conversation.id).toMutableList();renderAll()
-        jumpToBottom();refresh()
+    private fun toast(text: String) { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }
+    private fun guard(action: () -> Unit) {
+        try { requireActivityUsable(); check(!controller.dataBusy); action() }
+        catch (_: Exception) { toast("操作或保存失败；原数据保留") }
     }
-    private fun currentControlOwner():Message? =
-        (if(controlTouchActive) controlTouchOwner else controlOwner)?.takeIf {it.conversationId==selected?.id}
-    private fun refresh() {
-        if(!activityUsable()) return
-        input.isEnabled=!sidebarVisible && controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true
-        send.isEnabled=controller.ready && !controller.dataBusy && controller.active==null && controller.problem?.startsWith("会话恢复失败")!=true
-        controlOwner=controller.active?.takeIf {it.conversationId==selected?.id && it.status==RunStatus.RUNNING}
-        val controlState=controlOwner?.let {controller.runState(it)}
-        stop.isEnabled=controlState!=null && input.isEnabled
-        stop.text=if(controlState?.pauseRequested==true) "继续" else "暂停"
-        stop.contentDescription=if(controlState?.pauseRequested==true) "继续当前回复，长按停止" else "暂停当前回复，长按停止"
-        if(controller.dataBusy) {status.text="处理备份中";return}
-        if(!controller.ready) {status.text="恢复会话中";return}
-        if(controller.problem?.startsWith("会话恢复失败")==true) {status.text=controller.problem;return}
+    private fun updateDraft(value: String) {
+        if (!activityUsable() || sidebarVisible || controller.dataBusy || !controller.ready) return
         guard {
-            if(dataRevision!=controller.dataRevision) {
-                dataRevision=controller.dataRevision
-                if(selectionReady && selected==null) {
-                    editing=true
-                    try {input.setText(controller.database.draft());input.setSelection(input.length())} finally {editing=false}
+            val id = selected?.id
+            if (id == null) controller.database.draft(value) else controller.database.draft(id, value)
+            draft = value; publishChat()
+        }
+    }
+    internal fun select(conversation: Conversation?) {
+        requireActivityUsable()
+        check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
+        val list = controller.database.conversations()
+        var targetDraft = if (conversation == null) controller.database.draft() else list.first { it.id == conversation.id }.draft
+        if (selectionReady) {
+            val id = selected?.id
+            if (id == null) controller.database.draft(draft) else if (list.any { it.id == id }) controller.database.draft(id, draft)
+            selections[id] = selectionStart to selectionEnd
+        }
+        if (selectionReady && selected?.id == conversation?.id) targetDraft = draft
+        // Commit the owner before allowing any text callbacks to write to it.
+        check(controller.preferences.edit().apply {
+            if (conversation == null) remove("selected") else putString("selected", conversation.id.value)
+        }.commit())
+        selected = conversation; selectionReady = true; draft = targetDraft
+        val range = selections[conversation?.id]
+        selectionStart = (range?.first ?: draft.length).coerceIn(0, draft.length)
+        selectionEnd = (range?.second ?: draft.length).coerceIn(0, draft.length)
+        shown = if (conversation == null) mutableListOf() else controller.database.messages(conversation.id).toMutableList()
+        collaborationOwner = null; collaborationVisible = false; publishChat(); jumpToBottom(); refresh()
+    }
+    private fun sendDraft(text: String) {
+        val saved = controller.send(selected, text) ?: return
+        selected = saved; selectionReady = true
+        val savedSelection = controller.preferences.edit().putString("selected", saved.id.value).commit()
+        draft = ""; selectionStart = 0; selectionEnd = 0
+        shown = controller.database.messages(saved.id).toMutableList()
+        publishChat(); jumpToBottom(); refresh()
+        if (!savedSelection) toast("消息已保存；最后选中会话未保存")
+    }
+    private fun currentControlOwner(): Message? =
+        (if (controlTouchActive) controlTouchOwner else controlOwner)?.takeIf { it.conversationId == selected?.id }
+    private fun refresh() {
+        if (!activityUsable()) return
+        backupBusy = controller.dataBusy
+        controlOwner = controller.active?.takeIf { it.conversationId == selected?.id && it.status == RunStatus.RUNNING }
+        if (controller.dataBusy) {
+            if (prompt?.backup == true) prompt = null
+            cancelRestorePreview(); publishChat(); return
+        }
+        if (!controller.ready || controller.problem?.startsWith("会话恢复失败") == true) { publishChat(); return }
+        guard {
+            if (!selectionReady) {
+                val id = controller.preferences.getString("selected", null)
+                select(controller.database.conversations().firstOrNull { it.id.value == id }); return@guard
+            }
+            if (dataRevision != controller.dataRevision) {
+                dataRevision = controller.dataRevision
+                val latest = selected?.id?.let { id -> controller.database.conversations().firstOrNull { it.id == id } }
+                if (selected != null && latest == null) { select(null); return@guard }
+                selected = latest
+                draft = latest?.draft ?: controller.database.draft()
+                selectionStart = selectionStart.coerceIn(0, draft.length); selectionEnd = selectionEnd.coerceIn(0, draft.length)
+            }
+            controller.consumeDataNotice()?.let { toast(it) }
+            selected?.let { conversation ->
+                if (shown.isEmpty()) shown = controller.database.messages(conversation.id).toMutableList()
+                else {
+                    // Refresh the loaded range, retaining the early-history window and history-hit owner.
+                    val first = shown.first().first
+                    val last = shown.last().first
+                    val active = controller.active?.takeIf { it.conversationId == conversation.id }
+                    val newOwner = active != null && shown.none { it.second.id == active.id }
+                    val persisted = readLoadedWindow(conversation.id, if (newOwner) Long.MAX_VALUE else last + 1,
+                        shown.size + if (newOwner) 2 else 0).filter { it.first >= first }
+                    shown = persisted.map { entry -> if (active != null && entry.second.id == active.id) entry.first to active else entry }.toMutableList()
                 }
             }
-            if(!isFinishing && !isDestroyed) controller.consumeDataNotice()?.let {toast(it)}
-            if(!selectionReady) {
-                val list=controller.database.conversations()
-                val id=controller.preferences.getString("selected",null)
-                select(list.firstOrNull {it.id.value==id});return@guard
-            }
-            val active=controller.active
-            if(active!=null && active.conversationId==selected?.id) {
-                val at=shown.indexOfFirst {it.second.id==active.id}
-                if(at>=0) shown[at]=shown[at].first to active
-                updateRow(active)
-            } else if(selected!=null && active==null && shown.any {it.second.status==RunStatus.RUNNING}) {
-                shown=shown.map {entry ->
-                    if(entry.second.status==RunStatus.RUNNING) {
-                        val saved=controller.database.messages(selected!!.id,entry.first+1,1).singleOrNull()
-                        if(saved?.second?.id==entry.second.id) {updateRow(saved.second);saved} else entry
-                    } else entry
-                }.toMutableList()
-            }
-            val activityState=if(active==null) "已就绪" else if(active.conversationId!=selected?.id) "其他会话运行中"
-                else if(controlState?.pauseRequested==true) "已请求暂停；点击继续，长按停止" else "运行中"
-            status.text=controller.problem ?: "${selected?.title ?: "未创建会话"} · $activityState"
+            publishChat()
             if (sidebarVisible || retainedPage == "manage") updatePane()
         }
     }
-    private fun renderAll() {cancelTurnJump();timeline.removeAllViews();rows.clear();shown.forEach {updateRow(it.second)} }
-    private fun updateRow(message:Message) {
-        val row=rows.getOrPut(message.id) {LinearLayout(this).apply {orientation=LinearLayout.VERTICAL;setPadding(0,12,0,12);timeline.addView(this)}}
-        row.removeAllViews()
-        row.addView(TextView(this).apply {text=getString(R.string.message_header,getString(if(message.role=="user") R.string.message_user else R.string.app_name),message.status);textSize=12f})
-        message.blocks.forEach {block -> when(block) {
-            is MessageBlock.Text -> row.addView(TextView(this).apply {text=MarkdownText.render(block.text);textSize=17f;setTextIsSelectable(true);movementMethod=android.text.method.LinkMovementMethod.getInstance()})
-            is MessageBlock.Tool -> {
-                val details=TextView(this).apply {text=getString(R.string.tool_details,block.invocation.arguments,block.result ?: getString(R.string.tool_waiting));visibility=if(block.invocation.id in expandedTools) View.VISIBLE else View.GONE;setTextIsSelectable(true)}
-                row.addView(Button(this).apply {text=getString(R.string.tool_header,block.invocation.name,getString(if(block.result!=null) R.string.tool_has_result else R.string.tool_pending));setOnClickListener {if(details.visibility==View.GONE) {expandedTools.add(block.invocation.id);details.visibility=View.VISIBLE} else {expandedTools.remove(block.invocation.id);details.visibility=View.GONE}}})
-                row.addView(details)
-                controller.questionProjection(message,block.invocation)?.let {question ->
-                    row.addView(app.daiyu.android.question.QuestionCardView(this).apply {
-                        val binding=question.binding
-                        if(binding!=null) bind(question.identity,question.record,question.canAnswer,binding)
-                        else bind(question.identity,question.record,false) {_,_,complete ->
-                            complete(app.daiyu.android.question.QuestionCardView.Reply.STOPPED)
-                        }
-                    })
-                }
-            }
-        } }
-        if(controller.canRetryQuestionCleanup(message)) row.addView(Button(this).apply {
-            text="重试停止清理";setOnClickListener {controller.stop(message)}
-        })
-        message.error?.let {row.addView(TextView(this).apply {text=it})}
-        row.addView(Button(this).apply {text="复制";setOnClickListener {
-            val text=message.blocks.joinToString("\n") {when(it) {is MessageBlock.Text->it.text;is MessageBlock.Tool->"${it.invocation.name}: ${it.result ?: "未完成"}"}}
-            (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("代鱼消息",text))
-        }})
-        scheduleBottomFollow()
+    private fun savedModelLabel(): String = try {
+        (controller.settings.nonSecretConfiguration()["model"] as? String)?.ifBlank { "模型" } ?: "模型"
+    } catch (_: Exception) { "模型" }
+    private fun readLoadedWindow(id: ConversationId, before: Long, count: Int): List<Pair<Long, Message>> {
+        val result = mutableListOf<Pair<Long, Message>>()
+        var cursor = before
+        var remaining = count
+        while (remaining > 0) {
+            val page = controller.database.messages(id, cursor, remaining.coerceAtMost(200))
+            if (page.isEmpty()) break
+            result.addAll(0, page); remaining -= page.size; cursor = page.first().first
+        }
+        return result
+    }
+    private fun publishChat() {
+        val state = controlOwner?.let { controller.runState(it) }
+        val phase = composerPhaseForRun(state?.pauseRequested)
+        val allowed = !sidebarVisible && controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true
+        chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
+            turns = ChatTurnMapper.map(shown.map { it.second }), canJumpToPreviousUser = shown.any { it.second.role == "user" },
+            balanceText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中"; else -> null },
+            composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,
+                phase = phase, modelLabel = savedModelLabel(),
+                assistantLabel = assistantStore.read(assistantStore.selectedId.value)?.name ?: "助手", enabled = allowed))
+    }
+    private fun requestScroll(id: String? = null, follow: Boolean = true) {
+        chatState = chatState.copy(scrollRequest = ChatScrollRequest(++scrollSerial, id, follow))
+    }
+    private fun jumpToBottom() { requestScroll() }
+    internal fun jumpToMessage(id: MessageId) {
+        check(shown.any { it.second.id == id && it.second.role == "user" })
+        requestScroll(id.value, false)
     }
     private fun chooseUserMessage() {
-        val messages=shown.map {it.second}.filter {it.role=="user"}
-        if(messages.isEmpty()) {toast("当前已加载历史中没有用户消息");return}
-        val labels=messages.map {it.blocks.filterIsInstance<MessageBlock.Text>().joinToString(" ") {block->block.text}.take(100)}
-        AlertDialog.Builder(this).setTitle("定位已加载的用户消息（更早内容请先加载）")
-            .setItems(labels.toTypedArray()) {_,index->guard {jumpToMessage(messages[index].id)}}.show()
-    }
-    internal fun jumpToMessage(id:MessageId) {
-        check(shown.any {it.second.id==id && it.second.role=="user"})
-        cancelTurnJump();followsBottom=false;scroll.removeCallbacks(initialBottom);cancelBottomFollow()
-        if(!refreshRateWindowResumed) return
-        jumpTarget=id;jumpTime=0L
-        Choreographer.getInstance().postFrameCallback(turnFrame)
-    }
-    private fun cancelScrollLayout() {
-        pendingScrollLayout?.let {if(scroll.viewTreeObserver.isAlive) scroll.viewTreeObserver.removeOnPreDrawListener(it)}
-        pendingScrollLayout=null
-    }
-    private fun afterScrollLayout(action:()->Boolean) {
-        cancelScrollLayout()
-        val listener=ViewTreeObserver.OnPreDrawListener {
-            if(!refreshRateWindowResumed || isFinishing || isDestroyed || action()) cancelScrollLayout()
-            true
-        }
-        pendingScrollLayout=listener
-        scroll.viewTreeObserver.addOnPreDrawListener(listener)
-    }
-    private fun cancelTurnJump() {
-        cancelScrollLayout()
-        Choreographer.getInstance().removeFrameCallback(turnFrame)
-        jumpTarget=null;turnMotion=null;jumpTime=0L;jumpRemainder=0f
-    }
-    private fun advanceTurnJump(time:Long) {
-        val id=jumpTarget ?: return
-        val row=rows[id]
-        if(!refreshRateWindowResumed || isFinishing || isDestroyed || row==null) {cancelTurnJump();return}
-        if(row.height<=0 || scroll.height<=0 || root.isLayoutRequested || timeline.isLayoutRequested || scroll.isLayoutRequested) {
-            afterScrollLayout {
-                if(row.height>0 && scroll.height>0 && !root.isLayoutRequested && !timeline.isLayoutRequested && !scroll.isLayoutRequested) {
-                    advanceTurnJump(System.nanoTime());true
-                } else false
-            }
-            return
-        }
-        val motion=turnMotion ?: ConversationTurnMotion(scroll.height.toFloat()).also {turnMotion=it}
-        val maximum=(timeline.height-scroll.height+scroll.paddingTop+scroll.paddingBottom).coerceAtLeast(0)
-        val target=row.top.coerceIn(0,maximum)
-        val distance=target-scroll.scrollY
-        if(kotlin.math.abs(distance)<=1) {scroll.scrollTo(0,target);cancelTurnJump();return}
-        val elapsed=if(jumpTime==0L) 0f else (time-jumpTime).coerceAtLeast(0)/1_000_000_000f
-        jumpTime=time
-        val movement=motion.advance(elapsed,kotlin.math.abs(distance).toFloat())+jumpRemainder
-        val pixels=movement.toInt().coerceAtMost(kotlin.math.abs(distance))
-        jumpRemainder=movement-pixels
-        scroll.scrollBy(0,if(distance<0) -pixels else pixels)
-        Choreographer.getInstance().postFrameCallback(turnFrame)
-    }
-    private fun isAtBottom()=scroll.scrollY+scroll.height-scroll.paddingTop-scroll.paddingBottom>=timeline.height-2
-    private fun cancelBottomFollow() {
-        Choreographer.getInstance().removeFrameCallback(followFrame)
-        followScheduled=false;followRemainder=0f;bottomMotion.reset()
-    }
-    private fun scheduleBottomFollow() {
-        if(followsBottom && refreshRateWindowResumed && !followScheduled && !isAtBottom()) {
-            followScheduled=true
-            Choreographer.getInstance().postFrameCallback(followFrame)
-        }
-    }
-    private fun jumpToBottom() {
-        cancelTurnJump()
-        followsBottom=true
-        cancelBottomFollow()
-        scroll.removeCallbacks(initialBottom)
-        scroll.post(initialBottom)
+        val messages = shown.map { it.second }.filter { it.role == "user" }
+        if (messages.isEmpty()) return
+        prompt = ChoicePrompt("定位用户消息", messages.map { it.blocks.filterIsInstance<MessageBlock.Text>().joinToString(" ") { block -> block.text }.take(100) },
+            { index -> guard { jumpToMessage(messages[index].id) } })
     }
     private fun loadEarlier() {
-        val id=selected?.id ?: return
-        val earlier=controller.database.messages(id,shown.firstOrNull()?.first ?: Long.MAX_VALUE)
-        if(earlier.isEmpty()) {toast("没有更早消息");return}
-        followsBottom=false;scroll.removeCallbacks(initialBottom);cancelBottomFollow()
-        val anchor=shown.firstOrNull {rows[it.second.id]?.bottom?.let {bottom->bottom>scroll.scrollY}==true}?.second?.id
-        val offset=anchor?.let {rows.getValue(it).top-scroll.scrollY} ?: 0
-        shown.addAll(0,earlier);renderAll()
-        if(anchor!=null) afterScrollLayout {
-            val row=rows[anchor]
-            if(row!=null && row.height>0 && scroll.height>0 && !root.isLayoutRequested && !timeline.isLayoutRequested && !scroll.isLayoutRequested) {
-                scroll.scrollTo(0,row.top-offset);true
-            } else false
-        }
+        val id = selected?.id ?: return
+        val earlier = controller.database.messages(id, shown.firstOrNull()?.first ?: Long.MAX_VALUE)
+        if (earlier.isEmpty()) { toast("没有更早消息"); return }
+        requestScroll(follow = false)
+        shown.addAll(0, earlier); publishChat()
     }
-    private fun backupMenu() {
-        checkBackupAvailable()
-        lastOpenedBackupUri=null
-        showBackupDialog(AlertDialog.Builder(this).setTitle("备份与导入")
-            .setItems(arrayOf("完整中立备份（推荐）","纯文本兼容备份","人工恢复已导入的模型配置")) {_,index->backupGuard {
-                if(index==2) previewConfigurationRestore() else backupFormatMenu(index==0)
-            }}
-            .setNegativeButton("取消",null).create())
+    private fun copyMessage(id: String) {
+        val message = shown.firstOrNull { it.second.id.value == id }?.second ?: return
+        val text = message.blocks.joinToString("\n") { block -> when (block) {
+            is MessageBlock.Text -> block.text
+            is MessageBlock.Tool -> "${block.invocation.name}: ${block.result ?: "未完成"}"
+        } }
+        (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("代鱼消息", text))
     }
-    private fun backupFormatMenu(complete:Boolean) {
-        checkBackupAvailable()
-        val description=if(complete) "包含会话、草稿、工具结果、协议历史、分支、压缩原文归档、用量、附件及非秘密配置。"+
-            "不含API密钥、Cookie、授权令牌或系统授权。配置导入后仅保存为备份元数据，不替换当前模型设置或启用授权。"+
-            "完整格式v1，包上限112MiB。含聊天隐私，请选择可信位置。"
-        else "文本格式v1，包含会话、文本、工具结果、协议历史及草稿。"+
-            "不含附件、压缩原文归档、分支、用量或模型配置，不能替代完整备份。文件上限16MiB。含聊天隐私，请选择可信位置。"
-        showBackupDialog(AlertDialog.Builder(this).setTitle(if(complete) "完整中立备份" else "纯文本兼容备份").setMessage(description)
-            .setPositiveButton("导出") {_,_->backupGuard {pickBackup(true,complete)}}
-            .setNeutralButton("导入") {_,_->backupGuard {pickBackup(false,complete)}}
-            .setNegativeButton("取消",null).create())
+
+    private fun modelSettings() {
+        requireActivityUsable(); check(!controller.dataBusy)
+        if (controller.active != null) { toast("当前运行使用冻结配置，请结束后修改"); return }
+        invalidateCatalog()
+        val editing = controller.settings.loadForEditing(); editingSettings = editing
+        val saved = editing.settings
+        modelDraft = ModelSettingsDraftUi(protocol = saved.protocol, endpoint = saved.endpoint, responsesPath = saved.responsesPath,
+            apiKey = saved.apiKey, model = saved.model, batteryEnabled = saved.batteryEnabled, deviceStatusEnabled = saved.deviceStatusEnabled,
+            customBody = saved.requestOptions.customBody, speedMode = saved.requestOptions.speedMode, codex = saved.requestOptions.codex)
+        modelError = null; retainedPage = "models"
     }
-    @Suppress("DEPRECATION")
-    private fun pickBackup(exporting:Boolean,complete:Boolean) {
-        checkBackupAvailable()
-        check(pendingBackupRequest==null) {"文件选择尚未返回；请先完成或取消选择"}
-        val code=if(complete) {if(exporting) 103 else 104} else {if(exporting) 101 else 102}
-        val action=if(exporting) android.content.Intent.ACTION_CREATE_DOCUMENT else android.content.Intent.ACTION_OPEN_DOCUMENT
-        pendingBackupRequest=code
+    private fun invalidateCatalog() {
+        catalogCancelled.set(true); catalogGeneration++; catalogBusy = false
+        catalog = emptyList(); catalogForDraft = null; catalogStatus = null
+    }
+    private fun changeModelDraft(value: ModelSettingsDraftUi) { invalidateCatalog(); modelDraft = value }
+    private fun ModelSettingsDraftUi.toSettings(base: ModelSettings) = base.copy(endpoint = endpoint.trim(), model = model.trim(),
+        apiKey = apiKey, protocol = protocol, responsesPath = responsesPath.trim(), batteryEnabled = batteryEnabled,
+        deviceStatusEnabled = deviceStatusEnabled, requestOptions = ProviderRequestOptions(customBody, speedMode, codex))
+    private fun saveModelSettings(value: ModelSettingsDraftUi) {
         try {
-            startActivityForResult(android.content.Intent(action).apply {
-                addCategory(android.content.Intent.CATEGORY_OPENABLE);type="application/json"
-                if(exporting) putExtra(android.content.Intent.EXTRA_TITLE,if(complete) "daiyu-complete-v1.json" else "daiyu-text-v1.json")
-            },code)
-        } catch(failure:Exception) {pendingBackupRequest=null;throw failure}
+            requireActivityUsable(); check(retainedPage == "models" && modelDraft === value)
+            check(controller.active == null && !controller.dataBusy)
+            val editing = checkNotNull(editingSettings)
+            require(value.savedProtocol == editing.settings.protocol)
+            require(value.protocol == editing.settings.protocol || value.protocolChangeAuthorized)
+            require(!editing.requestOptionsUnavailable || value.requestOptionsReplacementAuthorized)
+            invalidateCatalog()
+            controller.settings.save(value.toSettings(editing.settings), protocolChangeAuthorized = value.protocolChangeAuthorized,
+                requestOptionsReplacementAuthorized = value.requestOptionsReplacementAuthorized)
+            returnToChat(); toast("模型设置已保存")
+        } catch (_: Exception) { modelError = "设置未保存" }
     }
-    @Suppress("DEPRECATION")
-    override fun onActivityResult(requestCode:Int,resultCode:Int,data:android.content.Intent?) {
-        super.onActivityResult(requestCode,resultCode,data)
-        if(requestCode !in setOf(101,102,103,104) || pendingBackupRequest!=requestCode) return
-        pendingBackupRequest=null
-        if(resultCode!=RESULT_OK) return
-        val uri=data?.data ?: run {toast("文件选择未返回URI；原数据保留，请重新选择");return}
-        val complete=requestCode==103 || requestCode==104
-        backupGuard {
-            require(uri.scheme=="content") {"文件选择未返回content URI；原数据保留，请重新选择"}
-            if(requestCode==101 || requestCode==103) controller.exportUserBackup(uri,complete)
-            else confirmBackupImport(uri,complete)
+    private fun fetchCatalog(value: ModelSettingsDraftUi) {
+        try {
+            requireActivityUsable(); check(retainedPage == "models" && modelDraft == value && !controller.dataBusy)
+            val editing = checkNotNull(editingSettings)
+            invalidateCatalog(); catalogCancelled = AtomicBoolean(false)
+            val cancelled = catalogCancelled; val generation = ++catalogGeneration
+            val draft = value.toSettings(editing.settings)
+            catalogBusy = true
+            val accepted = controller.fetchModelCatalog(draft, { cancelled.get() }) { models ->
+                if (activityUsable() && retainedPage == "models" && !cancelled.get() && generation == catalogGeneration && modelDraft == value) {
+                    catalogBusy = false; catalogForDraft = value
+                    catalog = models.orEmpty().map { ModelCatalogEntryUi(it.id, it.displayName) }
+                    catalogStatus = when { models == null -> "获取失败"; models.isEmpty() -> "模型目录为空"; else -> null }
+                }
+            }
+            if (!accepted) { catalogBusy = false; catalogForDraft = value; catalogStatus = "当前不可查询" }
+        } catch (_: Exception) { catalogBusy = false; catalogForDraft = value; catalogStatus = "获取失败" }
+    }
+
+    private fun checkBackupAvailable() {
+        requireActivityUsable()
+        check(controller.ready && controller.active == null && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true) {
+            "会话尚未就绪、运行中、备份任务进行中或恢复失败；未打开备份，请稍后重新选择文件"
         }
     }
-    private fun confirmBackupImport(uri:Uri,complete:Boolean) {
-        checkBackupAvailable()
-        val explanation=if(complete) "仅追加完整格式v1。会话、消息、分支、附件身份、独立草稿或备份配置冲突将整包回滚，"+
-            "不覆盖已有会话；重复整包不会再次追加。非秘密配置只保存为备份元数据，不替换当前模型设置、密钥或系统授权。不会自动执行历史模型请求或工具。"
-        else "仅追加文本格式v1。会话ID、消息ID或独立草稿冲突将整包回滚，不覆盖已有数据，不自动执行历史模型请求或工具。"+
-            "此入口不接受完整备份；完整包请选择完整中立备份入口。"
-        lateinit var confirmation:AlertDialog
-        confirmation=AlertDialog.Builder(this).setTitle(if(complete) "确认导入完整中立备份" else "确认导入文本备份").setMessage(explanation)
-            .setPositiveButton("导入") {_,_->backupGuard {
-                check(backupDialog===confirmation && confirmation.isShowing) {"导入确认已失效；请重新选择文件"}
-                // Consume before dispatch: a replaced, cancelled or repeated callback has no authority.
-                backupDialog=null
-                controller.importUserBackup(uri,complete)
-            }}
-            .setNegativeButton("取消",null).create()
-        showBackupDialog(confirmation)
+    private fun backupGuard(action: () -> Unit) {
+        try { checkBackupAvailable(); action() }
+        catch (failure: Exception) { toast(if (failure is IllegalStateException || failure is IllegalArgumentException)
+            failure.message ?: "备份操作失败；原数据保留" else "备份操作失败；原数据保留，请重新选择文件") }
     }
-    private fun chooseConversation(query:String="",folder:String?=null) {
-        val list=controller.database.conversations(query,folder)
-        AlertDialog.Builder(this).setTitle("会话").setItems(list.map {"${if(it.pinned) "★ " else ""}${if(it.folder.isNotEmpty()) "[${it.folder}] " else ""}${it.title}"}.toTypedArray()) {_,which ->
-            if(controller.dataBusy) {toast("备份任务进行中");return@setItems}
-            val conversation=list[which]
-            AlertDialog.Builder(this).setTitle(conversation.title).setItems(arrayOf("打开","重命名","删除",if(conversation.pinned) "取消置顶" else "置顶","移动到文件夹")) {_,action -> guard {when(action) {
-                0->select(conversation)
-                1->{val edit=EditText(this).apply {setText(conversation.title)};AlertDialog.Builder(this).setTitle("重命名").setView(edit).setPositiveButton("保存") {_,_->guard {controller.database.rename(conversation.id,edit.text.toString());if(selected?.id==conversation.id) {selected=conversation.copy(title=edit.text.toString());refresh()}}}.setNegativeButton("取消",null).show()}
-                3->{controller.database.organize(conversation.id,conversation.folder,!conversation.pinned);chooseConversation(query,folder)}
-                4->{val edit=EditText(this).apply {hint="文件夹名称；留空移出";setText(conversation.folder)};AlertDialog.Builder(this).setTitle("移动到文件夹").setView(edit).setPositiveButton("保存") {_,_->guard {controller.database.organize(conversation.id,edit.text.toString().trim(),conversation.pinned);chooseConversation(query,folder)}}.setNegativeButton("取消",null).show()}
-                2->if(controller.active?.conversationId==conversation.id) toast("先停止此会话的运行再删除") else AlertDialog.Builder(this).setMessage("确认删除此会话及其消息？").setPositiveButton("删除") {_,_->guard {check(controller.active?.conversationId!=conversation.id) {"会话运行中，不能删除"};controller.database.delete(conversation.id);if(selected?.id==conversation.id) {select(null)}}}.setNegativeButton("取消",null).show()
-            }} }.show()
-        }.show()
+    private fun offerOpenedBackup(open: Intent?) {
+        if (open?.action != Intent.ACTION_VIEW) return
+        backupGuard {
+            val uri = open.data
+            require(uri != null && uri.scheme == "content" && open.type == "application/json") { "请选择content类型的JSON备份文件" }
+            require(open.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0) { "备份文件未授予读取权限；请重新选择文件" }
+            if (lastOpenedBackupUri == uri.toString() && prompt?.backup == true) return@backupGuard
+            lastOpenedBackupUri = uri.toString(); retainedPage = "backup"
+            prompt = ChoicePrompt("打开备份", listOf("完整中立备份（推荐）", "纯文本兼容备份"),
+                { index -> backupGuard { confirmBackupImport(uri, index == 0) } }, backup = true)
+        }
+    }
+    private fun backupMenu() { checkBackupAvailable(); lastOpenedBackupUri = null; retainedPage = "backup" }
+    @Suppress("DEPRECATION") private fun pickBackup(exporting: Boolean, complete: Boolean) {
+        checkBackupAvailable(); check(pendingBackupRequest == null) { "文件选择尚未返回；请先完成或取消选择" }
+        val code = if (complete) { if (exporting) 103 else 104 } else { if (exporting) 101 else 102 }
+        pendingBackupRequest = code
+        try {
+            startActivityForResult(Intent(if (exporting) Intent.ACTION_CREATE_DOCUMENT else Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE); type = "application/json"
+                if (exporting) putExtra(Intent.EXTRA_TITLE, if (complete) "daiyu-complete-v1.json" else "daiyu-text-v1.json")
+            }, code)
+        } catch (failure: Exception) { pendingBackupRequest = null; throw failure }
+    }
+    @Suppress("DEPRECATION") override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode !in setOf(101, 102, 103, 104) || pendingBackupRequest != requestCode) return
+        pendingBackupRequest = null
+        if (resultCode != RESULT_OK) return
+        val uri = data?.data ?: run { toast("文件选择未返回URI；原数据保留，请重新选择"); return }
+        val complete = requestCode == 103 || requestCode == 104
+        backupGuard {
+            require(uri.scheme == "content") { "文件选择未返回content URI；原数据保留，请重新选择" }
+            if (requestCode == 101 || requestCode == 103) controller.exportUserBackup(uri, complete)
+            else confirmBackupImport(uri, complete)
+        }
+    }
+    private fun confirmBackupImport(uri: Uri, complete: Boolean) {
+        checkBackupAvailable()
+        prompt = ConfirmPrompt(if (complete) "确认导入完整中立备份" else "确认导入文本备份", "", "导入",
+            action = { backupGuard { controller.importUserBackup(uri, complete) } }, backup = true)
+    }
+    private fun cancelRestorePreview() {
+        configurationRestorePreview?.let { controller.cancelConfigurationRestore(it) }
+        configurationRestorePreview = null; restorePreviewText = ""
     }
     private fun previewConfigurationRestore() {
-        checkBackupAvailable()
-        configurationRestoreDialog?.dismiss()
-        val preview=controller.previewImportedConfiguration()
-        val plan=preview.plan
-        fun value(values:Map<String,Any?>,name:String):String = when {
-            name == "protocol" -> when(values[name]) { null, "responses" -> "Responses"; "messages" -> "Messages"; else -> "无效（须修复）" }
+        checkBackupAvailable(); cancelRestorePreview()
+        val preview = controller.previewImportedConfiguration()
+        configurationRestorePreview = preview
+        val plan = preview.plan
+        val labels = listOf("protocol" to "协议", "endpoint" to "服务地址", "responses-path" to "Responses 路径",
+            "model" to "模型", "battery" to "只读电量工具", "device-status" to "只读设备状态工具")
+        fun value(values: Map<String, Any?>, name: String): String = when {
+            name == "protocol" -> when (values[name]) { null, "responses" -> "Responses"; "messages" -> "Messages"; else -> "无效" }
             !values.containsKey(name) -> "（未设置）"
-            values[name]=="" -> "（空）"
-            values[name] is Boolean -> if(values[name]==true) "允许" else "关闭"
+            values[name] == "" -> "（空）"
+            values[name] is Boolean -> if (values[name] == true) "允许" else "关闭"
             else -> values[name]?.toString() ?: "（空）"
         }
-        val labels=listOf("protocol" to "协议","endpoint" to "服务地址","responses-path" to "Responses 路径","model" to "模型",
-            "battery" to "只读电量工具","device-status" to "只读设备状态工具")
-        val message=if(plan.isNoOp) "没有已导入的非秘密配置；不会修改当前设置。" else
-            labels.joinToString("\n\n") {(name,label)->"$label：\n当前：${value(plan.before,name)}\n恢复后：${value(plan.after,name)}"}+
-                "\n\n仅恢复已导入完整备份的非秘密配置，不执行历史请求，不启用工具或系统授权。"+
-                (if(plan.credentialRebindRequired) "\n协议、服务地址、路径或模型发生变化：当前加密密钥保留但不会读取或用于新配置。恢复后必须在模型设置中重新输入并保存密钥，才可发送。"
-                else "\n当前密钥不读取、不展示、不修改；已有密钥重绑要求不会解除。")+
-                "\n取消或页面重建不恢复、不重放。恢复失败时原配置保留；若存储补偿也失败，将阻止发送并要求重新保存。"
-        val dialog=AlertDialog.Builder(this).setTitle("预览人工恢复模型配置").setMessage(message)
-            .setNegativeButton("取消") {_,_->controller.cancelConfigurationRestore(preview)}.apply {
-                if(!plan.isNoOp) setPositiveButton("确认恢复",null)
-            }.create()
-        configurationRestoreDialog=dialog
-        configurationRestorePreview=preview
-        dialog.setOnDismissListener {
-            controller.cancelConfigurationRestore(preview)
-            if(configurationRestoreDialog===dialog) {
-                configurationRestoreDialog=null
-                configurationRestorePreview=null
-            }
-        }
-        dialog.setOnCancelListener {controller.cancelConfigurationRestore(preview)}
-        dialog.setOnShowListener {
-            if(!plan.isNoOp) dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-                try {
-                    // The Controller rechecks ready/active/dataBusy/recovery failure immediately before commit.
-                    requireActivityUsable()
-                    controller.restoreImportedConfiguration(preview,authorized=true)
-                    dialog.dismiss()
-                    toast(if(plan.credentialRebindRequired) "配置已恢复；请重新输入并保存密钥，工具保持关闭" else "非秘密配置已恢复；工具保持关闭")
-                } catch (_:Exception) {
-                    dialog.dismiss()
-                    toast("配置未恢复；原配置保留，若存储补偿失败须重新保存。请等待操作结束并重新预览")
-                }
-            }
-        }
-        dialog.show()
+        restorePreviewText = if (plan.isNoOp) "暂无配置" else labels.joinToString("\n") { (name, label) ->
+            "$label：${value(plan.before, name)} → ${value(plan.after, name)}"
+        } + if (plan.credentialRebindRequired) "\n密钥：重新输入" else ""
     }
-    private fun modelSettings() {
-        if(controller.active!=null) {toast("当前运行使用冻结配置，请结束后修改");return}
-        settingsDialog?.dismiss()
-        val editingSettings=controller.settings.loadForEditing()
-        val saved=editingSettings.settings
-        val fields=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL}
-        val endpoint=EditText(this).apply {hint="HTTPS 服务基础地址或完整 Responses 地址";setText(saved.endpoint);inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI}
-        val path=EditText(this).apply {hint="可选 Responses 路径，如 /responses";setText(saved.responsesPath);inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI}
-        val model=EditText(this).apply {hint="模型标识";setText(saved.model)}
-        val key=EditText(this).apply {hint="API密钥（加密保存）";inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD;setText(saved.apiKey)}
-        val battery=CheckBox(this).apply {text="允许模型查询只读电量";isChecked=saved.batteryEnabled}
-        val deviceStatus=CheckBox(this).apply {text="允许模型查询只读设备状态（电量、内存、应用存储所在卷、系统与开机时长；结果发送给模型服务，不含设备标识）";isChecked=saved.deviceStatusEnabled}
-        val customBody=EditText(this).apply {
-            hint="自定义请求 JSON 对象（可留空，最多64KiB）";minLines=2;maxLines=6
-            inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-            setText(saved.requestOptions.customBody);isSaveEnabled=false
-        }
-        val speedModes=listOf<GptSpeedMode?>(null,GptSpeedMode.NORMAL,GptSpeedMode.FAST,GptSpeedMode.ULTRA_FAST)
-        val speed=Spinner(this).apply {
-            adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,
-                listOf("不指定 GPT 服务档位","GPT 普通档位","GPT 快速档位","GPT 超快速档位"))
-            setSelection(speedModes.indexOf(saved.requestOptions.speedMode).coerceAtLeast(0))
-        }
-        val codex=CheckBox(this).apply {text="使用 Codex 服务档位规则";isChecked=saved.requestOptions.codex}
-        val replaceOptions=CheckBox(this).apply {
-            text="原请求策略不可用；我确认用当前高级选项替换原值";isChecked=false
-            visibility=if(editingSettings.requestOptionsUnavailable) View.VISIBLE else View.GONE
-        }
-        val protocols=RadioGroup(this)
-        val responses=RadioButton(this).apply {id=View.generateViewId();text="OpenAI Responses"}
-        val messages=RadioButton(this).apply {id=View.generateViewId();text="Anthropic Messages"}
-        protocols.addView(responses);protocols.addView(messages)
-        protocols.check(when(saved.protocol) {
-            ProviderProtocol.RESPONSES -> responses.id
-            ProviderProtocol.MESSAGES -> messages.id
-            ProviderProtocol.UNKNOWN -> -1
-        })
-        var selectedProtocol=saved.protocol
-        val rebind=CheckBox(this).apply {text="我已重新输入密钥，确认将其绑定到所选协议";visibility=View.GONE}
-        path.isEnabled=saved.protocol != ProviderProtocol.MESSAGES
-        if(saved.protocol == ProviderProtocol.MESSAGES) endpoint.hint="HTTPS 基础地址或完整 Messages 地址"
-        protocols.setOnCheckedChangeListener { _, id ->
-            val chosen=when(id) {
-                responses.id -> ProviderProtocol.RESPONSES
-                messages.id -> ProviderProtocol.MESSAGES
-                else -> ProviderProtocol.UNKNOWN
-            }
-            if(chosen != selectedProtocol) {key.setText("");rebind.isChecked=false}
-            selectedProtocol=chosen
-            path.isEnabled=chosen != ProviderProtocol.MESSAGES
-            if(chosen == ProviderProtocol.MESSAGES) path.setText("")
-            endpoint.hint=if(chosen == ProviderProtocol.MESSAGES) "HTTPS 基础地址或完整 Messages 地址" else "HTTPS 基础地址或完整 Responses 地址"
-            rebind.visibility=if(chosen != saved.protocol) View.VISIBLE else View.GONE
-        }
-        key.isSaveEnabled=false
-        fields.addView(protocols);fields.addView(rebind)
-        fields.addView(TextView(this).apply {setText(R.string.model_protocol_note)})
-        if(editingSettings.requestOptionsUnavailable) fields.addView(TextView(this).apply {
-            text="原请求策略不可用；原值尚未替换。请检查高级选项，并明确勾选替换授权。"
-        })
-        if(editingSettings.credentialUnavailable) fields.addView(TextView(this).apply {text="已保存密钥不可用；原配置已保留，请重新输入密钥"})
-        if(saved.protocol == ProviderProtocol.UNKNOWN) fields.addView(TextView(this).apply {text="已保存协议无效；请选择协议并重新输入密钥"})
-        fields.addView(endpoint);fields.addView(path);fields.addView(model);fields.addView(key);fields.addView(battery);fields.addView(deviceStatus)
-        fields.addView(TextView(this).apply {
-            text="高级请求选项保存到本机并发送给供应商，不进入非秘密备份，请勿填写凭据。JSON 不能覆盖消息、工具或流式控制字段；Messages 不支持 GPT/Codex 档位。Codex 不支持超快速，供应商实际支持需另行确认。"
-        })
-        fields.addView(customBody);fields.addView(speed);fields.addView(codex);fields.addView(replaceOptions)
-        val dialog=AlertDialog.Builder(this).setTitle("模型设置").setView(ScrollView(this).apply {addView(fields)}).setPositiveButton("保存",null).setNegativeButton("取消",null).create()
-        var catalogGeneration=0L
-        var catalogCancelled=java.util.concurrent.atomic.AtomicBoolean(false)
-        val catalogStatus=TextView(this)
-        val catalogButton=Button(this).apply {text="获取模型目录（使用当前草稿）"}
-        fun catalogDraft()=saved.copy(endpoint=endpoint.text.toString().trim(),
-            model=model.text.toString(),apiKey=key.text.toString(),protocol=selectedProtocol,
-            responsesPath=path.text.toString().trim())
-        fun current(generation:Long,draft:app.daiyu.android.storage.ModelSettings)=
-            activityCallbacksAllowed && !isFinishing && !isDestroyed && settingsDialog===dialog &&
-                dialog.isShowing && !catalogCancelled.get() && generation==catalogGeneration && catalogDraft()==draft
-        val changed=object:TextWatcher {
-            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
-            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {
-                catalogCancelled.set(true);catalogGeneration++;modelCatalogDialog?.dismiss();modelCatalogDialog=null
-                catalogButton.isEnabled=true;catalogStatus.text=""
-            }
-            override fun afterTextChanged(s:Editable?) {}
-        }
-        listOf(endpoint,path,model,key).forEach {it.addTextChangedListener(changed)}
-        catalogButton.setOnClickListener {
-            catalogCancelled.set(true);catalogCancelled=java.util.concurrent.atomic.AtomicBoolean(false)
-            val requestCancelled=catalogCancelled
-            val draft=catalogDraft();val generation=++catalogGeneration
-            modelCatalogDialog?.dismiss();modelCatalogDialog=null
-            catalogButton.isEnabled=false;catalogStatus.text="正在获取模型目录…"
-            val accepted=controller.fetchModelCatalog(draft,{requestCancelled.get()}) {models ->
-                if(current(generation,draft)) {
-                    catalogButton.isEnabled=true
-                    catalogStatus.text=when {models==null->"获取失败；请检查地址、协议、密钥与网络";models.isEmpty()->"供应商返回空模型目录";else->"选择模型仅修改草稿，仍需点击保存"}
-                    if(!models.isNullOrEmpty()) {
-                        modelCatalogDialog=AlertDialog.Builder(this).setTitle("选择模型（不自动保存）")
-                            .setItems(models.map {it.displayName+if(it.displayName==it.id) "" else " (${it.id})"}.toTypedArray()) {_,index ->
-                                if(current(generation,draft)) model.setText(models[index].id)
-                            }.setNegativeButton("取消",null).show()
-                    }
+    private fun confirmConfigurationRestore() {
+        backupGuard {
+            val preview = checkNotNull(configurationRestorePreview)
+            check(!preview.plan.isNoOp)
+            prompt = ConfirmPrompt("恢复模型配置", "", "确认恢复", action = {
+                backupGuard {
+                    check(configurationRestorePreview === preview)
+                    try { controller.restoreImportedConfiguration(preview, authorized = true); toast("配置已恢复") }
+                    finally { cancelRestorePreview() }
                 }
-            }
-            if(!accepted) {catalogButton.isEnabled=true;catalogStatus.text="当前不可查询；请等待会话或数据操作结束"}
+            }, backup = true)
         }
-        fields.addView(catalogButton);fields.addView(catalogStatus)
-        key.importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
-        dialog.setOnShowListener {dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
-            try {
-                catalogCancelled.set(true);catalogGeneration++
-                modelCatalogDialog?.dismiss();modelCatalogDialog=null;catalogButton.isEnabled=true
-                requireActivityUsable();check(settingsDialog === dialog && dialog.isShowing)
-                check(controller.active == null && !controller.dataBusy)
-                require(selectedProtocol == saved.protocol || rebind.isChecked)
-                require(!editingSettings.requestOptionsUnavailable || replaceOptions.isChecked)
-                controller.settings.save(saved.copy(endpoint=endpoint.text.toString().trim(),model=model.text.toString().trim(),
-                    apiKey=key.text.toString(),batteryEnabled=battery.isChecked,responsesPath=path.text.toString().trim(),
-                    deviceStatusEnabled=deviceStatus.isChecked,protocol=selectedProtocol,
-                    requestOptions=ProviderRequestOptions(customBody.text.toString(),speedModes[speed.selectedItemPosition],codex.isChecked)),
-                    protocolChangeAuthorized=rebind.isChecked,requestOptionsReplacementAuthorized=replaceOptions.isChecked)
-                dialog.dismiss();toast("模型设置已保存")
-            }
-            catch (_:Exception) {toast("设置未保存；检查协议、HTTPS地址、路径、模型与密钥；切换协议须重输密钥并勾选确认，高级策略须为合法JSON；不可用策略须明确授权替换")}
-        }}
-        settingsDialog=dialog
-        dialog.setOnDismissListener {
-            catalogCancelled.set(true);catalogGeneration++
-            if(settingsDialog===dialog) {
-                modelCatalogDialog?.dismiss();modelCatalogDialog=null;settingsDialog=null
-            }
-        }
-        dialog.show()
     }
+    private fun loadAppearance(): AppearanceSettings {
+        val preferences = getSharedPreferences("appearance-settings", MODE_PRIVATE)
+        return AppearanceSettings(themeMode = AppearanceThemeMode.fromPersistedValue(preferences.getString("theme", null)),
+            interfaceScale = preferences.getFloat("scale", 1f), messageTimestampsEnabled = preferences.getBoolean("timestamps", false)).normalized()
+    }
+    private fun saveAppearance(value: AppearanceSettings) { guard {
+        val normalized = value.normalized()
+        check(getSharedPreferences("appearance-settings", MODE_PRIVATE).edit().putString("theme", normalized.themeMode.persistedValue)
+            .putFloat("scale", normalized.interfaceScale).putBoolean("timestamps", normalized.messageTimestampsEnabled).commit())
+        appearance = normalized
+    } }
 }

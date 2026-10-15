@@ -22,6 +22,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
@@ -54,7 +55,7 @@ internal fun DaiyuTextInputDialog(
                 label = hint,
                 useLabelAsPlaceholder = true,
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.testTag("prompt-input").fillMaxWidth(),
             )
             MiuixDialogActions(
                 confirmText = confirmText,
@@ -122,7 +123,7 @@ internal fun DaiyuChoiceSheet(
                 LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false)) {
                     itemsIndexed(options) { index, option ->
                         Box(
-                            Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                            Modifier.testTag("prompt-choice:$index").fillMaxWidth().heightIn(min = 56.dp)
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable { onSelect(index) }.padding(horizontal = 12.dp, vertical = 16.dp),
                             contentAlignment = Alignment.CenterStart,

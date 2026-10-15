@@ -2,6 +2,10 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
@@ -29,8 +33,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.MarkdownText
@@ -48,19 +54,37 @@ internal fun ChatMessageList(
     canJumpToPreviousUser: Boolean,
     actions: ChatScreenActions,
     modifier: Modifier = Modifier,
+    scrollRequest: ChatScrollRequest? = null,
+    turnExtras: @Composable (String) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val dragging by listState.interactionSource.collectIsDraggedAsState()
-    var followBottom by remember { mutableStateOf(true) }
+    var followBottom by rememberSaveable { mutableStateOf(true) }
+    var wasDragged by remember { mutableStateOf(false) }
+    var touchEpoch by remember { mutableStateOf(0L) }
+    var consumedScrollSerial by rememberSaveable { mutableStateOf<Long?>(null) }
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
     val scope = rememberCoroutineScope()
+    LaunchedEffect(scrollRequest, touchEpoch) {
+        scrollRequest?.takeIf { it.serial != consumedScrollSerial }?.let { request ->
+            consumedScrollSerial = request.serial
+            followBottom = request.followBottom
+            wasDragged = false
+            if (request.messageId != null) {
+                val index = turns.indexOfFirst { it.id == request.messageId }
+                if (index >= 0) listState.animateScrollToItem(index)
+            } else if (request.followBottom && turns.isNotEmpty()) {
+                listState.scrollToItem(turns.lastIndex)
+            }
+        }
+    }
     LaunchedEffect(dragging) {
-        if (dragging) followBottom = false
+        if (dragging) { followBottom = false; wasDragged = true }
     }
     LaunchedEffect(listState) {
         snapshotFlow { listState.canScrollForward to listState.isScrollInProgress }.collect { (canScroll, scrolling) ->
-            if (!canScroll && !scrolling && !currentDragging) followBottom = true
+            if (!canScroll && !scrolling && !currentDragging && wasDragged) followBottom = true
         }
     }
     // Observe measured height as well as item count, so streaming text also stays in view.
@@ -81,13 +105,25 @@ internal fun ChatMessageList(
         }
     }
     Box(modifier.fillMaxSize()) {
-        LazyColumn(state = listState, modifier = Modifier.fillMaxSize(),
+        LazyColumn(state = listState, modifier = Modifier.testTag("chat-messages").fillMaxSize().pointerInput(Unit) {
+            awaitEachGesture {
+                awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                // A down over a child action also cancels follow and an in-flight user-message jump.
+                followBottom = false; wasDragged = false; touchEpoch++
+                do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
+            }
+        },
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 64.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp)) {
             items(turns, key = { it.id }, contentType = { if (it is ChatTurnUi.User) "user" else "assistant" }) { turn ->
-                when (turn) {
-                    is ChatTurnUi.User -> UserTurn(turn, actions)
-                    is ChatTurnUi.Assistant -> AssistantTurn(turn, actions)
+                Column(Modifier.testTag("chat-turn:${turn.id}")) {
+                    when (turn) {
+                        is ChatTurnUi.User -> UserTurn(turn, actions)
+                        is ChatTurnUi.Assistant -> Column {
+                            AssistantTurn(turn, actions)
+                            turnExtras(turn.id)
+                        }
+                    }
                 }
             }
         }

@@ -114,7 +114,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var outputs = emptyList<ToolOutput>()
         var round = 0
         var requestUnconfirmed = false
-        val owner = java.util.UUID.randomUUID().toString()
+        val executionOwner = RunExecutionOwner.issue(initial)
+        val owner = executionOwner.ownerId
+        var ownerBound = false
         var revision = 0L
         val records = linkedMapOf<ToolCallId, ToolRecord>()
         fun snapshot(message: Message = current): RunCheckpoint = synchronized(terminalLock) {
@@ -196,6 +198,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         fun open(): ModelSession {
             while (true) {
                 boundary()
+                if (!ownerBound) {
+                    options.receiptBatchExecutor?.bindOwner(executionOwner)
+                    ownerBound = true
+                }
                 val token = synchronized(terminalLock) {
                     if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
                     if (pauseRequested || supplements.isNotEmpty() || breakStream) null

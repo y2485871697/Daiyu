@@ -264,4 +264,27 @@ class ToolDispatcherTest {
         assertEquals(calls.map { it.id }, results.map { it.callId })
         assertEquals(listOf("sample-1", "sample-2"), results.map { (it.outcome as DispatchOutcome.Confirmed).payload })
     }
+    @Test fun contextualPlansWithoutRunnerOwnerRejectWholeBatchBeforeReservation() {
+        val store = InMemoryToolLedgerStore()
+        var executions = 0
+        val owned = object : RegisteredTool {
+            override val definition = ToolDefinition("owned", 1, "owned read", "read", ToolEffect.READ_ONLY, ToolSchema(emptyList()))
+            override fun prepare(arguments: ToolArguments) = PreparedTool.contextual {
+                executions++; ExecutionReceipt.Confirmed("never")
+            }
+        }
+        val plan = owned.prepare(owned.definition.schema.parse("{}"))
+        try { plan.execute(); fail("context-free execution accepted") } catch (_: IllegalStateException) {}
+        val plain = read { executions++; ExecutionReceipt.Confirmed("never") }
+        val dispatcher = ToolDispatcher(ToolRegistry().register(plain).register(owned).snapshot(),
+            SessionCapabilities("s", setOf("read", "notes.read")), ToolLedger(store))
+        val result = dispatcher.dispatch(TaskAuthorization("s", "t"), listOf(
+            ToolInvocation(ToolCallId("plain-call"), "read_note", "{}"),
+            ToolInvocation(ToolCallId("owned-call"), "owned", "{}")))
+        assertEquals(2, result.size)
+        assertTrue(result.all { it.outcome == DispatchOutcome.NotExecuted("tool_execution_context_required") })
+        assertEquals(0, executions)
+        assertTrue(store.transaction { it.toList() }.isEmpty())
+    }
+
 }

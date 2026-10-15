@@ -1,6 +1,5 @@
 package app.daiyu.android.model.catalog
 
-import android.net.Uri
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -331,7 +330,7 @@ private fun parseHttpsBase(value: String): URI {
     require(uri.userInfo == null && uri.query == null && uri.fragment == null)
     require(uri.port == -1 || uri.port in 1..65535)
     require(uri.rawPath.none { it.code < 0x20 || it == ' ' })
-    rejectTraversal(uri.rawPath)
+    rejectTraversal(uri.path)
     return uri
 }
 
@@ -340,11 +339,10 @@ private fun parseRelativePath(path: String): String {
         throw IllegalArgumentException("模型目录路径无效")
     }
     require(uri.scheme == null && uri.rawAuthority == null && uri.query == null && uri.fragment == null)
-    rejectTraversal(uri.rawPath)
+    rejectTraversal(uri.path)
     return uri.rawPath.trimEnd('/').ifEmpty { "/" }
 }
 
 private fun rejectTraversal(path: String) {
-    val decoded = try { Uri.decode(path) } catch (_: Exception) { path }
-    require(decoded.split('/').none { it == "." || it == ".." })
+    require(path.split('/').none { it == "." || it == ".." })
 }

@@ -1,6 +1,7 @@
 package app.daiyu.android.domain.tools
 
 import app.daiyu.android.domain.ToolInvocation
+import app.daiyu.android.domain.runtime.RunExecutionOwner
 import java.security.MessageDigest
 import java.util.Collections
 
@@ -53,7 +54,30 @@ interface RegisteredTool {
     val definition: ToolDefinition
     fun prepare(arguments: ToolArguments): PreparedTool
 }
-class PreparedTool(val writeEffect: WriteEffect? = null, val execute: () -> ExecutionReceipt)
+/** Dispatcher-created execution data; no model-supplied identity or reconstructed authorization. */
+class ToolExecutionContext internal constructor(
+    val owner: RunExecutionOwner,
+    val invocation: ToolInvocation,
+    val authorization: TaskAuthorization,
+    val cancelled: () -> Boolean
+)
+
+class PreparedTool private constructor(
+    val writeEffect: WriteEffect?,
+    val execute: () -> ExecutionReceipt,
+    private val contextualExecution: ((ToolExecutionContext) -> ExecutionReceipt)?
+) {
+    constructor(writeEffect: WriteEffect? = null, execute: () -> ExecutionReceipt) : this(writeEffect, execute, null)
+    internal val requiresContext: Boolean get() = contextualExecution != null
+    internal fun execute(context: ToolExecutionContext?): ExecutionReceipt =
+        contextualExecution?.invoke(checkNotNull(context) { "tool_execution_context_required" }) ?: execute()
+
+    companion object {
+        /** Context becomes available only after whole-batch validation and ledger reservation. */
+        fun contextual(writeEffect: WriteEffect? = null, execute: (ToolExecutionContext) -> ExecutionReceipt): PreparedTool =
+            PreparedTool(writeEffect, { error("tool_execution_context_required") }, execute)
+    }
+}
 
 /** Registration is explicit; unknown modules do not receive placeholder-success implementations. */
 class ToolRegistry {

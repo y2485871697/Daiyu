@@ -761,4 +761,100 @@ class RunnerControlTest {
         } finally { runner.stop(); owner.join(5000); assertFalse(owner.isAlive) }
     }
 
+    @Test fun ownerBindingWaitsForDurableBoundaryAndFailureNeverOpensModel() {
+        for (failCommit in listOf(false, true)) {
+            var bindings = 0; var opens = 0
+            val checkpoints = mutableListOf<RunCheckpoint>()
+            val runtime = object : AtomicRuntimeStore {
+                override fun commitCheckpoint(checkpoint: RunCheckpoint) {
+                    if (failCommit) error("disk")
+                    checkpoints.add(checkpoint)
+                }
+                override fun reconcileCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint = error("no recovery")
+            }
+            val executor = object : ReceiptBatchToolExecutor {
+                override fun bindOwner(owner: RunExecutionOwner) {
+                    bindings++
+                    assertTrue(checkpoints.isNotEmpty())
+                    assertEquals(checkpoints.last().owner, owner.ownerId)
+                    assertTrue(owner.owns(initial()))
+                    error("binding rejected")
+                }
+                override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
+            }
+            val runner = ChatRunner(ModelPort { opens++; error("must not open") }, store(),
+                BatteryTool { error("unused") }, RunnerOptions(runtimeStore = runtime, receiptBatchExecutor = executor)) {}
+            assertEquals(RunStatus.FAILED, runner.run(initial(), emptyList()).status)
+            assertEquals(if (failCommit) 0 else 1, bindings)
+            assertEquals(0, opens)
+        }
+    }
+
+    @Test fun stoppedBeforeRunNeverBindsOwnerOrOpensModel() {
+        var bindings = 0; var opens = 0
+        val executor = object : ReceiptBatchToolExecutor {
+            override fun bindOwner(owner: RunExecutionOwner) { bindings++ }
+            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
+        }
+        val runner = ChatRunner(ModelPort { opens++; error("must not open") }, store(),
+            BatteryTool { error("unused") }, RunnerOptions(receiptBatchExecutor = executor)) {}
+        runner.stop()
+        assertEquals(RunStatus.STOPPED, runner.run(initial(), emptyList()).status)
+        assertEquals(0, bindings); assertEquals(0, opens)
+    }
+
+    @Test fun stopDuringOwnerBindingDoesNotWaitOrAllowLateModelOpen() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        var opens = 0
+        val executor = object : ReceiptBatchToolExecutor {
+            override fun bindOwner(owner: RunExecutionOwner) {
+                entered.countDown(); check(release.await(5, TimeUnit.SECONDS))
+            }
+            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
+        }
+        val runner = ChatRunner(ModelPort { opens++; error("must not open") }, store(),
+            BatteryTool { error("unused") }, RunnerOptions(receiptBatchExecutor = executor)) {}
+        val task = FutureTask { runner.run(initial(), emptyList()) }
+        val worker = Thread(task).apply { isDaemon = true; start() }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            runner.stop()
+            assertFalse(task.isDone)
+            release.countDown()
+            assertEquals(RunStatus.STOPPED, task.get(5, TimeUnit.SECONDS).status)
+            assertEquals(0, opens)
+        } finally { release.countDown(); runner.stop(); worker.join(5000); assertFalse(worker.isAlive) }
+    }
+
+    @Test fun pauseReopenRetainsOneOwnerAndIndependentRunsCannotShareIt() {
+        val paused = CountDownLatch(1)
+        val owners = mutableListOf<RunExecutionOwner>()
+        var opens = 0
+        lateinit var runner: ChatRunner
+        val executor = object : ReceiptBatchToolExecutor {
+            override fun bindOwner(owner: RunExecutionOwner) { owners.add(owner) }
+            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
+        }
+        val model = ModelPort {
+            opens++
+            if (opens == 1) session { _, _ -> assertTrue(runner.pause()); paused.countDown() }
+            else session { _, sink -> sink(ModelEvent.TextFinal("answer", "resumed")) }
+        }
+        runner = ChatRunner(model, store(), BatteryTool { error("unused") }, RunnerOptions(receiptBatchExecutor = executor)) {}
+        val task = FutureTask { runner.run(initial(), emptyList()) }
+        val thread = Thread(task).apply { isDaemon = true; start() }
+        try {
+            assertTrue(paused.await(5, TimeUnit.SECONDS))
+            assertTrue(runner.resume())
+            assertEquals(RunStatus.COMPLETED, task.get(5, TimeUnit.SECONDS).status)
+            assertEquals(2, opens); assertEquals(1, owners.size)
+        } finally { runner.stop(); thread.join(5000); assertFalse(thread.isAlive) }
+        val other = ChatRunner(ModelPort { session { _, _ -> } }, store(), BatteryTool { error("unused") },
+            RunnerOptions(receiptBatchExecutor = executor)) {}
+        assertEquals(RunStatus.COMPLETED, other.run(initial(), emptyList()).status)
+        assertEquals(2, owners.size)
+        assertNotEquals(owners[0].ownerId, owners[1].ownerId)
+        assertTrue(owners.all { it.owns(initial()) })
+    }
+
 }

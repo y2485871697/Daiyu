@@ -103,6 +103,7 @@ class ChatController internal constructor(private val application:Application,
         val preparedModel=try {model(config)} catch (_:Exception) {
             problem="模型初始化失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
+        var preparingTools: RunCatalogTools? = null
         val prepared = try {
             val contextTools = ScopedContextTools.create(
                 ContextRegistry(contextService), ContextRegistryScope(conversationId),
@@ -114,6 +115,7 @@ class ChatController internal constructor(private val application:Application,
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run) { grants, authorization ->
                 SkillToolRegistry(application).captureForRun(grants, authorization)
             }
+            preparingTools = tools
             val owned = ChatRunner(preparedModel, database, tools,
                 RunnerOptions(runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools)) {
                 synchronized(this) {
@@ -123,6 +125,7 @@ class ChatController internal constructor(private val application:Application,
             }
             owned to tools
         } catch (_: Exception) {
+            preparingTools?.close()
             problem="运行准备失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
         val (owned, tools) = prepared

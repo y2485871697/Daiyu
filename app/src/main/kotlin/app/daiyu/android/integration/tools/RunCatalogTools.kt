@@ -2,6 +2,7 @@ package app.daiyu.android.integration.tools
 
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.ReceiptBatchToolExecutor
+import app.daiyu.android.domain.runtime.RunExecutionOwner
 import app.daiyu.android.domain.tools.*
 import app.daiyu.android.skills.SkillRunSession
 import java.util.concurrent.atomic.AtomicBoolean
@@ -20,11 +21,20 @@ internal class RunCatalogTools(
     @Volatile private var skills: SkillRunSession? = null
     @Volatile private var bridge: CatalogModelBridge? = null
 
+    @Volatile private var owner: RunExecutionOwner? = null
+    @Synchronized override fun bindOwner(owner: RunExecutionOwner) {
+        check(!closed.get()) { "run_closed" }
+        require(owner.conversationId == conversationId && owner.runId == runId) { "tool_run_owner_mismatch" }
+        check(this.owner == null || this.owner === owner) { "tool_owner_already_bound" }
+        this.owner = owner
+    }
+
     override val definitions: List<app.daiyu.android.domain.ToolDefinition> get() = initialized().definitions
 
     @Synchronized private fun initialized(): CatalogModelBridge {
         check(!closed.get()) { "run_closed" }
         bridge?.let { return it }
+        val bound = checkNotNull(owner) { "tool_owner_not_bound" }
         val scope = try { capture(capabilities, authorization) } catch (failure: Exception) {
             closed.set(true)
             throw failure
@@ -34,6 +44,7 @@ internal class RunCatalogTools(
             check(!closed.get()) { "run_closed" }
             ScopedSkillTools.create(scope, authorization).forEach { registry.register(it) }
             val result = CatalogModelBridge(registry.snapshot(), capabilities, ledger, conversationId, runId, authorization)
+            result.bindOwner(bound)
             check(!closed.get()) { "run_closed" }
             bridge = result
             return result
@@ -47,6 +58,7 @@ internal class RunCatalogTools(
         require(message.conversationId == conversationId && message.runId == runId && message.role == Message.ASSISTANT_ROLE) {
             "tool_run_owner_mismatch"
         }
+        require(checkNotNull(owner) { "tool_owner_not_bound" }.owns(message)) { "tool_run_owner_mismatch" }
         if (closed.get()) return invocations.map { ToolDispatchResult(it.id, DispatchOutcome.NotExecuted("run_closed")) }
         return checkNotNull(bridge) { "catalog_not_prepared" }.execute(message, invocations) { closed.get() || cancelled() }
     }

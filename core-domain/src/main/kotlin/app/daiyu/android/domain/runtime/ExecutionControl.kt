@@ -53,6 +53,9 @@ fun interface BatchToolExecutor {
 
 /** Central dispatcher receipts retain confirmed errors, rejection and uncertainty per call. */
 fun interface ReceiptBatchToolExecutor {
+    /** Called once by Runner after its first durable boundary, before catalog/model access.
+     * Binding is in-memory only; implementations must not create resources or execute tools here. */
+    fun bindOwner(owner: RunExecutionOwner) {}
     fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): List<ToolDispatchResult>
 }
 

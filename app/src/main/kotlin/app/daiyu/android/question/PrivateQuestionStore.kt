@@ -8,7 +8,7 @@ import android.database.sqlite.SQLiteOpenHelper
 import app.daiyu.android.domain.question.*
 
 /** Separate app-private database; no conversation/shared schema changes or external files. */
-class PrivateQuestionStore(context: Context) : SQLiteOpenHelper(context, "questions.db", null, 1), QuestionStore {
+class PrivateQuestionStore(context: Context) : SQLiteOpenHelper(context, "questions.db", null, 1), QuestionStore, java.io.Closeable {
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE questions (call_id TEXT PRIMARY KEY NOT NULL, request TEXT NOT NULL, answer TEXT, interrupted INTEGER NOT NULL DEFAULT 0)")
     }

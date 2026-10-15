@@ -99,10 +99,6 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                 }
             }
         }
-        if (state.phase != ComposerPhase.IDLE) {
-            Text("短按暂停 · 长按停止", Modifier.align(Alignment.CenterHorizontally).padding(top = 4.dp),
-                color = colors.onSurfaceVariantSummary, style = MiuixTheme.textStyles.footnote1)
-        }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             ComposerChip(DaiyuIcons.Model, state.modelLabel, state.enabled, actions.onModelClick)

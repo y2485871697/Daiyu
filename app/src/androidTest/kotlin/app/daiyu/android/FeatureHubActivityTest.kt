@@ -8,6 +8,25 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.runtime.SideEffect
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.unit.dp
+import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceTopBarBlurStyle
+import app.daiyu.android.ui.app.AgentAppTheme
+import app.daiyu.android.ui.components.TopBarBackdrop
+import app.daiyu.android.ui.components.captureForTopBar
+import app.daiyu.android.ui.components.rememberTopBarBackdrop
+import app.daiyu.android.ui.components.topBarContainerColor
+import top.yukonga.miuix.kmp.theme.MiuixTheme
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicReference
 import app.daiyu.android.ui.FeatureDetails
 import app.daiyu.android.ui.FeatureControlKind
 import app.daiyu.android.ui.FeatureCatalog
@@ -238,6 +257,44 @@ class FeatureHubActivityTest : android.test.InstrumentationTestCase() {
             controlMain { assertEquals("原聊天草稿", input().text.toString()) }
         }
         assertEquals(0, fixture.opens.get())
+        assertTopBarBlurCompatibility()
+    }
+    private fun assertTopBarBlurCompatibility() {
+        AppearanceTopBarBlurStyle.entries.forEach { style ->
+            listOf(true, false).forEach { enabled ->
+                val drawn = CountDownLatch(1)
+                val observation = AtomicReference<Triple<Boolean, Boolean, Boolean>>()
+                controlMain {
+                    checkNotNull(activity).setContent {
+                        AgentAppTheme(
+                            AppearanceSettings(blurEnabled = enabled, topBarBlurStyle = style),
+                            applyInterfaceScale = true,
+                        ) {
+                            val backdrop = rememberTopBarBackdrop()
+                            val capture = Modifier.captureForTopBar(backdrop)
+                            val solid = topBarContainerColor(backdrop) == MiuixTheme.colorScheme.surface
+                            SideEffect { observation.set(Triple(backdrop != null, solid, capture === Modifier)) }
+                            Box(Modifier.fillMaxSize().drawWithContent {
+                                drawContent()
+                                drawn.countDown()
+                            }) {
+                                Box(Modifier.fillMaxSize().then(capture))
+                                TopBarBackdrop(backdrop) {
+                                    Box(Modifier.fillMaxWidth().height(64.dp))
+                                }
+                            }
+                        }
+                    }
+                }
+                assertTrue("Top bar did not draw: $style enabled=$enabled", drawn.await(5, TimeUnit.SECONDS))
+                instrumentation.waitForIdleSync()
+                val expected = enabled && android.os.Build.VERSION.SDK_INT >= 33
+                val actual = checkNotNull(observation.get())
+                assertEquals("Backdrop: $style enabled=$enabled", expected, actual.first)
+                assertEquals("Solid surface: $style enabled=$enabled", !expected, actual.second)
+                assertEquals("Capture: $style enabled=$enabled", !expected, actual.third)
+            }
+        }
     }
     fun testOriginalSidebarOpensOverChatAndBackDoesNotLoseOrSendDraft() {
         controlMain { input().setText("抽屉草稿") }

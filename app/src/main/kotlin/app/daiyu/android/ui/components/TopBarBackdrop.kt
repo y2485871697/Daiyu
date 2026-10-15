@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.components
 
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.runtime.Composable
@@ -22,7 +23,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun rememberTopBarBackdrop(): LayerBackdrop? {
-    if (!LocalBlurEnabled.current || !isRuntimeShaderSupported()) return null
+    if (Build.VERSION.SDK_INT < 33 || !LocalBlurEnabled.current || !isRuntimeShaderSupported()) return null
     val surfaceColor = MiuixTheme.colorScheme.surface
     return rememberLayerBackdrop {
         drawRect(surfaceColor)
@@ -37,7 +38,7 @@ internal fun TopBarBackdrop(
 ) {
     val surfaceColor = MiuixTheme.colorScheme.surface
     val modifier = when {
-        backdrop == null -> Modifier.background(surfaceColor)
+        Build.VERSION.SDK_INT < 33 || backdrop == null -> Modifier.background(surfaceColor)
         LocalTopBarBlurStyle.current == AppearanceTopBarBlurStyle.PROGRESSIVE -> {
             Modifier.progressiveTextureBlur(
                 backdrop = backdrop,
@@ -68,11 +69,11 @@ internal fun TopBarBackdrop(
 }
 
 internal fun Modifier.captureForTopBar(backdrop: LayerBackdrop?): Modifier =
-    if (backdrop == null) this else layerBackdrop(backdrop)
+    if (Build.VERSION.SDK_INT < 33 || backdrop == null) this else layerBackdrop(backdrop)
 
 @Composable
 internal fun topBarContainerColor(backdrop: LayerBackdrop?): Color =
-    if (backdrop == null) MiuixTheme.colorScheme.surface else Color.Transparent
+    if (Build.VERSION.SDK_INT < 33 || backdrop == null) MiuixTheme.colorScheme.surface else Color.Transparent
 
 private const val TopBarBlurRadius = 25f
 private const val TopBarSurfaceAlpha = 0.8f

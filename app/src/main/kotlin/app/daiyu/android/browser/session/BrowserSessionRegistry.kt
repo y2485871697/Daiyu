@@ -35,8 +35,8 @@ class BrowserSessionRegistry(private val release: (BrowserTabLease) -> Unit = {}
         require(grant.access != BrowserAccess.DISABLED) { "BROWSER_DISABLED" }
         val previous = sessions[grant.owner]
         if (previous != null) {
-            check(previous.grant == grant) { "BROWSER_GRANT_FROZEN" }
             check(!previous.closed) { "BROWSER_SESSION_CLOSED" }
+            check(previous.grant == grant) { "BROWSER_GRANT_FROZEN" }
         } else sessions[grant.owner] = Session(grant, ++generation)
     }
     fun newTab(owner: BrowserOwner): BrowserTabLease = synchronized(lock) {
@@ -169,7 +169,9 @@ class BrowserSessionRegistry(private val release: (BrowserTabLease) -> Unit = {}
     }
     fun close(owner: BrowserOwner) {
         val resources = synchronized(lock) {
-            val session = sessions[owner] ?: return
+            val session = sessions.getOrPut(owner) {
+                Session(BrowserGrant(owner, BrowserAccess.DISABLED), ++generation)
+            }
             if (session.closed) return
             session.closed = true
             val leases = session.tabs.flatMap { (id, tab) ->

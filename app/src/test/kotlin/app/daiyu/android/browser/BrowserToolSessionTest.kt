@@ -87,6 +87,41 @@ class BrowserToolSessionTest {
         catch (_: IllegalArgumentException) { }
     }
 
+    @Test fun closeBeforeFacadeCreationRejectsWithoutHostSideEffects() {
+        for (owner in listOf(main, child)) {
+            val released = mutableListOf<BrowserTabLease>()
+            val registry = BrowserSessionRegistry { released.add(it) }
+            repeat(2) { registry.close(owner) }
+            val resources = Resources()
+            val port = Port()
+            var preflights = 0
+            for (access in listOf(BrowserAccess.READ_ONLY, BrowserAccess.FULL)) {
+                try {
+                    BrowserToolSession(BrowserGrant(owner, access), registry, resources, port) { preflights++ }
+                    fail("facade opened after owner close")
+                } catch (e: IllegalStateException) {
+                    assertEquals("BROWSER_SESSION_CLOSED", e.message)
+                }
+            }
+            assertTrue(resources.created.isEmpty())
+            assertTrue(resources.closed.isEmpty())
+            assertTrue(resources.rebound.isEmpty())
+            assertTrue(resources.live.isEmpty())
+            assertTrue(port.calls.isEmpty())
+            assertEquals(0, preflights)
+            assertTrue(released.isEmpty())
+            val other = Fixture(if (owner == main) child else main, registry = registry)
+            confirmed(call(other.session, "new_tab"))
+            val lease = other.session.currentTab!!
+            repeat(2) { registry.close(owner) }
+            confirmed(call(other.session, "get_text"))
+            assertEquals(1, other.port.calls.size)
+            repeat(2) { other.session.close() }
+            assertEquals(listOf(lease), other.resources.closed)
+            assertEquals(listOf(lease), released)
+        }
+    }
+
     @Test fun startsEmptyAndDefaultTabBelongsToThisSession() {
         val f = Fixture(main)
         assertNull(f.session.currentTab)

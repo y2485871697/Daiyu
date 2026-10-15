@@ -35,6 +35,64 @@ class ProviderRequestWireTest {
         try { work(); fail("invalid policy must fail before connection") } catch (_: IllegalArgumentException) {}
     }
 
+    @Test fun responsesCustomEndpointAndKeyStayInBodyWithoutChangingConfiguration() {
+        val custom = """{"endpoint":"https://body.invalid/v1/responses","key":"body-key","apiKey":"body-api-key","metadata":{"enabled":false,"attempt":7,"labels":["fixture"],"optional":null}}"""
+        val config = settings.copy(requestOptions = ProviderRequestOptions(custom))
+        val before = config.requestSnapshot()
+        val conn = Connection(response())
+        var requestedUrl: URL? = null
+        ResponsesModel(config) { url -> requestedUrl = url; conn }.open(emptyList()).next(emptyList()) {}
+        assertEquals("https://example.invalid/v1/responses", requestedUrl.toString())
+        assertEquals("POST", conn.requestMethod)
+        assertEquals("Bearer synthetic-key", conn.getRequestProperty("Authorization"))
+        val body = conn.body()
+        assertEquals("https://body.invalid/v1/responses", body.get("endpoint"))
+        assertEquals("body-key", body.get("key"))
+        assertEquals("body-api-key", body.get("apiKey"))
+        val metadata = body.getJSONObject("metadata")
+        assertEquals(false, metadata.get("enabled"))
+        assertEquals(7, metadata.get("attempt"))
+        assertEquals("fixture", metadata.getJSONArray("labels").get(0))
+        assertSame(JSONObject.NULL, metadata.get("optional"))
+        assertEquals(before, config.requestSnapshot())
+        assertEquals(custom, config.requestOptions.customBody)
+        assertTrue(conn.closed)
+    }
+
+    @Test fun messagesCustomEndpointAndKeyStayInBodyWithoutChangingConfiguration() {
+        val events = listOf(
+            JSONObject().put("type", "message_start").put("message", JSONObject().put("id", "msg").put("role", "assistant").put("content", JSONArray())),
+            JSONObject().put("type", "content_block_start").put("index", 0).put("content_block", JSONObject().put("type", "text").put("text", "ok")),
+            JSONObject().put("type", "content_block_stop").put("index", 0),
+            JSONObject().put("type", "message_delta").put("delta", JSONObject().put("stop_reason", "end_turn")),
+            JSONObject().put("type", "message_stop")
+        )
+        val custom = """{"endpoint":"https://body.invalid/v1/messages","key":"body-key","apiKey":"body-api-key","metadata":{"enabled":false,"attempt":7,"labels":["fixture"],"optional":null}}"""
+        val config = settings.copy(endpoint = "https://example.invalid/v1/messages", model = "claude-fixture",
+            protocol = ProviderProtocol.MESSAGES, requestOptions = ProviderRequestOptions(custom))
+        val before = config.requestSnapshot()
+        val conn = Connection(events.joinToString("") { "event: ${it.getString("type")}\ndata: $it\n\n" })
+        val user = Message(MessageId("u"), ConversationId("c"), RunId("r"), "user", listOf(MessageBlock.Text("u", "hi")), RunStatus.COMPLETED)
+        var requestedUrl: URL? = null
+        MessagesModel(config) { url -> requestedUrl = url; conn }.open(listOf(user)).next(emptyList()) {}
+        assertEquals("https://example.invalid/v1/messages", requestedUrl.toString())
+        assertEquals("POST", conn.requestMethod)
+        assertEquals("synthetic-key", conn.getRequestProperty("x-api-key"))
+        val body = conn.body()
+        assertEquals("https://body.invalid/v1/messages", body.get("endpoint"))
+        assertEquals("body-key", body.get("key"))
+        assertEquals("body-api-key", body.get("apiKey"))
+        assertEquals(4096, body.get("max_tokens"))
+        val metadata = body.getJSONObject("metadata")
+        assertEquals(false, metadata.get("enabled"))
+        assertEquals(7, metadata.get("attempt"))
+        assertEquals("fixture", metadata.getJSONArray("labels").get(0))
+        assertSame(JSONObject.NULL, metadata.get("optional"))
+        assertEquals(before, config.requestSnapshot())
+        assertEquals(custom, config.requestOptions.customBody)
+        assertTrue(conn.closed)
+    }
+
     @Test fun actualResponsesPostMergesBeforeSelectingFinalModelTier() {
         val custom = """{"model":"relay/gpt-6","reasoning":{"effort":"high"},"metadata":{"user":"yes"},"service_tier":"auto"}"""
         val config = settings.copy(requestOptions = ProviderRequestOptions(custom, GptSpeedMode.FAST))

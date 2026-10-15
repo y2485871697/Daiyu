@@ -185,8 +185,8 @@ class QuestionBarrier(private val store: QuestionStore, private val ownerPrefix:
                 synchronized(monitor) { store.get(callId)?.answer }?.let { answered = true; return it }
                 throw failure
             }
-            synchronized(monitor) {
-                while (true) {
+            while (true) {
+                synchronized(monitor) {
                     val record = store.get(callId) ?: throw QuestionException(QuestionFailure.UNKNOWN_QUESTION)
                     record.answer?.let { answered = true; return it }
                     if (Thread.currentThread().isInterrupted || closed || callId in expiredInMemory || record.interrupted) throw InterruptedException()

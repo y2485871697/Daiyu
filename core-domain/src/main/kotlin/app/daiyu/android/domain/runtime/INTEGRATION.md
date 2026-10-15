@@ -52,7 +52,7 @@ Minimal transaction algorithm for a NEW run:
    A terminal message implies checkpoint.phase=TERMINAL. Commit before returning.
 4. Reject stale/terminal writes. Publish callbacks are outside the persistence contract and their
    exceptions do not change a committed terminal. A lost commit receipt requires idempotent
-   database reconciliation, never remote retry.
+   a same-owner read-only receipt check, never remote retry.
 
 `reconcileCheckpoint` runs only after the previous owner is known dead. In one transaction read
 both message and checkpoint, fence the old owner, and reconcile: an already-terminal message
@@ -91,6 +91,16 @@ existing ChatRunnerTest/ChatRunnerRepetitionTest and Android storage/controller 
 
 - `open` 与 `next/resume` 启动以前的最后短锁 admission 是控制线性化点；模型调用、存储、取消与等待仍在锁外。暂停/追加在 `open` 窗口使 generation 失效；正常返回的旧 session 被取消，控制失效后的 provider 异常回控制边界。持久化异常仍终止，不作为网络重试。
 - 边界暂停必须显式 resume，不无故切换已持有工具 outputs 的 session；追加排队后进入下一次模型 history。STREAMING 追加、stop 后旧 Text/Reasoning/Protocol/Tool/Usage 全事件均受 generation fence。控制方法锁内捕获 waiter/session，锁外 unpark/cancel。
-- legacy `ConversationStore.save` 终态写入抛错后可能已经提交，禁止再次无条件写 FAILED 或 COMPLETED。无读回契约时返回带“保存失败，已显示内容可能未落盘”的本地失败投影，不声称持久终态已失败。Atomic 路径仅通过 `reconcileCheckpoint` 读回确认，不重复 commit。
+- legacy `ConversationStore.save` 终态写入抛错后可能已经提交，禁止再次无条件写 FAILED 或 COMPLETED。无读回契约时返回带“保存失败，已显示内容可能未落盘”的本地失败投影，不声称持久终态已失败。Atomic 的任何持久回执异常只通过 `readCommittedCheckpoint` 只读确认，不重复 commit；仅取得新排他lease后才允许死亡恢复 `reconcileCheckpoint`。
 - 新测试的有状态 Atomic fake 验证 Runner owner/revision 与终态回执调用契约；UNKNOWN 跨 runner/new run/new callId/等价 JSON/路由测试桥使用生产 `ToolLedger`，但内存账本不是 durable journal/授权生产适配器。真实数据库事务、重开与活跃 owner 接管由03/06及01集成证明。
 - 消费 `/workspace/daiyu-coordination/task-01/interfaces-v1.md`：构造与既有 ModelPort/ModelSession/RunnerOptions 契约保持兼容；Question/child-owner 的确切 hook、生产 Atomic store 与 request/attempt/可信 usage 签名尚未冻结，本批不猜参数接线。
+
+## 01生产SQLite接线（随代码同次提交）
+
+Controller在worker启动先取得canonical数据库sidecar的OS排他锁；同JVM guard在打开channel前拒绝第二实例。成功后才打开/迁移schema6并恢复旧checkpoint。锁贯穿所有任务，close排空worker、成功关闭数据库后释放；超时保留锁并可重试。锁文件不删除，不以Activity重建、stop返回或时间戳代替旧worker退出。
+
+`storage/SQLiteRuntimeStore`使用同一个helper的同一事务CAS owner/revision/process_owner，写checkpoint、message及run级history校验；旧save禁止写已checkpoint管理的消息，删除message经FK级联删除checkpoint。版本化codec保留全部字段，RUNNING负载在64MiB中预留4096B恢复增长；大JSON/消息按64KiB BLOB分块读取，Context消费同步保持完整快照。
+
+Runner的Atomic提交异常不再尝试第二次FAILED写入，也不触发恢复。只读回执确认任何真实终态即采用；RUNNING/null/坏身份/读取错误只产生带保存失败提示的本地投影，Controller保持阻塞。启动恢复只使用库中最新记录，IN_FLIGHT转UNKNOWN，已有消息终态不降级；绝不打开模型或重放工具。恢复不导入备份中的运行owner，完整备份仍仅保留中立内容。
+
+本批真实跨进程争锁/物理强杀/OEM证据仍待20号业务验证；暂停/补充UI和Question/child-owner等未接。本批host与平台结果以唯一重构清单、对应CHECK及Actions证据为准，不以类型检查称业务完成。

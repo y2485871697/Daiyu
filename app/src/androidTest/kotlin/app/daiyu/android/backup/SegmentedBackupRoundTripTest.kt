@@ -155,7 +155,7 @@ class SegmentedBackupRoundTripTest : InstrumentationTestCase() {
     }
 
     private fun assertRestored(f: Fixture, seed: Seed) {
-        assertEquals(5, f.db.readableDatabase.version)
+        assertEquals(6, f.db.readableDatabase.version)
         val rows = f.db.messages(seed.owner).map { it.second }
         assertEquals(seed.rows, rows)
         assertEquals(3, rows.last().historySegments.size)

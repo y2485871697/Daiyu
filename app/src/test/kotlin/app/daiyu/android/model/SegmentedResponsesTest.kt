@@ -105,7 +105,7 @@ class SegmentedResponsesTest {
             val snapshot=source.copy(blocks=source.blocks.toList(),protocolItems=source.protocolItems.toList())
             val items=input(listOf(source))
             assertEquals(1,items.size)
-            assertEquals(setOf("role","content"),items.single().keySet())
+            assertEquals(setOf("role","content"),items.single().keys().asSequence().toSet())
             assertEquals("assistant",items.single().getString("role"))
             assertEquals(" first \nsecond\n\n[回复已中断]",items.single().getString("content"))
             assertEquals(snapshot,source)

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <string name="ui_enable_memory_4b69b7">Enable memory</string>
+  <string name="ui_copy_4edd1d">copy</string>
+  <string name="ui_no_skills_installed_yet_4e960f">No Skills installed yet</string>
+  <string name="ui_edit_a7f814">edit</string>
+  <string name="ui_memory_b55ff5">Memory</string>
+  <string name="skills_no_description">No description</string>
+  <string name="memory_over_limit">Over the 1 MiB limit. Remove some content</string>
+  <string name="assistant_list_title">Assistants</string>
+  <string name="assistant_edit_title">Personality</string>
+  <string name="assistant_search">Search assistants</string>
+  <string name="assistant_current">Current</string>
+  <string name="assistant_empty">No matching assistants</string>
+  <string name="assistant_delete_title">Delete assistant</string>
+  <string name="assistant_delete_body">Delete %1$s? This cannot be undone.</string>
+  <string name="assistant_preview">Preview</string>
+  <string name="assistant_identity">Identity</string>
+  <string name="assistant_name">Name</string>
+  <string name="assistant_unnamed">Untitled</string>
+  <string name="assistant_prompt_title">Personality prompt</string>
+  <string name="assistant_crop_title">Crop avatar</string>
+  <string name="assistant_memory_summary">Only affects this assistant. MEMORY.md is shared. Turning this off skips injection and memory tools, but keeps existing notes.</string>
+  <string name="assistant_skills_summary">Only affects this assistant. The three built-in skills start on; newly installed skills stay off until you enable them here.</string>
+</resources>

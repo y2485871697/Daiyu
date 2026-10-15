@@ -236,15 +236,31 @@ class FeatureHubActivityTest : android.test.InstrumentationTestCase() {
     }
 
 
+    private class SemanticProbe {
+        var visited = 0
+        var refreshFailed = 0
+        var visible = 0
+        var hiddenMatch = false
+        override fun toString() = "nodes=$visited,refreshFailed=$refreshFailed,visible=$visible,hiddenMatch=$hiddenMatch"
+    }
     private fun containsVisibleSemanticText(
         node: android.view.accessibility.AccessibilityNodeInfo,
         text: String,
+        probe: SemanticProbe,
+        deadline: Long,
     ): Boolean {
         try {
-            if (node.isVisibleToUser && node.text?.toString() == text) return true
+            if (android.os.SystemClock.uptimeMillis() >= deadline) return false
+            probe.visited++
+            if (!node.refresh()) { probe.refreshFailed++; return false }
+            if (node.isVisibleToUser) probe.visible++
+            if (node.text?.toString() == text) {
+                if (node.isVisibleToUser) return true
+                probe.hiddenMatch = true
+            }
             for (index in 0 until node.childCount) {
                 val child = node.getChild(index) ?: continue
-                if (containsVisibleSemanticText(child, text)) return true
+                if (containsVisibleSemanticText(child, text, probe, deadline)) return true
             }
             return false
         } finally {
@@ -253,18 +269,32 @@ class FeatureHubActivityTest : android.test.InstrumentationTestCase() {
     }
     private fun awaitSemanticText(text: String) {
         val deadline = android.os.SystemClock.uptimeMillis() + 5000
+        var last = "root=null"
         while (android.os.SystemClock.uptimeMillis() < deadline) {
             val root = instrumentation.uiAutomation.rootInActiveWindow
-            if (root != null && containsVisibleSemanticText(root, text)) return
+            val probe = SemanticProbe()
+            last = if (root == null) "root=null" else
+                "package=${root.packageName},class=${root.className},window=${root.windowId}"
+            if (root != null && containsVisibleSemanticText(root, text, probe, deadline)) return
+            last += ";$probe"
             android.os.SystemClock.sleep(50)
         }
-        fail("Original Compose text missing: $text")
+        var viewState = ""
+        controlMain {
+            val decor = checkNotNull(activity).window.decorView
+            viewState = "attached=${decor.isAttachedToWindow},focus=${decor.hasWindowFocus()},inputs=${mainViews().filterIsInstance<EditText>().size}"
+        }
+        fail("Original Compose text missing: $text; $last; $viewState")
     }
     fun testOriginalManageAndUsagePagesOpenAndBackRestoresRealChatDraft() {
         controlMain { input().setText("原聊天草稿") }
         listOf("P22" to R.string.history_page_title, "P21" to R.string.stats_page_title).forEach { (id, title) ->
             val window = openHub()
-            controlMain { slot(window, id).performClick(); action(window, id).performClick() }
+            controlMain {
+                assertTrue("detail click $id", slot(window, id).performClick())
+                assertTrue("open click $id", action(window, id).performClick())
+                assertFalse("hub dismissed for $id", window.isShowing)
+            }
             instrumentation.waitForIdleSync()
             awaitSemanticText(instrumentation.targetContext.getString(title))
             controlMain { assertFalse(window.isShowing); checkNotNull(activity).onBackPressedDispatcher.onBackPressed() }

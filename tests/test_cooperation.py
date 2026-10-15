@@ -8,7 +8,7 @@ from unittest.mock import patch
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts/cooperation'))
-from evidence import atomic_json, coverage, digest, verify_bundle, validate_record
+from evidence import SCOPES, UNIT_REPORTS, atomic_json, coverage, digest, verify_bundle, validate_record
 from cooperate import cloud_fill, locked, run_scope
 
 
@@ -20,10 +20,11 @@ class EvidenceTests(unittest.TestCase):
         self.folder.mkdir(parents=True)
         (self.folder / 'check.log').write_text('BUILD SUCCESSFUL')
         with zipfile.ZipFile(self.folder / 'reports.zip', 'w') as z:
-            z.writestr('TEST-demo.xml', '<testsuite tests="2" errors="0" failures="0" skipped="0"><testcase name="one"/><testcase name="two"/></testsuite>')
+            for module in UNIT_REPORTS:
+                z.writestr(module + '/TEST-demo.xml', '<testsuite tests="1" errors="0" failures="0" skipped="0"><testcase name="one"/></testsuite>')
         self.record = dict(check_id='pc-demo', check_attempt=2, source_sha='a'*40,
-            config_id='b'*64, scope='unit', task=':core-domain:test', exit_code=0, result='passed',
-            incremental_base_sha='a'*40, environment={'jdk':'27'}, command=['gradlew',':core-domain:test'],
+            config_id='b'*64, scope='unit', task=SCOPES['unit'], exit_code=0, result='passed',
+            incremental_base_sha='a'*40, environment={'jdk':'27'}, command=['gradlew', *SCOPES['unit'].split()],
             log_sha256=digest(self.folder / 'check.log'), report_sha256=digest(self.folder / 'reports.zip'))
         self.save()
 

@@ -92,7 +92,7 @@ Set-Location -LiteralPath $Source
 $Common=@('--daemon','--parallel','--build-cache',"--max-workers=$Workers",'--console=plain','--warning-mode=fail','-I',$Guard)
 if($Mode -eq 'preflight') {
     $ErrorActionPreference='Continue'
-    $PreviewTasks=if($Scope -eq 'unit'){@(':core-domain:test')}elseif($Scope -eq 'lint'){@(':app:lintDebug')}else{@(':core-domain:test',':app:lintDebug')}
+    $PreviewTasks=if($Scope -eq 'unit'){@(':core-domain:test',':app:testDebugUnitTest')}elseif($Scope -eq 'lint'){@(':app:lintDebug')}else{@(':core-domain:test',':app:testDebugUnitTest',':app:lintDebug')}
     & .\gradlew.bat @PreviewTasks '--dry-run' @Common *> (Join-Path $Report 'preflight.log')
     $code=$LASTEXITCODE
     $ErrorActionPreference='Stop'
@@ -106,19 +106,31 @@ Save-Status
 $Final=0
 $PackageScan='not_run'
 try {
-    $Specs=@(@{name='unit';task=':core-domain:test';reports='core-domain\build\test-results\test'},@{name='lint';task=':app:lintDebug';reports='app\build\reports'})
+    $Specs=@(@{name='unit';task=':core-domain:test :app:testDebugUnitTest';reports=@('core-domain\build\test-results\test','app\build\test-results\testDebugUnitTest')},@{name='lint';task=':app:lintDebug';reports=@('app\build\reports')})
     foreach($spec in ($Specs | Where-Object {$Scope -eq 'all' -or $_.name -eq $Scope})) {
-        $item=[ordered]@{check_id=$CheckId;check_attempt=$CheckAttempt;config_id=$Config;scope=$spec.name;name=$spec.name;task=$spec.task;command=@('gradlew.bat',$spec.task)+$Common;source_sha=$Sha;incremental_base_sha=$Sha;diff='none; exact immutable snapshot; Gradle build cache enabled';result='running';exit_code=$null;started_at=[DateTime]::UtcNow.ToString('o')}
+        $Tasks=$spec.task.Split(' ')
+        $item=[ordered]@{check_id=$CheckId;check_attempt=$CheckAttempt;config_id=$Config;scope=$spec.name;name=$spec.name;task=$spec.task;command=@('gradlew.bat')+$Tasks+$Common;source_sha=$Sha;incremental_base_sha=$Sha;diff='none; exact immutable snapshot; Gradle build cache enabled';result='running';exit_code=$null;started_at=[DateTime]::UtcNow.ToString('o')}
         $Status.items+=,$item; Save-Status
         $log=Join-Path $Report ($spec.name+'.log')
         $ErrorActionPreference='Continue'
-        & .\gradlew.bat $spec.task @Common *> $log
+        & .\gradlew.bat @Tasks @Common *> $log
         $code=$LASTEXITCODE
         $ErrorActionPreference='Stop'
         $item.exit_code=$code; $item.result=if($code -eq 0){'passed'}else{'failed'};$item.ended_at=[DateTime]::UtcNow.ToString('o')
         $item.log_sha256=(Get-FileHash $log -Algorithm SHA256).Hash.ToLowerInvariant()
         $dest=Join-Path $Report $spec.name;New-Item -ItemType Directory -Path $dest -Force | Out-Null
-        if(Test-Path -LiteralPath $spec.reports){Copy-Item -LiteralPath $spec.reports -Destination (Join-Path $dest 'reports') -Recurse -Force}
+        foreach($reports in $spec.reports) {
+            if(Test-Path -LiteralPath $reports) {
+                $reportDest=Join-Path $dest $reports
+                New-Item -ItemType Directory -Path (Split-Path -Parent $reportDest) -Force | Out-Null
+                Copy-Item -LiteralPath $reports -Destination $reportDest -Recurse -Force
+                if(-not @(Get-ChildItem -LiteralPath $reports -Recurse -File -Filter '*.xml').Count -and $code -eq 0) {
+                    $code=1;$item.exit_code=1;$item.result='failed'
+                }
+            } elseif($code -eq 0) {
+                $code=1;$item.exit_code=1;$item.result='failed'
+            }
+        }
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         $archive=Join-Path $Report ($spec.name+'-reports.zip')
         [IO.Compression.ZipFile]::CreateFromDirectory($dest,$archive)

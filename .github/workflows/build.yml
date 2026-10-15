@@ -80,10 +80,6 @@ jobs:
           CHECK_SCOPE: ${{ inputs.check_scope }}
           EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: python scripts/cooperation/cloud_checks.py --scope "$CHECK_SCOPE"
-      - name: 应用JVM历史回归（不打包）
-        if: inputs.check_scope != 'lint'
-        shell: bash
-        run: ./gradlew --no-daemon --warning-mode=fail -I scripts/cooperation/checks_only.init.gradle :app:testDebugUnitTest
       - name: 上传检查报告
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

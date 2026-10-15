@@ -269,6 +269,9 @@ class FeatureHubActivityTest : android.test.InstrumentationTestCase() {
             awaitSemanticText(instrumentation.targetContext.getString(title))
             controlMain { assertFalse(window.isShowing); checkNotNull(activity).onBackPressedDispatcher.onBackPressed() }
             instrumentation.waitForIdleSync()
+            awaitControl("chat input reattached after $id") {
+                mainViews().filterIsInstance<EditText>().size == 1
+            }
             controlMain { assertEquals("原聊天草稿", input().text.toString()) }
         }
         assertEquals(0, fixture.opens.get())

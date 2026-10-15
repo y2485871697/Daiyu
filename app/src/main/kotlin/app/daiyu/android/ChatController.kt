@@ -9,7 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.RunnerOptions
-import app.daiyu.android.model.ResponsesModel
+import app.daiyu.android.model.ModelFactory
 import app.daiyu.android.platform.AndroidReadOnlyTools
 import app.daiyu.android.storage.*
 import java.util.UUID
@@ -22,7 +22,7 @@ class ChatApplication:Application() {
 class ChatController internal constructor(private val application:Application,
     val database:ConversationDatabase, val settings:ModelSettingsStore, val preferences:SharedPreferences,
     private val model:(ModelSettings)->ModelPort) {
-    constructor(application:Application):this(application,ConversationDatabase(application),ModelSettingsStore(application),application.getSharedPreferences("conversation-ui",0),{ResponsesModel(it)})
+    constructor(application:Application):this(application,ConversationDatabase(application),ModelSettingsStore(application),application.getSharedPreferences("conversation-ui",0),{ModelFactory.create(it)})
     private val executor=Executors.newSingleThreadExecutor()
     private val handler=Handler(Looper.getMainLooper())
     // Entry points and callback commits share this controller's monitor. Runner control and
@@ -84,12 +84,15 @@ class ChatController internal constructor(private val application:Application,
         val user=Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
         val assistant=Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
         val prior=try {if(conversation==null) emptyList() else ContextService(application,database).prepareSend(conversationId).messages} catch(_:Exception) {problem="读取历史失败；草稿保留，未发起网络请求";notifyChanged();return null}
+        val preparedModel=try {model(config)} catch (_:Exception) {
+            problem="模型初始化失败；草稿保留，未发起网络请求";notifyChanged();return null
+        }
         val saved=try {
             database.send(user,assistant,conversation==null)
         } catch (_:Exception) {problem="发送内容保存失败；草稿保留，未发起网络请求";notifyChanged();return null}
         problem=null;active=assistant
         val tools=config.enabledTools()
-        val owned=ChatRunner(ModelPort { history -> model(config).open(history,tools) },database,AndroidReadOnlyTools(application,tools),
+        val owned=ChatRunner(ModelPort { history -> preparedModel.open(history,tools) },database,AndroidReadOnlyTools(application,tools),
             RunnerOptions(runtimeStore=checkNotNull(runtimeStore))) {
             synchronized(this) {
                 if(!closed && active?.id==assistant.id && active?.runId==run && active?.conversationId==conversationId &&

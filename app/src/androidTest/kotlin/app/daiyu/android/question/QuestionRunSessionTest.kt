@@ -10,6 +10,7 @@ import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 @Suppress("DEPRECATION")
@@ -20,8 +21,13 @@ class QuestionRunSessionTest : InstrumentationTestCase() {
         ToolInvocation(ToolCallId(id), ASK_USER_TOOL_NAME, body)
     private class Queue : Executor {
         val work = ArrayDeque<Runnable>()
-        override fun execute(command: Runnable) { work.add(command) }
-        fun drain() { while (work.isNotEmpty()) work.remove().run() }
+        @Synchronized override fun execute(command: Runnable) { work.add(command) }
+        fun drain() {
+            while (true) {
+                val command = synchronized(this) { work.pollFirst() } ?: return
+                command.run()
+            }
+        }
     }
     private class Store : QuestionStore {
         val rows = linkedMapOf<String, QuestionRecord>()
@@ -143,6 +149,64 @@ class QuestionRunSessionTest : InstrumentationTestCase() {
         assertTrue(store.get(owner.storageKey)!!.interrupted)
         assertFalse(session.begin(owner, invocation(), onPending = {}, onResult = {}))
         stop(session, writer); assertEquals(1, store.creates); registry.close()
+    }
+    fun testCompletionRejectionClaimsUnconfirmedBeforeFencedPendingCanPublishStopped() {
+        val store = Store(); val registry = QuestionRegistry(store, owner)
+        val queued = Queue(); val scheduled = AtomicInteger()
+        val mainHeld = CountDownLatch(1); val releaseMain = CountDownLatch(1)
+        val gateTimedOut = AtomicReference(false)
+        val writer = Executor { command ->
+            queued.execute(command)
+            if (scheduled.incrementAndGet() == 2) {
+                // Pause cleanup scheduling after the fence, before Unconfirmed is posted.
+                releaseMain.countDown()
+                idle()
+            }
+        }
+        val session = QuestionRunSession(registry, owner, writer,
+            Executor { throw RejectedExecutionException() }, { true }, { _, _ -> })
+        val result = CountDownLatch(1); var value: QuestionRunResult? = null; var results = 0
+        android.os.Handler(android.os.Looper.getMainLooper()).post {
+            mainHeld.countDown()
+            if (!releaseMain.await(5, TimeUnit.SECONDS)) gateTimedOut.set(true)
+        }
+        try {
+            await(mainHeld)
+            assertTrue(session.begin(owner, invocation(), onPending = {}, onResult = {
+                value = it; results++; result.countDown()
+            }))
+            queued.drain(); await(result); idle()
+            assertFalse("main gate timed out", gateTimedOut.get())
+            assertTrue(value is QuestionRunResult.Unconfirmed)
+            assertTrue(store.get(owner.storageKey)!!.interrupted)
+            assertFalse(session.begin(owner.copy(callId = "next"), invocation("next"), onPending = {}, onResult = {}))
+            stop(session, queued)
+            assertEquals(1, results); assertEquals(1, store.creates)
+        } finally { releaseMain.countDown(); registry.close() }
+    }
+    fun testCompletionRejectionCleanupFailureStaysFencedUntilRetrySucceeds() {
+        val store = Store().apply { interruptFails = true }; val registry = QuestionRegistry(store, owner)
+        val writer = Queue()
+        val session = QuestionRunSession(registry, owner, writer,
+            Executor { throw RejectedExecutionException() }, { true }, { _, _ -> })
+        val result = CountDownLatch(1); var value: QuestionRunResult? = null; var results = 0
+        try {
+            session.begin(owner, invocation(), onPending = {}, onResult = {
+                value = it; results++; result.countDown()
+            })
+            writer.drain(); await(result)
+            assertTrue(value is QuestionRunResult.Unconfirmed)
+            assertFalse(store.get(owner.storageKey)!!.interrupted)
+            assertFalse(session.begin(owner.copy(callId = "next"), invocation("next"), onPending = {}, onResult = {}))
+            val reply = CountDownLatch(1)
+            session.binding.submit(owner, QuestionAnswer.Selected("one")) {
+                assertEquals(QuestionCardView.Reply.STOPPED, it); reply.countDown()
+            }
+            writer.drain(); await(reply); stop(session, writer, false)
+            store.interruptFails = false; stop(session, writer)
+            assertTrue(store.get(owner.storageKey)!!.interrupted)
+            assertEquals(1, results); assertEquals(1, store.creates)
+        } finally { store.interruptFails = false; registry.close() }
     }
     fun testFailedInterruptionCanBeRetriedAndCannotReenableAnswers() {
         val store = Store(); val registry = QuestionRegistry(store, owner)

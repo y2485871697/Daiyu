@@ -41,7 +41,7 @@ internal fun SettingsSectionTitle(title: String) {
         text = title,
         style = MiuixTheme.textStyles.body2,
         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        modifier = Modifier.padding(start = 28.dp, end = 28.dp, top = 20.dp, bottom = 8.dp),
+        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 8.dp),
     )
 }
 
@@ -66,7 +66,7 @@ internal fun SettingsRow(
     Row(
         modifier = Modifier.fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 10.dp),
+            .heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leading != null) {
@@ -146,7 +146,7 @@ internal fun SettingsTextField(
             cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
             visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else KeyboardType.Text),
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
                 .background(MiuixTheme.colorScheme.surface).padding(12.dp)
                 .semantics { contentDescription = label },
             decorationBox = { editor ->

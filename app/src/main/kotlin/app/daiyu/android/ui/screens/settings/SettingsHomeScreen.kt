@@ -119,7 +119,7 @@ internal fun DaiyuSettingsScreen(
         item(key = "settings_search") {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 DaiyuIcon(DaiyuIcons.Search, contentDescription = null,
-                    modifier = Modifier.padding(horizontal = 12.dp), tint = MiuixTheme.colorScheme.primary, size = 24.dp)
+                    modifier = Modifier.padding(horizontal = 12.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
                 TextField(
                     value = query,
                     onValueChange = { query = it },
@@ -142,7 +142,7 @@ internal fun DaiyuSettingsScreen(
                         else -> DaiyuIcons.Chart
                     }
                     SettingsRow(title = title, onClick = { onPermissionClick(id) }, leading = {
-                        DaiyuIcon(icon, contentDescription = null, tint = MiuixTheme.colorScheme.primary, size = 24.dp)
+                        DaiyuIcon(icon, contentDescription = null, tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
                     }, trailing = {
                         Text(state.statusText, style = MiuixTheme.textStyles.body2,
                             color = if (state.granted) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary)
@@ -170,7 +170,7 @@ internal fun DaiyuSettingsScreen(
                             }
                         }, leading = {
                             DaiyuIcon(settingsEntryIcons.getValue(entry.id), contentDescription = null,
-                                tint = MiuixTheme.colorScheme.primary, size = 24.dp)
+                                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
                         })
                     }
                 }

@@ -86,6 +86,12 @@ class TerminalPathsTest : InstrumentationTestCase() {
         }
         val paths = TerminalPaths(root, "/guest/shared")
         assertThrows<SecurityException> { paths.resolveAttachment("/guest/shared/link.txt") }
+        val original = File(root, "notes.txt").apply { writeText("authorized") }
+        val attachment = paths.resolveAttachment("/guest/shared/notes.txt")
+        val moved = File(root, "old.txt")
+        assertTrue(original.renameTo(moved))
+        Files.createSymbolicLink(original.toPath(), moved.toPath())
+        assertThrows<SecurityException> { attachment.openRead().close() }
     }
 
     fun testOpenedLeafNeverReadsReplacementPath() {
@@ -99,7 +105,14 @@ class TerminalPathsTest : InstrumentationTestCase() {
                 file.writeText("replacement")
             }
         }
-        attachment.openRead().use { assertEquals("authorized", it.bufferedReader().readText()) }
+        attachment.openRead().use { input ->
+            val descriptor = (input as java.io.FileInputStream).fd
+            val flags = android.system.Os::class.java.getMethod("fcntlInt", java.io.FileDescriptor::class.java,
+                Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                .invoke(null, descriptor, android.system.OsConstants.F_GETFD, 0) as Int
+            assertTrue(flags and android.system.OsConstants.FD_CLOEXEC != 0)
+            assertEquals("authorized", input.bufferedReader().readText())
+        }
     }
 
     fun testDirectoryDescriptorDoesNotFollowReplacementSymlink() {

@@ -1,10 +1,10 @@
 package app.daiyu.android.integration.tools
 
 import android.test.InstrumentationTestCase
-import app.daiyu.android.domain.ReadOnlyTool
-import app.daiyu.android.domain.ToolCallId
-import app.daiyu.android.domain.ToolInvocation
+import app.daiyu.android.domain.*
+import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.*
+import app.daiyu.android.domain.tools.ToolDefinition
 import org.json.JSONObject
 import java.util.UUID
 
@@ -12,13 +12,41 @@ import java.util.UUID
 class AndroidToolIntegrationTest : InstrumentationTestCase() {
     private val databaseName = "tool-integration-test-${UUID.randomUUID()}.db"
     private val context get() = instrumentation.targetContext
+    private val readResources = mutableListOf<RunDeviceResources>()
     override fun tearDown() {
-        try { context.deleteDatabase(databaseName) } finally { super.tearDown() }
+        try { readResources.forEach { it.close() }; context.deleteDatabase(databaseName) } finally { super.tearDown() }
     }
     private fun call(id: String, name: String, arguments: String = "{}") = ToolInvocation(ToolCallId(id), name, arguments)
-    private fun readDispatcher(store: ToolLedgerStore, allowed: Set<ReadOnlyTool>) = ToolDispatcher(
-        AndroidToolRegistry.create(context).snapshot(), SessionCapabilities("session", AndroidToolRegistry.capabilitiesFor(allowed)), ToolLedger(store))
-    private val task get() = TaskAuthorization("session", "task")
+    private val task = TaskAuthorization("session", "task")
+    private val owner: RunExecutionOwner by lazy {
+        val message = Message(MessageId("device-test-assistant"), ConversationId("device-test"), RunId("task"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+        var result: RunExecutionOwner? = null
+        val receiver = object : ReceiptBatchToolExecutor {
+            override fun bindOwner(owner: RunExecutionOwner) { result = owner }
+            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): List<ToolDispatchResult> = error("no model tools")
+        }
+        val runner = ChatRunner(ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
+            override fun cancel() {}
+        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("no model tools") }, RunnerOptions(receiptBatchExecutor = receiver)) {}
+        check(runner.run(message, emptyList()).status == RunStatus.COMPLETED); checkNotNull(result)
+    }
+    private inner class OwnedReadDispatcher(private val dispatcher: ToolDispatcher) {
+        fun dispatch(authorization: TaskAuthorization, batch: List<ToolInvocation>) = dispatcher.dispatchOwned(authorization, batch, owner)
+    }
+    private fun readDispatcher(store: ToolLedgerStore, allowed: Set<ReadOnlyTool>): OwnedReadDispatcher {
+        val resources = RunDeviceResources(context); readResources.add(resources)
+        val capabilities = SessionCapabilities("session", AndroidToolRegistry.capabilitiesFor(allowed))
+        resources.bind(owner, task, capabilities)
+        return OwnedReadDispatcher(ToolDispatcher(AndroidToolRegistry.create(resources).snapshot(), capabilities, ToolLedger(store)))
+    }
+    fun testUnownedDeviceDispatchCannotSampleOrReserve() {
+        SQLiteToolLedgerStore(context, databaseName).use { store ->
+            val dispatcher = ToolDispatcher(AndroidToolRegistry.create(context).snapshot(), SessionCapabilities("session", AndroidToolRegistry.capabilitiesFor(ReadOnlyTool.entries.toSet())), ToolLedger(store))
+            val result = dispatcher.dispatch(task, listOf(call("unowned-device", ReadOnlyTool.BATTERY.toolName))).single().outcome
+            assertEquals(DispatchOutcome.NotExecuted("tool_execution_context_required"), result); assertTrue(store.transaction { it.isEmpty() })
+        }
+    }
 
     fun testRealReadOnlyBackendAndCapabilityArgumentFailures() {
         SQLiteToolLedgerStore(context, databaseName).use { store ->

@@ -474,8 +474,15 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                     throw InterruptedException()
                                 }
                             }
-                            if (attempt == 0) active.next(outputs, sink)
-                            else (active as ResumableModelSession).resume(sink)
+                            val delivery = ProviderEventDeliveryGate()
+                            try {
+                                val attemptSink: (ModelEvent) -> Unit = { event -> delivery.deliver { sink(event) } }
+                                if (attempt == 0) active.next(outputs, attemptSink)
+                                else (active as ResumableModelSession).resume(attemptSink)
+                            } finally {
+                                // Drain the old attempt outside Runner locks before reconnecting.
+                                delivery.close()
+                            }
                             break
                         } catch (failure: Exception) {
                             if (stopped.get() || breakStream || sinkFailure != null) throw failure

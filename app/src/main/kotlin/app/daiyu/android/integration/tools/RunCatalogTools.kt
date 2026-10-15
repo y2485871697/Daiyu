@@ -14,6 +14,7 @@ internal class RunCatalogTools(
     private val ledger: ToolLedger,
     private val conversationId: ConversationId,
     private val runId: RunId,
+    private val deviceResources: RunDeviceResources? = null,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
     private val authorization = TaskAuthorization(capabilities.sessionId, runId.value)
@@ -26,6 +27,7 @@ internal class RunCatalogTools(
         check(!closed.get()) { "run_closed" }
         require(owner.conversationId == conversationId && owner.runId == runId) { "tool_run_owner_mismatch" }
         check(this.owner == null || this.owner === owner) { "tool_owner_already_bound" }
+        deviceResources?.bind(owner, authorization, capabilities)
         this.owner = owner
     }
 
@@ -36,7 +38,7 @@ internal class RunCatalogTools(
         bridge?.let { return it }
         val bound = checkNotNull(owner) { "tool_owner_not_bound" }
         val scope = try { capture(capabilities, authorization) } catch (failure: Exception) {
-            closed.set(true)
+            close()
             throw failure
         }
         skills = scope
@@ -72,5 +74,12 @@ internal class RunCatalogTools(
         return checkNotNull(bridge) { "catalog_not_prepared" }.start(message, invocations) { closed.get() || cancelled() }
     }
     // Do not wait for capture or in-flight reads on the UI/control thread.
-    override fun close() { closed.set(true); skills?.close() }
+    override fun close() {
+        closed.set(true); deviceResources?.close(); skills?.close()
+    }
+    internal fun closeWhenIdle(onClosed: () -> Unit) {
+        close()
+        val devices = deviceResources
+        if (devices == null) onClosed() else devices.closeWhenIdle(onClosed)
+    }
 }

@@ -63,6 +63,8 @@ class ChatController internal constructor(private val application:Application,
         var cleaning=false
         var cleanupConfirmed=false
         var cleanupFailed=false
+        var devicesClosing=false
+        var devicesClosed=false
         var result:Message?=null
     }
     private var resources:RunResources?=null
@@ -180,15 +182,18 @@ class ChatController internal constructor(private val application:Application,
             problem="模型初始化失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
         var preparingTools: RunCatalogTools? = null
+        var preparingDevices: RunDeviceResources? = null
         val prepared = try {
             val contextTools = ScopedContextTools.create(
                 ContextRegistry(contextService), ContextRegistryScope(conversationId),
                 run, preparedContext?.archiveId)
-            val registry = AndroidToolRegistry.create(application, contextTools, enableUserBarrier=true)
+            val devices = RunDeviceResources(application)
+            preparingDevices = devices
+            val registry = AndroidToolRegistry.create(devices, contextTools, enableUserBarrier=true)
             val capabilities = SessionCapabilities(run.value,
                 AndroidToolRegistry.capabilitiesFor(config.enabledTools()) + contextTools.map { it.definition.capability } +
                     setOf(SkillRunSession.READ, SkillRunSession.RESOURCE, AndroidToolRegistry.ASK_USER_CAPABILITY))
-            val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run) { grants, authorization ->
+            val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices) { grants, authorization ->
                 SkillToolRegistry(application).captureForRun(grants, authorization)
             }
             preparingTools = tools
@@ -202,6 +207,7 @@ class ChatController internal constructor(private val application:Application,
             owned to tools
         } catch (_: Exception) {
             preparingTools?.close()
+            preparingDevices?.close()
             problem="运行准备失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
         val (owned, tools) = prepared
@@ -332,7 +338,19 @@ class ChatController internal constructor(private val application:Application,
             return
         }
         if(lifetime.result==null) return
-        lifetime.tools.close();lifetime.writer.shutdown();lifetime.waiter.shutdown()
+        if(!lifetime.devicesClosing) {
+            lifetime.devicesClosing=true
+            lifetime.tools.closeWhenIdle {
+                handler.post {synchronized(this) {
+                    if(resources===lifetime) {
+                        lifetime.devicesClosed=true
+                        cleanupRun(lifetime)
+                    }
+                }}
+            }
+        }
+        if(!lifetime.devicesClosed) return
+        lifetime.writer.shutdown();lifetime.waiter.shutdown()
         resources=null;runner=null;runTools=null
         val result=checkNotNull(lifetime.result)
         if(!closed) {

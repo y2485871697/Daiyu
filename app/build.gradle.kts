@@ -1,7 +1,7 @@
 plugins { id("com.android.application") }
 
 abstract class StageBrowserCore:Sync() {
-    @get:Internal abstract val outputDirectory:DirectoryProperty
+    @get:OutputDirectory abstract val outputDirectory:DirectoryProperty
 }
 val browserRoot=rootProject.layout.projectDirectory.dir("components/openminis-browser")
 androidComponents.onVariants { variant ->

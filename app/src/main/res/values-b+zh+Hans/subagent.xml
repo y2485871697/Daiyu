@@ -1,0 +1,5 @@
+<resources>
+    <string name="subagent_action_close">关闭</string>
+    <string name="subagent_provider_empty">暂无模型提供商，请新增</string>
+    <string name="subagent_reasoning_picker_title">调整思考深度</string>
+</resources>

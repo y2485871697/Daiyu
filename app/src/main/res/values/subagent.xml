@@ -1,0 +1,5 @@
+<resources>
+    <string name="subagent_action_close">Close</string>
+    <string name="subagent_provider_empty">No model providers yet. Add one to get started</string>
+    <string name="subagent_reasoning_picker_title">Adjust thinking depth</string>
+</resources>

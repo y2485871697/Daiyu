@@ -139,6 +139,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val raw = string(envelope, "payload"); val id = PrivateBlobs.digest(raw.toByteArray(Charsets.UTF_8))
         require(id == string(envelope, "sha256")) { "备份摘要不匹配" }
         val payload = objectOf(raw); fields(payload, setOf("text_backup", "tables", "config", "blobs", "excluded", "inventory"))
+        store.preflightBackup(string(payload, "text_backup"))
         val legacy = objectOf(string(payload, "text_backup"))
         require(legacy.getString("format") == "daiyu-neutral-text" && legacy.getInt("version") == 1)
         val oldRaw = string(legacy, "payload"); require(PrivateBlobs.digest(oldRaw.toByteArray(Charsets.UTF_8)) == legacy.getString("sha256"))

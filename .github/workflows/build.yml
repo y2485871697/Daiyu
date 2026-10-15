@@ -80,12 +80,19 @@ jobs:
           CHECK_SCOPE: ${{ inputs.check_scope }}
           EXPECTED_SHA: ${{ inputs.expected_sha }}
         run: python scripts/cooperation/cloud_checks.py --scope "$CHECK_SCOPE"
+      - name: 应用JVM历史回归（不打包）
+        if: inputs.check_scope != 'lint'
+        shell: bash
+        run: ./gradlew --no-daemon --warning-mode=fail -I scripts/cooperation/checks_only.init.gradle :app:testDebugUnitTest
       - name: 上传检查报告
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: 代鱼检查报告-${{ matrix.os }}
-          path: cooperation-reports/
+          path: |
+            cooperation-reports/
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/tests/testDebugUnitTest/
           if-no-files-found: error
   build:
     name: 单测、检查与开发包
@@ -115,7 +122,7 @@ jobs:
           python3 -B -m unittest discover -s tests -q
           python3 scripts/verify_boundaries.py
       - name: 单测与 Lint
-        run: ./gradlew --no-daemon :core-domain:test :app:lintDebug
+        run: ./gradlew --no-daemon :core-domain:test :app:testDebugUnitTest :app:lintDebug
       - name: 准备固定签名
         env:
           DAIYU_RELEASE_KEYSTORE_BASE64: ${{ secrets.DAIYU_RELEASE_KEYSTORE_BASE64 }}
@@ -150,6 +157,8 @@ jobs:
         with:
           name: 代鱼测试报告
           path: |
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/tests/testDebugUnitTest/
             core-domain/build/test-results
             core-domain/build/reports/tests
             app/build/reports/lint-results-debug.*

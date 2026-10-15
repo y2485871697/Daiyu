@@ -120,6 +120,20 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
                     assertTrue(definitions.all { !it.sideEffect })
                     assertEquals("fixture-model", config.model)
                     assertEquals("fixture-key", config.apiKey)
+                    val runTools = ChatController::class.java.getDeclaredField("runTools").apply { isAccessible = true }
+                        .get(f.controller)
+                    val bound = runTools.javaClass.getDeclaredField("owner").apply { isAccessible = true }.get(runTools)
+                        as app.daiyu.android.domain.runtime.RunExecutionOwner
+                    val assistant = f.db.messages(conversation.id).last().second
+                    assertTrue(bound.owns(assistant))
+                    f.db.readableDatabase.rawQuery(
+                        "SELECT owner,conversation_id,run_id FROM runtime_checkpoints WHERE message_id=?",
+                        arrayOf(assistant.id.value)).use { row ->
+                        assertTrue(row.moveToFirst())
+                        assertEquals(bound.ownerId, row.getString(0))
+                        assertEquals(bound.conversationId.value, row.getString(1))
+                        assertEquals(bound.runId.value, row.getString(2))
+                    }
                     return session(config.model)
                 }
             }

@@ -2,6 +2,7 @@ package app.daiyu.android.domain.tools
 
 import app.daiyu.android.domain.ToolCallId
 import app.daiyu.android.domain.ToolInvocation
+import app.daiyu.android.domain.runtime.RunExecutionOwner
 
 sealed interface DispatchOutcome {
     data class NotExecuted(val code: String) : DispatchOutcome
@@ -22,12 +23,27 @@ class ToolDispatcher(
         task: TaskAuthorization,
         batch: List<ToolInvocation>,
         cancelled: () -> Boolean = { false }
+    ): List<ToolDispatchResult> = dispatchInternal(task, batch, null, cancelled)
+
+    fun dispatchOwned(
+        task: TaskAuthorization,
+        batch: List<ToolInvocation>,
+        owner: RunExecutionOwner,
+        cancelled: () -> Boolean = { false }
+    ): List<ToolDispatchResult> = dispatchInternal(task, batch, owner, cancelled)
+
+    private fun dispatchInternal(
+        task: TaskAuthorization,
+        batch: List<ToolInvocation>,
+        owner: RunExecutionOwner?,
+        cancelled: () -> Boolean
     ): List<ToolDispatchResult> {
         val invocations = batch.toList()
         fun rejected(code: String) = invocations.map { ToolDispatchResult(it.id, DispatchOutcome.NotExecuted(code)) }
         if (invocations.isEmpty()) return emptyList()
         if (invocations.size > 64) return rejected("batch_too_large")
         if (task.sessionId != session.sessionId) return rejected("task_session_mismatch")
+        if (owner != null && task.taskId != owner.runId.value) return rejected("tool_run_owner_mismatch")
         if (invocations.map { it.id }.distinct().size != invocations.size) return rejected("duplicate_call_id")
         val definitions = invocations.map { catalog.find(it.name) ?: return rejected("unknown_tool") }
         if (invocations.size != 1 && definitions.any { it.first.effect == ToolEffect.USER_BARRIER })
@@ -42,6 +58,7 @@ class ToolDispatcher(
                 catch (_: RuntimeException) { return rejected("invalid_arguments") }
             val plan = try { tool.prepare(arguments) }
                 catch (_: Exception) { return rejected("preparation_failed") }
+            if (plan.requiresContext && owner == null) return rejected("tool_execution_context_required")
             if ((definition.effect == ToolEffect.WRITE) != (plan.writeEffect != null))
                 return rejected("effect_contract_violation")
             if (plan.writeEffect != null && plan.writeEffect !in task.allowedWrites)
@@ -67,7 +84,7 @@ class ToolDispatcher(
             if (entry.state == LedgerState.NOT_EXECUTED) return@mapIndexed ToolDispatchResult(call.id,
                 DispatchOutcome.NotExecuted(entry.code))
             val receipt = if (stop || cancelled()) ExecutionReceipt.NotExecuted("batch_stopped_before_execution") else {
-                try { plans[index].execute() }
+                try { plans[index].execute(owner?.let { ToolExecutionContext(it, call, task, cancelled) }) }
                 // Once execution starts, exceptions (including interruption) do NOT prove non-execution.
                 catch (_: Exception) { ExecutionReceipt.Unknown("adapter_result_unconfirmed") }
             }

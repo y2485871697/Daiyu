@@ -1,15 +1,22 @@
 plugins { id("com.android.application") }
 
-val browserRoot=rootProject.layout.projectDirectory.dir("components/openminis-browser")
-val stageBrowserCore by tasks.registering(Sync::class) {
-    from(browserRoot.dir("upstream/src/main/kotlin")) {
-        include(listOf("BrowserAction.kt","BrowserActionInput.kt","BrowserActionResult.kt",
-            "BrowserUseJS.kt","InterceptedDialogQueue.kt","BrowserUseManager.kt").map {
-            "com/openminis/app/browser/$it"
-        })
-    }
-    into(layout.buildDirectory.dir("generated/openminis-browser/kotlin"))
+abstract class StageBrowserCore:Sync() {
+    @get:Internal abstract val outputDirectory:DirectoryProperty
 }
+val browserRoot=rootProject.layout.projectDirectory.dir("components/openminis-browser")
+androidComponents.onVariants { variant ->
+    val stageBrowserCore=tasks.register<StageBrowserCore>("stage${variant.name.replaceFirstChar {it.uppercaseChar()}}BrowserCore") {
+        from(browserRoot.dir("upstream/src/main/kotlin")) {
+            include(listOf("BrowserAction.kt","BrowserActionInput.kt","BrowserActionResult.kt",
+                "BrowserUseJS.kt","InterceptedDialogQueue.kt","BrowserUseManager.kt").map {
+                "com/openminis/app/browser/$it"
+            })
+        }
+        into(outputDirectory)
+    }
+    variant.sources.kotlin?.addGeneratedSourceDirectory(stageBrowserCore,StageBrowserCore::outputDirectory)
+}
+
 android {
     useLibrary("android.test.runner")
     useLibrary("android.test.base")
@@ -31,10 +38,9 @@ android {
     }
     sourceSets {
         getByName("main") {
-            java.srcDir(stageBrowserCore)
-            java.srcDir(browserRoot.dir("adapter/src/main/kotlin"))
+            kotlin.directories.add(browserRoot.dir("adapter/src/main/kotlin").asFile.absolutePath)
         }
-        getByName("test").java.srcDir(browserRoot.dir("adapter/src/test/kotlin"))
+        getByName("test").kotlin.directories.add(browserRoot.dir("adapter/src/test/kotlin").asFile.absolutePath)
     }
     val signingValues = listOf(
         "DAIYU_RELEASE_STORE_FILE", "DAIYU_RELEASE_STORE_PASSWORD",
@@ -72,7 +78,7 @@ dependencies {
 }
 
 val hostPty=layout.buildDirectory.file("host-pty/daiyu_pty")
-val compileHostPty by tasks.registering(Exec::class) {
+val compileHostPty=tasks.register<Exec>("compileHostPty") {
     val source=layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/daiyu_pty.c")
     inputs.file(source)
     outputs.file(hostPty)
@@ -80,7 +86,7 @@ val compileHostPty by tasks.registering(Exec::class) {
     commandLine("cc","-std=c11","-Wall","-Wextra","-Werror","-O2",source.asFile.absolutePath,
         "-o",hostPty.get().asFile.absolutePath)
 }
-val verifyHostPty by tasks.registering(Exec::class) {
+val verifyHostPty=tasks.register<Exec>("verifyHostPty") {
     val verifier=layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/verify_host.py")
     val report=layout.buildDirectory.dir("reports/host-pty")
     dependsOn(compileHostPty)

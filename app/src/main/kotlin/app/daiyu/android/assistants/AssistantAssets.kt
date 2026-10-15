@@ -4,7 +4,9 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.AtomicFile
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.security.MessageDigest
 
 /** Optional host boundary for avatar files and revision-checked MEMORY.md editing. */
@@ -65,7 +67,7 @@ class FileAssistantAssets(context: Context) : AssistantAssets {
     override fun memory(id: String): AssistantMemorySnapshot {
         val file = memoryFile(id)
         val bytes = if (!file.baseFile.exists() && !File(file.baseFile.path + ".bak").exists()) byteArrayOf()
-            else file.openRead().use { it.readNBytes(AssistantAssets.MAX_MEMORY_BYTES + 1) }
+            else file.openRead().use { readBounded(it, AssistantAssets.MAX_MEMORY_BYTES + 1) }
         require(bytes.size <= AssistantAssets.MAX_MEMORY_BYTES) { "记忆文件超过 1 MiB 安全上限" }
         return snapshot(bytes)
     }
@@ -89,4 +91,18 @@ class FileAssistantAssets(context: Context) : AssistantAssets {
     override fun deleteMemory(id: String) { memoryFile(id).delete() }
     private fun snapshot(bytes: ByteArray) = AssistantMemorySnapshot(bytes.toString(Charsets.UTF_8),
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) })
+}
+
+/** API 26 replacement for InputStream.readNBytes: reads at most [limit] bytes. */
+private fun readBounded(input: InputStream, limit: Int): ByteArray {
+    val out = ByteArrayOutputStream()
+    val buffer = ByteArray(8192)
+    var total = 0
+    while (total < limit) {
+        val read = input.read(buffer, 0, minOf(buffer.size, limit - total))
+        if (read < 0) break
+        out.write(buffer, 0, read)
+        total += read
+    }
+    return out.toByteArray()
 }

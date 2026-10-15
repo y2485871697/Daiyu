@@ -22,6 +22,7 @@ internal object ResponsesStream {
     }
     private fun decode(reader:BufferedReader, cancelled:()->Boolean, sink:(ModelEvent)->Unit):List<String> {
         var output:List<String>?=null
+        var usage:ModelEvent.Usage?=null
         val sequence=mutableSetOf<Long>()
         val calls=linkedMapOf<String,ToolInvocation>()
         val parts=mutableMapOf<String,java.util.SortedMap<Int,String>>()
@@ -114,6 +115,7 @@ internal object ResponsesStream {
                         }
                     }
                     checkProtocol(confirmed==calls.keys)
+                    usage=ProviderUsage.responses(response)
                     for(i in 0 until out.length()) {
                         val item=out.getJSONObject(i)
                         summaryItem(item)
@@ -135,6 +137,9 @@ internal object ResponsesStream {
             output==null
         }
         if(cancelled()) throw InterruptedException()
-        return output ?: throw ModelRequestException(ModelFailure.INCOMPLETE)
+        val confirmed = output ?: throw ModelRequestException(ModelFailure.INCOMPLETE)
+        usage?.let(sink)
+        if(cancelled()) throw InterruptedException()
+        return confirmed
     }
 }

@@ -37,9 +37,7 @@ internal object MessagesStream {
             fun usage(value: JSONObject) {
                 fun tokens(key: String, previous: Long?): Long? {
                     if (!value.has(key) || value.isNull(key)) return previous
-                    val count = value.getLong(key)
-                    protocol(count in 0..1_000_000_000_000L)
-                    return count
+                    return ProviderUsage.count(value, key, previous)
                 }
                 input = tokens("input_tokens", input)
                 output = tokens("output_tokens", output)
@@ -157,14 +155,14 @@ internal object MessagesStream {
             // Validate the complete saved envelope (including unknown retained wire fields)
             // before confirming any tool; it must fit both history replay and the next POST.
             val saved = MessagesRequest.message("assistant", content).toString()
+            val confirmedUsage = ProviderUsage.messages(input, output, cached, creation)
             blocks.forEach { (index, block) ->
                 if (block.wire.getString("type") == "text") deliver(ModelEvent.TextFinal("$id:$index", block.text.toString()))
                 else deliver(ModelEvent.ToolReady(ToolInvocation(ToolCallId(block.wire.getString("id")),
                     block.wire.getString("name"), block.wire.getJSONObject("input").toString())))
             }
             // Anthropic input_tokens excludes both cache categories; expose total input and cache reads.
-            val totalInput = input?.let { it + (cached ?: 0L) + (creation ?: 0L) }
-            if (totalInput != null || output != null || cached != null) deliver(ModelEvent.Usage(totalInput, output, cached))
+            confirmedUsage?.let(::deliver)
             if (cancelled()) throw InterruptedException()
             return saved
         } catch (failure: JSONException) {

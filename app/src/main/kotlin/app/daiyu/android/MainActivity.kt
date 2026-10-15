@@ -35,6 +35,7 @@ class MainActivity:Activity() {
     private var controlTouchActive=false
     private var controlTouchGeneration=0L
     private var settingsDialog:AlertDialog?=null
+    private var modelCatalogDialog:AlertDialog?=null
     private var skillManagementDialog:SkillManagementDialog?=null
     private var backupDialog:AlertDialog?=null
     private var configurationRestoreDialog:AlertDialog?=null
@@ -278,6 +279,7 @@ class MainActivity:Activity() {
         window.decorView.removeCallbacks(refreshRateRequest)
         configurationRestorePreview?.let {controller.cancelConfigurationRestore(it)}
         configurationRestorePreview=null
+        modelCatalogDialog?.dismiss();modelCatalogDialog=null
         settingsDialog?.dismiss();backupDialog?.dismiss();configurationRestoreDialog?.dismiss()
         skillManagementDialog?.dismiss();skillManagementDialog=null
         controller.unobserve(listener);super.onDestroy()
@@ -594,6 +596,7 @@ class MainActivity:Activity() {
     }
     private fun modelSettings() {
         if(controller.active!=null) {toast("当前运行使用冻结配置，请结束后修改");return}
+        settingsDialog?.dismiss()
         val editingSettings=controller.settings.loadForEditing()
         val saved=editingSettings.settings
         val fields=LinearLayout(this).apply {orientation=LinearLayout.VERTICAL}
@@ -659,9 +662,51 @@ class MainActivity:Activity() {
         })
         fields.addView(customBody);fields.addView(speed);fields.addView(codex);fields.addView(replaceOptions)
         val dialog=AlertDialog.Builder(this).setTitle("模型设置").setView(ScrollView(this).apply {addView(fields)}).setPositiveButton("保存",null).setNegativeButton("取消",null).create()
+        var catalogGeneration=0L
+        var catalogCancelled=java.util.concurrent.atomic.AtomicBoolean(false)
+        val catalogStatus=TextView(this)
+        val catalogButton=Button(this).apply {text="获取模型目录（使用当前草稿）"}
+        fun catalogDraft()=saved.copy(endpoint=endpoint.text.toString().trim(),
+            model=model.text.toString(),apiKey=key.text.toString(),protocol=selectedProtocol,
+            responsesPath=path.text.toString().trim())
+        fun current(generation:Long,draft:app.daiyu.android.storage.ModelSettings)=
+            activityCallbacksAllowed && !isFinishing && !isDestroyed && settingsDialog===dialog &&
+                dialog.isShowing && !catalogCancelled.get() && generation==catalogGeneration && catalogDraft()==draft
+        val changed=object:TextWatcher {
+            override fun beforeTextChanged(s:CharSequence?,start:Int,count:Int,after:Int) {}
+            override fun onTextChanged(s:CharSequence?,start:Int,before:Int,count:Int) {
+                catalogCancelled.set(true);catalogGeneration++;modelCatalogDialog?.dismiss();modelCatalogDialog=null
+                catalogButton.isEnabled=true;catalogStatus.text=""
+            }
+            override fun afterTextChanged(s:Editable?) {}
+        }
+        listOf(endpoint,path,model,key).forEach {it.addTextChangedListener(changed)}
+        catalogButton.setOnClickListener {
+            catalogCancelled.set(true);catalogCancelled=java.util.concurrent.atomic.AtomicBoolean(false)
+            val requestCancelled=catalogCancelled
+            val draft=catalogDraft();val generation=++catalogGeneration
+            modelCatalogDialog?.dismiss();modelCatalogDialog=null
+            catalogButton.isEnabled=false;catalogStatus.text="正在获取模型目录…"
+            val accepted=controller.fetchModelCatalog(draft,{requestCancelled.get()}) {models ->
+                if(current(generation,draft)) {
+                    catalogButton.isEnabled=true
+                    catalogStatus.text=when {models==null->"获取失败；请检查地址、协议、密钥与网络";models.isEmpty()->"供应商返回空模型目录";else->"选择模型仅修改草稿，仍需点击保存"}
+                    if(!models.isNullOrEmpty()) {
+                        modelCatalogDialog=AlertDialog.Builder(this).setTitle("选择模型（不自动保存）")
+                            .setItems(models.map {it.displayName+if(it.displayName==it.id) "" else " (${it.id})"}.toTypedArray()) {_,index ->
+                                if(current(generation,draft)) model.setText(models[index].id)
+                            }.setNegativeButton("取消",null).show()
+                    }
+                }
+            }
+            if(!accepted) {catalogButton.isEnabled=true;catalogStatus.text="当前不可查询；请等待会话或数据操作结束"}
+        }
+        fields.addView(catalogButton);fields.addView(catalogStatus)
         key.importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         dialog.setOnShowListener {dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             try {
+                catalogCancelled.set(true);catalogGeneration++
+                modelCatalogDialog?.dismiss();modelCatalogDialog=null;catalogButton.isEnabled=true
                 requireActivityUsable();check(settingsDialog === dialog && dialog.isShowing)
                 check(controller.active == null && !controller.dataBusy)
                 require(selectedProtocol == saved.protocol || rebind.isChecked)
@@ -676,7 +721,12 @@ class MainActivity:Activity() {
             catch (_:Exception) {toast("设置未保存；检查协议、HTTPS地址、路径、模型与密钥；切换协议须重输密钥并勾选确认，高级策略须为合法JSON；不可用策略须明确授权替换")}
         }}
         settingsDialog=dialog
-        dialog.setOnDismissListener {if(settingsDialog===dialog) settingsDialog=null}
+        dialog.setOnDismissListener {
+            catalogCancelled.set(true);catalogGeneration++
+            if(settingsDialog===dialog) {
+                modelCatalogDialog?.dismiss();modelCatalogDialog=null;settingsDialog=null
+            }
+        }
         dialog.show()
     }
 }

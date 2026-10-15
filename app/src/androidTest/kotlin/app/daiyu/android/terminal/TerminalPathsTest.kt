@@ -7,6 +7,8 @@ import java.nio.file.Files
 @Suppress("DEPRECATION")
 class TerminalPathsTest : InstrumentationTestCase() {
     private lateinit var temporaryRoot: File
+    private val owners = mutableListOf<TerminalPaths>()
+    private fun paths(root: File, guest: String) = TerminalPaths(root, guest).also { owners += it }
 
     override fun setUp() {
         super.setUp()
@@ -15,14 +17,18 @@ class TerminalPathsTest : InstrumentationTestCase() {
     }
 
     override fun tearDown() {
-        deleteRecursively(temporaryRoot)
-        super.tearDown()
+        try {
+            owners.asReversed().forEach { it.close() }
+        } finally {
+            deleteRecursively(temporaryRoot)
+            super.tearDown()
+        }
     }
 
     fun testNormalizesHostRootAndResolvesAbsoluteGuestPath() {
         val root = File(temporaryRoot, "shared").apply { mkdirs() }
         val attachment = File(root, "notes.txt").apply { writeText("frozen") }
-        val paths = TerminalPaths(root, "/guest/shared")
+        val paths = paths(root, "/guest/shared")
 
         assertEquals(root.canonicalFile, paths.hostRoot)
         assertEquals("/guest/shared", paths.guestRoot)
@@ -34,12 +40,12 @@ class TerminalPathsTest : InstrumentationTestCase() {
     fun testRejectsInvalidRootsAndGuestTraversal() {
         val root = File(temporaryRoot, "shared").apply { mkdirs() }
         val regularFile = File(temporaryRoot, "not-a-directory").apply { writeText("x") }
-        assertThrows<IllegalArgumentException> { TerminalPaths(regularFile, "/guest") }
-        assertThrows<IllegalArgumentException> { TerminalPaths(root, "guest/shared") }
-        assertThrows<IllegalArgumentException> { TerminalPaths(root, "/guest/../shared") }
-        assertThrows<IllegalArgumentException> { TerminalPaths(root, "/guest/shared\u0000") }
+        assertThrows<IllegalArgumentException> { paths(regularFile, "/guest") }
+        assertThrows<IllegalArgumentException> { paths(root, "guest/shared") }
+        assertThrows<IllegalArgumentException> { paths(root, "/guest/../shared") }
+        assertThrows<IllegalArgumentException> { paths(root, "/guest/shared\u0000") }
 
-        val paths = TerminalPaths(root, "/guest/shared")
+        val paths = paths(root, "/guest/shared")
         assertThrows<IllegalArgumentException> { paths.resolveAttachment("guest/shared/file") }
         assertThrows<IllegalArgumentException> { paths.resolveAttachment("/guest/shared/../outside") }
         assertThrows<IllegalArgumentException> { paths.resolveAttachment("/guest/shared/file\u0000.txt") }
@@ -48,7 +54,7 @@ class TerminalPathsTest : InstrumentationTestCase() {
     fun testReportsPathChangedNotAuthorizedAfterRootReplacement() {
         val root = File(temporaryRoot, "shared").apply { mkdirs() }
         File(root, "notes.txt").writeText("before")
-        val paths = TerminalPaths(root, "/guest/shared")
+        val paths = paths(root, "/guest/shared")
         val resolved = paths.resolveAttachment("/guest/shared/notes.txt")
 
         val oldRoot = File(temporaryRoot, "old-shared")
@@ -63,11 +69,10 @@ class TerminalPathsTest : InstrumentationTestCase() {
     fun testReportsPathChangedNotAuthorizedAfterAttachmentReplacement() {
         val root = File(temporaryRoot, "shared").apply { mkdirs() }
         val file = File(root, "notes.txt").apply { writeText("before") }
-        val paths = TerminalPaths(root, "/guest/shared")
+        val paths = paths(root, "/guest/shared")
         val resolved = paths.resolveAttachment("/guest/shared/notes.txt")
 
-        // Keep the original inode alive so replacement cannot reuse its identity.
-        assertTrue(file.renameTo(File(root, "old-notes.txt")))
+        assertTrue(file.delete())
         file.writeText("replacement")
         val result = paths.validate(resolved)
         assertFalse(result.authorized)
@@ -86,7 +91,7 @@ class TerminalPathsTest : InstrumentationTestCase() {
         } catch (_: SecurityException) {
             return
         }
-        val paths = TerminalPaths(root, "/guest/shared")
+        val paths = paths(root, "/guest/shared")
         assertThrows<SecurityException> { paths.resolveAttachment("/guest/shared/link.txt") }
         val original = File(root, "notes.txt").apply { writeText("authorized") }
         val attachment = paths.resolveAttachment("/guest/shared/notes.txt")
@@ -99,7 +104,7 @@ class TerminalPathsTest : InstrumentationTestCase() {
     fun testOpenedLeafNeverReadsReplacementPath() {
         val root = File(temporaryRoot, "shared").apply { mkdirs() }
         val file = File(root, "notes.txt").apply { writeText("authorized") }
-        val paths = TerminalPaths(root, "/guest")
+        val paths = paths(root, "/guest")
         val attachment = paths.resolveAttachment("/guest/notes.txt")
         paths.afterDescriptorOpened = { index ->
             if (index == 0) {
@@ -123,7 +128,7 @@ class TerminalPathsTest : InstrumentationTestCase() {
         File(child, "notes.txt").writeText("authorized")
         val outside = File(temporaryRoot, "outside").apply { mkdirs() }
         File(outside, "notes.txt").writeText("outside")
-        val paths = TerminalPaths(root, "/guest")
+        val paths = paths(root, "/guest")
         val attachment = paths.resolveAttachment("/guest/child/notes.txt")
         paths.afterDescriptorOpened = { index ->
             if (index == 0) {
@@ -139,13 +144,204 @@ class TerminalPathsTest : InstrumentationTestCase() {
     fun testHeldDescriptorSurvivesGcAndPathReplacement() {
         val root = File(temporaryRoot, "shared").apply { mkdirs() }
         val file = File(root, "notes.txt").apply { writeText("authorized") }
-        val attachment = TerminalPaths(root, "/guest").resolveAttachment("/guest/notes.txt")
+        val attachment = paths(root, "/guest").resolveAttachment("/guest/notes.txt")
         attachment.openRead().use { input ->
             assertTrue(file.renameTo(File(root, "old.txt")))
             file.writeText("replacement")
             System.gc()
             repeat(50) { file.inputStream().use { assertTrue(it.read() >= 0) } }
             assertEquals("authorized", input.bufferedReader().readText())
+        }
+    }
+
+    fun testLeafIdentityIsPinnedAcrossDeleteAndRecreate() {
+        val root = File(temporaryRoot, "shared").apply { mkdirs() }
+        val file = File(root, "notes.txt").apply { writeText("authorized") }
+        val paths = paths(root, "/guest")
+        val attachment = paths.resolveAttachment("/guest/notes.txt")
+        val original = Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java).fileKey()
+        val pin = attachment.pins.single()
+        assertCloseOnExec(pin.fileDescriptor)
+        assertTrue(file.delete())
+        assertEquals(original, Files.readAttributes(java.nio.file.Paths.get("/proc/self/fd/${pin.fd}"),
+            java.nio.file.attribute.BasicFileAttributes::class.java).fileKey())
+        file.writeText("replacement")
+        assertFalse(original == Files.readAttributes(file.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java).fileKey())
+        assertFalse(attachment.revalidate().authorized)
+        assertThrows<SecurityException> { attachment.openRead().close() }
+    }
+
+    fun testRootIdentityIsPinnedBeforeAnyAttachmentResolution() {
+        val root = File(temporaryRoot, "shared").apply { mkdirs() }
+        val original = Files.readAttributes(root.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java).fileKey()
+        val paths = paths(root, "/guest")
+        assertEquals(1, retainedDescriptors())
+        val rootPin = TerminalPaths::class.java.getDeclaredField("rootDescriptor")
+            .apply { isAccessible = true }.get(paths) as android.os.ParcelFileDescriptor
+        assertCloseOnExec(rootPin.fileDescriptor)
+        assertTrue(root.delete())
+        assertTrue(root.mkdirs())
+        File(root, "notes.txt").writeText("replacement")
+        assertFalse(original == Files.readAttributes(root.toPath(), java.nio.file.attribute.BasicFileAttributes::class.java).fileKey())
+        assertThrows<SecurityException> { paths.resolveAttachment("/guest/notes.txt") }
+        paths.close()
+        assertEquals(0, retainedDescriptors())
+    }
+
+    fun testParentAndLeafIdentityPinsRemainUntilAttachmentCloses() {
+        val root = File(temporaryRoot, "shared").apply { mkdirs() }
+        val child = File(root, "child").apply { mkdirs() }
+        val file = File(child, "notes.txt").apply { writeText("authorized") }
+        val paths = paths(root, "/guest")
+        val attachment = paths.resolveAttachment("/guest/child/notes.txt")
+        assertEquals(3, retainedDescriptors())
+        val pinned = attachment.pins.map { it.fd }
+        assertTrue(file.delete())
+        assertTrue(child.delete())
+        assertTrue(child.mkdirs())
+        file.writeText("replacement")
+        pinned.forEach { assertTrue(File("/proc/self/fd/$it").exists()) }
+        assertFalse(attachment.revalidate().authorized)
+        assertThrows<SecurityException> { attachment.openRead().close() }
+        attachment.close()
+        attachment.close()
+        assertEquals(1, retainedDescriptors())
+        paths.close()
+        assertEquals(0, retainedDescriptors())
+    }
+
+    fun testAttachmentCloseRejectsNewReadsButDoesNotRevokeAdmittedStream() {
+        val root = File(temporaryRoot, "shared").apply { mkdirs() }
+        File(root, "notes.txt").writeText("authorized")
+        val paths = paths(root, "/guest")
+        val attachment = paths.resolveAttachment("/guest/notes.txt")
+        attachment.openRead().use { input ->
+            attachment.close()
+            attachment.close()
+            assertFalse(attachment.revalidate().authorized)
+            assertThrows<SecurityException> { attachment.openRead().close() }
+            paths.close()
+            assertEquals(1, retainedDescriptors())
+            assertEquals("authorized", input.bufferedReader().readText())
+        }
+        assertEquals(0, retainedDescriptors())
+    }
+
+    fun testOwnerCloseReleasesUnclosedAttachmentsAndRejectsNewWork() {
+        val root = File(temporaryRoot, "shared").apply { mkdirs() }
+        File(root, "notes.txt").writeText("authorized")
+        val paths = paths(root, "/guest")
+        val first = paths.resolveAttachment("/guest/notes.txt")
+        val second = paths.resolveAttachment("/guest/notes.txt")
+        assertEquals(3, retainedDescriptors())
+        paths.close()
+        paths.close()
+        first.close()
+        second.close()
+        assertEquals(0, retainedDescriptors())
+        assertFalse(first.revalidate().authorized)
+        assertFalse(paths.validate(second).authorized)
+        assertThrows<SecurityException> { first.openRead().close() }
+        assertThrows<SecurityException> { paths.resolveAttachment("/guest/notes.txt") }
+    }
+
+    fun testFailedResolutionReleasesAllAcquiredChildPins() {
+        val root = File(temporaryRoot, "shared").apply { mkdirs() }
+        val child = File(root, "child").apply { mkdirs() }
+        File(child, "notes.txt").writeText("authorized")
+        val paths = paths(root, "/guest")
+        paths.afterDescriptorOpened = { index -> if (index == 1) throw java.io.IOException("pin failure") }
+        assertThrows<SecurityException> { paths.resolveAttachment("/guest/child/notes.txt") }
+        assertEquals(1, retainedDescriptors())
+        paths.afterDescriptorOpened = null
+        paths.resolveAttachment("/guest/child/notes.txt").use { attachment ->
+            attachment.openRead().use { assertEquals("authorized", it.bufferedReader().readText()) }
+        }
+        assertEquals(1, retainedDescriptors())
+        paths.close()
+        assertEquals(0, retainedDescriptors())
+    }
+
+    fun testPinningRaceDoesNotPublishReplacementSnapshot() {
+        val root = File(temporaryRoot, "shared").apply { mkdirs() }
+        val child = File(root, "child").apply { mkdirs() }
+        File(child, "notes.txt").writeText("authorized")
+        val paths = paths(root, "/guest")
+        paths.afterDescriptorOpened = { index ->
+            if (index == 0) {
+                assertTrue(child.renameTo(File(root, "old-child")))
+                assertTrue(child.mkdirs())
+                File(child, "notes.txt").writeText("replacement")
+            }
+        }
+        assertThrows<SecurityException> { paths.resolveAttachment("/guest/child/notes.txt") }
+        assertEquals(1, retainedDescriptors())
+        paths.close()
+        assertEquals(0, retainedDescriptors())
+    }
+
+    fun testCrossOwnerAttachmentCannotValidateOrOpen() {
+        val root = File(temporaryRoot, "shared").apply { mkdirs() }
+        File(root, "notes.txt").writeText("authorized")
+        val first = paths(root, "/guest")
+        val second = paths(root, "/guest")
+        val attachment = first.resolveAttachment("/guest/notes.txt")
+        assertFalse(second.validate(attachment).authorized)
+        assertThrows<SecurityException> { second.openRead(attachment).close() }
+        second.close()
+        attachment.openRead().use { assertEquals("authorized", it.bufferedReader().readText()) }
+        first.close()
+        assertEquals(0, retainedDescriptors())
+    }
+
+    fun testIndependentReadsAndInPlaceChangesPreserveObjectIdentity() {
+        val root = File(temporaryRoot, "shared").apply { mkdirs() }
+        val file = File(root, "notes.txt").apply { writeText("original") }
+        val paths = paths(root, "/guest")
+        val first = paths.resolveAttachment("/guest/notes.txt")
+        val second = paths.resolveAttachment("/guest/notes.txt")
+        first.close()
+        assertTrue(second.revalidate().authorized)
+        second.openRead().use { one ->
+            second.openRead().use { two ->
+                assertEquals('o'.code, one.read())
+                assertEquals('r'.code, one.read())
+                assertEquals('o'.code, two.read())
+            }
+        }
+        file.writeText("same inode, different size and time")
+        assertTrue(second.revalidate().authorized)
+        second.openRead().use { assertEquals(file.readText(), it.bufferedReader().readText()) }
+    }
+
+    fun testFailedReadAdmissionReleasesTemporaryDescriptors() {
+        val root = File(temporaryRoot, "shared").apply { mkdirs() }
+        val child = File(root, "child").apply { mkdirs() }
+        File(child, "notes.txt").writeText("authorized")
+        val paths = paths(root, "/guest")
+        val attachment = paths.resolveAttachment("/guest/child/notes.txt")
+        val retained = retainedDescriptors()
+        for (failAt in -1..1) {
+            paths.afterDescriptorOpened = { index -> if (index == failAt) throw java.io.IOException("read failure") }
+            assertThrows<SecurityException> { attachment.openRead().close() }
+            assertEquals(retained, retainedDescriptors())
+        }
+        paths.afterDescriptorOpened = null
+        attachment.openRead().use { assertEquals("authorized", it.bufferedReader().readText()) }
+    }
+
+    private fun assertCloseOnExec(descriptor: java.io.FileDescriptor) {
+        val flags = android.system.Os::class.java.getMethod("fcntlInt", java.io.FileDescriptor::class.java,
+            Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+            .invoke(null, descriptor, android.system.OsConstants.F_GETFD, 0) as Int
+        assertTrue(flags and android.system.OsConstants.FD_CLOEXEC != 0)
+    }
+
+    private fun retainedDescriptors(): Int {
+        val prefix = temporaryRoot.canonicalPath + "/"
+        return File("/proc/self/fd").listFiles().orEmpty().count { fd ->
+            try { android.system.Os.readlink(fd.path).startsWith(prefix) }
+            catch (_: android.system.ErrnoException) { false }
         }
     }
 

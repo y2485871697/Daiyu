@@ -3,7 +3,6 @@ package app.daiyu.android.browser.openminis
 import app.daiyu.android.browser.bridge.BrowserCommand
 import com.openminis.app.browser.BrowserAction
 import com.openminis.app.browser.ScrollDirection
-import com.openminis.app.browser.UserAgentProfile
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -32,11 +31,21 @@ class OpenMinisCommandMapperTest {
         assertEquals(ScrollDirection.UP, scroll.direction)
         assertEquals(120, scroll.amount)
         assertEquals("return 1", OpenMinisCommandMapper.map(command("execute_js", "script" to "return 1")).script)
-        assertEquals(UserAgentProfile.DESKTOP_CHROME,
-            OpenMinisCommandMapper.map(command("set_user_agent", "user_agent" to "desktop_chrome")).userAgent)
         assertEquals(100, OpenMinisCommandMapper.map(command("get_backbone", "max_depth" to 100)).maxDepth)
         assertEquals(BrowserAction.GET_PAGE_INFO, OpenMinisCommandMapper.map(command("get_page_info")).action)
         assertEquals("a", OpenMinisCommandMapper.map(command("find_elements", "selector" to "a")).selector)
+    }
+
+    @Test fun tokenlessUaChangesAreRejectedByMapperAndResultConversion() {
+        for (profile in listOf("desktop_chrome", "mobile_chrome")) {
+            val command = command("set_user_agent", "user_agent" to profile)
+            try { OpenMinisCommandMapper.map(command); fail("UA must not reach fixed manager") }
+            catch (failure: IllegalStateException) { assertEquals("BROWSER_OPENMINIS_USER_AGENT_UNSUPPORTED", failure.message) }
+            try {
+                OpenMinisCommandMapper.result(command, com.openminis.app.browser.BrowserActionResult("Switched"))
+                fail("UA success must not be published")
+            } catch (failure: IllegalStateException) { assertEquals("BROWSER_OPENMINIS_USER_AGENT_UNSUPPORTED", failure.message) }
+        }
     }
 
     @Test fun bodyPaginationReadsBeyondUpstreamTenThousandCharacterCutoff() {

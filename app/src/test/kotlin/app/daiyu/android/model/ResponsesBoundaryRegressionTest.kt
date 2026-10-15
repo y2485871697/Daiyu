@@ -89,6 +89,25 @@ class ResponsesBoundaryRegressionTest {
         try {session.next(emptyList()) {};fail("failed sink reposted")} catch(_:IllegalStateException) {}
         assertEquals(1,connections)
     }
+    @Test fun usageDeliveryFailureSealsSessionWithoutReposting() {
+        var connections=0
+        val failure=org.json.JSONException("usage sink")
+        val stream="data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":3}}}\n\n"
+        val session=ResponsesModel(config) {connections++;Connection(stream=stream)}.open(emptyList())
+        try {session.next(emptyList()) {if(it is ModelEvent.Usage) throw failure};fail("sink failed")}
+        catch(actual:Exception) {assertSame(failure,actual)}
+        try {session.next(emptyList()) {};fail("failed session reposted")} catch(_:IllegalStateException) {}
+        assertEquals(1,connections)
+    }
+    @Test fun cancellingInsideUsageKeepsObservationButPreventsProtocolOutput() {
+        val stream="data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":3}}}\n\n"
+        val session=ResponsesModel(config) {Connection(stream=stream)}.open(emptyList())
+        val events=mutableListOf<ModelEvent>()
+        try {session.next(emptyList()) {events.add(it);if(it is ModelEvent.Usage) session.cancel()};fail("cancelled")}
+        catch(_:InterruptedException) {}
+        assertEquals(1,events.filterIsInstance<ModelEvent.Usage>().size)
+        assertTrue(events.none {it is ModelEvent.ProtocolOutput})
+    }
     @Test fun nestedOptionalSchemaIsNotReplacedOrForcedStrict() {
         val connection=Connection()
         val schema="""{"type":"object","properties":{"query":{"type":"string","minLength":2,"maxLength":8,"enum":["ab","cd"]},"options":{"type":"object","properties":{"tags":{"type":"array","items":{"type":"string"}}},"additionalProperties":false}},"required":["query"],"additionalProperties":false}"""

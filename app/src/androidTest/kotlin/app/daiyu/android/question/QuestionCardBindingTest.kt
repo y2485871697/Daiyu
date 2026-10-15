@@ -90,6 +90,38 @@ class QuestionCardBindingTest : InstrumentationTestCase() {
         assertTrue(cleanup)
         registry.close()
     }
+    fun testDetachImmediatelySuppressesStaleAttachBeforeWriterRuns() {
+        val store = Store(); val registry = registry(store); val queue = Queue()
+        val binding = QuestionCardBinding(registry, owner, queue) { true }
+        var reads = 0
+        val detached = CountDownLatch(1)
+        onMain {
+            binding.attach({ reads++ }, { fail("stale attachment must not publish") })
+            binding.detach { detached.countDown() }
+        }
+        assertEquals(2, queue.work.size)
+        queue.work.remove().run()
+        assertEquals("stale attach must not enqueue a database refresh", 1, queue.work.size)
+        queue.drain(); await(detached); instrumentation.waitForIdleSync()
+        assertEquals(0, reads)
+        assertFalse(store.get(owner.storageKey)!!.interrupted)
+        registry.close()
+    }
+
+    fun testDetachedCallbackCannotEnqueueMoreReadsBeforeQueuedDetachRuns() {
+        val registry = registry(Store()); val queue = Queue()
+        val binding = QuestionCardBinding(registry, owner, queue) { true }
+        onMain { binding.attach({}, { fail("unexpected unavailable") }) }
+        queue.drain(); instrumentation.waitForIdleSync()
+        val detached = CountDownLatch(1)
+        onMain { binding.detach { detached.countDown() } }
+        assertEquals(1, queue.work.size)
+        registry.submit(owner, QuestionAnswer.Selected("one"))
+        assertEquals("old listener must not enqueue work after detach fence", 1, queue.work.size)
+        queue.drain(); await(detached)
+        registry.close()
+    }
+
     fun testRejectedDetachReportsFailureWithoutThrowingOnMain() {
         val registry = registry(Store())
         val binding = QuestionCardBinding(registry, owner, Executor { throw RejectedExecutionException() }) { true }

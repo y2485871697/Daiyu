@@ -16,9 +16,10 @@ internal class CatalogModelBridge(
     session: SessionCapabilities,
     ledger: ToolLedger,
     private val conversationId: ConversationId,
-    private val runId: RunId
+    private val runId: RunId,
+    private val task: TaskAuthorization
 ) : CatalogTool, ReceiptBatchToolExecutor {
-    private val task = TaskAuthorization(session.sessionId, runId.value)
+    init { require(task.sessionId == session.sessionId && task.taskId == runId.value) { "tool_run_owner_mismatch" } }
     private val dispatcher = ToolDispatcher(catalog, session, ledger)
     override val definitions: List<ModelDefinition> = Collections.unmodifiableList(
         catalog.advertisements(session).map {

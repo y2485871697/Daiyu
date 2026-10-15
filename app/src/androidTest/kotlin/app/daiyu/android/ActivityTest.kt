@@ -45,18 +45,22 @@ class ActivityTest:InstrumentationTestCase() {
         instrumentation.runOnMainSync {try {work()} catch (problem:Throwable) {failure=problem}}
         failure?.let {throw it}
     }
-    private fun awaitScrollLayout(activity:MainActivity,scroll:android.widget.ScrollView) {
+    private fun awaitScrollLayout(activity:MainActivity,scroll:android.widget.ScrollView,phase:String="scroll") {
         val pending=MainActivity::class.java.getDeclaredField("pendingScrollLayout").apply {isAccessible=true}
         val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
         var ready=false
+        var lastState="not sampled"
         while(!ready && System.nanoTime()<deadline) {
             awaitFrames()
             onMain {
                 ready=scroll.height>0 && pending.get(activity)==null && !scroll.isLayoutRequested &&
                     !scroll.getChildAt(0).isLayoutRequested && !activity.window.decorView.isLayoutRequested
+                lastState="height=${scroll.height}, pending=${pending.get(activity)!=null}, " +
+                    "scrollLayout=${scroll.isLayoutRequested}, childLayout=${scroll.getChildAt(0).isLayoutRequested}, " +
+                    "decorLayout=${activity.window.decorView.isLayoutRequested}"
             }
         }
-        assertTrue("scroll layout and pending anchor restoration must finish",ready)
+        assertTrue("scroll layout and pending anchor restoration must finish: $phase, $lastState",ready)
     }
     private fun start()=instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
     fun testStreamingFollowStopsOnTouchAndEarlierHistory() {
@@ -105,18 +109,18 @@ class ActivityTest:InstrumentationTestCase() {
                 val cancel=android.view.MotionEvent.obtain(now,now,android.view.MotionEvent.ACTION_CANCEL,10f,10f,0)
                 scroll.dispatchTouchEvent(cancel);cancel.recycle()
             }
-            instrumentation.waitForIdleSync()
+            awaitScrollLayout(current,scroll,"after touch and 40-line update")
             onMain {
                 assertEquals(0,scroll.scrollY)
                 button(current,"回到底部").performClick()
             }
-            instrumentation.waitForIdleSync()
+            awaitScrollLayout(current,scroll,"after return to bottom")
             onMain {
                 assertTrue(following.getBoolean(current));assertTrue(scroll.scrollY>0)
                 update.invoke(current,tail.copy(blocks=listOf(MessageBlock.Text("a","更多内容\n".repeat(80)))))
             }
             instrumentation.waitForIdleSync()
-            awaitScrollLayout(current,scroll)
+            awaitScrollLayout(current,scroll,"after 80-line update")
             var anchor=MessageId("not-selected")
             var anchorOffset=0
             val rowField=MainActivity::class.java.getDeclaredField("rows").apply {isAccessible=true}
@@ -131,7 +135,7 @@ class ActivityTest:InstrumentationTestCase() {
                 assertTrue(views(current.window.decorView).filterIsInstance<TextView>().any {it.text.toString().contains("历史用户 45")})
 
             }
-            awaitScrollLayout(current,scroll)
+            awaitScrollLayout(current,scroll,"after prepend")
             onMain {
                 @Suppress("UNCHECKED_CAST") val rows=rowField.get(current) as Map<MessageId,android.widget.LinearLayout>
                 assertEquals("prepend must preserve visible message offset",anchorOffset,rows.getValue(anchor).top-scroll.scrollY)

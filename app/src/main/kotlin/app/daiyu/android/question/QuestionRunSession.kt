@@ -39,7 +39,7 @@ class QuestionRunSession(
 
     private class Work(val identity: QuestionIdentity, val onResult: (QuestionRunResult) -> Unit,
         val offer: BarrierOffer?) {
-        val delivered = AtomicBoolean()
+        val resultClaimed = AtomicBoolean()
         val waiterDone = CompletableFuture<Unit>()
     }
     private val main = Handler(Looper.getMainLooper())
@@ -108,7 +108,7 @@ class QuestionRunSession(
                     if (!live(work)) { work.waiterDone.complete(Unit); deliver(work, QuestionRunResult.Stopped(identity)); return@execute }
                     val record = registry.barrier.register(identity.storageKey, question, listOf(ASK_USER_TOOL_NAME))
                     main.post {
-                        if (!work.delivered.get()) {
+                        if (!work.resultClaimed.get()) {
                             if (!live(work)) {
                                 fenceAndCleanup(work)
                                 deliver(work, QuestionRunResult.Stopped(identity))
@@ -146,8 +146,11 @@ class QuestionRunSession(
     }
 
     private fun deliver(work: Work, result: QuestionRunResult) {
+        if (!work.resultClaimed.compareAndSet(false, true)) return
+        postClaimedResult(work, result)
+    }
+    private fun postClaimedResult(work: Work, result: QuestionRunResult) {
         main.post {
-            if (!work.delivered.compareAndSet(false, true)) return@post
             synchronized(monitor) { if (active === work) active = null }
             val value = if (result is QuestionRunResult.Answered && !live(work))
                 QuestionRunResult.Stopped(work.identity) else result
@@ -165,8 +168,10 @@ class QuestionRunSession(
         }
     }
     private fun abandon(work: Work) {
+        // Claim before fencing so a queued pending callback cannot replace this failure with Stopped.
+        val claimed = work.resultClaimed.compareAndSet(false, true)
         fenceAndCleanup(work)
-        deliver(work, QuestionRunResult.Unconfirmed(work.identity))
+        if (claimed) postClaimedResult(work, QuestionRunResult.Unconfirmed(work.identity))
     }
 
     /** Fences begin/answers immediately. Success means durable interruption AND waiter exit.

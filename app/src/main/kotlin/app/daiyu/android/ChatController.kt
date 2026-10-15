@@ -14,6 +14,8 @@ import android.os.Handler
 import android.os.Looper
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.RunnerOptions
+import app.daiyu.android.skills.SkillRunSession
+import app.daiyu.android.skills.SkillToolRegistry
 import app.daiyu.android.model.ModelFactory
 import app.daiyu.android.storage.*
 import java.util.UUID
@@ -43,6 +45,7 @@ class ChatController internal constructor(private val application:Application,
     @Volatile var active:Message?=null;private set
     @Volatile var problem:String?=null;private set
     @Volatile private var runner:ChatRunner?=null
+    @Volatile private var runTools:RunCatalogTools?=null
     @Volatile var dataBusy=false;private set
     var dataRevision=0L;private set
     var dataNotice:String?=null;private set
@@ -98,35 +101,40 @@ class ChatController internal constructor(private val application:Application,
         val preparedModel=try {model(config)} catch (_:Exception) {
             problem="模型初始化失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
-        val owned = try {
+        val prepared = try {
             val contextTools = ScopedContextTools.create(
                 ContextRegistry(contextService), ContextRegistryScope(conversationId),
                 run, preparedContext?.archiveId)
-            val catalog = AndroidToolRegistry.create(application, contextTools).snapshot()
+            val registry = AndroidToolRegistry.create(application, contextTools)
             val capabilities = SessionCapabilities(run.value,
-                AndroidToolRegistry.capabilitiesFor(config.enabledTools()) + contextTools.map { it.definition.capability })
-            val tools = CatalogModelBridge(catalog, capabilities, toolLedger, conversationId, run)
-            ChatRunner(preparedModel, database, tools,
+                AndroidToolRegistry.capabilitiesFor(config.enabledTools()) + contextTools.map { it.definition.capability } +
+                    setOf(SkillRunSession.READ, SkillRunSession.RESOURCE))
+            val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run) { grants, authorization ->
+                SkillToolRegistry(application).captureForRun(grants, authorization)
+            }
+            val owned = ChatRunner(preparedModel, database, tools,
                 RunnerOptions(runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools)) {
                 synchronized(this) {
                     if(!closed && active?.id==assistant.id && active?.runId==run && active?.conversationId==conversationId &&
                         it.id==assistant.id && it.runId==run && it.conversationId==conversationId) {active=it;notifyChanged()}
                 }
             }
+            owned to tools
         } catch (_: Exception) {
             problem="运行准备失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
-        if (closed) return null
+        val (owned, tools) = prepared
+        if (closed) { tools.close(); return null }
         val saved=try {
             database.send(user,assistant,conversation==null)
-        } catch (_:Exception) {problem="发送内容保存失败；草稿保留，未发起网络请求";notifyChanged();return null}
+        } catch (_:Exception) {tools.close();problem="发送内容保存失败；草稿保留，未发起网络请求";notifyChanged();return null}
         problem=null;active=assistant
-        runner=owned
+        runner=owned;runTools=tools
         executor.execute {
-            val result=owned.run(assistant,prior+user)
+            val result=try {owned.run(assistant,prior+user)} finally {tools.close()}
             synchronized(this) {
                 if(!closed && runner===owned && active?.id==assistant.id && active?.runId==run && active?.conversationId==conversationId) {
-                    runner=null
+                    runner=null;runTools=null
                     if (result.error?.startsWith("保存失败")==true) { active=result;problem=result.error }
                     else active=null
                     notifyChanged()
@@ -240,17 +248,20 @@ class ChatController internal constructor(private val application:Application,
             }
         }} catch(failure:java.util.concurrent.RejectedExecutionException) {dataBusy=false;notifyChanged();throw failure}
     }
-    fun stop() {val owned=synchronized(this) {runner};owned?.stop()}
+    fun stop() {
+        val (owned, tools)=synchronized(this) {runner to runTools}
+        owned?.stop();tools?.close()
+    }
     internal fun close() {
         val owned=synchronized(this) {
             if(closed) null else {
                 closed=true;ready=false;dataBusy=false;active=null
                 configurationRestorePreview=null;dataNotice=null;listeners.clear()
-                runner.also {runner=null}
+                (runner to runTools).also {runner=null;runTools=null}
             }
         }
         handler.removeCallbacksAndMessages(null)
-        owned?.stop()
+        owned?.first?.stop();owned?.second?.close()
         executor.shutdown()
         // Never close storage while an accepted run/data task can still be using it.
         check(executor.awaitTermination(10,java.util.concurrent.TimeUnit.SECONDS))

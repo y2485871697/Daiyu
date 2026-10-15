@@ -274,4 +274,86 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         assertEquals(outputs.map {it.output},f.db.messages(c.id).last().second.blocks.filterIsInstance<MessageBlock.Tool>().map {it.result})
     }
 
+    private fun installSkill(f:Fixture, body:String="old-body", revision:String?=null):app.daiyu.android.skills.InstalledSkill =
+        app.daiyu.android.skills.SkillStore(f.app).install(listOf(app.daiyu.android.skills.SkillBundle(mapOf(
+            "SKILL.md" to "---\nname: demo\ndescription: Demo\n---\n$body".toByteArray(),
+            "references/guide.md" to "guide".toByteArray()))),
+            if(revision==null) emptyMap() else mapOf("demo" to revision)).single()
+    private fun skillArguments(revision:String)=org.json.JSONObject().put("id","user:demo").put("revision",revision)
+
+    fun testSkillsActualCatalogFreezesIndexAndBodyButRejectsChangedResource() {
+        val probe=CatalogProbe();val f=fresh {probe};val old=installSkill(f)
+        val c=f.db.create();var changed=false
+        probe.batches=listOf(listOf(call("skill-list","skills_list",org.json.JSONObject()),
+            call("skill-body","skills_read",skillArguments(old.revision)),
+            call("skill-resource","skills_read_resource",skillArguments(old.revision).put("path","references/guide.md"))))
+        probe.beforeReturn={
+            assertFalse(android.os.Looper.myLooper()==android.os.Looper.getMainLooper())
+            if(!changed) {
+                changed=true
+                app.daiyu.android.skills.SkillToolRegistry(f.app).enabled=false
+                installSkill(f,"new-body",old.revision)
+            }
+        }
+        finish(f,c)
+        assertEquals(setOf("skills_list","skills_read","skills_read_resource"),probe.definitions.filter {it.name.startsWith("skills_")}.map {it.name}.toSet())
+        assertTrue(probe.definitions.none {it.sideEffect})
+        assertTrue(probe.definitions.single {it.name=="skills_list"}.description.contains(old.revision))
+        val outputs=probe.returned.single();assertEquals(3,outputs.size)
+        val index=org.json.JSONObject(outputs[0].output);assertTrue(index.getBoolean("ok"))
+        assertEquals(old.revision,index.getJSONArray("skills").getJSONObject(0).getString("revision"))
+        val body=org.json.JSONObject(outputs[1].output);assertTrue(body.getBoolean("ok"));assertFalse(body.getBoolean("executable"))
+        assertTrue(body.getString("content").endsWith("old-body"));assertFalse(body.getString("content").contains("new-body"))
+        val resource=org.json.JSONObject(outputs[2].output);assertFalse(resource.getBoolean("ok"));assertEquals("skill_conflict",resource.getString("error"))
+        val entries=ledger(f);assertEquals(3,entries.size);assertEquals(1,entries.count {it.isError})
+        val reply=f.db.messages(c.id).last().second
+        assertTrue(entries.all {it.sessionId==reply.runId.value && it.taskId==reply.runId.value})
+        probe.batches=emptyList();probe.returned.clear();probe.beforeReturn={}
+        finish(f,c)
+        assertTrue(probe.definitions.none {it.name.startsWith("skills_")})
+        assertEquals(3,ledger(f).size)
+    }
+    fun testSkillsInvalidWholeBatchDoesNotReserveAndInstallIsNotReachable() {
+        val probe=CatalogProbe();val f=fresh {probe};val old=installSkill(f);val c=f.db.create()
+        probe.batches=listOf(listOf(call("valid-skill","skills_read",skillArguments(old.revision)),
+            call("bad-skill","skills_read_resource",skillArguments(old.revision).put("path","../secret"))))
+        finish(f,c)
+        probe.returned.single().forEach {output ->
+            val result=org.json.JSONObject(output.output)
+            assertFalse(result.getBoolean("ok"));assertFalse(result.getBoolean("executed"))
+            assertEquals("preparation_failed",result.getString("error"))
+        }
+        assertTrue(ledger(f).isEmpty())
+        probe.returned.clear();probe.batches=listOf(listOf(call("install","skills_install_from_github",org.json.JSONObject())))
+        finish(f,c)
+        assertEquals("unknown_tool",org.json.JSONObject(probe.returned.single().single().output).getString("error"))
+        assertTrue(ledger(f).isEmpty())
+        assertEquals(old.revision,app.daiyu.android.skills.SkillStore(f.app).list().single().revision)
+    }
+    fun testSkillsCaptureFailurePersistsFailedWithoutOpeningModelAndCanStartNextRun() {
+        val opens=AtomicInteger();val f=fresh {ModelPort {opens.incrementAndGet();session("next-run")}}
+        val broken=File(f.app.filesDir,"agent-builtin-skills-v1");broken.writeText("not a directory")
+        val c=f.db.create()
+        main {assertNotNull(f.controller.send(c,"accepted before worker capture"))}
+        awaitState(f) {f.controller.active==null}
+        assertEquals(0,opens.get());assertEquals(RunStatus.FAILED,f.db.messages(c.id).last().second.status)
+        assertTrue(ledger(f).isEmpty());assertTrue(broken.delete())
+        finish(f,c);assertEquals(1,opens.get())
+    }
+    fun testStopBeforeSkillBatchExecutionPreventsReadAndLedgerReservation() {
+        val probe=CatalogProbe();val f=fresh {probe};installSkill(f);val c=f.db.create()
+        val entered=CountDownLatch(1);val release=CountDownLatch(1)
+        probe.batches=listOf(listOf(call("stopped-skill","skills_list",org.json.JSONObject())))
+        probe.beforeReturn={entered.countDown();check(release.await(10,TimeUnit.SECONDS))}
+        try {
+            main {assertNotNull(f.controller.send(c,"stop before read"))}
+            assertTrue(entered.await(5,TimeUnit.SECONDS))
+            main {f.controller.stop()}
+            assertTrue(ledger(f).isEmpty())
+        } finally {release.countDown()}
+        awaitState(f) {f.controller.active==null}
+        assertEquals(RunStatus.STOPPED,f.db.messages(c.id).last().second.status)
+        assertTrue(ledger(f).isEmpty());assertTrue(probe.returned.isEmpty())
+    }
+
 }

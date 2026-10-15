@@ -1,10 +1,11 @@
 package app.daiyu.android.domain.runtime
 
 import app.daiyu.android.domain.*
+import app.daiyu.android.domain.tools.ToolDispatchResult
 
 /** Runtime status is separate from Message.status: legacy stores can keep RUNNING until terminal. */
 enum class ExecutionPhase { IDLE, STREAMING, BOUNDARY, PAUSED, TOOL_EXECUTING, RECONNECTING, TERMINAL }
-enum class ToolDisposition { READY, IN_FLIGHT, SUCCEEDED, UNKNOWN }
+enum class ToolDisposition { READY, IN_FLIGHT, SUCCEEDED, FAILED, NOT_EXECUTED, UNKNOWN }
 data class ToolRecord(val invocation: ToolInvocation, val disposition: ToolDisposition, val result: String? = null)
 
 /** Immutable, platform-serializable checkpoint. No credentials or transport objects belong here. */
@@ -50,6 +51,11 @@ fun interface BatchToolExecutor {
     fun execute(message: Message, invocations: List<ToolInvocation>): List<ToolOutput>
 }
 
+/** Central dispatcher receipts retain confirmed errors, rejection and uncertainty per call. */
+fun interface ReceiptBatchToolExecutor {
+    fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): List<ToolDispatchResult>
+}
+
 /** Atomic execution claim, keyed by conversation/run/call AND canonical equivalent operation.
  * Implementations must block UNKNOWN/IN_FLIGHT even for another call ID, JSON key order or route
  * (GUI/HTTP/local). Only a separate read-only verification may resolve an unknown claim.
@@ -81,9 +87,13 @@ class RunnerOptions(
     val validateBatch: (List<ToolInvocation>) -> Unit = {},
     val onUsage: (ModelEvent.Usage) -> Unit = {},
     val batchExecutor: BatchToolExecutor? = null,
-    val maxRounds: Int = 12
+    val maxRounds: Int = 12,
+    val receiptBatchExecutor: ReceiptBatchToolExecutor? = null
 ) {
-    init { require(maxRounds in 1..100) }
+    init {
+        require(maxRounds in 1..100)
+        require(batchExecutor == null || receiptBatchExecutor == null)
+    }
 }
 
 data class ExecutionState(

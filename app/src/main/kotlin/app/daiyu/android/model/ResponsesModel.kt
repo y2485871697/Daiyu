@@ -11,12 +11,18 @@ import javax.net.ssl.HttpsURLConnection
 class ResponsesModel internal constructor(private val settings:ModelSettings, private val connect:(URL)->HttpsURLConnection):ModelPort {
     constructor(settings:ModelSettings):this(settings,{it.openConnection() as HttpsURLConnection})
     override fun open(history:List<Message>):ModelSession = open(history,settings.enabledTools())
-    override fun open(history:List<Message>,tools:Set<ReadOnlyTool>):ModelSession = Session(settings,history,connect,tools.toSet())
-    private class Session(private val settings:ModelSettings,history:List<Message>,private val connect:(URL)->HttpsURLConnection,private val tools:Set<ReadOnlyTool>):ModelSession {
+    override fun open(history:List<Message>,tools:Set<ReadOnlyTool>):ModelSession = open(history,tools.map {
+        ToolDefinition(it.toolName,it.description,"""{"type":"object","properties":{},"required":[],"additionalProperties":false}""")
+    })
+    override fun open(history:List<Message>,definitions:List<ToolDefinition>):ModelSession = Session(settings,history,connect,definitions.toList())
+    private class Session(private val settings:ModelSettings,history:List<Message>,private val connect:(URL)->HttpsURLConnection,private val tools:List<ToolDefinition>):ModelSession {
         private val cancelled=AtomicBoolean(false)
         @Volatile private var connection:HttpsURLConnection?=null
         private val input=JSONArray()
         private val ownItems=mutableListOf<String>()
+        private var usable=true
+        private var started=false
+        private var pending=emptySet<String>()
         init {
             settings.validate()
             MessageHistory.expand(history).forEach { message ->
@@ -57,11 +63,17 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
         private fun checkCancelled() {if(cancelled.get()) throw InterruptedException()}
         override fun next(outputs:List<ToolOutput>,sink:(ModelEvent)->Unit) {
             checkCancelled()
+            check(usable && (!started || pending.isNotEmpty())) { "Responses session cannot be replayed" }
+            require(outputs.map {it.callId.value}.toSet()==pending && outputs.size==pending.size) {
+                "Tool outputs must match all pending tool calls exactly once"
+            }
+            started=true
+            usable=false
             outputs.forEach {val item=JSONObject().put("type","function_call_output").put("call_id",it.callId.value).put("output",it.output);input.put(item);ownItems.add(item.toString())}
             val schemas=JSONArray()
             tools.forEach { definition ->
-                schemas.put(JSONObject().put("type","function").put("name",definition.toolName).put("description",definition.description)
-                    .put("parameters",JSONObject().put("type","object").put("properties",JSONObject()).put("required",JSONArray()).put("additionalProperties",false)).put("strict",true))
+                schemas.put(JSONObject().put("type","function").put("name",definition.name).put("description",definition.description)
+                    .put("parameters",JSONObject(definition.parameters)).put("strict",false))
             }
             val request=JSONObject().put("model",settings.model).put("input",input).put("stream",true).put("store",false).put("include",JSONArray().put("reasoning.encrypted_content"))
             if(schemas.length()>0) request.put("tools",schemas)
@@ -98,9 +110,18 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
                 conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
                     val items=ResponsesStream.read(reader,cancelled::get,deliver)
                     checkCancelled()
-                    items.forEach {input.put(JSONObject(it));ownItems.add(it)}
+                    val calls=mutableSetOf<String>()
+                    items.forEach { raw ->
+                        val item=JSONObject(raw)
+                        if(item.optString("type")=="function_call") {
+                            val id=item.opt("call_id") as? String ?: throw ModelRequestException(ModelFailure.PROTOCOL)
+                            if(id.isBlank() || !calls.add(id)) throw ModelRequestException(ModelFailure.PROTOCOL)
+                        }
+                        input.put(item);ownItems.add(raw)
+                    }
                     deliver(ModelEvent.ProtocolOutput(ownItems.toList()))
                     checkCancelled()
+                    pending=calls.toSet()
                 }
                 checkCancelled()
             } catch(failure:Exception) {
@@ -119,7 +140,11 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
             }
             // Cleanup may cancel too. Only check on success so the original failure stays primary.
             checkCancelled()
+            usable=true
         }
-        override fun cancel() {cancelled.set(true);connection?.disconnect()}
+        override fun cancel() {
+            cancelled.set(true)
+            try {connection?.disconnect()} catch(_:Exception) {}
+        }
     }
 }

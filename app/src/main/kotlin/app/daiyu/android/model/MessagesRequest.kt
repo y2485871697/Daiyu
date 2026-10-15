@@ -157,6 +157,17 @@ internal object MessagesRequest {
             require(message.role == "user" || message.role == "assistant") {
                 "Messages supports only user and assistant history; system messages are unsupported"
             }
+            if (message.role == "assistant" && message.status == RunStatus.INTERRUPTED) {
+                if (message.protocolItems.isNotEmpty()) replayHistory(message, validateOnly = true)
+                val text = message.blocks.filterIsInstance<MessageBlock.Text>()
+                    .map { it.text }.filter { it.isNotBlank() }.joinToString("\n")
+                if (text.isNotBlank()) {
+                    val content = JSONArray().put(JSONObject().put("type", "text")
+                        .put("text", "$text\n\n[回复已中断]"))
+                    messages.put(MessagesRequest.message("assistant", content))
+                }
+                return@forEach
+            }
             if (message.role == "assistant" && message.status != RunStatus.COMPLETED) return@forEach
             if (message.protocolItems.isNotEmpty()) {
                 replayHistory(message).forEach { messages.put(it) }
@@ -185,7 +196,7 @@ internal object MessagesRequest {
     }
 
     /** Raw items remain authoritative wire data; blocks supply only missing completed results. */
-    private fun replayHistory(owner: Message): List<JSONObject> {
+    private fun replayHistory(owner: Message, validateOnly: Boolean = false): List<JSONObject> {
         val items = owner.protocolItems.map { raw ->
             val item = jsonObject(raw, MAX_MESSAGE_CONTAINER_DEPTH)
             require(item.optString("role") in setOf("user", "assistant") &&
@@ -229,6 +240,7 @@ internal object MessagesRequest {
                 missing.getOrPut(index) { JSONArray() }.put(result(id, output))
             }
         }
+        if (validateOnly) return emptyList()
         return items.flatMapIndexed { index, item ->
             val added = missing[index]
             if (added == null) {

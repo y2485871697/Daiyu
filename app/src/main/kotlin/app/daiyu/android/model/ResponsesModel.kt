@@ -19,11 +19,24 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
         private val ownItems=mutableListOf<String>()
         init {
             settings.validate()
-            history.forEach { message ->
+            MessageHistory.expand(history).forEach { message ->
                 if(message.role=="user") {
                     input.put(JSONObject().put("role","user").put("content",message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") {it.text}))
                 } else if(message.status==RunStatus.COMPLETED) {
-                    if(message.protocolItems.isNotEmpty()) message.protocolItems.forEach {input.put(JSONObject(it))}
+                    if(message.protocolItems.isNotEmpty()) {
+                        val items = message.protocolItems.map { JSONObject(it) }
+                        items.forEach { input.put(it) }
+                        val calls = items.filter { it.optString("type") == "function_call" }.map { it.getString("call_id") }.toSet()
+                        val results = items.filter { it.optString("type") == "function_call_output" }.associate { it.getString("call_id") to it.getString("output") }
+                        message.blocks.filterIsInstance<MessageBlock.Tool>().forEach { block ->
+                            val result = block.result
+                            if(result != null) {
+                                require(block.invocation.id.value in calls) { "历史工具缺少已确认协议调用" }
+                                if(block.invocation.id.value in results) require(results[block.invocation.id.value] == result) { "历史工具结果冲突" }
+                                else input.put(JSONObject().put("type","function_call_output").put("call_id",block.invocation.id.value).put("output",result))
+                            }
+                        }
+                    }
                     else message.blocks.forEach { block -> when(block) {
                         is MessageBlock.Text -> input.put(JSONObject().put("role","assistant").put("content",block.text))
                         is MessageBlock.Tool -> if(block.result!=null) {

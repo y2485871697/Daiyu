@@ -2,18 +2,21 @@ package app.daiyu.android.domain
 
 import org.junit.Assert.*
 import org.junit.Test
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 class ChatRunnerRepetitionTest {
     private val initial = Message(MessageId("a"), ConversationId("c"), RunId("r"), "assistant", emptyList(), RunStatus.RUNNING)
     private val call = ToolInvocation(ToolCallId("call"), "get_battery_status", "0,".repeat(5000))
     private val saved = mutableListOf<Message>()
-    private var cancelled = false
+    private val cancelled = CountDownLatch(1)
     private var executions = 0
     private var rounds = 0
+    private fun awaitCancelled(): Boolean = cancelled.await(2, TimeUnit.SECONDS)
     private fun run(cancelThrows: Boolean = false, events: (Int, (ModelEvent) -> Unit) -> Unit): Message {
         val model = ModelPort { object : ModelSession {
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) { events(++rounds, sink) }
-            override fun cancel() { cancelled = true; if (cancelThrows) throw IllegalStateException("cancel fixture") }
+            override fun cancel() { cancelled.countDown(); if (cancelThrows) throw IllegalStateException("cancel fixture") }
         } }
         return ChatRunner(model, object : ConversationStore {
             override fun save(message: Message) { saved.add(message) }
@@ -26,7 +29,7 @@ class ChatRunnerRepetitionTest {
         assertEquals(RunStatus.FAILED, result.status)
         assertTrue(result.error!!.contains("高度重复"))
         assertTrue(result.blocks.isNotEmpty())
-        assertTrue(cancelled)
+        assertTrue(awaitCancelled())
         assertEquals(1, rounds)
         assertEquals(1, saved.count { it.status != RunStatus.RUNNING })
     }
@@ -39,7 +42,7 @@ class ChatRunnerRepetitionTest {
         assertEquals(RunStatus.FAILED, result.status)
         assertEquals("accepted", (result.blocks.last() as MessageBlock.Text).text)
         assertEquals(0, executions)
-        assertTrue(cancelled)
+        assertTrue(awaitCancelled())
     }
     @Test fun identicalFinalSnapshotDoesNotCountDeltasTwice() {
         val text = "OK.\n".repeat(800)
@@ -123,7 +126,7 @@ class ChatRunnerRepetitionTest {
         assertTrue(result.error!!.contains("思考摘要"))
         assertEquals("accepted", (result.blocks.single() as MessageBlock.Text).text)
         assertEquals(1, rounds)
-        assertTrue(cancelled)
+        assertTrue(awaitCancelled())
         assertEquals(1, saved.count { it.status != RunStatus.RUNNING })
     }
     @Test fun reasoningFinalSnapshotsAreIdempotentAndCorrectionsReplace() {

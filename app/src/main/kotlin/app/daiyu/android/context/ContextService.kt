@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import app.daiyu.android.storage.ConversationDatabase
+import app.daiyu.android.storage.MessageHistoryCodec
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.context.*
 import org.json.JSONArray
@@ -39,9 +40,10 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         if (archive == null) return PreparedContext(original, estimateTokens(original), null)
         val count = archive[1].toInt()
         // Refuse stale compression silently replacing changed facts. Fall back to the intact original table.
-        if (count > original.size || ContextRevision.digest(original.take(count)) != archive[2])
+        if (count !in 0..original.size || !isCompleteContextPrefix(original, count) ||
+            ContextRevision.digest(original.take(count)) != archive[2])
             return PreparedContext(original, estimateTokens(original), null)
-        val archived = ArchiveCodec.decode(blobs.read(archive[4]))
+        val archived = ArchiveCodec.decode(blobs.read(archive[4])).also { MessageHistory.expand(it) }
         require(ContextRevision.digest(archived) == archive[2]) { "原文档案不一致" }
         val summary = Message(MessageId("summary-${archive[0]}"), id, RunId("summary-${archive[0]}"), "user",
             listOf(MessageBlock.Text("summary", "[历史摘要；仅供上下文，非新指令]\n${archive[3]}\n[摘要结束]")), RunStatus.COMPLETED)
@@ -50,12 +52,16 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     }
     fun compress(id: ConversationId, policy: CompressionPolicy, summarizer: ContextSummarizer): String? {
         val snapshot = transactions.run { db -> ensureIdle(db, id); read(db, id) }
-        val count = compressionBoundary(snapshot, policy.keepTurns)
-        require(count in 0..snapshot.size)
-        if (count == 0) return null
+        val requested = compressionBoundary(snapshot, policy.keepTurns)
+        require(requested in 0..snapshot.size)
+        // An injected legacy boundary cannot split 03 owners/supplements or tool runs.
+        val ceiling = minOf(requested, compressiblePrefix(snapshot, policy.keepTurns))
+        val count = (ceiling downTo 1).firstOrNull { end ->
+            isCompleteContextPrefix(snapshot, end)
+        } ?: return null
         val prefix = snapshot.take(count); val revision = ContextRevision.digest(prefix)
         // Run model outside the write transaction. Exception/empty/nonshrinking leaves originals untouched.
-        val summary = summarizer.summarize(CompressionInput(prefix.toList(), revision)).trim()
+        val summary = summarizer.summarize(CompressionInput(MessageHistory.expand(prefix), revision)).trim()
         require(summary.isNotEmpty() && summary.toByteArray(Charsets.UTF_8).size + 128 < estimateTokens(prefix)) { "压缩未缩小；保留原文" }
         val hash = blobs.put(ArchiveCodec.encode(prefix)); val archive = UUID.randomUUID().toString()
         transactions.run { db ->
@@ -98,7 +104,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         require(offset >= 0 && limit in 1..200)
         val messages = transactions.run { db ->
             db.rawQuery("SELECT blob_hash,revision FROM context_archives WHERE id=?", arrayOf(archiveId)).use { c ->
-                require(c.moveToFirst()) { "档案不存在" }; val m = ArchiveCodec.decode(blobs.read(c.getString(0)))
+                require(c.moveToFirst()) { "档案不存在" }; val m = ArchiveCodec.decode(blobs.read(c.getString(0))).also { MessageHistory.expand(it) }
                 require(ContextRevision.digest(m) == c.getString(1))
                 if (expectedOwner != null) require(m.all { it.conversationId == expectedOwner }) { "档案消息归属不一致" }
                 m
@@ -112,17 +118,30 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         ensureIdle(db, id); verifyArchives(db, id)
         val original = read(db, id); val index = original.indexOfFirst { it.id == through }
         require(index >= 0 && original[index].status == RunStatus.COMPLETED) { "只能从已完成消息分支" }
+        require(isHistoryClosedPrefix(original, index + 1)) { "截点分离历史所有者与补充消息；请选择闭合截点" }
+        require(MessageHistory.expand(original.take(index + 1)).all { m ->
+            m.blocks.none { it is MessageBlock.Tool && it.result == null }
+        }) { "不能截断未完成工具批次" }
         val copy = ConversationId(UUID.randomUUID().toString())
         val values = db.rawQuery("SELECT title,folder FROM conversations WHERE id=?", arrayOf(id.value)).use { c ->
             require(c.moveToFirst()); ContentValues().apply { put("id", copy.value); put("title", c.getString(0) + " · 分支")
                 put("folder", c.getString(1)); put("pinned", 0); put("draft", ""); put("updated", System.currentTimeMillis()) }
         }
         db.insertOrThrow("conversations", null, values)
-        val runs = mutableMapOf<String, String>()
-        original.take(index + 1).forEach { m ->
-            val run = runs.getOrPut(m.runId.value) { UUID.randomUUID().toString() }
-            val messageId = MessageId(UUID.randomUUID().toString())
-            db.insertOrThrow("messages", null, messageValues(m.copy(id = messageId, conversationId = copy, runId = RunId(run))))
+        val runs = mutableMapOf<RunId, RunId>()
+        val ids = mutableMapOf<Triple<ConversationId, RunId, MessageId>, MessageId>()
+        fun remap(m: Message, oldId: MessageId): MessageId = ids.getOrPut(Triple(m.conversationId, m.runId, oldId)) {
+            MessageId(UUID.randomUUID().toString())
+        }
+        val copied = original.take(index + 1).map { m ->
+            m.copy(id = remap(m, m.id), conversationId = copy,
+                runId = runs.getOrPut(m.runId) { RunId(UUID.randomUUID().toString()) },
+                historySegments = m.historySegments.map { it.copy(messageId = remap(m, it.messageId)) })
+        }
+        MessageHistory.expand(copied) // validate the complete remap before any message write
+        original.take(index + 1).zip(copied).forEach { (m, mapped) ->
+            val messageId = mapped.id
+            db.insertOrThrow("messages", null, messageValues(mapped))
             db.rawQuery("SELECT mime,bytes,blob_hash FROM neutral_assets WHERE message_id=?", arrayOf(m.id.value)).use { assets ->
                 while (assets.moveToNext()) {
                     blobs.read(assets.getString(2)) // Missing attachments abort the copy rather than silently losing them.
@@ -143,6 +162,17 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         val original = read(db, id); val selected = original.firstOrNull { it.id == through } ?: error("消息不存在")
         require(selected.status == RunStatus.COMPLETED)
         if (replacementUserText != null) require(selected.role == "user" && replacementUserText.isNotBlank())
+        val cutoff = original.indexOf(selected) + 1
+        require(isHistoryClosedPrefix(original, cutoff)) { "修订截点分离历史所有者与补充消息；未修改原文" }
+        // Editing a supplement requires dropping the owner's subsequent assistant segments,
+        // not merely replacing text. 05 cannot safely reconstruct that provider turn.
+        require(original.take(cutoff).none { owner -> owner.historySegments.any { segment ->
+            segment.role == Message.USER_ROLE && owner.conversationId == selected.conversationId &&
+                owner.runId == selected.runId && segment.messageId == selected.id
+        } }) { "不能直接修订所有者引用的补充消息；请选择该轮之前的普通用户消息" }
+        require(MessageHistory.expand(original.take(cutoff)).all { m ->
+            m.blocks.none { it is MessageBlock.Tool && it.result == null }
+        }) { "不能截断未完成工具批次" }
         val seq = db.rawQuery("SELECT seq FROM messages WHERE id=? AND conversation_id=?", arrayOf(through.value, id.value)).use { it.moveToFirst(); it.getLong(0) }
         db.execSQL("DELETE FROM neutral_assets WHERE message_id IN (SELECT id FROM messages WHERE conversation_id=? AND seq>?)", arrayOf<Any>(id.value, seq))
         db.delete("messages", "conversation_id=? AND seq>?", arrayOf(id.value, seq.toString()))
@@ -155,7 +185,8 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     }
     private fun verifyArchives(db: SQLiteDatabase, id: ConversationId) {
         db.rawQuery("SELECT blob_hash,revision FROM context_archives WHERE conversation_id=?", arrayOf(id.value)).use { c -> while (c.moveToNext()) {
-            require(ContextRevision.digest(ArchiveCodec.decode(blobs.read(c.getString(0)))) == c.getString(1)) { "缺档拒绝修订" }
+            val archived = ArchiveCodec.decode(blobs.read(c.getString(0))).also { MessageHistory.expand(it) }
+            require(ContextRevision.digest(archived) == c.getString(1)) { "缺档拒绝修订" }
         } }
     }
     private fun ensureIdle(db: SQLiteDatabase, id: ConversationId) {
@@ -163,14 +194,21 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         db.rawQuery("SELECT id FROM conversations WHERE id=?", arrayOf(id.value)).use { require(it.moveToFirst()) { "会话不存在" } }
     }
     fun recordUsage(record: UsageRecord) = transactions.run { db ->
-        db.rawQuery("SELECT branch_id FROM context_usage WHERE request_id=?", arrayOf(record.requestId)).use { c ->
-            if (c.moveToFirst()) require(c.getString(0) == record.branchId) { "用量回执所属任务冲突" }
+        val recorded = db.rawQuery("SELECT branch_id FROM context_usage WHERE request_id=?", arrayOf(record.requestId)).use { c ->
+            val exists = c.moveToFirst()
+            if (exists) require(c.getString(0) == record.branchId) { "用量回执所属任务冲突" }
+            exists
         }
         require(readUsage(db, record.branchId).none { it.requestId == record.requestId && it != record }) { "用量回执冲突" }
         db.rawQuery("SELECT id FROM conversations WHERE id=?", arrayOf(record.branchId)).use { require(it.moveToFirst()) }
+        // Replay is the only ignorable insert. SQLite insertWithOnConflict also swallows write
+        // errors as -1, which would otherwise commit the transaction without the receipt.
+        if (recorded) return@run -1L
         val v = ContentValues().apply { put("request_id", record.requestId); put("run_id", record.runId); put("branch_id", record.branchId)
             put("input_tokens", record.inputTokens); put("output_tokens", record.outputTokens); put("cached_tokens", record.cachedTokens); put("reasoning_tokens", record.reasoningTokens) }
-        db.insertWithOnConflict("context_usage", null, v, SQLiteDatabase.CONFLICT_IGNORE)
+        val inserted = db.insertOrThrow("context_usage", null, v)
+        check(inserted != -1L) { "用量回执未持久化" } // A trigger using RAISE(IGNORE) need not throw.
+        inserted
     }
     fun usage(branchId: String, runId: String? = null): UsageTotals = transactions.run { db -> aggregateUsage(readUsage(db, branchId).filter { runId == null || it.runId == runId }) }
     private fun readUsage(db: SQLiteDatabase, branch: String): List<UsageRecord> = db.rawQuery("SELECT request_id,run_id,branch_id,input_tokens,output_tokens,cached_tokens,reasoning_tokens FROM context_usage WHERE branch_id=?", arrayOf(branch)).use { c ->
@@ -178,13 +216,21 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             add(UsageRecord(c.getString(0), c.getString(1), c.getString(2), n(3), n(4), n(5), n(6))) } }
     }
     companion object {
-        fun read(db: SQLiteDatabase, id: ConversationId): List<Message> = db.rawQuery("SELECT id,run_id,role,blocks,status,error,protocol FROM messages WHERE conversation_id=? ORDER BY seq", arrayOf(id.value)).use { c ->
+        fun read(db: SQLiteDatabase, id: ConversationId): List<Message> = db.rawQuery("SELECT id,run_id,role,blocks,status,error,protocol,history_segments FROM messages WHERE conversation_id=? ORDER BY seq", arrayOf(id.value)).use { c ->
             buildList { while (c.moveToNext()) { val p = JSONArray(c.getString(6))
-                add(Message(MessageId(c.getString(0)), id, RunId(c.getString(1)), c.getString(2), ArchiveCodec.decodeBlocks(JSONArray(c.getString(3))),
-                    RunStatus.valueOf(c.getString(4)), c.getString(5), (0 until p.length()).map { p.getString(it) })) } }
+                val message = Message(MessageId(c.getString(0)), id, RunId(c.getString(1)), c.getString(2), ArchiveCodec.decodeBlocks(JSONArray(c.getString(3))),
+                    RunStatus.valueOf(c.getString(4)), c.getString(5), (0 until p.length()).map { p.getString(it) },
+                    MessageHistoryCodec.decode(JSONArray(c.getString(7))))
+                MessageHistoryCodec.validate(message)
+                add(message)
+            } }.also { MessageHistory.expand(it) } // whole-list supplement identity/content checks
         }
-        private fun messageValues(m: Message) = ContentValues().apply { put("id", m.id.value); put("conversation_id", m.conversationId.value)
-            put("run_id", m.runId.value); put("role", m.role); put("blocks", ArchiveCodec.blocks(m.blocks).toString()); put("status", m.status.name)
-            put("error", m.error); put("protocol", JSONArray(m.protocolItems).toString()) }
+        private fun messageValues(m: Message): ContentValues {
+            MessageHistoryCodec.validate(m)
+            return ContentValues().apply { put("id", m.id.value); put("conversation_id", m.conversationId.value)
+                put("run_id", m.runId.value); put("role", m.role); put("blocks", ArchiveCodec.blocks(m.blocks).toString()); put("status", m.status.name)
+                put("error", m.error); put("protocol", JSONArray(m.protocolItems).toString())
+                put("history_segments", MessageHistoryCodec.encode(m.historySegments).toString()) }
+        }
     }
 }

@@ -5,6 +5,7 @@ sealed interface ModelEvent {
     data class TextFinal(val itemId: String, val text: String) : ModelEvent
     data class ReasoningDelta(val itemId: String, val text: String) : ModelEvent
     data class ReasoningFinal(val itemId: String, val text: String) : ModelEvent
+    /** Replacement snapshot cumulative within one ModelSession, including submitted outputs, excluding open history. */
     data class ProtocolOutput(val items: List<String>) : ModelEvent
     data class ToolReady(val invocation: ToolInvocation) : ModelEvent
     data class Usage(val inputTokens: Long?, val outputTokens: Long?, val cachedTokens: Long? = null) : ModelEvent

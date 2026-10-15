@@ -28,7 +28,9 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
             MessageHistory.expand(history).forEach { message ->
                 if(message.role=="user") {
                     input.put(JSONObject().put("role","user").put("content",message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") {it.text}))
-                } else if(message.status==RunStatus.COMPLETED) {
+                } else if(message.status==RunStatus.COMPLETED ||
+                    (message.role=="assistant" && message.status==RunStatus.INTERRUPTED)) {
+                    val interrupted=message.status==RunStatus.INTERRUPTED
                     if(message.protocolItems.isNotEmpty()) {
                         val items = message.protocolItems.map { raw ->
                             val item = JSONObject(raw)
@@ -38,7 +40,7 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
                             }
                             item
                         }
-                        items.forEach { input.put(it) }
+                        if(!interrupted) items.forEach { input.put(it) }
                         val calls = items.filter { it.optString("type") == "function_call" }.map { it.getString("call_id") }.toSet()
                         val results = items.filter { it.optString("type") == "function_call_output" }.associate { it.getString("call_id") to it.getString("output") }
                         message.blocks.filterIsInstance<MessageBlock.Tool>().forEach { block ->
@@ -46,17 +48,23 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
                             if(result != null) {
                                 require(block.invocation.id.value in calls) { "历史工具缺少已确认协议调用" }
                                 if(block.invocation.id.value in results) require(results[block.invocation.id.value] == result) { "历史工具结果冲突" }
-                                else input.put(JSONObject().put("type","function_call_output").put("call_id",block.invocation.id.value).put("output",result))
+                                else if(!interrupted) input.put(JSONObject().put("type","function_call_output").put("call_id",block.invocation.id.value).put("output",result))
                             }
                         }
                     }
-                    else message.blocks.forEach { block -> when(block) {
+                    else if(!interrupted) message.blocks.forEach { block -> when(block) {
                         is MessageBlock.Text -> input.put(JSONObject().put("role","assistant").put("content",block.text))
                         is MessageBlock.Tool -> if(block.result!=null) {
                             input.put(JSONObject().put("type","function_call").put("call_id",block.invocation.id.value).put("name",block.invocation.name).put("arguments",block.invocation.arguments))
                             input.put(JSONObject().put("type","function_call_output").put("call_id",block.invocation.id.value).put("output",block.result))
                         }
                     } }
+                    if(interrupted) {
+                        val text=message.blocks.filterIsInstance<MessageBlock.Text>()
+                            .filter {it.text.isNotBlank()}.joinToString("\n") {it.text}
+                        if(text.isNotBlank()) input.put(JSONObject().put("role","assistant")
+                            .put("content",text+"\n\n[回复已中断]"))
+                    }
                 }
             }
         }

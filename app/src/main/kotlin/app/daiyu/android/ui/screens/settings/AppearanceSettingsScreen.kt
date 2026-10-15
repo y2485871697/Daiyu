@@ -39,7 +39,8 @@ internal fun AppearanceSettingsScreen(
     onOpenRefreshRate: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
-    scaleRange: ClosedFloatingPointRange<Float> = 0.85f..1.3f,
+    scaleRange: ClosedFloatingPointRange<Float> =
+        app.daiyu.android.data.model.MIN_INTERFACE_SCALE..app.daiyu.android.data.model.MAX_INTERFACE_SCALE,
 ) {
     val colors = MiuixTheme.colorScheme
     MiuixScaffoldPage(title = "外观与阅读", onBack = onBack, modifier = modifier) {
@@ -79,16 +80,16 @@ internal fun AppearanceSettingsScreen(
             SettingsSectionTitle("个性化")
             SettingsCard {
                 SettingsRow("应用图标", onClick = onOpenAppIcon, leading = {
-                    DaiyuIcon(DaiyuIcons.AppIcon, contentDescription = null, tint = colors.primary, size = 24.dp)
+                    DaiyuIcon(DaiyuIcons.AppIcon, contentDescription = null, tint = colors.onSurfaceVariantSummary, size = 24.dp)
                 })
                 SettingsRow("图标外观设置", onClick = onOpenIconAppearance, leading = {
-                    DaiyuIcon(DaiyuIcons.Palette, contentDescription = null, tint = colors.primary, size = 24.dp)
+                    DaiyuIcon(DaiyuIcons.Palette, contentDescription = null, tint = colors.onSurfaceVariantSummary, size = 24.dp)
                 })
                 SettingsRow("鲸鱼女仆", onClick = onOpenPet, leading = {
-                    DaiyuIcon(DaiyuIcons.Pet, contentDescription = null, tint = colors.primary, size = 24.dp)
+                    DaiyuIcon(DaiyuIcons.Pet, contentDescription = null, tint = colors.onSurfaceVariantSummary, size = 24.dp)
                 })
                 SettingsRow("震动设置", onClick = onOpenVibration, leading = {
-                    DaiyuIcon(DaiyuIcons.Vibration, contentDescription = null, tint = colors.primary, size = 24.dp)
+                    DaiyuIcon(DaiyuIcons.Vibration, contentDescription = null, tint = colors.onSurfaceVariantSummary, size = 24.dp)
                 })
             }
         }
@@ -97,7 +98,7 @@ internal fun AppearanceSettingsScreen(
             SettingsCard {
                 SettingsSwitchRow("消息时间戳", state.showMessageTimestamps, onMessageTimestampsChange)
                 SettingsRow("刷新率策略", onClick = onOpenRefreshRate, leading = {
-                    DaiyuIcon(DaiyuIcons.Refresh, contentDescription = null, tint = colors.primary, size = 24.dp)
+                    DaiyuIcon(DaiyuIcons.Refresh, contentDescription = null, tint = colors.onSurfaceVariantSummary, size = 24.dp)
                 })
             }
         }

@@ -45,14 +45,14 @@ internal object FeatureCatalog {
             FeatureEntry("P21", "用量统计", FeatureRoute.USAGE_STATS),
             FeatureEntry("P39", "重复输出保护"),
             FeatureEntry("P42", "会话压缩状态"),
-            FeatureEntry("P43", "请求与运行状态")
+            FeatureEntry("P43", "请求与运行")
         )),
         FeatureGroup("collaboration", "协作与交互", listOf(
             FeatureEntry("P15", "子代理运行"),
-            FeatureEntry("P16", "子代理设置与状态"),
-            FeatureEntry("P23", "交互模式与问答", FeatureRoute.CHAT)
+            FeatureEntry("P16", "子代理设置"),
+            FeatureEntry("P23", "交互问答", FeatureRoute.CHAT)
         )),
-        FeatureGroup("voice", "语音与文件打开", listOf(
+        FeatureGroup("voice", "语音与文件", listOf(
             FeatureEntry("P32", "语音模式"),
             FeatureEntry("P32.dictation", "语音听写"),
             FeatureEntry("P38", "TTS 播放与试听"),
@@ -62,9 +62,9 @@ internal object FeatureCatalog {
             FeatureEntry("P33", "技能管理", FeatureRoute.SKILLS),
             FeatureEntry("P34", "浏览器"),
             FeatureEntry("R06", "设备与 Root"),
-            FeatureEntry("R07", "无障碍与屏幕操作"),
+            FeatureEntry("R07", "无障碍操作"),
             FeatureEntry("R08", "虚拟屏"),
-            FeatureEntry("R09", "终端与 Linux 环境"),
+            FeatureEntry("R09", "Linux 终端"),
             FeatureEntry("R12", "备份与导入", FeatureRoute.BACKUP)
         )),
         FeatureGroup("appearance", "外观与阅读", listOf(
@@ -73,10 +73,10 @@ internal object FeatureCatalog {
             FeatureEntry("P30", "图标外观设置"),
             FeatureEntry("P31", "震动设置"),
             FeatureEntry("P35", "消息时间戳"),
-            FeatureEntry("P36", "圆形加载指示器"),
+            FeatureEntry("P36", "加载样式"),
             FeatureEntry("P37", "消息操作栏"),
             FeatureEntry("P40", "刷新率策略"),
-            FeatureEntry("P41", "跟随与消息定位", FeatureRoute.USER_MESSAGE)
+            FeatureEntry("P41", "跟随与定位", FeatureRoute.USER_MESSAGE)
         ))
     )
 }

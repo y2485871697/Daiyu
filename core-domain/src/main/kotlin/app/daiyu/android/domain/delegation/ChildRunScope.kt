@@ -6,9 +6,9 @@ import app.daiyu.android.domain.tools.TaskAuthorization
 import app.daiyu.android.domain.tools.WriteEffect
 
 data class ChildRunOwner(val conversationId: String, val parentRunId: String, val taskGroupId: String,
-    val generation: Long, val childRunId: String) {
+    val generation: Long, val childRunId: String, val assistantMessageId: String) {
     init {
-        require(listOf(conversationId, parentRunId, taskGroupId, childRunId).all { it.isNotBlank() && it.length <= 200 })
+        require(listOf(conversationId, parentRunId, taskGroupId, childRunId, assistantMessageId).all { it.isNotBlank() && it.length <= 200 })
         require(generation >= 0 && childRunId != parentRunId)
     }
 }
@@ -18,7 +18,7 @@ class ChildRunScope private constructor(val owner: ChildRunOwner, val session: S
     val authorization: TaskAuthorization) {
     fun requireOwner(message: Message) {
         require(message.conversationId.value == owner.conversationId && message.runId.value == owner.childRunId &&
-            message.role == Message.ASSISTANT_ROLE) { "child_run_owner_mismatch" }
+            message.id.value == owner.assistantMessageId && message.role == Message.ASSISTANT_ROLE) { "child_run_owner_mismatch" }
     }
     companion object {
         fun capture(owner: ChildRunOwner, parentSession: SessionCapabilities, parentAuthorization: TaskAuthorization,

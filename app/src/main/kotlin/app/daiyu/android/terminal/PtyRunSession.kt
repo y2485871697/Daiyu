@@ -29,7 +29,7 @@ class PtyRunOwner(
  * Central Dispatcher still owns write approval and its authoritative tool ledger.
  * requestId and sequence come from the trusted host, not model JSON.
  */
-class PtyRunSession private constructor(private val owner: PtyRunOwner, private val session: PtySession) : AutoCloseable {
+class PtyRunSession internal constructor(private val owner: PtyRunOwner, private val session: PtySession) : AutoCloseable {
     private val closed = AtomicBoolean(false)
     private val lifecycle = Any()
 
@@ -52,8 +52,8 @@ class PtyRunSession private constructor(private val owner: PtyRunOwner, private 
         execute(caller) { session.interrupt(requestId, controlSequence) }
 
     override fun close() {
-        val stop = synchronized(lifecycle) { closed.compareAndSet(false, true) }
-        if (stop) session.close()
+        synchronized(lifecycle) { closed.set(true) }
+        session.close()
     }
 
     /** Host/worker only; retain the selected Linux lease when this returns false. */

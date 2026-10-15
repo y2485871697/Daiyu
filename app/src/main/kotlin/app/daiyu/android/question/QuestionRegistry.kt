@@ -41,6 +41,11 @@ class QuestionRegistry private constructor(
     @Throws(InterruptedException::class)
     fun execute(identity: QuestionIdentity, name: String, arguments: JSONObject, batchToolNames: List<String> = listOf(ASK_USER_TOOL_NAME)): JSONObject =
         execute(identity.storageKey, name, arguments, batchToolNames)
+    @Throws(InterruptedException::class)
+    fun awaitAnswer(identity: QuestionIdentity, question: UserQuestion): QuestionAnswer {
+        check(Looper.myLooper() != Looper.getMainLooper()) { "background_thread_required" }
+        return barrier.execute(identity.storageKey, question)
+    }
     fun submit(identity: QuestionIdentity, answer: QuestionAnswer) = submit(identity.storageKey, answer)
     /** Cancel the owner without fabricating an answer; also unblocks any waiting execute. */
     fun interrupt() = barrier.close()

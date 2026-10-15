@@ -67,6 +67,37 @@ class LeaseBrowserHostTest {
         }
     }
 
+    @Test fun unsupportedDirectBackendCommandsCannotEnqueueOrRetireTheLoadedResource() {
+        val f = Fixture()
+        val lease = f.create()
+        val commands = listOf(
+            BrowserCommand("set_user_agent", lease.tabId, mapOf("user_agent" to "desktop_chrome")),
+            BrowserCommand("set_user_agent", lease.tabId, mapOf("user_agent" to "mobile_chrome")),
+            BrowserCommand("set_viewport", lease.tabId, mapOf("viewport_width" to 800, "viewport_height" to 600)),
+            BrowserCommand("reload", lease.tabId), BrowserCommand("go_back", lease.tabId), BrowserCommand("go_forward", lease.tabId),
+            BrowserCommand("navigate", lease.tabId, mapOf("url" to "https://example.invalid/", "timeout_ms" to 1000)),
+        )
+        try {
+            for (command in commands) {
+                try { f.ui.now { f.host.execute(command, lease) }; fail("unsupported backend command") }
+                catch (_: IllegalArgumentException) { }
+                catch (_: IllegalStateException) { }
+                f.ui.drain()
+                assertEquals(0, f.resources.single().calls)
+                assertEquals(0, f.resources.single().destroyed)
+                f.sessions.assertCurrent(lease)
+            }
+            val pending = f.start(lease)
+            f.ui.next()
+            assertEquals(1, f.resources.single().calls)
+            f.resources.single().result.complete(BrowserActionResult("original resource"))
+            assertEquals("original resource", pending.join().text)
+        } finally {
+            f.ui.now { f.host.close(lease) }
+            f.ui.drain()
+        }
+    }
+
     @Test fun admissionOnlyPostsAndNeverCallsResourceOnSameStack() {
         val f = Fixture()
         val lease = f.create()

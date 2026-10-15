@@ -66,6 +66,101 @@ class IntegrationSettingsActivityTest:android.test.InstrumentationTestCase() {
     }
     private fun body(dialog:AlertDialog)=views(dialog.window!!.decorView).filterIsInstance<EditText>()
         .single {it.hint?.toString()?.startsWith("自定义请求 JSON")==true}
+    private fun catalogDialog()=MainActivity::class.java.getDeclaredField("modelCatalogDialog")
+        .apply {isAccessible=true}.get(checkNotNull(activity)) as AlertDialog?
+    private fun catalogButton()=views(settingsDialog().window!!.decorView).filterIsInstance<Button>()
+        .single {it.text.toString()=="获取模型目录（使用当前草稿）"}
+    private fun catalogModel()=views(settingsDialog().window!!.decorView).filterIsInstance<EditText>()
+        .single {it.hint?.toString()=="模型标识"}
+    private class CatalogConnection(url:java.net.URL,val entered:java.util.concurrent.CountDownLatch,
+        val release:java.util.concurrent.CountDownLatch,val body:String,val status:Int):java.net.HttpURLConnection(url) {
+        @Volatile var disconnected=false
+        override fun connect() {}
+        override fun disconnect() {disconnected=true}
+        override fun usingProxy()=false
+        override fun getResponseCode():Int {
+            check(android.os.Looper.myLooper()!=android.os.Looper.getMainLooper())
+            entered.countDown();check(release.await(10,java.util.concurrent.TimeUnit.SECONDS));return status
+        }
+        override fun getInputStream()=body.byteInputStream()
+    }
+    private fun catalogue(body:String="""{"data":[{"id":"first"},{"id":"second"}]}""",
+        status:Int=200,held:Boolean=false):Triple<java.util.concurrent.CountDownLatch,java.util.concurrent.CountDownLatch,java.util.concurrent.atomic.AtomicReference<CatalogConnection>> {
+        val entered=java.util.concurrent.CountDownLatch(1)
+        val release=java.util.concurrent.CountDownLatch(if(held) 1 else 0)
+        val connection=java.util.concurrent.atomic.AtomicReference<CatalogConnection>()
+        fixture.controller.modelCatalog=app.daiyu.android.model.catalog.ModelCatalogService(
+            {error("draft must not load saved credentials")},app.daiyu.android.model.catalog.RemoteModelFetcher {url ->
+                CatalogConnection(url,entered,release,body,status).also {connection.set(it)}
+            })
+        return Triple(entered,release,connection)
+    }
+    fun testCatalogUsesCurrentEmptyKeyDraftAndOnlyExplicitSavePersistsSelection() {
+        val (_,_,connection)=catalogue()
+        val before=fixture.settings.load()
+        openSettings()
+        controlMain {
+            val edits=views(settingsDialog().window!!.decorView).filterIsInstance<EditText>()
+            edits.single {it.hint?.toString()?.startsWith("HTTPS")==true}.setText("https://catalog.invalid/v1/responses")
+            edits.single {it.hint?.toString()?.startsWith("API密钥")==true}.setText("")
+            catalogModel().setText("");catalogButton().performClick()
+        }
+        awaitControl("catalog selection") {catalogDialog()?.isShowing==true}
+        controlMain {catalogDialog()!!.listView.performItemClick(null,1,1)}
+        assertEquals(before,fixture.settings.load())
+        assertEquals("https://catalog.invalid/v1/models",connection.get().url.toString())
+        assertNull(connection.get().getRequestProperty("Authorization"))
+        controlMain {
+            assertEquals("second",catalogModel().text.toString())
+            views(settingsDialog().window!!.decorView).filterIsInstance<EditText>()
+                .single {it.hint?.toString()?.startsWith("API密钥")==true}.setText("new-key")
+            settingsDialog().getButton(AlertDialog.BUTTON_POSITIVE).performClick()
+        }
+        assertEquals("second",fixture.settings.load().model)
+        assertEquals("new-key",fixture.settings.load().apiKey)
+    }
+    fun testCatalogChangedAndRestoredDraftRevokesLateResponseAndCanRetry() {
+        val (entered,release,connection)=catalogue(held=true)
+        openSettings();controlMain {catalogButton().performClick()}
+        assertTrue(entered.await(5,java.util.concurrent.TimeUnit.SECONDS))
+        try {controlMain {val edit=catalogModel();val old=edit.text.toString();edit.setText("changed");edit.setText(old)}}
+        finally {release.countDown()}
+        awaitControl("old catalog finished") {connection.get().disconnected}
+        instrumentation.waitForIdleSync()
+        controlMain {assertNull(catalogDialog());catalogButton().performClick()}
+        awaitControl("new catalog selection") {catalogDialog()?.isShowing==true}
+        controlMain {settingsDialog().getButton(AlertDialog.BUTTON_NEGATIVE).performClick()}
+        awaitControl("catalog closes with parent") {catalogDialog()==null}
+    }
+    fun testCatalogSaveFailureAndDismissRevokePendingResponse() {
+        for(save in listOf(true,false)) {
+            val (entered,release,connection)=catalogue(held=true)
+            openSettings();controlMain {
+                if(save) catalogModel().setText("")
+                catalogButton().performClick()
+            }
+            assertTrue(entered.await(5,java.util.concurrent.TimeUnit.SECONDS))
+            try {controlMain {settingsDialog().getButton(if(save) AlertDialog.BUTTON_POSITIVE else AlertDialog.BUTTON_NEGATIVE).performClick()}}
+            finally {release.countDown()}
+            awaitControl("revoked catalog finished") {connection.get().disconnected}
+            instrumentation.waitForIdleSync();controlMain {assertNull(catalogDialog());if(save) settingsDialog().dismiss()}
+        }
+    }
+    fun testCatalogEmptyAndFailurePreserveSettingsAndHideResponseDetails() {
+        val before=fixture.settings.load()
+        for((body,status) in listOf("""{"data":[]}""" to 200,"SECRET_RESPONSE_SENTINEL" to 401,"SECRET_RESPONSE_SENTINEL" to 200)) {
+            catalogue(body,status);openSettings();controlMain {catalogButton().performClick()}
+            awaitControl("catalog outcome") {catalogButton().isEnabled}
+            controlMain {
+                assertNull(catalogDialog())
+                val texts=views(settingsDialog().window!!.decorView).filterIsInstance<android.widget.TextView>().map {it.text.toString()}
+                assertFalse(texts.any {it.contains("SECRET_RESPONSE_SENTINEL")})
+                assertTrue(texts.any {it.contains(if(status==200 && body.contains("data")) "供应商返回空模型目录" else "获取失败")})
+                settingsDialog().dismiss()
+            }
+            assertEquals(before,fixture.settings.load())
+        }
+    }
     fun testAdvancedRequestOptionsSaveReopenAndRejectInvalidBodyAndTier() {
         openSettings()
         controlMain {

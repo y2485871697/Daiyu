@@ -21,6 +21,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
@@ -64,7 +65,7 @@ internal fun SettingsRow(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier.testTag("settings-row:$title").fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -95,6 +96,7 @@ internal fun SettingsSwitchRow(title: String, checked: Boolean, onCheckedChange:
     val colors = MiuixTheme.colorScheme
     SettingsRow(title = title, trailing = {
         Switch(
+            modifier = Modifier.testTag("settings-switch:$title"),
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
@@ -111,7 +113,7 @@ internal fun SettingsSwitchRow(title: String, checked: Boolean, onCheckedChange:
 
 @Composable
 internal fun SettingsRadioRow(title: String, selected: Boolean, onClick: () -> Unit) {
-    Box(Modifier.fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, onClick = onClick)) {
+    Box(Modifier.testTag("settings-radio:$title").fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, onClick = onClick)) {
         SettingsRow(title = title, trailing = {
             if (selected) {
                 DaiyuIcon(DaiyuIcons.Check, contentDescription = "已选择",
@@ -146,7 +148,7 @@ internal fun SettingsTextField(
             cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
             visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else KeyboardType.Text),
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp))
+            modifier = Modifier.testTag("settings-field:$label").fillMaxWidth().clip(RoundedCornerShape(24.dp))
                 .background(MiuixTheme.colorScheme.surface).padding(12.dp)
                 .semantics { contentDescription = label },
             decorationBox = { editor ->

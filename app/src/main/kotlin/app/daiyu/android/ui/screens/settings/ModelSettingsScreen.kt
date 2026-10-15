@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.model.ProviderProtocol
@@ -141,7 +142,7 @@ internal fun ModelSettingsScreen(
                     text = if (isFetchingCatalog) "获取中" else "获取模型",
                     onClick = { onFetchCatalog(draft) },
                     enabled = !isFetchingCatalog,
-                    modifier = Modifier.fillMaxWidth().padding(12.dp),
+                    modifier = Modifier.testTag("model-catalog-fetch").fillMaxWidth().padding(12.dp),
                 )
             }
             if (catalogIsCurrent && !catalogStatusText.isNullOrBlank()) SettingsNote(catalogStatusText)
@@ -169,7 +170,7 @@ internal fun ModelSettingsScreen(
             TextButton(
                 text = "保存",
                 onClick = { onSave(draft) },
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 24.dp),
+                modifier = Modifier.testTag("model-save").fillMaxWidth().padding(horizontal = 12.dp, vertical = 24.dp),
             )
         }
     }

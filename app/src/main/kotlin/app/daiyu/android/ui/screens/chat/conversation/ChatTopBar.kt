@@ -18,6 +18,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -33,7 +34,7 @@ internal fun ChatTopBar(title: String, balanceText: String?, actions: ChatScreen
     var expanded by remember { mutableStateOf(false) }
     Row(modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         ChatIconButton(DaiyuIcons.Menu, "打开侧边栏", actions.onOpenSidebar)
-        Text(title.ifBlank { "新会话" }, Modifier.weight(1f).padding(horizontal = 4.dp),
+        Text(title.ifBlank { "新会话" }, Modifier.testTag("chat-title").weight(1f).padding(horizontal = 4.dp),
             color = MiuixTheme.colorScheme.onSurface, style = MiuixTheme.textStyles.title3,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
         if (!balanceText.isNullOrBlank()) {

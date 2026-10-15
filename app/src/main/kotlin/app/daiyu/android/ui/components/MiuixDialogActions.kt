@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalView
 import app.daiyu.android.ui.haptics.TouchHaptics
 import androidx.compose.ui.res.stringResource
@@ -50,7 +51,7 @@ fun MiuixDialogActions(
                 onCancel()
             },
             enabled = cancelEnabled,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.testTag("dialog-cancel").weight(1f),
         )
         TextButton(
             text = confirmText,
@@ -59,7 +60,7 @@ fun MiuixDialogActions(
                 onConfirm()
             },
             enabled = confirmEnabled,
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.testTag("dialog-confirm").weight(1f),
             colors = if (destructive) {
                 ButtonDefaults.textButtonColorsPrimary(
                     color = MiuixTheme.colorScheme.error,

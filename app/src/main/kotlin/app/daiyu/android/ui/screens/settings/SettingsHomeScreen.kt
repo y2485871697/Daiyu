@@ -10,6 +10,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.FeatureCatalog
 import app.daiyu.android.ui.FeatureEntry
@@ -126,7 +127,7 @@ internal fun DaiyuSettingsScreen(
                     label = "搜索设置",
                     useLabelAsPlaceholder = true,
                     singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.testTag("settings-search").weight(1f),
                 )
             }
         }

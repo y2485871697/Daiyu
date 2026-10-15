@@ -50,7 +50,10 @@ class ModelCatalogServiceTest {
             "https://example.invalid" to "https://example.invalid/v1/models",
             "https://example.invalid/v1" to "https://example.invalid/v1/models",
             "https://example.invalid/relay/v1/responses/" to "https://example.invalid/relay/v1/models",
-            "https://example.invalid/relay" to "https://example.invalid/relay/models"
+            "https://example.invalid/relay" to "https://example.invalid/relay/models",
+            "https://example.invalid/a+b/v1" to "https://example.invalid/a+b/v1/models",
+            "https://example.invalid/a%2Bb/v1" to "https://example.invalid/a%2Bb/v1/models",
+            "https://example.invalid/team%2Fname/v1" to "https://example.invalid/team%2Fname/v1/models"
         )) {
             val request = catalogRequest(settings().copy(endpoint = endpoint, responsesPath = "/inference-only"))
             assertEquals(expected, remoteModelsEndpoint(request.baseUrl, request.protocol))
@@ -63,6 +66,9 @@ class ModelCatalogServiceTest {
             settings().copy(protocol = ProviderProtocol.UNKNOWN), settings().copy(endpoint = "http://example.invalid"),
             settings().copy(endpoint = "https://key@example.invalid"), settings().copy(endpoint = "https://example.invalid?secret=x"),
             settings().copy(endpoint = "https://example.invalid/a/%2e%2e/v1"),
+            settings().copy(endpoint = "https://example.invalid/a%2f..%2fv1"),
+            settings().copy(endpoint = "https://example.invalid//%2e%2e/v1"),
+            settings().copy(endpoint = "https://example.invalid/a%2f%2e%2e%2fv1"),
             settings().copy(endpoint = "https://example.invalid/v1/messages"),
             settings().copy(endpoint = "https://example.invalid/custom/responses"))) {
             try { service.fetchDraft(draft); fail("unsafe configuration accepted") }

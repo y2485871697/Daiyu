@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.stats
 
 import android.content.Context
+import android.os.Build
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.NumberPicker
@@ -147,9 +148,11 @@ private class SpinnerDatePickerView(
     }
 
     fun setTextColor(color: Int) {
-        yearPicker.setTextColor(color)
-        monthPicker.setTextColor(color)
-        dayPicker.setTextColor(color)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            yearPicker.setTextColor(color)
+            monthPicker.setTextColor(color)
+            dayPicker.setTextColor(color)
+        }
     }
 
     private fun publish() {

@@ -58,7 +58,7 @@ class MessagesModel internal constructor(
                 val item = MessagesRequest.message("user", content)
                 messages.put(item); ownItems.add(item.toString())
             }
-            val request = MessagesRequest.body(settings.model, messages, tools, maxTokens)
+            val request = settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens), ProviderProtocol.MESSAGES)
             var deliveryFailure: Exception? = null
             val deliver: (ModelEvent) -> Unit = { event ->
                 checkCancelled()

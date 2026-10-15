@@ -25,6 +25,7 @@ class ProviderSnapshot private constructor(
     val responsesPath: String,
     val batteryEnabled: Boolean,
     val deviceStatusEnabled: Boolean,
+    val requestOptions: ProviderRequestOptions,
     tools: Set<ReadOnlyTool>
 ) {
     val tools: Set<ReadOnlyTool> =
@@ -37,7 +38,8 @@ class ProviderSnapshot private constructor(
         batteryEnabled = batteryEnabled,
         responsesPath = responsesPath,
         deviceStatusEnabled = deviceStatusEnabled,
-        protocol = protocol
+        protocol = protocol,
+        requestOptions = requestOptions
     )
 
     override fun toString(): String =
@@ -49,7 +51,7 @@ class ProviderSnapshot private constructor(
         protocol == other.protocol && endpoint == other.endpoint && model == other.model &&
         apiKey == other.apiKey && responsesPath == other.responsesPath &&
         batteryEnabled == other.batteryEnabled && deviceStatusEnabled == other.deviceStatusEnabled &&
-        tools == other.tools
+        tools == other.tools && requestOptions == other.requestOptions
 
     override fun hashCode(): Int {
         var result = protocol.hashCode()
@@ -60,6 +62,7 @@ class ProviderSnapshot private constructor(
         result = 31 * result + batteryEnabled.hashCode()
         result = 31 * result + deviceStatusEnabled.hashCode()
         result = 31 * result + tools.hashCode()
+        result = 31 * result + requestOptions.hashCode()
         return result
     }
 
@@ -78,6 +81,7 @@ class ProviderSnapshot private constructor(
                 responsesPath = settings.responsesPath,
                 batteryEnabled = settings.batteryEnabled,
                 deviceStatusEnabled = settings.deviceStatusEnabled,
+                requestOptions = settings.requestOptions,
                 tools = settings.enabledTools()
             )
         }

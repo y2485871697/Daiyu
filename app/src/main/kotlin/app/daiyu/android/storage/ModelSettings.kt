@@ -9,6 +9,7 @@ import app.daiyu.android.domain.messagesEndpoint
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.UnsupportedProviderException
 import app.daiyu.android.domain.ReadOnlyTool
+import app.daiyu.android.model.ProviderRequestOptions
 import app.daiyu.android.model.ProviderSnapshot
 import java.security.KeyStore
 import java.util.UUID
@@ -21,7 +22,7 @@ import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
-data class ModelSettings(val endpoint: String, val model: String, val apiKey: String, val batteryEnabled: Boolean, val responsesPath: String = "", val deviceStatusEnabled: Boolean = false, val protocol: ProviderProtocol = ProviderProtocol.RESPONSES) {
+data class ModelSettings(val endpoint: String, val model: String, val apiKey: String, val batteryEnabled: Boolean, val responsesPath: String = "", val deviceStatusEnabled: Boolean = false, val protocol: ProviderProtocol = ProviderProtocol.RESPONSES, val requestOptions: ProviderRequestOptions = ProviderRequestOptions()) {
     fun enabledTools(): Set<ReadOnlyTool> = buildSet {
         if (batteryEnabled) add(ReadOnlyTool.BATTERY)
         if (deviceStatusEnabled) add(ReadOnlyTool.DEVICE_STATUS)
@@ -37,15 +38,16 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
     fun requestSnapshot(): ProviderSnapshot = ProviderSnapshot.capture(this)
     override fun toString(): String =
         "ModelSettings(protocol=${protocol.wireName}, endpoint=$endpoint, model=$model, apiKey=<redacted>, batteryEnabled=$batteryEnabled, " +
-            "responsesPath=$responsesPath, deviceStatusEnabled=$deviceStatusEnabled)"
+            "responsesPath=$responsesPath, deviceStatusEnabled=$deviceStatusEnabled, requestOptions=$requestOptions)"
     fun validate() {
         requestEndpoint()
+        requestOptions.validate(protocol)
         require(model.isNotBlank() && model.length<=200 && apiKey.isNotBlank() && apiKey.length<=8192) {"请填写模型和密钥"}
         require(!apiKey.contains('\n') && !apiKey.contains('\r')) {"密钥含非法换行"}
     }
 }
 class CredentialUnavailableException:IllegalStateException("已保存密钥不可用；请重新输入密钥")
-data class EditingSettings(val settings:ModelSettings,val credentialUnavailable:Boolean)
+data class EditingSettings(val settings:ModelSettings,val credentialUnavailable:Boolean,val requestOptionsUnavailable:Boolean = false)
 
 /** A detached preview, not an authorization. Snapshots preserve absent versus explicitly empty fields. */
 class NonSecretRestorePlan internal constructor(
@@ -148,11 +150,24 @@ class ModelSettingsStore internal constructor(context:Context,private val keyAli
         preferences.getBoolean(REBIND_REQUIRED, false)
     } catch (_: Exception) { true } // Malformed gate fails closed before any decryption.
 
+    private fun readRequestOptions(): ProviderRequestOptions = ProviderRequestOptions.decode(
+        if (preferences.contains("request-options")) preferences.getString("request-options", null)
+            ?: throw IllegalStateException("模型请求配置无效；请重新保存") else null)
+
     private fun editingWithoutCredential(): EditingSettings {
         val values = readNonSecretConfiguration(includeProtocol = false)
+        var optionsUnavailable = false
+        val options = try {
+            readRequestOptions().also {
+                val protocol = readProtocol()
+                if (protocol != ProviderProtocol.UNKNOWN) it.validate(protocol)
+            }
+        } catch (_: Exception) {
+            optionsUnavailable = true; ProviderRequestOptions()
+        }
         return EditingSettings(ModelSettings(values["endpoint"] as? String ?: "", values["model"] as? String ?: "", "",
             values["battery"] as? Boolean ?: false, values["responses-path"] as? String ?: "",
-            values["device-status"] as? Boolean ?: false, readProtocol()), true)
+            values["device-status"] as? Boolean ?: false, readProtocol(), options), true, optionsUnavailable)
     }
     private fun keyStore()=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
     private fun existingKey(alias:String)=keyStore().getKey(alias,null) as? SecretKey
@@ -164,6 +179,9 @@ class ModelSettingsStore internal constructor(context:Context,private val keyAli
         if(preferences in failedStores || credentialRebindRequired() || readProtocol() == ProviderProtocol.UNKNOWN) return@synchronized editingWithoutCredential()
         val values=preferences.all
         var unavailable=false
+        var optionsUnavailable = false
+        val options=try { readRequestOptions().also {it.validate(readProtocol())} }
+        catch (_:Exception) {unavailable=true;optionsUnavailable=true;ProviderRequestOptions()}
         val apiKey=try {
             val encrypted=values["key"] as? String
             if(encrypted==null) {
@@ -179,7 +197,7 @@ class ModelSettingsStore internal constructor(context:Context,private val keyAli
             }
         } catch (_:Exception) {unavailable=true;""}
         EditingSettings(ModelSettings(values["endpoint"] as? String ?: "",values["model"] as? String ?: "",apiKey,
-            values["battery"] as? Boolean ?: false,values["responses-path"] as? String ?: "",values["device-status"] as? Boolean ?: false,readProtocol()),unavailable)
+            values["battery"] as? Boolean ?: false,values["responses-path"] as? String ?: "",values["device-status"] as? Boolean ?: false,readProtocol(),options),unavailable,optionsUnavailable)
     }
     fun load():ModelSettings=synchronized(lock) {
         check(readProtocol() != ProviderProtocol.UNKNOWN) {"模型协议无效；请到模型设置重新选择"}
@@ -189,8 +207,15 @@ class ModelSettingsStore internal constructor(context:Context,private val keyAli
         if(loaded.credentialUnavailable) throw CredentialUnavailableException()
         loaded.settings
     }
-    fun save(settings:ModelSettings, protocolChangeAuthorized: Boolean = false):Unit=synchronized(lock) {
+    fun save(settings:ModelSettings, protocolChangeAuthorized: Boolean = false, requestOptionsReplacementAuthorized: Boolean = false):Unit=synchronized(lock) {
         settings.validate()
+        val previousOptionsValid = try {
+            val previousOptions = readRequestOptions()
+            val previousProtocol = readProtocol()
+            if (previousProtocol != ProviderProtocol.UNKNOWN) previousOptions.validate(previousProtocol)
+            true
+        } catch (_: Exception) { false }
+        require(previousOptionsValid || requestOptionsReplacementAuthorized) { "请求策略已损坏；替换或重置需要明确确认" }
         require(readProtocol() == settings.protocol || protocolChangeAuthorized) {"切换协议须重新输入密钥并明确确认"}
         val previous=preferences.all
         val owner=previous["key-owner"] as? String ?: UUID.randomUUID().toString()
@@ -206,6 +231,10 @@ class ModelSettingsStore internal constructor(context:Context,private val keyAli
                 .apply {
                     if(settings.protocol == ProviderProtocol.MESSAGES) putString("protocol", "messages")
                     else remove("protocol")
+                }
+                .apply {
+                    if(settings.requestOptions == ProviderRequestOptions()) remove("request-options")
+                    else putString("request-options", settings.requestOptions.encode())
                 }
                 .putString("key-owner",owner).putString("key-alias",alias).putString("iv",Base64.encodeToString(cipher.iv,Base64.NO_WRAP)).putString("key",encrypted)
                 .remove(REBIND_REQUIRED).commit()
@@ -249,7 +278,7 @@ class ModelSettingsStore internal constructor(context:Context,private val keyAli
         private val failedStores=java.util.Collections.newSetFromMap(java.util.WeakHashMap<SharedPreferences,Boolean>())
         private const val REBIND_REQUIRED = "credential-rebind-required"
         private val configurationFields = listOf("endpoint", "model", "responses-path", "device-status", "battery", "protocol")
-        private val fields = configurationFields + listOf("key-owner", "key-alias", "iv", "key", REBIND_REQUIRED)
+        private val fields = configurationFields + listOf("request-options", "key-owner", "key-alias", "iv", "key", REBIND_REQUIRED)
 
         private fun putField(editor: SharedPreferences.Editor, name: String, values: Map<String, Any?>) {
             if(!values.containsKey(name)) editor.remove(name)

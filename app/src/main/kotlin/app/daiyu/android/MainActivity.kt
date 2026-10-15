@@ -16,8 +16,10 @@ import android.view.MotionEvent
 import android.view.ViewTreeObserver
 import android.widget.*
 import app.daiyu.android.domain.*
-import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.model.ProviderProtocol
+import app.daiyu.android.model.ProviderRequestOptions
+import app.daiyu.android.model.GptSpeedMode
+import app.daiyu.android.skills.SkillManagementDialog
 
 class MainActivity:Activity() {
     private val controller get()=(application as ChatApplication).controller
@@ -33,6 +35,7 @@ class MainActivity:Activity() {
     private var controlTouchActive=false
     private var controlTouchGeneration=0L
     private var settingsDialog:AlertDialog?=null
+    private var skillManagementDialog:SkillManagementDialog?=null
     private var backupDialog:AlertDialog?=null
     private var configurationRestoreDialog:AlertDialog?=null
     private var configurationRestorePreview:ChatController.ConfigurationRestorePreview?=null
@@ -94,6 +97,11 @@ class MainActivity:Activity() {
         toolbar.addView(button("会话") {chooseConversation()});toolbar.addView(button("新建") {select(null)})
         toolbar.addView(button("模型设置") {modelSettings()});root.addView(toolbar)
         root.addView(button("备份与导入") {backupMenu()})
+        root.addView(button("技能管理") {
+            skillManagementDialog?.dismiss()
+            val owner=controller
+            skillManagementDialog=SkillManagementDialog(this) {owner.skillManagement()}.also {it.show()}
+        })
         root.addView(button("搜索会话") {
             val query=EditText(this).apply {hint="标题、草稿或消息关键词"}
             AlertDialog.Builder(this).setTitle("搜索会话").setView(query).setPositiveButton("搜索") {_,_->guard {chooseConversation(query.text.toString())}}.setNegativeButton("取消",null).show()
@@ -269,6 +277,7 @@ class MainActivity:Activity() {
         configurationRestorePreview?.let {controller.cancelConfigurationRestore(it)}
         configurationRestorePreview=null
         settingsDialog?.dismiss();backupDialog?.dismiss();configurationRestoreDialog?.dismiss()
+        skillManagementDialog?.dismiss();skillManagementDialog=null
         controller.unobserve(listener);super.onDestroy()
     }
     private fun toast(text:String) {Toast.makeText(this,text,Toast.LENGTH_LONG).show()}
@@ -592,6 +601,22 @@ class MainActivity:Activity() {
         val key=EditText(this).apply {hint="API密钥（加密保存）";inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD;setText(saved.apiKey)}
         val battery=CheckBox(this).apply {text="允许模型查询只读电量";isChecked=saved.batteryEnabled}
         val deviceStatus=CheckBox(this).apply {text="允许模型查询只读设备状态（电量、内存、应用存储所在卷、系统与开机时长；结果发送给模型服务，不含设备标识）";isChecked=saved.deviceStatusEnabled}
+        val customBody=EditText(this).apply {
+            hint="自定义请求 JSON 对象（可留空，最多64KiB）";minLines=2;maxLines=6
+            inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            setText(saved.requestOptions.customBody);isSaveEnabled=false
+        }
+        val speedModes=listOf<GptSpeedMode?>(null,GptSpeedMode.NORMAL,GptSpeedMode.FAST,GptSpeedMode.ULTRA_FAST)
+        val speed=Spinner(this).apply {
+            adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,
+                listOf("不指定 GPT 服务档位","GPT 普通档位","GPT 快速档位","GPT 超快速档位"))
+            setSelection(speedModes.indexOf(saved.requestOptions.speedMode).coerceAtLeast(0))
+        }
+        val codex=CheckBox(this).apply {text="使用 Codex 服务档位规则";isChecked=saved.requestOptions.codex}
+        val replaceOptions=CheckBox(this).apply {
+            text="原请求策略不可用；我确认用当前高级选项替换原值";isChecked=false
+            visibility=if(editingSettings.requestOptionsUnavailable) View.VISIBLE else View.GONE
+        }
         val protocols=RadioGroup(this)
         val responses=RadioButton(this).apply {id=View.generateViewId();text="OpenAI Responses"}
         val messages=RadioButton(this).apply {id=View.generateViewId();text="Anthropic Messages"}
@@ -621,9 +646,16 @@ class MainActivity:Activity() {
         key.isSaveEnabled=false
         fields.addView(protocols);fields.addView(rebind)
         fields.addView(TextView(this).apply {setText(R.string.model_protocol_note)})
+        if(editingSettings.requestOptionsUnavailable) fields.addView(TextView(this).apply {
+            text="原请求策略不可用；原值尚未替换。请检查高级选项，并明确勾选替换授权。"
+        })
         if(editingSettings.credentialUnavailable) fields.addView(TextView(this).apply {text="已保存密钥不可用；原配置已保留，请重新输入密钥"})
         if(saved.protocol == ProviderProtocol.UNKNOWN) fields.addView(TextView(this).apply {text="已保存协议无效；请选择协议并重新输入密钥"})
         fields.addView(endpoint);fields.addView(path);fields.addView(model);fields.addView(key);fields.addView(battery);fields.addView(deviceStatus)
+        fields.addView(TextView(this).apply {
+            text="高级请求选项保存到本机并发送给供应商，不进入非秘密备份，请勿填写凭据。JSON 不能覆盖消息、工具或流式控制字段；Messages 不支持 GPT/Codex 档位。Codex 不支持超快速，供应商实际支持需另行确认。"
+        })
+        fields.addView(customBody);fields.addView(speed);fields.addView(codex);fields.addView(replaceOptions)
         val dialog=AlertDialog.Builder(this).setTitle("模型设置").setView(ScrollView(this).apply {addView(fields)}).setPositiveButton("保存",null).setNegativeButton("取消",null).create()
         key.importantForAutofill=View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         dialog.setOnShowListener {dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
@@ -631,12 +663,15 @@ class MainActivity:Activity() {
                 requireActivityUsable();check(settingsDialog === dialog && dialog.isShowing)
                 check(controller.active == null && !controller.dataBusy)
                 require(selectedProtocol == saved.protocol || rebind.isChecked)
-                controller.settings.save(ModelSettings(endpoint.text.toString().trim(),model.text.toString().trim(),
-                    key.text.toString(),battery.isChecked,path.text.toString().trim(),deviceStatus.isChecked,selectedProtocol),
-                    protocolChangeAuthorized=rebind.isChecked)
+                require(!editingSettings.requestOptionsUnavailable || replaceOptions.isChecked)
+                controller.settings.save(saved.copy(endpoint=endpoint.text.toString().trim(),model=model.text.toString().trim(),
+                    apiKey=key.text.toString(),batteryEnabled=battery.isChecked,responsesPath=path.text.toString().trim(),
+                    deviceStatusEnabled=deviceStatus.isChecked,protocol=selectedProtocol,
+                    requestOptions=ProviderRequestOptions(customBody.text.toString(),speedModes[speed.selectedItemPosition],codex.isChecked)),
+                    protocolChangeAuthorized=rebind.isChecked,requestOptionsReplacementAuthorized=replaceOptions.isChecked)
                 dialog.dismiss();toast("模型设置已保存")
             }
-            catch (_:Exception) {toast("设置未保存；检查协议、HTTPS地址、路径、模型与密钥；切换协议须重输密钥并勾选确认")}
+            catch (_:Exception) {toast("设置未保存；检查协议、HTTPS地址、路径、模型与密钥；切换协议须重输密钥并勾选确认，高级策略须为合法JSON；不可用策略须明确授权替换")}
         }}
         settingsDialog=dialog
         dialog.setOnDismissListener {if(settingsDialog===dialog) settingsDialog=null}

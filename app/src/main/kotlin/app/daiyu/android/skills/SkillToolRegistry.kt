@@ -11,8 +11,9 @@ class SkillToolRegistry(
     context: Context,
     private val github: GitHubSkills = GitHubSkills(),
     private val builtin: SkillStore = SkillStore(File(context.filesDir, "agent-builtin-skills-v1")),
-    private val user: SkillStore = SkillStore(File(context.filesDir, "runtime-skills-v1"), builtin.list().map { it.name }.toSet())
+    user: SkillStore? = null
 ) {
+    private val userStore by lazy { user ?: SkillStore(File(context.filesDir, "runtime-skills-v1"), builtin.list().map { it.name }.toSet()) }
     private val preferences = context.getSharedPreferences("runtime-skills-v1-settings", Context.MODE_PRIVATE)
     var enabled: Boolean
         get() = preferences.getBoolean("enabled", true)
@@ -43,7 +44,7 @@ class SkillToolRegistry(
         val skills = if (!enabled) emptyList() else {
             val app = builtin.snapshot().skills
             val names = app.map { it.name }.toSet()
-            app + user.snapshot().skills.filter { it.name !in names }
+            app + userStore.snapshot().skills.filter { it.name !in names }
         }
         return SkillSnapshot(Collections.unmodifiableList(ArrayList(skills)))
     }
@@ -62,15 +63,25 @@ class SkillToolRegistry(
         require(used <= SkillRunSession.MAX_CAPTURE_BYTES) { "snapshot_too_large" }
         val remaining = SkillRunSession.MAX_CAPTURE_BYTES - used
         val users = if (remaining == 0) {
-            require(user.list().none { it.enabled }) { "snapshot_too_large" }
+            require(userStore.list().none { it.enabled }) { "snapshot_too_large" }
             emptyList()
         } else {
-            user.captureForRun(remaining)
+            userStore.captureForRun(remaining)
         }
         val names = app.map { it.name }.toSet()
         val entries = app.map { SkillRunSession.Entry("builtin:${it.name}", it, builtin) } +
-            users.filter { it.name !in names }.map { SkillRunSession.Entry("user:${it.name}", it, user) }
+            users.filter { it.name !in names }.map { SkillRunSession.Entry("user:${it.name}", it, userStore) }
         return SkillRunSession.create(authorization, permissions, entries)
+    }
+    internal fun managementState(): SkillManagement.State {
+        val global = enabled
+        return try {
+            SkillManagement.State(global, Collections.unmodifiableList(
+                builtin.list().map { SkillManagement.Entry("builtin:${it.name}", it, true) } +
+                    userStore.list().map { SkillManagement.Entry("user:${it.name}", it, false) }))
+        } catch (_: Exception) {
+            SkillManagement.State(global, emptyList(), entriesUnavailable = true)
+        }
     }
     fun setEnabled(id: String, value: Boolean, revision: String): InstalledSkill {
         val (store, name) = resolve(id); return store.setEnabled(name, value, revision)
@@ -95,7 +106,7 @@ class SkillToolRegistry(
                 val bundles = github.download(validated.selection)
                 val protected = builtin.list().map { it.name }.toSet()
                 require(bundles.none { SkillFrontmatter.parse(SkillFiles.text(it.files.getValue("SKILL.md"))).name in protected }) { "builtin_conflict" }
-                val installed = user.install(bundles, validated.replacements, validated.incoming)
+                val installed = userStore.install(bundles, validated.replacements, validated.incoming)
                 JSONObject().put("skills", JSONArray(installed.map { metadata("user", it) }))
             }
         }
@@ -106,12 +117,12 @@ class SkillToolRegistry(
     } catch (conflict: SkillConflict) {
         failure("skill_conflict").put("id", if (name == "skills_read" || name == "skills_read_resource") arguments.optString("id") else "user:${conflict.skillName}").put("current_revision", conflict.currentRevision ?: JSONObject.NULL).put("action", "reread_before_replace")
     } catch (problem: Exception) { failure(problem.message?.takeIf { it.matches(Regex("[a-z_]+")) } ?: "skills_unavailable") }
-    private fun listJson(): JSONArray = JSONArray(builtin.list().map { metadata("builtin", it) } + user.list().map { metadata("user", it) })
+    private fun listJson(): JSONArray = JSONArray(builtin.list().map { metadata("builtin", it) } + userStore.list().map { metadata("user", it) })
     private fun metadata(origin: String, skill: InstalledSkill): JSONObject = JSONObject().put("id", "$origin:${skill.name}").put("name", skill.name).put("description", skill.description)
         .put("revision", skill.revision).put("enabled", enabled && skill.enabled).put("builtin", origin == "builtin").put("source", skill.source ?: JSONObject.NULL).put("commit", skill.commit ?: JSONObject.NULL)
     private fun resolve(id: String): Pair<SkillStore, String> {
         require(id.count { it == ':' } == 1) { "invalid_id" }
-        val store = when (id.substringBefore(':')) { "builtin" -> builtin; "user" -> user; else -> error("invalid_id") }
+        val store = when (id.substringBefore(':')) { "builtin" -> builtin; "user" -> userStore; else -> error("invalid_id") }
         return store to id.substringAfter(':')
     }
     private fun text(json: JSONObject, key: String): String = json.get(key) as? String ?: error("invalid_arguments")

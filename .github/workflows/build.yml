@@ -159,6 +159,7 @@ jobs:
             core-domain/build/test-results
             core-domain/build/reports/tests
             app/build/reports/lint-results-debug.*
+            app/build/reports/host-pty/
           if-no-files-found: ignore
       - name: 上传开发包
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9

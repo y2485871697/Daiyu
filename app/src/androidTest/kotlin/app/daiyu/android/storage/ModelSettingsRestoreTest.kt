@@ -26,7 +26,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
         val outcomes = mutableListOf<CommitOutcome>()
         private fun read(name: String?) {
             reads.add(name)
-            if(protectCredentials) check(name in configKeys || name == gate) { "credential/unknown read: $name" }
+            if(protectCredentials) check(name in configKeys || name == gate || name == "request-options") { "credential/unknown read: $name" }
         }
         private fun write(name: String?) {
             writes.add(name)
@@ -400,10 +400,30 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
         val editing=f.reopen().loadForEditing()
         assertEquals("",editing.settings.apiKey);assertEquals(ProviderProtocol.MESSAGES,editing.settings.protocol)
         assertTrue(editing.credentialUnavailable)
-        assertTrue(f.spy.reads.all {it in configKeys || it==gate})
+        assertTrue(f.spy.reads.all {it in configKeys || it==gate || it=="request-options"})
         assertTrue(f.spy.writes.all {it in configKeys || it==gate})
         assertTrue(f.spy.reads.intersect(materialKeys).isEmpty())
         assertTrue(f.spy.writes.intersect(materialKeys).isEmpty())
+    }
+
+    fun testRequestOptionsSaveFailureRestoresValueAndPresence() {
+        val configured = app.daiyu.android.model.ProviderRequestOptions("""{"temperature":0.2}""",
+            app.daiyu.android.model.GptSpeedMode.FAST)
+        for (outcome in listOf(CommitOutcome.FALSE_AFTER_WRITE, CommitOutcome.THROW_AFTER_WRITE)) {
+            for (transition in 0..2) {
+                val f = fresh()
+                val old = f.settings.copy(requestOptions = if (transition == 2) app.daiyu.android.model.ProviderRequestOptions() else configured)
+                f.save(old)
+                val before = HashMap(f.raw.all)
+                val next = old.copy(requestOptions = if (transition == 1) app.daiyu.android.model.ProviderRequestOptions()
+                    else configured.copy(customBody = """{"temperature":0.7}"""))
+                f.spy.outcomes.add(outcome)
+                rejected { f.save(next) }
+                assertEquals(before, f.raw.all)
+                f.spy.protectCredentials = false
+                assertEquals(old, f.reopen().load())
+            }
+        }
     }
 
 }

@@ -1,4 +1,15 @@
 plugins { id("com.android.application") }
+
+val browserRoot=rootProject.layout.projectDirectory.dir("components/openminis-browser")
+val stageBrowserCore by tasks.registering(Sync::class) {
+    from(browserRoot.dir("upstream/src/main/kotlin")) {
+        include(listOf("BrowserAction.kt","BrowserActionInput.kt","BrowserActionResult.kt",
+            "BrowserUseJS.kt","InterceptedDialogQueue.kt","BrowserUseManager.kt").map {
+            "com/openminis/app/browser/$it"
+        })
+    }
+    into(layout.buildDirectory.dir("generated/openminis-browser/kotlin"))
+}
 android {
     useLibrary("android.test.runner")
     useLibrary("android.test.base")
@@ -17,6 +28,13 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+    sourceSets {
+        getByName("main") {
+            java.srcDir(stageBrowserCore)
+            java.srcDir(browserRoot.dir("adapter/src/main/kotlin"))
+        }
+        getByName("test").java.srcDir(browserRoot.dir("adapter/src/test/kotlin"))
     }
     val signingValues = listOf(
         "DAIYU_RELEASE_STORE_FILE", "DAIYU_RELEASE_STORE_PASSWORD",
@@ -46,6 +64,37 @@ android {
 kotlin { jvmToolchain(27) }
 dependencies {
     implementation(project(":core-domain"))
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
     testImplementation("org.json:json:20260522")
+}
+
+val hostPty=layout.buildDirectory.file("host-pty/daiyu_pty")
+val compileHostPty by tasks.registering(Exec::class) {
+    val source=layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/daiyu_pty.c")
+    inputs.file(source)
+    outputs.file(hostPty)
+    doFirst {hostPty.get().asFile.parentFile.mkdirs()}
+    commandLine("cc","-std=c11","-Wall","-Wextra","-Werror","-O2",source.asFile.absolutePath,
+        "-o",hostPty.get().asFile.absolutePath)
+}
+val verifyHostPty by tasks.registering(Exec::class) {
+    val verifier=layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/verify_host.py")
+    val report=layout.buildDirectory.dir("reports/host-pty")
+    dependsOn(compileHostPty)
+    inputs.files(verifier,hostPty)
+    outputs.dir(report)
+    commandLine("python3",verifier.asFile.absolutePath,hostPty.get().asFile.absolutePath,
+        report.get().asFile.absolutePath)
+}
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    if(System.getProperty("os.name").startsWith("Linux",ignoreCase=true)) {
+        dependsOn(verifyHostPty)
+        systemProperty("daiyu.pty.helper",hostPty.get().asFile.absolutePath)
+    } else {
+        exclude("**/PtyRunSessionHostTest.class")
+        filter {excludeTestsMatching("app.daiyu.android.terminal.PtySessionHostTest.testRealPtyPersistsShellAndRejectsStartupReplay")}
+    }
 }

@@ -1,0 +1,143 @@
+package app.daiyu.android.storage
+
+import android.content.ContentValues
+import android.database.sqlite.SQLiteDatabase
+import app.daiyu.android.context.DatabaseTransactions
+import app.daiyu.android.domain.*
+import app.daiyu.android.domain.runtime.*
+import java.io.File
+import java.io.RandomAccessFile
+import java.nio.channels.FileLock
+import java.util.UUID
+
+/** The OS lease is held for the controller worker's entire lifetime, not just for a DB transaction. */
+internal class SQLiteRuntimeStore private constructor(
+    private val database: ConversationDatabase, private val path: String,
+    private val file: RandomAccessFile, private val lock: FileLock
+) : AtomicRuntimeStore, AutoCloseable {
+    private val processOwner = UUID.randomUUID().toString()
+    private val transactions = DatabaseTransactions { database.writableDatabase }
+    private var recovered = false
+    private var closed = false
+    private fun available() { check(!closed && lock.isValid) { "运行存储所有权已释放" } }
+
+    @Synchronized fun recoverPending() {
+        available(); check(!recovered) { "运行恢复只能在取得所有权后执行一次" }
+        transactions.run { db ->
+            val ids = db.rawQuery("SELECT message_id FROM runtime_checkpoints WHERE phase!='TERMINAL'", null).use { c ->
+                buildList { while (c.moveToNext()) add(c.getString(0)) }
+            }
+            ids.forEach { reconcile(db, requireNotNull(read(db, it))) }
+            database.recoverUncheckpointed(db)
+        }
+        recovered = true
+    }
+    @Synchronized override fun commitCheckpoint(checkpoint: RunCheckpoint) {
+        available(); check(recovered)
+        val encoded = RunCheckpointCodec.encode(checkpoint)
+        transactions.run { db ->
+            val m = checkpoint.message
+            val prior = db.rawQuery("SELECT owner,revision,phase,process_owner,conversation_id,run_id FROM runtime_checkpoints WHERE message_id=?",
+                arrayOf(m.id.value)).use { c -> if (!c.moveToFirst()) null else {
+                check(c.getString(0) == checkpoint.owner && c.getLong(1) == checkpoint.revision - 1 &&
+                    c.getString(2) != ExecutionPhase.TERMINAL.name && c.getString(3) == processOwner &&
+                    c.getString(4) == m.conversationId.value && c.getString(5) == m.runId.value) { "拒绝过期或异主检查点" }
+                c.getLong(1)
+            } }
+            if (prior == null) check(checkpoint.revision == 1L) { "首个检查点版本必须为1" }
+            val persisted = database.runtimeMessage(db, m)
+            check(persisted.status == RunStatus.RUNNING) { "消息已终结，不允许接管运行" }
+            val values = values(checkpoint, encoded)
+            if (prior == null) db.insertOrThrow("runtime_checkpoints", null, values)
+            else check(db.update("runtime_checkpoints", values,
+                "message_id=? AND owner=? AND revision=? AND phase!='TERMINAL' AND process_owner=?",
+                arrayOf(m.id.value, checkpoint.owner, prior.toString(), processOwner)) == 1)
+            database.writeRuntimeMessage(db, m)
+        }
+    }
+    @Synchronized override fun readCommittedCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint? {
+        available(); check(recovered)
+        return transactions.run { db ->
+            val prior = read(db, checkpoint.message.id.value) ?: return@run null
+            sameIdentity(prior.value.message, checkpoint.message)
+            check(prior.processOwner == processOwner && prior.value.owner == checkpoint.owner &&
+                prior.value.revision <= checkpoint.revision) { "拒绝异主回执读取" }
+            check(database.runtimeMessage(db, prior.value.message) == prior.value.message) { "消息与检查点不一致" }
+            prior.value
+        }
+    }
+    /** Only a new OS lease may recover a previous lease's rows. Caller state is never trusted as a write. */
+    @Synchronized override fun reconcileCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
+        available()
+        return transactions.run { db ->
+            val prior = requireNotNull(read(db, checkpoint.message.id.value)) { "检查点不存在" }
+            sameIdentity(prior.value.message, checkpoint.message)
+            reconcile(db, prior)
+        }
+    }
+    private data class Stored(val value: RunCheckpoint, val processOwner: String)
+    private fun reconcile(db: SQLiteDatabase, prior: Stored): RunCheckpoint {
+        val saved = prior.value
+        val actual = database.runtimeMessage(db, saved.message)
+        if (saved.phase == ExecutionPhase.TERMINAL) {
+            check(actual == saved.message) { "终态消息与检查点不一致" }; return saved
+        }
+        check(prior.processOwner != processOwner) { "活跃所有者不能执行死亡恢复" }
+        val interrupted = ProcessRecovery.interrupt(saved)
+        val result = interrupted.copy(message = if (actual.status == RunStatus.RUNNING) interrupted.message else actual,
+            phase = ExecutionPhase.TERMINAL, messageReconciled = true, owner = "recovery-${UUID.randomUUID()}",
+            revision = saved.revision + 1)
+        val encoded = RunCheckpointCodec.encode(result)
+        if (actual.status == RunStatus.RUNNING) database.writeRuntimeMessage(db, result.message)
+        check(db.update("runtime_checkpoints", values(result, encoded), "message_id=? AND owner=? AND revision=? AND process_owner=?",
+            arrayOf(saved.message.id.value, saved.owner, saved.revision.toString(), prior.processOwner)) == 1)
+        return result
+    }
+    private fun sameIdentity(a: Message, b: Message) {
+        require(a.id == b.id && a.conversationId == b.conversationId && a.runId == b.runId)
+    }
+    private fun values(checkpoint: RunCheckpoint, encoded: String) = ContentValues().apply {
+        put("message_id", checkpoint.message.id.value); put("conversation_id", checkpoint.message.conversationId.value)
+        put("run_id", checkpoint.message.runId.value); put("owner", checkpoint.owner); put("revision", checkpoint.revision)
+        put("phase", checkpoint.phase.name); put("process_owner", processOwner); put("payload", encoded)
+    }
+    private fun read(db: SQLiteDatabase, messageId: String): Stored? {
+        val metadata = db.rawQuery("SELECT conversation_id,run_id,owner,revision,phase,process_owner,length(payload) FROM runtime_checkpoints WHERE message_id=?",
+            arrayOf(messageId)).use { c -> if (!c.moveToFirst()) null else {
+            val size = c.getLong(6); require(size in 1..(64L * 1024 * 1024))
+            listOf(c.getString(0), c.getString(1), c.getString(2), c.getLong(3).toString(), c.getString(4), c.getString(5), size.toString())
+        } } ?: return null
+        val value = RunCheckpointCodec.decode(requireNotNull(SQLiteText.read(db, "runtime_checkpoints", "payload", "message_id", messageId)))
+        check(value.message.id.value == messageId && value.message.conversationId.value == metadata[0] &&
+            value.message.runId.value == metadata[1] && value.owner == metadata[2] &&
+            value.revision.toString() == metadata[3] && value.phase.name == metadata[4]) { "检查点元数据不匹配" }
+        return Stored(value, metadata[5])
+    }
+    @Synchronized override fun close() {
+        if (!closed) {
+            closed = true
+            try { lock.release() } finally { try { file.close() } finally { synchronized(leases) { leases.remove(path) } } }
+        }
+    }
+    companion object {
+        private val leases = mutableSetOf<String>()
+        fun acquire(database: ConversationDatabase): SQLiteRuntimeStore {
+            val sidecar = database.runtimeLockFile
+            val path = sidecar.path
+            synchronized(leases) { check(leases.add(path)) { "另一个会话控制器仍拥有运行存储" } }
+            var file: RandomAccessFile? = null
+            try {
+                check(sidecar.parentFile!!.let { it.isDirectory || it.mkdirs() })
+                file = RandomAccessFile(sidecar, "rw")
+                val lock = file.channel.tryLock() ?: error("另一个进程仍拥有运行存储")
+                return SQLiteRuntimeStore(database, path, file, lock)
+            } catch (failure: Exception) {
+                try { file?.close() } finally { synchronized(leases) { leases.remove(path) } }
+                throw failure
+            }
+        }
+        fun installSchema(db: SQLiteDatabase) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS runtime_checkpoints(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL,process_owner TEXT NOT NULL,owner TEXT NOT NULL,revision INTEGER NOT NULL CHECK(revision>0),phase TEXT NOT NULL,payload TEXT NOT NULL)")
+        }
+    }
+}

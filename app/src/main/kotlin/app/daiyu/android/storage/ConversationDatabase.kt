@@ -2,7 +2,6 @@ package app.daiyu.android.storage
 
 import android.content.ContentValues
 import android.content.Context
-import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import app.daiyu.android.domain.*
@@ -11,24 +10,30 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 5), ConversationStore {
+class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 6), ConversationStore {
+    internal val runtimeLockFile = java.io.File(context.getDatabasePath("conversations.db").canonicalPath + ".runtime-owner")
     /** A message row keeps the v4 columns as the legacy projection.  This column is an
      * append-only, lossless history of the provider attempts.  Empty means an old row and
      * is deliberately handled by the v4 codec (important for old backup digests). */
     private val historyColumn = "history_segments"
+    override fun onConfigure(db: SQLiteDatabase) {
+        db.setForeignKeyConstraintsEnabled(true)
+        db.execSQL("PRAGMA synchronous=FULL")
+    }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL,role TEXT NOT NULL,blocks TEXT NOT NULL,status TEXT NOT NULL,error TEXT,protocol TEXT NOT NULL,history_segments TEXT NOT NULL DEFAULT '[]')")
         db.execSQL("CREATE INDEX messages_tail ON messages(conversation_id,seq)")
         createComposer(db)
         ContextStorage.installSchema(db)
+        SQLiteRuntimeStore.installSchema(db)
     }
     private fun createComposer(db:SQLiteDatabase) {
         db.execSQL("CREATE TABLE composer(id INTEGER PRIMARY KEY CHECK(id=1),draft TEXT NOT NULL)")
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..4 && newVersion==5) {"不支持此数据库版本，保留原数据"}
+        check(oldVersion in 1..5 && newVersion==6) {"不支持此数据库版本，保留原数据"}
         if(oldVersion==1) createComposer(db)
         if(oldVersion<=2) {
             db.execSQL("ALTER TABLE conversations ADD COLUMN folder TEXT NOT NULL DEFAULT ''")
@@ -36,10 +41,14 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         }
         if(oldVersion<=4) db.execSQL("ALTER TABLE messages ADD COLUMN history_segments TEXT NOT NULL DEFAULT '[]'")
         ContextStorage.installSchema(db)
+        SQLiteRuntimeStore.installSchema(db)
     }
     fun draft():String=readableDatabase.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
     fun draft(text:String) {check(writableDatabase.update("composer",ContentValues().apply {put("draft",text)},"id=1",null)==1)}
-    fun recover() { writableDatabase.execSQL("UPDATE messages SET status='INTERRUPTED',error='上次运行中断；未自动重发模型请求或工具' WHERE status='RUNNING'") }
+    fun recover() { SQLiteRuntimeStore.acquire(this).use { it.recoverPending() } }
+    internal fun recoverUncheckpointed(db: SQLiteDatabase) {
+        db.execSQL("UPDATE messages SET status='INTERRUPTED',error='上次运行中断；未自动重发模型请求或工具' WHERE status='RUNNING' AND NOT EXISTS (SELECT 1 FROM runtime_checkpoints WHERE message_id=messages.id)")
+    }
     fun conversations(query:String="",folder:String?=null): List<Conversation> {
         require(query.length<=1000 && (folder==null || folder.length<=200))
         val conditions=mutableListOf<String>();val args=mutableListOf<String>()
@@ -80,15 +89,21 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.delete("messages","conversation_id=?",arrayOf(id.value))
         db.delete("conversations","id=?",arrayOf(id.value))
     } }
-    private fun readMessageRow(c: Cursor, id: ConversationId): Message = Message(
-        MessageId(c.getString(1)), id, RunId(c.getString(2)), c.getString(3),
-        decode(JSONArray(c.getString(4))), RunStatus.valueOf(c.getString(5)), c.getString(6),
-        jsonStrings(JSONArray(c.getString(7))), MessageHistoryCodec.decode(JSONArray(c.getString(8)))
-    ).also { MessageHistoryCodec.validate(it) }
+    internal fun storedMessage(db: SQLiteDatabase, conversation: ConversationId, messageId: String): Message {
+        val metadata = db.rawQuery("SELECT run_id,role,status FROM messages WHERE id=? AND conversation_id=?",
+            arrayOf(messageId, conversation.value)).use { c ->
+            check(c.moveToFirst()) { "消息不存在" }; Triple(c.getString(0), c.getString(1), c.getString(2))
+        }
+        fun text(column: String) = SQLiteText.read(db, "messages", column, "id", messageId)
+        return Message(MessageId(messageId), conversation, RunId(metadata.first), metadata.second,
+            decode(JSONArray(requireNotNull(text("blocks")))), RunStatus.valueOf(metadata.third), text("error"),
+            jsonStrings(JSONArray(requireNotNull(text("protocol")))),
+            MessageHistoryCodec.decode(JSONArray(requireNotNull(text(historyColumn))))).also { MessageHistoryCodec.validate(it) }
+    }
     private fun validateRunHistory(db: SQLiteDatabase, id: ConversationId, run: RunId) {
-        val rows = db.rawQuery("SELECT seq,id,run_id,role,blocks,status,error,protocol,history_segments FROM messages WHERE conversation_id=? AND run_id=? ORDER BY seq",
-            arrayOf(id.value,run.value)).use { c -> buildList { while(c.moveToNext()) add(readMessageRow(c,id)) } }
-        MessageHistory.validate(rows)
+        val ids = db.rawQuery("SELECT id FROM messages WHERE conversation_id=? AND run_id=? ORDER BY seq",
+            arrayOf(id.value,run.value)).use { c -> buildList { while(c.moveToNext()) add(c.getString(0)) } }
+        MessageHistory.validate(ids.map { storedMessage(db,id,it) })
     }
     fun send(user:Message,assistant:Message,newConversation:Boolean=false):Conversation {
         require(user.conversationId==assistant.conversationId && user.runId==assistant.runId)
@@ -110,6 +125,9 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     override fun save(message:Message) {
         try { transaction { db ->
             require(message.role == Message.ASSISTANT_ROLE) { "仅允许保存 assistant 运行回执" }
+            check(!db.rawQuery("SELECT 1 FROM runtime_checkpoints WHERE message_id=?", arrayOf(message.id.value)).use { it.moveToFirst() }) {
+                "运行已由原子检查点所有者管理，拒绝旧消息写入路径"
+            }
             val encoded = values(message)
             val count=db.update("messages",encoded,"id=? AND conversation_id=? AND run_id=? AND role=? AND status='RUNNING' AND EXISTS (SELECT 1 FROM conversations WHERE id=?)",
                 arrayOf(message.id.value,message.conversationId.value,message.runId.value,message.role,message.conversationId.value))
@@ -124,6 +142,19 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             }
             validateRunHistory(db,message.conversationId,message.runId)
         } } catch(e:Exception) {throw PersistenceException(e)}
+    }
+    internal fun runtimeMessage(db: SQLiteDatabase, expected: Message): Message {
+        check(db.rawQuery("SELECT 1 FROM conversations WHERE id=?", arrayOf(expected.conversationId.value)).use { it.moveToFirst() }) {
+            "所属会话已不存在"
+        }
+        return storedMessage(db, expected.conversationId, expected.id.value).also {
+            require(it.runId == expected.runId && it.role == Message.ASSISTANT_ROLE)
+        }
+    }
+    internal fun writeRuntimeMessage(db: SQLiteDatabase, message: Message) {
+        check(db.update("messages", values(message), "id=? AND conversation_id=? AND run_id=? AND role='assistant' AND status='RUNNING'",
+            arrayOf(message.id.value, message.conversationId.value, message.runId.value)) == 1) { "运行消息已结束，拒绝迟到检查点" }
+        validateRunHistory(db, message.conversationId, message.runId)
     }
     fun exportBackup():String {
         var result=""
@@ -300,11 +331,16 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     private fun transaction(block:(SQLiteDatabase)->Unit) { val db=writableDatabase;db.beginTransaction();try {block(db);db.setTransactionSuccessful()} finally {db.endTransaction()} }
     fun messages(id: ConversationId, before: Long = Long.MAX_VALUE, limit: Int = 50): List<Pair<Long,Message>> {
         require(limit in 1..200) {"分页数量须为1至200"}
-        return readableDatabase.rawQuery("SELECT seq,id,run_id,role,blocks,status,error,protocol,history_segments FROM messages WHERE conversation_id=? AND seq<? ORDER BY seq DESC LIMIT ?",arrayOf(id.value,before.toString(),limit.toString())).use { c ->
-            buildList { while(c.moveToNext()) {
-                add(c.getLong(0) to readMessageRow(c,id))
-            }}.reversed()
-        }
+        val db=readableDatabase
+        db.beginTransaction()
+        try {
+            val ids=db.rawQuery("SELECT seq,id FROM messages WHERE conversation_id=? AND seq<? ORDER BY seq DESC LIMIT ?",
+                arrayOf(id.value,before.toString(),limit.toString())).use { c ->
+                buildList { while(c.moveToNext()) add(c.getLong(0) to c.getString(1)) }.reversed()
+            }
+            val result=ids.map { (seq,key) -> seq to storedMessage(db,id,key) }
+            db.setTransactionSuccessful();return result
+        } finally { db.endTransaction() }
     }
     private fun jsonStrings(array:JSONArray) = (0 until array.length()).map {array.getString(it)}
     private fun encode(blocks:List<MessageBlock>)=JSONArray().apply { blocks.forEach { b -> put(when(b) {

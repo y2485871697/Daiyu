@@ -38,6 +38,9 @@ interface AtomicRuntimeStore : RuntimeStore {
     /** Acquire a recovery owner, reconcile existing terminal messages (never downgrade to INTERRUPTED)
      * and checkpoint atomically. Must be idempotent if a previous commit's receipt was lost. */
     fun reconcileCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint
+    /** Read an uncertain commit under the SAME owner, without acquiring recovery ownership or writing.
+     * Null means the exact persisted outcome is unavailable. Never delegates to recovery. */
+    fun readCommittedCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint? = null
 }
 
 /** Batch boundary integration for ToolDispatcher. Implementations validate the ENTIRE batch before

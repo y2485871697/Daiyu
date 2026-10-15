@@ -277,4 +277,64 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         instrumentation.waitForIdleSync();assertNull(f.controller.active);assertFalse(f.controller.ready)
         assertEquals(2,f.calls.get())
     }
+    private fun awaitController(controller:ChatController) {
+        val ready=CountDownLatch(1);val listener:()->Unit={if(controller.ready) ready.countDown()}
+        main {controller.observe(listener);listener()}
+        try {assertTrue(ready.await(10,TimeUnit.SECONDS));instrumentation.waitForIdleSync()}
+        finally {main {controller.unobserve(listener)}}
+    }
+    private fun another(f:Fixture):ChatController = ChatController(f.app,ConversationDatabase(f.app),f.settings,
+        f.app.getSharedPreferences("conversation-ui",0),{error("replacement must not replay")})
+    fun testSecondControllerRejectsWithoutInterruptingActiveOwner() {
+        val f=fresh();val session=session(f)
+        main {assertNotNull(f.controller.send(null,"active"))}
+        assertTrue(session.entered.await(5,TimeUnit.SECONDS));val active=f.controller.active!!
+        val before=f.db.messages(active.conversationId)
+        val blocked=another(f)
+        try {
+            awaitController(blocked);assertTrue(blocked.problem!!.startsWith("会话恢复失败"))
+            main {assertNull(blocked.send(null,"must not send"));rejects {blocked.dataTask {"no"}}}
+            assertEquals(before,f.db.messages(active.conversationId));assertEquals(1,f.calls.get())
+            blocked.close()
+            assertEquals(before,f.db.messages(active.conversationId))
+            session.release.countDown();awaitState(f) {f.controller.active==null}
+            assertEquals(RunStatus.COMPLETED,f.db.messages(active.conversationId).last().second.status)
+        } finally {session.release.countDown();blocked.close()}
+    }
+    fun testUncertainTerminalRemainsRunningUntilNewLeaseAndBlocksNewWork() {
+        val f=fresh();val session=session(f)
+        main {assertNotNull(f.controller.send(null,"accepted"))}
+        assertTrue(session.entered.await(5,TimeUnit.SECONDS));val active=f.controller.active!!
+        f.db.writableDatabase.execSQL("CREATE TRIGGER reject_terminal BEFORE UPDATE ON runtime_checkpoints WHEN NEW.phase='TERMINAL' BEGIN SELECT RAISE(ABORT,'injected'); END")
+        session.release.countDown();awaitState(f) {f.controller.active?.error?.startsWith("保存失败")==true}
+        val persisted=f.db.messages(active.conversationId).last().second
+        assertEquals(RunStatus.RUNNING,persisted.status);assertEquals("answer",(persisted.blocks.single() as MessageBlock.Text).text)
+        main {assertNull(f.controller.send(null,"must not send"));rejects {f.controller.dataTask {"no"}}}
+        assertEquals(1,f.calls.get())
+        f.db.writableDatabase.execSQL("DROP TRIGGER reject_terminal")
+        f.controller.close()
+        val replacement=another(f)
+        try {
+            awaitController(replacement);assertNull(replacement.problem);assertNull(replacement.active)
+            val recovered=replacement.database.messages(active.conversationId).last().second
+            assertEquals(RunStatus.INTERRUPTED,recovered.status);assertEquals(persisted.blocks,recovered.blocks)
+            assertEquals(1,f.calls.get())
+        } finally {replacement.close()}
+    }
+    fun testCloseTimeoutKeepsLeaseUntilWorkerActuallyExitsAndCloseCanRetry() {
+        val f=fresh();val entered=CountDownLatch(1);val release=CountDownLatch(1)
+        main {f.controller.dataTask {entered.countDown();check(release.await(25,TimeUnit.SECONDS));"finished"}}
+        assertTrue(entered.await(5,TimeUnit.SECONDS))
+        val failure=AtomicReference<Throwable?>();val closer=Thread {try {f.controller.close()} catch(t:Throwable) {failure.set(t)}}
+        closer.start();closer.join(12_000)
+        try {
+            assertFalse(closer.isAlive);assertTrue(failure.get() is IllegalStateException)
+            val blocked=another(f)
+            try {awaitController(blocked);assertTrue(blocked.problem!!.startsWith("会话恢复失败"))}
+            finally {blocked.close()}
+        } finally {release.countDown();closer.join(5000);f.controller.close()}
+        val replacement=another(f)
+        try {awaitController(replacement);assertNull(replacement.problem)} finally {replacement.close()}
+    }
+
 }

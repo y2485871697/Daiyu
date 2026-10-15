@@ -6,7 +6,7 @@ import unittest
 import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts/cooperation'))
-from evidence import atomic_json, coverage, digest, verify_bundle
+from evidence import SCOPES, UNIT_REPORTS, atomic_json, coverage, digest, verify_bundle
 
 
 class CloudEvidenceTests(unittest.TestCase):
@@ -22,11 +22,12 @@ class CloudEvidenceTests(unittest.TestCase):
             folder.mkdir(parents=True)
             (folder / 'check.log').write_text('BUILD SUCCESSFUL')
             with zipfile.ZipFile(folder / 'reports.zip', 'w') as z:
-                z.writestr('TEST-demo.xml', '<testsuite tests="1" failures="0" errors="0" skipped="0"><testcase name="ok"/></testsuite>')
+                for module in UNIT_REPORTS:
+                    z.writestr(module + '/TEST-demo.xml', '<testsuite tests="1" failures="0" errors="0" skipped="0"><testcase name="ok"/></testsuite>')
             record = dict(check_id=f'github-42-{os_name}', check_attempt=1, source_sha=self.sha,
-                          config_id=self.config, scope='unit', task=':core-domain:test', exit_code=0,
+                          config_id=self.config, scope='unit', task=SCOPES['unit'], exit_code=0,
                           result='passed', incremental_base_sha=self.sha, environment={'os': os_name},
-                          command=['gradlew', ':core-domain:test'], apk_built=False, package_scan='passed',
+                          command=['gradlew', *SCOPES['unit'].split()], apk_built=False, package_scan='passed',
                           log_sha256=digest(folder / 'check.log'), report_sha256=digest(folder / 'reports.zip'))
             atomic_json(folder / 'record.json', record)
             archive = self.base / f'{aid}.zip'

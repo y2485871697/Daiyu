@@ -12,6 +12,8 @@ import app.daiyu.android.context.ContextService
 import app.daiyu.android.context.PrivateBlobs
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.context.ContextRevision
+import app.daiyu.android.model.MessagesRequest
+import app.daiyu.android.model.MessagesStream
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.storage.ModelSettingsStore
 import app.daiyu.android.testContext
@@ -217,6 +219,76 @@ class SegmentedBackupRoundTripTest : InstrumentationTestCase() {
         })
         assertEquals(textBefore, source.db.exportBackup())
         assertRestored(source, seed)
+    }
+
+    fun testMessagesStreamSegmentsSurviveCompletePackageReopenAndHistoryReplayWithoutModelCalls() {
+        val source = fresh()
+        val owner = source.db.create().id
+        val run = RunId("messages-run-${owner.value}")
+        val callId = "messages-call-${owner.value}"
+        val result = "合成工具结果；不执行真实工具"
+        fun stream(messageId: String, text: String, withTool: Boolean): Pair<String, List<MessageBlock>> {
+            val frames = mutableListOf(
+                """{"type":"message_start","message":{"id":"$messageId","role":"assistant","content":[]}}""",
+                """{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"","fixture_marker":"$messageId"}}""",
+                """{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"$text"}}""",
+                """{"type":"content_block_stop","index":0}"""
+            )
+            if (withTool) frames += listOf(
+                """{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"$callId","name":"synthetic_lookup","input":{}}}""",
+                """{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"key\":\"fixture\"}"}}""",
+                """{"type":"content_block_stop","index":1}"""
+            )
+            frames += listOf(
+                """{"type":"message_delta","delta":{"stop_reason":"${if (withTool) "tool_use" else "end_turn"}"}}""",
+                """{"type":"message_stop"}"""
+            )
+            val events = mutableListOf<ModelEvent>()
+            val saved = frames.joinToString("") { "data: $it\n\n" }.reader().buffered().use {
+                MessagesStream.read(it, { false }) { event -> events += event }
+            }
+            assertEquals(listOf(ModelEvent.TextFinal("$messageId:0", text)), events.filterIsInstance<ModelEvent.TextFinal>())
+            assertEquals(messageId, JSONObject(saved).getJSONArray("content").getJSONObject(0).getString("fixture_marker"))
+            val blocks = events.mapNotNull { event -> when (event) {
+                is ModelEvent.TextFinal -> MessageBlock.Text(event.itemId, event.text)
+                is ModelEvent.ToolReady -> MessageBlock.Tool(event.invocation, result)
+                else -> null
+            } }
+            return saved to blocks
+        }
+        val before = stream("messages-before-${owner.value}", "调用前正文", true)
+        val after = stream("messages-after-${owner.value}", "调用后正文", false)
+        val id = MessageId("messages-assistant-${owner.value}")
+        val segments = listOf(
+            MessageHistorySegment(id, "assistant", before.second, listOf(before.first)),
+            MessageHistorySegment(id, "assistant", after.second, listOf(after.first)))
+        val user = Message(MessageId("messages-user-${owner.value}"), owner, run, "user",
+            listOf(MessageBlock.Text("question", "合成问题")), RunStatus.COMPLETED)
+        val reply = Message(id, owner, run, "assistant", segments.flatMap { it.blocks }, RunStatus.COMPLETED,
+            protocolItems = segments.flatMap { it.protocolItems }, historySegments = segments)
+        source.db.send(user, reply.copy(status = RunStatus.RUNNING)); source.db.save(reply)
+        val rows = listOf(user, reply)
+        assertEquals(rows, source.db.messages(owner).map { it.second })
+        val complete = source.backup.exportPackage()
+        val inventory = source.backup.preflight(complete)
+        assertEquals(1, inventory.conversations); assertEquals(2, inventory.messages)
+        assertEquals(0, inventory.archives); assertEquals(0, inventory.attachments)
+        val target = fresh()
+        assertEquals(inventory, target.backup.preflight(complete))
+        val imported = complete.byteInputStream().use { target.backup.importPackage(it) }
+        assertFalse(imported.alreadyImported); assertEquals(inventory, imported.inventory)
+        target.controller.close(); open(target)
+        val restored = target.db.messages(owner).map { it.second }
+        assertEquals(rows, restored); assertEquals(segments, restored.last().historySegments)
+        assertEquals(complete, target.backup.exportPackage())
+        val expected = JSONArray()
+            .put(JSONObject().put("role", "user").put("content", JSONArray().put(JSONObject().put("type", "text").put("text", "合成问题"))))
+            .put(JSONObject(before.first))
+            .put(JSONObject().put("role", "user").put("content", JSONArray().put(JSONObject().put("type", "tool_result").put("tool_use_id", callId).put("content", result))))
+            .put(JSONObject(after.first))
+        assertEquals(expected.toString(), MessagesRequest.history(restored).toString())
+        assertEquals(0, source.modelCalls.get()); assertEquals(0, target.modelCalls.get())
+        assertNull(source.controller.active); assertNull(target.controller.active)
     }
 
     private fun seal(envelope: JSONObject, contents: JSONObject): String {

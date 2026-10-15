@@ -1,0 +1,96 @@
+{
+  "baseline_sha": "ae6e834a554ee85291e00b008e53d227d2ce0a1c",
+  "workflow_path": ".github/workflows/build.yml",
+  "workflow_sha256": "219693727458cfb2bc46ceb8cc6ce127be1b5cf2b94954ebc684f2b3a03b7a16",
+  "scope": "unique fixed action uses entries; separate subactions can share repository LICENSE",
+  "actions": [
+    {
+      "uses": "ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d",
+      "repository": "ReactiveCircus/android-emulator-runner",
+      "revision": "a421e43855164a8197daf9d8d40fe71c6996bb0d",
+      "category": "CI only; not app dependency",
+      "license_status": "fixed_source_text_retrieved",
+      "license_url": "https://raw.githubusercontent.com/ReactiveCircus/android-emulator-runner/a421e43855164a8197daf9d8d40fe71c6996bb0d/LICENSE",
+      "license_path": "THIRD_PARTY/task19/upstream-licenses/ReactiveCircus-android-emulator-runner-a421e438-LICENSE",
+      "bytes": 11343,
+      "sha256": "0b64a565cedfa1ac8d2cd7cf40965e6098f97f260fe51a4df9f697a063d0a8db"
+    },
+    {
+      "uses": "actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "repository": "actions/checkout",
+      "revision": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+      "category": "CI only; not app dependency",
+      "license_status": "fixed_source_text_retrieved",
+      "license_url": "https://raw.githubusercontent.com/actions/checkout/3d3c42e5aac5ba805825da76410c181273ba90b1/LICENSE",
+      "license_path": "THIRD_PARTY/task19/upstream-licenses/actions-checkout-3d3c42e5-LICENSE",
+      "bytes": 1097,
+      "sha256": "3e855ffa704114a51628ef8f0bf3aeb41728adf9d9070e263bf58aa5640b0eb5"
+    },
+    {
+      "uses": "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333",
+      "repository": "actions/download-artifact",
+      "revision": "9000827ccba6bdab643e8b6fd33ac0654aef8333",
+      "category": "CI only; not app dependency",
+      "license_status": "fixed_source_text_retrieved",
+      "license_url": "https://raw.githubusercontent.com/actions/download-artifact/9000827ccba6bdab643e8b6fd33ac0654aef8333/LICENSE",
+      "license_path": "THIRD_PARTY/task19/upstream-licenses/actions-download-artifact-9000827c-LICENSE",
+      "bytes": 1097,
+      "sha256": "3e855ffa704114a51628ef8f0bf3aeb41728adf9d9070e263bf58aa5640b0eb5"
+    },
+    {
+      "uses": "actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6",
+      "repository": "actions/setup-java",
+      "revision": "de7274f081f381c8f8158605e0321c36c376e2e6",
+      "category": "CI only; not app dependency",
+      "license_status": "fixed_source_text_retrieved",
+      "license_url": "https://raw.githubusercontent.com/actions/setup-java/de7274f081f381c8f8158605e0321c36c376e2e6/LICENSE",
+      "license_path": "THIRD_PARTY/task19/upstream-licenses/actions-setup-java-de7274f0-LICENSE",
+      "bytes": 1096,
+      "sha256": "7d070f6b64d9bcc530fe99cc21eaaa4b3c364e0b2d367d7735671fa202a03b32"
+    },
+    {
+      "uses": "actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+      "repository": "actions/upload-artifact",
+      "revision": "cf430e030ddbb5b0abf93d22962f4752f3646cd9",
+      "category": "CI only; not app dependency",
+      "license_status": "fixed_source_text_retrieved",
+      "license_url": "https://raw.githubusercontent.com/actions/upload-artifact/cf430e030ddbb5b0abf93d22962f4752f3646cd9/LICENSE",
+      "license_path": "THIRD_PARTY/task19/upstream-licenses/actions-upload-artifact-cf430e03-LICENSE",
+      "bytes": 1097,
+      "sha256": "3e855ffa704114a51628ef8f0bf3aeb41728adf9d9070e263bf58aa5640b0eb5"
+    },
+    {
+      "uses": "android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd",
+      "repository": "android-actions/setup-android",
+      "revision": "be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd",
+      "category": "CI only; not app dependency",
+      "license_status": "fixed_source_text_retrieved",
+      "license_url": "https://raw.githubusercontent.com/android-actions/setup-android/be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd/LICENSE",
+      "license_path": "THIRD_PARTY/task19/upstream-licenses/android-actions-setup-android-be39fa83-LICENSE",
+      "bytes": 1071,
+      "sha256": "e286712adf3180a55df8d91bea69712585319019acef683549217ca02d7cc3ec"
+    },
+    {
+      "uses": "gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6",
+      "repository": "gradle/actions",
+      "revision": "3f5f9adaf7d9fecd50b5935e54106014257a94e6",
+      "category": "CI only; not app dependency",
+      "license_status": "fixed_source_text_retrieved",
+      "license_url": "https://raw.githubusercontent.com/gradle/actions/3f5f9adaf7d9fecd50b5935e54106014257a94e6/LICENSE",
+      "license_path": "THIRD_PARTY/task19/upstream-licenses/gradle-actions-3f5f9ada-LICENSE",
+      "bytes": 1615,
+      "sha256": "1630d48dbf619d1bbf9d5718cbc28a597a352117435aad6c2c55d7980852ce19"
+    },
+    {
+      "uses": "gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6",
+      "repository": "gradle/actions",
+      "revision": "3f5f9adaf7d9fecd50b5935e54106014257a94e6",
+      "category": "CI only; not app dependency",
+      "license_status": "fixed_source_text_retrieved",
+      "license_url": "https://raw.githubusercontent.com/gradle/actions/3f5f9adaf7d9fecd50b5935e54106014257a94e6/LICENSE",
+      "license_path": "THIRD_PARTY/task19/upstream-licenses/gradle-actions-3f5f9ada-LICENSE",
+      "bytes": 1615,
+      "sha256": "1630d48dbf619d1bbf9d5718cbc28a597a352117435aad6c2c55d7980852ce19"
+    }
+  ]
+}

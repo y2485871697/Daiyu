@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "baseline_sha": "ae6e834a554ee85291e00b008e53d227d2ce0a1c",
+  "scope": "Baseline tracked source-tree artifacts and existing license/notice files only; not resolved transitive dependencies, APK contents, or planned migration binaries.",
+  "records": [
+    {
+      "path": "LICENSE",
+      "bytes": 34523,
+      "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+      "kind": "license_or_notice"
+    },
+    {
+      "path": "THIRD_PARTY/gradle-LICENSE",
+      "bytes": 10174,
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "kind": "license_or_notice"
+    },
+    {
+      "path": "THIRD_PARTY/rikkahub/LICENSE",
+      "bytes": 34523,
+      "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+      "kind": "license_or_notice"
+    },
+    {
+      "path": "THIRD_PARTY/rikkahub/NOTICE.md",
+      "bytes": 1357,
+      "sha256": "daad4386d288edb084c54340284a42810da451f9bc19bb0049a0fb9d52a86a08",
+      "kind": "license_or_notice"
+    },
+    {
+      "path": "gradle/wrapper/gradle-wrapper.jar",
+      "bytes": 48749,
+      "sha256": "3b8a25775a69158b5ad2b1d17a80a88dc7b40a352a73eb27d06c612a7ce68e98",
+      "kind": "tracked_artifact"
+    }
+  ]
+}

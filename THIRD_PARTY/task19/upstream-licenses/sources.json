@@ -1,0 +1,19 @@
+{
+  "baseline_sha": "ae6e834a554ee85291e00b008e53d227d2ce0a1c",
+  "sources": [
+    {
+      "path": "THIRD_PARTY/task19/upstream-licenses/rikkahub-c94237e-LICENSE",
+      "url": "https://raw.githubusercontent.com/rikkahub/rikkahub/c94237eaa36c84816ab7e2e6dee9ce82477d4725/LICENSE",
+      "bytes": 34523,
+      "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+      "scope": "fixed upstream license text only, no migrated file identity inference"
+    },
+    {
+      "path": "THIRD_PARTY/task19/upstream-licenses/openminis-4ef2900-LICENSE",
+      "url": "https://raw.githubusercontent.com/OpenMinis/OpenMinis/4ef29002e88db1e20e462ec2ff46916e8a7dcb45/LICENSE",
+      "bytes": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "scope": "fixed upstream license text only, no migrated file identity inference"
+    }
+  ]
+}

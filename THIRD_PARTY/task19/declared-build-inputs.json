@@ -1,0 +1,22 @@
+{
+  "baseline_sha": "ae6e834a554ee85291e00b008e53d227d2ce0a1c",
+  "scope": "literal tracked Gradle declarations; not resolved transitive dependencies",
+  "inputs": [
+    {
+      "path": "build.gradle.kts",
+      "text": "plugins {\n    id(\"com.android.application\") version \"9.5.0-alpha09\" apply false\n    kotlin(\"jvm\") version \"2.4.21\" apply false\n}\n"
+    },
+    {
+      "path": "core-domain/build.gradle.kts",
+      "text": "plugins { kotlin(\"jvm\") }\nkotlin {\n    jvmToolchain(27)\n    compilerOptions { jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17 }\n}\ntasks.withType<JavaCompile>().configureEach { options.release = 17 }\ndependencies { testImplementation(\"junit:junit:4.13.2\") }\ntasks.test { useJUnit() }\n"
+    },
+    {
+      "path": "app/build.gradle.kts",
+      "text": "plugins { id(\"com.android.application\") }\nandroid {\n    useLibrary(\"android.test.runner\")\n    useLibrary(\"android.test.base\")\n    useLibrary(\"android.test.mock\")\n    namespace = \"app.daiyu.android\"\n    compileSdk { version = release(37) { minorApiLevel = 2 } }\n    buildToolsVersion = \"37.0.0\"\n    defaultConfig {\n        applicationId = \"app.daiyu.android\"\n        minSdk = 26\n        targetSdk = 37\n        testInstrumentationRunner = \"android.test.InstrumentationTestRunner\"\n        versionCode = 1\n        versionName = \"0.1.0\"\n    }\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }\n    val signingValues = listOf(\n        \"DAIYU_RELEASE_STORE_FILE\", \"DAIYU_RELEASE_STORE_PASSWORD\",\n        \"DAIYU_RELEASE_KEY_ALIAS\", \"DAIYU_RELEASE_KEY_PASSWORD\"\n    ).map { System.getenv(it)?.takeIf(String::isNotBlank) }\n    val fixedSigning = signingValues.all { it != null }\n    check(signingValues.all { it == null } || fixedSigning) { \"固定签名配置不完整\" }\n    check(System.getenv(\"DAIYU_REQUIRE_SIGNING\") != \"true\" || fixedSigning) { \"交付构建必须配置固定签名\" }\n    if (fixedSigning) {\n        signingConfigs.create(\"release\") {\n            storeFile = file(signingValues[0]!!)\n            storePassword = signingValues[1]\n            keyAlias = signingValues[2]\n            keyPassword = signingValues[3]\n            storeType = \"PKCS12\"\n            check(storeFile!!.isFile) { \"固定签名文件不存在\" }\n        }\n    }\n    buildTypes {\n        debug { if (fixedSigning) signingConfig = signingConfigs.getByName(\"release\") }\n        release {\n            isMinifyEnabled = false\n            if (fixedSigning) signingConfig = signingConfigs.getByName(\"release\")\n        }\n    }\n}\nkotlin { jvmToolchain(27) }\ndependencies { implementation(project(\":core-domain\")) }\n"
+    },
+    {
+      "path": "gradle/wrapper/gradle-wrapper.properties",
+      "text": "distributionBase=GRADLE_USER_HOME\ndistributionPath=wrapper/dists\ndistributionUrl=https\\://services.gradle.org/distributions/gradle-9.8.1-bin.zip\ndistributionSha256Sum=dce76f55f8e251a3a1f130eb120f30b3d271de2b76c9b0729d316b5a1b6dc01f\nnetworkTimeout=60000\nvalidateDistributionUrl=true\nzipStoreBase=GRADLE_USER_HOME\nzipStorePath=wrapper/dists\n"
+    }
+  ]
+}

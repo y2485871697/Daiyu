@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.22)
+project(daiyu_terminal C)
+add_executable(daiyu_pty daiyu_pty.c)
+target_compile_features(daiyu_pty PRIVATE c_std_11)
+target_compile_options(daiyu_pty PRIVATE -Wall -Wextra -Werror)
+if(ANDROID)
+    target_link_options(daiyu_pty PRIVATE -Wl,-z,max-page-size=16384)
+endif()

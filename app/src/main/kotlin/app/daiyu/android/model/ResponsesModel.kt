@@ -75,8 +75,9 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
                 schemas.put(JSONObject().put("type","function").put("name",definition.name).put("description",definition.description)
                     .put("parameters",JSONObject(definition.parameters)).put("strict",false))
             }
-            val request=JSONObject().put("model",settings.model).put("input",input).put("stream",true).put("store",false).put("include",JSONArray().put("reasoning.encrypted_content"))
-            if(schemas.length()>0) request.put("tools",schemas)
+            val baseRequest=JSONObject().put("model",settings.model).put("input",input).put("stream",true).put("store",false).put("include",JSONArray().put("reasoning.encrypted_content"))
+            if(schemas.length()>0) baseRequest.put("tools",schemas)
+            val request=settings.requestOptions.apply(baseRequest,ProviderProtocol.RESPONSES)
             var deliveryFailure:Exception?=null
             val deliver:(ModelEvent)->Unit={event ->
                 checkCancelled()

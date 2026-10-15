@@ -170,7 +170,8 @@ class ChatRunnerTest {
         try {
             assertTrue(completing.await(5,TimeUnit.SECONDS));stopper.start()
             stopTask.get(1,TimeUnit.SECONDS)
-            assertTrue(stopper.state != Thread.State.BLOCKED)
+            stopper.join(1000)
+            assertFalse("stop must finish while completion persistence remains blocked",stopper.isAlive)
             release.countDown();val result=task.get(5,TimeUnit.SECONDS)
             assertEquals(RunStatus.COMPLETED,result.status)
             assertEquals(listOf(RunStatus.COMPLETED),saved.filter {it.status!=RunStatus.RUNNING}.map {it.status})

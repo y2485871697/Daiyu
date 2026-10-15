@@ -107,10 +107,11 @@ class ControllerRunControlTest:InstrumentationTestCase() {
             f.controller.close()
             assertNull(f.controller.runState(owner));assertFalse(f.controller.pause(owner));assertFalse(f.controller.resume(owner));assertFalse(f.controller.stop(owner))
         }
-        app.daiyu.android.storage.ConversationDatabase(f.application).use {reopened ->
+        val reopened=app.daiyu.android.storage.ConversationDatabase(f.application)
+        try {
             assertEquals(RunStatus.STOPPED,reopened.messages(owner.conversationId).last().second.status)
             assertEquals(2,reopened.messages(owner.conversationId).size)
-        }
+        } finally {reopened.close()}
         assertEquals(1,f.opens.get())
     }
 

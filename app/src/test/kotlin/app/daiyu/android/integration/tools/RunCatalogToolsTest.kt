@@ -35,7 +35,7 @@ class RunCatalogToolsTest {
     private fun ownedTools(registry: ToolRegistry, capabilities: SessionCapabilities, ledger: ToolLedger,
         conversation: ConversationId, run: RunId,
         capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession): RunCatalogTools =
-        RunCatalogTools(registry, capabilities, ledger, conversation, run, capture).apply { bindOwner(runnerOwner(owner)) }
+        RunCatalogTools(registry, capabilities, ledger, conversation, run, capture = capture).apply { bindOwner(runnerOwner(owner)) }
 
     private val revision = "a".repeat(64)
     private val capabilities = SessionCapabilities("run", setOf(SkillRunSession.READ, SkillRunSession.RESOURCE))

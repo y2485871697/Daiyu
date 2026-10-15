@@ -358,7 +358,15 @@ class QuestionBarrierTest {
     }
 
     @Test fun failedCloseStillWakesClearsDisplayAndCanRetryDurableInterruption() {
-        val store = Store(); val barrier = QuestionBarrier(store)
+        val store = Store()
+        val waiting = CountDownLatch(1)
+        val reads = java.util.concurrent.atomic.AtomicInteger()
+        val observed = object : QuestionStore by store {
+            override fun get(callId: String): QuestionRecord? = store.get(callId).also {
+                if (reads.incrementAndGet() == 2) waiting.countDown()
+            }
+        }
+        val barrier = QuestionBarrier(observed)
         val ready = CountDownLatch(1); val done = CountDownLatch(1)
         val result = AtomicReference<Throwable>(); var cleared = 0
         val disk = IllegalStateException("private-store-detail")
@@ -372,7 +380,8 @@ class QuestionBarrierTest {
         worker.start()
         try {
             assertTrue(ready.await(2, TimeUnit.SECONDS))
-            // Acquiring the barrier monitor after ready ensures execute is registered/waiting.
+            await(waiting)
+            // The wait-loop read follows notification drain; acquiring monitor proves wait().
             barrier.records()
             store.interruptFailure = disk
             try { barrier.close(); fail("expected failed durable interruption") } catch (error: IllegalStateException) { assertSame(disk, error); assertSame(ui, error.suppressed.single()) }

@@ -1,0 +1,93 @@
+package app.daiyu.android
+
+import app.daiyu.android.context.ContextService
+import app.daiyu.android.domain.*
+import app.daiyu.android.storage.ConversationDatabase
+import app.daiyu.android.ui.RetainedConversationData
+
+@Suppress("DEPRECATION")
+class RetainedConversationDataTest : android.test.AndroidTestCase() {
+    private lateinit var scoped: android.content.Context
+    private lateinit var database: ConversationDatabase
+    private lateinit var data: RetainedConversationData
+    override fun setUp() {
+        super.setUp(); scoped = testContext(context, "retained-ui-${java.util.UUID.randomUUID()}-")
+        database = ConversationDatabase(scoped)
+        data = RetainedConversationData(database, ContextService(scoped, database))
+    }
+    override fun tearDown() {
+        try { database.close(); scoped.deleteDatabase("conversations.db") } finally { super.tearDown() }
+    }
+    fun testFolderCatalogPersistsEmptyFoldersAndKeepsPinnedMembershipOnRenameAndDelete() {
+        val conversation = database.create()
+        data.createFolder("独立空目录")
+        assertEquals(listOf("独立空目录"), data.folders().map { it.name })
+        database.close(); database = ConversationDatabase(scoped)
+        data = RetainedConversationData(database, ContextService(scoped, database))
+        assertEquals(listOf("独立空目录"), data.folders().map { it.name })
+        database.organize(conversation.id, "独立空目录", true)
+        data.changeFolder("独立空目录", "更名")
+        assertEquals("更名", database.conversations().single().folder)
+        assertTrue(database.conversations().single().pinned)
+        database.close(); database = ConversationDatabase(scoped)
+        data = RetainedConversationData(database, ContextService(scoped, database))
+        assertEquals(listOf("更名"), data.folders().map { it.name })
+        data.changeFolder("更名", null)
+        assertTrue(data.folders().isEmpty())
+        assertEquals("", database.conversations().single().folder)
+        assertTrue(database.conversations().single().pinned)
+    }
+    fun testFolderRenameConflictPreservesBothCatalogAndConversation() {
+        val conversation = database.create()
+        data.createFolder("原目录"); data.createFolder("目标")
+        database.organize(conversation.id, "原目录", true)
+        try { data.changeFolder("原目录", "目标"); fail("conflict accepted") } catch (_: IllegalStateException) { }
+        assertEquals(setOf("原目录", "目标"), data.folders().map { it.name }.toSet())
+        assertEquals("原目录", database.conversations().single().folder)
+    }
+    fun testFullHistorySearchReturnsExactOlderMessageIdentityAndStatsDoNotInventUsage() {
+        val conversation = database.create()
+        val run = RunId("search-run")
+        val user = Message(MessageId("older-user"), conversation.id, run, "user", listOf(MessageBlock.Text("needle-text", "before Needle after")), RunStatus.COMPLETED)
+        val assistant = Message(MessageId("older-answer"), conversation.id, run, "assistant", emptyList(), RunStatus.RUNNING)
+        database.send(user, assistant)
+        database.save(assistant.copy(status = RunStatus.COMPLETED))
+        repeat(60) { n ->
+            val r = RunId("later-$n")
+            val u = Message(MessageId("u-$n"), conversation.id, r, "user", listOf(MessageBlock.Text("text-$n", "later $n")), RunStatus.COMPLETED)
+            val a = Message(MessageId("a-$n"), conversation.id, r, "assistant", emptyList(), RunStatus.RUNNING)
+            database.send(u, a); database.save(a.copy(status = RunStatus.COMPLETED))
+        }
+        val hit = data.search("needle").single()
+        assertEquals(conversation.id.value, hit.conversationId); assertEquals(user.id.value, hit.messageId)
+        val snapshot = data.stats()
+        assertEquals(1, snapshot.currentConversations); assertEquals(122, snapshot.currentMessages)
+        assertFalse(snapshot.heatmapAvailable); assertFalse(snapshot.tokenAccountingAvailable); assertFalse(snapshot.lifetimeAccountingAvailable)
+        assertTrue(snapshot.modelUsage.providers.isEmpty())
+        val summary = data.summaries(null).single()
+        assertFalse(summary.isActiveRun); assertFalse(summary.hasCompletionMarker)
+    }
+    fun testDeleteAllRollsBackEarlierDeletesWhenLaterDeleteFails() {
+        val first = database.create(); val second = database.create()
+        val last = database.conversations().last().id.value
+        database.writableDatabase.execSQL("CREATE TRIGGER reject_one BEFORE DELETE ON conversations WHEN old.id='$last' BEGIN SELECT RAISE(ABORT,'test'); END")
+        try { data.deleteAll(); fail("failure missing") } catch (_: android.database.sqlite.SQLiteException) { }
+        assertEquals(setOf(first.id, second.id), database.conversations().map { it.id }.toSet())
+        database.writableDatabase.execSQL("DROP TRIGGER reject_one")
+        data.deleteAll(); assertTrue(database.conversations().isEmpty())
+    }
+    fun testVersionSixUpgradePreservesHistoryDraftPinAndExistingFolder() {
+        val conversation = database.create()
+        database.draft(conversation.id, "迁移草稿")
+        database.organize(conversation.id, "已有目录", true)
+        database.writableDatabase.execSQL("DROP TABLE conversation_folders")
+        database.writableDatabase.version = 6
+        database.close(); database = ConversationDatabase(scoped)
+        data = RetainedConversationData(database, ContextService(scoped, database))
+        assertEquals(7, database.readableDatabase.version)
+        val restored = database.conversations().single()
+        assertEquals(conversation.id, restored.id); assertEquals("迁移草稿", restored.draft)
+        assertEquals("已有目录", restored.folder); assertTrue(restored.pinned)
+        assertEquals(listOf("已有目录"), data.folders().map { it.name })
+    }
+}

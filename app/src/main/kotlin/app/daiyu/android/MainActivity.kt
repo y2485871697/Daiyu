@@ -1,6 +1,26 @@
 package app.daiyu.android
 
-import android.app.Activity
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.viewinterop.AndroidView
+import app.daiyu.android.context.ContextService
+import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.ui.RetainedConversationData
+import app.daiyu.android.ui.app.AgentAppTheme
+import app.daiyu.android.ui.components.ConversationSidePaneScaffold
+import app.daiyu.android.ui.model.ConversationPaneUiState
+import app.daiyu.android.ui.model.ConversationSummaryUi
+import app.daiyu.android.ui.model.MessageSearchHit
+import app.daiyu.android.ui.screens.chat.ManageChatsScreen
+import app.daiyu.android.ui.screens.stats.UsageStatsScreen
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import android.app.AlertDialog
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -23,8 +43,12 @@ import app.daiyu.android.skills.SkillManagementDialog
 import app.daiyu.android.ui.FeatureHubDialog
 import app.daiyu.android.ui.FeatureRoute
 
-class MainActivity:Activity() {
+class MainActivity:ComponentActivity() {
     private val controller get()=(application as ChatApplication).controller
+    private var sidebarVisible by mutableStateOf(false)
+    private var retainedPage by mutableStateOf("chat")
+    private var paneState by mutableStateOf(ConversationPaneUiState(emptyList(), null, ""))
+    private val retainedData by lazy { RetainedConversationData(controller.database, ContextService(this, controller.database)) }
     private lateinit var root:LinearLayout
     private lateinit var timeline:LinearLayout
     private lateinit var scroll:ScrollView
@@ -98,7 +122,7 @@ class MainActivity:Activity() {
         root.addView(TextView(this).apply {text="代鱼 · 聊天";textSize=24f})
         val toolbar=LinearLayout(this)
         fun button(label:String,action:()->Unit)=Button(this).apply {text=label;setOnClickListener {guard {check(!controller.dataBusy);action()}}}
-        toolbar.addView(button("会话") {chooseConversation()});toolbar.addView(button("新建") {select(null)})
+        toolbar.addView(button("会话") {openSidebar()});toolbar.addView(button("新建") {select(null)})
         toolbar.addView(button("模型设置") {modelSettings()});root.addView(toolbar)
         val utilities=LinearLayout(this)
         utilities.addView(button("备份与导入") {backupMenu()})
@@ -178,7 +202,68 @@ class MainActivity:Activity() {
             true
         }
         actions.addView(send);actions.addView(stop);actions.addView(button("回到底部") {jumpToBottom()})
-        root.addView(actions);setContentView(root);root.requestApplyInsets()
+        root.addView(actions)
+        setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
+                BackHandler(enabled = retainedPage != "chat") { retainedPage = "chat" }
+                when (retainedPage) {
+                    "manage" -> ManageChatsScreen(
+                        conversations = paneState.historyConversations,
+                        onBack = { retainedPage = "chat" },
+                        onOpenConversation = { id -> guard { openRetainedConversation(id) } },
+                        onTogglePin = { id -> guard { toggleRetainedPin(id) } },
+                        onDeleteConversation = { item -> guard { deleteRetainedConversation(item.id) } },
+                        onDeleteAll = { guard {
+                            check(controller.active == null) { "请先停止当前运行" }
+                            retainedData.deleteAll(); select(null); updatePane()
+                        } },
+                        onSearchHistory = { query -> withContext(Dispatchers.IO) { retainedData.search(query) } },
+                        onOpenHistoryHit = { hit -> guard { openHistoryHit(hit) } },
+                    )
+                    "usage" -> UsageStatsScreen(onBack = { retainedPage = "chat" }, load = { retainedData.stats() })
+                    else -> ConversationSidePaneScaffold(
+                        state = paneState, visible = sidebarVisible, backHandlerEnabled = true,
+                        onOpen = { openSidebar() }, onDismiss = { dismissSidebar() },
+                        onSearchChange = { paneState = paneState.copy(searchQuery = it) },
+                        onConversationSelected = { id -> guard { openRetainedConversation(id) } },
+                        onConversationRename = { item -> editRetainedConversation(item, false) },
+                        onConversationDelete = { item ->
+                            AlertDialog.Builder(this).setMessage("确认删除此会话及其消息？")
+                                .setNegativeButton("取消", null).setPositiveButton("删除") { _, _ ->
+                                    guard { deleteRetainedConversation(item.id) }
+                                }.show()
+                        },
+                        onMoveConversationToFolder = { item -> editRetainedConversation(item, true) },
+                        onConversationTogglePin = { item -> guard { toggleRetainedPin(item.id) } },
+                        onConversationExport = { openFeatureHub("P38.files") },
+                        onNewConversation = { guard { dismissSidebar(); select(null) } },
+                        onOpenManageChats = { guard { dismissSidebar(); updatePane(); retainedPage = "manage" } },
+                        onSelectFolder = { id -> paneState = paneState.copy(selectedFolderId = id); updatePane() },
+                        onCreateFolder = { name -> guard { retainedData.createFolder(name); updatePane() } },
+                        onRenameFolder = { old, name -> guard {
+                            retainedData.changeFolder(old, name)
+                            if (paneState.selectedFolderId == old) paneState = paneState.copy(selectedFolderId = name)
+                            updatePane()
+                        } },
+                        onDeleteFolder = { name -> guard {
+                            retainedData.changeFolder(name, null)
+                            if (paneState.selectedFolderId == name) paneState = paneState.copy(selectedFolderId = null)
+                            updatePane()
+                        } },
+                        onSelectAssistant = {}, onEditAssistant = { openFeatureHub("P01") },
+                        onOpenAssistants = { dismissSidebar(); openFeatureHub("P01") },
+                        onOpenSettings = { dismissSidebar(); openFeatureHub() },
+                        onOpenModelProviders = { dismissSidebar(); guard { modelSettings() } },
+                        onOpenUsageStats = { dismissSidebar(); retainedPage = "usage" },
+                        onOpenSkills = { dismissSidebar(); guard { openSkillManagement() } },
+                        onOpenPermissions = { dismissSidebar(); openFeatureHub("R06") },
+                    ) {
+                        AndroidView(factory = { root }, modifier = Modifier.fillMaxSize())
+                    }
+                }
+            }
+        }
+        root.requestApplyInsets()
         activityCallbacksAllowed=true
         controller.observe(listener);refresh()
         pendingBackupRequest=state?.getInt("pending-backup-request",0)?.takeIf {it!=0}
@@ -297,11 +382,14 @@ class MainActivity:Activity() {
                 guard {chooseConversation(folder=folders[index])}
             }.show()
     }
-    private fun openFeatureHub() {
+    private fun openFeatureHub(entryId: String? = null) {
         featureHubDialog?.dismiss()
         featureHubDialog=FeatureHubDialog(this) {route ->
             if(activityUsable()) guard {
                 when(route) {
+                    FeatureRoute.SIDEBAR -> { retainedPage = "chat"; openSidebar() }
+                    FeatureRoute.MANAGE_CHATS -> { updatePane(); retainedPage = "manage" }
+                    FeatureRoute.USAGE_STATS -> { retainedPage = "usage" }
                     FeatureRoute.CONVERSATIONS -> chooseConversation()
                     FeatureRoute.MODEL_SETTINGS -> modelSettings()
                     FeatureRoute.SKILLS -> openSkillManagement()
@@ -312,7 +400,81 @@ class MainActivity:Activity() {
                     FeatureRoute.USER_MESSAGE -> chooseUserMessage()
                 }
             }
-        }.also {it.show()}
+        }.also {it.show(entryId)}
+    }
+    private fun openSidebar() {
+        guard {
+            updatePane()
+            input.clearFocus()
+            (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                .hideSoftInputFromWindow(input.windowToken, 0)
+            sidebarVisible = true
+            input.isEnabled = false
+        }
+    }
+    private fun dismissSidebar() {
+        sidebarVisible = false
+        if (activityUsable()) refresh()
+    }
+    private fun updatePane() {
+        if (!controller.ready || controller.dataBusy) return
+        val all = retainedData.summaries(controller.active)
+        paneState = paneState.copy(
+            conversations = all.filter { it.folderId == paneState.selectedFolderId },
+            historyConversations = all, selectedConversationId = selected?.id?.value,
+            folders = retainedData.folders(),
+        )
+    }
+    private fun retainedConversation(id: String) = controller.database.conversations().single { it.id.value == id }
+    private fun openRetainedConversation(id: String) {
+        val conversation = retainedConversation(id)
+        dismissSidebar(); retainedPage = "chat"; select(conversation)
+    }
+    private fun toggleRetainedPin(id: String) {
+        val conversation = retainedConversation(id)
+        controller.database.organize(conversation.id, conversation.folder, !conversation.pinned)
+        updatePane()
+    }
+    private fun deleteRetainedConversation(id: String) {
+        val conversation = retainedConversation(id)
+        check(controller.active?.conversationId != conversation.id) { "请先停止此会话的运行" }
+        controller.database.delete(conversation.id)
+        if (selected?.id == conversation.id) select(null)
+        updatePane()
+    }
+    private fun editRetainedConversation(item: ConversationSummaryUi, folder: Boolean) {
+        guard {
+            val current = retainedConversation(item.id)
+            val editor = EditText(this).apply { setText(if (folder) current.folder else current.title) }
+            AlertDialog.Builder(this).setTitle(if (folder) "移动到文件夹" else "重命名")
+                .setView(editor).setNegativeButton("取消", null).setPositiveButton("保存") { _, _ -> guard {
+                    val latest = retainedConversation(item.id)
+                    if (folder) controller.database.organize(latest.id, editor.text.toString(), latest.pinned)
+                    else controller.database.rename(latest.id, editor.text.toString())
+                    if (selected?.id == latest.id) selected = retainedConversation(item.id)
+                    updatePane(); refresh()
+                } }.show()
+        }
+    }
+    private fun openHistoryHit(hit: MessageSearchHit) {
+        val conversation = retainedConversation(hit.conversationId)
+        openRetainedConversation(hit.conversationId)
+        // Load the owner row, not an arbitrary most-recent page.
+        val db = controller.database.readableDatabase
+        val sequence = db.rawQuery("SELECT seq FROM messages WHERE conversation_id=? AND id=?",
+            arrayOf(conversation.id.value, hit.ownerMessageId)).use { cursor ->
+            check(cursor.moveToFirst()) { "命中消息已不存在" }; cursor.getLong(0)
+        }
+        shown = controller.database.messages(conversation.id, sequence + 1, 50).toMutableList()
+        renderAll(); followsBottom = false; scroll.removeCallbacks(initialBottom); cancelBottomFollow()
+        root.post {
+            if (activityUsable() && selected?.id == conversation.id) afterScrollLayout {
+                if (scroll.height == 0 || timeline.isLayoutRequested) false else {
+                    rows[MessageId(hit.ownerMessageId)]?.let { row -> scroll.smoothScrollTo(0, row.top) }
+                    true
+                }
+            }
+        }
     }
     private fun toast(text:String) {Toast.makeText(this,text,Toast.LENGTH_LONG).show()}
     private fun guard(action:()->Unit) {try {requireActivityUsable();check(!controller.dataBusy);action()} catch (_:Exception) {toast("操作或保存失败；原数据保留")} }
@@ -342,7 +504,7 @@ class MainActivity:Activity() {
         (if(controlTouchActive) controlTouchOwner else controlOwner)?.takeIf {it.conversationId==selected?.id}
     private fun refresh() {
         if(!activityUsable()) return
-        input.isEnabled=controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true
+        input.isEnabled=!sidebarVisible && controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true
         send.isEnabled=controller.ready && !controller.dataBusy && controller.active==null && controller.problem?.startsWith("会话恢复失败")!=true
         controlOwner=controller.active?.takeIf {it.conversationId==selected?.id && it.status==RunStatus.RUNNING}
         val controlState=controlOwner?.let {controller.runState(it)}
@@ -382,6 +544,7 @@ class MainActivity:Activity() {
             val activityState=if(active==null) "已就绪" else if(active.conversationId!=selected?.id) "其他会话运行中"
                 else if(controlState?.pauseRequested==true) "已请求暂停；点击继续，长按停止" else "运行中"
             status.text=controller.problem ?: "${selected?.title ?: "未创建会话"} · $activityState"
+            if (sidebarVisible || retainedPage == "manage") updatePane()
         }
     }
     private fun renderAll() {cancelTurnJump();timeline.removeAllViews();rows.clear();shown.forEach {updateRow(it.second)} }

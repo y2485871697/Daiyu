@@ -1,0 +1,195 @@
+{
+  "source_sha": "f001fb82eb9941e5673970c656f5c4d5370fbf7f",
+  "files": [
+    {
+      "source": "ui/components/ConversationSidePaneScaffold.kt",
+      "source_sha256": "6b315c8f3be4faf0415108e274215997a6e7e5d63d8c653a15cb5ea9f27d54aa",
+      "target": "ui/components/ConversationSidePaneScaffold.kt"
+    },
+    {
+      "source": "ui/components/MiuixScaffoldPage.kt",
+      "source_sha256": "da6210255628148f8f62515f58f897c1012e7c1fb59d4c7df29d6e40ae5008c4",
+      "target": "ui/components/MiuixScaffoldPage.kt"
+    },
+    {
+      "source": "ui/components/MiuixDialogActions.kt",
+      "source_sha256": "385d2dee34caaf488e0b976f7326bef5dbc90e5a8d6e5f803350fdd3480da8d3",
+      "target": "ui/components/MiuixDialogActions.kt"
+    },
+    {
+      "source": "ui/components/EtaDropdownMenu.kt",
+      "source_sha256": "c2fb6434eb842f0877bb799d6ec372662ae68a77c5ceacf01a010b8f8acf7b28",
+      "target": "ui/components/EtaDropdownMenu.kt"
+    },
+    {
+      "source": "ui/components/AdaptiveTopAppBar.kt",
+      "source_sha256": "d954370f76c757e75ef578d1468e1509ea729fa57fd167cc1c2bf608ce8133eb",
+      "target": "ui/components/AdaptiveTopAppBar.kt"
+    },
+    {
+      "source": "ui/components/MiuixBackButton.kt",
+      "source_sha256": "698329f9df3c690aa20f41304069550ee39c49bda249679b8b9636277b2f4311",
+      "target": "ui/components/MiuixBackButton.kt"
+    },
+    {
+      "source": "ui/components/TopBarBackdrop.kt",
+      "source_sha256": "de251355afbbe035425802df2121eab7fcd22aee8eb13c585b208e8374bb2941",
+      "target": "ui/components/TopBarBackdrop.kt"
+    },
+    {
+      "source": "ui/components/NoRippleIndication.kt",
+      "source_sha256": "15f3e9b80735b7750dcb985bb6b742275d70c29f7e42a3438f8a4db503e29d62",
+      "target": "ui/components/NoRippleIndication.kt"
+    },
+    {
+      "source": "ui/components/EditorScrollIsolation.kt",
+      "source_sha256": "f08d9c21b2bfa187a7b884829860480bdf64c11e41abefe88c0f6b99c16aa61b",
+      "target": "ui/components/EditorScrollIsolation.kt"
+    },
+    {
+      "source": "ui/model/ConversationUiState.kt",
+      "source_sha256": "c9ca2c2c10f3008c1ef4a1a081d0816f64781f0f05e5ce93d238a69e486df04b",
+      "target": "ui/model/ConversationUiState.kt"
+    },
+    {
+      "source": "ui/app/AgentAppTheme.kt",
+      "source_sha256": "391a46a43e936b838258003c27f79094b255c3cbf60fba4bd0ac395c7a04a0cf",
+      "target": "ui/app/AgentAppTheme.kt"
+    },
+    {
+      "source": "ui/app/AppearanceThemeLocals.kt",
+      "source_sha256": "e7daa261826dcc8b18a4f3bbeeb91609934ab6c718d18e369312d67be35f7d03",
+      "target": "ui/app/AppearanceThemeLocals.kt"
+    },
+    {
+      "source": "ui/app/SearchHistoryDialog.kt",
+      "source_sha256": "b8055974d6901334796bda73eb666c614e1c0fd11712a139a39dc017659b7199",
+      "target": "ui/app/SearchHistoryDialog.kt"
+    },
+    {
+      "source": "ui/app/ConversationTokenUsageDialog.kt",
+      "source_sha256": "57730c33a7ad21a07ef4e2a79bc9405896bc3053166e41fa746c4074070b25c2",
+      "target": "ui/app/ConversationTokenUsageDialog.kt"
+    },
+    {
+      "source": "ui/layout/AdaptivePageLayout.kt",
+      "source_sha256": "fddbaa5e3a6f9cc49f1fba23909ecebf6ea7fd323ba29b39828e8b8e3abacfee",
+      "target": "ui/layout/AdaptivePageLayout.kt"
+    },
+    {
+      "source": "ui/screens/chat/ManageChatsScreen.kt",
+      "source_sha256": "3961a3d07e3564bd85ff974133292dca5e40c298bac19afb0fc0cad3bdf0214e",
+      "target": "ui/screens/chat/ManageChatsScreen.kt"
+    },
+    {
+      "source": "ui/screens/chat/ManageChatListItem.kt",
+      "source_sha256": "49f7c86b75aa6e7506fab40151718d28c9c7f037a655fc49ac968caf1fa9302f",
+      "target": "ui/screens/chat/ManageChatListItem.kt"
+    },
+    {
+      "source": "ui/screens/stats/UsageStatsScreen.kt",
+      "source_sha256": "994bd989b98a6450d57346adf83622f9fe74e5e52b358ffc0c393bc8b75f19d5",
+      "target": "ui/screens/stats/UsageStatsScreen.kt"
+    },
+    {
+      "source": "ui/screens/stats/UsageDateTimePicker.kt",
+      "source_sha256": "5da95baf8e71f1b5d70a108439a0795740ad88432ff4c9c2a6489a9a264d70a7",
+      "target": "ui/screens/stats/UsageDateTimePicker.kt"
+    },
+    {
+      "source": "ui/screens/stats/UsageFilterPreset.kt",
+      "source_sha256": "5b39898676a411197969a6042e01fc1448d2b76dd33a9bd29329615a0b309ff1",
+      "target": "ui/screens/stats/UsageFilterPreset.kt"
+    },
+    {
+      "source": "ui/screens/stats/CacheHitRate.kt",
+      "source_sha256": "9605ba2352b1f27cc011278089ea5c20f6d514c10d2c9196becf21a68ae889c7",
+      "target": "ui/screens/stats/CacheHitRate.kt"
+    },
+    {
+      "source": "data/model/AppearanceSettings.kt",
+      "source_sha256": "2aa1c10e3c8cd91c1b01b2df5ca9e958ce8401fdf5a752b4022459ab247f74f6",
+      "target": "data/model/AppearanceSettings.kt"
+    }
+  ],
+  "resources": [
+    "action_back",
+    "action_cancel",
+    "action_clear",
+    "action_delete",
+    "action_rename",
+    "action_save",
+    "action_search_history",
+    "action_token_usage",
+    "conversation_dock_models",
+    "conversation_empty",
+    "conversation_export",
+    "conversation_no_results",
+    "conversation_pin",
+    "conversation_search_hint",
+    "conversation_section_pinned",
+    "conversation_section_today",
+    "conversation_unpin",
+    "drawer_chats_chip",
+    "drawer_create_folder_title",
+    "drawer_delete_folder_message",
+    "drawer_delete_folder_title",
+    "drawer_folder_name",
+    "drawer_manage_chats",
+    "drawer_move_to_folder",
+    "drawer_new_conversation",
+    "drawer_new_folder",
+    "drawer_rename_folder_title",
+    "history_page_delete_all",
+    "history_page_delete_all_message",
+    "history_page_delete_all_title",
+    "history_page_empty",
+    "history_page_title",
+    "route_settings",
+    "route_skills",
+    "search_history_empty",
+    "search_history_hint",
+    "search_history_no_results",
+    "stats_model_active_days",
+    "stats_model_cache_hit_rate",
+    "stats_model_conversation_avg",
+    "stats_model_conversations",
+    "stats_model_daily_avg",
+    "stats_model_empty",
+    "stats_model_filter_clear",
+    "stats_model_filter_collapsed",
+    "stats_model_filter_datetime_placeholder",
+    "stats_model_filter_datetime_title",
+    "stats_model_filter_empty",
+    "stats_model_filter_end",
+    "stats_model_filter_preset_30d",
+    "stats_model_filter_preset_7d",
+    "stats_model_filter_preset_month",
+    "stats_model_filter_preset_today",
+    "stats_model_filter_preset_week",
+    "stats_model_filter_set",
+    "stats_model_filter_start",
+    "stats_model_filter_title",
+    "stats_model_total_title",
+    "stats_page_cache_creation_tokens",
+    "stats_page_cached_tokens",
+    "stats_page_dow_fri",
+    "stats_page_dow_mon",
+    "stats_page_dow_wed",
+    "stats_page_fresh_input_tokens",
+    "stats_page_heatmap_less",
+    "stats_page_heatmap_more",
+    "stats_page_heatmap_title",
+    "stats_page_launch_count",
+    "stats_page_output_tokens",
+    "stats_page_title",
+    "stats_page_token_total",
+    "stats_page_total_conversations",
+    "stats_page_total_messages",
+    "stats_tab_models",
+    "stats_tab_overview",
+    "token_usage_empty",
+    "token_usage_total",
+    "ui_permission_health_3048bb"
+  ]
+}

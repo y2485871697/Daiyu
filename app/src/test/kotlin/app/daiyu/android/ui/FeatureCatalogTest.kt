@@ -24,7 +24,9 @@ class FeatureCatalogTest {
     }
     @Test fun onlyExistingNavigationHasRoutes() {
         assertEquals(mapOf(
-            "P22" to FeatureRoute.CONVERSATIONS,
+            "P07" to FeatureRoute.SIDEBAR,
+            "P21" to FeatureRoute.USAGE_STATS,
+            "P22" to FeatureRoute.MANAGE_CHATS,
             "P28" to FeatureRoute.CONVERSATION_SEARCH,
             "P28.folders" to FeatureRoute.FOLDERS,
             "R03" to FeatureRoute.MODEL_SETTINGS,
@@ -40,8 +42,8 @@ class FeatureCatalogTest {
             "P41" to FeatureRoute.USER_MESSAGE
         ), entries.mapNotNull { entry -> entry.route?.let { entry.id to it } }.toMap())
     }
-    @Test fun retainedSidebarAndUnwiredMediaHaveNoReplacementAction() {
-        for (id in listOf("P01", "P07", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P32", "R06", "R07", "R08", "R09"))
+    @Test fun unwiredMediaAndAssistantHaveNoReplacementAction() {
+        for (id in listOf("P01", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P32", "R06", "R07", "R08", "R09"))
             assertNull(id, entries.single { it.id == id }.route)
     }
     @Test fun chatControlSlotsNavigateWithoutExecutingACommand() {
@@ -52,5 +54,38 @@ class FeatureCatalogTest {
         assertEquals(listOf("供应商余额", "上下文统计", "用量统计"),
             listOf("P05", "P10", "P21").map { id -> entries.single { it.id == id }.title })
         assertTrue(entries.filter { it.id in setOf("P35", "P36", "P37", "P39", "P40", "P42", "P43") }.all { it.route == null })
+    }
+
+    @Test fun detailsCoverEveryEntryWithStableUniqueControls() {
+        assertEquals(entries.map { it.id }.toSet(), FeatureDetails.pages.keys)
+        val controls = FeatureDetails.pages.values.flatten().flatMap { it.controls }
+        assertEquals(256, controls.size)
+        assertEquals(FeatureControlKind.entries.toSet(), controls.map { it.kind }.toSet())
+        FeatureDetails.pages.forEach { (id, sections) ->
+            assertTrue(id, sections.isNotEmpty())
+            assertEquals(id, sections.size, sections.map { it.id }.toSet().size)
+            val rows = sections.flatMap { it.controls }
+            assertEquals(id, rows.size, rows.map { it.id }.toSet().size)
+            sections.forEach { section ->
+                assertTrue(section.id.isNotBlank() && section.title.isNotBlank() && section.controls.isNotEmpty())
+                section.controls.forEach { control ->
+                    assertTrue(control.id.isNotBlank() && control.title.isNotBlank())
+                    assertTrue(control.route == null || control.kind == FeatureControlKind.ACTION)
+                    assertFalse(listOf("尚未接入", "未实现", "占位", "开发中").any { it in control.title })
+                }
+            }
+        }
+    }
+    @Test fun onlyExplicitSecondaryOpenActionsNavigate() {
+        val expected = mapOf(
+            "SIDEBAR" to "P07", "MANAGE_CHATS" to "P22", "USAGE_STATS" to "P21",
+            "CONVERSATION_SEARCH" to "P28", "FOLDERS" to "P28.folders",
+            "MODEL_SETTINGS" to "R03 P02 P04 P06", "CHAT" to "P11 P12 P13 P23",
+            "SKILLS" to "P33", "BACKUP" to "P38.files R12", "USER_MESSAGE" to "P41"
+        ).flatMap { (route, ids) -> ids.split(' ').map { "$it:open" to FeatureRoute.valueOf(route) } }.toMap()
+        val actual = FeatureDetails.pages.flatMap { (id, sections) -> sections.flatMap { it.controls }.mapNotNull {
+            control -> control.route?.let { "$id:${control.id}" to it }
+        } }.toMap()
+        assertEquals(expected, actual)
     }
 }

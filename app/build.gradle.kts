@@ -1,4 +1,7 @@
-plugins { id("com.android.application") }
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
+}
 
 abstract class StageBrowserCore:Sync() {
     @get:OutputDirectory abstract val outputDirectory:DirectoryProperty
@@ -18,6 +21,7 @@ androidComponents.onVariants { variant ->
 }
 
 android {
+    buildFeatures { compose = true }
     useLibrary("android.test.runner")
     useLibrary("android.test.base")
     useLibrary("android.test.mock")
@@ -70,6 +74,13 @@ android {
 kotlin { jvmToolchain(27) }
 dependencies {
     implementation(project(":core-domain"))
+    implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.4-rc01")
+    implementation("top.yukonga.miuix.kmp:miuix-blur-android:0.9.4-rc01")
+    implementation("androidx.compose.material3:material3:1.4.0")
+    implementation("androidx.compose.material:material-icons-extended:1.7.8")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.11.0")
+    implementation("androidx.navigationevent:navigationevent-compose:1.1.2")
+    implementation("androidx.activity:activity-compose:1.13.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
     testImplementation("junit:junit:4.13.2")

@@ -208,24 +208,28 @@ class OperationJournal(directory: File, scope: String, private val limit: Int = 
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(lockTimeoutMillis)
         if (!lock.tryLock(lockTimeoutMillis, TimeUnit.MILLISECONDS)) throw IOException("Journal lock deadline")
         try {
-            RandomAccessFile(lockFile, "rw").use { raf ->
-                while (true) {
-                    if (Thread.currentThread().isInterrupted) throw InterruptedException()
-                    try {
-                        val held = raf.channel.tryLock()
-                        if (held != null) return held.use {
-                            if (System.nanoTime() >= deadline) throw IOException("Journal file-lock deadline")
-                            if (Thread.currentThread().isInterrupted) throw InterruptedException()
-                            block()
-                        }
-                    } catch (_: OverlappingFileLockException) {
-                        // Another journal instance holds the same process/file reservation.
-                    }
-                    if (System.nanoTime() >= deadline) throw IOException("Journal file-lock deadline")
-                    Thread.sleep(10)
-                }
+            return RandomAccessFile(lockFile, "rw").use { raf ->
+                withChannelLock(raf, deadline, block)
             }
         } finally { lock.unlock() }
+    }
+
+    private fun <T> withChannelLock(raf: RandomAccessFile, deadline: Long, block: () -> T): T {
+        while (true) {
+            if (Thread.currentThread().isInterrupted) throw InterruptedException()
+            try {
+                val held = raf.channel.tryLock()
+                if (held != null) return held.use {
+                    if (System.nanoTime() >= deadline) throw IOException("Journal file-lock deadline")
+                    if (Thread.currentThread().isInterrupted) throw InterruptedException()
+                    block()
+                }
+            } catch (_: OverlappingFileLockException) {
+                // Another journal instance holds the same process/file reservation.
+            }
+            if (System.nanoTime() >= deadline) throw IOException("Journal file-lock deadline")
+            Thread.sleep(10)
+        }
     }
 
     companion object {

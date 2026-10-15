@@ -14,6 +14,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -71,7 +72,7 @@ fun MiuixScaffoldPage(
             // 保留 MiuixTheme 注入的默认越界工厂，让短内容页也能回弹到顶栏采样区。
             LazyColumn(
                 state = listState,
-                modifier = listModifier
+                modifier = listModifier.testTag("page:$title")
                     .fillMaxSize()
                     .horizontalCutoutPadding()
                     .captureForTopBar(backdrop)

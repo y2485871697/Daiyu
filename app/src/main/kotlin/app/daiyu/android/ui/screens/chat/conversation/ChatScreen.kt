@@ -16,6 +16,9 @@ data class ChatScreenActions(
     val onMore: () -> Unit = {},
     val onSend: (String) -> Unit = {},
     val onTextChange: (String) -> Unit = {},
+    val onSelectionChange: (Int, Int) -> Unit = { _, _ -> },
+    val onControlPress: () -> Unit = {},
+    val onControlRelease: () -> Unit = {},
     val onPrimaryTap: () -> Unit = {},
     val onPrimaryLongPress: () -> Unit = {},
     val onAttach: () -> Unit = {},
@@ -43,13 +46,16 @@ internal fun DaiyuChatScreen(
     state: ChatScreenState,
     actions: ChatScreenActions,
     modifier: Modifier = Modifier,
+    turnExtras: @Composable (String) -> Unit = {},
 ) {
     Column(
         modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
             .statusBarsPadding().navigationBarsPadding().imePadding(),
     ) {
         ChatTopBar(state.title, state.balanceText, actions)
-        ChatMessageList(state.turns, state.canJumpToPreviousUser, actions, Modifier.weight(1f))
+        androidx.compose.runtime.key(state.conversationKey) {
+            ChatMessageList(state.turns, state.canJumpToPreviousUser, actions, Modifier.weight(1f), state.scrollRequest, turnExtras)
+        }
         ChatComposer(state.composer, actions)
     }
 }

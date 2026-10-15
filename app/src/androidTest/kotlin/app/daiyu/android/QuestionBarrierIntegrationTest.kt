@@ -7,6 +7,7 @@ import android.test.InstrumentationTestCase
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
+import androidx.compose.ui.test.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.question.*
 import app.daiyu.android.domain.runtime.*
@@ -24,7 +25,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Real public catalog, Activity, Controller, Runner, ledger and both durable stores. No network. */
 @Suppress("DEPRECATION")
-class QuestionBarrierIntegrationTest : InstrumentationTestCase() {
+class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
     companion object {
         private const val CALL = "provider-question-call"
         private const val ARGS = """{"title":"Route choice","question":"Which route?","options":[{"id":"one","label":"First route"},{"id":"two","label":"Second route"}],"allow_other":false,"allow_delegation":false,"allow_note":false}"""
@@ -111,12 +112,8 @@ class QuestionBarrierIntegrationTest : InstrumentationTestCase() {
     private fun submits(v:View)=views(v).filterIsInstance<Button>().filterNot {it is CompoundButton}
     private fun insideCard(v:View):Boolean {var p=v.parent;while(p!=null) {if(p is QuestionCardView) return true;p=p.parent};return false}
     private fun send(f:Fixture):Message {
-        var owner:Message?=null
-        main {
-            all().filterIsInstance<EditText>().single {!insideCard(it)}.setText("Ask for a route")
-            all().filterIsInstance<Button>().single {!insideCard(it) && it.text.toString()=="发送"}.performClick()
-            owner=checkNotNull(f.c.active)
-        };return checkNotNull(owner)
+        setDraft("Ask for a route");node("chat-send").performClick()
+        return checkNotNull(f.c.active)
     }
     private fun checkpoint(f:Fixture,m:Message):RunCheckpoint=f.db.readableDatabase.rawQuery("SELECT payload FROM runtime_checkpoints WHERE message_id=?",arrayOf(m.id.value)).use {
         check(it.moveToFirst());RunCheckpointCodec.decode(it.getString(0))

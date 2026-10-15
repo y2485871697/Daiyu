@@ -22,6 +22,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 enum class ChatMenuAction {
+    LOAD_EARLIER, LOCATE_USER, BOTTOM, SEARCH, SETTINGS,
     NEW_CHAT, RENAME, INTERACTIVE_MODE, CONVERSATION_ID, EXPORT, CONTEXT_STATS,
     COMPRESS_CONTEXT, SUB_AGENT, ATTACH_IMAGE, ATTACH_VIDEO, ATTACH_FILE, GENERATE_IMAGE, GENERATE_VIDEO,
 }
@@ -39,6 +40,11 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
         MenuEntry("上下文统计", DaiyuIcons.Context, ChatMenuAction.CONTEXT_STATS),
         MenuEntry("压缩上下文", DaiyuIcons.Compress, ChatMenuAction.COMPRESS_CONTEXT),
         MenuEntry("子代理协作", DaiyuIcons.SubAgent, ChatMenuAction.SUB_AGENT),
+        MenuEntry("加载更早消息", DaiyuIcons.Refresh, ChatMenuAction.LOAD_EARLIER),
+        MenuEntry("定位用户消息", DaiyuIcons.Locate, ChatMenuAction.LOCATE_USER),
+        MenuEntry("回到底部", DaiyuIcons.JumpUp, ChatMenuAction.BOTTOM),
+        MenuEntry("搜索会话", DaiyuIcons.Search, ChatMenuAction.SEARCH),
+        MenuEntry("设置", DaiyuIcons.Settings, ChatMenuAction.SETTINGS),
     )
     DropdownMenu(expanded, onDismiss, containerColor = MiuixTheme.colorScheme.surface) {
         entries.forEach { entry ->

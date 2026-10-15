@@ -9,7 +9,12 @@ data class ChatScreenState(
     val turns: List<ChatTurnUi> = emptyList(),
     val composer: ComposerUi = ComposerUi(),
     val canJumpToPreviousUser: Boolean = false,
+    val conversationKey: String? = null,
+    val scrollRequest: ChatScrollRequest? = null,
 )
+
+/** A new serial consumes a host navigation request, never a model execution state. */
+data class ChatScrollRequest(val serial: Long, val messageId: String? = null, val followBottom: Boolean = true)
 
 sealed interface ChatTurnUi {
     val id: String
@@ -49,8 +54,17 @@ data class WorkStepUi(
 enum class WorkStepState { PENDING, OK, FAILED }
 enum class ComposerPhase { IDLE, RUNNING, PAUSED }
 
+/** Null means no controllable owner. PAUSED is a UI projection of pauseRequested, never RunStatus. */
+internal fun composerPhaseForRun(pauseRequested: Boolean?): ComposerPhase = when (pauseRequested) {
+    null -> ComposerPhase.IDLE
+    true -> ComposerPhase.PAUSED
+    false -> ComposerPhase.RUNNING
+}
+
 data class ComposerUi(
     val text: String = "",
+    val selectionStart: Int = text.length,
+    val selectionEnd: Int = text.length,
     val phase: ComposerPhase = ComposerPhase.IDLE,
     val modelLabel: String = "模型",
     val reasoningLabel: String = "推理强度",

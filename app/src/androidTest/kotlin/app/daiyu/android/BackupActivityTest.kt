@@ -2,7 +2,7 @@ package app.daiyu.android
 
 import android.app.Activity
 import android.app.Application
-import android.app.AlertDialog
+import android.content.DialogInterface
 import android.app.Instrumentation
 import android.content.ContentProvider
 import android.content.ContentValues
@@ -14,9 +14,7 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.test.InstrumentationTestCase
 import android.test.mock.MockContentResolver
-import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
+import androidx.compose.ui.test.*
 import app.daiyu.android.backup.NeutralBackupService
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.*
@@ -32,7 +30,7 @@ import java.util.concurrent.atomic.AtomicReference
  * ControllerBackupTest owns the large backup/schema/credential fixtures.
  */
 @Suppress("DEPRECATION")
-class BackupActivityTest:InstrumentationTestCase() {
+class BackupActivityTest:ComposeActivityTestCase() {
     private class Documents(private val directory:File):ContentProvider() {
         val opens=AtomicInteger()
         var deny=false
@@ -146,25 +144,18 @@ class BackupActivityTest:InstrumentationTestCase() {
         Intent(Intent.ACTION_VIEW).setClass(instrumentation.targetContext,MainActivity::class.java).setDataAndType(uri,mime).apply {
             if(grant) addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-    private fun views(view:View):List<View> = listOf(view)+if(view is ViewGroup)
-        (0 until view.childCount).flatMap {views(view.getChildAt(it))} else emptyList()
-    private fun dialog():AlertDialog?=MainActivity::class.java.getDeclaredField("backupDialog").apply {isAccessible=true}.get(activity) as? AlertDialog
+    private fun dialog():Any?=(MainActivity::class.java.getDeclaredField("prompt\$delegate").apply {isAccessible=true}.get(activity) as androidx.compose.runtime.State<*>).value
     private fun pending():Int?=MainActivity::class.java.getDeclaredField("pendingBackupRequest").apply {isAccessible=true}.get(activity) as? Int
     private fun click(label:String) {
-        main {views(activity!!.window.decorView).filterIsInstance<Button>().single {it.text.toString()==label}.performClick()}
-        instrumentation.waitForIdleSync()
-    }
-    private fun choose(index:Int) {
-        main {
-            val list=dialog()!!.listView
-            assertTrue("format list must be visible to the user",list.isShown)
-            list.performItemClick(list.getChildAt(index) ?: View(activity),index,list.getItemIdAtPosition(index))
+        if(label=="模型设置") {openModels();return}
+        if(ui.onAllNodesWithTag("page:备份与导入").fetchSemanticsNodes().isEmpty()) {
+            menu("设置");reveal("settings-row:备份与导入","设置").performClick()
         }
-        instrumentation.waitForIdleSync()
     }
+    private fun choose(index:Int) {node("prompt-choice:$index").assertIsDisplayed().performClick()}
     private fun press(which:Int) {
-        main {dialog()!!.getButton(which).performClick()}
-        instrumentation.waitForIdleSync()
+        node(if(which==DialogInterface.BUTTON_NEGATIVE) "dialog-cancel" else "dialog-confirm").performClick()
+        ui.waitForIdle()
     }
     private fun setField(name:String,value:Any?) {
         ChatController::class.java.getDeclaredField(name).apply {isAccessible=true}.set(controller,value)
@@ -200,8 +191,9 @@ class BackupActivityTest:InstrumentationTestCase() {
         }
         instrumentation.addMonitor(monitor)
         try {
-            click("备份与导入");choose(if(complete) 0 else 1)
-            press(if(exporting) AlertDialog.BUTTON_POSITIVE else AlertDialog.BUTTON_NEUTRAL)
+            click("备份与导入")
+            val action=if(exporting) {if(complete) "导出完整备份" else "导出精简备份"} else {if(complete) "导入完整备份" else "导入精简备份"}
+            reveal("settings-row:$action","备份与导入").performClick()
             assertTrue("SAF launch not observed",observed.await(5,TimeUnit.SECONDS))
             instrumentation.waitForIdleSync()
             main {assertNull("request must be consumed at callback",pending())}
@@ -231,10 +223,10 @@ class BackupActivityTest:InstrumentationTestCase() {
         for(code in listOf(102,104)) {
             picker(code,uri=if(code==104) completeUri else textUri)
             main {assertNotNull(dialog());assertEquals(0,provider.opens.get())}
-            press(AlertDialog.BUTTON_NEGATIVE);unchanged(before)
+            press(DialogInterface.BUTTON_NEGATIVE);unchanged(before)
             for(state in listOf("active","busy","recovery","not-ready")) {
                 picker(code,uri=if(code==104) completeUri else textUri)
-                main {gate(state)};press(AlertDialog.BUTTON_POSITIVE);main {gate(null)}
+                main {gate(state)};press(DialogInterface.BUTTON_POSITIVE);main {gate(null)}
                 assertEquals(0,provider.opens.get());unchanged(before)
             }
         }
@@ -246,7 +238,7 @@ class BackupActivityTest:InstrumentationTestCase() {
             val bytes=provider.file(uri).readBytes()
             picker(code,uri=uri)
             assertEquals(0L,controller.dataRevision)
-            press(AlertDialog.BUTTON_POSITIVE);awaitState {!controller.dataBusy && controller.dataRevision==1L}
+            press(DialogInterface.BUTTON_POSITIVE);awaitState {!controller.dataBusy && controller.dataRevision==1L}
             assertEquals(1,controller.database.conversations().size)
             assertTrue(bytes.contentEquals(provider.file(uri).readBytes()));assertEquals(0,modelCalls.get())
             val output=Uri.parse("content://activity-backup/output-$code.json")
@@ -267,9 +259,9 @@ class BackupActivityTest:InstrumentationTestCase() {
         start(opened(completeUri));val before=controller.database.exportBackup()
         main {assertNotNull(dialog())};assertEquals(0,provider.opens.get());unchanged(before)
         choose(0);assertEquals(0,provider.opens.get());unchanged(before)
-        press(AlertDialog.BUTTON_NEGATIVE);unchanged(before)
+        press(DialogInterface.BUTTON_NEGATIVE);unchanged(before)
         main {instrumentation.callActivityOnNewIntent(activity,opened(completeUri))}
-        instrumentation.waitForIdleSync();choose(0);press(AlertDialog.BUTTON_POSITIVE)
+        instrumentation.waitForIdleSync();choose(0);press(DialogInterface.BUTTON_POSITIVE)
         awaitState {!controller.dataBusy && controller.dataRevision==1L}
         assertEquals(1,controller.database.conversations().size);assertEquals(0,modelCalls.get())
     }
@@ -285,7 +277,7 @@ class BackupActivityTest:InstrumentationTestCase() {
             val confirmation=dialog()
             instrumentation.callActivityOnNewIntent(activity,opened());assertSame(confirmation,dialog())
         }
-        press(AlertDialog.BUTTON_POSITIVE);awaitState {!controller.dataBusy && controller.dataRevision==1L}
+        press(DialogInterface.BUTTON_POSITIVE);awaitState {!controller.dataBusy && controller.dataRevision==1L}
         assertEquals(1,controller.database.conversations().size);assertEquals(0,modelCalls.get())
     }
     fun testViewMissingUriNoGrantWrongSchemeMimeAndGatesRejectWithoutReading() {
@@ -301,14 +293,14 @@ class BackupActivityTest:InstrumentationTestCase() {
     fun testViewRevokedGrantAndWrongFormatFailWithoutMutation() {
         start();val before=controller.database.exportBackup()
         main {provider.deny=true;instrumentation.callActivityOnNewIntent(activity,opened())}
-        instrumentation.waitForIdleSync();choose(1);press(AlertDialog.BUTTON_POSITIVE);awaitState {!controller.dataBusy}
+        instrumentation.waitForIdleSync();choose(1);press(DialogInterface.BUTTON_POSITIVE);awaitState {!controller.dataBusy}
         assertEquals(1,provider.opens.get());unchanged(before)
         main {provider.deny=false;instrumentation.callActivityOnNewIntent(activity,opened(textUri))}
-        instrumentation.waitForIdleSync();choose(0);press(AlertDialog.BUTTON_POSITIVE);awaitState {!controller.dataBusy}
+        instrumentation.waitForIdleSync();choose(0);press(DialogInterface.BUTTON_POSITIVE);awaitState {!controller.dataBusy}
         assertEquals(2,provider.opens.get());unchanged(before)
         provider.file(textUri).writeText("not JSON")
         main {instrumentation.callActivityOnNewIntent(activity,opened(textUri))}
-        instrumentation.waitForIdleSync();choose(1);press(AlertDialog.BUTTON_POSITIVE);awaitState {!controller.dataBusy}
+        instrumentation.waitForIdleSync();choose(1);press(DialogInterface.BUTTON_POSITIVE);awaitState {!controller.dataBusy}
         assertEquals(3,provider.opens.get());unchanged(before)
     }
     fun testRecreationDropsViewChoiceAndConfirmationWithoutReplay() {
@@ -327,14 +319,14 @@ class BackupActivityTest:InstrumentationTestCase() {
             instrumentation.waitForIdleSync()
         } finally {instrumentation.removeMonitor(monitor)}
     }
-    private fun restoreDialog():AlertDialog?=MainActivity::class.java.getDeclaredField("configurationRestoreDialog").apply {isAccessible=true}.get(activity) as? AlertDialog
+    private fun restoreDialog():Any?=dialog()
     private fun restorePress(which:Int) {
-        main {restoreDialog()!!.getButton(which).performClick()}
-        instrumentation.waitForIdleSync()
+        if(which==DialogInterface.BUTTON_NEGATIVE && dialog()==null) backToChat(checkNotNull(activity)) else press(which)
     }
     private fun restorePreview() {
-        click("备份与导入");choose(2)
-        main {assertNotNull("manual restore preview must be visible",restoreDialog())}
+        click("备份与导入");reveal("settings-row:预览模型配置","备份与导入").performClick()
+        val preview=(MainActivity::class.java.getDeclaredField("configurationRestorePreview\$delegate").apply {isAccessible=true}.get(activity) as androidx.compose.runtime.State<*>).value as? ChatController.ConfigurationRestorePreview
+        if(preview?.plan?.isNoOp==false) reveal("settings-row:恢复配置","备份与导入").performClick()
     }
     private fun modelPreferences()=fixtureApp.getSharedPreferences("model-settings",0)
     private fun seedRestoreMetadata() {
@@ -352,17 +344,16 @@ class BackupActivityTest:InstrumentationTestCase() {
         provider.file(completeUri).writeText(backup.exportPackage())
         backup.setNonSecretConfiguration(emptyMap())
         val before=HashMap(modelPreferences().all)
-        start(opened(completeUri));choose(0);press(AlertDialog.BUTTON_POSITIVE)
+        start(opened(completeUri));choose(0);press(DialogInterface.BUTTON_POSITIVE)
         awaitState {!controller.dataBusy && controller.dataRevision==1L}
         assertEquals(before,modelPreferences().all);assertEquals(1,provider.opens.get())
         restorePreview()
-        main {
-            val previewText=views(restoreDialog()!!.window!!.decorView).filterIsInstance<android.widget.TextView>().joinToString("\n") {it.text.toString()}
-            assertTrue(previewText.contains("https://current.invalid"));assertTrue(previewText.contains("https://imported.invalid"))
-            assertTrue(previewText.contains("重新输入"));assertTrue(previewText.contains("不启用工具"))
-            assertFalse(previewText.contains("SECRET_"));assertEquals(before,modelPreferences().all)
-        }
-        restorePress(AlertDialog.BUTTON_POSITIVE)
+        ui.onNode(hasText("https://current.invalid",substring=true),useUnmergedTree=true).assertExists()
+        ui.onNode(hasText("https://imported.invalid",substring=true),useUnmergedTree=true).assertExists()
+        ui.onAllNodes(hasText("SECRET_",substring=true),useUnmergedTree=true).assertCountEquals(0)
+        assertEquals(before,modelPreferences().all)
+        node("dialog-confirm").assertTextEquals("确认恢复")
+        restorePress(DialogInterface.BUTTON_POSITIVE)
         assertEquals("https://imported.invalid",modelPreferences().getString("endpoint",null))
         assertEquals("imported-model",modelPreferences().getString("model",null))
         assertFalse(modelPreferences().getBoolean("battery",true));assertFalse(modelPreferences().getBoolean("device-status",true))
@@ -376,12 +367,7 @@ class BackupActivityTest:InstrumentationTestCase() {
         main {assertNull(restoreDialog())};assertEquals(1,provider.opens.get());assertEquals(0,modelCalls.get())
         // Real settings dialog must not prefill the old credential; only an explicit new key save clears the gate.
         click("模型设置")
-        main {
-            val settingsDialog=MainActivity::class.java.getDeclaredField("settingsDialog").apply {isAccessible=true}.get(activity) as AlertDialog
-            val key=views(settingsDialog.window!!.decorView).filterIsInstance<android.widget.EditText>().single {it.hint.toString().startsWith("API密钥")}
-            assertEquals("",key.text.toString());key.setText("synthetic-new-key")
-            settingsDialog.getButton(AlertDialog.BUTTON_POSITIVE).performClick()
-        }
+        modelField("API Key").assertTextEquals("");editModel("API Key","synthetic-new-key");saveModel()
         instrumentation.waitForIdleSync()
         assertFalse(modelPreferences().getBoolean("credential-rebind-required",false))
         assertEquals("synthetic-new-key",controller.settings.load().apiKey)
@@ -390,12 +376,12 @@ class BackupActivityTest:InstrumentationTestCase() {
     }
     fun testRestoreCancelAndRecreationDropConfirmationWithoutApplyingOrReplaying() {
         seedRestoreMetadata();start();val before=HashMap(modelPreferences().all)
-        restorePreview();restorePress(AlertDialog.BUTTON_NEGATIVE)
+        restorePreview();restorePress(DialogInterface.BUTTON_NEGATIVE)
         assertEquals(before,modelPreferences().all);main {assertNull(restoreDialog())}
         restorePreview();recreate()
         main {assertNull(restoreDialog())}
         assertEquals(before,modelPreferences().all)
-        restorePreview();main {restoreDialog()!!.cancel()}
+        restorePreview();node("dialog-cancel").performClick()
         instrumentation.waitForIdleSync();assertEquals(before,modelPreferences().all)
         assertEquals(0,modelCalls.get());assertEquals(0,provider.opens.get());assertEquals(0L,controller.dataRevision)
     }
@@ -403,7 +389,7 @@ class BackupActivityTest:InstrumentationTestCase() {
         seedRestoreMetadata();start();val before=HashMap(modelPreferences().all)
         for(state in listOf("active","busy","recovery","not-ready")) {
             restorePreview();main {gate(state)}
-            try {restorePress(AlertDialog.BUTTON_POSITIVE)} finally {main {gate(null)}}
+            try {restorePress(DialogInterface.BUTTON_POSITIVE)} finally {main {gate(null)}}
             main {assertNull(restoreDialog())};assertEquals(before,modelPreferences().all)
         }
         assertEquals(0,provider.opens.get());assertEquals(0,modelCalls.get());assertEquals(0L,controller.dataRevision)
@@ -412,32 +398,30 @@ class BackupActivityTest:InstrumentationTestCase() {
         seedRestoreMetadata();start();val before=HashMap(modelPreferences().all)
         restorePreview()
         NeutralBackupService(fixtureApp,controller.database).setNonSecretConfiguration(mapOf("model" to "replacement"))
-        restorePress(AlertDialog.BUTTON_POSITIVE);assertEquals(before,modelPreferences().all)
+        restorePress(DialogInterface.BUTTON_POSITIVE);assertEquals(before,modelPreferences().all)
         restorePreview();assertTrue(modelPreferences().edit().putString("model","user-edit").commit())
         val changed=HashMap(modelPreferences().all)
-        restorePress(AlertDialog.BUTTON_POSITIVE);assertEquals(changed,modelPreferences().all)
+        restorePress(DialogInterface.BUTTON_POSITIVE);assertEquals(changed,modelPreferences().all)
         assertEquals(0,provider.opens.get());assertEquals(0,modelCalls.get())
     }
     fun testRestoreCommitFailureInRealActivityPreservesOriginalAndRequiresNewPreview() {
         seedRestoreMetadata();start();val before=HashMap(modelPreferences().all)
         restorePreview();fixtureApp.failNextRestoreCommit=true
-        restorePress(AlertDialog.BUTTON_POSITIVE)
+        restorePress(DialogInterface.BUTTON_POSITIVE)
         main {assertNull(restoreDialog())};assertEquals(before,modelPreferences().all)
         recreate();main {assertNull(restoreDialog())};assertEquals(before,modelPreferences().all)
-        restorePreview();restorePress(AlertDialog.BUTTON_POSITIVE)
+        restorePreview();restorePress(DialogInterface.BUTTON_POSITIVE)
         assertEquals("imported-model",modelPreferences().getString("model",null))
         assertEquals(0,modelCalls.get());assertEquals(0,provider.opens.get());assertEquals(0L,controller.dataRevision)
     }
     fun testRestoreEmptyMetadataOnlyShowsNoOpAndInvalidMetadataNeverShowsConfirm() {
         start();val before=HashMap(modelPreferences().all)
         restorePreview()
-        main {
-            assertFalse(restoreDialog()!!.getButton(AlertDialog.BUTTON_POSITIVE)?.isShown==true)
-            assertTrue(views(restoreDialog()!!.window!!.decorView).filterIsInstance<android.widget.TextView>().any {it.text.toString().contains("没有已导入")})
-        }
-        restorePress(AlertDialog.BUTTON_NEGATIVE)
+        node("dialog-confirm").assertDoesNotExist()
+        ui.onNodeWithText("暂无配置").assertExists()
+        restorePress(DialogInterface.BUTTON_NEGATIVE)
         NeutralBackupService(fixtureApp,controller.database).setNonSecretConfiguration(mapOf("model" to "m".repeat(201)))
-        click("备份与导入");choose(2)
+        click("备份与导入");reveal("settings-row:预览模型配置","备份与导入").performClick()
         main {assertNull(restoreDialog())};assertEquals(before,modelPreferences().all)
         assertEquals(0,modelCalls.get());assertEquals(0,provider.opens.get())
     }

@@ -5,6 +5,18 @@ import java.util.concurrent.locks.LockSupport
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.DispatchOutcome
 import app.daiyu.android.domain.tools.jsonQuote
+import app.daiyu.android.domain.tools.BarrierOffer
+import app.daiyu.android.domain.tools.ExecutionReceipt
+import app.daiyu.android.domain.tools.ReceiptBatchStart
+import kotlin.coroutines.Continuation
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.startCoroutine
+import kotlin.coroutines.suspendCoroutine
+
+sealed interface RunSlice {
+    data class Completed(val message: Message) : RunSlice
+    data class Suspended(val offer: BarrierOffer) : RunSlice
+}
 
 /** One owner thread applies events. Cancellation only signals and closes transport. */
 class ChatRunner private constructor(private val model: ModelPort, private val store: ConversationStore,
@@ -31,6 +43,72 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     @Volatile private var execution = ExecutionState()
     @Volatile private var session: ModelSession? = null
     @Volatile private var identity: Message? = null
+    private class WaitingSlice(
+        val offer: BarrierOffer,
+        val generation: Long,
+        val continuation: Continuation<ExecutionReceipt>,
+        val isCurrent: () -> Boolean
+    )
+    private var waitingSlice: WaitingSlice? = null
+    private var sliceCompletion: Result<Message>? = null
+
+    /** These entry points belong to the parent's serialized worker slot, never a UI callback. */
+    fun startSlice(initial: Message, history: List<Message>): RunSlice =
+        startInternal(initial, history, allowBarrier = true)
+
+    fun resumeSlice(offer: BarrierOffer, receipt: ExecutionReceipt): RunSlice {
+        val waiting = synchronized(terminalLock) {
+            check(!terminal && !terminalReserved && !stopped.get()) { "Runner已停止" }
+            val held = checkNotNull(waitingSlice) { "没有待恢复的工具" }
+            check(held.offer === offer && offer.waitingCommitted &&
+                held.generation == generation && held.isCurrent()) { "过期或不属于本轮的offer" }
+            waitingSlice = null
+            sliceCompletion = null
+            held
+        }
+        waiting.continuation.resumeWith(Result.success(receipt))
+        return collectSlice()
+    }
+
+    /** Call only after the parent has durably stopped the Question session and its waiter. */
+    fun drainStoppedSlice(): RunSlice {
+        val waiting = synchronized(terminalLock) {
+            check(stopped.get()) { "必须先停止Runner" }
+            waitingSlice.also {
+                if (it != null) {
+                    waitingSlice = null
+                    sliceCompletion = null
+                }
+            }
+        }
+        if (waiting != null) {
+            waiting.continuation.resumeWith(Result.failure(InterruptedException()))
+        }
+        return collectSlice()
+    }
+
+    private fun collectSlice(): RunSlice {
+        sliceCompletion?.let { return RunSlice.Completed(it.getOrThrow()) }
+        return synchronized(terminalLock) {
+            RunSlice.Suspended(checkNotNull(waitingSlice) { "Runner未完成且没有Continuation" }.offer)
+        }
+    }
+
+    private fun startInternal(initial: Message, history: List<Message>, allowBarrier: Boolean): RunSlice {
+        require(initial.status == RunStatus.RUNNING && initial.role == "assistant")
+        synchronized(terminalLock) {
+            check(!started) { "Runner只能启动一次" }
+            started = true
+            identity = initial
+        }
+        val body: suspend () -> Message = { runBody(initial, history, allowBarrier) }
+        body.startCoroutine(object : Continuation<Message> {
+            override val context = EmptyCoroutineContext
+            override fun resumeWith(result: Result<Message>) { sliceCompletion = result }
+        })
+        return collectSlice()
+    }
+
     fun state(): ExecutionState = execution
     fun stop() {
         // Reserve the terminal outcome before observing the session. The object captured here is
@@ -104,9 +182,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         } else phase
         execution = ExecutionState(actual, pauseRequested, supplements.size, attempt)
     }
-    fun run(initial: Message, history: List<Message>): Message {
-        require(initial.status == RunStatus.RUNNING && initial.role == "assistant")
-        synchronized(terminalLock) { check(!started) { "Runner只能启动一次" }; started = true; identity = initial }
+    fun run(initial: Message, history: List<Message>): Message =
+        when (val slice = startInternal(initial, history, allowBarrier = false)) {
+            is RunSlice.Completed -> slice.message
+            is RunSlice.Suspended -> error("同步Runner不能等待用户")
+        }
+
+    private suspend fun runBody(initial: Message, history: List<Message>, allowBarrier: Boolean): Message {
         var current = initial
         val sourceHistory = history.toList()
         var modelHistory = sourceHistory
@@ -118,12 +200,14 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         val owner = executionOwner.ownerId
         var ownerBound = false
         var revision = 0L
+        var pendingCheckpoint: PendingToolCheckpoint? = null
         val records = linkedMapOf<ToolCallId, ToolRecord>()
         fun snapshot(message: Message = current): RunCheckpoint = synchronized(terminalLock) {
             RunCheckpoint(message, modelHistory,
                 if (message.status != RunStatus.RUNNING) ExecutionPhase.TERMINAL else execution.phase,
                 records.values.toList(), outputs, supplements.toList(), round, requestUnconfirmed,
-                owner = owner, revision = revision + 1)
+                owner = owner, revision = revision + 1,
+                pending = if (message.status == RunStatus.RUNNING) pendingCheckpoint else null)
         }
         fun checkpoint() {
             val runtime = options.runtimeStore ?: return
@@ -132,6 +216,34 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (runtime is AtomicRuntimeStore) runtime.commitCheckpoint(next) else runtime.save(next)
                 revision = next.revision
             } catch (failure: Exception) { throw PersistenceException(failure) }
+        }
+        suspend fun awaitBarrier(offer: BarrierOffer): ExecutionReceipt {
+            val runtime = checkNotNull(options.runtimeStore as? AtomicRuntimeStore) {
+                "用户等待需要原子检查点存储"
+            }
+            check(runtime.durable) { "用户等待需要持久检查点存储" }
+            pendingCheckpoint = offer.pending
+            setPhase(ExecutionPhase.WAITING_USER)
+            val expected = snapshot()
+            try {
+                runtime.commitCheckpoint(expected)
+            } catch (failure: Exception) {
+                val committed = try { runtime.readCommittedCheckpoint(expected) } catch (_: Exception) { null }
+                if (committed != expected) throw PersistenceException(failure)
+            }
+            revision = expected.revision
+            return suspendCoroutine { continuation ->
+                synchronized(terminalLock) {
+                    if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
+                    check(waitingSlice == null)
+                    offer.markWaitingCommitted()
+                    waitingSlice = WaitingSlice(offer, generation, continuation) {
+                        revision == expected.revision && pendingCheckpoint == expected.pending &&
+                            owner == expected.owner && offer.context.owner === executionOwner &&
+                            execution.phase == ExecutionPhase.WAITING_USER
+                    }
+                }
+            }
         }
         fun apply(candidate: Message) {
             val next = segmentHistory.project(candidate)
@@ -426,6 +538,11 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 checkpoint()
                 require(pending.none { it.name == "ask_user" } || pending.size == 1) { "ask_user必须独占工具批次" }
                 options.validateBatch(pending.toList())
+                if (pending.any { it.name == "ask_user" }) {
+                    check(allowBarrier) { "ask_user需要startSlice" }
+                    check(options.receiptBatchExecutor != null && options.runtimeStore is AtomicRuntimeStore &&
+                        options.runtimeStore.durable) { "ask_user需要持久原子检查点和receipt执行器" }
+                }
                 if (pending.isEmpty()) {
                     if (boundary()) { cancelSession(active); active = open(); continue }
                     // Reserve normal completion before leaving the control section. stop() then
@@ -451,12 +568,37 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     checkpoint()
                     if (stopped.get() || terminalReserved) throw InterruptedException()
                     val receipts = try {
-                        receiptBatch.execute(current, pending.toList(), stopped::get).also {
+                        val start = if (allowBarrier) {
+                            receiptBatch.start(current, pending.toList(), stopped::get)
+                        } else {
+                            ReceiptBatchStart.Completed(receiptBatch.execute(current, pending.toList(), stopped::get))
+                        }
+                        val completed = when (start) {
+                            is ReceiptBatchStart.Completed -> start.receipts
+                            is ReceiptBatchStart.Suspended -> {
+                                check(allowBarrier)
+                                val offer = start.offer
+                                val call = pending.single()
+                                check(call.name == "ask_user" && offer.context.owner === executionOwner &&
+                                    executionOwner.owns(current) && offer.context.invocation === call &&
+                                    offer.pending.callId == call.id && !offer.waitingCommitted &&
+                                    records[call.id]?.disposition == ToolDisposition.IN_FLIGHT) { "barrier身份不匹配" }
+                                val receipt = awaitBarrier(offer)
+                                if (stopped.get() || terminalReserved) throw InterruptedException()
+                                val finished = offer.finish(receipt)
+                                pendingCheckpoint = null
+                                setPhase(ExecutionPhase.TOOL_EXECUTING)
+                                listOf(finished)
+                            }
+                        }
+                        completed.also {
                             check(it.map { receipt -> receipt.callId } == pending.map { call -> call.id }) {
                                 "批次结果身份或顺序错误"
                             }
                         }
-                    } catch (_: Exception) {
+                    } catch (failure: Exception) {
+                        if (failure is PersistenceException || failure is InterruptedException) throw failure
+                        pendingCheckpoint = null
                         pending.forEach {
                             records[it.id] = ToolRecord(it, ToolDisposition.UNKNOWN)
                             unknownOperations.add(it.name to it.arguments)
@@ -560,6 +702,20 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             }
             throw IllegalStateException("工具续轮达到12轮上限，已停止追加请求")
         } catch (failure: Exception) {
+            if (allowBarrier && failure is PersistenceException) {
+                synchronized(terminalLock) {
+                    terminalReserved = true
+                    terminal = true
+                    setPhase(ExecutionPhase.TERMINAL)
+                }
+                throw failure
+            }
+            pendingCheckpoint = null
+            records.entries.forEach { entry ->
+                if (entry.value.disposition == ToolDisposition.IN_FLIGHT) {
+                    entry.setValue(entry.value.copy(disposition = ToolDisposition.UNKNOWN))
+                }
+            }
             val terminalInfo = synchronized(terminalLock) {
                 // A reservation is only an in-memory ordering decision. Its durable outcome must
                 // be read back after a failed terminal commit; it is never proof of COMPLETED.
@@ -586,7 +742,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 try {
                     apply(next)
                     return current
-                } catch (_: Exception) { /* A failed terminal receipt is confirmed only by reading. */ }
+                } catch (saveFailure: Exception) {
+                    if (allowBarrier && saveFailure is PersistenceException) throw saveFailure
+                    /* A failed terminal receipt is confirmed only by reading. */
+                }
             }
             if (runtime is AtomicRuntimeStore) {
                 // Read only: a live owner's uncertain receipt never authorizes process recovery.

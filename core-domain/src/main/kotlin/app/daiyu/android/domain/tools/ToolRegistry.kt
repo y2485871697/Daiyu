@@ -65,7 +65,8 @@ class ToolExecutionContext internal constructor(
 class PreparedTool private constructor(
     val writeEffect: WriteEffect?,
     val execute: () -> ExecutionReceipt,
-    private val contextualExecution: ((ToolExecutionContext) -> ExecutionReceipt)?
+    private val contextualExecution: ((ToolExecutionContext) -> ExecutionReceipt)?,
+    internal val isUserBarrier: Boolean = false
 ) {
     constructor(writeEffect: WriteEffect? = null, execute: () -> ExecutionReceipt) : this(writeEffect, execute, null)
     internal val requiresContext: Boolean get() = contextualExecution != null
@@ -73,6 +74,9 @@ class PreparedTool private constructor(
         contextualExecution?.invoke(checkNotNull(context) { "tool_execution_context_required" }) ?: execute()
 
     companion object {
+        fun userBarrier(): PreparedTool =
+            PreparedTool(null, { error("user_barrier_requires_start") }, null, isUserBarrier = true)
+
         /** Context becomes available only after whole-batch validation and ledger reservation. */
         fun contextual(writeEffect: WriteEffect? = null, execute: (ToolExecutionContext) -> ExecutionReceipt): PreparedTool =
             PreparedTool(writeEffect, { error("tool_execution_context_required") }, execute)

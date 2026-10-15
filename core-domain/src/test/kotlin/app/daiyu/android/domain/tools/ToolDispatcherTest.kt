@@ -90,8 +90,9 @@ class ToolDispatcherTest {
         val mixed = dispatcher.dispatch(task(emptySet()), listOf(call("ask", "ask_user", "{}"), call("read", "read_note", "{}")))
         assertTrue(mixed.all { code(it.outcome) == "ask_user_batch_barrier" })
         assertEquals(0, executions)
-        assertTrue(outcome(dispatcher, task(emptySet()), call("ask", "ask_user", "{}")) is DispatchOutcome.Confirmed)
-        assertEquals(1, executions)
+        assertEquals("user_barrier_requires_start",
+            code(outcome(dispatcher, task(emptySet()), call("ask", "ask_user", "{}"))))
+        assertEquals(0, executions)
         val empty = ToolDispatcher(ToolRegistry().snapshot(), SessionCapabilities("session", setOf("notes.read")), ToolLedger(InMemoryToolLedgerStore()))
         assertEquals("unknown_tool", code(outcome(empty, task(), call("ask", "ask_user", "{}"))))
     }

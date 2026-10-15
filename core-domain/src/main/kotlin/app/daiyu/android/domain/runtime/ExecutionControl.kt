@@ -2,11 +2,14 @@ package app.daiyu.android.domain.runtime
 
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.tools.ToolDispatchResult
+import app.daiyu.android.domain.tools.ReceiptBatchStart
 
 /** Runtime status is separate from Message.status: legacy stores can keep RUNNING until terminal. */
-enum class ExecutionPhase { IDLE, STREAMING, BOUNDARY, PAUSED, TOOL_EXECUTING, RECONNECTING, TERMINAL }
+enum class ExecutionPhase { IDLE, STREAMING, BOUNDARY, PAUSED, TOOL_EXECUTING, WAITING_USER, RECONNECTING, TERMINAL }
 enum class ToolDisposition { READY, IN_FLIGHT, SUCCEEDED, FAILED, NOT_EXECUTED, UNKNOWN }
 data class ToolRecord(val invocation: ToolInvocation, val disposition: ToolDisposition, val result: String? = null)
+
+data class PendingToolCheckpoint(val callId: ToolCallId)
 
 /** Immutable, platform-serializable checkpoint. No credentials or transport objects belong here. */
 data class RunCheckpoint(
@@ -20,7 +23,8 @@ data class RunCheckpoint(
     val requestUnconfirmed: Boolean = false,
     val messageReconciled: Boolean = true,
     val owner: String = "",
-    val revision: Long = 0
+    val revision: Long = 0,
+    val pending: PendingToolCheckpoint? = null
 )
 
 /** save must durably commit before returning if durable=true. Implement with a transaction/WAL. */
@@ -57,6 +61,8 @@ fun interface ReceiptBatchToolExecutor {
      * Binding is in-memory only; implementations must not create resources or execute tools here. */
     fun bindOwner(owner: RunExecutionOwner) {}
     fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): List<ToolDispatchResult>
+    fun start(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): ReceiptBatchStart =
+        ReceiptBatchStart.Completed(execute(message, invocations, cancelled))
 }
 
 /** Atomic execution claim, keyed by conversation/run/call AND canonical equivalent operation.
@@ -110,14 +116,14 @@ data class ExecutionState(
 object ProcessRecovery {
     fun interrupt(checkpoint: RunCheckpoint): RunCheckpoint {
         if (checkpoint.phase == ExecutionPhase.TERMINAL) return checkpoint
-        if (checkpoint.message.status != RunStatus.RUNNING) return checkpoint.copy(phase = ExecutionPhase.TERMINAL)
+        if (checkpoint.message.status != RunStatus.RUNNING) return checkpoint.copy(phase = ExecutionPhase.TERMINAL, pending = null)
         val tools = checkpoint.tools.map {
             if (it.disposition == ToolDisposition.IN_FLIGHT) it.copy(disposition = ToolDisposition.UNKNOWN) else it
         }
         return checkpoint.copy(
             message = checkpoint.message.copy(status = RunStatus.INTERRUPTED,
                 error = "上次运行中断；未自动重发模型请求或工具"),
-            phase = ExecutionPhase.TERMINAL, tools = tools, messageReconciled = false
+            phase = ExecutionPhase.TERMINAL, tools = tools, messageReconciled = false, pending = null
         )
     }
 

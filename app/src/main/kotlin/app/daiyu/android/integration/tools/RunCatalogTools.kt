@@ -62,6 +62,15 @@ internal class RunCatalogTools(
         if (closed.get()) return invocations.map { ToolDispatchResult(it.id, DispatchOutcome.NotExecuted("run_closed")) }
         return checkNotNull(bridge) { "catalog_not_prepared" }.execute(message, invocations) { closed.get() || cancelled() }
     }
+    override fun start(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): ReceiptBatchStart {
+        require(message.conversationId == conversationId && message.runId == runId && message.role == Message.ASSISTANT_ROLE) {
+            "tool_run_owner_mismatch"
+        }
+        require(checkNotNull(owner) { "tool_owner_not_bound" }.owns(message)) { "tool_run_owner_mismatch" }
+        if (closed.get()) return ReceiptBatchStart.Completed(
+            invocations.map { ToolDispatchResult(it.id, DispatchOutcome.NotExecuted("run_closed")) })
+        return checkNotNull(bridge) { "catalog_not_prepared" }.start(message, invocations) { closed.get() || cancelled() }
+    }
     // Do not wait for capture or in-flight reads on the UI/control thread.
     override fun close() { closed.set(true); skills?.close() }
 }

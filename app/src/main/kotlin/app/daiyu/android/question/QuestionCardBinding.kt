@@ -8,6 +8,7 @@ import app.daiyu.android.domain.question.QuestionIdentity
 import app.daiyu.android.domain.question.QuestionRecord
 import app.daiyu.android.domain.question.QuestionRefreshException
 import java.util.concurrent.Executor
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
@@ -21,6 +22,20 @@ class QuestionCardBinding(
     private val main = Handler(Looper.getMainLooper())
     private val fenced = AtomicBoolean(false)
     private val attachment = AtomicLong()
+    internal class Draft {
+        var selection: QuestionAnswer? = null
+        var other = ""
+        var note = ""
+        @Volatile var saving = false
+        @Volatile var reply: QuestionCardView.Reply? = null
+        @Volatile var saved: QuestionAnswer? = null
+        var changed: (() -> Unit)? = null
+    }
+    private val drafts = mutableMapOf<QuestionIdentity, Draft>()
+    @Synchronized internal fun draft(identity: QuestionIdentity): Draft {
+        require(identity.ownerPrefix == owner.ownerPrefix) { "question_owner_mismatch" }
+        return drafts.getOrPut(identity) { Draft() }
+    }
     init { require(registry.ownerPrefix == owner.ownerPrefix) { "question_owner_mismatch" } }
 
     fun identity(callId: String): QuestionIdentity = owner.copy(callId = callId)
@@ -66,8 +81,30 @@ class QuestionCardBinding(
     }
 
     fun submit(identity: QuestionIdentity, answer: QuestionAnswer, done: (QuestionCardView.Reply) -> Unit) {
-        fun deliver(reply: QuestionCardView.Reply) { main.post { done(reply) } }
-        if (identity.ownerPrefix != owner.ownerPrefix) { deliver(QuestionCardView.Reply.REJECTED); return }
+        if (identity.ownerPrefix != owner.ownerPrefix) {
+            main.post { done(QuestionCardView.Reply.REJECTED) }; return
+        }
+        val state = draft(identity)
+        val held = synchronized(state) {
+            when {
+                state.saving -> QuestionCardView.Reply.UNCONFIRMED
+                state.saved != null -> if (state.saved == answer) QuestionCardView.Reply.SAVED else QuestionCardView.Reply.REJECTED
+                state.reply == QuestionCardView.Reply.UNCONFIRMED || state.reply == QuestionCardView.Reply.STOPPED -> state.reply
+                else -> { state.saving = true; state.reply = null; null }
+            }
+        }
+        if (held != null) { main.post { done(held) }; return }
+        fun deliver(reply: QuestionCardView.Reply) {
+            main.post {
+                synchronized(state) {
+                    state.saving = false; state.reply = reply
+                    if (reply == QuestionCardView.Reply.SAVED || reply == QuestionCardView.Reply.SAVED_REFRESH_FAILED) state.saved = answer
+                }
+                state.changed?.invoke()
+                done(reply)
+            }
+        }
+        main.post { state.changed?.invoke() }
         try {
             writer.execute {
                 workerOnly()
@@ -81,7 +118,8 @@ class QuestionCardBinding(
                 catch (_: Exception) { QuestionCardView.Reply.UNCONFIRMED }
                 deliver(reply)
             }
-        } catch (_: Exception) { deliver(QuestionCardView.Reply.UNCONFIRMED) }
+        } catch (_: RejectedExecutionException) { deliver(QuestionCardView.Reply.REJECTED) }
+        catch (_: Exception) { deliver(QuestionCardView.Reply.UNCONFIRMED) }
     }
 
     /** Fence new answers now; interrupt the same barrier off the control thread. Failures are retryable. */

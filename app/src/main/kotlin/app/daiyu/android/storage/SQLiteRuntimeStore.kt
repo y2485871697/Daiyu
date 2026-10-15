@@ -5,6 +5,8 @@ import android.database.sqlite.SQLiteDatabase
 import app.daiyu.android.context.DatabaseTransactions
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
+import app.daiyu.android.domain.question.ASK_USER_TOOL_NAME
+import app.daiyu.android.domain.question.QuestionIdentity
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.channels.FileLock
@@ -21,13 +23,13 @@ internal class SQLiteRuntimeStore private constructor(
     private var closed = false
     private fun available() { check(!closed && lock.isValid) { "运行存储所有权已释放" } }
 
-    @Synchronized fun recoverPending() {
+    @Synchronized fun recoverPending(beforeQuestionRecovery: ((QuestionIdentity) -> Unit)? = null) {
         available(); check(!recovered) { "运行恢复只能在取得所有权后执行一次" }
+        val priors = recoverable(database.readableDatabase)
+        priors.forEach { prepareQuestionRecovery(it, beforeQuestionRecovery) }
         transactions.run { db ->
-            val ids = db.rawQuery("SELECT message_id FROM runtime_checkpoints WHERE phase!='TERMINAL'", null).use { c ->
-                buildList { while (c.moveToNext()) add(c.getString(0)) }
-            }
-            ids.forEach { reconcile(db, requireNotNull(read(db, it))) }
+            check(recoverable(db) == priors) { "恢复准备后检查点已变化" }
+            priors.forEach { reconcile(db, it) }
             database.recoverUncheckpointed(db)
         }
         recovered = true
@@ -67,15 +69,38 @@ internal class SQLiteRuntimeStore private constructor(
         }
     }
     /** Only a new OS lease may recover a previous lease's rows. Caller state is never trusted as a write. */
-    @Synchronized override fun reconcileCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint {
+    @Synchronized override fun reconcileCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint =
+        reconcileCheckpoint(checkpoint, null)
+
+    @Synchronized fun reconcileCheckpoint(checkpoint: RunCheckpoint,
+        beforeQuestionRecovery: ((QuestionIdentity) -> Unit)?): RunCheckpoint {
         available()
+        val prior = requireNotNull(read(database.readableDatabase, checkpoint.message.id.value)) { "检查点不存在" }
+        sameIdentity(prior.value.message, checkpoint.message)
+        prepareQuestionRecovery(prior, beforeQuestionRecovery)
         return transactions.run { db ->
-            val prior = requireNotNull(read(db, checkpoint.message.id.value)) { "检查点不存在" }
-            sameIdentity(prior.value.message, checkpoint.message)
+            check(read(db, checkpoint.message.id.value) == prior) { "恢复准备后检查点已变化" }
             reconcile(db, prior)
         }
     }
     private data class Stored(val value: RunCheckpoint, val processOwner: String)
+    private fun recoverable(db: SQLiteDatabase): List<Stored> {
+        val ids = db.rawQuery(
+            "SELECT message_id FROM runtime_checkpoints WHERE phase!='TERMINAL' ORDER BY message_id", null
+        ).use { c -> buildList { while (c.moveToNext()) add(c.getString(0)) } }
+        return ids.map { requireNotNull(read(db, it)) }
+    }
+    private fun prepareQuestionRecovery(prior: Stored, beforeQuestionRecovery: ((QuestionIdentity) -> Unit)?) {
+        val saved = prior.value
+        if (saved.phase == ExecutionPhase.TERMINAL) return
+        check(prior.processOwner != processOwner) { "活跃所有者不能执行死亡恢复" }
+        val question = saved.tools.firstOrNull {
+            it.invocation.name == ASK_USER_TOOL_NAME && it.disposition == ToolDisposition.IN_FLIGHT
+        } ?: return
+        val identity = QuestionIdentity(saved.message.conversationId.value, saved.message.runId.value,
+            saved.owner, question.invocation.id.value)
+        checkNotNull(beforeQuestionRecovery) { "恢复提问前必须确认旧作用域已持久中断" }.invoke(identity)
+    }
     private fun reconcile(db: SQLiteDatabase, prior: Stored): RunCheckpoint {
         val saved = prior.value
         val actual = database.runtimeMessage(db, saved.message)
@@ -86,7 +111,10 @@ internal class SQLiteRuntimeStore private constructor(
         val interrupted = ProcessRecovery.interrupt(saved)
         val result = interrupted.copy(message = if (actual.status == RunStatus.RUNNING) interrupted.message else actual,
             phase = ExecutionPhase.TERMINAL, messageReconciled = true, owner = "recovery-${UUID.randomUUID()}",
-            revision = saved.revision + 1)
+            revision = saved.revision + 1, pending = null,
+            tools = saved.tools.map {
+                if (it.disposition == ToolDisposition.IN_FLIGHT) it.copy(disposition = ToolDisposition.UNKNOWN) else it
+            })
         val encoded = RunCheckpointCodec.encode(result)
         if (actual.status == RunStatus.RUNNING) database.writeRuntimeMessage(db, result.message)
         check(db.update("runtime_checkpoints", values(result, encoded), "message_id=? AND owner=? AND revision=? AND process_owner=?",

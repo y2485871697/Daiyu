@@ -4,6 +4,8 @@ import android.os.Handler
 import android.os.Looper
 import app.daiyu.android.domain.ToolInvocation
 import app.daiyu.android.domain.question.*
+import app.daiyu.android.domain.runtime.RunExecutionOwner
+import app.daiyu.android.domain.tools.BarrierOffer
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
@@ -26,9 +28,17 @@ class QuestionRunSession(
     private val writer: Executor,
     private val completionWorker: Executor,
     private val ownerIsLive: () -> Boolean,
-    private val onFailure: (QuestionIdentity, Exception) -> Unit
+    private val onFailure: (QuestionIdentity, Exception) -> Unit,
+    private val executionOwner: RunExecutionOwner?,
+    private val currentOffer: () -> BarrierOffer?
 ) {
-    private class Work(val identity: QuestionIdentity, val onResult: (QuestionRunResult) -> Unit) {
+    constructor(registry: QuestionRegistry, owner: QuestionIdentity, writer: Executor,
+        completionWorker: Executor, ownerIsLive: () -> Boolean,
+        onFailure: (QuestionIdentity, Exception) -> Unit) :
+        this(registry, owner, writer, completionWorker, ownerIsLive, onFailure, null, { null })
+
+    private class Work(val identity: QuestionIdentity, val onResult: (QuestionRunResult) -> Unit,
+        val offer: BarrierOffer?) {
         val delivered = AtomicBoolean()
         val waiterDone = CompletableFuture<Unit>()
     }
@@ -38,25 +48,55 @@ class QuestionRunSession(
     private val seen = mutableSetOf<String>()
     private var active: Work? = null
     private val outstanding = mutableListOf<Work>()
-    val binding = QuestionCardBinding(registry, owner, writer) { live() }
+    val binding = QuestionCardBinding(registry, owner, writer) {
+        val work = synchronized(monitor) { active }
+        if (work == null) live() else live(work)
+    }
     init {
         require(registry.ownerPrefix == owner.ownerPrefix) { "question_owner_mismatch" }
         require(writer !== completionWorker) { "question_writer_must_not_wait_for_answer" }
     }
     private fun live() = !fenced.get() && ownerIsLive()
+    private fun live(work: Work) = live() && (work.offer?.let { ownsCurrentOffer(it) } ?: true)
+
+    private fun ownsCurrentOffer(offer: BarrierOffer): Boolean {
+        val expected = executionOwner ?: return false
+        return try {
+            val context = offer.context
+            offer.waitingCommitted && context.owner === expected &&
+                expected.conversationId.value == owner.conversationId &&
+                expected.runId.value == owner.runId && expected.ownerId == owner.ownerId &&
+                context.invocation.id == offer.pending.callId && context.invocation.name == ASK_USER_TOOL_NAME &&
+                context.authorization.taskId == expected.runId.value && !context.cancelled() && currentOffer() === offer
+        } catch (_: Exception) { false }
+    }
+
+    /** Only the original, durably waiting offer. Never finishes the ledger or resumes Runner. */
+    fun begin(offer: BarrierOffer, onPending: (QuestionRecord) -> Unit,
+        onResult: (QuestionRunResult) -> Unit): Boolean {
+        if (!live() || !ownsCurrentOffer(offer)) return false
+        val identity = try { owner.copy(callId = offer.context.invocation.id.value) }
+            catch (_: IllegalArgumentException) { return false }
+        return beginInternal(identity, offer.context.invocation, listOf(ASK_USER_TOOL_NAME), onPending, onResult, offer)
+    }
     private fun workerOnly() = check(Looper.myLooper() != Looper.getMainLooper()) { "background_thread_required" }
 
     /** Uses the provider invocation unchanged. Duplicate calls never install another consumer. */
     fun begin(identity: QuestionIdentity, invocation: ToolInvocation,
         batchToolNames: List<String> = listOf(ASK_USER_TOOL_NAME),
-        onPending: (QuestionRecord) -> Unit, onResult: (QuestionRunResult) -> Unit): Boolean {
+        onPending: (QuestionRecord) -> Unit, onResult: (QuestionRunResult) -> Unit): Boolean =
+        beginInternal(identity, invocation, batchToolNames, onPending, onResult, null)
+
+    private fun beginInternal(identity: QuestionIdentity, invocation: ToolInvocation,
+        batchToolNames: List<String>, onPending: (QuestionRecord) -> Unit,
+        onResult: (QuestionRunResult) -> Unit, offer: BarrierOffer?): Boolean {
         if (identity.ownerPrefix != owner.ownerPrefix || identity.callId != invocation.id.value ||
             invocation.name != ASK_USER_TOOL_NAME || batchToolNames != listOf(ASK_USER_TOOL_NAME)) return false
         val question = try { AskUserContract.parse(invocation.arguments) }
         catch (_: IllegalArgumentException) { return false }
-        val work = Work(identity, onResult)
+        val work = Work(identity, onResult, offer)
         synchronized(monitor) {
-            if (!live() || active != null || !seen.add(identity.storageKey)) return false
+            if (!live(work) || active != null || !seen.add(identity.storageKey)) return false
             active = work
             outstanding.removeAll { it.waiterDone.isDone }
             outstanding.add(work)
@@ -65,19 +105,24 @@ class QuestionRunSession(
             writer.execute {
                 try {
                     workerOnly()
-                    if (!live()) { work.waiterDone.complete(Unit); deliver(work, QuestionRunResult.Stopped(identity)); return@execute }
+                    if (!live(work)) { work.waiterDone.complete(Unit); deliver(work, QuestionRunResult.Stopped(identity)); return@execute }
                     val record = registry.barrier.register(identity.storageKey, question, listOf(ASK_USER_TOOL_NAME))
                     main.post {
-                        if (live() && !work.delivered.get()) {
-                            try { onPending(record) }
-                            catch (_: Exception) { abandon(work) }
+                        if (!work.delivered.get()) {
+                            if (!live(work)) {
+                                fenceAndCleanup(work)
+                                deliver(work, QuestionRunResult.Stopped(identity))
+                            } else {
+                                try { onPending(record) }
+                                catch (_: Exception) { abandon(work) }
+                            }
                         }
                     }
                     try {
                         completionWorker.execute {
                             try {
                                 workerOnly()
-                                if (!live()) {
+                                if (!live(work)) {
                                     fenceAndCleanup(work)
                                     deliver(work, QuestionRunResult.Stopped(identity))
                                 } else deliver(work, QuestionRunResult.Answered(identity, registry.awaitAnswer(identity, question)))
@@ -104,7 +149,7 @@ class QuestionRunSession(
         main.post {
             if (!work.delivered.compareAndSet(false, true)) return@post
             synchronized(monitor) { if (active === work) active = null }
-            val value = if (result is QuestionRunResult.Answered && !live())
+            val value = if (result is QuestionRunResult.Answered && !live(work))
                 QuestionRunResult.Stopped(work.identity) else result
             // A callback failure is not authority to replay a question or model continuation.
             try { work.onResult(value) } catch (failure: Exception) {

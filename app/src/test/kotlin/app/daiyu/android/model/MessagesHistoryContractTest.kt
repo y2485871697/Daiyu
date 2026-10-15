@@ -183,4 +183,55 @@ class MessagesHistoryContractTest {
         rejected {encode(owner(listOf(MessageBlock.Text("body", "unsupported"))).copy(role = "system", status = RunStatus.INTERRUPTED))}
     }
 
+    @Test fun contentStringsAreStrictDespiteAndroidStyleGetStringCoercion() {
+        class AndroidStrings : JSONObject() {
+            override fun getString(key: String): String = get(key).toString()
+        }
+        val validate = MessagesRequest::class.java
+            .getDeclaredMethod("validateContent", JSONObject::class.java).apply { isAccessible = true }
+        fun check(message: JSONObject, label: String, reject: Boolean) {
+            val failure = runCatching { validate.invoke(MessagesRequest, message) }.exceptionOrNull()
+            if (reject) assertTrue(label,
+                failure is java.lang.reflect.InvocationTargetException && failure.cause is org.json.JSONException)
+            else assertNull(label, failure)
+        }
+        val invalid = listOf<Any?>(null, JSONObject.NULL, 7, true, JSONObject(), JSONArray())
+        val fixtures = listOf(
+            Triple("assistant", text(" \n"), listOf("text")),
+            Triple("assistant", call().put("id", "").put("name", ""), listOf("id", "name")),
+            Triple("user", MessagesRequest.result("", ""), listOf("tool_use_id", "content")))
+        for ((role, seed, fields) in fixtures) {
+            fun block(): JSONObject = AndroidStrings().also { copy ->
+                val keys = seed.keys()
+                while (keys.hasNext()) { val key = keys.next(); copy.put(key, seed.get(key)) }
+            }
+            fun envelope(content: JSONObject): JSONObject = AndroidStrings().put("role", role)
+                .put("content", JSONArray().put(content))
+            check(envelope(block()), "$role valid strings", false)
+            for (field in listOf("type") + fields) for ((index, value) in invalid.withIndex()) {
+                check(envelope(block().put(field, value)), "$role $field invalid[$index]", true)
+            }
+            for ((index, value) in invalid.withIndex()) {
+                check(envelope(block()).put("role", value), "role invalid[$index]", true)
+            }
+        }
+    }
+    @Test fun malformedSavedStringsFailBeforeConnectionForCompletedAndInterrupted() {
+        val config = ModelSettings("https://example.invalid/v1/messages", "fixture", "synthetic-key", false)
+        var connected = 0
+        val model = MessagesModel(config) { connected++; throw AssertionError("connection attempted") }
+        val invalid = listOf(
+            listOf(raw("assistant", text("ok").put("text", 7))),
+            listOf(raw("assistant", call().put("name", true))),
+            listOf(raw("assistant", call()), raw("user", MessagesRequest.result("call", "done").put("content", JSONArray()))))
+        for (status in listOf(RunStatus.COMPLETED, RunStatus.INTERRUPTED)) for (saved in invalid) {
+            val message = owner(listOf(MessageBlock.Text("display", "must not fall back")), saved).copy(status = status)
+            val failure = runCatching { model.open(listOf(message)) }.exceptionOrNull()
+            assertTrue("$status malformed saved string must fail",
+                failure is org.json.JSONException || failure is IllegalArgumentException)
+            assertEquals(saved, message.protocolItems)
+        }
+        assertEquals(0, connected)
+    }
+
 }

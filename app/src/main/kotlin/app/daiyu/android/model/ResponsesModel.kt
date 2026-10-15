@@ -24,7 +24,14 @@ class ResponsesModel internal constructor(private val settings:ModelSettings, pr
                     input.put(JSONObject().put("role","user").put("content",message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") {it.text}))
                 } else if(message.status==RunStatus.COMPLETED) {
                     if(message.protocolItems.isNotEmpty()) {
-                        val items = message.protocolItems.map { JSONObject(it) }
+                        val items = message.protocolItems.map { raw ->
+                            val item = JSONObject(raw)
+                            require(item.has("type") || item.optJSONArray("content") == null ||
+                                item.optString("role") !in setOf("user", "assistant")) {
+                                "Messages 协议历史不能用于 Responses"
+                            }
+                            item
+                        }
                         items.forEach { input.put(it) }
                         val calls = items.filter { it.optString("type") == "function_call" }.map { it.getString("call_id") }.toSet()
                         val results = items.filter { it.optString("type") == "function_call_output" }.associate { it.getString("call_id") to it.getString("output") }

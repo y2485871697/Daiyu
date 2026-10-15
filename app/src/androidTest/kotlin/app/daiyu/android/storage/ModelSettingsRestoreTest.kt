@@ -5,6 +5,7 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import android.test.InstrumentationTestCase
 import app.daiyu.android.testContext
+import app.daiyu.android.model.ProviderProtocol
 import org.json.JSONObject
 import java.security.KeyStore
 import java.util.UUID
@@ -12,7 +13,7 @@ import java.util.UUID
 @Suppress("DEPRECATION")
 class ModelSettingsRestoreTest : InstrumentationTestCase() {
     private enum class CommitOutcome { OK, FALSE_AFTER_WRITE, THROW_AFTER_WRITE, FALSE_BEFORE_WRITE }
-    private val configKeys = setOf("endpoint", "model", "responses-path", "battery", "device-status")
+    private val configKeys = setOf("endpoint", "model", "responses-path", "battery", "device-status", "protocol")
     private val materialKeys = setOf("key", "iv", "key-alias", "key-owner")
     private val gate = "credential-rebind-required"
 
@@ -103,13 +104,13 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
         } finally { super.tearDown() }
     }
 
-    fun testPrepareIsReadOnlyImmutableAndLimitedToFiveKeys() {
+    fun testPrepareIsReadOnlyImmutableAndLimitedToNonSecretKeys() {
         val f = fresh(); f.seedConfiguration(); f.seedMaterial()
         val before = HashMap(f.raw.all)
         val json = JSONObject().put("model", "restored-model").put("battery", true)
         val plan = f.store.prepareNonSecretRestore(json)
         assertEquals(before, f.raw.all); assertEquals(0, f.spy.commits); assertTrue(f.spy.writes.isEmpty())
-        assertEquals(configKeys, f.spy.reads); assertEquals(configKeys, plan.before.keys)
+        assertEquals(configKeys, f.spy.reads); assertEquals(configKeys - "protocol", plan.before.keys)
         assertEquals(plan.before, f.store.nonSecretConfiguration())
         assertEquals(f.settings.endpoint, plan.after["endpoint"]); assertEquals("restored-model", plan.after["model"])
         assertEquals(false, plan.after["battery"]); assertEquals(false, plan.after["device-status"])
@@ -167,6 +168,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
     fun testStalePlansRejectValueAndPresenceChangesBeforeCommit() {
         for(name in configKeys) {
             val f = fresh(); f.seedConfiguration()
+            if(name == "protocol") assertTrue(f.raw.edit().putString("protocol", "responses").commit())
             val plan = f.store.prepareNonSecretRestore(JSONObject().put("model", "restored"))
             assertTrue(f.raw.edit().remove(name).commit()); val afterConcurrentChange = HashMap(f.raw.all)
             rejected { f.store.applyNonSecretRestore(plan, true) }
@@ -318,4 +320,90 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
             assertEquals("replacement-committed", f.reopen().load().apiKey)
         }
     }
+    fun testLegacyProtocolAndMalformedProtocolCanBeEditedWithoutCredentialRead() {
+        val f=fresh();f.save()
+        assertFalse(f.raw.contains("protocol"))
+        f.spy.protectCredentials=false
+        assertEquals(ProviderProtocol.RESPONSES,f.reopen().load().protocol)
+        for(bad in listOf<Any>("", "unknown", "RESPONSES", false)) {
+            val edit=f.raw.edit()
+            if(bad is String) edit.putString("protocol",bad) else edit.putBoolean("protocol",false)
+            assertTrue(edit.commit());f.spy.protectCredentials=true;f.spy.resetObservations()
+            rejected {f.reopen().load()}
+            val editing=f.reopen().loadForEditing()
+            assertEquals(ProviderProtocol.UNKNOWN,editing.settings.protocol)
+            assertEquals("",editing.settings.apiKey);assertTrue(editing.credentialUnavailable)
+            assertTrue(f.spy.reads.intersect(materialKeys).isEmpty())
+            f.spy.protectCredentials=false
+            f.store.save(f.settings,protocolChangeAuthorized=true)
+            assertFalse(f.raw.contains("protocol"))
+        }
+    }
+
+    fun testProtocolSaveRequiresRebindAndCompensatesProtocolPresence() {
+        val f=fresh();f.save();f.spy.protectCredentials=false
+        val next=f.settings.copy(endpoint="https://example.invalid/v1/messages",responsesPath="",
+            protocol=ProviderProtocol.MESSAGES,apiKey="explicit-messages-key")
+        val before=HashMap(f.raw.all)
+        rejected {f.store.save(next)};assertEquals(before,f.raw.all)
+        for(outcome in listOf(CommitOutcome.FALSE_AFTER_WRITE,CommitOutcome.THROW_AFTER_WRITE)) {
+            f.spy.outcomes.add(outcome)
+            rejected {f.store.save(next,protocolChangeAuthorized=true)}
+            assertEquals(before,f.raw.all)
+        }
+        f.store.save(next,protocolChangeAuthorized=true)
+        assertEquals(next,f.reopen().load());assertEquals("messages",f.raw.getString("protocol",null))
+        val messages=HashMap(f.raw.all)
+        f.spy.outcomes.add(CommitOutcome.FALSE_AFTER_WRITE)
+        rejected {f.store.save(f.settings,protocolChangeAuthorized=true)}
+        assertEquals(messages,f.raw.all)
+        f.store.save(f.settings,protocolChangeAuthorized=true);assertFalse(f.raw.contains("protocol"))
+    }
+
+    fun testProtocolRestoreKeepsLegacyOmissionsAndPersistentRebindGate() {
+        val f=fresh();f.save();val material=f.material()
+        val incoming=JSONObject().put("protocol","messages").put("responses-path","")
+            .put("endpoint","https://example.invalid/v1/messages")
+        val plan=f.store.prepareNonSecretRestore(incoming)
+        assertTrue(plan.credentialRebindRequired)
+        f.spy.outcomes.add(CommitOutcome.FALSE_AFTER_WRITE)
+        val before=HashMap(f.raw.all)
+        rejected {f.store.applyNonSecretRestore(plan,true)};assertEquals(before,f.raw.all)
+        f.store.applyNonSecretRestore(plan,true)
+        assertEquals(material,f.material());assertTrue(f.raw.getBoolean(gate,false))
+        assertFalse(f.raw.getBoolean("battery",true));assertFalse(f.raw.getBoolean("device-status",true))
+        assertEquals(ProviderProtocol.MESSAGES,f.reopen().loadForEditing().settings.protocol)
+        val legacy=f.store.prepareNonSecretRestore(JSONObject().put("model","legacy"))
+        assertEquals("messages",legacy.after["protocol"])
+        val empty=f.store.prepareNonSecretRestore(JSONObject())
+        assertTrue(empty.isNoOp);assertEquals(empty.before,empty.after)
+        rejected {f.reopen().load()}
+        rejected {f.store.prepareNonSecretRestore(JSONObject().put("protocol","unexpected"))}
+        rejected {f.store.prepareNonSecretRestore(JSONObject().put("responses-path","/responses"))}
+        assertEquals(material,f.material())
+    }
+
+    fun testProtocolRestoreRemainsBehindCredentialReadAndWriteGuards() {
+        val f=fresh();f.seedConfiguration();f.seedMaterial()
+        val material=f.material();val before=HashMap(f.raw.all)
+        f.spy.resetObservations()
+        assertTrue(f.spy.protectCredentials)
+        val plan=f.store.prepareNonSecretRestore(JSONObject().put("protocol","messages")
+            .put("responses-path","").put("endpoint","https://example.invalid/v1/messages"))
+        assertTrue(plan.credentialRebindRequired);assertEquals(before,f.raw.all)
+        assertEquals(configKeys,f.spy.reads);assertTrue(f.spy.writes.isEmpty());assertEquals(0,f.spy.commits)
+        f.store.applyNonSecretRestore(plan,true)
+        assertTrue(f.spy.protectCredentials);assertEquals(material,f.material())
+        assertEquals("messages",f.raw.getString("protocol",null));assertTrue(f.raw.getBoolean(gate,false))
+        assertFalse(f.raw.getBoolean("battery",true));assertFalse(f.raw.getBoolean("device-status",true))
+        rejected {f.reopen().load()}
+        val editing=f.reopen().loadForEditing()
+        assertEquals("",editing.settings.apiKey);assertEquals(ProviderProtocol.MESSAGES,editing.settings.protocol)
+        assertTrue(editing.credentialUnavailable)
+        assertTrue(f.spy.reads.all {it in configKeys || it==gate})
+        assertTrue(f.spy.writes.all {it in configKeys || it==gate})
+        assertTrue(f.spy.reads.intersect(materialKeys).isEmpty())
+        assertTrue(f.spy.writes.intersect(materialKeys).isEmpty())
+    }
+
 }

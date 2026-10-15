@@ -213,24 +213,17 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     internal fun preflightBackup(text:String) { parseBackup(text) }
     fun importBackup(text:String):Pair<Int,Int> {
         val (imported,restored,draft)=parseBackup(text)
-        var importedResult=0 to 0
         transaction {db->
-            val existingDraft=db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
-            require(draft.isEmpty() || existingDraft.isEmpty() || draft==existingDraft) {"未创建会话草稿冲突；未覆盖"}
-            val existingConversations=imported.count {c -> db.rawQuery("SELECT 1 FROM conversations WHERE id=?",arrayOf(c.id.value)).use {it.moveToFirst()} }
-            val existingMessages=restored.count {m -> db.rawQuery("SELECT 1 FROM messages WHERE id=?",arrayOf(m.id.value)).use {it.moveToFirst()} }
-            val total=imported.size+restored.size; val present=existingConversations+existingMessages
-            require(present==0 || present==total) {"备份身份冲突；未部分导入"}
-            if (present==0) {
-                imported.forEach {c->db.insertOrThrow("conversations",null,ContentValues().apply {
-                    put("id",c.id.value);put("title",c.title);put("draft",c.draft);put("updated",c.updatedAt);put("folder",c.folder);put("pinned",if(c.pinned) 1 else 0)
-                })}
-                restored.forEach {db.insertOrThrow("messages",null,values(it))}
-                if(existingDraft.isEmpty()) check(db.update("composer",ContentValues().apply {put("draft",draft)},"id=1",null)==1)
-                importedResult=imported.size to restored.size
-            }
+            // Append only. Any identity collision aborts the entire transaction.
+            imported.forEach {c->db.insertOrThrow("conversations",null,ContentValues().apply {
+                put("id",c.id.value);put("title",c.title);put("draft",c.draft);put("updated",c.updatedAt);put("folder",c.folder);put("pinned",if(c.pinned) 1 else 0)
+            })}
+            restored.forEach {db.insertOrThrow("messages",null,values(it))}
+            val existing=db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
+            require(draft.isEmpty() || existing.isEmpty() || draft==existing) {"未创建会话草稿冲突；未覆盖"}
+            if(existing.isEmpty()) check(db.update("composer",ContentValues().apply {put("draft",draft)},"id=1",null)==1)
         }
-        return importedResult
+        return imported.size to restored.size
     }
     private fun string(value:JSONObject,key:String):String = (value.get(key) as? String) ?: error("字段须为文本")
     private fun integer(value:JSONObject,key:String):Long {

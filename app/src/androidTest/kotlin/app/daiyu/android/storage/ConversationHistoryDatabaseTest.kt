@@ -70,7 +70,22 @@ class ConversationHistoryDatabaseTest : InstrumentationTestCase() {
         val target = fresh(); val imported = open(target)
         assertEquals(1 to 2, imported.importBackup(backup))
         assertEquals(backup, imported.exportBackup())
-        assertEquals(0 to 0, imported.importBackup(backup))
+        var rejected=false
+        try {imported.importBackup(backup)} catch(_:Exception) {rejected=true}
+        assertTrue("text backup identity collision must reject",rejected)
+        assertEquals(backup, imported.exportBackup())
+        val envelope=org.json.JSONObject(backup)
+        val payload=org.json.JSONObject(envelope.getString("payload"))
+        payload.getJSONArray("conversations").getJSONObject(0).put("title","different content with all same identities")
+        val raw=payload.toString()
+        val digest=java.security.MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8))
+            .joinToString("") {"%02x".format(it)}
+        val changed=envelope.put("payload",raw).put("sha256",digest).toString()
+        imported.preflightBackup(changed)
+        var changedRejected=false
+        try {imported.importBackup(changed)} catch(_:Exception) {changedRejected=true}
+        assertTrue("different content must not be reported as a duplicate success",changedRejected)
+        assertEquals(backup,imported.exportBackup())
     }
 
     fun testRecoverPreservesSegmentsAndDeleteRejectsLateSave() {
@@ -110,7 +125,10 @@ class ConversationHistoryDatabaseTest : InstrumentationTestCase() {
         assertEquals(listOf("before","full result","after"),MessageHistory.expand(prepared.messages).last().blocks.map {
             when(it) {is MessageBlock.Text->it.text;is MessageBlock.Tool->it.result}
         })
-        val backup=db.exportBackup();assertTrue(backup.contains("history_segments"));assertEquals(0 to 0,db.importBackup(backup))
+        val backup=db.exportBackup();assertTrue(backup.contains("history_segments"))
+        var duplicateRejected=false
+        try {db.importBackup(backup)} catch(_:Exception) {duplicateRejected=true}
+        assertTrue(duplicateRejected);assertEquals(backup,db.exportBackup())
     }
     fun testInvalidSupplementSaveRollsBackAcrossCloseReopen() {
         val context=fresh();var db=open(context);val conversation=db.create().id;val run=RunId("conflict-run")

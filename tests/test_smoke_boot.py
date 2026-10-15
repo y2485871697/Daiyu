@@ -75,12 +75,17 @@ class ProcessTests(unittest.TestCase):
         self.assertNotEqual(subprocess.run(cmd, cwd=self.root, env=env, capture_output=True).returncode, 0)
         self.assertEqual((sdk / 'adb.real').read_bytes(), first)
 
-    def smoke(self, api=26, case='ok'):
+    def smoke(self, api=26, case='ok', source_text=None, extra_source=None):
         (self.root / 'delivery/tests').mkdir(parents=True, exist_ok=True)
         (self.root / 'delivery/app.apk').touch()
         (self.root / 'delivery/tests/platform-test.apk').touch()
         (self.root / 'app/src/androidTest').mkdir(parents=True, exist_ok=True)
-        (self.root / 'app/src/androidTest/Test.kt').write_text('fun testOne() {}\n')
+        (self.root / 'app/src/androidTest/Test.kt').write_text(
+            source_text if source_text is not None else
+            'package app.daiyu.android\nclass FirstTest : android.test.InstrumentationTestCase() {\n fun testOne() {}\n}\n')
+        (self.root / 'app/src/androidTest/Helper.kt').write_text('class SupportHelper {}\n')
+        if extra_source is not None:
+            (self.root / 'app/src/androidTest/Second.kt').write_text(extra_source)
         self.executable('sleep', '#!/bin/sh\nexit 0\n')
         self.executable('timeout', '#!/bin/sh\nshift 2\nexec "$@"\n')
         self.executable('adb', '''#!/usr/bin/env python3
@@ -95,7 +100,10 @@ elif a[:3]==['shell','cat','/proc/meminfo']: print('MemTotal: 5000000 kB')
 elif a[0]=='install':
  print('Success');sys.exit(7 if case=='install-fail' else 0)
 elif a[:3]==['shell','am','instrument']:
- print('OK (2 tests)' if case=='count' else 'OK (1 tests)',flush=True)
+ Path('smoke/instrumentation-args.txt').write_text('\\n'.join(a))
+ classes='app.daiyu.android.FirstTest,app.daiyu.android.other.SecondTest' if case=='multi' else 'app.daiyu.android.FirstTest'
+ if a!=['shell','am','instrument','-w','-e','class',classes,'app.daiyu.android.test/android.test.InstrumentationTestRunner']: sys.exit(11)
+ print('OK (3 tests)' if case=='multi' else 'OK (2 tests)' if case=='count' else 'OK (1 tests)',flush=True)
  if case=='failure': print('FAILURES!!!')
  sys.exit(9 if case=='instrument-fail' else 0)
 elif a[:3]==['shell','am','start']: print('Status: ok')
@@ -113,6 +121,34 @@ elif a[:3]==['emu','screenrecord','screenshot']: Path(a[-1],'Screenshot_fake.png
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         self.assertEqual((self.root / 'smoke/启动.png').read_bytes(), b'\x89PNG\r\n\x1a\n')
         self.assertIn('phase=instrumentation exit=0', (self.root / 'smoke/stages.txt').read_text())
+        args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
+        self.assertEqual(args[3:7], ['-w', '-e', 'class', 'app.daiyu.android.FirstTest'])
+
+    def test_all_source_classes_are_selected(self):
+        result = self.smoke(case='multi', extra_source=(
+            'package app.daiyu.android.other\nclass SecondTest : android.test.InstrumentationTestCase() {\n fun testTwo() {}\n fun testThree() {}\n}\n'))
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
+        self.assertEqual(args[6], 'app.daiyu.android.FirstTest,app.daiyu.android.other.SecondTest')
+        self.assertEqual((self.root / 'smoke/instrumentation-targets.txt').read_text().splitlines()[0], '3')
+
+    def test_discovery_rejects_missing_package(self):
+        result = self.smoke(source_text='class FirstTest : android.test.InstrumentationTestCase() {\n fun testOne() {}\n}\n')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / 'smoke/instrumentation-args.txt').exists())
+
+    def test_discovery_rejects_ambiguous_class(self):
+        result = self.smoke(extra_source=(
+            'package app.daiyu.android\nclass SecondTest : android.test.InstrumentationTestCase() {\n fun testTwo() {}\n}\n'
+            'class ThirdTest : android.test.InstrumentationTestCase() {}\n'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / 'smoke/instrumentation-args.txt').exists())
+
+    def test_discovery_rejects_duplicate_class(self):
+        result = self.smoke(extra_source=(
+            'package app.daiyu.android\nclass FirstTest : android.test.InstrumentationTestCase() {\n fun testTwo() {}\n}\n'))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / 'smoke/instrumentation-args.txt').exists())
 
     def test_high_api_screenshot(self):
         result = self.smoke(api=37)

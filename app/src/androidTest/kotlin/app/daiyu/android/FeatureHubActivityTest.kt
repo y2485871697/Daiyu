@@ -236,11 +236,26 @@ class FeatureHubActivityTest : android.test.InstrumentationTestCase() {
     }
 
 
+    private fun containsVisibleSemanticText(
+        node: android.view.accessibility.AccessibilityNodeInfo,
+        text: String,
+    ): Boolean {
+        try {
+            if (node.isVisibleToUser && node.text?.toString() == text) return true
+            for (index in 0 until node.childCount) {
+                val child = node.getChild(index) ?: continue
+                if (containsVisibleSemanticText(child, text)) return true
+            }
+            return false
+        } finally {
+            node.recycle()
+        }
+    }
     private fun awaitSemanticText(text: String) {
         val deadline = android.os.SystemClock.uptimeMillis() + 5000
         while (android.os.SystemClock.uptimeMillis() < deadline) {
             val root = instrumentation.uiAutomation.rootInActiveWindow
-            if (root?.findAccessibilityNodeInfosByText(text)?.any { it.isVisibleToUser } == true) return
+            if (root != null && containsVisibleSemanticText(root, text)) return
             android.os.SystemClock.sleep(50)
         }
         fail("Original Compose text missing: $text")

@@ -44,4 +44,8 @@ android {
     }
 }
 kotlin { jvmToolchain(27) }
-dependencies { implementation(project(":core-domain")) }
+dependencies {
+    implementation(project(":core-domain"))
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20260522")
+}

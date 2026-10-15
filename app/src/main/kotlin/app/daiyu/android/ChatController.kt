@@ -4,6 +4,7 @@ import android.app.Application
 import android.content.SharedPreferences
 import android.net.Uri
 import app.daiyu.android.backup.NeutralBackupService
+import app.daiyu.android.context.ContextService
 import android.os.Handler
 import android.os.Looper
 import app.daiyu.android.domain.*
@@ -76,7 +77,7 @@ class ChatController internal constructor(private val application:Application,
         val run=RunId(UUID.randomUUID().toString())
         val user=Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
         val assistant=Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
-        val prior=try {if(conversation==null) emptyList() else database.messages(conversationId,limit=50).map {it.second}} catch(_:Exception) {problem="读取历史失败；草稿保留，未发起网络请求";notifyChanged();return null}
+        val prior=try {if(conversation==null) emptyList() else ContextService(application,database).prepareSend(conversationId).messages} catch(_:Exception) {problem="读取历史失败；草稿保留，未发起网络请求";notifyChanged();return null}
         val saved=try {
             database.send(user,assistant,conversation==null)
         } catch (_:Exception) {problem="发送内容保存失败；草稿保留，未发起网络请求";notifyChanged();return null}

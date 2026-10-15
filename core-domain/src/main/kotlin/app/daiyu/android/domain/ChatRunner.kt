@@ -1,6 +1,7 @@
 package app.daiyu.android.domain
 
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.locks.LockSupport
 import app.daiyu.android.domain.runtime.*
 
 /** One owner thread applies events. Cancellation only signals and closes transport. */
@@ -12,12 +13,17 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     constructor(model: ModelPort, store: ConversationStore, tool: BatteryTool, options: RunnerOptions,
         publish: (Message) -> Unit) : this(model, store, tool, publish, options)
     private val stopped = AtomicBoolean(false)
+    /** Control state only. No I/O, callbacks, cancellation, or waits may run under this lock. */
     private val terminalLock = Object()
-    private var terminal = false
+    private val eventLock = Any()
+    @Volatile private var terminal = false
+    @Volatile private var terminalReserved = false
     private var started = false
-    private var pauseRequested = false
+    @Volatile private var pauseRequested = false
     @Volatile private var breakStream = false
-    private var generation = 0L
+    @Volatile private var generation = 0L
+    @Volatile private var boundaryWaiter: Thread? = null
+    @Volatile private var requestOpening = false
     private val supplements = mutableListOf<Message>()
     private val supplementIds = mutableSetOf<MessageId>()
     @Volatile private var execution = ExecutionState()
@@ -25,47 +31,64 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     @Volatile private var identity: Message? = null
     fun state(): ExecutionState = execution
     fun stop() {
-        synchronized(terminalLock) {
-            if (terminal) return
-            stopped.set(true); generation++; terminalLock.notifyAll()
+        // Reserve the terminal outcome before observing the session. The object captured here is
+        // the one that may be cancelled; never read session again after leaving the lock.
+        val captured = synchronized(terminalLock) {
+            if (terminal || terminalReserved) return
+            terminalReserved = true
+            stopped.set(true)
+            generation++
+            Pair(session, boundaryWaiter)
         }
-        cancelSession(session)
+        captured.second?.let { LockSupport.unpark(it) }
+        cancelSession(captured.first)
     }
     /** Nonblocking control call. A tool already executing is allowed to finish its batch. */
     fun pause(): Boolean {
-        val close = synchronized(terminalLock) {
-            if (terminal || stopped.get()) return false
+        val captured = synchronized(terminalLock) {
+            if (terminal || terminalReserved || stopped.get()) return false
             pauseRequested = true
             execution = execution.copy(pauseRequested = true)
-            if (execution.phase == ExecutionPhase.STREAMING || execution.phase == ExecutionPhase.RECONNECTING) {
-                breakStream = true; generation++; true
-            } else false
+            if (requestOpening || execution.phase == ExecutionPhase.STREAMING || execution.phase == ExecutionPhase.RECONNECTING) {
+                breakStream = true
+                generation++
+                Pair(session, boundaryWaiter)
+            } else Pair(null, boundaryWaiter)
         }
-        if (close) cancelSession(session)
+        captured.second?.let { LockSupport.unpark(it) }
+        cancelSession(captured.first)
         return true
     }
     /** Only explicit resume releases a paused boundary; supplements alone never do. */
-    fun resume(): Boolean = synchronized(terminalLock) {
-        if (terminal || stopped.get() || !pauseRequested) return false
-        pauseRequested = false
-        execution = execution.copy(pauseRequested = false)
-        terminalLock.notifyAll(); true
+    fun resume(): Boolean {
+        val waiter = synchronized(terminalLock) {
+            if (terminal || terminalReserved || stopped.get() || !pauseRequested) return false
+            pauseRequested = false
+            execution = execution.copy(pauseRequested = false)
+            boundaryWaiter
+        }
+        waiter?.let { LockSupport.unpark(it) }
+        return true
     }
     /** Caller persists the user message first, on its own writer. Identity checked, not re-saved here. */
     fun supplement(message: Message): Boolean {
-        val close = synchronized(terminalLock) {
+        val captured = synchronized(terminalLock) {
             val owner = identity ?: return false
-            if (terminal || stopped.get() || message.role != "user" || message.status != RunStatus.COMPLETED ||
+            if (terminal || terminalReserved || stopped.get() || message.role != "user" || message.status != RunStatus.COMPLETED ||
                 message.conversationId != owner.conversationId || message.runId != owner.runId ||
-                message.id in supplementIds) return false
+                message.id == owner.id || message.error != null || message.historySegments.isNotEmpty() ||
+                message.blocks.any { it is MessageBlock.Tool } || message.id in supplementIds) return false
             supplementIds.add(message.id)
             supplements.add(message)
             execution = execution.copy(queuedSupplements = supplements.size)
-            if (!pauseRequested && (execution.phase == ExecutionPhase.STREAMING || execution.phase == ExecutionPhase.RECONNECTING)) {
-                breakStream = true; generation++; true
-            } else false
+            if (requestOpening || (!pauseRequested && (execution.phase == ExecutionPhase.STREAMING || execution.phase == ExecutionPhase.RECONNECTING))) {
+                breakStream = true
+                generation++
+                Pair(session, boundaryWaiter)
+            } else Pair(null, boundaryWaiter)
         }
-        if (close) cancelSession(session)
+        captured.second?.let { LockSupport.unpark(it) }
+        cancelSession(captured.first)
         return true
     }
     /** Public recovery entry point; never opens a model or executes a tool. */
@@ -73,18 +96,22 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         val runtime = requireNotNull(options.runtimeStore) { "恢复需要检查点存储" }
         return ProcessRecovery.recover(checkpoint, store, runtime, publish).message
     }
-    private fun setPhase(phase: ExecutionPhase, attempt: Int = 0) {
-        execution = ExecutionState(phase, pauseRequested, supplements.size, attempt)
+    private fun setPhase(phase: ExecutionPhase, attempt: Int = 0) = synchronized(terminalLock) {
+        val actual = if (phase == ExecutionPhase.BOUNDARY || phase == ExecutionPhase.PAUSED) {
+            if (pauseRequested) ExecutionPhase.PAUSED else ExecutionPhase.BOUNDARY
+        } else phase
+        execution = ExecutionState(actual, pauseRequested, supplements.size, attempt)
     }
     fun run(initial: Message, history: List<Message>): Message {
         require(initial.status == RunStatus.RUNNING && initial.role == "assistant")
         synchronized(terminalLock) { check(!started) { "Runner只能启动一次" }; started = true; identity = initial }
         var current = initial
-        var modelHistory = history.toList()
+        val sourceHistory = history.toList()
+        var modelHistory = sourceHistory
+        val segmentHistory = RunnerHistorySegments(initial)
         var outputs = emptyList<ToolOutput>()
         var round = 0
         var requestUnconfirmed = false
-        var historyBlockStart = 0
         val owner = java.util.UUID.randomUUID().toString()
         var revision = 0L
         val records = linkedMapOf<ToolCallId, ToolRecord>()
@@ -102,7 +129,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 revision = next.revision
             } catch (failure: Exception) { throw PersistenceException(failure) }
         }
-        fun apply(next: Message) {
+        fun apply(candidate: Message) {
+            val next = segmentHistory.project(candidate)
             val runtime = options.runtimeStore
             try {
                 if (runtime is AtomicRuntimeStore) {
@@ -122,37 +150,90 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         val calls = linkedMapOf<ToolCallId, ToolInvocation>()
         val results = mutableMapOf<ToolCallId, String>()
         val unknownOperations = mutableSetOf<Pair<String, String>>()
-        fun open(): ModelSession {
-            requestUnconfirmed = true
-            checkpoint() // open may itself send a request; persist uncertainty first.
-            return if (tool is CatalogTool) model.open(modelHistory, tool.definitions) else model.open(modelHistory)
+        fun awaitPause() {
+            while (true) {
+                val needsCheckpoint = synchronized(terminalLock) {
+                    if (!pauseRequested || stopped.get() || terminalReserved) {
+                        boundaryWaiter = null
+                        return
+                    }
+                    boundaryWaiter = Thread.currentThread()
+                    val changed = execution.phase != ExecutionPhase.PAUSED
+                    setPhase(ExecutionPhase.PAUSED)
+                    changed
+                }
+                if (needsCheckpoint) checkpoint()
+                // Do not wait while owning the control lock. unpark is intentionally used by
+                // stop/resume, including the race where the wake-up precedes park().
+                LockSupport.park()
+            }
         }
         fun boundary(): Boolean {
-            synchronized(terminalLock) {
-                setPhase(if (pauseRequested) ExecutionPhase.PAUSED else ExecutionPhase.BOUNDARY)
-                checkpoint()
-                while (pauseRequested && !stopped.get()) terminalLock.wait()
-                if (stopped.get()) throw InterruptedException()
-                val reopen = breakStream || supplements.isNotEmpty()
-                if (reopen) {
-                    val accepted = current.copy(status = RunStatus.COMPLETED, error = null, protocolItems = emptyList(),
-                        blocks = current.blocks.drop(historyBlockStart).filter { it !is MessageBlock.Tool || it.result != null })
-                    modelHistory = modelHistory + accepted + supplements
-                    historyBlockStart = current.blocks.size
-                    supplements.clear(); outputs = emptyList(); breakStream = false
+            setPhase(if (pauseRequested) ExecutionPhase.PAUSED else ExecutionPhase.BOUNDARY)
+            checkpoint()
+            awaitPause()
+            if (stopped.get() || terminalReserved) throw InterruptedException()
+            val acceptedUsers = synchronized(terminalLock) {
+                if (stopped.get() || terminalReserved) throw InterruptedException()
+                if (!breakStream && supplements.isEmpty()) null
+                else supplements.toList().also {
+                    supplements.clear(); breakStream = false
+                    execution = execution.copy(queuedSupplements = 0)
                 }
-                setPhase(ExecutionPhase.BOUNDARY)
-                checkpoint()
-                return reopen
+            }
+            if (acceptedUsers != null) {
+                val sealed = segmentHistory.sealSession(current, acceptedUsers)
+                outputs = emptyList()
+                modelHistory = sourceHistory + sealed.copy(status = RunStatus.COMPLETED, error = null)
+                apply(sealed)
+            }
+            setPhase(ExecutionPhase.BOUNDARY)
+            checkpoint()
+            return acceptedUsers != null
+        }
+        fun open(): ModelSession {
+            while (true) {
+                boundary()
+                val token = synchronized(terminalLock) {
+                    if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
+                    if (pauseRequested || supplements.isNotEmpty() || breakStream) null
+                    else { requestOpening = true; generation }
+                } ?: continue
+                requestUnconfirmed = true
+                try {
+                    checkpoint() // open may itself send a request; persist uncertainty first.
+                    val admitted = synchronized(terminalLock) {
+                        if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
+                        token == generation && !pauseRequested && supplements.isEmpty() && !breakStream
+                    }
+                    if (!admitted) continue
+                    val opened = try {
+                        if (tool is CatalogTool) model.open(modelHistory, tool.definitions) else model.open(modelHistory)
+                    } catch (failure: Exception) {
+                        val invalidated = synchronized(terminalLock) {
+                            if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
+                            token != generation || pauseRequested || supplements.isNotEmpty() || breakStream
+                        }
+                        if (invalidated) continue
+                        throw failure
+                    }
+                    val accept = synchronized(terminalLock) {
+                        if (stopped.get() || terminalReserved || terminal || token != generation ||
+                            pauseRequested || supplements.isNotEmpty() || breakStream) false
+                        else { session = opened; true }
+                    }
+                    if (accept) return opened
+                    cancelSession(opened)
+                } finally {
+                    synchronized(terminalLock) { requestOpening = false }
+                }
             }
         }
         try {
-            boundary()
             var active = open()
-            session = active
             if (stopped.get()) { cancelSession(active); throw InterruptedException() }
             while (round < options.maxRounds) {
-                if (boundary()) { cancelSession(active); active = open(); session = active }
+                if (boundary()) { cancelSession(active); active = open() }
                 if (stopped.get()) throw InterruptedException()
                 val pending = mutableListOf<ToolInvocation>()
                 val repetition = ReasoningRepetitionGuard()
@@ -198,12 +279,22 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 var textFloor = current.blocks.size
                 var sinkFailure: Exception? = null
                 var accepting = true
-                val token = synchronized(terminalLock) { setPhase(ExecutionPhase.STREAMING); ++generation }
+                val token = synchronized(terminalLock) {
+                    if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
+                    if (pauseRequested || supplements.isNotEmpty() || breakStream) null
+                    else { setPhase(ExecutionPhase.STREAMING); ++generation }
+                }
+                if (token == null) {
+                    if (boundary()) { cancelSession(active); active = open() }
+                    continue
+                }
                 requestUnconfirmed = true
                 checkpoint()
                 val sink: (ModelEvent) -> Unit = { event ->
-                    synchronized(terminalLock) {
-                    if (!accepting || token != generation || terminal || stopped.get()) return@synchronized
+                    // Event callbacks are serialized independently of control calls. In particular,
+                    // no persistence or observer callback below runs while terminalLock is held.
+                    synchronized(eventLock) {
+                    if (!accepting || token != generation || terminal || terminalReserved || stopped.get()) return@synchronized
                     try {
                     sinkFailure?.let { throw it }
                     repetitiveSurface?.let { throw RepetitiveOutputException(it) }
@@ -211,7 +302,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         is ModelEvent.Usage -> options.onUsage(event)
                         is ModelEvent.ReasoningDelta -> { checkText(event.itemId, event.text, final = false, reasoning = true) }
                         is ModelEvent.ReasoningFinal -> { checkText(event.itemId, event.text, final = true, reasoning = true) }
-                        is ModelEvent.ProtocolOutput -> apply(current.copy(protocolItems = event.items))
+                        is ModelEvent.ProtocolOutput -> {
+                            segmentHistory.replaceSessionProtocol(current, event.items)
+                            apply(current.copy(protocolItems = event.items))
+                        }
                         is ModelEvent.TextDelta -> {
                             bodyProgress(checkText(event.itemId, event.text, final = false))
                             val blocks = current.blocks.toMutableList()
@@ -253,6 +347,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     var attempt = 0
                     while (true) {
                         try {
+                            // The admission check is deliberately after the uncertainty
+                            // checkpoint: a stop during that write must not open the request.
+                            synchronized(terminalLock) {
+                                if (stopped.get() || terminalReserved || terminal || token != generation) {
+                                    throw InterruptedException()
+                                }
+                            }
                             if (attempt == 0) active.next(outputs, sink)
                             else (active as ResumableModelSession).resume(sink)
                             break
@@ -263,16 +364,43 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             if (attempt >= options.reconnect.maxAttempts || classified !in options.reconnect.failures ||
                                 resumable?.canResume != true) throw failure
                             synchronized(terminalLock) {
+                                if (stopped.get() || terminalReserved || breakStream) throw InterruptedException()
                                 setPhase(ExecutionPhase.RECONNECTING, ++attempt)
-                                checkpoint()
-                                if (options.reconnect.delayMillis > 0) terminalLock.wait(options.reconnect.delayMillis)
-                                if (stopped.get() || breakStream) throw InterruptedException()
+                            }
+                            checkpoint()
+                            if (options.reconnect.delayMillis > 0) {
+                                // A deadline park is outside the control lock and is interruptible
+                                // by stop/resume's unpark; unlike sleep it does not add stop latency.
+                                val deadline = System.nanoTime() + options.reconnect.delayMillis * 1_000_000L
+                                while (true) {
+                                    val remaining = deadline - System.nanoTime()
+                                    if (remaining <= 0L) break
+                                    synchronized(terminalLock) {
+                                        if (stopped.get() || terminalReserved || breakStream) throw InterruptedException()
+                                        boundaryWaiter = Thread.currentThread()
+                                    }
+                                    LockSupport.parkNanos(remaining)
+                                    synchronized(terminalLock) {
+                                        if (boundaryWaiter === Thread.currentThread()) boundaryWaiter = null
+                                        if (stopped.get() || terminalReserved || breakStream) throw InterruptedException()
+                                    }
+                                }
+                            }
+                            synchronized(terminalLock) {
+                                if (stopped.get() || terminalReserved || breakStream) throw InterruptedException()
                                 setPhase(ExecutionPhase.STREAMING, attempt)
                             }
                         }
                     }
                 } catch (failure: Exception) { transportFailure = failure }
-                finally { synchronized(terminalLock) { accepting = false; generation++ } }
+                finally {
+                    // Fence after all currently executing callbacks, not merely after the
+                    // transport returns. Late callbacks then observe accepting=false/token mismatch.
+                    synchronized(eventLock) {
+                        accepting = false
+                        synchronized(terminalLock) { generation++ }
+                    }
+                }
                 if (stopped.get()) throw InterruptedException()
                 sinkFailure?.let { throw it }
                 repetitiveSurface?.let { throw RepetitiveOutputException(it) }
@@ -280,7 +408,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     // A cancelled stream never confirms pending tools. Only accepted text is retained.
                     cancelSession(active)
                     boundary()
-                    active = open(); session = active
+                    active = open()
                     continue
                 }
                 transportFailure?.let { throw it }
@@ -291,13 +419,18 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 require(pending.none { it.name == "ask_user" } || pending.size == 1) { "ask_user必须独占工具批次" }
                 options.validateBatch(pending.toList())
                 if (pending.isEmpty()) {
-                    if (boundary()) { cancelSession(active); active = open(); session = active; continue }
+                    if (boundary()) { cancelSession(active); active = open(); continue }
+                    // Reserve normal completion before leaving the control section. stop() then
+                    // cannot race this terminal outcome, while the actual transaction stays outside.
                     val completed = synchronized(terminalLock) {
-                        if (stopped.get()) throw InterruptedException()
+                        if (stopped.get() || terminalReserved) throw InterruptedException()
                         if (pauseRequested || supplements.isNotEmpty() || breakStream) false
-                        else { apply(current.copy(status = RunStatus.COMPLETED)); true }
+                        else { terminalReserved = true; true }
                     }
-                    if (completed) return current
+                    if (completed) {
+                        apply(current.copy(status = RunStatus.COMPLETED))
+                        return current
+                    }
                     continue
                 }
                 // Pause/supplement requests during this batch wait until ALL calls finish.
@@ -307,6 +440,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (batch != null) {
                     pending.forEach { records[it.id] = ToolRecord(it, ToolDisposition.IN_FLIGHT) }
                     checkpoint()
+                    if (stopped.get() || terminalReserved) throw InterruptedException()
                     val batchOutputs = try { batch.execute(current, pending.toList()) } catch (_: Exception) {
                         pending.forEach {
                             records[it.id] = ToolRecord(it, ToolDisposition.UNKNOWN)
@@ -370,26 +504,88 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             }
             throw IllegalStateException("工具续轮达到12轮上限，已停止追加请求")
         } catch (failure: Exception) {
-            val status = synchronized(terminalLock) {
-                terminal = true; setPhase(ExecutionPhase.TERMINAL)
-                if (stopped.get()) RunStatus.STOPPED else RunStatus.FAILED
+            val terminalInfo = synchronized(terminalLock) {
+                // A reservation is only an in-memory ordering decision. Its durable outcome must
+                // be read back after a failed terminal commit; it is never proof of COMPLETED.
+                val reserved = terminalReserved
+                terminalReserved = true
+                terminal = true
+                setPhase(ExecutionPhase.TERMINAL)
+                val outcome = if (stopped.get()) RunStatus.STOPPED
+                else if (reserved) RunStatus.COMPLETED
+                else RunStatus.FAILED
+                Pair(reserved, outcome)
             }
-            val next = current.copy(status = status, error = if (status == RunStatus.STOPPED) null else
-                if (failure is PersistenceException) "保存失败，已显示内容可能未落盘" else
+            val wasReserved = terminalInfo.first
+            val status = terminalInfo.second
+            val baseError = if (failure is PersistenceException) "保存失败，已显示内容可能未落盘" else
                 if (failure is UnknownToolOutcomeException) "工具结果未知；已停止，禁止重放，请仅使用只读方式核实" else
-                if (failure is RepetitiveOutputException) "检测到模型${failure.surface}持续高度重复，已中止本次请求；已接收内容和工具结果已保留" else if (failure is ModelRequestException) failure.failure.userMessage else "请求失败，请检查模型设置或网络")
-            try { apply(next) } catch (_: Exception) {
-                current = next.copy(error = "保存失败，已显示内容可能未落盘")
-                try { publish(current) } catch (_: Exception) { }
+                if (failure is RepetitiveOutputException) "检测到模型${failure.surface}持续高度重复，已中止本次请求；已接收内容和工具结果已保留" else if (failure is ModelRequestException) failure.failure.userMessage else "请求失败，请检查模型设置或网络"
+            val next = current.copy(status = status, error = if (status == RunStatus.STOPPED || status == RunStatus.COMPLETED) null else baseError)
+            val runtime = options.runtimeStore
+            val terminalCommitWasAttempted = wasReserved && status == RunStatus.COMPLETED
+            var commitFailure: Exception? = null
+            // A terminal write may have succeeded before throwing. Never replace it with
+            // a second unconditional terminal write, including on legacy stores.
+            if (!terminalCommitWasAttempted) {
+                try {
+                    apply(next)
+                    return current
+                } catch (persist: Exception) {
+                    commitFailure = persist
+                }
             }
+            if (runtime is AtomicRuntimeStore) {
+                // reconcileCheckpoint is the only available read-after-uncertain-commit hook.
+                // Do not issue a second unconditional terminal commit.
+                try {
+                    val reconciled = runtime.reconcileCheckpoint(snapshot(next))
+                    val actual = reconciled.message
+                    val confirmed = if (status == RunStatus.COMPLETED) actual.status == RunStatus.COMPLETED
+                    else actual.status != RunStatus.RUNNING
+                    if (confirmed) {
+                        current = actual
+                        try { publish(current) } catch (_: Exception) { }
+                        return current
+                    }
+                } catch (reconcileFailure: Exception) {
+                    if (commitFailure == null) commitFailure = reconcileFailure
+                }
+            }
+            val detail = (commitFailure?.cause ?: commitFailure)?.message?.takeIf { it.isNotBlank() }
+            val persistenceError = if (runtime !is AtomicRuntimeStore) "保存失败，已显示内容可能未落盘"
+            else if (detail == null) "保存失败，无法确认终态是否已落盘" else
+                "保存失败，无法确认终态是否已落盘：$detail"
+            // In particular, a reserved COMPLETED state is not returned as success unless the
+            // atomic reconciliation read actually confirms it.
+            current = next.copy(status = if (status == RunStatus.COMPLETED) RunStatus.FAILED else status,
+                error = persistenceError)
+            try { publish(current) } catch (_: Exception) { }
             return current
-        } finally { cancelSession(session); session = null }
+        } finally {
+            val toCancel = synchronized(terminalLock) {
+                val captured = session
+                session = null
+                captured
+            }
+            cancelSession(toCancel)
+        }
     }
 }
 class PersistenceException(cause: Throwable) : RuntimeException("Conversation persistence failed", cause)
 
 private fun cancelSession(session: ModelSession?) {
-    try { session?.cancel() } catch (_: Exception) { }
+    if (session == null) return
+    // Cancellation is transport cleanup, not control flow. A broken provider is allowed to
+    // block here without delaying stop/pause/supplement or the runner's terminal projection.
+    try {
+        Thread {
+            try { session.cancel() } catch (_: Exception) { }
+        }.apply {
+            isDaemon = true
+            name = "chat-runner-cancel"
+        }.start()
+    } catch (_: Exception) { }
 }
 
 private class RepetitiveOutputException(val surface: String) : RuntimeException("Repetitive model output")

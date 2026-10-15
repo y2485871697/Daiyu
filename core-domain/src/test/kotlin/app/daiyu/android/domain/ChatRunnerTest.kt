@@ -2,6 +2,7 @@ package app.daiyu.android.domain
 
 import org.junit.Assert.*
 import org.junit.Test
+import app.daiyu.android.domain.runtime.RunnerOptions
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.FutureTask
 import java.util.concurrent.TimeUnit
@@ -51,17 +52,43 @@ class ChatRunnerTest {
         assertEquals("真实结果", (result.blocks[1] as MessageBlock.Tool).result)
     }
     @Test fun stopIgnoresLateEventsAndHasOneTerminal() {
-        val saved = mutableListOf<Message>(); lateinit var runner: ChatRunner
+        val saved = mutableListOf<Message>(); val published = mutableListOf<Message>()
+        val usage = mutableListOf<ModelEvent.Usage>(); var executed = 0
+        lateinit var runner: ChatRunner; lateinit var retainedSink: (ModelEvent) -> Unit
+        val late = listOf<ModelEvent>(
+            ModelEvent.TextDelta("t", "迟到"), ModelEvent.TextFinal("t", "不得替换"),
+            ModelEvent.ReasoningDelta("r", "OK.\n".repeat(2000)),
+            ModelEvent.ReasoningFinal("r", "OK.\n".repeat(2000)),
+            ModelEvent.ProtocolOutput(listOf("late-protocol")),
+            ModelEvent.ToolReady(ToolInvocation(ToolCallId("late"), "get_battery_status", "{}")),
+            ModelEvent.Usage(99, 99))
         val port = ModelPort { object : ModelSession {
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
-                sink(ModelEvent.TextDelta("t", "已确认"));runner.stop();sink(ModelEvent.TextDelta("t", "迟到"))
-            }; override fun cancel() {}
+                retainedSink = sink; sink(ModelEvent.TextDelta("t", "已确认"))
+                sink(ModelEvent.ProtocolOutput(listOf("accepted-protocol"))); sink(ModelEvent.Usage(1, 2))
+                runner.stop(); late.forEach { sink(it) }
+            }
+            override fun cancel() {}
         } }
-        runner = ChatRunner(port, object : ConversationStore { override fun save(message: Message) { saved.add(message) } }, BatteryTool { error("no tool") }, {})
-        val result=runner.run(initial(), emptyList())
-        assertEquals(RunStatus.STOPPED,result.status);assertEquals("已确认",(result.blocks.single() as MessageBlock.Text).text)
-        assertEquals(1,saved.count { it.status != RunStatus.RUNNING })
+        runner = ChatRunner(port, object : ConversationStore {
+            override fun save(message: Message) { saved.add(message) }
+        }, BatteryTool { executed++; "bad" }, RunnerOptions(onUsage = usage::add), published::add)
+        val result = runner.run(initial(), emptyList())
+        assertEquals(RunStatus.STOPPED, result.status); assertNull(result.error)
+        assertEquals(listOf(MessageBlock.Text("t", "已确认")), result.blocks)
+        assertEquals(listOf("accepted-protocol"), result.protocolItems)
+        assertEquals(listOf(ModelEvent.Usage(1, 2)), usage); assertEquals(0, executed)
+        assertEquals(listOf(result), saved.filter { it.status != RunStatus.RUNNING })
+        assertEquals(listOf(result), published.filter { it.status != RunStatus.RUNNING })
+        val savedBefore = saved.toList(); val publishedBefore = published.toList()
+        late.forEach { retainedSink(it) }
+        assertEquals(savedBefore, saved); assertEquals(publishedBefore, published)
+        assertEquals(listOf(ModelEvent.Usage(1, 2)), usage); assertEquals(0, executed)
+        assertFalse(runner.pause()); assertFalse(runner.resume())
+        assertFalse(runner.supplement(initial().copy(id = MessageId("after-stop"), role = "user", status = RunStatus.COMPLETED)))
     }
+
+
     @Test fun incompleteProtocolNeverExecutesTool() {
         var executed=0
         val port=ModelPort { object : ModelSession {
@@ -142,16 +169,15 @@ class ChatRunnerTest {
         owner.start()
         try {
             assertTrue(completing.await(5,TimeUnit.SECONDS));stopper.start()
-            val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
-            while(stopper.state!=Thread.State.BLOCKED && !stopTask.isDone && System.nanoTime()<deadline) Thread.yield()
-            assertEquals(Thread.State.BLOCKED,stopper.state)
-            release.countDown();val result=task.get(5,TimeUnit.SECONDS);stopTask.get(5,TimeUnit.SECONDS)
+            stopTask.get(1,TimeUnit.SECONDS)
+            assertTrue(stopper.state != Thread.State.BLOCKED)
+            release.countDown();val result=task.get(5,TimeUnit.SECONDS)
             assertEquals(RunStatus.COMPLETED,result.status)
             assertEquals(listOf(RunStatus.COMPLETED),saved.filter {it.status!=RunStatus.RUNNING}.map {it.status})
             assertEquals(listOf(RunStatus.COMPLETED),published.filter {it.status!=RunStatus.RUNNING}.map {it.status})
         } finally {release.countDown();owner.join(5000);if(stopper.state!=Thread.State.NEW) stopper.join(5000);assertFalse(stopper.isAlive)}
     }
-    @Test fun failedCompletionSaveFallsBackToDurableFailure() {
+    @Test fun failedCompletionSaveDoesNotAttemptSecondTerminal() {
         checkTerminalSaveFailure(false)
     }
     @Test fun failedTerminalSavesPublishWithoutClaimingDurability() {
@@ -172,8 +198,8 @@ class ChatRunnerTest {
         },BatteryTool {error("unused")},published::add).run(initial(),emptyList())
         assertEquals(RunStatus.FAILED,result.status);assertEquals("accepted",(result.blocks.single() as MessageBlock.Text).text)
         assertEquals("保存失败，已显示内容可能未落盘",result.error)
-        assertEquals(listOf(RunStatus.COMPLETED,RunStatus.FAILED),attempted.filter {it.status!=RunStatus.RUNNING}.map {it.status})
-        assertEquals(if(failAllTerminals) emptyList<RunStatus>() else listOf(RunStatus.FAILED),saved.filter {it.status!=RunStatus.RUNNING}.map {it.status})
+        assertEquals(listOf(RunStatus.COMPLETED),attempted.filter {it.status!=RunStatus.RUNNING}.map {it.status})
+        assertEquals(emptyList<RunStatus>(),saved.filter {it.status!=RunStatus.RUNNING}.map {it.status})
         assertEquals(listOf(RunStatus.FAILED),published.filter {it.status!=RunStatus.RUNNING}.map {it.status})
     }
 

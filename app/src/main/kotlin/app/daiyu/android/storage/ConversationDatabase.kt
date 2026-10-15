@@ -2,6 +2,7 @@ package app.daiyu.android.storage
 
 import android.content.ContentValues
 import android.content.Context
+import android.database.Cursor
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import app.daiyu.android.domain.*
@@ -10,10 +11,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 4), ConversationStore {
+class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 5), ConversationStore {
+    /** A message row keeps the v4 columns as the legacy projection.  This column is an
+     * append-only, lossless history of the provider attempts.  Empty means an old row and
+     * is deliberately handled by the v4 codec (important for old backup digests). */
+    private val historyColumn = "history_segments"
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0)")
-        db.execSQL("CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL,role TEXT NOT NULL,blocks TEXT NOT NULL,status TEXT NOT NULL,error TEXT,protocol TEXT NOT NULL)")
+        db.execSQL("CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL,role TEXT NOT NULL,blocks TEXT NOT NULL,status TEXT NOT NULL,error TEXT,protocol TEXT NOT NULL,history_segments TEXT NOT NULL DEFAULT '[]')")
         db.execSQL("CREATE INDEX messages_tail ON messages(conversation_id,seq)")
         createComposer(db)
         ContextStorage.installSchema(db)
@@ -23,12 +28,13 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..3 && newVersion==4) {"不支持此数据库版本，保留原数据"}
+        check(oldVersion in 1..4 && newVersion==5) {"不支持此数据库版本，保留原数据"}
         if(oldVersion==1) createComposer(db)
         if(oldVersion<=2) {
             db.execSQL("ALTER TABLE conversations ADD COLUMN folder TEXT NOT NULL DEFAULT ''")
             db.execSQL("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
         }
+        if(oldVersion<=4) db.execSQL("ALTER TABLE messages ADD COLUMN history_segments TEXT NOT NULL DEFAULT '[]'")
         ContextStorage.installSchema(db)
     }
     fun draft():String=readableDatabase.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
@@ -74,6 +80,16 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.delete("messages","conversation_id=?",arrayOf(id.value))
         db.delete("conversations","id=?",arrayOf(id.value))
     } }
+    private fun readMessageRow(c: Cursor, id: ConversationId): Message = Message(
+        MessageId(c.getString(1)), id, RunId(c.getString(2)), c.getString(3),
+        decode(JSONArray(c.getString(4))), RunStatus.valueOf(c.getString(5)), c.getString(6),
+        jsonStrings(JSONArray(c.getString(7))), MessageHistoryCodec.decode(JSONArray(c.getString(8)))
+    ).also { MessageHistoryCodec.validate(it) }
+    private fun validateRunHistory(db: SQLiteDatabase, id: ConversationId, run: RunId) {
+        val rows = db.rawQuery("SELECT seq,id,run_id,role,blocks,status,error,protocol,history_segments FROM messages WHERE conversation_id=? AND run_id=? ORDER BY seq",
+            arrayOf(id.value,run.value)).use { c -> buildList { while(c.moveToNext()) add(readMessageRow(c,id)) } }
+        MessageHistory.validate(rows)
+    }
     fun send(user:Message,assistant:Message,newConversation:Boolean=false):Conversation {
         require(user.conversationId==assistant.conversationId && user.runId==assistant.runId)
         require(user.role=="user" && user.status==RunStatus.COMPLETED && assistant.role=="assistant" && assistant.status==RunStatus.RUNNING)
@@ -86,15 +102,27 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             }
             check(db.update("conversations",ContentValues().apply {put("draft","");put("updated",System.currentTimeMillis())},"id=?",arrayOf(user.conversationId.value))==1) {"会话不存在"}
             db.insertOrThrow("messages",null,values(user));db.insertOrThrow("messages",null,values(assistant))
+            validateRunHistory(db,user.conversationId,user.runId)
             conversation=db.rawQuery("SELECT title,updated,folder,pinned FROM conversations WHERE id=?",arrayOf(user.conversationId.value)).use {it.moveToFirst();Conversation(user.conversationId,it.getString(0),"",it.getLong(1),it.getString(2),it.getInt(3)!=0)}
         }
         return checkNotNull(conversation)
     }
     override fun save(message:Message) {
         try { transaction { db ->
-            val count=db.update("messages",values(message),"id=? AND conversation_id=? AND run_id=? AND role=? AND status='RUNNING' AND EXISTS (SELECT 1 FROM conversations WHERE id=?)",
+            require(message.role == Message.ASSISTANT_ROLE) { "仅允许保存 assistant 运行回执" }
+            val encoded = values(message)
+            val count=db.update("messages",encoded,"id=? AND conversation_id=? AND run_id=? AND role=? AND status='RUNNING' AND EXISTS (SELECT 1 FROM conversations WHERE id=?)",
                 arrayOf(message.id.value,message.conversationId.value,message.runId.value,message.role,message.conversationId.value))
-            check(count==1) {"消息已结束或所属会话不存在，拒绝迟到回执"}
+            if (count==0) {
+                val identical=db.rawQuery("SELECT conversation_id,run_id,role,blocks,status,error,protocol,history_segments FROM messages WHERE id=?",arrayOf(message.id.value)).use {c ->
+                    c.moveToFirst() && c.getString(0)==message.conversationId.value && c.getString(1)==message.runId.value && c.getString(2)==message.role &&
+                        c.getString(3)==encoded.getAsString("blocks") && c.getString(4)==encoded.getAsString("status") &&
+                        (c.isNull(5) && encoded.get("error")==null || !c.isNull(5) && c.getString(5)==encoded.getAsString("error")) &&
+                        c.getString(6)==encoded.getAsString("protocol") && c.getString(7)==encoded.getAsString(historyColumn)
+                }
+                check(identical) {"消息已结束或所属会话不存在，拒绝迟到回执"}
+            }
+            validateRunHistory(db,message.conversationId,message.runId)
         } } catch(e:Exception) {throw PersistenceException(e)}
     }
     fun exportBackup():String {
@@ -103,7 +131,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             val conversationCount=db.rawQuery("SELECT count(*) FROM conversations",null).use {it.moveToFirst();it.getLong(0)}
             val messageCount=db.rawQuery("SELECT count(*) FROM messages",null).use {it.moveToFirst();it.getLong(0)}
             require(conversationCount<=1000 && messageCount<=50000) {"文本备份最多1000个会话、50000条消息"}
-            val rawBytes=db.rawQuery("SELECT (SELECT coalesce(sum(length(CAST(id AS BLOB))+length(CAST(title AS BLOB))+length(CAST(draft AS BLOB))+length(CAST(folder AS BLOB))),0) FROM conversations)+(SELECT coalesce(sum(length(CAST(id AS BLOB))+length(CAST(conversation_id AS BLOB))+length(CAST(run_id AS BLOB))+length(CAST(blocks AS BLOB))+length(CAST(protocol AS BLOB))+coalesce(length(CAST(error AS BLOB)),0)),0) FROM messages)+(SELECT length(CAST(draft AS BLOB)) FROM composer WHERE id=1)",null).use {it.moveToFirst();it.getLong(0)}
+            val rawBytes=db.rawQuery("SELECT (SELECT coalesce(sum(length(CAST(id AS BLOB))+length(CAST(title AS BLOB))+length(CAST(draft AS BLOB))+length(CAST(folder AS BLOB))),0) FROM conversations)+(SELECT coalesce(sum(length(CAST(id AS BLOB))+length(CAST(conversation_id AS BLOB))+length(CAST(run_id AS BLOB))+length(CAST(blocks AS BLOB))+length(CAST(protocol AS BLOB))+coalesce(length(CAST(error AS BLOB)),0)+length(CAST(history_segments AS BLOB))),0) FROM messages)+(SELECT length(CAST(draft AS BLOB)) FROM composer WHERE id=1)",null).use {it.moveToFirst();it.getLong(0)}
             require(rawBytes<=16*1024*1024) {"备份超过16MiB上限"}
             var encodedBytes=0L
             fun reserve(value:JSONObject) {
@@ -116,10 +144,17 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 reserve(value);conversations.put(value)
             }}
             val messages=JSONArray()
-            db.rawQuery("SELECT id,conversation_id,run_id,role,blocks,status,error,protocol FROM messages ORDER BY seq",null).use {c->while(c.moveToNext()) {
+            db.rawQuery("SELECT id,conversation_id,run_id,role,blocks,status,error,protocol,history_segments FROM messages ORDER BY seq",null).use {c->while(c.moveToNext()) {
                 val blocks=JSONArray(c.getString(4));validateBlocks(blocks)
                 val protocol=JSONArray(c.getString(7));validateProtocol(protocol)
                 val value=JSONObject().put("id",c.getString(0)).put("conversation_id",c.getString(1)).put("run_id",c.getString(2)).put("role",c.getString(3)).put("blocks",blocks).put("status",c.getString(5)).put("error",c.getString(6) ?: JSONObject.NULL).put("protocol",protocol)
+                val rawSegments=c.getString(8)
+                if (JSONArray(rawSegments).length()!=0) {
+                    val segments=MessageHistoryCodec.decode(JSONArray(rawSegments))
+                    val projection=Message(MessageId(c.getString(0)),ConversationId(c.getString(1)),RunId(c.getString(2)),c.getString(3),decode(blocks),RunStatus.valueOf(c.getString(5)),c.getString(6),jsonStrings(protocol),historySegments=segments)
+                    MessageHistoryCodec.validate(projection)
+                    value.put("history_segments", JSONArray(rawSegments))
+                }
                 reserve(value);messages.put(value)
             }}
             val draft=db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
@@ -149,7 +184,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             Conversation(ConversationId(id),string(c,"title"),string(c,"draft"),integer(c,"updated"),folder,boolean(c,"pinned"))
         }
         val restored=(0 until messages.length()).map {i->val m=messages.getJSONObject(i)
-            require(m.keys().asSequence().toSet()==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol"))
+            require(m.keys().asSequence().toSet().let {it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol") || it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol","history_segments")})
             val id=identity(string(m,"id"));require(messageIds.add(id));val conversation=identity(string(m,"conversation_id"));require(conversation in ids)
             val role=string(m,"role");require(role in setOf("user","assistant"))
             val status=RunStatus.valueOf(string(m,"status"));val encoded=m.getJSONArray("blocks");validateBlocks(encoded);val blocks=decode(encoded)
@@ -160,25 +195,42 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             }}
             require(blocks.filterIsInstance<MessageBlock.Tool>().map {it.invocation.id}.distinct().size==blocks.filterIsInstance<MessageBlock.Tool>().size)
             val originalError=if(m.isNull("error")) null else string(m,"error")
-            Message(MessageId(id),ConversationId(conversation),RunId(identity(string(m,"run_id"))),role,blocks,
+            val segments = if (m.has("history_segments")) {
+                val encodedSegments = m.getJSONArray("history_segments")
+                require(encodedSegments.length() > 0)
+                MessageHistoryCodec.decode(encodedSegments).also { rows -> rows.forEach { validateProtocol(JSONArray(it.protocolItems)) } }
+            } else emptyList()
+            val restored = Message(MessageId(id),ConversationId(conversation),RunId(identity(string(m,"run_id"))),role,blocks,
                 if(status==RunStatus.RUNNING) RunStatus.INTERRUPTED else status,
-                if(status==RunStatus.RUNNING) "导入时原运行未结束；未自动重发请求或工具" else originalError,jsonStrings(protocol))
+                if(status==RunStatus.RUNNING) "导入时原运行未结束；未自动重发请求或工具" else originalError,jsonStrings(protocol),
+                historySegments = segments)
+            MessageHistoryCodec.validate(restored)
+            restored
         }
+        MessageHistory.validate(restored)
         return Triple(imported,restored,string(data,"draft"))
     }
+    internal fun preflightBackup(text:String) { parseBackup(text) }
     fun importBackup(text:String):Pair<Int,Int> {
         val (imported,restored,draft)=parseBackup(text)
+        var importedResult=0 to 0
         transaction {db->
-            // Append only. Any identity collision aborts the entire transaction.
-            imported.forEach {c->db.insertOrThrow("conversations",null,ContentValues().apply {
-                put("id",c.id.value);put("title",c.title);put("draft",c.draft);put("updated",c.updatedAt);put("folder",c.folder);put("pinned",if(c.pinned) 1 else 0)
-            })}
-            restored.forEach {db.insertOrThrow("messages",null,values(it))}
-            val existing=db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
-            require(draft.isEmpty() || existing.isEmpty() || draft==existing) {"未创建会话草稿冲突；未覆盖"}
-            if(existing.isEmpty()) check(db.update("composer",ContentValues().apply {put("draft",draft)},"id=1",null)==1)
+            val existingDraft=db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
+            require(draft.isEmpty() || existingDraft.isEmpty() || draft==existingDraft) {"未创建会话草稿冲突；未覆盖"}
+            val existingConversations=imported.count {c -> db.rawQuery("SELECT 1 FROM conversations WHERE id=?",arrayOf(c.id.value)).use {it.moveToFirst()} }
+            val existingMessages=restored.count {m -> db.rawQuery("SELECT 1 FROM messages WHERE id=?",arrayOf(m.id.value)).use {it.moveToFirst()} }
+            val total=imported.size+restored.size; val present=existingConversations+existingMessages
+            require(present==0 || present==total) {"备份身份冲突；未部分导入"}
+            if (present==0) {
+                imported.forEach {c->db.insertOrThrow("conversations",null,ContentValues().apply {
+                    put("id",c.id.value);put("title",c.title);put("draft",c.draft);put("updated",c.updatedAt);put("folder",c.folder);put("pinned",if(c.pinned) 1 else 0)
+                })}
+                restored.forEach {db.insertOrThrow("messages",null,values(it))}
+                if(existingDraft.isEmpty()) check(db.update("composer",ContentValues().apply {put("draft",draft)},"id=1",null)==1)
+                importedResult=imported.size to restored.size
+            }
         }
-        return imported.size to restored.size
+        return importedResult
     }
     private fun string(value:JSONObject,key:String):String = (value.get(key) as? String) ?: error("字段须为文本")
     private fun integer(value:JSONObject,key:String):Long {
@@ -247,14 +299,18 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     }
     private fun backupDigest(value:String)=java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)).joinToString("") {"%02x".format(it.toInt() and 255)}
     private fun values(message:Message)=ContentValues().apply {
+        MessageHistoryCodec.validate(message)
         put("id",message.id.value);put("conversation_id",message.conversationId.value);put("run_id",message.runId.value)
         put("role",message.role);put("blocks",encode(message.blocks).toString());put("status",message.status.name);put("error",message.error);put("protocol",JSONArray(message.protocolItems).toString())
+        put(historyColumn, if (message.historySegments.isEmpty()) "[]" else MessageHistoryCodec.encode(message.historySegments).toString())
     }
     private fun transaction(block:(SQLiteDatabase)->Unit) { val db=writableDatabase;db.beginTransaction();try {block(db);db.setTransactionSuccessful()} finally {db.endTransaction()} }
     fun messages(id: ConversationId, before: Long = Long.MAX_VALUE, limit: Int = 50): List<Pair<Long,Message>> {
         require(limit in 1..200) {"分页数量须为1至200"}
-        return readableDatabase.rawQuery("SELECT seq,id,run_id,role,blocks,status,error,protocol FROM messages WHERE conversation_id=? AND seq<? ORDER BY seq DESC LIMIT ?",arrayOf(id.value,before.toString(),limit.toString())).use { c ->
-            buildList { while(c.moveToNext()) add(c.getLong(0) to Message(MessageId(c.getString(1)),id,RunId(c.getString(2)),c.getString(3),decode(JSONArray(c.getString(4))),RunStatus.valueOf(c.getString(5)),c.getString(6),jsonStrings(JSONArray(c.getString(7))))) }.reversed()
+        return readableDatabase.rawQuery("SELECT seq,id,run_id,role,blocks,status,error,protocol,history_segments FROM messages WHERE conversation_id=? AND seq<? ORDER BY seq DESC LIMIT ?",arrayOf(id.value,before.toString(),limit.toString())).use { c ->
+            buildList { while(c.moveToNext()) {
+                add(c.getLong(0) to readMessageRow(c,id))
+            }}.reversed()
         }
     }
     private fun jsonStrings(array:JSONArray) = (0 until array.length()).map {array.getString(it)}

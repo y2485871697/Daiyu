@@ -28,6 +28,10 @@ class MainActivity:Activity() {
     private lateinit var status:TextView
     private lateinit var send:Button
     private lateinit var stop:Button
+    private var controlOwner:Message?=null
+    private var controlTouchOwner:Message?=null
+    private var controlTouchActive=false
+    private var controlTouchGeneration=0L
     private var settingsDialog:AlertDialog?=null
     private var backupDialog:AlertDialog?=null
     private var configurationRestoreDialog:AlertDialog?=null
@@ -137,7 +141,37 @@ class MainActivity:Activity() {
                 if(!selectionSaved) toast("消息已保存；最后选中会话未保存")
             }
         }
-        stop=button("停止") {controller.stop();status.text="正在停止；不代表远端已取消"}
+        stop=object:Button(this) {
+            override fun dispatchTouchEvent(event:MotionEvent):Boolean {
+                if(event.actionMasked==MotionEvent.ACTION_DOWN) {
+                    controlTouchGeneration++;controlTouchActive=true;controlTouchOwner=controlOwner
+                }
+                val handled=super.dispatchTouchEvent(event)
+                if(event.actionMasked==MotionEvent.ACTION_UP || event.actionMasked==MotionEvent.ACTION_CANCEL) {
+                    val generation=controlTouchGeneration
+                    post {if(controlTouchGeneration==generation) {controlTouchActive=false;controlTouchOwner=null}}
+                }
+                return handled
+            }
+        }.apply {
+            text="暂停"
+            setOnClickListener {guard {
+                currentControlOwner()?.let {owner ->
+                    controller.runState(owner)?.let {state ->
+                        val accepted=if(state.pauseRequested) controller.resume(owner) else controller.pause(owner)
+                        if(accepted) refresh()
+                    }
+                }
+            }}
+        }
+        stop.setOnLongClickListener {
+            guard {
+                currentControlOwner()?.let {owner ->
+                    if(controller.stop(owner)) status.text="正在停止；不代表远端已取消"
+                }
+            }
+            true
+        }
         actions.addView(send);actions.addView(stop);actions.addView(button("回到底部") {jumpToBottom()})
         root.addView(actions);setContentView(root);root.requestApplyInsets()
         activityCallbacksAllowed=true
@@ -261,11 +295,17 @@ class MainActivity:Activity() {
         shown=if(conversation==null) mutableListOf() else controller.database.messages(conversation.id).toMutableList();renderAll()
         jumpToBottom();refresh()
     }
+    private fun currentControlOwner():Message? =
+        (if(controlTouchActive) controlTouchOwner else controlOwner)?.takeIf {it.conversationId==selected?.id}
     private fun refresh() {
         if(!activityUsable()) return
         input.isEnabled=controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败")!=true
         send.isEnabled=controller.ready && !controller.dataBusy && controller.active==null && controller.problem?.startsWith("会话恢复失败")!=true
-        stop.isEnabled=controller.active?.status==RunStatus.RUNNING
+        controlOwner=controller.active?.takeIf {it.conversationId==selected?.id && it.status==RunStatus.RUNNING}
+        val controlState=controlOwner?.let {controller.runState(it)}
+        stop.isEnabled=controlState!=null && input.isEnabled
+        stop.text=if(controlState?.pauseRequested==true) "继续" else "暂停"
+        stop.contentDescription=if(controlState?.pauseRequested==true) "继续当前回复，长按停止" else "暂停当前回复，长按停止"
         if(controller.dataBusy) {status.text="处理备份中";return}
         if(!controller.ready) {status.text="恢复会话中";return}
         if(controller.problem?.startsWith("会话恢复失败")==true) {status.text=controller.problem;return}
@@ -296,7 +336,9 @@ class MainActivity:Activity() {
                     } else entry
                 }.toMutableList()
             }
-            status.text=controller.problem ?: "${selected?.title ?: "未创建会话"} · ${if(active!=null) if(active.conversationId==selected?.id) "运行中" else "其他会话运行中" else "已就绪"}"
+            val activityState=if(active==null) "已就绪" else if(active.conversationId!=selected?.id) "其他会话运行中"
+                else if(controlState?.pauseRequested==true) "已请求暂停；点击继续，长按停止" else "运行中"
+            status.text=controller.problem ?: "${selected?.title ?: "未创建会话"} · $activityState"
         }
     }
     private fun renderAll() {cancelTurnJump();timeline.removeAllViews();rows.clear();shown.forEach {updateRow(it.second)} }

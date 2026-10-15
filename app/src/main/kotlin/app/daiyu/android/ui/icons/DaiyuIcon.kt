@@ -18,7 +18,7 @@ internal fun DaiyuIcon(
     contentDescription: String?,
     modifier: Modifier = Modifier,
     tint: Color = MiuixTheme.colorScheme.onSurface,
-    size: Dp = 22.dp,
+    size: Dp = 24.dp,
 ) {
     Image(
         imageVector = icon,

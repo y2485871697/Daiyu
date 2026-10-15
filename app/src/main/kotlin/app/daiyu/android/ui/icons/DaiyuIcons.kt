@@ -23,9 +23,9 @@ object DaiyuIcons {
     val More: ImageVector by lazy {
         ImageVector.Builder(name = "Daiyu.More", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
             path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.75f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, fill = null) {
-                moveTo(6f, 11f); curveTo(7.3f, 11f, 7.3f, 13f, 6f, 13f); curveTo(4.7f, 13f, 4.7f, 11f, 6f, 11f); close()
-                moveTo(12f, 11f); curveTo(13.3f, 11f, 13.3f, 13f, 12f, 13f); curveTo(10.7f, 13f, 10.7f, 11f, 12f, 11f); close()
-                moveTo(18f, 11f); curveTo(19.3f, 11f, 19.3f, 13f, 18f, 13f); curveTo(16.7f, 13f, 16.7f, 11f, 18f, 11f); close()
+                moveTo(5.5f, 10.5f); curveTo(6.328f, 10.5f, 7.0f, 11.172f, 7.0f, 12f); curveTo(7.0f, 12.828f, 6.328f, 13.5f, 5.5f, 13.5f); curveTo(4.672f, 13.5f, 4.0f, 12.828f, 4.0f, 12f); curveTo(4.0f, 11.172f, 4.672f, 10.5f, 5.5f, 10.5f); close()
+                moveTo(12f, 10.5f); curveTo(12.828f, 10.5f, 13.5f, 11.172f, 13.5f, 12f); curveTo(13.5f, 12.828f, 12.828f, 13.5f, 12f, 13.5f); curveTo(11.172f, 13.5f, 10.5f, 12.828f, 10.5f, 12f); curveTo(10.5f, 11.172f, 11.172f, 10.5f, 12f, 10.5f); close()
+                moveTo(18.5f, 10.5f); curveTo(19.328f, 10.5f, 20.0f, 11.172f, 20.0f, 12f); curveTo(20.0f, 12.828f, 19.328f, 13.5f, 18.5f, 13.5f); curveTo(17.672f, 13.5f, 17.0f, 12.828f, 17.0f, 12f); curveTo(17.0f, 11.172f, 17.672f, 10.5f, 18.5f, 10.5f); close()
             }
         }.build()
     }
@@ -127,8 +127,8 @@ object DaiyuIcons {
     val Steer: ImageVector by lazy {
         ImageVector.Builder(name = "Daiyu.Steer", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
             path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.75f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, fill = null) {
-                moveTo(5f, 4f); lineTo(5f, 12f); curveTo(5f, 14.2f, 6.8f, 16f, 9f, 16f); lineTo(20f, 16f)
-                moveTo(15f, 11f); lineTo(20f, 16f); lineTo(15f, 21f)
+                moveTo(5f, 3f); lineTo(5f, 10f); curveTo(5f, 12.2f, 6.8f, 14f, 9f, 14f); lineTo(20f, 14f)
+                moveTo(15f, 9f); lineTo(20f, 14f); lineTo(15f, 19f)
             }
         }.build()
     }
@@ -301,7 +301,7 @@ object DaiyuIcons {
                 moveTo(9f, 17f); curveTo(9f, 14f, 5.5f, 13.5f, 5.5f, 9.5f)
                 curveTo(5.5f, 5.9f, 8.4f, 3f, 12f, 3f); curveTo(15.6f, 3f, 18.5f, 5.9f, 18.5f, 9.5f)
                 curveTo(18.5f, 13.5f, 15f, 14f, 15f, 17f); close()
-                moveTo(9f, 20f); lineTo(15f, 20f); moveTo(11f, 21f); lineTo(13f, 21f)
+                moveTo(9.5f, 20.5f); lineTo(14.5f, 20.5f)
                 moveTo(12f, 17f); lineTo(12f, 12f); moveTo(9.5f, 9.5f); lineTo(12f, 12f); lineTo(14.5f, 9.5f)
             }
         }.build()
@@ -319,10 +319,9 @@ object DaiyuIcons {
     val Context: ImageVector by lazy {
         ImageVector.Builder(name = "Daiyu.Context", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
             path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.75f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, fill = null) {
-                moveTo(16.5f, 3f); curveTo(11.5f, 3f, 7.5f, 7f, 7.5f, 12f)
-                curveTo(7.5f, 17f, 11.5f, 21f, 16.5f, 21f)
-                lineTo(16.5f, 17f); curveTo(13.7f, 17f, 11.5f, 14.8f, 11.5f, 12f)
-                curveTo(11.5f, 9.2f, 13.7f, 7f, 16.5f, 7f); close()
+                moveTo(12f, 3f); lineTo(21f, 8f); lineTo(12f, 13f); lineTo(3f, 8f); close()
+                moveTo(3f, 12.5f); lineTo(12f, 17.5f); lineTo(21f, 12.5f)
+                moveTo(3f, 16.5f); lineTo(12f, 21.5f); lineTo(21f, 16.5f)
             }
         }.build()
     }
@@ -547,12 +546,9 @@ object DaiyuIcons {
     val Skills: ImageVector by lazy {
         ImageVector.Builder(name = "Daiyu.Skills", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
             path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.75f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, fill = null) {
-                moveTo(4f, 20f); lineTo(15f, 9f); lineTo(18f, 12f); lineTo(7f, 21f); close()
-                moveTo(12.5f, 11.5f); lineTo(15.5f, 14.5f)
-                moveTo(15f, 3f); lineTo(16f, 6f); lineTo(19f, 7f); lineTo(16f, 8f); lineTo(15f, 11f)
-                lineTo(14f, 8f); lineTo(11f, 7f); lineTo(14f, 6f); close()
-                moveTo(5f, 5f); lineTo(5f, 9f); moveTo(3f, 7f); lineTo(7f, 7f)
-                moveTo(20f, 15f); lineTo(20f, 19f); moveTo(18f, 17f); lineTo(21f, 17f)
+                moveTo(4f, 20f); lineTo(12.5f, 11.5f)
+                moveTo(16f, 3f); lineTo(17.1f, 6.9f); lineTo(21f, 8f); lineTo(17.1f, 9.1f); lineTo(16f, 13f)
+                lineTo(14.9f, 9.1f); lineTo(11f, 8f); lineTo(14.9f, 6.9f); close()
             }
         }.build()
     }
@@ -738,12 +734,10 @@ object DaiyuIcons {
     val Reconnect: ImageVector by lazy {
         ImageVector.Builder(name = "Daiyu.Reconnect", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
             path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.75f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, fill = null) {
-                moveTo(9f, 8f); lineTo(12f, 5f); curveTo(14f, 3f, 17f, 3f, 19f, 5f)
-                curveTo(21f, 7f, 21f, 10f, 19f, 12f); lineTo(16f, 15f)
-                moveTo(8f, 9f); lineTo(5f, 12f); curveTo(3f, 14f, 3f, 17f, 5f, 19f)
-                curveTo(7f, 21f, 10f, 21f, 12f, 19f); lineTo(15f, 16f)
-                moveTo(8f, 16f); lineTo(16f, 8f)
-                moveTo(13f, 8f); lineTo(16f, 8f); lineTo(16f, 11f)
+                moveTo(9f, 3f); lineTo(9f, 7f); moveTo(15f, 3f); lineTo(15f, 7f)
+                moveTo(6f, 7f); lineTo(18f, 7f); lineTo(18f, 11f); curveTo(18f, 14.3f, 15.3f, 17f, 12f, 17f)
+                curveTo(8.7f, 17f, 6f, 14.3f, 6f, 11f); close()
+                moveTo(12f, 17f); lineTo(12f, 21f)
             }
         }.build()
     }
@@ -760,10 +754,9 @@ object DaiyuIcons {
     val Pet: ImageVector by lazy {
         ImageVector.Builder(name = "Daiyu.Pet", defaultWidth = 24.dp, defaultHeight = 24.dp, viewportWidth = 24f, viewportHeight = 24f).apply {
             path(stroke = SolidColor(Color.Black), strokeLineWidth = 1.75f, strokeLineCap = StrokeCap.Round, strokeLineJoin = StrokeJoin.Round, fill = null) {
-                moveTo(12f, 12f); curveTo(9f, 6f, 5f, 5f, 3f, 6f)
-                curveTo(3f, 12f, 6f, 15f, 10f, 14f); curveTo(10f, 17f, 9f, 19f, 7f, 20f)
-                curveTo(11f, 21f, 15f, 19f, 14f, 14f); curveTo(18f, 15f, 21f, 12f, 21f, 6f)
-                curveTo(18f, 5f, 14f, 7f, 12f, 12f); close()
+                moveTo(5f, 10f); lineTo(5f, 4f); lineTo(9f, 7.5f); curveTo(10.6f, 7f, 13.4f, 7f, 15f, 7.5f)
+                lineTo(19f, 4f); lineTo(19f, 10f); curveTo(20.5f, 12f, 20.5f, 15f, 19f, 17f)
+                curveTo(17f, 20.5f, 7f, 20.5f, 5f, 17f); curveTo(3.5f, 15f, 3.5f, 12f, 5f, 10f); close()
             }
         }.build()
     }

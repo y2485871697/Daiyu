@@ -6,6 +6,7 @@ import java.util.Collections
 
 enum class ProviderProtocol(val wireName: String) {
     RESPONSES("responses"),
+    MESSAGES("messages"),
     UNKNOWN("unknown")
 }
 
@@ -35,7 +36,8 @@ class ProviderSnapshot private constructor(
         apiKey = apiKey,
         batteryEnabled = batteryEnabled,
         responsesPath = responsesPath,
-        deviceStatusEnabled = deviceStatusEnabled
+        deviceStatusEnabled = deviceStatusEnabled,
+        protocol = protocol
     )
 
     override fun toString(): String =
@@ -62,11 +64,12 @@ class ProviderSnapshot private constructor(
     }
 
     companion object {
-        fun capture(settings: ModelSettings): ProviderSnapshot = capture(settings, ProviderProtocol.RESPONSES)
+        fun capture(settings: ModelSettings): ProviderSnapshot = capture(settings, settings.protocol)
 
         fun capture(settings: ModelSettings, protocol: ProviderProtocol): ProviderSnapshot {
             if (settings.apiKey.isBlank()) throw MissingProviderCredentialException()
-            settings.validate()
+            if (protocol == ProviderProtocol.UNKNOWN) settings.validate()
+            else settings.copy(protocol = protocol).validate()
             return ProviderSnapshot(
                 protocol = protocol,
                 endpoint = settings.endpoint,

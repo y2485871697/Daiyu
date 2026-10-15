@@ -14,6 +14,7 @@ object ModelFactory {
                 val settings = snapshot.asModelSettings()
                 ResponsesModel(settings)
             }
+            ProviderProtocol.MESSAGES -> MessagesModel(snapshot.asModelSettings())
             ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(snapshot.protocol.wireName)
         }
     }
@@ -24,6 +25,7 @@ object ModelFactory {
     fun create(settings: ModelSettings, protocol: String): ModelPort {
         val selected = when (protocol.trim().lowercase()) {
             ProviderProtocol.RESPONSES.wireName -> ProviderProtocol.RESPONSES
+            ProviderProtocol.MESSAGES.wireName -> ProviderProtocol.MESSAGES
             else -> throw UnsupportedProviderException(protocol)
         }
         return create(settings, selected)

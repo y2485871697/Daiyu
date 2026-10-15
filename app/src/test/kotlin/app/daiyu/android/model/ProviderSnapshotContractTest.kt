@@ -31,7 +31,7 @@ class ProviderSnapshotContractTest {
     }
 
     @Test fun unknownProtocolsCannotFallBackToResponses() {
-        for (wire in listOf("messages", "anthropic-messages", "unknown", "")) {
+        for (wire in listOf("anthropic-messages", "unknown", "")) {
             try {
                 ModelFactory.create(settings(), wire)
                 fail("unsupported protocol must fail closed")

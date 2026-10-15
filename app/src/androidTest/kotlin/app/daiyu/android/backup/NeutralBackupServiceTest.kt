@@ -172,4 +172,41 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
         try { assertEquals(old, reopened.exportBackup()); assertEquals(0, reopened.readableDatabase.rawQuery("SELECT count(*) FROM neutral_config", null).use { it.moveToFirst(); it.getInt(0) }) }
         finally { reopened.close() }
     }
+    fun testMessagesProtocolRoundTripIsMetadataUntilExplicitRestore() {
+        val (context,source,exporter)=fresh();seed(source,1)
+        val prefs=context.getSharedPreferences("model-settings",Context.MODE_PRIVATE)
+        assertTrue(prefs.edit().putString("protocol","messages").putString("endpoint","https://example.invalid/v1/messages")
+            .putString("responses-path","").putString("model","fixture").putBoolean("battery",true)
+            .putString("key","SYNTHETIC_SECRET").commit())
+        assertTrue(exporter.captureNonSecretConfiguration(context).isNotEmpty())
+        val text=exporter.exportPackage();assertFalse(text.contains("SYNTHETIC_SECRET"))
+        val (targetContext,target,importer)=fresh()
+        importer.importPackage(text)
+        assertEquals("messages",importer.importedConfiguration().getString("protocol"))
+        val targetPrefs=targetContext.getSharedPreferences("model-settings",Context.MODE_PRIVATE)
+        assertTrue(targetPrefs.all.isEmpty())
+        val settings=app.daiyu.android.storage.ModelSettingsStore(targetContext)
+        val plan=settings.prepareNonSecretRestore(importer.importedConfiguration())
+        assertTrue(plan.credentialRebindRequired)
+        settings.applyNonSecretRestore(plan,true)
+        assertEquals("messages",targetPrefs.getString("protocol",null))
+        assertFalse(targetPrefs.getBoolean("battery",true))
+        assertFalse(targetPrefs.getBoolean("device-status",true))
+        reject {settings.load()}
+        assertEquals(source.exportBackup(),target.exportBackup())
+    }
+
+    fun testInvalidMessagesBackupConfigurationRejectsWithoutMutatingMetadata() {
+        val (_,_,backup)=fresh()
+        backup.setNonSecretConfiguration(mapOf("model" to "existing"))
+        val before=backup.exportPackage()
+        for(config in listOf(
+            mapOf("protocol" to "unknown"),mapOf("protocol" to false),
+            mapOf("protocol" to "messages","responses-path" to "/responses"),
+            mapOf("protocol" to "messages","endpoint" to "https://example.invalid/v1/responses"))) {
+            reject {backup.setNonSecretConfiguration(config)}
+            assertEquals(before,backup.exportPackage())
+        }
+    }
+
 }

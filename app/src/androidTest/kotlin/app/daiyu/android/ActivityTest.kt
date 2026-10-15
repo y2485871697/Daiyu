@@ -453,4 +453,74 @@ class ActivityTest:InstrumentationTestCase() {
         }
     }
 
+    fun testProtocolSelectionClearsCredentialRequiresRebindAndSurvivesReopen() {
+        val application=instrumentation.targetContext.applicationContext as ChatApplication
+        val context=testContext(instrumentation.targetContext,"protocol-ui-${java.util.UUID.randomUUID()}-")
+        val store=settingsStore(context)
+        val config=ModelSettings("https://example.invalid","fixture","synthetic-responses-key",false,"/responses")
+        store.save(config)
+        val db=ConversationDatabase(context)
+        val calls=java.util.concurrent.atomic.AtomicInteger()
+        val controller=ChatController(application,db,store,context.getSharedPreferences("conversation-ui",0),{calls.incrementAndGet();error("no network")})
+        var original:ChatController?=null
+        var activity:MainActivity?=null
+        try {
+            val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
+            while(!controller.ready && System.nanoTime()<deadline) Thread.sleep(10)
+            assertTrue(controller.ready)
+            instrumentation.runOnMainSync {original=application.controller;application.controller=controller}
+            val current=start();activity=current
+            instrumentation.waitForIdleSync()
+            instrumentation.runOnMainSync {
+                input(current).setText("协议切换保留草稿")
+                button(current,"模型设置").performClick()
+                val dialogField=MainActivity::class.java.getDeclaredField("settingsDialog").apply {isAccessible=true}
+                var dialog=dialogField.get(current) as android.app.AlertDialog
+                var nodes=views(dialog.window!!.decorView)
+                var edits=nodes.filterIsInstance<EditText>()
+                assertEquals(4,edits.size)
+                assertEquals(config.apiKey,edits[3].text.toString())
+                nodes.filterIsInstance<android.widget.RadioButton>().single {it.text.toString()=="Anthropic Messages"}.performClick()
+                assertEquals("",edits[3].text.toString());assertEquals("",edits[1].text.toString())
+                assertFalse(edits[1].isEnabled)
+                edits[3].setText("synthetic-messages-key")
+                dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick()
+                assertTrue(dialog.isShowing);assertEquals(config,store.load())
+                nodes.filterIsInstance<android.widget.CheckBox>().single {it.text.toString().contains("确认将其绑定")}.isChecked=true
+                dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick()
+                assertFalse(dialog.isShowing)
+                val messages=store.load()
+                assertEquals(app.daiyu.android.model.ProviderProtocol.MESSAGES,messages.protocol)
+                assertEquals("synthetic-messages-key",messages.apiKey);assertEquals("",messages.responsesPath)
+                assertTrue(app.daiyu.android.model.ModelFactory.create(messages) is app.daiyu.android.model.MessagesModel)
+                assertEquals(messages,settingsStore(context).load())
+                button(current,"模型设置").performClick()
+                dialog=dialogField.get(current) as android.app.AlertDialog
+                nodes=views(dialog.window!!.decorView);edits=nodes.filterIsInstance<EditText>()
+                assertTrue(nodes.filterIsInstance<android.widget.RadioButton>().single {it.text.toString()=="Anthropic Messages"}.isChecked)
+                assertFalse(edits[1].isEnabled)
+                nodes.filterIsInstance<android.widget.RadioButton>().single {it.text.toString()=="OpenAI Responses"}.performClick()
+                assertEquals("",edits[3].text.toString());assertTrue(edits[1].isEnabled)
+                edits[1].setText("/responses");edits[3].setText("explicit-responses-key")
+                nodes.filterIsInstance<android.widget.CheckBox>().single {it.text.toString().contains("确认将其绑定")}.isChecked=true
+                dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick()
+                assertFalse(dialog.isShowing)
+                assertEquals(config.copy(apiKey="explicit-responses-key"),store.load())
+                assertFalse(context.getSharedPreferences("model-settings",0).contains("protocol"))
+                assertEquals("协议切换保留草稿",input(current).text.toString())
+                assertTrue(db.conversations().isEmpty());assertEquals(0,calls.get())
+            }
+        } finally {
+            try {
+                instrumentation.runOnMainSync {activity?.finish()}
+                instrumentation.waitForIdleSync();controller.close()
+            } finally {
+                instrumentation.runOnMainSync {original?.let {application.controller=it}}
+                context.getSharedPreferences("model-settings",0).edit().clear().commit()
+                context.getSharedPreferences("conversation-ui",0).edit().clear().commit()
+                context.deleteDatabase("conversations.db")
+            }
+        }
+    }
+
 }

@@ -19,6 +19,7 @@ collect_diagnostics() {
   timeout --kill-after=5 10 adb shell df -h /data > smoke/storage.txt 2>&1 || true
   timeout --kill-after=5 10 adb shell cat /proc/meminfo > smoke/memory-exit.txt 2>&1 || true
   timeout --kill-after=5 15 adb logcat -d -b all > smoke/logcat-exit.txt 2>&1 || true
+  timeout --kill-after=5 15 adb shell dumpsys dropbox --print data_app_anr > smoke/anr-dropbox.txt 2>&1 || true
 }
 trap collect_diagnostics EXIT
 adb_stage device 60 wait-for-device
@@ -54,14 +55,35 @@ if test -n "${EMULATOR_RAM_MB:-}"; then
 fi
 adb_stage install-app 120 install "$APK" 2>&1 | tee smoke/install.txt
 adb_stage install-tests 120 install delivery/tests/platform-test.apk 2>&1 | tee smoke/test-install.txt
-adb_stage instrumentation 300 shell am instrument -w app.daiyu.android.test/android.test.InstrumentationTestRunner 2>&1 | tee smoke/platform-tests.txt
-expected=$(python3 - <<'PYCOUNT'
+# Explicitly name every source test class: legacy default discovery scans all dependency DEX.
+target_spec=$(python3 - <<'PYCOUNT'
 from pathlib import Path
 import re
-print(sum(len(re.findall(r"^\s*fun test\w+\(",p.read_text(),re.M)) for p in Path("app/src/androidTest").rglob("*.kt")))
+classes = {}
+for path in sorted(Path("app/src/androidTest").rglob("*.kt")):
+    source = path.read_text()
+    count = len(re.findall(r"^\s*fun test\w+\(", source, re.M))
+    if not count:
+        continue
+    packages = re.findall(r"^package\s+([\w.]+)\s*$", source, re.M)
+    names = re.findall(r"^class\s+(\w+Test)\s*:", source, re.M)
+    if len(packages) != 1 or len(names) != 1:
+        raise ValueError(f"Ambiguous instrumentation test declaration: {path}")
+    name = packages[0] + "." + names[0]
+    if name in classes:
+        raise ValueError(f"Duplicate instrumentation test class: {name}")
+    classes[name] = count
+if not classes:
+    raise ValueError("No instrumentation tests found")
+print(sum(classes.values()))
+print(",".join(sorted(classes)))
 PYCOUNT
 )
+expected=${target_spec%%$'\n'*}
+test_classes=${target_spec#*$'\n'}
 test "$expected" -gt 0
+printf '%s\n' "$target_spec" > smoke/instrumentation-targets.txt
+adb_stage instrumentation 300 shell am instrument -w -e class "$test_classes" app.daiyu.android.test/android.test.InstrumentationTestRunner 2>&1 | tee smoke/platform-tests.txt
 grep -q "OK ($expected tests)" smoke/platform-tests.txt
 if grep -q 'FAILURES!!!' smoke/platform-tests.txt; then exit 1; fi
 adb_stage packages 20 shell pm list packages > smoke/packages.txt

@@ -18,7 +18,7 @@ class CatalogModelBridgeTest {
             override fun prepare(arguments:ToolArguments)=PreparedTool(execute=execute)
         })
         return CatalogModelBridge(registry.snapshot(),SessionCapabilities("session",setOf("read")),
-            ToolLedger(InMemoryToolLedgerStore()),owner.conversationId,owner.runId)
+            ToolLedger(InMemoryToolLedgerStore()),owner.conversationId,owner.runId,TaskAuthorization("session",owner.runId.value))
     }
     @Test fun canonicalFilteredSchemaAndReceiptReplayUseOneCatalogAndLedger() {
         var executions=0

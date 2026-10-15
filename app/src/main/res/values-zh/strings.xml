@@ -1,0 +1,11 @@
+<resources>
+    <string name="app_name">代鱼</string>
+    <string name="message_header">%1$s · %2$s</string>
+    <string name="message_user">你</string>
+    <string name="tool_details">参数：%1$s\n结果：%2$s</string>
+    <string name="tool_waiting">等待确认</string>
+    <string name="tool_header">工具 %1$s · %2$s</string>
+    <string name="tool_has_result">已有结果</string>
+    <string name="tool_pending">待处理</string>
+    <string name="model_protocol_note">请选择协议，仅HTTPS。Responses：基础域名追加 /v1/responses，/v1 追加 /responses，自定义路径按“地址＋路径”组合。Messages：基础域名追加 /v1/messages，/v1 追加 /messages，完整接口地址保持原样，不使用 Responses 路径；版本固定为2023-06-01。切换协议须重新输入密钥并确认绑定。密钥不写入聊天。</string>
+</resources>

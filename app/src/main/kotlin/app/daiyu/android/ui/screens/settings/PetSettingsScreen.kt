@@ -8,5 +8,5 @@ import app.daiyu.android.pet.PetHost
 /** Parent owns navigation, the single PetHost and its lifecycle; this screen owns no runtime. */
 @Composable
 fun PetSettingsScreen(host: PetHost, modifier: Modifier = Modifier) {
-    AndroidView(modifier = modifier, factory = { host.createSettingsView(it) })
+    AndroidView(modifier = modifier, factory = { host.createSettingsView(it).apply { tag = "pet-settings-view" } })
 }

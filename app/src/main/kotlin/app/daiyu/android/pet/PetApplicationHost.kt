@@ -37,7 +37,8 @@ fun interface PetAssistantTransitionSource {
  * [close] ends this instance permanently. Keep it for repeated close if WM cleanup is UNKNOWN;
  * do not replace it with a fresh instance until [cleanupComplete] is true.
  *
- * Construct and call UI/configuration methods on main. Returned leases may be cancelled anywhere.
+ * Construct and call UI/settings methods on main; onModelConfigurationChanged is worker-safe.
+ * Returned leases may be cancelled anywhere.
  * The resolver must independently resolve/validate assistantId + providerId + modelId, including
  * their relationship, and return null if any record/credential is unavailable. ModelSettings.model
  * is the selected record's API name, not the model record ID. Ownership of voice transfers here.
@@ -67,6 +68,8 @@ class PetApplicationHost internal constructor(
      */
     val host = PetHost(context.applicationContext, model, voice, onOpenSettings, windowPort,
         { overlayAllowed && runCatching { systemCanDrawOverlays() }.getOrDefault(false) })
+    private val modelAdapter = model as? AndroidPetModelPort
+    init { modelAdapter?.bindOwner(host.controller) }
     val cleanupComplete: Boolean get() = closed && host.snapshot().overlayState == PetOverlayState.CLOSED
     private var attachment: Any? = null
     private var completionBinding: CompletionBinding? = null
@@ -120,11 +123,20 @@ class PetApplicationHost internal constructor(
     }
 
     /** Registry/credential edits can change the binding WITHOUT changing the three saved IDs.
-     * Retire in-flight pet effects now; the next request resolves fresh. Never resolve a main model.
+     * Worker-safe and synchronous: retire adapter authority AND controller effects before returning.
+     * Transport cancellation runs asynchronously; this does not wait for physical I/O drain.
+     * The shared controller monitor prevents a checked callback waiting on that monitor from later
+     * delivering a stale reaction/usage receipt. Only visual synchronization is deferred to main;
+     * that queued work must never invalidate a request accepted under the new configuration.
      */
     fun onModelConfigurationChanged(): PetCommandResult {
-        mainThread()
-        return host.setEnabled(host.snapshot().pet.state.settings.enabled)
+        val result = synchronized(host.controller) {
+            if (closed) return PetCommandResult.Rejected("宿主已关闭")
+            modelAdapter?.invalidateConfiguration()
+            host.controller.setEnabled(host.controller.snapshot().state.settings.enabled)
+        }
+        onMain { if (!closed) host.refreshOverlayPermission() }
+        return result
     }
 
     /** Bind the real post-commit producer, not ChatController's generic UI-change notification.

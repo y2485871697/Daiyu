@@ -1,7 +1,7 @@
 package app.daiyu.android.ui
 
 internal enum class FeatureRoute {
-    SIDEBAR, MANAGE_CHATS, USAGE_STATS, CONVERSATIONS, MODEL_SETTINGS, SKILLS, BACKUP, CONVERSATION_SEARCH, FOLDERS, CHAT, USER_MESSAGE, TERMINAL, LINUX_SETTINGS, BROWSER_SETTINGS, COMPRESSION_SETTINGS, GENERATION_SETTINGS
+    SIDEBAR, MANAGE_CHATS, USAGE_STATS, CONVERSATIONS, MODEL_SETTINGS, SKILLS, BACKUP, CONVERSATION_SEARCH, FOLDERS, CHAT, USER_MESSAGE, TERMINAL, LINUX_SETTINGS, BROWSER_SETTINGS, COMPRESSION_SETTINGS, GENERATION_SETTINGS, PET_SETTINGS, AUXILIARY_VISION_SETTINGS
 }
 
 internal data class FeatureEntry(val id: String, val title: String, val route: FeatureRoute? = null)
@@ -26,7 +26,7 @@ internal object FeatureCatalog {
             FeatureEntry("P05", "供应商余额"),
             FeatureEntry("P06", "远端模型目录", FeatureRoute.MODEL_SETTINGS),
             FeatureEntry("P08", "标题模型"),
-            FeatureEntry("P25", "辅助视觉模型"),
+            FeatureEntry("P25", "辅助视觉模型", FeatureRoute.AUXILIARY_VISION_SETTINGS),
             FeatureEntry("P26", "错误重连")
         )),
         FeatureGroup("input", "输入与生成", listOf(
@@ -68,7 +68,7 @@ internal object FeatureCatalog {
             FeatureEntry("R12", "备份与导入", FeatureRoute.BACKUP)
         )),
         FeatureGroup("appearance", "外观与阅读", listOf(
-            FeatureEntry("P24", "鲸鱼女仆"),
+            FeatureEntry("P24", "鲸鱼女仆", FeatureRoute.PET_SETTINGS),
             FeatureEntry("P29", "应用图标"),
             FeatureEntry("P30", "图标外观设置"),
             FeatureEntry("P31", "震动设置"),

@@ -1,7 +1,7 @@
 package app.daiyu.android.ui
 
 internal enum class FeatureRoute {
-    SIDEBAR, MANAGE_CHATS, USAGE_STATS, CONVERSATIONS, MODEL_SETTINGS, SKILLS, BACKUP, CONVERSATION_SEARCH, FOLDERS, CHAT, USER_MESSAGE, TERMINAL, BROWSER_SETTINGS
+    SIDEBAR, MANAGE_CHATS, USAGE_STATS, CONVERSATIONS, MODEL_SETTINGS, SKILLS, BACKUP, CONVERSATION_SEARCH, FOLDERS, CHAT, USER_MESSAGE, TERMINAL, BROWSER_SETTINGS, COMPRESSION_SETTINGS
 }
 
 internal data class FeatureEntry(val id: String, val title: String, val route: FeatureRoute? = null)
@@ -40,7 +40,7 @@ internal object FeatureCatalog {
             FeatureEntry("P20", "会话生视频")
         )),
         FeatureGroup("context", "上下文与统计", listOf(
-            FeatureEntry("P09", "上下文压缩"),
+            FeatureEntry("P09", "上下文压缩", FeatureRoute.COMPRESSION_SETTINGS),
             FeatureEntry("P10", "上下文统计"),
             FeatureEntry("P21", "用量统计", FeatureRoute.USAGE_STATS),
             FeatureEntry("P39", "重复输出保护"),

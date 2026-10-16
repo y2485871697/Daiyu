@@ -1,0 +1,29 @@
+package app.daiyu.android.context
+
+import android.content.Context
+import android.os.Looper
+
+/** Wiring only: constructing this on the UI thread never opens preferences, keystore or network.
+ * The parent calls freeze/prepare on its reserved preparation worker, then retains its existing
+ * revision/owner/send transaction checks. No duplicate compression or deadline implementation. */
+internal object ProductionContextPreparation {
+    fun create(context: Context, service: ContextService): ContextPreparationCoordinator {
+        val app = context.applicationContext ?: context
+        return ContextPreparationCoordinator(
+            service = service,
+            settingsSnapshot = {
+                requireWorker()
+                ProductionCompressionSettingsStore(app).snapshot().coordinatorSettings()
+            },
+            policies = ProductionCompressionPolicyResolver,
+            models = ProviderSummaryModelResolver { binding ->
+                requireWorker()
+                SummaryProfileStore(app).configuration(binding)
+            },
+        )
+    }
+
+    private fun requireWorker() {
+        check(Looper.myLooper() != Looper.getMainLooper()) { "压缩配置和摘要密钥必须在准备工作线程读取" }
+    }
+}

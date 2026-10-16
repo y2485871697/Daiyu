@@ -262,6 +262,9 @@ internal object FeatureDetails {
             )),
         ),
         "P09" to listOf(
+            FeatureSection("open", "设置入口", listOf(
+                FeatureControl("open", "打开压缩设置", FeatureControlKind.ACTION, FeatureRoute.COMPRESSION_SETTINGS),
+            )),
             FeatureSection("content", "设置与内容", listOf(
                 FeatureControl("mode", "手动与自动压缩", FeatureControlKind.CHOICE),
                 FeatureControl("model", "压缩模型与端点", FeatureControlKind.FIELD),

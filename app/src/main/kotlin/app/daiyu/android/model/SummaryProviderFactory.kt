@@ -10,9 +10,13 @@ import javax.net.ssl.HttpsURLConnection
  * output/reasoning budgets, instructions, tools and provider-specific tool aliases cannot slip
  * through the general-purpose custom-body merge. */
 internal object SummaryProviderFactory {
-    fun create(snapshot: ProviderSnapshot, maxOutputTokens: Int, instructions: String,
-        connect: (URL) -> HttpsURLConnection): ModelPort {
-        require(maxOutputTokens > 0 && instructions.isNotBlank())
+    /** Pure validation shared by profile save/load/freeze and transport creation. No model or I/O. */
+    fun validate(snapshot: ProviderSnapshot) {
+        validatedCustomBody(snapshot)
+    }
+
+    private fun validatedCustomBody(snapshot: ProviderSnapshot): JSONObject {
+        snapshot.asModelSettings().validate()
         require(snapshot.protocol in setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES)) {
             "摘要模型协议不受支持"
         }
@@ -30,6 +34,14 @@ internal object SummaryProviderFactory {
                 "摘要采样选项必须为有效数值"
             }
         }
+        return body
+    }
+
+    fun create(snapshot: ProviderSnapshot, maxOutputTokens: Int, instructions: String,
+        connect: (URL) -> HttpsURLConnection): ModelPort {
+        require(maxOutputTokens > 0 && instructions.isNotBlank())
+        val body = validatedCustomBody(snapshot)
+        val options = snapshot.requestOptions
         body.put(if (snapshot.protocol == ProviderProtocol.RESPONSES) "max_output_tokens" else "max_tokens",
             maxOutputTokens)
         val settings = snapshot.asModelSettings().copy(batteryEnabled = false, deviceStatusEnabled = false,

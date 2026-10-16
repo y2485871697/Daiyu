@@ -38,7 +38,8 @@ internal data class R08VirtualDisplayHeldState(val revoked: Boolean, val activeE
     val pendingFinalOutcomes: Int, val startAttempted: Boolean, val initialized: Boolean, val uncertain: Boolean)
 
 /** Leaf registration only. Parent owns the one ToolRegistry/ToolDispatcher/ToolLedger and must
- * forward FINAL outcomes before its next dispatch/close observation. Nothing starts on construction,
+ * beginBatch BEFORE dispatch and finishBatch with FINAL outcomes, including ledger short-circuits.
+ * Nothing starts on construction,
  * bind, definitions, prepare, admission, approval, settings display, or close.
  */
 internal class R08VirtualDisplayCatalogLeaf internal constructor(
@@ -54,7 +55,29 @@ internal class R08VirtualDisplayCatalogLeaf internal constructor(
     private var authorization: TaskAuthorization? = null
     private var revoked = false
     private var active = 0
+    // Identity-only capability. Constructing another ticket cannot release this leaf's batches.
+    internal class BatchTicket internal constructor()
+    private class BatchState(val wholeBatch: List<ToolInvocation>) {
+        val relevant = wholeBatch.filter { it.name == WRITE_TOOL || it.name == READ_TOOL }
+        val executed = mutableSetOf<String>()
+        var activeExecutions = 0
+        var finishing = false
+    }
+    private val batches = mutableMapOf<BatchTicket, BatchState>()
+    // Keep local execute accounting until FINAL central feedback, not just the adapter return.
     private val pendingFinal = mutableSetOf<String>()
+
+    /** In-memory only. Register the ORIGINAL WHOLE batch before any dispatcher/ledger access.
+     * Missing callbacks (including exceptions) leave the ticket pending. No timeout releases it.
+     * Concurrent batches may not reuse an outstanding R08 call ID.
+     */
+    fun beginBatch(originalWholeBatch: List<ToolInvocation>): BatchTicket = synchronized(stateLock) {
+        check(!revoked && approval.isActive) { "virtual_display_revoked" }
+        val state = BatchState(originalWholeBatch.toList())
+        val outstanding = batches.values.flatMap { it.relevant }.map { it.id.value }.toSet() + pendingFinal
+        require(state.relevant.none { it.id.value in outstanding }) { "virtual_display_batch_call_pending" }
+        BatchTicket().also { batches[it] = state }
+    }
     private var startAttempted = false
     private var transportReady = false
     private var initialized = false
@@ -116,12 +139,20 @@ internal class R08VirtualDisplayCatalogLeaf internal constructor(
         }
 
     private fun execute(context: ToolExecutionContext, operation: R08VirtualDisplayOperation): ExecutionReceipt {
-        synchronized(stateLock) {
+        val batch = synchronized(stateLock) {
+            val registered = batches.values.singleOrNull { !it.finishing && context.invocation in it.relevant }
+            if (registered == null) {
+                pendingFinal.add(context.invocation.id.value)
+                return unknown("virtual_display_batch_not_registered")
+            }
             admission(context, operation)?.let { return it }
             if (uncertain) return ExecutionReceipt.Unknown("virtual_display_owner_uncertain")
             if (context.cancelled()) return ExecutionReceipt.NotExecuted("cancelled_before_execution")
             pendingFinal.add(context.invocation.id.value)
+            registered.executed.add(context.invocation.id.value)
+            registered.activeExecutions++
             active++
+            registered
         }
         try {
             // Serialize workers, never lifecycle/close. Recheck revocation after any wait.
@@ -171,7 +202,7 @@ internal class R08VirtualDisplayCatalogLeaf internal constructor(
                 }
                 finish(intent, result)
             }
-        } finally { synchronized(stateLock) { active-- } }
+        } finally { synchronized(stateLock) { active--; batch.activeExecutions-- } }
     }
 
     private fun finish(intent: R08VirtualDisplayIntent, receipt: ExecutionReceipt): ExecutionReceipt = try {
@@ -220,26 +251,58 @@ internal class R08VirtualDisplayCatalogLeaf internal constructor(
         return ExecutionReceipt.Unknown(code)
     }
 
-    /** MUST receive the actual final central results, including persistence failure/replay UNKNOWN.
-     * Pass the original whole batch; other catalog leaves' results are ignored. No second ledger. */
-    fun observeOutcomes(batch: List<ToolInvocation>, results: List<ToolDispatchResult>) {
-        val relevant = batch.filter { it.name == WRITE_TOOL || it.name == READ_TOOL }.map { it.id }.toSet()
-        results.filter { it.callId in relevant }.forEach { result ->
-            val evidence = when (result.outcome) {
-                is DispatchOutcome.Unknown -> R08VirtualDisplayEvidence.UNKNOWN
-                is DispatchOutcome.NotExecuted -> R08VirtualDisplayEvidence.NOT_EXECUTED
-                is DispatchOutcome.Confirmed -> R08VirtualDisplayEvidence.CONFIRMED
+    /** MUST receive the actual complete final central results, in original dispatcher order.
+     * The identity ticket owns its immutable original whole batch; no caller-supplied replacement
+     * batch can release it. Bad/missing/duplicate feedback latches UNKNOWN and leaves it pending.
+     * Only R08 evidence is journaled, but coverage of the WHOLE batch is required. No second ledger.
+     * Call on a worker: journal I/O runs outside stateLock, with the ticket still held throughout.
+     */
+    fun finishBatch(ticket: BatchTicket, finalResults: List<ToolDispatchResult>) {
+        val results = finalResults.toList()
+        val batch = synchronized(stateLock) {
+            val registered = batches[ticket]
+            if (registered == null || registered.finishing || registered.activeExecutions != 0) {
+                uncertain = true
+                throw IllegalStateException("virtual_display_invalid_batch_ticket")
             }
-            if (evidence == R08VirtualDisplayEvidence.UNKNOWN) unknown("virtual_display_central_ledger_unknown")
-            try { journal.finalOutcome(plan.bindingKey, plan.generation, result.callId.value, evidence) }
-            catch (_: Exception) { unknown("virtual_display_final_journal_uncertain") }
-            synchronized(stateLock) { pendingFinal.remove(result.callId.value) }
+            if (results.map { it.callId } != registered.wholeBatch.map { it.id }) {
+                uncertain = true
+                throw IllegalArgumentException("virtual_display_incomplete_final_batch")
+            }
+            registered.finishing = true
+            registered
         }
-        if (!results.map { it.callId }.containsAll(relevant)) unknown("virtual_display_missing_final_outcome")
+        var completed = false
+        try {
+            batch.wholeBatch.zip(results).forEach { (call, result) ->
+                if (call.name != WRITE_TOOL && call.name != READ_TOOL) return@forEach
+                val evidence = when (result.outcome) {
+                    is DispatchOutcome.Unknown -> R08VirtualDisplayEvidence.UNKNOWN
+                    is DispatchOutcome.NotExecuted -> R08VirtualDisplayEvidence.NOT_EXECUTED
+                    is DispatchOutcome.Confirmed -> R08VirtualDisplayEvidence.CONFIRMED
+                }
+                if (evidence == R08VirtualDisplayEvidence.UNKNOWN) unknown("virtual_display_central_ledger_unknown")
+                journal.finalOutcome(plan.bindingKey, plan.generation, result.callId.value, evidence)
+            }
+            completed = true
+        } catch (_: Exception) {
+            unknown("virtual_display_final_journal_uncertain")
+        } finally {
+            synchronized(stateLock) {
+                // No duplicate finish may enter the journal or release a different ticket's calls.
+                // Even an uncaught journal failure must not clear the held accounting.
+                if (completed) {
+                    pendingFinal.removeAll(batch.executed)
+                    batches.remove(ticket)
+                } else uncertain = true
+            }
+        }
     }
 
     fun heldState(): R08VirtualDisplayHeldState = synchronized(stateLock) {
-        R08VirtualDisplayHeldState(revoked || !approval.isActive, active, pendingFinal.size, startAttempted, initialized, uncertain)
+        val registeredIds = batches.values.flatMap { it.relevant }.map { it.id.value }.toSet()
+        val pending = batches.values.sumOf { it.relevant.size } + pendingFinal.count { it !in registeredIds }
+        R08VirtualDisplayHeldState(revoked || !approval.isActive, active, pending, startAttempted, initialized, uncertain)
     }
 
     /** Pure revocation only: no socket close, wait/join, release, handoff, reconnect or kill. */
@@ -261,7 +324,12 @@ internal class R08VirtualDisplayCatalogLeaf internal constructor(
                     AndroidVirtualDisplayOwnerHost.Lifecycle.UNKNOWN -> R08VirtualDisplayCloseResult.Unknown()
                 }
             } catch (_: Exception) { R08VirtualDisplayCloseResult.Unknown() }
-            done(result)
+            // Host observation is I/O outside stateLock. Recheck after it so concurrent bad
+            // feedback cannot turn a newly latched UNKNOWN into a stale Drained observation.
+            val latest = heldState()
+            done(if (result == R08VirtualDisplayCloseResult.Drained &&
+                (!latest.revoked || latest.activeExecutions != 0 || latest.pendingFinalOutcomes != 0 || latest.uncertain))
+                R08VirtualDisplayCloseResult.Unknown() else result)
         }, "r08-virtual-display-observe").apply { isDaemon = true; start() }
     }
 

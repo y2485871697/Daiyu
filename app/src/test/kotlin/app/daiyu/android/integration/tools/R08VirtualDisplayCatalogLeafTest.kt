@@ -30,6 +30,9 @@ class R08VirtualDisplayCatalogLeafTest {
         val final = mutableListOf<R08VirtualDisplayEvidence>()
         var lookupOnly = false
         var failClaim = false
+        var failFinal = false
+        val finalEntered = CountDownLatch(1)
+        var finalPause: CountDownLatch? = null
         override fun claim(intent: R08VirtualDisplayIntent): R08VirtualDisplayPermit {
             if (failClaim) throw IOException("test journal unavailable")
             val old = claims.putIfAbsent(intent.operationId, intent)
@@ -38,6 +41,9 @@ class R08VirtualDisplayCatalogLeafTest {
         }
         override fun complete(intent: R08VirtualDisplayIntent, evidence: R08VirtualDisplayEvidence) = Unit
         override fun finalOutcome(bindingKey: String, generation: String, invocationId: String, evidence: R08VirtualDisplayEvidence) {
+            finalEntered.countDown()
+            finalPause?.await(5, TimeUnit.SECONDS)
+            if (failFinal) throw IOException("test final journal unavailable")
             final.add(evidence)
         }
     }
@@ -128,7 +134,9 @@ class R08VirtualDisplayCatalogLeafTest {
             JSONObject().put("step_id", id).toString())
         fun frame() = ToolInvocation(ToolCallId("frame-call"), R08VirtualDisplayCatalogLeaf.READ_TOOL, "{\"read_id\":\"frame\"}")
         fun dispatch(vararg calls: ToolInvocation, authorization: TaskAuthorization = auth): List<ToolDispatchResult> = worker {
-            dispatcher.dispatchOwned(authorization, calls.toList(), owner).also { leaf.observeOutcomes(calls.toList(), it) }
+            val batch = calls.toList()
+            val ticket = leaf.beginBatch(batch)
+            dispatcher.dispatchOwned(authorization, batch, owner).also { leaf.finishBatch(ticket, it) }
         }
         fun initialize() { assertConfirmed(dispatch(step("start"))); assertConfirmed(dispatch(step("initialize"))) }
     }
@@ -306,6 +314,207 @@ class R08VirtualDisplayCatalogLeafTest {
         assertEquals(0, f.endpoint.starts)
         assertTrue(f.journal.claims.isEmpty())
         assertTrue(closeResult(f) is R08VirtualDisplayCloseResult.Unknown)
+    }
+
+    private fun rejectedFeedback(block: () -> Unit) {
+        try { block(); fail("invalid feedback accepted") }
+        catch (_: IllegalArgumentException) { }
+        catch (_: IllegalStateException) { }
+    }
+
+    @Test fun centralLedgerUnknownShortCircuitWithoutAnyFeedbackCannotDrain() {
+        val store = InMemoryToolLedgerStore()
+        val f = Fixture(store)
+        assertConfirmed(f.dispatch(f.step("start", "earlier-start")))
+        // Simulate an already durable ambiguous effect. A different ID hits semantic protection,
+        // so neither local execute nor the owner journal gets called on the second dispatch.
+        store.transaction { entries -> entries[0] = entries[0].copy(state = LedgerState.UNKNOWN) }
+        val calls = listOf(f.step("start", "protected-start"))
+        f.leaf.beginBatch(calls)
+        assertEquals(1, f.leaf.heldState().pendingFinalOutcomes)
+        val results = worker { f.dispatcher.dispatchOwned(f.auth, calls, f.owner) }
+        assertEquals(DispatchOutcome.Unknown("unknown_effect_protected"), results.single().outcome)
+        assertEquals(1, f.endpoint.starts)
+        assertEquals(1, f.journal.claims.size)
+        assertEquals(1, f.journal.final.size)
+        assertFalse(f.leaf.heldState().uncertain) // No feedback at all, not even UNKNOWN delivery.
+        f.endpoint.lifecycle = AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED
+        assertTrue(closeResult(f) is R08VirtualDisplayCloseResult.Unknown)
+        assertEquals(0, f.endpoint.observations)
+        assertEquals(1, f.leaf.heldState().pendingFinalOutcomes)
+    }
+
+    @Test fun localExecuteWithoutFinalFeedbackKeepsItsAccountingAfterReturn() {
+        val f = Fixture()
+        val calls = listOf(f.step("start"))
+        f.leaf.beginBatch(calls)
+        assertConfirmed(worker { f.dispatcher.dispatchOwned(f.auth, calls, f.owner) })
+        assertEquals(0, f.leaf.heldState().activeExecutions)
+        assertEquals(1, f.leaf.heldState().pendingFinalOutcomes)
+        assertFalse(f.leaf.heldState().uncertain)
+        assertTrue(f.journal.final.isEmpty())
+        f.endpoint.lifecycle = AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED
+        assertTrue(closeResult(f) is R08VirtualDisplayCloseResult.Unknown)
+    }
+
+    @Test fun dispatcherExceptionWithoutFeedbackKeepsPreRegisteredTicket() {
+        val f = Fixture()
+        val calls = listOf(f.step("start"))
+        f.leaf.beginBatch(calls)
+        worker {
+            try {
+                f.dispatcher.dispatchOwned(f.auth, calls, f.owner) { throw IOException("test dispatcher interruption") }
+                fail("dispatcher unexpectedly returned")
+            } catch (_: IOException) { }
+        }
+        assertEquals(0, f.endpoint.starts)
+        assertEquals(0, f.leaf.heldState().activeExecutions)
+        assertEquals(1, f.leaf.heldState().pendingFinalOutcomes)
+        f.endpoint.lifecycle = AndroidVirtualDisplayOwnerHost.Lifecycle.NOT_STARTED
+        assertTrue(closeResult(f) is R08VirtualDisplayCloseResult.Unknown)
+    }
+
+    @Test fun executeWithoutTicketFailsClosedAndCannotBeRetroactivelyReleased() {
+        val f = Fixture()
+        val calls = listOf(f.step("start"))
+        val results = worker { f.dispatcher.dispatchOwned(f.auth, calls, f.owner) }
+        assertEquals(DispatchOutcome.Unknown("virtual_display_batch_not_registered"), results.single().outcome)
+        assertEquals(0, f.endpoint.starts)
+        assertEquals(1, f.leaf.heldState().pendingFinalOutcomes)
+        rejectedFeedback { f.leaf.beginBatch(calls) }
+        f.endpoint.lifecycle = AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED
+        assertTrue(closeResult(f) is R08VirtualDisplayCloseResult.Unknown)
+    }
+
+    @Test fun missingWholeBatchResultsNeverReleaseEvenWhenAllR08ResultsArePresent() {
+        val f = Fixture()
+        val calls = mutableListOf(f.step("start"), ToolInvocation(ToolCallId("other"), "unknown_tool", "{}"))
+        val ticket = f.leaf.beginBatch(calls)
+        val results = worker { f.dispatcher.dispatchOwned(f.auth, calls, f.owner) }
+        calls.clear() // The ticket must own the original snapshot, not this caller-owned list.
+        rejectedFeedback { f.leaf.finishBatch(ticket, results.take(1)) }
+        assertEquals(1, f.leaf.heldState().pendingFinalOutcomes)
+        assertTrue(f.leaf.heldState().uncertain)
+        assertTrue(f.journal.final.isEmpty())
+        f.endpoint.lifecycle = AndroidVirtualDisplayOwnerHost.Lifecycle.NOT_STARTED
+        assertTrue(closeResult(f) is R08VirtualDisplayCloseResult.Unknown)
+    }
+
+    @Test fun missingDuplicateAndWrongOrderedResultsFailBeforeAnyJournalRelease() {
+        for (mode in listOf("missing", "duplicate", "reordered", "extra", "wrong-id")) {
+            val f = Fixture()
+            val calls = listOf(f.step("start"), f.step("initialize"))
+            val ticket = f.leaf.beginBatch(calls)
+            val results = worker { f.dispatcher.dispatchOwned(f.auth, calls, f.owner) }
+            val invalid = when (mode) {
+                "missing" -> emptyList()
+                "duplicate" -> listOf(results[0], results[0])
+                "reordered" -> results.reversed()
+                "extra" -> results + results.last()
+                else -> listOf(results[0], results[1].copy(callId = ToolCallId("forged")))
+            }
+            rejectedFeedback { f.leaf.finishBatch(ticket, invalid) }
+            assertEquals(2, f.leaf.heldState().pendingFinalOutcomes)
+            assertTrue(f.leaf.heldState().uncertain)
+            assertTrue(f.journal.final.isEmpty())
+            f.endpoint.lifecycle = AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED
+            assertTrue(closeResult(f) is R08VirtualDisplayCloseResult.Unknown)
+        }
+    }
+
+    @Test fun forgedForeignAndAlreadyFinishedTicketsCannotReleasePendingBatch() {
+        val f = Fixture()
+        val firstCalls = listOf(f.step("start"))
+        val first = f.leaf.beginBatch(firstCalls)
+        val firstResults = worker { f.dispatcher.dispatchOwned(f.auth, firstCalls, f.owner) }
+        worker { f.leaf.finishBatch(first, firstResults) }
+        assertEquals(0, f.leaf.heldState().pendingFinalOutcomes)
+        val secondCalls = listOf(f.step("initialize"))
+        f.leaf.beginBatch(secondCalls)
+        val secondResults = worker { f.dispatcher.dispatchOwned(f.auth, secondCalls, f.owner) }
+        val other = Fixture()
+        val foreign = other.leaf.beginBatch(listOf(other.step("initialize")))
+        for (ticket in listOf(R08VirtualDisplayCatalogLeaf.BatchTicket(), foreign, first)) {
+            rejectedFeedback { f.leaf.finishBatch(ticket, secondResults) }
+            assertEquals(1, f.leaf.heldState().pendingFinalOutcomes)
+            assertEquals(1, f.journal.final.size)
+        }
+        assertTrue(f.leaf.heldState().uncertain)
+        f.endpoint.lifecycle = AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED
+        assertTrue(closeResult(f) is R08VirtualDisplayCloseResult.Unknown)
+    }
+
+    @Test fun normalWholeBatchFeedbackDrainsAndPreservesDuplicateIdRejection() {
+        val f = Fixture()
+        assertConfirmed(f.dispatch(f.step("start"), f.step("initialize"), f.step("release")))
+        assertEquals(0, f.leaf.heldState().activeExecutions)
+        assertEquals(0, f.leaf.heldState().pendingFinalOutcomes)
+        assertEquals(List(3) { R08VirtualDisplayEvidence.CONFIRMED }, f.journal.final)
+        // A duplicate ID in the ORIGINAL batch is a legitimate dispatcher rejection, not a
+        // fabricated duplicate result. Exact original order/multiplicity must still be accepted.
+        assertDenied(f.dispatch(f.step("tap", "duplicate"), f.step("tap", "duplicate")))
+        assertEquals(0, f.leaf.heldState().pendingFinalOutcomes)
+        assertFalse(f.leaf.heldState().uncertain)
+        f.endpoint.lifecycle = AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED
+        assertEquals(R08VirtualDisplayCloseResult.Drained, closeResult(f))
+    }
+
+    @Test fun finalJournalFailureKeepsPendingAndLatchesUnknown() {
+        val f = Fixture()
+        f.journal.failFinal = true
+        assertConfirmed(f.dispatch(f.step("start")))
+        assertEquals(1, f.leaf.heldState().pendingFinalOutcomes)
+        assertTrue(f.leaf.heldState().uncertain)
+        f.endpoint.lifecycle = AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED
+        assertTrue(closeResult(f) is R08VirtualDisplayCloseResult.Unknown)
+    }
+
+    @Test fun closeDuringFinalJournalIOIsNonblockingAndRetainsTicketUntilFeedbackCompletes() {
+        val f = Fixture()
+        val calls = listOf(f.step("start"))
+        val ticket = f.leaf.beginBatch(calls)
+        val results = worker { f.dispatcher.dispatchOwned(f.auth, calls, f.owner) }
+        val unblock = CountDownLatch(1)
+        f.journal.finalPause = unblock
+        f.endpoint.lifecycle = AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val finishing = executor.submit<Unit> { f.leaf.finishBatch(ticket, results) }
+            assertTrue(f.journal.finalEntered.await(5, TimeUnit.SECONDS))
+            assertEquals(0, f.leaf.heldState().activeExecutions)
+            assertEquals(1, f.leaf.heldState().pendingFinalOutcomes)
+            assertTrue(closeResult(f) is R08VirtualDisplayCloseResult.Unknown)
+            assertEquals(0, f.endpoint.observations)
+            unblock.countDown()
+            finishing.get(5, TimeUnit.SECONDS)
+            assertEquals(0, f.leaf.heldState().pendingFinalOutcomes)
+            assertEquals(R08VirtualDisplayCloseResult.Drained, closeResult(f))
+            rejectedFeedback { f.leaf.beginBatch(listOf(f.step("initialize"))) }
+        } finally { unblock.countDown(); executor.shutdownNow() }
+    }
+
+    @Test fun concurrentDuplicateFinishCannotReleaseTicketDuringFirstCallback() {
+        val f = Fixture()
+        val calls = listOf(f.step("start"))
+        val ticket = f.leaf.beginBatch(calls)
+        val results = worker { f.dispatcher.dispatchOwned(f.auth, calls, f.owner) }
+        val unblock = CountDownLatch(1)
+        f.journal.finalPause = unblock
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val finishing = executor.submit<Unit> { f.leaf.finishBatch(ticket, results) }
+            assertTrue(f.journal.finalEntered.await(5, TimeUnit.SECONDS))
+            rejectedFeedback { f.leaf.finishBatch(ticket, results) }
+            assertEquals(1, f.leaf.heldState().pendingFinalOutcomes)
+            assertTrue(f.journal.final.isEmpty())
+            unblock.countDown()
+            finishing.get(5, TimeUnit.SECONDS)
+            assertEquals(1, f.journal.final.size)
+            assertEquals(0, f.leaf.heldState().pendingFinalOutcomes)
+            assertTrue(f.leaf.heldState().uncertain)
+            f.endpoint.lifecycle = AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED
+            assertTrue(closeResult(f) is R08VirtualDisplayCloseResult.Unknown)
+        } finally { unblock.countDown(); executor.shutdownNow() }
     }
 
     @Test fun closeIsNonblockingWhileRequestIsInFlightAndNeverSendsCleanup() {

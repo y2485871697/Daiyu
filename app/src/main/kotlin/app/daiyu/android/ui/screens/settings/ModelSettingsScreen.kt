@@ -68,6 +68,8 @@ internal fun ModelSettingsScreen(
     isFetchingCatalog: Boolean = false,
     catalogStatusText: String? = null,
     catalogForDraft: ModelSettingsDraftUi? = null,
+    catalogEnabled: Boolean = true,
+    enabled: Boolean = true,
 ) {
     val catalogIsCurrent = catalogForDraft?.let {
         it.endpoint == draft.endpoint && it.responsesPath == draft.responsesPath &&
@@ -77,14 +79,14 @@ internal fun ModelSettingsScreen(
         item(key = "model_protocol") {
             SettingsSectionTitle("服务协议")
             SettingsCard {
-                SettingsRadioRow("OpenAI Responses", draft.protocol == ProviderProtocol.RESPONSES) {
+                SettingsRadioRow("OpenAI Responses", draft.protocol == ProviderProtocol.RESPONSES, enabled = enabled) {
                     onDraftChange(draft.selectProtocol(ProviderProtocol.RESPONSES))
                 }
-                SettingsRadioRow("Anthropic Messages", draft.protocol == ProviderProtocol.MESSAGES) {
+                SettingsRadioRow("Anthropic Messages", draft.protocol == ProviderProtocol.MESSAGES, enabled = enabled) {
                     onDraftChange(draft.selectProtocol(ProviderProtocol.MESSAGES))
                 }
                 if (draft.protocol != draft.savedProtocol) {
-                    SettingsSwitchRow("重输密钥并绑定", draft.protocolChangeAuthorized) {
+                    SettingsSwitchRow("重输密钥并绑定", draft.protocolChangeAuthorized, enabled = enabled) {
                         onDraftChange(draft.copy(protocolChangeAuthorized = it))
                     }
                 }
@@ -95,24 +97,24 @@ internal fun ModelSettingsScreen(
         item(key = "model_connection") {
             SettingsSectionTitle("连接与模型")
             SettingsCard {
-                SettingsTextField("Base URL", draft.endpoint, { onDraftChange(draft.copy(endpoint = it)) })
+                SettingsTextField("Base URL", draft.endpoint, { onDraftChange(draft.copy(endpoint = it)) }, enabled = enabled)
                 SettingsTextField("Responses 路径", draft.responsesPath, { onDraftChange(draft.copy(responsesPath = it)) },
-                    hint = "/responses", enabled = draft.protocol != ProviderProtocol.MESSAGES)
-                SettingsTextField("模型名", draft.model, { onDraftChange(draft.copy(model = it)) })
-                SettingsTextField("API Key", draft.apiKey, { onDraftChange(draft.copy(apiKey = it)) }, password = true)
+                    hint = "/responses", enabled = enabled && draft.protocol != ProviderProtocol.MESSAGES)
+                SettingsTextField("模型名", draft.model, { onDraftChange(draft.copy(model = it)) }, enabled = enabled)
+                SettingsTextField("API Key", draft.apiKey, { onDraftChange(draft.copy(apiKey = it)) }, password = true, enabled = enabled)
             }
         }
         item(key = "model_device_tools") {
             SettingsSectionTitle("设备工具")
             SettingsCard {
-                SettingsSwitchRow("电量查询", draft.batteryEnabled) { onDraftChange(draft.copy(batteryEnabled = it)) }
-                SettingsSwitchRow("设备状态查询", draft.deviceStatusEnabled) { onDraftChange(draft.copy(deviceStatusEnabled = it)) }
+                SettingsSwitchRow("电量查询", draft.batteryEnabled, enabled = enabled) { onDraftChange(draft.copy(batteryEnabled = it)) }
+                SettingsSwitchRow("设备状态查询", draft.deviceStatusEnabled, enabled = enabled) { onDraftChange(draft.copy(deviceStatusEnabled = it)) }
             }
         }
         item(key = "model_advanced") {
             SettingsSectionTitle("高级选项")
             SettingsCard {
-                SettingsTextField("自定义请求体", draft.customBody, { onDraftChange(draft.copy(customBody = it)) }, multiline = true)
+                SettingsTextField("自定义请求体", draft.customBody, { onDraftChange(draft.copy(customBody = it)) }, multiline = true, enabled = enabled)
             }
         }
         item(key = "model_speed") {
@@ -124,11 +126,11 @@ internal fun ModelSettingsScreen(
                     GptSpeedMode.FAST to "快速",
                     GptSpeedMode.ULTRA_FAST to "超快速",
                 ).forEach { (mode, title) ->
-                    SettingsRadioRow(title, draft.speedMode == mode) { onDraftChange(draft.copy(speedMode = mode)) }
+                    SettingsRadioRow(title, draft.speedMode == mode, enabled = enabled) { onDraftChange(draft.copy(speedMode = mode)) }
                 }
-                SettingsSwitchRow("Codex 档位", draft.codex) { onDraftChange(draft.copy(codex = it)) }
+                SettingsSwitchRow("Codex 档位", draft.codex, enabled = enabled) { onDraftChange(draft.copy(codex = it)) }
                 if (requestOptionsUnavailable) {
-                    SettingsSwitchRow("授权替换策略", draft.requestOptionsReplacementAuthorized) {
+                    SettingsSwitchRow("授权替换策略", draft.requestOptionsReplacementAuthorized, enabled = enabled) {
                         onDraftChange(draft.copy(requestOptionsReplacementAuthorized = it))
                     }
                 }
@@ -141,7 +143,7 @@ internal fun ModelSettingsScreen(
                 TextButton(
                     text = if (isFetchingCatalog) "获取中" else "获取模型",
                     onClick = { onFetchCatalog(draft) },
-                    enabled = !isFetchingCatalog,
+                    enabled = enabled && catalogEnabled && !isFetchingCatalog,
                     modifier = Modifier.testTag("model-catalog-fetch").fillMaxWidth().padding(12.dp),
                 )
             }
@@ -170,6 +172,7 @@ internal fun ModelSettingsScreen(
             TextButton(
                 text = "保存",
                 onClick = { onSave(draft) },
+                enabled = enabled,
                 modifier = Modifier.testTag("model-save").fillMaxWidth().padding(horizontal = 12.dp, vertical = 24.dp),
             )
         }

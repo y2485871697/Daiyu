@@ -46,7 +46,13 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             it.config.getOrNull(SemanticsProperties.EditableText)?.text == text
         })
     }
-    protected fun saveModel() { reveal("model-save").performClick() }
+    protected fun saveModel() {
+        reveal("model-save").performClick()
+        awaitControl("model settings completion") {
+            !(instrumentation.targetContext.applicationContext as ChatApplication).controller.dataBusy
+        }
+        ui.waitForIdle()
+    }
     protected fun openModels() {
         openSettings()
         reveal("settings-row:模型提供商", "设置").performClick()

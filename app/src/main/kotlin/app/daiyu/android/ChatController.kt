@@ -917,15 +917,32 @@ class ChatController internal constructor(private val application:Application,
         if(configurationRestorePreview===preview) configurationRestorePreview=null
     }
     /** Single-use manual confirmation. Recheck runtime gates AND both snapshots at the actual commit. */
-    @Synchronized internal fun restoreImportedConfiguration(preview:ConfigurationRestorePreview,authorized:Boolean) {
+    @Synchronized internal fun restoreImportedConfiguration(preview:ConfigurationRestorePreview,authorized:Boolean,
+        completed:(Boolean)->Unit = {}) {
         val current=configurationRestorePreview
         configurationRestorePreview=null
         checkConfigurationRestoreAvailable()
         require(authorized && current===preview) {"恢复预览已失效；请重新预览并确认"}
-        check(neutralBackup.importedConfiguration().toString()==preview.metadata) {"备份配置已变化；请重新预览"}
-        checkConfigurationRestoreAvailable()
-        settings.applyNonSecretRestore(preview.plan,authorized=true)
-        notifyChanged()
+        dataTask(failureNotice="配置未恢复；请重新预览并确认",completed=completed,work={
+            check(neutralBackup.importedConfiguration().toString()==preview.metadata) {"备份配置已变化；请重新预览"}
+            settings.applyNonSecretRestore(preview.plan,authorized=true)
+            "配置已恢复"
+        })
+    }
+    internal fun saveModelSettings(value:ModelSettings,protocolChangeAuthorized:Boolean,
+        requestOptionsReplacementAuthorized:Boolean,completed:(Boolean)->Unit) {
+        check(Looper.myLooper()==Looper.getMainLooper())
+        dataTask(failureNotice="模型设置未保存",completed=completed,work={
+            settings.save(value,protocolChangeAuthorized,requestOptionsReplacementAuthorized)
+            "模型设置已保存"
+        })
+    }
+    internal fun selectConfiguredModel(expected:ModelSettings,model:String,completed:(Boolean)->Unit) {
+        check(Looper.myLooper()==Looper.getMainLooper())
+        dataTask(failureNotice="模型切换未保存",completed=completed,work={
+            settings.selectModel(expected,model)
+            "模型已切换"
+        })
     }
     internal fun exportUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver) {
         dataTask(work={
@@ -978,14 +995,15 @@ class ChatController internal constructor(private val application:Application,
             .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
             .decode(java.nio.ByteBuffer.wrap(out.toByteArray())).toString()
     }
-    @Synchronized internal fun dataTask(importing:Boolean=false,work:()->String) {
+    @Synchronized internal fun dataTask(importing:Boolean=false,failureNotice:String?=null,
+        completed:(Boolean)->Unit = {},work:()->String) {
         check(idleAvailable() && !hasLiveChildTasks()) { "请等待后台子任务实际结束" }
         dataBusy=true;notifyChanged()
         try {executor.execute {
-            var value=if(importing) "导入失败；原会话保留，格式、校验或身份冲突" else "导出失败；目标文件可能不完整，原会话保留"
+            var value=failureNotice ?: if(importing) "导入失败；原会话保留，格式、校验或身份冲突" else "导出失败；目标文件可能不完整，原会话保留"
             var success=false
             try {value=work();success=true} catch(failure:Exception) {
-                value=when(failure) {
+                value=failureNotice ?: when(failure) {
                     is SecurityException -> "备份文件访问权限不足或已失效；请重新选择文件。原会话保留，导出目标可能不完整"
                     is java.nio.charset.CharacterCodingException -> "导入失败；备份不是有效UTF-8文本。原会话保留，未执行历史请求"
                     is java.io.IOException -> if(importing) "导入失败；读取备份或写入附件失败。原会话保留，未执行历史请求"
@@ -1002,7 +1020,10 @@ class ChatController internal constructor(private val application:Application,
                             dataNotice=notice;dataBusy=false;true
                         }
                     }
-                    if(committed) dispatchChanged()
+                    if(committed) {
+                        dispatchChanged()
+                        try { completed(success) } catch (_:Exception) { /* Persistence has already finished. */ }
+                    }
                 }
             }
         }} catch(failure:java.util.concurrent.RejectedExecutionException) {dataBusy=false;notifyChanged();throw failure}

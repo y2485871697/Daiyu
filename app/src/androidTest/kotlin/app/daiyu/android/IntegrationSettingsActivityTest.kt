@@ -98,11 +98,39 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         node("chat-model-search").performTextReplacement("second")
         node("chat-model-option:first").assertDoesNotExist()
         node("chat-model-option:second").performClick()
+        awaitControl("chat model selected") { !fixture.controller.dataBusy }
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
         node("chat-model-picker").assertDoesNotExist()
         assertEquals(before.copy(model = "second"), fixture.settings.load())
         assertEquals(database, fixture.database.exportBackup())
         assertDraft("切换模型时保留草稿")
         assertEquals(0, fixture.opens.get())
+    }
+    fun testOldPickerSelectionCannotBorrowReopenedPickerOwner() {
+        val (_, _, first) = catalogue()
+        val before = fixture.settings.load()
+        node("chat-model").performClick(); finished(first)
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-option:second").fetchSemanticsNodes().isNotEmpty() }
+        lateinit var stale: () -> Unit
+        mainThread {
+            val owner = MainActivity::class.java.getDeclaredField("chatModelOwner")
+                .apply { isAccessible = true }.get(activity)
+            val select = MainActivity::class.java.declaredMethods.single {
+                it.name == "selectChatModel" && it.parameterCount == 2
+            }.apply { isAccessible = true }
+            stale = { select.invoke(activity, "second", owner); Unit }
+        }
+        ui.onNodeWithText("取消").performClick()
+        val (_, _, second) = catalogue()
+        node("chat-model").performClick(); finished(second)
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-option:second").fetchSemanticsNodes().isNotEmpty() }
+        mainThread { stale() }
+        assertFalse(fixture.controller.dataBusy)
+        assertEquals(before, fixture.settings.load())
+        node("chat-model-picker").assertExists()
+        node("chat-model-option:second").performClick()
+        awaitControl("new picker selection") { !fixture.controller.dataBusy }
+        assertEquals("second", fixture.settings.load().model)
     }
     fun testDismissedChatModelPickerCannotReviveFromPendingCatalog() {
         val (entered, release, connection) = catalogue(held = true)
@@ -130,6 +158,8 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         val changed = before.copy(model = "external-change")
         fixture.settings.save(changed)
         node("chat-model-option:second").performClick()
+        awaitControl("chat model rejected") { !fixture.controller.dataBusy }
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("切换未保存，请关闭后重新选择").fetchSemanticsNodes().isNotEmpty() }
         assertEquals(changed, fixture.settings.load())
         ui.onNodeWithText("切换未保存，请关闭后重新选择").assertExists()
         ui.onNodeWithText("取消").performClick()
@@ -147,16 +177,24 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             ui.onNodeWithText("取消").performClick()
         } finally { fixture.controller.stop(owner) }
     }
-    fun testCatalogUsesCurrentEmptyKeyDraftAndOnlyExplicitSavePersistsSelection() {
+    fun testCatalogImportsCheckedModelsWithoutChangingCurrentDraftOrCredentials() {
         val (_, _, connection) = catalogue(); val before = fixture.settings.load()
         openModels(); editModel("Base URL", "https://catalog.invalid/v1/responses")
-        editModel("API Key", ""); editModel("模型名", ""); fetch(); finished(connection)
-        reveal("settings-row:second").performClick()
+        editModel("API Key", ""); editModel("模型名", "")
+        fetch(); finished(connection)
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-option:second").fetchSemanticsNodes().isNotEmpty() }
+        node("provider-model-option:second").performClick()
+        ui.onNodeWithText("导入所选").performClick()
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-selection").fetchSemanticsNodes().isEmpty() }
         assertEquals(before, fixture.settings.load())
         assertEquals("https://catalog.invalid/v1/models", connection.get().url.toString())
         assertNull(connection.get().getRequestProperty("Authorization"))
-        modelField("模型名").assertEditableText("second"); editModel("API Key", "new-key"); saveModel()
-        assertEquals("second", fixture.settings.load().model); assertEquals("new-key", fixture.settings.load().apiKey)
+        val imported = fixture.settings.modelCatalogSnapshot().models
+        assertTrue(imported.any { it.id == "second" }); assertFalse(imported.any { it.id == "first" })
+        modelField("模型名").assertEditableText("")
+        editModel("模型名", "manual-model"); editModel("API Key", "new-key"); saveModel()
+        awaitControl("model save") { !fixture.controller.dataBusy && fixture.settings.load().model == "manual-model" }
+        assertEquals("manual-model", fixture.settings.load().model); assertEquals("new-key", fixture.settings.load().apiKey)
     }
     fun testCatalogChangedAndRestoredDraftRevokesLateResponseAndCanRetry() {
         val (entered, release, connection) = catalogue(held = true)
@@ -167,11 +205,13 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             editModel("模型名", "changed"); modelField("模型名").assertEditableText("changed")
             editModel("模型名", old); modelField("模型名").assertEditableText(old)
         } finally { release.countDown() }
-        finished(connection); fetchReady(); node("settings-row:second").assertDoesNotExist()
+        finished(connection); fetchReady(); node("provider-model-selection").assertDoesNotExist()
         val (retryEntered, _, retryConnection) = catalogue()
-        fetch(); assertTrue(retryEntered.await(5, TimeUnit.SECONDS))
-        finished(retryConnection); fetchReady(); reveal("settings-row:second").assertExists()
-        backToChat(activity); node("settings-row:second").assertDoesNotExist()
+        fetch(); assertTrue(retryEntered.await(5, TimeUnit.SECONDS)); finished(retryConnection)
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-option:second").fetchSemanticsNodes().isNotEmpty() }
+        node("provider-model-option:second").assertExists()
+        ui.onNodeWithText("取消").performClick(); backToChat(activity)
+        node("provider-model-selection").assertDoesNotExist()
         assertEquals(old, fixture.settings.load().model); assertEquals(before, fixture.settings.load())
     }
     fun testCatalogSaveFailureAndDismissRevokePendingResponse() {
@@ -180,8 +220,12 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             val (entered, release, connection) = catalogue(held = true)
             openModels(); if (save) editModel("模型名", "")
             fetch(); assertTrue(entered.await(5, TimeUnit.SECONDS))
-            try { if (save) saveModel() else backToChat(activity) } finally { release.countDown() }
-            finished(connection); node("settings-row:second").assertDoesNotExist()
+            try {
+                if (save) reveal("model-save").performClick() else backToChat(activity)
+            } finally { release.countDown() }
+            finished(connection)
+            if (save) awaitControl("invalid model save") { !fixture.controller.dataBusy }
+            node("provider-model-selection").assertDoesNotExist()
             assertEquals(before, fixture.settings.load())
             if (save) backToChat(activity)
         }
@@ -191,9 +235,11 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         for ((body, status) in listOf("""{"data":[]}""" to 200, "SECRET_RESPONSE_SENTINEL" to 401, "SECRET_RESPONSE_SENTINEL" to 200)) {
             val (_, _, connection) = catalogue(body, status); openModels(); fetch(); finished(connection)
             reveal("model-catalog-fetch").assertIsEnabled()
-            ui.onNodeWithText(if (status == 200 && body.contains("data")) "模型目录为空" else "获取失败").assertExists()
+            val expected = if (status == 200 && body.contains("data")) "模型目录为空" else "获取失败，请重试"
+            ui.waitUntil(5_000) { ui.onAllNodesWithText(expected).fetchSemanticsNodes().isNotEmpty() }
+            ui.onNodeWithText(expected).assertExists()
             ui.onAllNodes(hasText("SECRET_RESPONSE_SENTINEL", substring = true)).assertCountEquals(0)
-            node("settings-row:second").assertDoesNotExist()
+            node("provider-model-selection").assertDoesNotExist()
             backToChat(activity); assertEquals(before, fixture.settings.load())
         }
     }

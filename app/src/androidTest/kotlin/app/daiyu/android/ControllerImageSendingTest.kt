@@ -116,7 +116,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
     }
 
     fun testAcceptedOrderedBlocksExactReceiptAndHistoryAfterDraftRemoval() {
-        val f = fixture(); val conversation = f.db.create()
+        val f = fixture(); val conversation = f.db.create("default")
         val owner = ImageAttachmentOwner(conversation.id.value, "editor-one")
         val first = image(f, owner); val second = image(f, owner)
         val parts = listOf(ImageSendPart.Text("before"), ImageSendPart.Image(first),
@@ -155,7 +155,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
 
     fun testUnsupportedOrUnknownCapabilityRejectsBeforeFactoryAndKeepsDraft() {
         for (supported in listOf<Boolean?>(null, false)) {
-            val f = fixture(); val conversation = f.db.create()
+            val f = fixture(); val conversation = f.db.create("default")
             val owner = ImageAttachmentOwner(conversation.id.value, "editor")
             val image = image(f, owner); f.db.draft(conversation.id, "keep")
             val result = submit(f, conversation, owner, 1, listOf(ImageSendPart.Image(image)), provider(f, supported))
@@ -167,7 +167,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
     }
 
     fun testRealPairTransactionFailureRetainsPublishedAssetsAndFencesRetry() {
-        val f = fixture(); val conversation = f.db.create()
+        val f = fixture(); val conversation = f.db.create("default")
         val owner = ImageAttachmentOwner(conversation.id.value, "editor")
         val image = image(f, owner); f.db.draft(conversation.id, "keep")
         f.db.writableDatabase.execSQL("CREATE TRIGGER fail_image_pair BEFORE INSERT ON messages WHEN NEW.role='assistant' BEGIN SELECT RAISE(IGNORE); END")
@@ -186,7 +186,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
     }
 
     fun testCancelDuringPreparationIsOutsideControllerMonitorAndDoesNotConsumeDraft() {
-        val f = fixture(); val conversation = f.db.create()
+        val f = fixture(); val conversation = f.db.create("default")
         val owner = ImageAttachmentOwner(conversation.id.value, "editor")
         val image = image(f, owner)
         val entered = CountDownLatch(1); val release = CountDownLatch(1); val done = CountDownLatch(1)
@@ -205,7 +205,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
     }
 
     fun testChangedDraftFailsAtomicallyAndCanRetryOnlyAsANewRevision() {
-        val f = fixture(); val conversation = f.db.create()
+        val f = fixture(); val conversation = f.db.create("default")
         val owner = ImageAttachmentOwner(conversation.id.value, "editor")
         val image = image(f, owner); val parts = listOf(ImageSendPart.Image(image))
         f.db.draft(conversation.id, "old draft")
@@ -241,7 +241,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
     }
 
     fun testChangedProviderCannotConnectOrAcceptTextWithOldImageHistoryUntilAuthorized() {
-        val f = fixture(); val conversation = f.db.create()
+        val f = fixture(); val conversation = f.db.create("default")
         val owner = ImageAttachmentOwner(conversation.id.value, "editor")
         val image = image(f, owner)
         assertTrue(submit(f, conversation, owner, 1, listOf(ImageSendPart.Image(image))) is ImageSendResult.Accepted)
@@ -260,7 +260,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
     }
 
     fun testCloseDuringPreparationRetainsDraftAndDrainsBeforeStorageClose() {
-        val f = fixture(); val conversation = f.db.create()
+        val f = fixture(); val conversation = f.db.create("default")
         val owner = ImageAttachmentOwner(conversation.id.value, "editor")
         val image = image(f, owner)
         val entered = CountDownLatch(1); val release = CountDownLatch(1); val done = CountDownLatch(1)
@@ -279,7 +279,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
     }
 
     fun testResolverDoesNotAuthorizeAnUnpersistedSelfConsistentImageRow() {
-        val f = fixture(); val conversation = f.db.create()
+        val f = fixture(); val conversation = f.db.create("default")
         val owner = ImageAttachmentOwner(conversation.id.value, "editor")
         val attachment = image(f, owner)
         val attempt = ControllerImageAttempt(owner, 1, listOf(ImageSendPart.Image(attachment)), provider(f),

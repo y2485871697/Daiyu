@@ -24,7 +24,7 @@ class RecordedUsageReaderDatabaseTest : InstrumentationTestCase() {
         try { runtime.close(); database.close(); context.deleteDatabase("conversations.db") } finally { super.tearDown() }
     }
     private fun seed(usage: ModelEvent.Usage? = ModelEvent.Usage(10, 20, 5),
-        conversation: ConversationId = database.create().id): RunCheckpoint {
+        conversation: ConversationId = database.create("default").id): RunCheckpoint {
         val id = UUID.randomUUID().toString()
         val user = Message(MessageId("u-$id"), conversation, RunId(id), "user", emptyList(), RunStatus.COMPLETED)
         val assistant = user.copy(id = MessageId("a-$id"), role = "assistant", status = RunStatus.RUNNING)

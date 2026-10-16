@@ -39,10 +39,10 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
     }
 
     fun testCurrentScopeIsReadBeforeGlobalCapAndStillFindsOldMessages() {
-        val noisy = database.create()
+        val noisy = database.create("default")
         repeat(101) { turn(noisy, "noise-$it", "共同关键词 $it") }
         database.organize(noisy.id, "", true) // Deterministically fills the global 200 first.
-        val target = database.create()
+        val target = database.create("default")
         val older = turn(target, "target", "共同关键词：较早正文").first
         repeat(30) { turn(target, "later-$it", "后续不匹配正文 $it") }
         database.rename(target.id, "中文目标会话")
@@ -60,7 +60,7 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
     }
 
     fun testSupplementHitRetainsPersistedOwnerForWindowNavigation() {
-        val conversation = database.create()
+        val conversation = database.create("default")
         val supplementId = MessageId("supplement-without-own-row")
         val (_, answer) = turn(conversation, "segmented", "普通正文", answerTransform = { owner ->
             owner.copy(historySegments = listOf(
@@ -77,7 +77,7 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
     }
 
     fun testChineseTitlesAndPreviewsDoNotSearchSerializedProtocolOrBlockMetadata() {
-        val conversation = database.create()
+        val conversation = database.create("default")
         turn(conversation, "metadata", "真正中文正文", userTransform = { user ->
             user.copy(
                 blocks = listOf(MessageBlock.Text("图片标识-secret-image-id", "真正中文正文")),
@@ -100,7 +100,7 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
     }
 
     fun testEmptyNoMatchInvalidAndDeletedScopesAreDistinctFromReadFailure() {
-        val conversation = database.create()
+        val conversation = database.create("default")
         turn(conversation, "errors", "正文")
         assertTrue(data.search("  ").isEmpty())
         assertTrue(data.searchCurrentConversation("缺失关键词", conversation.id.value).isEmpty())

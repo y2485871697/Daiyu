@@ -93,7 +93,7 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         }} finally {super.tearDown()}
     }
     fun testReentrantSendAndDataTaskCannotReserveTwiceDuringSettingsRead() {
-        val f=fresh();val c=f.db.create();f.db.draft(c.id,"retained until accepted")
+        val f=fresh();val c=f.db.create("default");f.db.draft(c.id,"retained until accepted")
         val s=session(f);var checks=0
         f.app.settingsRead={
             assertNull(f.controller.send(c,"duplicate"))
@@ -109,7 +109,7 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         assertEquals(2,f.db.messages(c.id).size)
     }
     fun testConcurrentSendRechecksGateBeforeSecondPersistentReceipt() {
-        val f=fresh();val c=f.db.create();val s=session(f)
+        val f=fresh();val c=f.db.create("default");val s=session(f)
         val reading=CountDownLatch(1);val release=CountDownLatch(1)
         val firstResult=AtomicReference<Conversation?>();val secondResult=AtomicReference<Conversation?>()
         val secondStarted=CountDownLatch(1);val secondFinished=CountDownLatch(1)
@@ -137,7 +137,7 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         awaitState(f) {f.controller.active==null}
     }
     fun testBusyFailureRetainsDraftAndReleasesGateOnMainThread() {
-        val f=fresh();val c=f.db.create();f.db.draft(c.id,"unsent")
+        val f=fresh();val c=f.db.create("default");f.db.draft(c.id,"unsent")
         val entered=CountDownLatch(1);val release=CountDownLatch(1);val threads=AtomicInteger()
         val listener:()->Unit={if(Looper.myLooper()!=Looper.getMainLooper()) threads.incrementAndGet()}
         main {f.controller.observe(listener);f.controller.dataTask(importing=true) {
@@ -160,7 +160,7 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         assertTrue(s.entered.await(5,TimeUnit.SECONDS));s.release.countDown();awaitState(f) {f.controller.active==null}
     }
     fun testCredentialHistoryAndTransactionFailuresPreserveDraftWithoutModelOpen() {
-        val f=fresh();val c=f.db.create();f.db.draft(c.id,"keep draft");f.db.draft("keep composer")
+        val f=fresh();val c=f.db.create("default");f.db.draft(c.id,"keep draft");f.db.draft("keep composer")
         f.app.getSharedPreferences("model-settings",0).edit().putBoolean("credential-rebind-required",true).commit()
         main {assertNull(f.controller.send(c,"keep draft"))}
         assertTrue(f.controller.problem?.contains("未发起网络请求")==true)
@@ -181,7 +181,7 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
     }
     fun testStartupGateWaitsForRealRecoveryAndNeverReplaysInterruptedRun() {
         val f=fresh(awaitRecovery=false) {db->
-            val c=db.create();val run=RunId("interrupted")
+            val c=db.create("default");val run=RunId("interrupted")
             val user=Message(MessageId("interrupted-user"),c.id,run,"user",listOf(MessageBlock.Text("u","old request")),RunStatus.COMPLETED)
             val reply=Message(MessageId("interrupted-reply"),c.id,run,"assistant",emptyList(),RunStatus.RUNNING)
             db.send(user,reply);db.draft("pending draft")
@@ -266,7 +266,7 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         finally {reopened.close()}
     }
     fun testOldSessionCallbacksCannotPolluteNextConversationOrClosedController() {
-        val f=fresh();val a=f.db.create();val b=f.db.create();f.db.draft(b.id,"B draft")
+        val f=fresh();val a=f.db.create("default");val b=f.db.create("default");f.db.draft(b.id,"B draft")
         val old=session(f);main {assertNotNull(f.controller.send(a,"A"))}
         assertTrue(old.entered.await(5,TimeUnit.SECONDS))
         main {assertNull(f.controller.send(b,"B draft"));f.controller.stop()}

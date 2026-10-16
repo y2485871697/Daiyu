@@ -244,7 +244,7 @@ class MessageImageBackupAssetsTest : InstrumentationTestCase() {
     }
 
     fun testRealBackupImportIntoPreparedTargetIsIdempotentAndFreshTargetRestartsReadable() {
-        val source = fixture(); val conversation = source.db.create().id; val bytes = png()
+        val source = fixture(); val conversation = source.db.create("default").id; val bytes = png()
         val owner = MessageImageOwner(conversation.value, "visible")
         val drafts = ImageAttachmentStore(File(source.context.filesDir, "drafts"), AndroidImageInspector())
         val draft = ImageAttachmentOwner(conversation.value, "source-draft-not-carried-in-backup")
@@ -274,7 +274,7 @@ class MessageImageBackupAssetsTest : InstrumentationTestCase() {
     }
 
     fun testLaterOwnerConflictRollsBackSqlButRetainsExistingAssetsAndEarlierOrphan() {
-        val source = fixture(); val conversation = source.db.create().id; val bytes = png()
+        val source = fixture(); val conversation = source.db.create("default").id; val bytes = png()
         val first = prepare(source, MessageImageOwner(conversation.value, "a-new"), bytes)
         val last = prepare(source, MessageImageOwner(conversation.value, "z-existing"), bytes)
         send(source, conversation, first); send(source, conversation, last)

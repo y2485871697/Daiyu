@@ -25,7 +25,7 @@ class PlatformTest:InstrumentationTestCase() {
         val context=testContext()
         context.deleteDatabase("conversations.db")
         var db=ConversationDatabase(context)
-        val a=db.create();val b=db.create()
+        val a=db.create("default");val b=db.create()
         db.draft(a.id,"草稿A");db.draft(b.id,"草稿B")
         val run=RunId("r")
         val user=Message(MessageId("u"),a.id,run,"user",listOf(MessageBlock.Text("u","查询电量")),RunStatus.COMPLETED)
@@ -141,7 +141,7 @@ class PlatformTest:InstrumentationTestCase() {
             assertEquals(before,prefs.all)
             val keys=java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
             if(kind=="missing-key") assertFalse(keys.containsAlias(alias))
-            val db=ConversationDatabase(context);val a=db.create();val b=db.create()
+            val db=ConversationDatabase(context);val a=db.create("default");val b=db.create()
             db.draft("new draft");db.draft(a.id,"A draft");db.draft(b.id,"B draft")
             val conversations=db.conversations()
             val requests=java.util.concurrent.atomic.AtomicInteger()
@@ -183,7 +183,7 @@ class PlatformTest:InstrumentationTestCase() {
     }
     fun testLateReceiptIdentityTerminalAndDelete() {
         val context=testContext();context.deleteDatabase("conversations.db")
-        val db=ConversationDatabase(context);val a=db.create();val b=db.create();db.draft(b.id,"B草稿")
+        val db=ConversationDatabase(context);val a=db.create("default");val b=db.create();db.draft(b.id,"B草稿")
         val (user,assistant)=pair(a.id,"identity");db.send(user,assistant)
         fun rejected(value:Message) {try {db.save(value);fail("late or mismatched write must fail")} catch(_:PersistenceException) {}}
         rejected(assistant.copy(conversationId=b.id));rejected(assistant.copy(runId=RunId("other")));rejected(assistant.copy(role="user"))
@@ -196,7 +196,7 @@ class PlatformTest:InstrumentationTestCase() {
     }
     fun testPaginationAndRecoveryAreStable() {
         val context=testContext();context.deleteDatabase("conversations.db")
-        val db=ConversationDatabase(context);val a=db.create()
+        val db=ConversationDatabase(context);val a=db.create("default")
         repeat(61) {i->val (u,m)=pair(a.id,"page-$i");db.send(u,m);db.save(m.copy(status=RunStatus.COMPLETED))}
         for(limit in listOf(-1,0,201)) {try {db.messages(a.id,limit=limit);fail("invalid page size")} catch(_:IllegalArgumentException) {}}
         val tail=db.messages(a.id);val middle=db.messages(a.id,tail.first().first);val first=db.messages(a.id,middle.first().first)
@@ -224,7 +224,7 @@ class PlatformTest:InstrumentationTestCase() {
         assertEquals("",db.draft());assertEquals("旧草稿",db.conversations().single().draft)
         assertEquals(MessageId("old"),db.messages(ConversationId("legacy")).single().second.id)
         assertEquals("",db.conversations().single().folder);assertFalse(db.conversations().single().pinned)
-        assertEquals(9,db.readableDatabase.version)
+        assertEquals(10,db.readableDatabase.version)
         for(table in listOf("context_archives","context_branches","context_usage","neutral_assets","neutral_config","neutral_imports")) {
             db.readableDatabase.rawQuery("SELECT * FROM $table LIMIT 0",null).use {assertTrue(it.columnCount>0)}
         }
@@ -233,7 +233,7 @@ class PlatformTest:InstrumentationTestCase() {
     fun testConversationOrganizationSearchAndVersionTwoMigration() {
         val context=testContext();context.deleteDatabase("conversations.db")
         var db=ConversationDatabase(context)
-        val a=db.create();val b=db.create()
+        val a=db.create("default");val b=db.create("default")
         db.rename(a.id,"百分号%标题");db.draft(b.id,"独立草稿")
         db.organize(a.id,"工作",true)
         val (user,assistant)=pair(b.id,"search")
@@ -266,7 +266,7 @@ class PlatformTest:InstrumentationTestCase() {
         assertEquals("新会话草稿",db.draft());assertEquals("旧草稿",db.conversations().single().draft)
         assertEquals(MessageId("history"),db.messages(ConversationId("old")).single().second.id)
         assertEquals("",db.conversations().single().folder);assertFalse(db.conversations().single().pinned)
-        assertEquals(9,db.readableDatabase.version)
+        assertEquals(10,db.readableDatabase.version)
         for(table in listOf("context_archives","context_branches","context_usage","neutral_assets","neutral_config","neutral_imports")) {
             db.readableDatabase.rawQuery("SELECT * FROM $table LIMIT 0",null).use {assertTrue(it.columnCount>0)}
         }
@@ -278,7 +278,7 @@ class PlatformTest:InstrumentationTestCase() {
         source.deleteDatabase("conversations.db");target.deleteDatabase("conversations.db")
         val from=ConversationDatabase(source);var to=ConversationDatabase(target)
         try {
-            val a=from.create();val b=from.create();from.organize(a.id,"文件夹",true)
+            val a=from.create("default");val b=from.create("default");from.organize(a.id,"文件夹",true)
             val (u,m)=pair(a.id,"backup");from.send(u,m);from.save(m.copy(blocks=listOf(MessageBlock.Text("body","已接收正文"))))
             from.draft(a.id,"A稿");from.draft(b.id,"B稿");from.draft("未创建稿")
             val packageText=from.exportBackup()
@@ -320,7 +320,7 @@ class PlatformTest:InstrumentationTestCase() {
         source.deleteDatabase("conversations.db");target.deleteDatabase("conversations.db")
         val from=ConversationDatabase(source);val to=ConversationDatabase(target)
         try {
-            val conversation=from.create();val (u,m)=pair(conversation.id,"strict")
+            val conversation=from.create("default");val (u,m)=pair(conversation.id,"strict")
             from.send(u,m)
             val protocol=listOf(
                 "{\"type\":\"reasoning\",\"summary\":[],\"encrypted_content\":\"synthetic-ciphertext\"}",

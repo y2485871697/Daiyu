@@ -92,7 +92,7 @@ class SegmentedBackupRoundTripTest : InstrumentationTestCase() {
         .put("content", JSONArray().put(JSONObject().put("type", "output_text").put("text", text))).toString()
 
     private fun seed(f: Fixture): Seed {
-        val owner = f.db.create().id
+        val owner = f.db.create("default").id
         val run = RunId("run-${owner.value}")
         val user = Message(MessageId("user-${owner.value}"), owner, run, "user",
             listOf(MessageBlock.Text("question", "合成问题：请先说明，再查询，再解释。")), RunStatus.COMPLETED)
@@ -157,7 +157,7 @@ class SegmentedBackupRoundTripTest : InstrumentationTestCase() {
     }
 
     private fun assertRestored(f: Fixture, seed: Seed) {
-        assertEquals(9, f.db.readableDatabase.version)
+        assertEquals(10, f.db.readableDatabase.version)
         val rows = f.db.messages(seed.owner).map { it.second }
         assertEquals(seed.rows, rows)
         assertEquals(3, rows.last().historySegments.size)
@@ -223,7 +223,7 @@ class SegmentedBackupRoundTripTest : InstrumentationTestCase() {
 
     fun testMessagesStreamSegmentsSurviveCompletePackageReopenAndHistoryReplayWithoutModelCalls() {
         val source = fresh()
-        val owner = source.db.create().id
+        val owner = source.db.create("default").id
         val run = RunId("messages-run-${owner.value}")
         val callId = "messages-call-${owner.value}"
         val result = "合成工具结果；不执行真实工具"
@@ -321,7 +321,7 @@ class SegmentedBackupRoundTripTest : InstrumentationTestCase() {
     fun testResignedHistoryIdentityTamperAndCrossOwnerArchiveLeaveTargetUnchanged() {
         val source = fresh()
         seed(source)
-        val otherOwner = source.db.create().id
+        val otherOwner = source.db.create("default").id
         val complete = source.backup.exportPackage()
         val wrongOwnerContents = payload(complete)
         wrongOwnerContents.getJSONObject("tables").getJSONArray("context_archives").getJSONObject(0)

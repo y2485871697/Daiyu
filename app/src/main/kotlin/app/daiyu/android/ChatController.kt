@@ -3,6 +3,8 @@ package app.daiyu.android
 import android.app.Application
 import android.content.SharedPreferences
 import android.net.Uri
+import app.daiyu.android.assistants.*
+import app.daiyu.android.model.AssistantModelFactory
 import app.daiyu.android.backup.NeutralBackupService
 import app.daiyu.android.context.ContextService
 import app.daiyu.android.context.ContextRegistry
@@ -49,8 +51,12 @@ class ChatApplication:Application() {
 class ChatController internal constructor(private val application:Application,
     val database:ConversationDatabase, val settings:ModelSettingsStore, val preferences:SharedPreferences,
     private val model:(ModelSettings)->ModelPort,
-    private val imageModel: (ProviderSnapshot)->ModelPort = { ModelFactory.create(it) }) {
-    constructor(application:Application):this(application,ConversationDatabase(application),ModelSettingsStore(application),application.getSharedPreferences("conversation-ui",0),{ModelFactory.create(it)})
+    private val imageModel: (ProviderSnapshot)->ModelPort = { ModelFactory.create(it) },
+    private val assistantModel: ((ProviderSnapshot, AssistantRunContext)->ModelPort)? = null,
+    val assistantAssets: AssistantAssets = FileAssistantAssets(application)) {
+    constructor(application:Application):this(application,ConversationDatabase(application),ModelSettingsStore(application),application.getSharedPreferences("conversation-ui",0),{ModelFactory.create(it)},
+        assistantModel=AssistantModelFactory::create)
+    val assistantStore: SqliteAssistantStore by lazy { SqliteAssistantStore(database) }
     internal val interactiveMode = app.daiyu.android.config.InteractiveModePreference(preferences)
     private val executor=Executors.newSingleThreadExecutor()
     private val handler=Handler(Looper.getMainLooper())
@@ -59,6 +65,25 @@ class ChatController internal constructor(private val application:Application,
     private val listeners=mutableMapOf<()->Unit,Any>()
     private var closed=false
     private var preparing=false
+    private var preparingGlobalAssistantId:String?=null
+    // Call only after the idle gate; this reads the already initialized in-memory selection.
+    private fun reservePreparation() {
+        preparingGlobalAssistantId=assistantStore.selectedId.value
+        preparing=true
+    }
+    internal fun bindConversationAssistant(owner: ConversationId, expected: String?, replacement: String): Boolean {
+        synchronized(this) {
+            if(!idleAvailable() || hasLiveChildTasks(owner)) return false
+            reservePreparation()
+        }
+        return try {
+            database.bindAssistant(owner, expected, replacement).also { changed ->
+                problem=if(changed) null else "会话或助手绑定已变化；请重新打开选择器"
+                notifyChanged()
+            }
+        } catch (_:Exception) {problem="助手绑定失败；原绑定和草稿保留";notifyChanged();false}
+        finally {finishPreparation()}
+    }
     private var pendingImage:ImageSendHandle?=null
     private var pendingShizuku:ControllerShizukuPreparation?=null
     @Synchronized internal fun shizukuPreparation():ControllerShizukuPreparation? = pendingShizuku
@@ -234,17 +259,10 @@ class ChatController internal constructor(private val application:Application,
     internal fun sendWithChildren(conversation: Conversation, text: String): Conversation? {
         synchronized(this) {
             if (!idleAvailable() || text.isBlank()) return null
-            preparing = true
+            reservePreparation()
         }
         return try {
-            val models = try {
-                require(conversationExists(conversation.id))
-                val key = SubAgentConfigKey.Conversation(conversation.id.value)
-                childBindings.freeze(key, childPreferences.snapshot(key))
-            } catch (_: Exception) {
-                problem = "子模型配置未绑定、已变更或不支持；草稿保留，未切换到主模型"; notifyChanged(); return null
-            }
-            sendPrepared(conversation, text, models)
+            sendPrepared(conversation, text, withChildren=true)
         } finally { finishPreparation() }
     }
     @Synchronized internal fun childTasks(conversationId: ConversationId, limit: Int = 20): List<ChildTaskRecord> {
@@ -274,6 +292,7 @@ class ChatController internal constructor(private val application:Application,
     @Volatile var ready=false;private set
     init {executor.execute {
         val failed=try {
+            assistantStore.requireReady() // Migration failure closes the send gate without replacing source data.
             val runtime=SQLiteRuntimeStore.acquire(database)
             runtimeStore=runtime
             val questions=PrivateQuestionStore(application)
@@ -320,7 +339,7 @@ class ChatController internal constructor(private val application:Application,
         synchronized(this) {
             if(!idleAvailable() || text.isBlank()) return null
             // Reserve before I/O, but never keep the monitor across I/O or model factories.
-            preparing=true
+            reservePreparation()
         }
         return try {sendPrepared(conversation,text)} finally {finishPreparation()}
     }
@@ -335,7 +354,7 @@ class ChatController internal constructor(private val application:Application,
         val timeout=ControllerShizukuPreparation.parseTimeout(timeoutInput) ?: return null
         val preview=runCatching {ControllerShizukuPreparation(conversation,text,uid,command,timeout)}.getOrNull()
             ?: return null
-        preparing=true;pendingShizuku=preview;notifyChanged()
+        reservePreparation();pendingShizuku=preview;notifyChanged()
         return preview
     }
     internal fun rejectShizuku(preview:ControllerShizukuPreparation) {
@@ -397,6 +416,7 @@ class ChatController internal constructor(private val application:Application,
     }
     private fun finishPreparation() = synchronized(this) {
         preparing=false
+        preparingGlobalAssistantId=null
         pendingImage=null
         if(closed) closeStorageWhenIdle() else notifyChanged()
     }
@@ -416,7 +436,7 @@ class ChatController internal constructor(private val application:Application,
         synchronized(this) {
             if(!idleAvailable() || draftRevision<0 || snapshot.none {it is ImageSendPart.Image} ||
                 conversation!=null && conversation.id.value!=owner.conversationId) return null
-            preparing=true;pendingImage=handle
+            reservePreparation();pendingImage=handle
         }
         try { executor.execute {
             var attempt:ControllerImageAttempt?=null
@@ -440,10 +460,39 @@ class ChatController internal constructor(private val application:Application,
         return handle
     }
     private fun sendPrepared(conversation:Conversation?,text:String,
-        childModels:Map<String,ChildModelDefinition> = emptyMap(), imageAttempt:ControllerImageAttempt?=null,
+        withChildren:Boolean = false, imageAttempt:ControllerImageAttempt?=null,
         shizukuPreparation:ControllerShizukuPreparation?=null,
         shizukuAuthorization:app.daiyu.android.domain.tools.TaskAuthorization?=null):Conversation? {
         require(shizukuPreparation==null || (imageAttempt==null && shizukuAuthorization!=null))
+        val assistantContext = try {
+            val binding=if(conversation==null) synchronized(this) {preparingGlobalAssistantId}
+                else database.assistantId(conversation.id)
+            if(binding==null) throw MissingAssistantBindingException()
+            // Freeze the profile before any memory/history I/O. capture consumes this exact
+            // value once; subsequent edits/deletion/global switching cannot change this run.
+            val profile=assistantStore.read(binding)?.let {it.copy(enabledSkillIds=it.enabledSkillIds.toList())}
+                ?: throw AssistantNotFoundException(binding)
+            val memory=if(profile.memoryEnabled) assistantAssets.memory(binding).content else ""
+            val frozen=object : AssistantStore by assistantStore {
+                override fun read(id:String):AssistantProfile? = profile.takeIf {it.id==id}
+            }
+            AssistantRunContext.capture(frozen,binding,memory)
+        } catch (_:MissingAssistantBindingException) {
+            problem="会话未绑定助手；请显式选择助手，草稿保留";notifyChanged();return null
+        } catch (_:AssistantNotFoundException) {
+            problem="会话助手已删除或不存在；请显式重新绑定，草稿保留";notifyChanged();return null
+        } catch (_:Exception) {
+            problem="助手配置或记忆读取失败；草稿保留，未发起请求";notifyChanged();return null
+        }
+        val childModels:Map<String,ChildModelDefinition> = if(!withChildren) emptyMap() else try {
+            val key=SubAgentConfigKey.Conversation(checkNotNull(conversation).id.value)
+            childBindings.freeze(key,childPreferences.snapshot(key)) { provider ->
+                val delegate=assistantModel?.invoke(provider,assistantContext) ?: model(provider.asModelSettings())
+                messageImages.wrap(delegate,provider)
+            }
+        } catch (_:Exception) {
+            problem="子模型配置未绑定、已变更或不支持；草稿保留，未切换到主模型";notifyChanged();return null
+        }
         val interactiveSnapshot = interactiveMode.snapshot()
         val config=try {settings.load().also {it.validate()}} catch (_:CredentialUnavailableException) {
             problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
@@ -474,7 +523,8 @@ class ChatController internal constructor(private val application:Application,
             val plan=messageImages.freeze(prior+user,provider,user) {
                 imageAttempt?.handle?.isCancelled()==true || shizukuPreparation?.isCancelled()==true || synchronized(this) {closed}
             }
-            val delegate=if(plan.hasImages) imageModel(provider) else model(config)
+            val delegate=assistantModel?.invoke(provider,assistantContext)
+                ?: if(plan.hasImages) imageModel(provider) else model(config)
             messageImages.wrap(delegate,provider,conversationId)
         } catch (_:Exception) {
             problem="图片历史读取、能力检查或模型初始化失败；草稿保留，未发起网络请求";notifyChanged();return null
@@ -549,9 +599,9 @@ class ChatController internal constructor(private val application:Application,
                     arrayOf(conversationId.value,shizukuPreparation.text)
                 ).use {it.moveToFirst()}
                 if(!sameDraft) throw ControllerShizukuDraftChangedException()
-                database.send(user,assistant,conversation==null)
+                database.send(user,assistant,conversation==null,assistantContext.assistantId)
             }
-            else if(imageAttempt==null) database.send(user,assistant,conversation==null)
+            else if(imageAttempt==null) database.send(user,assistant,conversation==null,assistantContext.assistantId)
             else app.daiyu.android.context.DatabaseTransactions { database.writableDatabase }.run { db ->
                 // The text CAS and both message rows share one outer SQLite transaction.
                 // Do not clear a newer persisted editor draft while images are being frozen.
@@ -562,7 +612,7 @@ class ChatController internal constructor(private val application:Application,
                     arrayOf(conversationId.value,imageAttempt.expectedDraftText)
                 ).use {it.moveToFirst()}
                 if(!sameDraft) throw ImageDraftChangedException()
-                database.send(user,assistant,conversation==null)
+                database.send(user,assistant,conversation==null,assistantContext.assistantId)
             }
         } catch (failure:Exception) {
             val draftChanged=failure is ImageDraftChangedException || failure is ControllerShizukuDraftChangedException

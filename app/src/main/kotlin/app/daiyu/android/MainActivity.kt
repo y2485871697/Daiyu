@@ -46,8 +46,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import app.daiyu.android.assistants.AssistantSkill
-import app.daiyu.android.assistants.FileAssistantAssets
-import app.daiyu.android.assistants.SharedPreferencesAssistantStore
+import app.daiyu.android.assistants.AssistantSelectionOwner
 import app.daiyu.android.context.ContextService
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
@@ -96,8 +95,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 class MainActivity : ComponentActivity() {
     private val controller get() = (application as ChatApplication).controller
     private val retainedData by lazy { RetainedConversationData(controller.database, ContextService(this, controller.database)) }
-    private val assistantStore by lazy { SharedPreferencesAssistantStore(applicationContext) }
-    private val assistantAssets by lazy { FileAssistantAssets(applicationContext) }
+    private val assistantStore get() = controller.assistantStore
+    private val assistantAssets get() = controller.assistantAssets
     private val reasoningPreference by lazy {
         ConversationReasoningPreference(getSharedPreferences("conversation-ui", MODE_PRIVATE))
     }
@@ -202,6 +201,18 @@ class MainActivity : ComponentActivity() {
     private var chatModelSettings: ModelSettings? = null
     private var chatModelCancelled = AtomicBoolean(false)
     private var assistantPicker by mutableStateOf(false)
+    private var assistantSelectionOwner by mutableStateOf<AssistantSelectionOwner?>(null)
+    private fun openAssistantPicker(global: Boolean = false) {
+        guard {
+            if(!controller.ready) return@guard
+            val owner=selected?.id
+            assistantSelectionOwner=AssistantSelectionOwner(owner?.value,editorGeneration,
+                if(global || owner==null) assistantStore.selectedId.value else controller.database.assistantId(owner), global || owner==null)
+            assistantPicker=true
+        }
+    }
+    private fun assistantOwnerMatches(owner: AssistantSelectionOwner): Boolean = activityUsable() &&
+        owner.accepts(assistantSelectionOwner,selected?.id?.value,editorGeneration,assistantPicker)
     private var assistantEditingId by mutableStateOf<String?>(null)
     private var collaborationOwner by mutableStateOf<String?>(null)
     private var collaborationVisible by mutableStateOf(false)
@@ -317,7 +328,7 @@ class MainActivity : ComponentActivity() {
                     "settings" -> DaiyuSettingsScreen(
                         onBack = { returnToChat() }, onRoute = { route -> openSettingsFromPage(route) },
                         onOpenSubAgents = { retainedPage = "subagents" },
-                        onOpenAssistants = { assistantPicker = true },
+                        onOpenAssistants = { openAssistantPicker(global = true) },
                         onOpenAppearance = { retainedPage = "appearance" },
                     )
                     "models" -> modelDraft?.let { value ->
@@ -393,8 +404,8 @@ class MainActivity : ComponentActivity() {
                             if (paneState.selectedFolderId == name) paneState = paneState.copy(selectedFolderId = null)
                             updatePane()
                         } },
-                        onSelectAssistant = {}, onEditAssistant = { assistantPicker = true },
-                        onOpenAssistants = { dismissSidebar(); assistantPicker = true },
+                        onSelectAssistant = {}, onEditAssistant = { openAssistantPicker() },
+                        onOpenAssistants = { dismissSidebar(); openAssistantPicker(global = true) },
                         onOpenSettings = { dismissSidebar(); retainedPage = "settings" },
                         onOpenModelProviders = { dismissSidebar(); guard { modelSettings() } },
                         onOpenUsageStats = { dismissSidebar(); retainedPage = "usage" },
@@ -419,10 +430,25 @@ class MainActivity : ComponentActivity() {
                         onSettings = { dismissChatModels(); guard { modelSettings() } },
                         onDismiss = ::dismissChatModels)
                 }
-                AssistantPickerDialog(show = assistantPicker, store = assistantStore, assets = assistantAssets,
-                    onSelect = { id -> guard { assistantStore.select(id); refresh() } },
-                    onEdit = { id -> assistantPicker = false; assistantEditingId = id; retainedPage = "assistant-edit" },
-                    onDismiss = { assistantPicker = false })
+                assistantSelectionOwner?.let { owner -> key(owner) {
+                    AssistantPickerDialog(show = assistantPicker, store = assistantStore, assets = assistantAssets,
+                        selectedId = owner.expectedAssistantId, useGlobalSelection = false,
+                        canMutate = { assistantOwnerMatches(owner) && !controller.dataBusy },
+                        onSelect = { id -> guard {
+                            check(assistantOwnerMatches(owner)) { "选择器所属页面已变化；未改变绑定" }
+                            if(owner.global) assistantStore.select(id)
+                            else {
+                                val conversationId=ConversationId(checkNotNull(owner.conversationId))
+                                check(controller.bindConversationAssistant(conversationId,owner.expectedAssistantId,id)) { "当前正在准备或运行，或绑定已变化；未改变绑定" }
+                                selected=selected?.copy(assistantId=id)
+                            }
+                            refresh()
+                        } },
+                        onEdit = { id -> if(assistantOwnerMatches(owner)) {
+                            assistantPicker = false; assistantEditingId = id; retainedPage = "assistant-edit"
+                        } },
+                        onDismiss = { if(assistantSelectionOwner===owner) assistantPicker = false })
+                } }
                 val owner = collaborationOwner
                 ConversationCollaborationDialog(show = collaborationVisible, conversationId = owner,
                     onDismiss = { collaborationVisible = false; collaborationOwner = null }, taskRunning = controller.active != null || backupBusy,
@@ -507,7 +533,7 @@ class MainActivity : ComponentActivity() {
             window.decorView.post { if (controlTouchGeneration == generation) { controlTouchActive = false; controlTouchOwner = null } }
         },
         onModelClick = { guard { openChatModels() } }, onReasoningClick = { thinkingPicker = true },
-        onAssistantClick = { assistantPicker = true }, onCopy = { id -> copyMessage(id) },
+        onAssistantClick = { openAssistantPicker() }, onCopy = { id -> copyMessage(id) },
         onMenuAction = { action -> guard { when (action) {
             ChatMenuAction.ATTACH_IMAGE -> {
                 if (editorMatches()) { imagePanelVisible = true; pickImages() }
@@ -1111,6 +1137,10 @@ class MainActivity : ComponentActivity() {
             if (sidebarVisible || retainedPage == "manage") updatePane()
         }
     }
+    private fun currentAssistantLabel(): String = try {
+        val binding=selected?.id?.let(controller.database::assistantId) ?: if(selected==null) assistantStore.selectedId.value else null
+        if(binding==null) "未绑定助手" else assistantStore.read(binding)?.name ?: "助手已删除，请重新绑定"
+    } catch (_:Exception) { "助手不可用" }
     private fun savedModelLabel(): String = try {
         (controller.settings.nonSecretConfiguration()["model"] as? String)?.ifBlank { "模型" } ?: "模型"
     } catch (_: Exception) { "模型" }
@@ -1147,7 +1177,7 @@ class MainActivity : ComponentActivity() {
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,
                 phase = phase, controlOwnerKey = controlOwner?.id?.value, modelLabel = savedModelLabel(),
                 reasoningLabel = reasoningPreference.get(selected?.id?.value).displayName,
-                assistantLabel = assistantStore.read(assistantStore.selectedId.value)?.name ?: "助手", enabled = allowed && !imageHost.sending && !shizukuWritesBlocked,
+                assistantLabel = currentAssistantLabel(), enabled = allowed && !imageHost.sending && !shizukuWritesBlocked,
                 supplementAvailable = state?.phase == ExecutionPhase.PAUSED && supplementDraft.pending == null,
                 supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&
                     supplementDraft.pending != null))

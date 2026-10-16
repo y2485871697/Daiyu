@@ -327,7 +327,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
     }
 
     fun testCancellationLosesToCommitThenReceiptSettlesReselectedEditorBeforeGateOpens() {
-        val conversation = controller.database.create()
+        val conversation = controller.database.create("default")
         mainThread { activity.select(conversation) }
         setDraft("仅发送一次")
         pick(1); waitImages(1); authorize()

@@ -18,7 +18,7 @@ class SQLiteRuntimeStoreDatabaseTest:InstrumentationTestCase() {
     }
     private fun lease(db:ConversationDatabase)=SQLiteRuntimeStore.acquire(db).also {stores+=it;it.recoverPending()}
     private fun seed(db:ConversationDatabase):RunCheckpoint {
-        val c=db.create().id;val run=RunId(UUID.randomUUID().toString())
+        val c=db.create("default").id;val run=RunId(UUID.randomUUID().toString())
         val user=Message(MessageId("u-${run.value}"),c,run,"user",listOf(MessageBlock.Text("u","question")),RunStatus.COMPLETED)
         val assistant=user.copy(id=MessageId("a-${run.value}"),role="assistant",status=RunStatus.RUNNING,blocks=emptyList())
         db.send(user,assistant)
@@ -183,9 +183,9 @@ class SQLiteRuntimeStoreDatabaseTest:InstrumentationTestCase() {
         val text=first.message.copy(blocks=listOf(MessageBlock.Text("t","old")),historySegments=listOf(
             MessageHistorySegment(first.message.id,"assistant",listOf(MessageBlock.Text("t","old")))))
         db.save(text);db.draft(first.message.conversationId,"draft");val before=db.messages(first.message.conversationId)
-        db.writableDatabase.execSQL("DROP TABLE runtime_checkpoints");db.writableDatabase.version=5;db.close()
+        db.writableDatabase.execSQL("DROP TABLE runtime_checkpoints");app.daiyu.android.removeAssistantSchemaForLegacyFixture(db.writableDatabase);db.writableDatabase.version=5;db.close()
         val runtime=lease(db)
-        assertEquals(9,db.readableDatabase.version);val restored=db.messages(first.message.conversationId)
+        assertEquals(10,db.readableDatabase.version);val restored=db.messages(first.message.conversationId)
         assertEquals(before.map {it.first},restored.map {it.first});assertEquals(text.blocks,restored.last().second.blocks)
         assertEquals(text.historySegments,restored.last().second.historySegments)
         assertEquals("draft",db.conversations().single().draft)

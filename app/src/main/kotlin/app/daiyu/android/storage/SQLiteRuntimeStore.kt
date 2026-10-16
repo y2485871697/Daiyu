@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
 import app.daiyu.android.context.DatabaseTransactions
 import app.daiyu.android.domain.*
+import app.daiyu.android.domain.delegation.*
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.question.ASK_USER_TOOL_NAME
 import app.daiyu.android.domain.question.QuestionIdentity
@@ -23,6 +24,18 @@ internal class SQLiteRuntimeStore private constructor(
     private var closed = false
     private fun available() { check(!closed && lock.isValid) { "运行存储所有权已释放" } }
 
+    private val childStore = SQLiteChildTaskStore(database)
+    internal val childTasks: ChildTaskStore = object : ChildTaskStore {
+        override fun enqueue(parent: RunExecutionOwner, tasks: List<ChildTaskRecord>) = childAccess { childStore.enqueue(parent, tasks) }
+        override fun started(task: ChildTaskRecord) = childAccess { childStore.started(task) }
+        override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) =
+            childAccess { childStore.finished(task, status, text, detail) }
+        override fun list(conversationId: String, limit: Int) = childAccess { childStore.list(conversationId, limit) }
+    }
+    @Synchronized private fun <T> childAccess(work: () -> T): T {
+        available(); check(recovered); return work()
+    }
+
     @Synchronized fun recoverPending(beforeQuestionRecovery: ((QuestionIdentity) -> Unit)? = null) {
         available(); check(!recovered) { "运行恢复只能在取得所有权后执行一次" }
         val priors = recoverable(database.readableDatabase)
@@ -31,6 +44,7 @@ internal class SQLiteRuntimeStore private constructor(
             check(recoverable(db) == priors) { "恢复准备后检查点已变化" }
             priors.forEach { reconcile(db, it) }
             database.recoverUncheckpointed(db)
+            SQLiteChildTaskStore.recoverPending(db)
         }
         recovered = true
     }

@@ -149,4 +149,96 @@ class ChildModelBatchTest {
         val count = AtomicInteger(); batch.close(); batch.closeWhenIdle { count.incrementAndGet() }
         assertEquals(1, count.get()); assertTrue(batch.execute(context(), listOf(ChildModelTask("one", "task"))) is ExecutionReceipt.NotExecuted)
     }
+    private class Records(private val failAt: String? = null) : ChildTaskStore {
+        val rows = linkedMapOf<String, ChildTaskRecord>()
+        val completed = CountDownLatch(1)
+        @Synchronized override fun enqueue(parent: RunExecutionOwner, tasks: List<ChildTaskRecord>) {
+            check(failAt != "enqueue")
+            tasks.forEach { rows[it.owner.childRunId] = it }
+        }
+        @Synchronized override fun started(task: ChildTaskRecord) {
+            check(failAt != "start"); rows[task.owner.childRunId] = task.copy(status = ChildTaskStatus.RUNNING)
+        }
+        @Synchronized override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) {
+            check(failAt != "finish"); rows[task.owner.childRunId] = task.copy(status = status, text = text, detail = detail)
+            if (status == ChildTaskStatus.COMPLETED) completed.countDown()
+        }
+        @Synchronized override fun list(conversationId: String, limit: Int) =
+            rows.values.filter { it.owner.conversationId == conversationId }.take(limit)
+    }
+
+    @Test fun journalCommitsQueueAndSendBoundaryBeforeModelAndPreservesCompletedResult() {
+        val records = Records(); val opens = AtomicInteger()
+        val child = port { history, sink ->
+            opens.incrementAndGet()
+            val row = records.list(parent.conversationId.value).single()
+            assertEquals(ChildTaskStatus.RUNNING, row.status)
+            assertEquals(owner.ownerId, row.parentOwnerId)
+            assertEquals(parent.id.value, row.parentMessageId)
+            assertEquals(history.single().runId.value, row.owner.childRunId)
+            sink(ModelEvent.TextFinal("text", "durable result"))
+        }
+        val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1) { child }), store = records))
+        try {
+            assertTrue(batch.execute(context(), listOf(ChildModelTask("one", "task"))) is ExecutionReceipt.Confirmed)
+            val row = records.list(parent.conversationId.value).single()
+            assertEquals(ChildTaskStatus.COMPLETED, row.status); assertEquals("durable result", row.text)
+            assertEquals(1, opens.get()); assertEquals("task", row.prompt)
+        } finally { batch.close() }
+    }
+
+    @Test fun journalAdmissionAndStartFailuresNeverOpenModel() {
+        for (stage in listOf("enqueue", "start")) {
+            val records = Records(stage); val opens = AtomicInteger()
+            val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1) {
+                ModelPort { opens.incrementAndGet(); error("must not open") }
+            }), store = records))
+            try {
+                assertTrue(batch.execute(context(), listOf(ChildModelTask("one", "task"))) is ExecutionReceipt.NotExecuted)
+                assertEquals(0, opens.get())
+                if (stage == "enqueue") assertTrue(records.rows.isEmpty())
+                else assertEquals(ChildTaskStatus.NOT_EXECUTED, records.rows.values.single().status)
+            } finally { batch.close() }
+        }
+    }
+
+    @Test fun journalFinishFailureCannotReportConfirmedOrReopenRequest() {
+        val records = Records("finish"); val opens = AtomicInteger()
+        val child = port { _, sink -> opens.incrementAndGet(); sink(ModelEvent.TextFinal("t", "answer")) }
+        val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1) { child }), store = records))
+        try {
+            assertTrue(batch.execute(context(), listOf(ChildModelTask("one", "task"))) is ExecutionReceipt.Unknown)
+            assertEquals(ChildTaskStatus.RUNNING, records.rows.values.single().status)
+            assertTrue(batch.execute(context(), listOf(ChildModelTask("one", "task"))) is ExecutionReceipt.NotExecuted)
+            assertEquals(1, opens.get())
+        } finally { batch.close() }
+    }
+
+    @Test fun factoryFailureIsRecordedAsUnsent() {
+        val records = Records()
+        val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1) { error("local factory") }), store = records))
+        try {
+            assertTrue(batch.execute(context(), listOf(ChildModelTask("one", "task"))) is ExecutionReceipt.NotExecuted)
+            assertEquals(ChildTaskStatus.NOT_EXECUTED, records.rows.values.single().status)
+            assertEquals("child_not_sent", records.rows.values.single().detail)
+        } finally { batch.close() }
+    }
+
+    @Test fun failedSiblingCannotEraseAlreadyCommittedChildResult() {
+        val records = Records()
+        val good = port { _, sink -> sink(ModelEvent.TextFinal("t", "retained answer")) }
+        val bad = port { _, _ -> check(records.completed.await(3, TimeUnit.SECONDS)); error("sent failure") }
+        val batch = bind(ChildModelBatch(mapOf("good" to ChildModelDefinition("shared", 2) { good },
+            "bad" to ChildModelDefinition("shared", 2) { bad }), store = records))
+        val idle = CountDownLatch(1)
+        try {
+            assertTrue(batch.execute(context(), listOf(ChildModelTask("good", "first"), ChildModelTask("bad", "second"))) is ExecutionReceipt.Unknown)
+            batch.closeWhenIdle { idle.countDown() }; assertTrue(idle.await(3, TimeUnit.SECONDS))
+            val rows = records.list(parent.conversationId.value).associateBy { it.profileId }
+            assertEquals(ChildTaskStatus.COMPLETED, rows.getValue("good").status)
+            assertEquals("retained answer", rows.getValue("good").text)
+            assertEquals(ChildTaskStatus.UNKNOWN, rows.getValue("bad").status)
+        } finally { batch.close() }
+    }
+
 }

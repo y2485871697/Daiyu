@@ -60,6 +60,70 @@ class VideoAssetStoreTest {
         store.openOriginal(owner, draft).use { assertArrayEquals(bytes, it.readBytes()) }
     }
 
+    @Test fun restoreRetainsOriginalIdOwnerAndCompleteMetadataAcrossRestart() {
+        val reference = MessageVideoReference(message, "11111111-1111-1111-1111-111111111111",
+            metadata.mime, bytes.size.toLong(), videoDigest(bytes), metadata.durationMs, metadata.width, metadata.height)
+        store.restore(message, listOf(reference), listOf(bytes))
+        store = newStore()
+        assertEquals(listOf(reference), store.preparedReferences(message))
+        store.openOriginal(message, reference).use { assertArrayEquals(bytes, it.readBytes()) }
+        store.restore(message, listOf(reference), listOf(bytes))
+        assertEquals(listOf(reference), store.preparedReferences(message))
+        failWith(VideoAttachmentFailure.OWNER_MISMATCH) {
+            store.restore(message.copy(conversationId = "foreign"), listOf(reference), listOf(bytes))
+        }
+        failWith(VideoAttachmentFailure.CORRUPT) {
+            store.restore(message, listOf(reference.copy(width = 33)), listOf(bytes))
+        }
+        store.openOriginal(message, reference).use { assertArrayEquals(bytes, it.readBytes()) }
+    }
+
+    @Test fun failedRestoreBatchKeepsExistingOriginalAndRemovesOnlyNewWork() {
+        val existing = store.prepare(message, add())
+        val next = existing.copy(id = "22222222-2222-2222-2222-222222222222")
+        val invalid = existing.copy(id = "33333333-3333-3333-3333-333333333333", width = 33)
+        failWith(VideoAttachmentFailure.CORRUPT) {
+            store.restore(message, listOf(existing, next, invalid), listOf(bytes, bytes, bytes))
+        }
+        assertEquals(listOf(existing), store.preparedReferences(message))
+        store.openOriginal(message, existing).use { assertArrayEquals(bytes, it.readBytes()) }
+        assertFalse(root.walkTopDown().any { it.name.endsWith(".pending") })
+    }
+
+    @Test fun cancelledRestoreAfterPublicationRemovesOnlyItsNewOriginal() {
+        val existing = store.prepare(message, add())
+        val next = existing.copy(id = "22222222-2222-2222-2222-222222222222")
+        failWith(VideoAttachmentFailure.CANCELLED) {
+            store.restore(message, listOf(existing, next), listOf(bytes, bytes),
+                isCancelled = { original(next).isFile })
+        }
+        assertEquals(listOf(existing), store.preparedReferences(message))
+        store.openOriginal(message, existing).use { assertArrayEquals(bytes, it.readBytes()) }
+        assertFalse(original(next).exists())
+    }
+
+    @Test fun idempotentRestoreDoesNotAcceptMetadataWhoseOriginalDisappeared() {
+        val existing = store.prepare(message, add())
+        assertTrue(original(existing).delete())
+        try {
+            store.restore(message, listOf(existing), listOf(bytes))
+            fail("missing original must not report idempotent success")
+        } catch (_: VideoAttachmentException) { }
+        assertFalse(original(existing).exists())
+    }
+
+    @Test fun restoreRejectsMissingCorruptBytesAndDuplicateIdsBeforePublication() {
+        val reference = MessageVideoReference(message, "11111111-1111-1111-1111-111111111111",
+            metadata.mime, bytes.size.toLong(), videoDigest(bytes), metadata.durationMs, metadata.width, metadata.height)
+        failWith(VideoAttachmentFailure.CORRUPT) { store.restore(message, listOf(reference), listOf(byteArrayOf())) }
+        failWith(VideoAttachmentFailure.CORRUPT) { store.restore(message, listOf(reference), listOf(bytes.reversedArray())) }
+        try {
+            store.restore(message, listOf(reference, reference), listOf(bytes, bytes))
+            fail("duplicate id")
+        } catch (_: IllegalArgumentException) { }
+        assertTrue(store.preparedReferences(message).isEmpty())
+    }
+
     @Test fun prepareCopiesOriginalAndRemainsIdempotentAfterDraftDeletion() {
         val draft = add()
         val accepted = store.prepare(message, draft)

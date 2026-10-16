@@ -11,7 +11,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +42,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.icons.DaiyuIcons
+import app.daiyu.android.ui.icons.daiyuIconColor
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -70,8 +70,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         else -> "发送"
     }
     Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(colors.surfaceContainer)
-            .border(1.dp, colors.outline, RoundedCornerShape(24.dp))) {
+        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerHigh)) {
             Column {
                 BasicTextField(
                     value = TextFieldValue(state.text, TextRange(state.selectionStart.coerceIn(0, state.text.length), state.selectionEnd.coerceIn(0, state.text.length))),
@@ -99,11 +98,11 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         verticalAlignment = Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             ChatIconButton(DaiyuIcons.Attach, "附件", { actions.onAttach(); attachments = true },
-                                Modifier.size(40.dp), enabled = state.enabled)
+                                Modifier.size(40.dp), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Attach))
                             ChatIconButton(DaiyuIcons.Reasoning, "推理强度，当前为 ${state.reasoningLabel}", actions.onOpenReasoning,
-                                Modifier.size(40.dp).testTag("chat-reasoning"), enabled = state.enabled)
+                                Modifier.size(40.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Reasoning))
                             ChatIconButton(DaiyuIcons.Assistant, "选择助手，当前为 ${state.assistantLabel}", actions.onOpenAssistant,
-                                Modifier.size(40.dp).testTag("chat-assistant"), enabled = state.enabled)
+                                Modifier.size(40.dp).testTag("chat-assistant"), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Assistant))
                         }
                         key(state.controlOwnerKey) {
                             Row(verticalAlignment = Alignment.CenterVertically) {

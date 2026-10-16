@@ -1,7 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,6 +28,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.icons.DaiyuIcons
+import app.daiyu.android.ui.icons.daiyuIconColor
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -41,19 +40,18 @@ internal fun ChatTopBar(title: String, balanceText: String?, actions: ChatScreen
         Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
             Text(title.ifBlank { "新会话" }, Modifier.testTag("chat-title"),
                 color = MiuixTheme.colorScheme.onSurface,
-                style = MiuixTheme.textStyles.title3.copy(fontSize = 17.sp, fontWeight = FontWeight.Medium),
+                style = MiuixTheme.textStyles.title3.copy(fontSize = 18.sp, fontWeight = FontWeight.SemiBold),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(assistantLabel, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 11.sp),
+                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         if (!balanceText.isNullOrBlank()) {
-            Text(balanceText, Modifier.widthIn(max = 76.dp).clip(RoundedCornerShape(50)).background(MiuixTheme.colorScheme.surfaceContainerHigh)
-                .padding(horizontal = 10.dp, vertical = 5.dp),
+            Text(balanceText, Modifier.widthIn(max = 76.dp).padding(horizontal = 8.dp, vertical = 5.dp),
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary, style = MiuixTheme.textStyles.footnote1,
                 maxLines = 1)
         }
-        ChatIconButton(DaiyuIcons.NewChat, "新建会话", { actions.onMenuAction(ChatMenuAction.NEW_CHAT) })
+        ChatIconButton(DaiyuIcons.NewChat, "新建会话", { actions.onMenuAction(ChatMenuAction.NEW_CHAT) }, tint = daiyuIconColor(DaiyuIcons.NewChat))
         Box {
             ChatIconButton(DaiyuIcons.More, "更多", { actions.onMore(); expanded = true })
             ChatOverflowMenu(expanded, { expanded = false }, actions.onMenuAction)

@@ -19,6 +19,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import app.daiyu.android.ui.icons.daiyuIconColor
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -31,7 +32,7 @@ internal fun SubAgentSettingRow(label: String, value: String, icon: ImageVector,
         .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
             enabled = enabled, role = Role.Button, hapticFeedbackEnabled = false, onClick = onClick, onLongClick = onLongClick)
         .padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(22.dp), tint = colors.onSurface.copy(alpha = alpha))
+        Icon(icon, null, Modifier.size(22.dp), tint = daiyuIconColor(icon).copy(alpha = alpha))
         Text(label, Modifier.widthIn(min = 72.dp, max = 100.dp), style = MaterialTheme.typography.bodyMedium, color = colors.onSurface.copy(alpha = alpha))
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (!badge.isNullOrBlank()) Surface(shape = RoundedCornerShape(6.dp), color = colors.surfaceVariant) {

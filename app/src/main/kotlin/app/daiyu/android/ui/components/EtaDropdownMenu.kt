@@ -60,7 +60,7 @@ import top.yukonga.miuix.kmp.squircle.squircleBorder
 import top.yukonga.miuix.kmp.squircle.squircleSurface
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-private val MenuCornerRadius = 16.dp
+private val MenuCornerRadius = 12.dp
 private val MenuMinWidth = 180.dp
 private val MenuMaxWidth = 280.dp
 private val MenuScreenMargin = 12.dp
@@ -214,9 +214,9 @@ internal fun EtaDropdownMenu(
                     .dropShadow(
                         shape = RoundedCornerShape(MenuCornerRadius),
                         shadow = Shadow(
-                            radius = 16.dp,
+                            radius = 8.dp,
                             color = Color.Black,
-                            alpha = 0.18f,
+                            alpha = 0.12f,
                         ),
                     )
                     .squircleSurface(

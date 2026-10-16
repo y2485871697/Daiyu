@@ -111,7 +111,7 @@ internal fun DaiyuChoiceSheet(
             Column(
                 modifier = Modifier.align(Alignment.BottomCenter).widthIn(max = 640.dp)
                     .fillMaxWidth().padding(12.dp).heightIn(max = 560.dp)
-                    .clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainer)
+                    .clip(RoundedCornerShape(20.dp)).background(colors.surfaceContainer)
                     .semantics { paneTitle = title }
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -125,7 +125,7 @@ internal fun DaiyuChoiceSheet(
                     itemsIndexed(options) { index, option ->
                         Box(
                             Modifier.testTag("prompt-choice:$index").fillMaxWidth().heightIn(min = 56.dp)
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(RoundedCornerShape(8.dp))
                                 .clickable { onSelect(index) }.padding(horizontal = 12.dp, vertical = 16.dp),
                             contentAlignment = Alignment.CenterStart,
                         ) {

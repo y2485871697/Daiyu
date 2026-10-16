@@ -58,6 +58,7 @@ import app.daiyu.android.data.repository.heatmapAlpha
 import app.daiyu.android.data.repository.heatmapQuartiles
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.haptics.TouchHaptics
+import app.daiyu.android.ui.icons.daiyuIconColor
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -200,7 +201,7 @@ private fun RowScope.UsageTabButton(
             .weight(1f)
             .height(44.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) colors.primary else colors.primaryContainer)
+            .background(if (selected) colors.primary else colors.surfaceVariant)
             .clickableNoRipple {
                 TouchHaptics.click(view)
                 onClick()
@@ -210,7 +211,7 @@ private fun RowScope.UsageTabButton(
         Text(
             text = label,
             style = MiuixTheme.textStyles.body1,
-            color = if (selected) colors.onPrimary else colors.onPrimaryContainer,
+            color = if (selected) colors.onPrimary else colors.onSurfaceVariantSummary,
         )
     }
 }
@@ -520,7 +521,7 @@ private fun UsageBoundChip(
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) colors.primary else colors.primaryContainer)
+            .background(if (selected) colors.primary else colors.surfaceVariant)
             .clickableNoRipple(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = contentAlignment,
@@ -528,7 +529,7 @@ private fun UsageBoundChip(
         Text(
             text = text,
             style = MiuixTheme.textStyles.body2,
-            color = if (selected) colors.onPrimary else colors.onPrimaryContainer,
+            color = if (selected) colors.onPrimary else colors.onSurfaceVariantSummary,
             maxLines = 1,
         )
     }
@@ -881,7 +882,7 @@ private fun StatCard(
             androidx.compose.material3.Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = MiuixTheme.colorScheme.primary,
+                tint = daiyuIconColor(icon),
                 modifier = Modifier.size(20.dp),
             )
             Text(

@@ -32,19 +32,16 @@ import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.FeatureRoute
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.icons.DaiyuIcon
+import app.daiyu.android.ui.icons.daiyuIconColor
 import app.daiyu.android.ui.icons.DaiyuIcons
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun SettingsIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, emphasized: Boolean = false) {
-    val colors = MiuixTheme.colorScheme
-    Box(Modifier.size(38.dp).background(
-        if (emphasized) colors.primaryContainer else colors.surfaceVariant,
-        RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
-        DaiyuIcon(icon, contentDescription = null,
-            tint = if (emphasized) colors.primary else colors.onSurfaceSecondary, size = 20.dp)
+internal fun SettingsIcon(icon: androidx.compose.ui.graphics.vector.ImageVector) {
+    Box(Modifier.size(38.dp), contentAlignment = Alignment.Center) {
+        DaiyuIcon(icon, contentDescription = null, tint = daiyuIconColor(icon), size = 23.dp)
     }
 }
 
@@ -52,13 +49,13 @@ internal fun SettingsIcon(icon: androidx.compose.ui.graphics.vector.ImageVector,
 private fun SettingsSearch(query: String, onQueryChange: (String) -> Unit) {
     val colors = MiuixTheme.colorScheme
     Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth()
-        .background(colors.surfaceContainerHigh, RoundedCornerShape(18.dp))
+        .background(colors.surfaceContainerHigh, RoundedCornerShape(12.dp))
         .padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         DaiyuIcon(DaiyuIcons.Search, null, tint = colors.onSurfaceVariantSummary, size = 20.dp)
         BasicTextField(value = query, onValueChange = onQueryChange, singleLine = true,
             textStyle = MiuixTheme.textStyles.body1.copy(color = colors.onSurface, fontSize = 15.sp),
             cursorBrush = SolidColor(colors.primary),
-            modifier = Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 16.dp)
+            modifier = Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 14.dp)
                 .testTag("settings-search").semantics { contentDescription = "搜索设置" },
             decorationBox = { editor ->
                 Box {
@@ -160,7 +157,7 @@ internal fun DaiyuSettingsScreen(
                                     "appearance" -> "主题、界面缩放与显示"
                                     "assistants" -> "身份、记忆与专属技能"
                                     else -> "模型、预设与协作配置"
-                                }, leading = { SettingsIcon(entry.icon, emphasized = true) })
+                                }, leading = { SettingsIcon(entry.icon) })
                         }
                     }
                 }

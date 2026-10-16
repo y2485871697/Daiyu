@@ -64,6 +64,7 @@ class PtyStartupOwnershipTest {
                 if (interrupt) Thread.currentThread().interrupt()
                 process
             },
+            createJournal = { directory, scope, binding -> hostJournal(directory, scope, binding = binding) },
             createSession = { process, journal ->
                 configure(journal)
                 if (failConstruction) throw IllegalStateException("construction failure")

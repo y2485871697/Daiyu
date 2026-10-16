@@ -74,6 +74,8 @@ android {
 kotlin { jvmToolchain(27) }
 dependencies {
     implementation(project(":core-domain"))
+    // Keep the tested runtime aligned with Espresso 3.7.0.
+    implementation("androidx.concurrent:concurrent-futures:1.2.0")
     implementation("dev.rikka.shizuku:api:13.1.5")
     implementation("dev.rikka.shizuku:provider:13.1.5")
     implementation("top.yukonga.miuix.kmp:miuix-ui-android:0.9.4-rc01")
@@ -119,7 +121,18 @@ tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
         dependsOn(verifyHostPty)
         systemProperty("daiyu.pty.helper",hostPty.get().asFile.absolutePath)
     } else {
-        exclude("**/PtyRunSessionHostTest.class")
+        // These contracts exercise Unix host paths / POSIX 0600, not Windows equivalents.
+        // They remain mandatory in the Linux lane; never weaken the production checks.
+        exclude("**/PtyRunSessionHostTest.class", "**/LinuxEnvironmentStoreTest.class")
+        filter {
+            listOf(
+                "executeOnlyPostsAndOffloadHasExactSecretBytesButSummaryHasNoValues",
+                "keywordsAreStrictAndMatchOnlyAuthorizedNames",
+                "tenantsAndWholeGenerationsAreFencedAndCancellationDoesNotTouchOtherOwner",
+                "cancelBeforeStartAndAfterWriteFencesLatePublishAndLeavesNoFiles",
+                "cookieNameAuthorizationReceivesOriginBeforeName",
+            ).forEach { excludeTestsMatching("app.daiyu.android.browser.BrowserCookieBackendTest.$it") }
+        }
         filter {excludeTestsMatching("app.daiyu.android.terminal.PtySessionHostTest.testRealPtyPersistsShellAndRejectsStartupReplay")}
     }
 }

@@ -40,7 +40,7 @@ class PtySessionHostTest : TestCase() {
             override fun isAlive() = alive
             override fun destroy() { alive = false; release.countDown(); eof.countDown() }
         }
-        val session = PtySession(fake, OperationJournal(root, "fence"))
+        val session = PtySession(fake, hostJournal(root, "fence"))
         val first = java.util.concurrent.atomic.AtomicReference<org.json.JSONObject>()
         val second = java.util.concurrent.atomic.AtomicReference<org.json.JSONObject>()
         val readyDeadline = System.nanoTime() + 1_000_000_000L

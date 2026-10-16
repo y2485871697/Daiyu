@@ -1,5 +1,6 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.ControllerVirtualDisplaySession
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.ReceiptBatchToolExecutor
 import app.daiyu.android.domain.runtime.RunExecutionOwner
@@ -52,11 +53,18 @@ internal class RunCatalogTools(
     private val authorizationFactory: ((RunExecutionOwner) -> TaskAuthorization)? = null,
     private val generationFactory: ((RunExecutionOwner, SessionCapabilities, TaskAuthorization) -> RunGenerationTools)? = null,
     private val virtualDisplayFactory: ((RunExecutionOwner, SessionCapabilities, TaskAuthorization) -> R08VirtualDisplayCatalogLeaf)? = null,
+    // Return an UNBOUND session; this catalog invokes its authorizationFactory with Runner's token.
+    // Session owns authorization and its leaf; never also supply authorizationFactory or a leaf factory.
+    virtualDisplaySession: ControllerVirtualDisplaySession? = null,
+    private val virtualDisplaySessionFactory: ((RunExecutionOwner, SessionCapabilities) -> ControllerVirtualDisplaySession)? = null,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
     // No temporary owner or authorization for generation. Legacy read-only callers retain
     // their empty authorization; a host factory never falls back to one if binding fails.
-    private val initialAuthorization: TaskAuthorization? = authorization ?: if (authorizationFactory != null) {
+    private val usesVirtualDisplaySession = virtualDisplaySession != null || virtualDisplaySessionFactory != null
+    @Volatile private var retainedVirtualDisplaySession = virtualDisplaySession
+    private var virtualDisplaySessionDrained = false
+    private val initialAuthorization: TaskAuthorization? = authorization ?: if (authorizationFactory != null || usesVirtualDisplaySession) {
         terminal?.authorization // A pre-approved PTY already pins this exact object.
     } else run {
         require(shizuku == null) { "shizuku_task_authorization_required" }
@@ -72,6 +80,10 @@ internal class RunCatalogTools(
         TerminalCatalogLeaf(it, capabilities, ledger, checkNotNull(initialAuthorization), conversationId, runId)
     }
     init {
+        require(virtualDisplaySession == null || virtualDisplaySessionFactory == null) { "virtual_display_session_ambiguous" }
+        require(!usesVirtualDisplaySession || (virtualDisplayFactory == null && authorizationFactory == null)) {
+            "virtual_display_session_factory_conflict"
+        }
         initialAuthorization?.let(::validateAuthorization)
         require(shizuku == null || (shizuku.session.sessionId == capabilities.sessionId && shizuku.session.runId == runId.value)) {
             "shizuku_approval_run_mismatch"
@@ -125,8 +137,21 @@ internal class RunCatalogTools(
         var createdVirtualDisplay: R08VirtualDisplayCatalogLeaf? = null
         try {
             // No catalog lifecycle/setup lock is held across host code or external open.
-            val authorization = if (authorizationFactory != null) authorizationFactory.invoke(owner)
-                else checkNotNull(initialAuthorization)
+            val session = retainedVirtualDisplaySession ?: virtualDisplaySessionFactory?.let { factory ->
+                createResource { factory(owner, capabilities) }.also { created ->
+                    // Keep the returned session even if close won while its factory was running.
+                    synchronized(closeLock) { retainedVirtualDisplaySession = created }
+                }
+            }
+            if (closed.get()) {
+                session?.let { stopResources(listOf(it)) }
+                error("run_closed")
+            }
+            val authorization = when {
+                session != null -> session.authorizationFactory(owner)
+                authorizationFactory != null -> authorizationFactory.invoke(owner)
+                else -> checkNotNull(initialAuthorization)
+            }
             validateAuthorization(authorization)
             require(initialAuthorization == null || authorization === initialAuthorization) { "tool_run_authorization_mismatch" }
             check(!closed.get()) { "run_closed" }
@@ -202,6 +227,7 @@ internal class RunCatalogTools(
                 browserTools.forEach { registry.register(it) }
                 generation?.registeredTools?.forEach { registry.register(it) }
                 virtualDisplay?.registeredTools?.forEach { registry.register(it) }
+                retainedVirtualDisplaySession?.registeredTools(bound, capabilities, authorization)?.forEach { registry.register(it) }
                 val result = CatalogModelBridge(registry.snapshot(), capabilities, ledger, conversationId, runId, authorization)
                 result.bindOwner(bound)
                 synchronized(closeLock) {
@@ -278,18 +304,31 @@ internal class RunCatalogTools(
      * Pure ask_user can suspend/resume independently: it owns no virtual-display operations.
      * All leaf/journal calls run outside closeLock. Missing/throwing feedback is never success. */
     private inner class CatalogBatch(val invocations: List<ToolInvocation>) {
-        private val leaf = virtualDisplay?.takeIf {
-            invocations.any { it.name == R08VirtualDisplayCatalogLeaf.WRITE_TOOL || it.name == R08VirtualDisplayCatalogLeaf.READ_TOOL }
+        private val relevant = invocations.any {
+            it.name == R08VirtualDisplayCatalogLeaf.WRITE_TOOL || it.name == R08VirtualDisplayCatalogLeaf.READ_TOOL
         }
+        private val leaf = virtualDisplay?.takeIf { relevant }
+        private val session = retainedVirtualDisplaySession?.takeIf { relevant }
         private var ticket: R08VirtualDisplayCatalogLeaf.BatchTicket? = null
-        val hasTicket: Boolean get() = ticket != null
-        fun begin() { ticket = leaf?.beginBatch(invocations) }
+        private var sessionTicket: ControllerVirtualDisplaySession.BatchTicket? = null
+        private var finalForwarded = false
+        val hasTicket: Boolean get() = ticket != null || sessionTicket != null
+        fun begin() {
+            // Mutually exclusive routes. The Session already owns its leaf: never bind another.
+            if (session != null) sessionTicket = session.beginBatch(invocations)
+            else ticket = leaf?.beginBatch(invocations)
+        }
         fun finish(results: List<ToolDispatchResult>) {
-            observeOutcomes(results)
-            ticket?.let { checkNotNull(leaf).finishBatch(it, results) }
+            check(!finalForwarded) { "catalog_batch_already_finished" }
+            finalForwarded = true // Consume before external feedback, even if feedback throws.
+            try { observeOutcomes(results) }
+            finally {
+                if (session != null) sessionTicket?.let { session.finishBatch(it, results) }
+                else ticket?.let { checkNotNull(leaf).finishBatch(it, results) }
+            }
         }
         fun unconfirmed() {
-            if (leaf != null) synchronized(closeLock) { recordCloseFailure("virtual_display_batch_unconfirmed") }
+            if (leaf != null || session != null) synchronized(closeLock) { recordCloseFailure("virtual_display_batch_unconfirmed") }
             // Do not invent results or finish a ticket when no final central result exists.
         }
     }
@@ -316,7 +355,7 @@ internal class RunCatalogTools(
             generation?.revokeAdmission()
             // Fence the terminal before stopping other resources; join is observed separately.
             // R08 close is revocation only. Never synthesize a release/shutdown operation.
-            claimStops(listOfNotNull(browser, generation, virtualDisplay, terminalLeaf, shizuku, background, children, deviceResources, skills))
+            claimStops(listOfNotNull(browser, generation, virtualDisplay, retainedVirtualDisplaySession, terminalLeaf, shizuku, background, children, deviceResources, skills))
         }
         browser?.revoke()
         stopClaimed(resources)
@@ -346,6 +385,40 @@ internal class RunCatalogTools(
     }
     internal fun revokeChildren() { background?.revoke() }
 
+    /** Same retained object for the accepted-run record/UI/explicit maintenance; never a new owner.
+     * Factories MUST retain it in that record before returning (including failed/late binding).
+     * Do not clear that record on close, cancellation, Unknown or a Runner stop request. */
+    internal fun virtualDisplaySessionForRetention(): ControllerVirtualDisplaySession? = retainedVirtualDisplaySession
+
+    /** Explicit WORKER maintenance after closeWithResult has begun and the parent's Runner has
+     * actually returned/joined. A stop request is not parentDrained. Local creation, dispatch,
+     * final forwarding, stop actions and other resource observations must also have finished.
+     * No owner I/O or lease release runs on the UI/control lane or under closeLock.
+     * Unknown is an observation, not a retry of any write: retain and observe physical exit later.
+     * Only Drained permits removing the accepted-run/session retention record.
+     * Uninitialized shutdown, if needed, remains a separate explicit session worker operation. */
+    internal fun observeVirtualDisplayCloseOnWorker(parentDrained: Boolean): RunCatalogCloseResult {
+        check(android.os.Looper.getMainLooper()?.thread !== Thread.currentThread()) { "virtual_display_worker_required" }
+        val session = synchronized(closeLock) {
+            if (!parentDrained || !closed.get() || !observingClose || !observationsStarted || registeringObservations ||
+                activeCreations != 0 || activeDispatches != 0 || pendingStops != 0 ||
+                remainingObservations != 0 || closeFailure != null)
+                return RunCatalogCloseResult.Unknown("virtual_display_parent_pending")
+            // Read the retained handle atomically with creation-drain evidence: a late factory
+            // must not be mistaken for the never-created case.
+            retainedVirtualDisplaySession
+        }
+        // No session after a successful local drain means its factory was never entered.
+        // A throwing/unfinished factory cannot pass localDrained (failure/creation accounting).
+        val result = session?.observeCloseOnWorker(parentDrained = true)
+        if (result != null && result != ControllerVirtualDisplaySession.CloseResult.Drained) {
+            return RunCatalogCloseResult.Unknown("virtual_display_close_unconfirmed")
+        }
+        synchronized(closeLock) { virtualDisplaySessionDrained = true }
+        notifyClosed()
+        return RunCatalogCloseResult.Drained
+    }
+
     /** Legacy callback means DRAINED only. External bindings must use closeWithResult instead. */
     internal fun closeWhenIdle(onClosed: () -> Unit) = closeWithResult {
         if (it == RunCatalogCloseResult.Drained) onClosed()
@@ -364,7 +437,7 @@ internal class RunCatalogTools(
             // The terminal leaf's own dispatcher is not used by this catalog. Its worker join
             // must therefore start only after OUR final receipt persistence/observation settles.
             if (!closed.get() || !observingClose || observationsStarted || activeCreations != 0 || pendingStops != 0 ||
-                ((terminalLeaf != null || browser != null || generation != null || virtualDisplay != null) && activeDispatches != 0)) false
+                activeDispatches != 0) false
             else {
                 observationsStarted = true
                 registeringObservations = true
@@ -443,7 +516,8 @@ internal class RunCatalogTools(
         val notification = synchronized(closeLock) {
             if (closeResult == null && observationsStarted && !registeringObservations &&
                 activeCreations == 0 && pendingStops == 0 && activeDispatches == 0 &&
-                (closeFailure != null || remainingObservations == 0)) {
+                (closeFailure != null || (remainingObservations == 0 &&
+                    (!usesVirtualDisplaySession || virtualDisplaySessionDrained)))) {
                 closeResult = closeFailure ?: RunCatalogCloseResult.Drained
             }
             val result = closeResult ?: return

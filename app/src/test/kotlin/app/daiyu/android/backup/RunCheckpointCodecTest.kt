@@ -24,7 +24,7 @@ class RunCheckpointCodecTest {
     private fun reject(block:()->Unit) {try {block();fail("invalid checkpoint accepted")} catch(_:Exception) {}}
     @Test fun strictVersionTypesBoundsAndOwnership() {
         val text=RunCheckpointCodec.encode(checkpoint())
-        val mutations=listOf<(JSONObject)->Unit>({it.put("version",4)}, {it.put("revision","4")},
+        val mutations=listOf<(JSONObject)->Unit>({it.put("version",5)}, {it.put("revision","4")},
             {it.put("owner","")},{it.put("round",101)},{it.put("message_reconciled",false)},
             {it.put("phase","TERMINAL")},{it.put("extra",true)}, {it.put("request_unconfirmed",1)})
         mutations.forEach {mutate-> val json=JSONObject(text);mutate(json);reject {RunCheckpointCodec.decode(json.toString())}}
@@ -68,9 +68,12 @@ class RunCheckpointCodecTest {
             phase = ExecutionPhase.WAITING_USER, tools = listOf(ToolRecord(question, ToolDisposition.IN_FLIGHT)),
             outputs = emptyList(), pending = PendingToolCheckpoint(question.id))
     }
-    @Test fun writesV3AndReadsLegacyOnlyWithTheirExactFields() {
-        val original = checkpoint(); val v3 = JSONObject(RunCheckpointCodec.encode(original))
-        assertEquals(3, v3.getInt("version")); assertTrue(v3.isNull("request"))
+    @Test fun writesV4AndReadsLegacyOnlyWithTheirExactFields() {
+        val original = checkpoint(); val v4 = JSONObject(RunCheckpointCodec.encode(original))
+        assertEquals(4, v4.getInt("version")); assertTrue(v4.isNull("request"))
+        assertEquals(0, v4.getJSONArray("usage").length())
+        assertEquals(original, RunCheckpointCodec.decode(v4.toString()))
+        val v3 = JSONObject(v4.toString()).put("version", 3); v3.remove("usage")
         assertEquals(original, RunCheckpointCodec.decode(v3.toString()))
         val v2 = JSONObject(v3.toString()).put("version", 2); v2.remove("request")
         assertEquals(original, RunCheckpointCodec.decode(v2.toString()))
@@ -78,13 +81,42 @@ class RunCheckpointCodecTest {
         assertEquals(original, RunCheckpointCodec.decode(v1.toString()))
         reject { RunCheckpointCodec.decode(JSONObject(v1.toString()).put("pending", JSONObject.NULL).toString()) }
         reject { RunCheckpointCodec.decode(JSONObject(v2.toString()).put("request", JSONObject.NULL).toString()) }
-        for (key in listOf("pending", "request")) {
-            val missing = JSONObject(v3.toString()); missing.remove(key)
+        reject { RunCheckpointCodec.decode(JSONObject(v3.toString()).put("usage", org.json.JSONArray()).toString()) }
+        for (key in listOf("pending", "request", "usage")) {
+            val missing = JSONObject(v4.toString()); missing.remove(key)
             reject { RunCheckpointCodec.decode(missing.toString()) }
         }
         val impossibleV1 = JSONObject(RunCheckpointCodec.encode(waiting())).put("version", 1)
-        impossibleV1.remove("pending"); impossibleV1.remove("request")
+        listOf("pending", "request", "usage").forEach(impossibleV1::remove)
         reject { RunCheckpointCodec.decode(impossibleV1.toString()) }
+    }
+    private fun withUsage() = checkpoint().let { value ->
+        val request = RequestCheckpoint("request", "attempt", value.owner, RequestOperation.NEXT)
+        value.copy(request = request, usage = listOf(RequestUsageCheckpoint(request, ModelEvent.Usage(null, 0, 7))))
+    }
+    @Test fun usageRoundTripsUnknownZeroAndRecoveryOwnership() {
+        val value = withUsage()
+        assertEquals(value, RunCheckpointCodec.decode(RunCheckpointCodec.encode(value)))
+        val recovered = ProcessRecovery.interrupt(value).copy(owner = "recovery", revision = 5, messageReconciled = true)
+        assertEquals(value.usage, recovered.usage)
+        assertEquals(recovered, RunCheckpointCodec.decode(RunCheckpointCodec.encode(recovered)))
+    }
+    @Test fun usageRejectsMalformedNumbersDuplicatesAndForeignActiveOwners() {
+        val text = RunCheckpointCodec.encode(withUsage())
+        val mutations = listOf<(JSONObject) -> Unit>(
+            { it.put("usage", JSONObject.NULL) }, { it.put("usage", "bad") },
+            { it.getJSONArray("usage").put(it.getJSONArray("usage").getJSONObject(0)) },
+            { it.getJSONArray("usage").getJSONObject(0).remove("input_tokens") },
+            { it.getJSONArray("usage").getJSONObject(0).put("extra", 1) },
+            { it.getJSONArray("usage").getJSONObject(0).put("input_tokens", "1") },
+            { it.getJSONArray("usage").getJSONObject(0).put("input_tokens", 1.5) },
+            { it.getJSONArray("usage").getJSONObject(0).put("output_tokens", true) },
+            { it.getJSONArray("usage").getJSONObject(0).put("output_tokens", -1) },
+            { it.getJSONArray("usage").getJSONObject(0).put("input_tokens", 6) },
+            { it.getJSONArray("usage").getJSONObject(0).getJSONObject("request").put("owner", "foreign") })
+        mutations.forEach { mutate -> val json = JSONObject(text); mutate(json)
+            reject { RunCheckpointCodec.decode(json.toString()) } }
+        reject { RunCheckpointCodec.encode(withUsage().let { it.copy(usage = it.usage + it.usage) }) }
     }
     @Test fun requestIdentityRoundTripsAllOperationsAndRecoveryKeepsOriginalOwner() {
         for (operation in RequestOperation.entries) {

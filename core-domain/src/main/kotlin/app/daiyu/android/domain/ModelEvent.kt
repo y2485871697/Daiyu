@@ -8,7 +8,18 @@ sealed interface ModelEvent {
     /** Replacement snapshot cumulative within one ModelSession, including submitted outputs, excluding open history. */
     data class ProtocolOutput(val items: List<String>) : ModelEvent
     data class ToolReady(val invocation: ToolInvocation) : ModelEvent
-    data class Usage(val inputTokens: Long?, val outputTokens: Long?, val cachedTokens: Long? = null) : ModelEvent
+    /** Complete provider-reported cumulative snapshot for one request, not a session total or
+     * billing receipt. null is unknown, not zero. Cache reads are a subset of total input,
+     * not an additional charge. A later snapshot replaces all fields, even null or lower counts.
+     * Providers normalize partial wire observations and apply their own upper count bound. */
+    data class Usage(val inputTokens: Long?, val outputTokens: Long?, val cachedTokens: Long? = null) : ModelEvent {
+        init {
+            require(inputTokens == null || inputTokens >= 0)
+            require(outputTokens == null || outputTokens >= 0)
+            require(cachedTokens == null || cachedTokens >= 0)
+            require(inputTokens == null || cachedTokens == null || cachedTokens <= inputTokens)
+        }
+    }
 }
 data class ToolOutput(val callId: ToolCallId, val output: String)
 interface ModelSession {

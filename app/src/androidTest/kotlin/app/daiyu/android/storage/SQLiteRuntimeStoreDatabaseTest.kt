@@ -69,7 +69,8 @@ class SQLiteRuntimeStoreDatabaseTest:InstrumentationTestCase() {
         runtime.commitCheckpoint(first)
         val active=first.copy(message=first.message.copy(blocks=listOf(MessageBlock.Text("t","accepted"),MessageBlock.Tool(call))),
             phase=ExecutionPhase.TOOL_EXECUTING,tools=listOf(ToolRecord(call,ToolDisposition.IN_FLIGHT)),requestUnconfirmed=true,revision=2,
-            request=RequestCheckpoint("request", "attempt", first.owner, RequestOperation.NEXT))
+            request=RequestCheckpoint("request", "attempt", first.owner, RequestOperation.NEXT),
+            usage=listOf(RequestUsageCheckpoint(RequestCheckpoint("request", "attempt", first.owner, RequestOperation.NEXT), ModelEvent.Usage(null, 0, 7))))
         runtime.commitCheckpoint(active)
         release(db,runtime)
         val next=SQLiteRuntimeStore.acquire(db).also {stores+=it}
@@ -78,9 +79,32 @@ class SQLiteRuntimeStoreDatabaseTest:InstrumentationTestCase() {
         assertEquals(ToolDisposition.UNKNOWN,result.tools.single().disposition);assertTrue(result.requestUnconfirmed)
         assertEquals(3L,result.revision);assertTrue(result.owner!=active.owner)
         assertEquals(active.request,result.request);assertEquals(active.owner,result.request!!.owner)
+        assertEquals(active.usage,result.usage)
         assertEquals(result,next.reconcileCheckpoint(first))
         next.recoverPending();rejects {next.commitCheckpoint(active.copy(revision=3))}
         rejects {runtime.commitCheckpoint(active.copy(revision=3))}
+    }
+    fun testUsageSharesAtomicCasAndFailedUpdatePreservesLastCommittedSnapshot() {
+        val db=fresh();val runtime=lease(db);val first=seed(db)
+        val request=RequestCheckpoint("request", "attempt", first.owner, RequestOperation.NEXT)
+        val accepted=first.copy(request=request,usage=listOf(RequestUsageCheckpoint(request,ModelEvent.Usage(10,20,5))))
+        runtime.commitCheckpoint(accepted)
+        val replacement=accepted.copy(revision=2,usage=listOf(RequestUsageCheckpoint(
+            request.copy(attemptId="resume",operation=RequestOperation.RESUME),ModelEvent.Usage(null,0,0))))
+        rejects {runtime.commitCheckpoint(replacement.copy(owner="foreign"))}
+        rejects {runtime.commitCheckpoint(replacement.copy(revision=3))}
+        db.writableDatabase.execSQL("CREATE TRIGGER fail_usage BEFORE UPDATE ON runtime_checkpoints BEGIN SELECT RAISE(ABORT,'usage failure'); END")
+        rejects {runtime.commitCheckpoint(replacement)}
+        assertEquals(accepted,runtime.readCommittedCheckpoint(replacement))
+        assertEquals(first.message,db.messages(first.message.conversationId).last().second)
+        db.writableDatabase.execSQL("DROP TRIGGER fail_usage")
+        runtime.commitCheckpoint(replacement)
+        assertEquals(replacement,runtime.readCommittedCheckpoint(replacement))
+        release(db,runtime)
+        val reopened=SQLiteRuntimeStore.acquire(db).also {stores+=it}
+        val recovered=reopened.reconcileCheckpoint(first)
+        assertEquals(replacement.usage,recovered.usage)
+        assertEquals(RunStatus.INTERRUPTED,recovered.message.status)
     }
     fun testExistingTerminalWinsRecoveryAndDeleteCascades() {
         val db=fresh();val runtime=lease(db);val first=seed(db);runtime.commitCheckpoint(first)

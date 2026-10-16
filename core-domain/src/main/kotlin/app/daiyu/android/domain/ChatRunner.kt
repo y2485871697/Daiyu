@@ -198,23 +198,23 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var round = 0
         var requestUnconfirmed = false
         var request: RequestCheckpoint? = null
+        var usage: List<RequestUsageCheckpoint> = emptyList()
         val executionOwner = RunExecutionOwner.issue(initial)
         val owner = executionOwner.ownerId
         var ownerBound = false
         var revision = 0L
         var pendingCheckpoint: PendingToolCheckpoint? = null
         val records = linkedMapOf<ToolCallId, ToolRecord>()
-        fun snapshot(message: Message = current): RunCheckpoint = synchronized(terminalLock) {
+        fun snapshot(message: Message = current, usageSnapshot: List<RequestUsageCheckpoint> = usage): RunCheckpoint = synchronized(terminalLock) {
             RunCheckpoint(message, modelHistory,
                 if (message.status != RunStatus.RUNNING) ExecutionPhase.TERMINAL else execution.phase,
                 records.values.toList(), outputs, supplements.toList(), round, requestUnconfirmed,
                 owner = owner, revision = revision + 1,
-                pending = if (message.status == RunStatus.RUNNING) pendingCheckpoint else null, request = request)
+                pending = if (message.status == RunStatus.RUNNING) pendingCheckpoint else null, request = request, usage = usageSnapshot)
         }
-        fun checkpoint() {
+        fun checkpoint(next: RunCheckpoint = snapshot()) {
             val runtime = options.runtimeStore ?: return
             try {
-                val next = snapshot()
                 if (runtime is AtomicRuntimeStore) runtime.commitCheckpoint(next) else runtime.save(next)
                 revision = next.revision
             } catch (failure: Exception) { throw PersistenceException(failure) }
@@ -423,7 +423,17 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     sinkFailure?.let { throw it }
                     repetitiveSurface?.let { throw RepetitiveOutputException(it) }
                     when (event) {
-                        is ModelEvent.Usage -> options.onUsage(event)
+                        is ModelEvent.Usage -> {
+                            val accepted = RequestUsageCheckpoint(checkNotNull(request), event)
+                            val at = usage.indexOfFirst { it.request.owner == accepted.request.owner &&
+                                it.request.requestId == accepted.request.requestId }
+                            val nextUsage = usage.toMutableList().apply {
+                                if (at < 0) add(accepted) else this[at] = accepted
+                            }.toList()
+                            checkpoint(snapshot(usageSnapshot = nextUsage))
+                            usage = nextUsage
+                            try { options.onUsage(event) } catch (_: Exception) { /* Observer failure cannot invalidate committed usage. */ }
+                        }
                         is ModelEvent.ReasoningDelta -> { checkText(event.itemId, event.text, final = false, reasoning = true) }
                         is ModelEvent.ReasoningFinal -> { checkText(event.itemId, event.text, final = true, reasoning = true) }
                         is ModelEvent.ProtocolOutput -> {

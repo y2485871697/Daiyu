@@ -14,12 +14,13 @@
 1. 进入页面后工作线程 `refresh()`，将不可变返回值交回 UI；不能把“已安装 Shizuku”当作服务运行或已授权。
 2. `UNAVAILABLE`：提示服务不可用；`UNSUPPORTED`：版本低于 13 或身份不受支持；`PERMISSION_REQUIRED`：显示明确授权按钮；`AUTHORIZED`：显示观测身份；`CLOSED`：管理器已关闭。
 3. 只有用户明确点击授权按钮才调用 `requestPermission()`。SDK 显示系统授权对话框；回调会使旧状态失效。界面重新获得焦点/用户刷新时再次 `refresh()`，不能靠原缓存显示授权成功。没有自动轮询或 UI 订阅 API。
-4. 授权成功不自动执行命令或连接 UserService。用户明确选择执行后端后才 `connect(expectedUid)`：`2000` 为 ADB shell，`0` 为 root。默认只接受 shell；实际 UID 与选择不一致即拒绝，不自动改选、不降级到普通 shell/root/Linux。
+4. 授权成功不自动执行命令或连接 UserService。用户明确选择执行后端后才 `connect(expectedUid)`：`2000` 为 ADB shell，`0` 为 root。expectedUid 无默认值，必须由可信宿主显式传入；实际 UID 与选择不一致即拒绝，不自动改选、不降级到普通 shell/root/Linux。
 5. `state.connected` 仅代表当前连接仍在本地有效范围，不代表设备命令成功；身份显示取已观测 `connection.identity.uid/kind`。
 
 ## 执行与任务边界
 
 - 获得连接后由可信宿主创建 `connection.openBackend(hostScope)`；scope 必须是 `[A-Za-z0-9_-]{1,128}`，同一连接只能绑定一个 scope。宿主必须把真实 task/run owner、精确写效果授权与取消信号接入后再向模型开放工具，本批没有注册模型命令工具或新增默认写权限。
+- `hostScope` 是 journal 命名和连接绑定键，不是授权凭证；UserService 的 owner Binder 是客户端存活令牌，不是 task/run owner。真实 owner 和精确授权须由可信宿主逐次新派发核验，不能由模型提供的 scope、UID 或脚本文本自行声明。run 取消、owner 失效或授权撤销时须封口关闭所属连接，不跨 run 转交后端或旧 handle。
 - `ShizukuCommand(requestId, script, timeoutMillis)`；requestId 必须是宿主稳定的操作 ID，超时默认 30 秒、范围 1..120000 ms；脚本最多 131072 UTF-8 字节、拒绝 NUL。不能收到 Unknown 后换 ID 重试同一操作。
 - `execute` 的 `Dispatched` 只表示已接收派发，不是执行完成；保留原 handle，调用 `poll`。`Completed(exitCode)` 才是进程退出与输出收尾已确认，非零退出码按真实值处理。`NotExecuted` 与 `Unknown` 分别呈现，未知不可当作失败后安全重放。
 - `poll(handle, offset, limit)` 返回原始字节，limit 最大 65536；使用 `nextOffset` 继续读；UTF-8 解码方必须处理跨页多字节。总保留 262144 字节，`truncated` 表示保留截断，`outputComplete` 表示实际输出 EOF，两者不同。

@@ -63,8 +63,8 @@ class ShizukuAuthorization(context: Context) : AutoCloseable {
         if (status.availability != ShizukuAvailability.AUTHORIZED) Shizuku.requestPermission(PERMISSION_REQUEST)
     }
     private fun invalidate() { gate.invalidate(); current?.close() }
-    /** expectedUid is an explicit host choice: default shell never silently accepts a root service. */
-    fun connect(expectedUid: Int = 2000): ShizukuConnection = synchronized(connectLock) {
+    /** The host must explicitly choose shell (2000) or root (0); no default or fallback. */
+    fun connect(expectedUid: Int): ShizukuConnection = synchronized(connectLock) {
         worker(); refresh(); check(!closed.get())
         gate.rotate()
         val grant = gate.acquire(expectedUid)

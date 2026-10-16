@@ -19,6 +19,10 @@ data class RequestCheckpoint(val requestId: String, val attemptId: String,
     init { require(listOf(requestId, attemptId, owner).all { it.isNotBlank() && it.length <= 200 }) }
 }
 
+/** Latest cumulative snapshot received for one host request, not a billing receipt.
+ * Resume replaces this same request's entire snapshot, including unknown fields. */
+data class RequestUsageCheckpoint(val request: RequestCheckpoint, val snapshot: ModelEvent.Usage)
+
 /** Immutable, platform-serializable checkpoint. No credentials or transport objects belong here. */
 data class RunCheckpoint(
     val message: Message,
@@ -33,7 +37,8 @@ data class RunCheckpoint(
     val owner: String = "",
     val revision: Long = 0,
     val pending: PendingToolCheckpoint? = null,
-    val request: RequestCheckpoint? = null
+    val request: RequestCheckpoint? = null,
+    val usage: List<RequestUsageCheckpoint> = emptyList()
 )
 
 /** save must durably commit before returning if durable=true. Implement with a transaction/WAL. */

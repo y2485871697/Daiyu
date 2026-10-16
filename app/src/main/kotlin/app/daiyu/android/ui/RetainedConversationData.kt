@@ -67,11 +67,7 @@ internal class RetainedConversationData(private val database: ConversationDataba
                 for (message in MessageHistory.expand(stored)) {
                     // Search explicit text/tool records, not serialized block IDs or protocol
                     // metadata. No image/attachment tables, asset paths or sidecar files are read.
-                    val text = message.blocks.mapNotNull { block -> when {
-                        block is MessageBlock.Text -> block.text
-                        block is MessageBlock.Tool -> listOfNotNull(block.invocation.name, block.invocation.arguments, block.result).joinToString(" ")
-                        else -> null // Non-text attachment blocks never contribute metadata.
-                    } }.joinToString("\n")
+                    val text = retainedSearchText(message.blocks)
                     val at = text.indexOf(needle, ignoreCase = true)
                     if (at >= 0 && seen.add(id.value to message.id.value)) {
                         add(MessageSearchHit(id.value, title, message.id.value,

@@ -64,7 +64,10 @@ class ConversationHistoryDatabaseTest : InstrumentationTestCase() {
         db.send(user, pending); db.save(pending.copy(status = RunStatus.COMPLETED))
         val loaded = db.messages(owner).last().second
         assertEquals(listOf("正文一", "工具结果", "正文二"), loaded.blocks.map { when (it) {
-            is MessageBlock.Text -> it.text; is MessageBlock.Tool -> it.result ?: "" } })
+            is MessageBlock.Text -> it.text
+            is MessageBlock.Tool -> it.result ?: ""
+            is MessageBlock.Image -> error("This text/tool fixture must not contain an image")
+        } })
         assertEquals(1, loaded.historySegments.size)
         val backup = db.exportBackup()
         val target = fresh(); val imported = open(target)
@@ -123,7 +126,11 @@ class ConversationHistoryDatabaseTest : InstrumentationTestCase() {
         val prepared=app.daiyu.android.context.ContextService(context,db).prepareSend(conversation)
         assertEquals(result,prepared.messages.last())
         assertEquals(listOf("before","full result","after"),MessageHistory.expand(prepared.messages).last().blocks.map {
-            when(it) {is MessageBlock.Text->it.text;is MessageBlock.Tool->it.result}
+            when(it) {
+                is MessageBlock.Text -> it.text
+                is MessageBlock.Tool -> it.result
+                is MessageBlock.Image -> error("This runner text/tool fixture must not contain an image")
+            }
         })
         val backup=db.exportBackup();assertTrue(backup.contains("history_segments"))
         var duplicateRejected=false

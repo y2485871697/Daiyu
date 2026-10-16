@@ -31,6 +31,7 @@ class MessageImageAssetStore(
 ) {
     private val root = initializeMediaRoot(root)
     private val gate = Any()
+    private val restoreInspector = AndroidImageInspector()
 
     val resolver: MessageImageResolver = object : MessageImageResolver {
         override fun read(owner: MessageImageOwner, reference: MessageImageReference): ByteArray =
@@ -112,6 +113,74 @@ class MessageImageAssetStore(
                 throw failure
             }
         }
+    }
+
+    /** Restore one complete, immutable owner batch, under the SAME gate as prepare/read/delete.
+     * The host must first authorize references against the package's persisted message owners.
+     * Every incoming original is copied and decoded before any filesystem mutation. Existing
+     * batches are compared by id + all metadata, not order or draft provenance, and fully verified;
+     * a missing/corrupt/conflicting batch is never repaired or overwritten by an import.
+     *
+     * Only a staging directory created by this invocation can be cleaned on failure. In particular
+     * pre-existing staging, tombstones, published batches and other owners (including safe orphans
+     * from an earlier owner in a failed DB transaction) are never deleted. No cross-owner/DB atomicity
+     * is claimed. The existing single-store, host-serialization and filesystem durability contract
+     * applies. Restore always uses the same real Android image decoding as draft import.
+     */
+    fun restore(
+        owner: MessageImageOwner,
+        references: List<MessageImageReference>,
+        contents: List<ByteArray>,
+    ): Unit = synchronized(gate) {
+        io {
+            val snapshot = references.toList()
+            val supplied = contents.toList()
+            validateReferences(owner, snapshot)
+            if (snapshot.size != supplied.size) fail(ImageAttachmentFailure.CORRUPT)
+            // Check bounds before copying caller-owned buffers; never retain mutable input arrays.
+            snapshot.zip(supplied).forEach { (ref, bytes) ->
+                if (bytes.size != ref.bytes) fail(ImageAttachmentFailure.CORRUPT)
+            }
+            val originals = supplied.map { it.copyOf() }
+            snapshot.zip(originals).forEach { (ref, bytes) -> verifyRestoredImage(ref, bytes) }
+            val ordered = snapshot.sortedBy { it.id }
+            val published = directory(owner)
+            if (directory(owner, ".deleting").exists()) fail(ImageAttachmentFailure.STORAGE)
+            if (published.exists()) {
+                val existing = readManifest(owner, published)
+                if (existing.references.sortedBy { it.id } != ordered) fail(ImageAttachmentFailure.CORRUPT)
+                // Reject unrecognized entries as well; never delete or normalize an existing batch.
+                val names = (published.listFiles() ?: fail(ImageAttachmentFailure.STORAGE)).map { it.name }.toSet()
+                if (names != ordered.map { it.id + ".image" }.toSet() + MANIFEST) fail(ImageAttachmentFailure.CORRUPT)
+                ordered.forEach { verifyRestoredImage(it, readLocked(owner, it)) }
+                return@io
+            }
+            val staging = directory(owner, ".pending")
+            // Unlike prepare recovery, import has no authority to discard earlier pending work.
+            if (staging.exists()) fail(ImageAttachmentFailure.STORAGE)
+            if (!staging.mkdir()) fail(ImageAttachmentFailure.STORAGE)
+            try {
+                snapshot.zip(originals).forEach { (ref, bytes) -> writeSynced(staging, ref.id + ".image", bytes) }
+                // No draft is involved in restore. Keep the v1 manifest readable by existing resolvers.
+                val source = ImageAttachmentOwner(owner.conversationId, owner.directoryName())
+                writeSynced(staging, MANIFEST, encode(Manifest(owner, source, ordered)))
+                // One store per root + gate/host serialization prevents concurrent destination writers.
+                // ATOMIC_MOVE is deliberately required: unsupported filesystems fail, never copy over.
+                if (directory(owner).exists() || directory(owner, ".deleting").exists()) fail(ImageAttachmentFailure.STORAGE)
+                Files.move(staging.toPath(), published.toPath(), ATOMIC_MOVE)
+                Unit
+            } catch (failure: Exception) {
+                try { cleanStagingLocked(owner) } catch (cleanup: Exception) { failure.addSuppressed(cleanup) }
+                throw failure
+            }
+        }
+    }
+
+    private fun verifyRestoredImage(reference: MessageImageReference, bytes: ByteArray) {
+        if (bytes.size != reference.bytes || imageDigest(bytes) != reference.sha256) fail(ImageAttachmentFailure.CORRUPT)
+        val actual = restoreInspector.inspect(bytes)
+        validateImageDimensions(actual, limits)
+        if (actual != ImageDimensions(reference.mime, reference.width, reference.height)) fail(ImageAttachmentFailure.CORRUPT)
     }
 
     /** Inspect an interrupted acceptance after restart using its persisted/known message identity.

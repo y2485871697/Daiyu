@@ -15,6 +15,12 @@ object ContextRevision {
             field(values.size.toString())
             values.forEach { b -> when (b) {
                 is MessageBlock.Text -> { field("text"); field(b.itemId); field(b.text) }
+                is MessageBlock.Image -> {
+                    val reference = b.reference
+                    field("image-v1"); field(reference.owner.conversationId); field(reference.owner.messageId)
+                    field(reference.id); field(reference.mime); field(reference.bytes.toString())
+                    field(reference.sha256); field(reference.width.toString()); field(reference.height.toString())
+                }
                 is MessageBlock.Tool -> { field("tool"); field(b.invocation.id.value); field(b.invocation.name)
                     field(b.invocation.arguments); field(if (b.result == null) "null" else "result"); field(b.result.orEmpty()) }
             } }
@@ -59,6 +65,8 @@ data class CompressionPolicy(val enabled: Boolean = false, val contextTokens: Lo
 fun estimateTokens(messages: List<Message>): Long = MessageHistory.expand(messages).sumOf { m ->
     16L + m.blocks.sumOf { b -> when (b) {
         is MessageBlock.Text -> b.text.toByteArray(Charsets.UTF_8).size.toLong()
+        // A byte-count heuristic only, not provider image usage; never count just the tiny reference.
+        is MessageBlock.Image -> b.reference.bytes.toLong()
         is MessageBlock.Tool -> b.invocation.arguments.toByteArray(Charsets.UTF_8).size.toLong() +
             (b.result?.toByteArray(Charsets.UTF_8)?.size ?: 0) + b.invocation.name.toByteArray(Charsets.UTF_8).size + 24L
     } } + m.protocolItems.sumOf { it.toByteArray(Charsets.UTF_8).size.toLong() }

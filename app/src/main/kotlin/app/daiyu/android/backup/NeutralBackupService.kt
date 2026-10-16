@@ -9,6 +9,8 @@ import app.daiyu.android.domain.context.ContextRevision
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.domain.ConversationId
 import app.daiyu.android.domain.messagesEndpoint
+import app.daiyu.android.domain.MessageImageReference
+import app.daiyu.android.storage.MessageImageReferenceCodec
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.InputStream
@@ -24,7 +26,10 @@ data class ImportResult(val packageId: String, val inventory: BackupInventory, v
  * A crash before commit leaves old state plus unreferenced immutable files, never half-visible new state.
  */
 class NeutralBackupService(private val store: ConversationDatabase, private val blobs: PrivateBlobs,
-    private val transactions: DatabaseTransactions = DatabaseTransactions { store.writableDatabase }) {
+    private val transactions: DatabaseTransactions = DatabaseTransactions { store.writableDatabase },
+    private val imageAssets: BackupImageAssets? = null) {
+    constructor(context: Context, store: ConversationDatabase, imageAssets: BackupImageAssets) :
+        this(store, PrivateBlobs(context), imageAssets = imageAssets)
     constructor(context: Context) : this(ConversationDatabase(context), PrivateBlobs(context))
     constructor(context: Context, store: ConversationDatabase) : this(store, PrivateBlobs(context))
 
@@ -84,12 +89,46 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val archives = tables.getJSONArray("context_archives"); val assets = tables.getJSONArray("neutral_assets")
         repeat(archives.length()) { hashes.add(archives.getJSONObject(it).getString("blob_hash")) }
         repeat(assets.length()) { hashes.add(assets.getJSONObject(it).getString("blob_hash")) }
-        val contents = JSONArray(); var total = 0L
-        hashes.sorted().forEach { hash -> val bytes = blobs.read(hash); total += bytes.size
-            require(total <= MAX_BYTES); contents.put(JSONObject().put("sha256", hash).put("bytes", bytes.size)
-                .put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))) }
+        val originals = linkedMapOf<String, ByteArray>(); var total = 0L
+        fun include(hash: String, bytes: ByteArray) {
+            require(PrivateBlobs.digest(bytes) == hash)
+            val previous = originals[hash]
+            if (previous != null) require(previous.contentEquals(bytes))
+            else { total += bytes.size; require(total <= MAX_BYTES); originals[hash] = bytes }
+        }
+        hashes.sorted().forEach { hash -> include(hash, blobs.read(hash)) }
+        val references = BackupImageManifest.References()
+        val textData = objectOf(objectOf(text).getString("payload"))
+        references.addRows(textData.getJSONArray("messages"))
+        val conversations = textData.getJSONArray("conversations")
+        val conversationOwners = (0 until conversations.length()).map { conversations.getJSONObject(it).getString("id") }.toSet()
+        repeat(archives.length()) {
+            val row = archives.getJSONObject(it)
+            require(string(row, "conversation_id") in conversationOwners)
+            val archived = ArchiveCodec.decode(originals.getValue(row.getString("blob_hash")))
+            // The archive table's persisted owner is authority, not the blob's own claims.
+            require(archived.all { it.conversationId.value == string(row, "conversation_id") })
+            require(archived.size.toLong() == integer(row, "prefix_count") && ContextRevision.digest(archived) == string(row, "revision"))
+            references.addArchive(archived)
+        }
+        val images = references.all()
+        // Check the metadata bound before opening any original image.
+        val manifest = BackupImageManifest.encode(images)
+        if (images.isNotEmpty()) {
+            val access = requireNotNull(imageAssets) { "消息原图存储未接入；不能导出仅含引用的备份" }
+            images.forEach { reference ->
+                val asset = MessageImageReferenceCodec.toAsset(reference)
+                val bytes = access.read(asset.owner, asset)
+                BackupImageManifest.verify(reference, bytes)
+                include(reference.sha256, bytes)
+            }
+        }
+        val contents = JSONArray()
+        originals.toSortedMap().forEach { (hash, bytes) -> contents.put(JSONObject().put("sha256", hash).put("bytes", bytes.size)
+            .put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))) }
         val payload = JSONObject().put("text_backup", text).put("tables", tables).put("config", config)
             .put("blobs", contents).put("excluded", JSONArray(listOf("凭据、授权令牌和密钥材料不导出")))
+        if (images.isNotEmpty()) payload.put("message_images", manifest)
         val inventory = inventory(payload)
         payload.put("inventory", inventoryJson(inventory))
         val raw = payload.toString()
@@ -109,9 +148,17 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
     }
     fun importPackage(text: String): ImportResult {
         val parsed = validate(text)
+        val access = if (parsed.images.isEmpty()) null else requireNotNull(imageAssets) { "消息原图存储未接入；不能恢复图片引用" }
         return transactions.run { db ->
             val duplicate = db.rawQuery("SELECT id FROM neutral_imports WHERE id=?", arrayOf(parsed.id)).use { it.moveToFirst() }
-            if (duplicate) return@run ImportResult(parsed.id, parsed.inventory, true)
+            if (duplicate) {
+                // A marker alone is not evidence that the original assets still exist.
+                parsed.images.forEach { reference ->
+                    val asset = MessageImageReferenceCodec.toAsset(reference)
+                    BackupImageManifest.verify(reference, requireNotNull(access).read(asset.owner, asset))
+                }
+                return@run ImportResult(parsed.id, parsed.inventory, true)
+            }
             // Existing parser validates text protocol, IDs, drafts and collisions; nested transaction shares helper.
             store.importBackup(parsed.payload.getString("text_backup"))
             parsed.bytes.forEach { (hash, bytes) -> require(blobs.put(bytes) == hash) }
@@ -132,18 +179,32 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                 require(current == null || current == config.get(key).toString()) { "非秘密配置冲突，未覆盖当前账户" }
                 if (current == null) db.insertOrThrow("neutral_config", null, ContentValues().apply { put("name", key); put("value", config.get(key).toString()) })
             }
+            // All package bytes/references were checked before the transaction; publish immutable
+            // owner batches only after SQL collisions/config conflicts have passed. A later SQL
+            // failure can leave harmless orphans, never delete/overwrite pre-existing assets.
+            parsed.images.groupBy { it.owner }.forEach { (_, references) ->
+                val assets = references.map(MessageImageReferenceCodec::toAsset)
+                val destination = requireNotNull(access)
+                destination.restore(assets.first().owner, assets, references.map { parsed.bytes.getValue(it.sha256) })
+                references.zip(assets).forEach { (reference, asset) ->
+                    BackupImageManifest.verify(reference, destination.read(asset.owner, asset))
+                }
+            }
             db.insertOrThrow("neutral_imports", null, ContentValues().apply { put("id", parsed.id); put("created", System.currentTimeMillis()) })
             ImportResult(parsed.id, parsed.inventory, false)
         }
     }
-    private data class Parsed(val id: String, val payload: JSONObject, val bytes: Map<String, ByteArray>, val inventory: BackupInventory)
+    private data class Parsed(val id: String, val payload: JSONObject, val bytes: Map<String, ByteArray>,
+        val inventory: BackupInventory, val images: List<MessageImageReference>)
     private fun validate(text: String): Parsed {
         require(text.toByteArray(Charsets.UTF_8).size.toLong() <= MAX_PACKAGE)
         val envelope = objectOf(text); fields(envelope, setOf("format", "version", "sha256", "payload"))
         require(envelope.get("format") == "daiyu-neutral-complete" && integer(envelope, "version") == 1L)
         val raw = string(envelope, "payload"); val id = PrivateBlobs.digest(raw.toByteArray(Charsets.UTF_8))
         require(id == string(envelope, "sha256")) { "备份摘要不匹配" }
-        val payload = objectOf(raw); fields(payload, setOf("text_backup", "tables", "config", "blobs", "excluded", "inventory"))
+        val payload = objectOf(raw)
+        val payloadFields = setOf("text_backup", "tables", "config", "blobs", "excluded", "inventory")
+        fields(payload, if (payload.has("message_images")) payloadFields + "message_images" else payloadFields)
         store.preflightBackup(string(payload, "text_backup"))
         val legacy = objectOf(string(payload, "text_backup"))
         require(legacy.getString("format") == "daiyu-neutral-text" && legacy.getInt("version") == 1)
@@ -168,12 +229,14 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             total += size; require(total <= MAX_BYTES); bytes[hash] = decoded
         }
         val used = mutableSetOf<String>()
+        val imageReferences = BackupImageManifest.References().apply { addRows(messages) }
         val archives = tables.getJSONArray("context_archives")
         repeat(archives.length()) { val row = archives.getJSONObject(it)
             val owner = string(row, "conversation_id"); require(owner in conversationIds)
             val hash = string(row, "blob_hash"); used.add(hash); val archived = ArchiveCodec.decode(bytes[hash] ?: error("缺原文档案"))
             require(archived.all { it.conversationId.value == owner } && archived.size.toLong() == integer(row, "prefix_count"))
             require(ContextRevision.digest(archived) == string(row, "revision")); require(string(row, "summary").isNotBlank())
+            imageReferences.addArchive(archived)
             require(integer(row, "active") in 0..1); integer(row, "created")
         }
         val assets = tables.getJSONArray("neutral_assets")
@@ -195,7 +258,9 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             require(string(r, "branch_id") in conversationIds)
             app.daiyu.android.domain.context.UsageRecord(string(r, "request_id"), string(r, "run_id"), string(r, "branch_id"), n("input_tokens"), n("output_tokens"), n("cached_tokens"), n("reasoning_tokens"))
         }
-        require(used == bytes.keys) { "附件/归档清单不一致" }
+        val images = BackupImageManifest.validate(payload, imageReferences, bytes)
+        images.forEach { used.add(it.sha256) }
+        require(used == bytes.keys) { "附件/归档/图片清单不一致" }
         validateConfig(payload.getJSONObject("config"))
         val excluded = payload.getJSONArray("excluded"); require(excluded.length() <= 20)
         repeat(excluded.length()) { require(excluded.get(it) is String && excluded.getString(it).length <= 200) }
@@ -205,7 +270,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         expected.keys().forEach { key -> require(declared.get(key) == expected.get(key) ||
             declared.get(key) is Number && expected.get(key) is Number &&
                 integer(declared, key) == integer(expected, key)) { "数量或字节清单不一致" } }
-        return Parsed(id, payload, bytes, inventory)
+        return Parsed(id, payload, bytes, inventory, images)
     }
     private fun inventory(payload: JSONObject): BackupInventory {
         val legacy = objectOf(payload.getString("text_backup")); val tables = payload.getJSONObject("tables")
@@ -214,7 +279,8 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val excluded = payload.getJSONArray("excluded")
         return BackupInventory(legacy.getInt("conversation_count"), legacy.getInt("message_count"),
             tables.getJSONArray("context_branches").length(), tables.getJSONArray("context_archives").length(),
-            tables.getJSONArray("neutral_assets").length(), size, payload.getJSONObject("config").length(),
+            tables.getJSONArray("neutral_assets").length() + (payload.optJSONArray("message_images")?.length() ?: 0),
+            size, payload.getJSONObject("config").length(),
             (0 until excluded.length()).map { excluded.getString(it) })
     }
     private fun inventoryJson(i: BackupInventory) = JSONObject().put("conversations", i.conversations).put("messages", i.messages)

@@ -115,19 +115,24 @@ internal class ControllerTerminalPreparation private constructor(
         }
 
     /** Short cancellation fence. Claimed leases are NEVER closed as though still preview leases. */
-    fun cancel() = synchronized(lock) {
-        if (phase == State.TRANSFERRED || phase == State.DRAINED) return@synchronized
-        cancelled = true
-        if (!approvalAttempted) {
-            try {
-                (preview.plan.launch as? TerminalPtyLaunch.Linux)?.close()
-                phase = State.DRAINED
-            } catch (_: Exception) { phase = State.UNKNOWN }
-        } else {
-            // TaskAuthorization has no revoke API. Binding.close fences all future admission.
-            try { binding?.close() } catch (_: Exception) { phase = State.UNKNOWN }
-            if (phase != State.UNKNOWN) phase = State.CLOSING
+    fun cancel() {
+        val owned = synchronized(lock) {
+            if (phase == State.TRANSFERRED || phase == State.DRAINED || cancelled) return
+            cancelled = true
+            phase = State.CLOSING
+            approvalAttempted to binding
         }
+        // Lease and transport calls are outside the lifecycle monitor.
+        val result = try {
+            if (!owned.first) {
+                (preview.plan.launch as? TerminalPtyLaunch.Linux)?.close()
+                State.DRAINED
+            } else {
+                owned.second?.close()
+                if (owned.second == null) State.UNKNOWN else State.CLOSING
+            }
+        } catch (_: Exception) { State.UNKNOWN }
+        synchronized(lock) { phase = result }
     }
 
     /** Explicit worker join, never composition/polling. False retains the binding/lease for retry. */

@@ -54,7 +54,8 @@ internal fun TerminalApprovalHost(
         }) { Text("准备终端审批（不启动）") }
         if (preparation == null) (problem ?: error)?.let { Text(it, color = MaterialTheme.colorScheme.error) }
     }
-    if (preparation != null) {
+    if (preparation != null && state != ControllerTerminalPreparation.State.CONFIRMED &&
+        state != ControllerTerminalPreparation.State.TRANSFERRED) {
         val sections = remember(preparation) { terminalApprovalSections(preparation) }
         val canConfirm = matches && state == ControllerTerminalPreparation.State.PREVIEW &&
             preparation.state == ControllerTerminalPreparation.State.PREVIEW

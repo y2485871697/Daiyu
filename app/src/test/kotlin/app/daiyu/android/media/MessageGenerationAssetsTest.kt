@@ -226,6 +226,53 @@ class MessageGenerationAssetsTest {
         assertEquals(result.get(), store(GenerationAssetFence(owner) { true }).pending(identity, 0)!!.receipt)
     }
 
+    @Test fun sharedGateKeepsHistoryAfterLocalCloseButOwnerRevokeRejectsBothStores() {
+        val gate = GenerationAssetPublicationGate()
+        val writerFence = GenerationAssetFence(owner, gate) { true }
+        val readerFence = GenerationAssetFence(owner, gate) { true }
+        val writer = store(writerFence)
+        val reader = store(readerFence)
+        val first = writer.commit(identity, 0, GenerationKind.IMAGE, image, info)
+        readerFence.revokeAdmission()
+        val second = writer.commit(identity, 1, GenerationKind.IMAGE, image, info)
+        expect(GenerationAssetFailure.CANCELLED) { reader.pending(first) }
+        val historyFence = GenerationAssetFence(owner, gate) { true }
+        val history = store(historyFence)
+        writerFence.revoke()
+        assertEquals(first, history.pending(first).receipt)
+        assertEquals(second, history.pending(second).receipt)
+        gate.revokeOnWorker()
+        expect(GenerationAssetFailure.CANCELLED) { history.pending(first) }
+        expect(GenerationAssetFailure.CANCELLED) {
+            writer.commit(identity, 2, GenerationKind.IMAGE, image, info)
+        }
+        assertEquals(2, originals().size) // revocation does not erase accepted originals
+    }
+
+    @Test fun sharedOwnerSealInsideFinalValidatorPreventsActualRename() {
+        val gate = GenerationAssetPublicationGate()
+        val validating = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val result = AtomicReference<Throwable?>()
+        var admissions = 0
+        val sharedFence = GenerationAssetFence(owner, gate) {
+            admissions++
+            if (admissions == 2) { validating.countDown(); await(release) }
+            true
+        }
+        val worker = Thread {
+            try { store(sharedFence).commit(identity, 0, GenerationKind.IMAGE, image, info) }
+            catch (failure: Throwable) { result.set(failure) }
+        }
+        worker.start()
+        try { await(validating); gate.sealAdmission() } finally { release.countDown() }
+        join(worker)
+        gate.revokeOnWorker()
+        assertEquals(GenerationAssetFailure.CANCELLED, (result.get() as GenerationAssetException).failure)
+        assertTrue(originals().isEmpty())
+        assertFalse(root.walkTopDown().any { it.isDirectory && it.name.endsWith(".pending") })
+    }
+
     @Test fun twoIndependentHelpersConvergeOnOnePublishedDirectory() {
         val start = CountDownLatch(1)
         val results = List(2) { AtomicReference<GenerationAssetReceipt?>() }

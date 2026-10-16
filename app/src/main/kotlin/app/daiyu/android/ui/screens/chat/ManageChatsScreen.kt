@@ -50,17 +50,16 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.R
 import app.daiyu.android.ui.haptics.TouchHaptics
-import app.daiyu.android.ui.app.SearchHistoryDialog
 import app.daiyu.android.ui.components.MiuixDialogActions
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.model.ConversationSummaryUi
-import app.daiyu.android.ui.model.MessageSearchHit
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import kotlinx.coroutines.flow.collectLatest
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 
@@ -86,11 +85,10 @@ internal fun ManageChatsScreen(
     onTogglePin: (String) -> Unit,
     onDeleteConversation: (ConversationSummaryUi) -> Unit,
     onDeleteAll: () -> Unit,
-    onSearchHistory: suspend (String) -> List<MessageSearchHit> = { emptyList() },
-    onOpenHistoryHit: (MessageSearchHit) -> Unit = {},
+    onOpenMessageSearch: () -> Unit,
+    onOpenConversationSearch: () -> Unit,
 ) {
     var showDeleteAll by remember { mutableStateOf(false) }
-    var showSearchHistory by remember { mutableStateOf(false) }
     // 多个会话同时在跑时，更新时间会不断把它们换到前面。管理页按打开时的顺序钉住，
     // 只在原地刷新标题和状态，滑动删除才点得中。新出现的会话插到最前，关掉页面再打开才重排。
     // The producer replaces immutable summary snapshots; row data always comes from the latest one.
@@ -125,7 +123,11 @@ internal fun ManageChatsScreen(
         onBack = onBack,
         listModifier = Modifier,
         actions = {
-            IconButton(onClick = { showSearchHistory = true }) {
+            TextButton(
+                text = stringResource(R.string.search_conversations_title),
+                onClick = onOpenConversationSearch,
+            )
+            IconButton(onClick = onOpenMessageSearch) {
                 Icon(
                     imageVector = Icons.Rounded.Search,
                     contentDescription = stringResource(R.string.action_search_history),
@@ -166,16 +168,6 @@ internal fun ManageChatsScreen(
             }
         }
     }
-
-    SearchHistoryDialog(
-        show = showSearchHistory,
-        onDismiss = { showSearchHistory = false },
-        onSearch = onSearchHistory,
-        onOpenHit = { hit ->
-            showSearchHistory = false
-            onOpenHistoryHit(hit)
-        },
-    )
 
     if (showDeleteAll) {
         WindowDialog(

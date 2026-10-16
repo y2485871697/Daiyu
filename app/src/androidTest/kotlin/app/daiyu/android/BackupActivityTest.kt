@@ -149,7 +149,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
     private fun click(label:String) {
         if(label=="模型设置") {openModels();return}
         if(ui.onAllNodesWithTag("page:备份与导入").fetchSemanticsNodes().isEmpty()) {
-            menu("设置");reveal("settings-row:数据备份","设置").performClick()
+            openSettings();reveal("settings-row:数据备份","设置").performClick()
         }
     }
     private fun choose(index:Int) {node("prompt-choice:$index").assertIsDisplayed().performClick()}

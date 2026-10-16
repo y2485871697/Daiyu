@@ -1,0 +1,370 @@
+package app.daiyu.android.terminal.install
+
+import app.daiyu.android.terminal.LinuxInstallation
+import junit.framework.TestCase
+import java.io.File
+import java.io.IOException
+import java.net.URI
+import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermissions
+import java.security.MessageDigest
+import java.util.concurrent.CancellationException
+
+/** All payloads and helpers are inert text; runner/transport/extractor are test doubles. */
+class RootlessLinuxInstallerTest : TestCase() {
+    private class Fixture(val root: File) {
+        val payload = "verified archive fixture".toByteArray()
+        val mirror = RootfsMirror("primary", URI("https://example.invalid/rootfs.tar.gz"))
+        val artifact = LinuxRootfsArtifact("fixture-1", "alpine", "fixture", "arm64-v8a",
+            RootfsArchive.TAR_GZIP, payload.size.toLong(), hash(payload), listOf(mirror))
+        val privateRoot = File(root, "linux-installations")
+        val proot = File(root, "proot").apply { writeText("inert proot"); setExecutable(true) }
+        val loader = File(root, "loader").apply { writeText("inert loader") }
+        val target = File(privateRoot, "environment/generation/rootfs")
+        val installation = LinuxInstallation("alpine", "environment", "generation", target,
+            proot, hash(proot.readBytes()), loader, hash(loader.readBytes()))
+        var requests = 0
+        var extractions = 0
+        var probes = 0
+        var moves = 0
+        var downloadBytes = payload
+        var beforeDownload: (() -> Unit)? = null
+        var afterExtract: (() -> Unit)? = null
+        val cancellation = LinuxInstallCancellation()
+
+        fun installer(sync: (File) -> Unit = {},
+                      move: ((File, File) -> Unit)? = null,
+                      managedRoot: File = privateRoot): RootlessLinuxInstaller = RootlessLinuxInstaller(
+            managedRoot,
+            LinuxRootfsExtraction { _, _, stage, token ->
+                extractions++
+                token.check()
+                File(stage, "bin").mkdir()
+                File(stage, "bin/sh").writeText("inert guest shell")
+                afterExtract?.invoke()
+            },
+            LinuxInstallProbeRunner { configuration, command, token ->
+                probes++
+                token.check()
+                check(configuration.backend == "linux")
+                check(!configuration.root)
+                check(command == "id -u")
+                check(configuration.linux!!.expectedUid == 0)
+                check(configuration.linux!!.shellArgv.first() == proot.path)
+                check(configuration.linux!!.sharedMounts.isEmpty())
+                LinuxProbeResult(0, "0\n")
+            },
+            LinuxArtifactDownload { _, _, destination, token ->
+                token.check()
+                beforeDownload?.invoke()
+                requests++
+                destination.writeBytes(downloadBytes)
+            }, sync,
+            { from, to ->
+                moves++
+                if (move != null) move(from, to) else { Files.move(from.toPath(), to.toPath()); Unit }
+            }
+        )
+    }
+
+    private fun fixture(block: (Fixture) -> Unit) {
+        val root = Files.createTempDirectory("linux-install-test-").toFile()
+        try { block(Fixture(root)) } finally { root.deleteRecursively() }
+    }
+
+    fun testPreparationAndApprovalHaveZeroRequestsAndNoFilesystemEffects() = fixture { f ->
+        val installer = f.installer()
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        installer.approveDownloadAndInstall(prepared)
+        assertEquals(0, f.requests)
+        assertEquals(0, f.extractions)
+        assertEquals(0, f.probes)
+        assertFalse(f.privateRoot.exists())
+    }
+
+    fun testSuccessfulFilesOnlyInstallIsOneShotAndHasReadableMarker() = fixture { f ->
+        val installer = f.installer()
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        val approval = installer.approveDownloadAndInstall(prepared)
+        val receipt = installer.install(approval, f.cancellation)
+        assertTrue(receipt.directorySyncConfirmed)
+        assertEquals(f.installation, installer.inspectPublished(prepared))
+        assertEquals(1, f.requests)
+        assertEquals(1, f.moves)
+        assertEquals(1, f.probes)
+        val marker = File(f.target, ".daiyu-rootfs-install").readText()
+        assertTrue(marker.contains("generation=generation\n"))
+        assertTrue(marker.contains("mirror=primary\n"))
+        rejected { installer.install(approval, f.cancellation) }
+        assertEquals(1, f.requests)
+        assertFalse(File(f.root, "selected-linux.json").exists())
+        assertFalse(File(f.root, "trusted-linux-catalog.json").exists())
+        assertEquals(listOf("rootfs"), f.target.parentFile.list()!!.toList())
+    }
+
+    fun testBadHashNeverExtractsProbesOrPublishes() = fixture { f ->
+        f.downloadBytes = ByteArray(f.payload.size) { 'x'.code.toByte() }
+        val installer = f.installer()
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        rejected { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        assertEquals(1, f.requests)
+        assertEquals(0, f.extractions)
+        assertEquals(0, f.probes)
+        assertEquals(0, f.moves)
+        assertFalse(f.target.exists())
+    }
+
+    fun testCancelledBeforeStartMakesZeroRequests() = fixture { f ->
+        val installer = f.installer()
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        f.cancellation.cancel()
+        cancelled { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        assertEquals(0, f.requests)
+        assertFalse(f.privateRoot.exists())
+    }
+
+    fun testCancellationAtLastSyncNeverRenames() = fixture { f ->
+        val installer = f.installer(sync = { directory ->
+            if (directory.name.startsWith(".staging-")) f.cancellation.cancel()
+        })
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        cancelled { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        assertEquals(1, f.requests)
+        assertEquals(1, f.probes)
+        assertEquals(0, f.moves)
+        assertFalse(f.target.exists())
+    }
+
+    fun testCancellationDuringExtractionDoesNotProbeOrPublish() = fixture { f ->
+        f.afterExtract = { f.cancellation.cancel() }
+        val installer = f.installer()
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        cancelled { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        assertEquals(0, f.probes)
+        assertEquals(0, f.moves)
+        assertFalse(f.target.exists())
+    }
+
+    fun testExistingEmptyOrPopulatedRootfsIsNeverReplaced() = fixture { f ->
+        val installer = f.installer()
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        assertTrue(f.target.mkdirs())
+        rejected { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        assertTrue(f.target.isDirectory)
+        assertEquals(0, f.target.list()!!.size)
+        val sentinel = File(f.target, "keep").apply { writeText("untouched") }
+        rejected { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        assertEquals("untouched", sentinel.readText())
+        assertEquals(0, f.requests)
+        assertEquals(0, f.moves)
+    }
+
+    fun testEveryManagedDirectoryNameSyncsItsParentBeforeDownloadEvenWhenExisting() {
+        for (existing in listOf(false, true)) fixture { f ->
+            if (existing) assertTrue(f.target.parentFile.mkdirs())
+            val synced = mutableListOf<File>()
+            val expected = listOf(f.root, f.privateRoot, File(f.privateRoot, "environment"))
+            val installer = f.installer(sync = { synced.add(it) })
+            f.beforeDownload = { assertEquals(expected, synced) }
+            val prepared = installer.prepare(f.artifact, "primary", f.installation)
+            val receipt = installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation)
+            assertTrue(receipt.directorySyncConfirmed)
+            assertEquals(expected, synced.take(3))
+            assertEquals(1, f.requests)
+        }
+    }
+
+    fun testDirectoryConfirmationDoesNotChangeExternalRootPermissionsOrSyncItsAncestors() = fixture { f ->
+        val permissions = PosixFilePermissions.fromString("rwxr-x---")
+        Files.setPosixFilePermissions(f.root.toPath(), permissions)
+        val synced = mutableListOf<File>()
+        val installer = f.installer(sync = { synced.add(it) })
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        val receipt = installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation)
+        assertTrue(receipt.directorySyncConfirmed)
+        assertEquals(permissions, Files.getPosixFilePermissions(f.root.toPath()))
+        assertTrue(synced.contains(f.root))
+        assertTrue(synced.all { it.toPath().startsWith(f.root.toPath()) })
+    }
+
+    fun testMissingExternalRootIsNotCreated() = fixture { f ->
+        val externalRoot = File(f.root, "missing-external-root")
+        val managedRoot = File(externalRoot, "linux-installations")
+        val installation = f.installation.copy(rootfs = File(managedRoot, "environment/generation/rootfs"))
+        val synced = mutableListOf<File>()
+        val installer = f.installer(sync = { synced.add(it) }, managedRoot = managedRoot)
+        val prepared = installer.prepare(f.artifact, "primary", installation)
+        rejected { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        assertFalse(externalRoot.exists())
+        assertTrue(synced.isEmpty())
+        assertEquals(0, f.requests)
+        assertEquals(0, f.extractions)
+        assertEquals(0, f.probes)
+        assertEquals(0, f.moves)
+    }
+
+    fun testFailedAncestorSyncIsRetriedWithNewApproval() = assertFailedAncestorSyncIsRetried()
+
+    fun testFailedAncestorSyncIsRetriedForDifferentGeneration() =
+        assertFailedAncestorSyncIsRetried(newGeneration = true)
+
+    fun testFailedAncestorSyncIsRetriedByNewInstaller() =
+        assertFailedAncestorSyncIsRetried(newInstaller = true)
+
+    fun testFailedAncestorSyncIsRetriedByNewInstallerForDifferentGeneration() =
+        assertFailedAncestorSyncIsRetried(newGeneration = true, newInstaller = true)
+
+    private fun assertFailedAncestorSyncIsRetried(newGeneration: Boolean = false,
+                                                 newInstaller: Boolean = false) {
+        for (level in 0..2) fixture { f ->
+            val expected = listOf(f.root, f.privateRoot, File(f.privateRoot, "environment"))
+            val synced = mutableListOf<File>()
+            var failSync = true
+            val sync: (File) -> Unit = { directory ->
+                synced.add(directory)
+                if (failSync && directory == expected[level]) {
+                    throw IOException("injected persistent ancestor sync failure")
+                }
+            }
+            val original = f.installer(sync = sync)
+            val originalPrepared = original.prepare(f.artifact, "primary", f.installation)
+            rejected { original.install(original.approveDownloadAndInstall(originalPrepared), f.cancellation) }
+            assertEquals(expected.take(level + 1), synced)
+            // The failed parent fsync leaves precisely this managed name on disk.
+            assertTrue(listOf(f.privateRoot, File(f.privateRoot, "environment"), f.target.parentFile)[level].isDirectory)
+
+            val retryInstaller = if (newInstaller) f.installer(sync = sync) else original
+            val retryInstallation = if (newGeneration) f.installation.copy(
+                generation = "generation-retry",
+                rootfs = File(f.privateRoot, "environment/generation-retry/rootfs")
+            ) else f.installation
+            val retryPrepared = if (newInstaller || newGeneration) {
+                retryInstaller.prepare(f.artifact, "primary", retryInstallation)
+            } else originalPrepared
+            synced.clear()
+            rejected {
+                retryInstaller.install(retryInstaller.approveDownloadAndInstall(retryPrepared), f.cancellation)
+            }
+            assertEquals(expected.take(level + 1), synced)
+            assertEquals(0, f.requests)
+            assertEquals(0, f.extractions)
+            assertEquals(0, f.probes)
+            assertEquals(0, f.moves)
+            assertFalse(f.target.exists())
+            assertFalse(retryInstallation.rootfs.exists())
+            assertFalse(File(retryInstallation.rootfs.parentFile, ".install-lock").exists())
+
+            failSync = false
+            synced.clear()
+            // No transport may run until ALL managed names have been reconfirmed, including
+            // existing ancestors shared with the failed generation/installer instance.
+            f.beforeDownload = { assertEquals(expected, synced) }
+            val receipt = retryInstaller.install(
+                retryInstaller.approveDownloadAndInstall(retryPrepared), f.cancellation)
+            assertTrue(receipt.directorySyncConfirmed)
+            assertEquals(retryInstallation, retryInstaller.inspectPublished(retryPrepared))
+            assertEquals(expected, synced.take(3))
+            assertEquals(1, f.requests)
+            assertEquals(1, f.extractions)
+            assertEquals(1, f.probes)
+            assertEquals(1, f.moves)
+        }
+    }
+
+    fun testFailureSyncingAnyNewAncestorAbortsBeforeDownloadAndPublication() {
+        for (level in 0..2) fixture { f ->
+            val failedParent = listOf(f.root, f.privateRoot, File(f.privateRoot, "environment"))[level]
+            val installer = f.installer(sync = { directory ->
+                if (directory == failedParent) throw IOException("injected ancestor sync failure")
+            })
+            val prepared = installer.prepare(f.artifact, "primary", f.installation)
+            rejected { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+            assertEquals(0, f.requests)
+            assertEquals(0, f.probes)
+            assertEquals(0, f.moves)
+            assertFalse(f.target.exists())
+            assertNull(installer.inspectPublished(prepared))
+        }
+    }
+
+    fun testRenameThenDirectorySyncFailureReconcilesVisibleFiles() = fixture { f ->
+        val installer = f.installer(sync = { dir ->
+            if (dir == f.target.parentFile && f.target.exists()) throw IOException("injected directory sync")
+        })
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        val receipt = installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation)
+        assertFalse(receipt.directorySyncConfirmed)
+        assertEquals(f.installation, installer.inspectPublished(prepared))
+        assertEquals(1, f.moves)
+        assertTrue(f.target.isDirectory)
+    }
+
+    fun testRenameThenCancellationStillReportsDiskResult() = fixture { f ->
+        val installer = f.installer(move = { from, to ->
+            Files.move(from.toPath(), to.toPath())
+            f.cancellation.cancel()
+            throw CancellationException("after rename")
+        })
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        val receipt = installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation)
+        assertFalse(receipt.directorySyncConfirmed)
+        assertEquals(f.installation, installer.inspectPublished(prepared))
+        assertTrue(f.target.exists())
+    }
+
+    fun testMarkerMismatchAndShellEscapeNeverCountAsInstalled() = fixture { f ->
+        val installer = f.installer()
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation)
+        val marker = File(f.target, ".daiyu-rootfs-install")
+        val saved = marker.readBytes()
+        marker.appendText("tampered")
+        rejected { installer.inspectPublished(prepared) }
+        marker.writeBytes(saved)
+        File(f.target, "bin/sh").delete()
+        Files.createSymbolicLink(File(f.target, "bin/sh").toPath(), f.proot.toPath())
+        rejected { installer.inspectPublished(prepared) }
+    }
+
+    fun testApprovalCannotBeTransferredToAnotherInstallerOrTarget() = fixture { f ->
+        val first = f.installer()
+        val second = f.installer()
+        val prepared = first.prepare(f.artifact, "primary", f.installation)
+        rejected { second.approveDownloadAndInstall(prepared) }
+        val approved = first.approveDownloadAndInstall(prepared)
+        rejected { second.install(approved, f.cancellation) }
+        assertEquals(0, f.requests)
+        rejected { first.prepare(f.artifact, "primary", f.installation.copy(rootfs = File(f.root, "elsewhere"))) }
+        rejected { first.prepare(f.artifact, "unknown", f.installation) }
+    }
+
+    fun testSymlinkParentAndStaleLockFailClosed() = fixture { f ->
+        val installer = f.installer()
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        f.target.parentFile.mkdirs()
+        File(f.target.parentFile, ".install-lock").mkdir()
+        rejected { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        assertEquals(0, f.requests)
+        File(f.target.parentFile, ".install-lock").delete()
+        f.privateRoot.deleteRecursively()
+        Files.createSymbolicLink(f.privateRoot.toPath(), f.root.toPath())
+        rejected { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        assertEquals(0, f.requests)
+        // Avoid a recursive test-cleanup traversal of the intentionally hostile symlink.
+        Files.delete(f.privateRoot.toPath())
+    }
+
+    private fun rejected(block: () -> Unit) {
+        try { block(); fail("expected rejection") } catch (_: IllegalStateException) {
+        } catch (_: IllegalArgumentException) { } catch (_: IOException) { }
+    }
+
+    private fun cancelled(block: () -> Unit) {
+        try { block(); fail("expected cancellation") } catch (_: CancellationException) { }
+    }
+
+    companion object {
+        private fun hash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { "%02x".format(it) }
+    }
+}

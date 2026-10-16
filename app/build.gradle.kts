@@ -97,6 +97,9 @@ android {
 kotlin { jvmToolchain(27) }
 dependencies {
     implementation(project(":core-domain"))
+    // Streaming rootfs extraction; XZ decoder memory is separately capped at 128 MiB.
+    implementation("org.apache.commons:commons-compress:1.28.0")
+    implementation("org.tukaani:xz:1.12")
     // Keep the tested runtime aligned with Espresso 3.7.0.
     implementation("androidx.concurrent:concurrent-futures:1.2.0")
     implementation("dev.rikka.shizuku:api:13.1.5")

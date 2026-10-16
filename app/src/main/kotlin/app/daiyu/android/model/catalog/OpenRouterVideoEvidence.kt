@@ -88,7 +88,7 @@ class OpenRouterVideoEvidence private constructor(
     /** Documentary protocol basis, not a successful inference/upload probe. See integration doc. */
     val protocol: ProviderProtocol get() = ProviderProtocol.RESPONSES
     val protocolDocumentation: String get() =
-        "https://openrouter.ai/docs/guides/overview/multimodal/videos"
+        "https://openrouter.ai/docs/client-sdks/typescript/models/inputvideo"
     private val claimed = AtomicBoolean(false)
 
     fun matches(snapshot: ProviderSnapshot, revision: Long): Boolean =
@@ -101,7 +101,7 @@ class OpenRouterVideoEvidence private constructor(
     internal fun claim(snapshot: ProviderSnapshot, revision: Long): Boolean =
         matches(snapshot, revision) && claimed.compareAndSet(false, true)
 
-    override fun toString() = "OpenRouterVideoEvidence(<runtime proof>)"
+    override fun toString() = "OpenRouterVideoEvidence(<fresh catalog declaration>)"
 
     companion object {
         /** Deliberately no injected fetcher: test transports must never mint production proof. */

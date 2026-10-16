@@ -170,7 +170,8 @@ class MainActivity : ComponentActivity() {
     private var shizukuEditor by mutableStateOf<ShizukuEditor?>(null)
     private var shizukuInFlight by mutableStateOf<ControllerShizukuPreparation?>(null)
     private val shizukuWritesBlocked: Boolean get() = shizukuInFlight != null ||
-        controller.shizukuPreparation()?.isSubmitted() == true || controller.generationSubmissionPending()
+        controller.shizukuPreparation()?.isSubmitted() == true || controller.generationSubmissionPending() ||
+        controller.virtualDisplayEntry() != null
     private val imagePicker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         imageHost.picked(uris)
     }
@@ -178,14 +179,14 @@ class MainActivity : ComponentActivity() {
     private var sidebarVisible: Boolean
         get() = sidebarVisibleState
         set(value) {
-            if (value && !sidebarVisibleState) { cancelGenerationOutputs(); cancelTerminalEditor() }
+            if (value && !sidebarVisibleState) { cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor() }
             sidebarVisibleState = value
         }
     private var retainedPageState by mutableStateOf("chat")
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
-            if (value != retainedPageState) cancelGenerationOutputs()
+            if (value != retainedPageState) { cancelGenerationOutputs(); cancelVirtualDisplayEditor() }
             if (value != "generation-settings") {
                 generationSettingsVisit?.active?.set(false)
                 generationSettingsVisit = null
@@ -242,6 +243,8 @@ class MainActivity : ComponentActivity() {
         var preparation by mutableStateOf<ControllerTerminalPreparation?>(null)
     }
     private var terminalEditor by mutableStateOf<TerminalEditor?>(null)
+    private var virtualDisplayEditor by mutableStateOf<ControllerVirtualDisplayEntry?>(null)
+    private var virtualDisplayRequest by mutableStateOf<app.daiyu.android.vdapproval.VirtualDisplayApprovalRequest?>(null)
     private var browserApproval by mutableStateOf<ControllerBrowserPreparation?>(null)
     private var browserPreparing by mutableStateOf(false)
     private var browserRequest: Any? = null
@@ -337,6 +340,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        // An Activity mount never inherits an approval capability from an older mount.
+        controller.virtualDisplayEntry()?.let(controller::cancelVirtualDisplay)
         if (state?.getBoolean("terminal-page", false) == true) {
             terminalPageOwner = Any()
             retainedPageState = "terminal"
@@ -638,6 +643,22 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 PromptSurface()
+                val vdEntry = virtualDisplayEditor
+                val vdRequest = virtualDisplayRequest
+                if (vdEntry != null && vdRequest != null) {
+                    androidx.compose.ui.window.Dialog(onDismissRequest = virtualDisplayCancelAction(vdEntry, vdRequest),
+                        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+                        androidx.compose.material3.Surface(Modifier.fillMaxSize()) {
+                            app.daiyu.android.vdapproval.VirtualDisplayApprovalScreen(vdRequest,
+                                onDecision = { original, approved ->
+                                    val current = activityUsable() && virtualDisplayEditor === vdEntry &&
+                                        virtualDisplayRequest === original && retainedPage == "chat" && !sidebarVisible
+                                    if (!current) false else controller.answerVirtualDisplay(vdEntry, original, approved)
+                                        .also { if (it) { virtualDisplayRequest = null; refresh() } }
+                                })
+                        }
+                    }
+                }
                 generationReceiptNotice?.let { notice ->
                     androidx.compose.ui.window.Popup(alignment = androidx.compose.ui.Alignment.TopCenter) {
                         androidx.compose.material3.Surface(tonalElevation = 8.dp) {
@@ -850,6 +871,26 @@ class MainActivity : ComponentActivity() {
                     !controller.generationSubmissionPending(),
                 modifier = Modifier.testTag("generation-approval-entry").heightIn(min = 48.dp),
                 onClick = ::openGenerationApproval)
+            top.yukonga.miuix.kmp.basic.TextButton(text = "副屏运行准备（需单独批准）",
+                enabled = available && pendingTextSend == null && virtualDisplayEditor == null &&
+                    controller.virtualDisplayEntry() == null,
+                modifier = Modifier.testTag("vd-prepare-entry").heightIn(min = 48.dp),
+                onClick = ::openVirtualDisplayPreparation)
+            virtualDisplayEditor?.let { entry ->
+                androidx.compose.material3.Text("仅批准启动、初始化、状态/截图和释放；准备与批准均不会启动 owner。")
+                top.yukonga.miuix.kmp.basic.TextButton(text = "接受消息并审阅完整副屏授权",
+                    enabled = !entry.submitted,
+                    modifier = Modifier.testTag("vd-submit"),
+                    onClick = { submitVirtualDisplay(entry) })
+                top.yukonga.miuix.kmp.basic.TextButton(text = "停止副屏运行 / 取消准备",
+                    modifier = Modifier.testTag("vd-cancel"), onClick = virtualDisplayCancelAction(entry, null))
+            }
+            if (controller.virtualDisplayEntry() != null) {
+                top.yukonga.miuix.kmp.basic.TextButton(text = "核实副屏停止（UNKNOWN 继续保留）",
+                    modifier = Modifier.testTag("vd-observe-close"), onClick = {
+                        controller.virtualDisplayEntry()?.let(controller::observeVirtualDisplayClose)
+                    })
+            }
             top.yukonga.miuix.kmp.basic.TextButton(text = "读取本会话生成资产",
                 modifier = Modifier.testTag("generation-output-entry").heightIn(min = 48.dp),
                 onClick = ::openGenerationOutputs)
@@ -1199,8 +1240,63 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun openVirtualDisplayPreparation() {
+        if (!activityUsable() || retainedPage != "chat" || sidebarVisible || !selectionReady ||
+            pendingTextSend != null || imageHost.busy || imageHost.hasAttachments || draft.isBlank()) return
+        cancelBrowserEditor(); cancelShizukuEditor()
+        val owner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+        virtualDisplayEditor = controller.prepareVirtualDisplaySend(selected, owner, draft, listOf(
+            app.daiyu.android.integration.tools.R08VirtualDisplayWrite("start", app.daiyu.android.integration.tools.R08VirtualDisplayAction.Start),
+            app.daiyu.android.integration.tools.R08VirtualDisplayWrite("initialize", app.daiyu.android.integration.tools.R08VirtualDisplayAction.Initialize),
+            app.daiyu.android.integration.tools.R08VirtualDisplayWrite("release", app.daiyu.android.integration.tools.R08VirtualDisplayAction.Release)), listOf(
+            app.daiyu.android.integration.tools.R08VirtualDisplayRead("status"),
+            app.daiyu.android.integration.tools.R08VirtualDisplayRead("snapshot", snapshot = true)))
+        publishChat()
+    }
+
+    private fun submitVirtualDisplay(entry: ControllerVirtualDisplayEntry) {
+        if (!activityUsable() || virtualDisplayEditor !== entry || retainedPage != "chat" || sidebarVisible ||
+            pendingTextSend != null || imageHost.hasAttachments || entry.text != draft ||
+            entry.editor != ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)) return
+        guard {
+            if (selected == null) controller.database.draft(entry.text)
+            else controller.database.draft(checkNotNull(selected).id, entry.text)
+            val pending = PendingTextSend(entry.editor, entry.text)
+            pendingTextSend = pending
+            if (!controller.sendVirtualDisplay(entry, pending.ticket) { result -> completeTextSend(pending, result) }) {
+                pendingTextSend = null
+                cancelVirtualDisplayEditor(entry)
+                toast("副屏运行未受理；保留草稿")
+            }
+            publishChat()
+        }
+    }
+
+    // Retain the host callback, not a callback that looks up whichever editor is current later.
+    // A Dialog additionally belongs to its exact request (even if its entry has not changed).
+    private fun virtualDisplayCancelAction(entry: ControllerVirtualDisplayEntry,
+        request: app.daiyu.android.vdapproval.VirtualDisplayApprovalRequest?): () -> Unit = {
+        if (request == null || virtualDisplayRequest === request) cancelVirtualDisplayEditor(entry)
+    }
+
+    private fun cancelVirtualDisplayEditor(original: ControllerVirtualDisplayEntry) {
+        if (virtualDisplayEditor !== original) return
+        // Fence BEFORE hiding the approval; disposal of an old screen cannot affect a later run.
+        controller.cancelVirtualDisplay(original)
+        virtualDisplayRequest = null
+        virtualDisplayEditor = null
+    }
+
+    // Navigation intentionally cancels the current editor rather than a retained UI capability.
+    private fun cancelVirtualDisplayEditor() {
+        val original = virtualDisplayEditor
+        if (original != null) cancelVirtualDisplayEditor(original)
+        else virtualDisplayRequest = null
+    }
+
     private fun cancelBrowserEditor() {
         cancelTerminalEditor()
+        cancelVirtualDisplayEditor()
         cancelGenerationEditor()
         cancelGenerationOutputs()
         browserRequest = null
@@ -1902,6 +1998,11 @@ class MainActivity : ComponentActivity() {
     private fun refresh() {
         if (!activityUsable()) return
         settleGenerationReceipt()
+        virtualDisplayEditor?.let { entry ->
+            if (controller.virtualDisplayEntry() !== entry) {
+                virtualDisplayEditor = null; virtualDisplayRequest = null
+            } else virtualDisplayRequest = controller.virtualDisplayApproval(entry)
+        }
         trackShizukuPreparation()
         backupBusy = controller.dataBusy
         chatModelPicker = chatModelPicker?.copy(enabled = controller.active == null && !controller.dataBusy && controller.ready)

@@ -12,7 +12,9 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 @Suppress("DEPRECATION")
-internal class RunControlFixture(base:Context, beforeModel: () -> Unit = {}) : AutoCloseable {
+internal class RunControlFixture(base:Context,
+    virtualDisplayFactory: ControllerVirtualDisplayFactory = ControllerVirtualDisplayFactory.REAL,
+    beforeModel: () -> Unit = {}) : AutoCloseable {
     private class FixtureApplication(base:Context):Application() {init {attachBaseContext(base)}}
     val application:Application=FixtureApplication(testContext(base,"run-control-${UUID.randomUUID()}-"))
     val database=ConversationDatabase(application)
@@ -32,7 +34,7 @@ internal class RunControlFixture(base:Context, beforeModel: () -> Unit = {}) : A
                 opens.incrementAndGet()
                 synchronized(queued) {histories.add(history);checkNotNull(queued.pollFirst())}
             }
-        })
+        }, virtualDisplayFactory = virtualDisplayFactory)
     }
     class Session(val text:String,held:Boolean,private val holdSeconds:Long=10,
         private val releaseOnCancel:Boolean=true) : ModelSession {

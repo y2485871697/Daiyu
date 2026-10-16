@@ -16,6 +16,24 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import app.daiyu.android.voice.AndroidSpeechPlayer
+import app.daiyu.android.voice.SpeechError
+import app.daiyu.android.voice.SpeechPhase
+import app.daiyu.android.voice.SpeechPlaybackState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import app.daiyu.android.assistants.AssistantSkill
 import app.daiyu.android.assistants.FileAssistantAssets
 import app.daiyu.android.assistants.SharedPreferencesAssistantStore
@@ -67,8 +85,18 @@ class MainActivity : ComponentActivity() {
     private val subAgentRepository by lazy {
         ConversationSubAgentPreferences(getSharedPreferences("subagent_configuration", MODE_PRIVATE))
     }
+    // The host is cheap; its Android player (and system TTS) exist only after an explicit click.
+    private val speechHost by lazy {
+        VoiceHost(lifecycleScope) { AndroidVoiceHostPlayer(AndroidSpeechPlayer(applicationContext)) }
+    }
     private var sidebarVisible by mutableStateOf(false)
-    private var retainedPage by mutableStateOf("chat")
+    private var retainedPageState by mutableStateOf("chat")
+    private var retainedPage: String
+        get() = retainedPageState
+        set(value) {
+            speechHost.setVisible(value == "chat" && !sidebarVisible)
+            retainedPageState = value
+        }
     private var paneState by mutableStateOf(ConversationPaneUiState(emptyList(), null, ""))
     private var chatState by mutableStateOf(ChatScreenState("代鱼"))
     private var selected: Conversation? = null
@@ -281,7 +309,10 @@ class MainActivity : ComponentActivity() {
                         onOpenPermissions = { dismissSidebar(); retainedPage = "settings" },
                     ) {
                         chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
-                            DaiyuChatScreen(chatState, chatActions(), turnExtras = { id -> QuestionExtras(id) })
+                            DaiyuChatScreen(chatState, chatActions(), turnExtras = { id ->
+                                QuestionExtras(id)
+                                VoiceExtras(id)
+                            })
                         }
                     }
                 }
@@ -332,6 +363,7 @@ class MainActivity : ComponentActivity() {
         val renderedOwner = controlOwner
         val renderedConversation = chatState.conversationKey
         val renderedEditorGeneration = editorGeneration
+        val renderedSpeechOwner = speechHost.owner
         fun editorMatches() = activityUsable() && selectionReady &&
             selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration
         fun gestureOwner() = currentControlOwner()?.takeIf {
@@ -340,7 +372,15 @@ class MainActivity : ComponentActivity() {
         fun pendingFeature() { Toast.makeText(this, "该功能界面已保留，后端尚未接入", Toast.LENGTH_SHORT).show() }
         return ChatScreenActions(
         onVoice = { pendingFeature() }, onContextClick = { pendingFeature() },
-        onRegenerate = { pendingFeature() }, onSpeak = { pendingFeature() },
+        onRegenerate = { pendingFeature() }, onSpeak = { id ->
+            if (activityUsable() && controller.ready && !controller.dataBusy &&
+                selected?.id?.value == renderedConversation) {
+                // Resolve the CURRENT displayed answer, never a captured stream/tool payload.
+                voiceHostText(chatState.turns, id)?.let { text ->
+                    speechHost.speak(renderedSpeechOwner, id, text)
+                }
+            }
+        },
         onBranch = { pendingFeature() }, onEditUser = { pendingFeature() }, onDeleteTurn = { pendingFeature() },
         onRetryStep = { pendingFeature() },
         onOpenSidebar = { openSidebar() }, onTextChange = { if (editorMatches()) updateDraft(it) },
@@ -406,6 +446,25 @@ class MainActivity : ComponentActivity() {
         if (activityUsable() && retainedPage == "settings") guard { openSettingsRoute(route) }
     }
 
+    @Composable private fun VoiceExtras(id: String) {
+        val state by speechHost.state.collectAsStateWithLifecycle()
+        if (state.owner != speechHost.owner || state.requestId != id) return
+        val status = voiceHostStatusResource(state) ?: return
+        val renderedOwner = state.owner
+        top.yukonga.miuix.kmp.basic.Text(
+            text = stringResource(status),
+            modifier = Modifier.testTag("voice-host-status-$id")
+                .semantics { liveRegion = LiveRegionMode.Polite },
+        )
+        if (voiceHostIsActive(state)) {
+            top.yukonga.miuix.kmp.basic.TextButton(
+                text = stringResource(R.string.voice_host_stop),
+                modifier = Modifier.testTag("voice-host-stop-$id"),
+                onClick = { speechHost.stop(renderedOwner, id) },
+            )
+        }
+    }
+
     @Composable private fun QuestionExtras(id: String) {
         val row = questionRows[id] ?: return
         row.projections.forEach { question ->
@@ -440,7 +499,8 @@ class MainActivity : ComponentActivity() {
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); offerOpenedBackup(intent) }
     override fun onResume() {
-        super.onResume(); refreshRateWindowResumed = true; applyPreferredRefreshRate()
+        super.onResume(); speechHost.setForeground(true)
+        refreshRateWindowResumed = true; applyPreferredRefreshRate()
         window.decorView.post(refreshRateRequest)
     }
     private fun applyPreferredRefreshRate() {
@@ -453,6 +513,7 @@ class MainActivity : ComponentActivity() {
         requestedPreferredRefreshRate = rate; attributes.preferredRefreshRate = rate; window.attributes = attributes
     }
     override fun onPause() {
+        speechHost.setForeground(false)
         refreshRateWindowResumed = false; window.decorView.removeCallbacks(refreshRateRequest)
         val previous = previousPreferredRefreshRate
         if (previous != null && window.attributes.preferredRefreshRate == requestedPreferredRefreshRate) {
@@ -462,7 +523,13 @@ class MainActivity : ComponentActivity() {
         if (selectionReady) selections[selected?.id] = selectionStart to selectionEnd
         super.onPause()
     }
+    override fun onStop() {
+        // Idempotent fallback as well as the earlier onPause cancellation.
+        speechHost.setForeground(false)
+        super.onStop()
+    }
     override fun onDestroy() {
+        speechHost.close()
         activityCallbacksAllowed = false; refreshRateWindowResumed = false
         window.decorView.removeCallbacks(refreshRateRequest); invalidateCatalog(); dismissChatModels()
         cancelRestorePreview(); prompt = null
@@ -492,8 +559,13 @@ class MainActivity : ComponentActivity() {
             FeatureRoute.CHAT, FeatureRoute.USER_MESSAGE -> Unit
         }
     }
-    private fun openSidebar() { guard { updatePane(); sidebarVisible = true; publishChat() } }
-    private fun dismissSidebar() { sidebarVisible = false; if (activityUsable()) refresh() }
+    private fun openSidebar() { guard {
+        updatePane(); speechHost.setVisible(false); sidebarVisible = true; publishChat()
+    } }
+    private fun dismissSidebar() {
+        sidebarVisible = false; speechHost.setVisible(retainedPage == "chat")
+        if (activityUsable()) refresh()
+    }
     private fun updatePane() {
         if (!controller.ready || controller.dataBusy) return
         val all = retainedData.summaries(controller.active)
@@ -591,6 +663,8 @@ class MainActivity : ComponentActivity() {
             if (conversation == null) remove("selected") else putString("selected", conversation.id.value)
         }.commit())
         editorGeneration++
+        // Even A -> A re-entry gets a new capability; old click lambdas cannot act on it.
+        speechHost.enter(conversation?.id?.value)
         selected = conversation; selectionReady = true; draft = targetDraft
         val range = selections[conversation?.id]
         selectionStart = (range?.first ?: draft.length).coerceIn(0, draft.length)
@@ -694,6 +768,8 @@ class MainActivity : ComponentActivity() {
         return result
     }
     private fun publishChat() {
+        // Also catches new-chat -> persisted conversation after sending, without auto-playing.
+        speechHost.syncConversation(selected?.id?.value)
         questionRows = shown.mapNotNull { (_, message) ->
             val projections = message.blocks.filterIsInstance<MessageBlock.Tool>()
                 .mapNotNull { controller.questionProjection(message, it.invocation) }
@@ -992,4 +1068,158 @@ class MainActivity : ComponentActivity() {
             .putBoolean("blur", normalized.blurEnabled).putString("blur_style", normalized.topBarBlurStyle.persistedValue).commit())
         appearance = normalized
     } }
+}
+
+/** Activity-owned, main-thread-only policy. The factory never runs on enter/render/resume. */
+internal interface VoiceHostPlayer : AutoCloseable {
+    val state: StateFlow<SpeechPlaybackState>
+    fun bindOwner(owner: String)
+    fun play(owner: String, requestId: String, text: String): Boolean
+    fun stop(owner: String): Boolean
+}
+
+private class AndroidVoiceHostPlayer(private val player: AndroidSpeechPlayer) : VoiceHostPlayer {
+    override val state get() = player.state
+    override fun bindOwner(owner: String) = player.bindOwner(owner)
+    override fun play(owner: String, requestId: String, text: String) = player.play(owner, requestId, text)
+    override fun stop(owner: String) = player.stop(owner)
+    override fun close() = player.close()
+}
+
+internal class VoiceHost(
+    private val scope: CoroutineScope,
+    private val factory: () -> VoiceHostPlayer,
+) : AutoCloseable {
+    // Observable so captured action capabilities are refreshed even after pause/resume without data edits.
+    var owner by mutableStateOf(java.util.UUID.randomUUID().toString())
+        private set
+    private var conversation: String? = null
+    private var foreground = false
+    private var visible = true
+    private var closed = false
+    private var player: VoiceHostPlayer? = null
+    private var observation: Job? = null
+    private var requestId: String? = null
+    private var acceptingPlayback = false
+    private val mutableState = MutableStateFlow(SpeechPlaybackState(owner = owner))
+    val state: StateFlow<SpeechPlaybackState> = mutableState.asStateFlow()
+
+    fun enter(conversationId: String?) {
+        if (closed) return
+        stop(owner)
+        conversation = conversationId
+        renewOwner()
+    }
+
+    fun syncConversation(conversationId: String?) {
+        if (conversation != conversationId) enter(conversationId)
+    }
+
+    fun setForeground(value: Boolean) {
+        if (closed || foreground == value) return
+        if (!value) stop(owner)
+        foreground = value
+        // Resume does not replay; it only invalidates pre-background click capabilities.
+        if (value) renewOwner()
+    }
+
+    fun setVisible(value: Boolean) {
+        if (closed || visible == value) return
+        if (!value) stop(owner)
+        visible = value
+        if (value) renewOwner()
+    }
+
+    private fun renewOwner() {
+        owner = java.util.UUID.randomUUID().toString()
+        requestId = null
+        acceptingPlayback = false
+        player?.bindOwner(owner)
+        mutableState.value = SpeechPlaybackState(owner = owner)
+    }
+
+    fun speak(expectedOwner: String?, id: String, text: String): Boolean {
+        if (closed || !foreground || !visible || owner != expectedOwner || id.isBlank()) return false
+        requestId = id
+        acceptingPlayback = false
+        if (text.isBlank()) {
+            // Empty answer (e.g. tool-only turn) must not initialize system TTS or read tool data.
+            player?.stop(owner)
+            mutableState.value = SpeechPlaybackState(owner, id, SpeechPhase.ERROR, SpeechError.EMPTY_TEXT)
+            return false
+        }
+        val target = player ?: try {
+            factory().also { created ->
+                try {
+                    created.bindOwner(owner)
+                } catch (failure: Exception) {
+                    runCatching { created.close() }
+                    throw failure
+                }
+                player = created
+                observation = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                    created.state.collect { accept(it) }
+                }
+            }
+        } catch (_: Exception) {
+            mutableState.value = SpeechPlaybackState(owner, id, SpeechPhase.UNAVAILABLE, SpeechError.ENGINE_UNAVAILABLE)
+            return false
+        }
+        acceptingPlayback = true
+        val accepted = target.play(owner, id, text)
+        accept(target.state.value)
+        return accepted
+    }
+
+    fun stop(expectedOwner: String?, expectedRequestId: String? = null): Boolean {
+        if (closed || owner != expectedOwner ||
+            (expectedRequestId != null && expectedRequestId != requestId)) return false
+        val target = player ?: return true
+        val accepted = target.stop(owner)
+        accept(target.state.value)
+        return accepted
+    }
+
+    private fun accept(value: SpeechPlaybackState) {
+        if (!closed && acceptingPlayback && value.owner == owner && value.requestId == requestId) {
+            mutableState.value = value
+        }
+    }
+
+    override fun close() {
+        if (closed) return
+        closed = true
+        observation?.cancel()
+        player?.close()
+        player = null
+        mutableState.value = SpeechPlaybackState(owner = owner, phase = SpeechPhase.CLOSED)
+    }
+}
+
+/** Only the current assistant's visible answer; never flatten work-process/tool payloads. */
+internal fun voiceHostText(turns: List<ChatTurnUi>, id: String): String? =
+    turns.filterIsInstance<ChatTurnUi.Assistant>().firstOrNull { it.id == id }?.finalText
+
+internal fun voiceHostIsActive(state: SpeechPlaybackState) = state.phase in setOf(
+    SpeechPhase.INITIALIZING, SpeechPhase.QUEUED, SpeechPhase.SPEAKING,
+)
+
+internal fun voiceHostStatusResource(state: SpeechPlaybackState): Int? = when (state.phase) {
+    SpeechPhase.INITIALIZING -> R.string.voice_host_initializing
+    SpeechPhase.QUEUED -> R.string.voice_host_queued
+    SpeechPhase.SPEAKING -> R.string.voice_host_speaking
+    SpeechPhase.COMPLETED -> R.string.voice_host_completed
+    SpeechPhase.STOPPED -> R.string.voice_host_stopped
+    SpeechPhase.UNAVAILABLE, SpeechPhase.ERROR -> when (state.error) {
+        SpeechError.ENGINE_UNAVAILABLE -> R.string.voice_host_engine_unavailable
+        SpeechError.INITIALIZATION_FAILED -> R.string.voice_host_initialization_failed
+        SpeechError.LANGUAGE_UNSUPPORTED -> R.string.voice_host_language_unsupported
+        SpeechError.LANGUAGE_DATA_MISSING -> R.string.voice_host_language_data_missing
+        SpeechError.OFFLINE_VOICE_UNAVAILABLE -> R.string.voice_host_offline_voice_unavailable
+        SpeechError.EMPTY_TEXT -> R.string.voice_host_empty_text
+        SpeechError.TEXT_TOO_LONG -> R.string.voice_host_text_too_long
+        SpeechError.STOP_FAILED -> R.string.voice_host_stop_failed
+        SpeechError.PLAYBACK_FAILED, null -> R.string.voice_host_playback_failed
+    }
+    SpeechPhase.IDLE, SpeechPhase.READY, SpeechPhase.CLOSED -> null
 }

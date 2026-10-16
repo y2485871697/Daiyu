@@ -348,4 +348,17 @@ class SegmentedBackupRoundTripTest : InstrumentationTestCase() {
         assertEquals(complete, source.backup.exportPackage())
         assertEquals(0, source.modelCalls.get())
     }
+    fun testSingleConversationPackagePreservesSegmentedProtocolAndArchiveWithoutOtherConversationOrReplay() {
+        val source=fresh();val selected=seed(source);val other=seed(source)
+        val before=source.backup.exportPackage();val text=source.backup.exportConversation(selected.owner)
+        val inventory=source.backup.preflight(text)
+        assertEquals(1,inventory.conversations);assertEquals(2,inventory.messages);assertEquals(1,inventory.archives)
+        assertFalse(payload(text).getString("text_backup").contains(other.owner.value))
+        val target=fresh();target.backup.importPackage(text)
+        assertEquals(listOf(selected.owner),target.db.conversations().map {it.id});assertRestored(target,selected)
+        target.controller.close();open(target);assertRestored(target,selected)
+        assertTrue(target.backup.importPackage(text).alreadyImported)
+        assertEquals(before,source.backup.exportPackage());assertEquals(0,source.modelCalls.get());assertEquals(0,target.modelCalls.get())
+    }
+
 }

@@ -209,4 +209,122 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
         }
     }
 
+    private fun payloadOf(text: String) = JSONObject(JSONObject(text).getString("payload"))
+    fun testSingleConversationPackageScopesArchivesAssetsUsageAndDraftsWithoutMutation() {
+        val (context, source, backup) = fresh(); val selected = seed(source, 6); val other = seed(source, 6)
+        source.rename(selected, "selected title"); source.rename(other, "OTHER_TITLE")
+        source.draft(selected, "selected draft"); source.draft(other, "OTHER_DRAFT"); source.draft("GLOBAL_DRAFT")
+        val contexts = ContextService(context, source)
+        val archive = contexts.compress(selected, CompressionPolicy(keepTurns = 2), ContextSummarizer { "selected summary" })!!
+        contexts.compress(other, CompressionPolicy(keepTurns = 2), ContextSummarizer { "OTHER_SUMMARY" })!!
+        contexts.recordUsage(app.daiyu.android.domain.context.UsageRecord("selected-request", "selected-run", selected.value, 10, 4, 2, null))
+        contexts.recordUsage(app.daiyu.android.domain.context.UsageRecord("other-request", "other-run", other.value, 20, 8, null, null))
+        val selectedBytes = byteArrayOf(0, 1, -1, 42)
+        backup.attach("selected-asset", source.messages(selected).first().second.id.value, "application/octet-stream", selectedBytes)
+        backup.attach("other-asset", source.messages(other).first().second.id.value, "application/octet-stream", byteArrayOf(7, 8))
+        backup.setNonSecretConfiguration(mapOf("model" to "GLOBAL_MODEL"))
+        val before = backup.exportPackage(); val metadata = backup.importedConfiguration().toString()
+        val text = backup.exportConversation(selected); val payload = payloadOf(text); val inventory = backup.preflight(text)
+        assertEquals(1, inventory.conversations); assertEquals(12, inventory.messages); assertEquals(source.messages(selected).size, inventory.messages)
+        assertEquals(1, inventory.archives); assertEquals(1, inventory.attachments); assertEquals(0, inventory.configEntries)
+        assertEquals(0, inventory.branches); assertEquals(0, payload.getJSONObject("config").length())
+        for(marker in listOf("OTHER_TITLE", "OTHER_DRAFT", "GLOBAL_DRAFT", "OTHER_SUMMARY", "GLOBAL_MODEL", "other-request", "other-asset")) assertFalse(marker, text.contains(marker))
+        val inner = payloadOf(payload.getString("text_backup")); assertEquals("", inner.getString("draft"))
+        assertEquals("selected draft", inner.getJSONArray("conversations").getJSONObject(0).getString("draft"))
+        val usage = payload.getJSONObject("tables").getJSONArray("context_usage")
+        assertEquals(1, usage.length()); assertEquals("selected-request", usage.getJSONObject(0).getString("request_id"))
+        val (targetContext, target, importer) = fresh(); target.draft("target global draft")
+        assertFalse(importer.importPackage(text).alreadyImported); assertTrue(importer.importPackage(text).alreadyImported)
+        assertEquals(listOf(selected), target.conversations().map {it.id})
+        assertEquals(source.messages(selected).map {it.second}, target.messages(selected).map {it.second})
+        assertEquals("selected draft", target.conversations().single().draft); assertEquals("target global draft", target.draft())
+        assertTrue(selectedBytes.contentEquals(importer.attachment("selected-asset")))
+        assertEquals(contexts.archivePage(archive), ContextService(targetContext, target).archivePage(archive))
+        assertEquals(contexts.usage(selected.value), ContextService(targetContext, target).usage(selected.value))
+        assertEquals(0, importer.importedConfiguration().length())
+        assertEquals(before, backup.exportPackage()); assertEquals(metadata, backup.importedConfiguration().toString())
+        target.close(); val reopened = ConversationDatabase(targetContext)
+        try {
+            assertEquals(source.messages(selected).map {it.second}, reopened.messages(selected).map {it.second})
+            assertTrue(NeutralBackupService(targetContext, reopened).importPackage(text).alreadyImported)
+            assertEquals("target global draft", reopened.draft())
+        } finally { reopened.close() }
+    }
+    fun testSingleBranchPackageKeepsProvenanceWithoutIncludingParentOrSibling() {
+        val (context, source, backup) = fresh(); val parent = seed(source, 2)
+        val contexts = ContextService(context, source); val through = source.messages(parent)[1].second.id
+        val child = contexts.branch(parent, through); contexts.branch(parent, through)
+        source.rename(parent, "PARENT_ONLY_TITLE"); source.draft(parent, "PARENT_ONLY_DRAFT")
+        backup.attach("parent-only-asset", source.messages(parent).first().second.id.value, "application/octet-stream", byteArrayOf(8))
+        val text = backup.exportConversation(child); val payload = payloadOf(text)
+        val branch = payload.getJSONObject("tables").getJSONArray("context_branches")
+        assertEquals(1, branch.length()); assertEquals(child.value, branch.getJSONObject(0).getString("conversation_id"))
+        assertEquals(parent.value, branch.getJSONObject(0).getString("parent_id")); assertEquals(through.value, branch.getJSONObject(0).getString("through_message"))
+        assertEquals(0, backup.preflight(text).attachments)
+        for(marker in listOf("PARENT_ONLY_TITLE", "PARENT_ONLY_DRAFT", "parent-only-asset")) assertFalse(text.contains(marker))
+        assertEquals(0, backup.preflight(backup.exportConversation(parent)).branches)
+        val (_, target, importer) = fresh(); importer.importPackage(text)
+        assertEquals(listOf(child), target.conversations().map {it.id}); assertEquals(source.messages(child).map {it.second}, target.messages(child).map {it.second})
+        source.delete(parent); assertEquals(text, backup.exportConversation(child))
+    }
+    fun testSingleConversationIgnoresUnrelatedCorruptionAndWholeLibraryLimits() {
+        val (_, source, backup) = fresh(); val selected = seed(source, 1); val other = seed(source, 1)
+        source.draft("GLOBAL_DRAFT"); val text = backup.exportConversation(selected)
+        source.writableDatabase.beginTransaction()
+        try {
+            repeat(1000) { source.writableDatabase.execSQL("INSERT INTO conversations(id,title,draft,updated,folder,pinned) VALUES(?,?,?,0,'',0)", arrayOf("unrelated-$it", "other", "")) }
+            source.writableDatabase.setTransactionSuccessful()
+        } finally { source.writableDatabase.endTransaction() }
+        assertEquals(text, backup.exportConversation(selected))
+        try { backup.exportPackage(); fail("whole-library conversation limit must reject") }
+        catch (failure: IllegalArgumentException) { assertEquals("文本备份最多1000个会话、50000条消息", failure.message) }
+        source.writableDatabase.delete("conversations", "id LIKE ?", arrayOf("unrelated-%"))
+        backup.attach("unrelated-missing", source.messages(other).first().second.id.value, "application/octet-stream", byteArrayOf(9))
+        source.writableDatabase.execSQL("UPDATE neutral_assets SET blob_hash=? WHERE id=?", arrayOf("0".repeat(64), "unrelated-missing"))
+        source.writableDatabase.execSQL("UPDATE messages SET blocks='not-json',protocol='not-json',history_segments='not-json' WHERE conversation_id=?", arrayOf(other.value))
+        source.writableDatabase.execSQL("INSERT INTO neutral_config(name,value) VALUES('api-key','UNRELATED_SECRET')")
+        assertEquals(text, backup.exportConversation(selected)); assertEquals(1, backup.preflight(text).conversations)
+        assertFalse(text.contains("UNRELATED_SECRET"))
+        source.writableDatabase.execSQL("UPDATE messages SET blocks='not-json' WHERE conversation_id=?", arrayOf(selected.value))
+        reject { backup.exportConversation(selected) }
+    }
+    fun testSingleConversationMissingDeletedAndEmptyAreDistinct() {
+        val (_, source, backup) = fresh(); val empty = source.create().id; val deleted = source.create().id
+        source.delete(deleted); val before = backup.exportPackage()
+        for(id in listOf(ConversationId("missing"), deleted, ConversationId("' OR 1=1 --"))) {
+            reject { source.exportConversationBackup(id) }; reject { backup.exportConversation(id) }
+        }
+        val text = backup.exportConversation(empty); val inventory = backup.preflight(text)
+        assertEquals(1, inventory.conversations); assertEquals(0, inventory.messages); assertEquals(0L, inventory.blobBytes)
+        val (_, target, importer) = fresh(); importer.importPackage(text)
+        assertEquals(listOf(empty), target.conversations().map {it.id}); assertEquals(before, backup.exportPackage())
+    }
+    fun testSingleConversationReadsOnlyReferencedUniqueBlobsAndRejectsMissingSelectedBlob() {
+        val (context, source, backup) = fresh(); val selected = seed(source, 1); val other = seed(source, 1)
+        val bytes = byteArrayOf(11, 22, 33); val owner = source.messages(selected).first().second.id.value
+        backup.attach("first", owner, "application/octet-stream", bytes); backup.attach("second", owner, "application/octet-stream", bytes)
+        backup.attach("unrelated", source.messages(other).first().second.id.value, "application/octet-stream", bytes)
+        val text = backup.exportConversation(selected); val payload = payloadOf(text)
+        assertEquals(2, backup.preflight(text).attachments); assertEquals(bytes.size.toLong(), backup.preflight(text).blobBytes)
+        assertEquals(1, payload.getJSONArray("blobs").length()); assertFalse(text.contains("unrelated"))
+        val (_, _, importer) = fresh(); importer.importPackage(text)
+        assertTrue(bytes.contentEquals(importer.attachment("first"))); assertTrue(bytes.contentEquals(importer.attachment("second")))
+        val hash = payload.getJSONArray("blobs").getJSONObject(0).getString("sha256")
+        assertTrue(File(context.filesDir, "neutral-context-blobs/$hash").delete())
+        reject { backup.exportConversation(selected) }
+    }
+    fun testSingleConversationOwnByteBudgetStillRejectsBeforeReadingOversizedRow() {
+        val (_, source, backup) = fresh(); val selected = seed(source, 1); val other = source.create().id
+        val before = backup.exportConversation(selected)
+        source.writableDatabase.execSQL("UPDATE conversations SET title=CAST(zeroblob(16777217) AS TEXT) WHERE id=?", arrayOf(other.value))
+        source.writableDatabase.execSQL("UPDATE composer SET draft=CAST(zeroblob(16777217) AS TEXT) WHERE id=1")
+        fun budgetReject(work: () -> Unit) {
+            try { work(); fail("byte budget must reject before row read") }
+            catch (failure: IllegalArgumentException) { assertEquals("备份超过16MiB上限", failure.message) }
+        }
+        assertEquals(before, backup.exportConversation(selected)); budgetReject { source.exportBackup() }
+        source.writableDatabase.execSQL("UPDATE conversations SET title=CAST(zeroblob(16777217) AS TEXT) WHERE id=?", arrayOf(selected.value))
+        budgetReject { source.exportConversationBackup(selected) }; budgetReject { backup.exportConversation(selected) }
+    }
+
 }

@@ -420,6 +420,15 @@ class ChatController internal constructor(private val application:Application,
             else "纯文本兼容备份已导出；不含附件、归档与分支元数据"
         })
     }
+    internal fun exportConversationBackup(uri:Uri,conversationId:ConversationId,resolver:android.content.ContentResolver=application.contentResolver) {
+        dataTask(work={
+            val text=neutralBackup.exportConversation(conversationId)
+            resolver.openOutputStream(uri,"wt")?.use {
+                it.write(text.toByteArray(Charsets.UTF_8))
+            } ?: throw java.io.IOException("无法打开目标")
+            "单会话中立备份已导出；不含全局草稿、配置、凭据或运行恢复状态，请妥善保管"
+        })
+    }
     internal fun importUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver) {
         dataTask(importing=true,work={
             val stream=resolver.openInputStream(uri)

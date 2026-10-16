@@ -170,6 +170,9 @@ class ChatController internal constructor(private val application:Application,
     internal val imageAttachments by lazy { AndroidImageAttachments(application.contentResolver,
         app.daiyu.android.media.ImageAttachmentStore(File(application.filesDir,"media-draft-images"),
             app.daiyu.android.media.AndroidImageInspector())) }
+    internal val videoAttachments by lazy {
+        app.daiyu.android.media.video.AndroidVideoAttachments(application)
+    }
     private val messageImageAssets by lazy { MessageImageAssetStore(File(application.filesDir,"media-message-images")) }
     private val messageImages by lazy { ControllerMessageImages(database,messageImageAssets) }
     private val imageJournal by lazy { application.getSharedPreferences("image-send-identities",0) }
@@ -1167,7 +1170,14 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     internal fun skillManagement():SkillManagement = SkillManagement.create {SkillToolRegistry(application)}
-    private val neutralBackup by lazy { NeutralBackupService(application, database, app.daiyu.android.backup.MessageImageBackupAssets(messageImageAssets)) }
+    private val neutralBackup by lazy {
+        val videoAssets = app.daiyu.android.backup.MessageVideoBackupAssets(videoAttachments.store)
+        NeutralBackupService(application, database,
+            app.daiyu.android.backup.MessageImageBackupAssets(messageImageAssets),
+            app.daiyu.android.backup.BackupVideoIntegration(videoAssets,
+                exportText = { db, scope -> database.exportBackupForVideoAssets(db, scope, videoAssets) },
+                restoreSidecars = { db, sidecars -> database.restoreVideoBackupSidecars(db, sidecars) }))
+    }
     internal class ConfigurationRestorePreview internal constructor(
         val plan:NonSecretRestorePlan, internal val metadata:String
     )

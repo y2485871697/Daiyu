@@ -27,9 +27,13 @@ data class ImportResult(val packageId: String, val inventory: BackupInventory, v
  */
 class NeutralBackupService(private val store: ConversationDatabase, private val blobs: PrivateBlobs,
     private val transactions: DatabaseTransactions = DatabaseTransactions { store.writableDatabase },
-    private val imageAssets: BackupImageAssets? = null) {
+    private val imageAssets: BackupImageAssets? = null,
+    private val videoIntegration: BackupVideoIntegration? = null) {
     constructor(context: Context, store: ConversationDatabase, imageAssets: BackupImageAssets) :
         this(store, PrivateBlobs(context), imageAssets = imageAssets)
+    constructor(context: Context, store: ConversationDatabase, imageAssets: BackupImageAssets?,
+        videoIntegration: BackupVideoIntegration) :
+        this(store, PrivateBlobs(context), imageAssets = imageAssets, videoIntegration = videoIntegration)
     constructor(context: Context) : this(ConversationDatabase(context), PrivateBlobs(context))
     constructor(context: Context, store: ConversationDatabase) : this(store, PrivateBlobs(context))
 
@@ -80,7 +84,9 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
     /** A conversation package excludes global drafts/configuration and never follows parent provenance. */
     fun exportConversation(conversationId: ConversationId): String = exportPackage(emptyMap(), conversationId)
     private fun exportPackage(configuration: Map<String, Any?>?, conversationId: ConversationId?): String = transactions.run { db ->
-        val text = if (conversationId == null) store.exportBackup() else store.exportConversationBackup(conversationId)
+        val text = videoIntegration?.exportText?.invoke(db, conversationId)
+            ?: if (conversationId == null) store.exportBackup() else store.exportConversationBackup(conversationId)
+        store.preflightBackup(text)
         val tables = JSONObject()
         COLUMNS.forEach { (table, _) -> tables.put(table, readTable(db, table, conversationId)) }
         val config = if (configuration == null) readConfig(db) else projectConfiguration(configuration).first
@@ -114,6 +120,17 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val images = references.all()
         // Check the metadata bound before opening any original image.
         val manifest = BackupImageManifest.encode(images)
+        val videoManifest = if (videoIntegration == null) null else BackupVideoManifest.read(db, textData.getJSONArray("messages"))
+        val videos = BackupVideoManifest.decode(videoManifest, textData.getJSONArray("messages"))
+        // Reserve the deduplicated package byte budget BEFORE opening video originals.
+        val sizes = originals.mapValues { it.value.size.toLong() }.toMutableMap()
+        fun reserve(hash: String, bytes: Long) {
+            val previous = sizes.put(hash, bytes)
+            require(previous == null || previous == bytes)
+        }
+        images.forEach { reserve(it.sha256, it.bytes.toLong()) }
+        videos.references.forEach { reserve(it.sha256, it.bytes) }
+        require(sizes.values.sum() <= MAX_BYTES)
         if (images.isNotEmpty()) {
             val access = requireNotNull(imageAssets) { "消息原图存储未接入；不能导出仅含引用的备份" }
             images.forEach { reference ->
@@ -123,12 +140,18 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                 include(reference.sha256, bytes)
             }
         }
+        videos.references.forEach { reference ->
+            val bytes = requireNotNull(videoIntegration).assets.read(reference.owner, reference)
+            BackupVideoManifest.verify(reference, bytes)
+            include(reference.sha256, bytes)
+        }
         val contents = JSONArray()
         originals.toSortedMap().forEach { (hash, bytes) -> contents.put(JSONObject().put("sha256", hash).put("bytes", bytes.size)
             .put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))) }
         val payload = JSONObject().put("text_backup", text).put("tables", tables).put("config", config)
             .put("blobs", contents).put("excluded", JSONArray(listOf("凭据、授权令牌和密钥材料不导出")))
         if (images.isNotEmpty()) payload.put("message_images", manifest)
+        if (videos.sidecars.isNotEmpty()) payload.put("message_videos", videoManifest)
         val inventory = inventory(payload)
         payload.put("inventory", inventoryJson(inventory))
         val raw = payload.toString()
@@ -149,6 +172,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
     fun importPackage(text: String): ImportResult {
         val parsed = validate(text)
         val access = if (parsed.images.isEmpty()) null else requireNotNull(imageAssets) { "消息原图存储未接入；不能恢复图片引用" }
+        val video = if (parsed.videos.sidecars.isEmpty()) null else requireNotNull(videoIntegration) { "原视频存储未接入；不能恢复视频引用" }
         return transactions.run { db ->
             val duplicate = db.rawQuery("SELECT id FROM neutral_imports WHERE id=?", arrayOf(parsed.id)).use { it.moveToFirst() }
             if (duplicate) {
@@ -156,6 +180,10 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                 parsed.images.forEach { reference ->
                     val asset = MessageImageReferenceCodec.toAsset(reference)
                     BackupImageManifest.verify(reference, requireNotNull(access).read(asset.owner, asset))
+                }
+                BackupVideoManifest.verifySidecars(db, parsed.videos.sidecars)
+                parsed.videos.references.forEach { reference ->
+                    BackupVideoManifest.verify(reference, requireNotNull(video).assets.read(reference.owner, reference))
                 }
                 return@run ImportResult(parsed.id, parsed.inventory, true)
             }
@@ -170,14 +198,19 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                         is Number -> values.put(key, value.toLong())
                         else -> error("非法字段")
                     } }
-                    db.insertOrThrow(table, null, values)
+                    check(db.insertOrThrow(table, null, values) != -1L) { "备份附表未写入" }
                 }
             }
             val config = parsed.payload.getJSONObject("config")
             config.keys().forEach { key ->
                 val current = db.rawQuery("SELECT value FROM neutral_config WHERE name=?", arrayOf(key)).use { if (it.moveToFirst()) it.getString(0) else null }
                 require(current == null || current == config.get(key).toString()) { "非秘密配置冲突，未覆盖当前账户" }
-                if (current == null) db.insertOrThrow("neutral_config", null, ContentValues().apply { put("name", key); put("value", config.get(key).toString()) })
+                if (current == null) check(db.insertOrThrow("neutral_config", null, ContentValues().apply { put("name", key); put("value", config.get(key).toString()) }) != -1L) { "备份配置未写入" }
+            }
+            if (video != null) {
+                // Parent persists against the actual imported physical rows, in THIS transaction.
+                video.restoreSidecars(db, parsed.videos.sidecars)
+                BackupVideoManifest.verifySidecars(db, parsed.videos.sidecars)
             }
             // All package bytes/references were checked before the transaction; publish immutable
             // owner batches only after SQL collisions/config conflicts have passed. A later SQL
@@ -190,12 +223,44 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                     BackupImageManifest.verify(reference, destination.read(asset.owner, asset))
                 }
             }
-            db.insertOrThrow("neutral_imports", null, ContentValues().apply { put("id", parsed.id); put("created", System.currentTimeMillis()) })
+            parsed.videos.references.groupBy { it.owner }.forEach { (owner, references) ->
+                val destination = requireNotNull(video).assets
+                destination.restore(owner, references, references.map { parsed.bytes.getValue(it.sha256) })
+                references.forEach { reference ->
+                    BackupVideoManifest.verify(reference, destination.read(owner, reference))
+                }
+            }
+            val importedAt = System.currentTimeMillis()
+            check(db.insertOrThrow("neutral_imports", null, ContentValues().apply {
+                put("id", parsed.id); put("created", importedAt)
+            }) != -1L) { "备份导入标记未写入" }
+            // The last SQL write can run triggers too; validate receipts only after it finishes.
+            check(db.rawQuery("SELECT 1 FROM neutral_imports WHERE id=? AND created=?",
+                arrayOf(parsed.id, importedAt.toString())).use { it.moveToFirst() }) { "备份导入标记回执不匹配" }
+            store.verifyRestoredBackup(db, parsed.payload.getString("text_backup"))
+            verifyImportedTables(db, parsed.payload.getJSONObject("tables"))
+            config.keys().forEach { key ->
+                check(db.rawQuery("SELECT 1 FROM neutral_config WHERE name=? AND value=?",
+                    arrayOf(key, config.get(key).toString())).use { it.moveToFirst() }) { "备份配置回执不匹配" }
+            }
+            BackupVideoManifest.verifySidecars(db, parsed.videos.sidecars)
             ImportResult(parsed.id, parsed.inventory, false)
         }
     }
+    private fun verifyImportedTables(db: SQLiteDatabase, tables: JSONObject) {
+        COLUMNS.forEach { (table, columns) ->
+            val rows = tables.getJSONArray(table)
+            repeat(rows.length()) { index ->
+                val row = rows.getJSONObject(index)
+                val args = columns.map { key -> if (row.isNull(key)) null else row.get(key).toString() }.toTypedArray()
+                check(db.rawQuery("SELECT 1 FROM $table WHERE " + columns.joinToString(" AND ") { "$it IS ?" } + " LIMIT 1",
+                    args).use { it.moveToFirst() }) { "备份附表回执不匹配" }
+            }
+        }
+    }
     private data class Parsed(val id: String, val payload: JSONObject, val bytes: Map<String, ByteArray>,
-        val inventory: BackupInventory, val images: List<MessageImageReference>)
+        val inventory: BackupInventory, val images: List<MessageImageReference>,
+        val videos: BackupVideoManifest.Validated)
     private fun validate(text: String): Parsed {
         require(text.toByteArray(Charsets.UTF_8).size.toLong() <= MAX_PACKAGE)
         val envelope = objectOf(text); fields(envelope, setOf("format", "version", "sha256", "payload"))
@@ -204,7 +269,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         require(id == string(envelope, "sha256")) { "备份摘要不匹配" }
         val payload = objectOf(raw)
         val payloadFields = setOf("text_backup", "tables", "config", "blobs", "excluded", "inventory")
-        fields(payload, if (payload.has("message_images")) payloadFields + "message_images" else payloadFields)
+        fields(payload, payloadFields + listOf("message_images", "message_videos").filter { payload.has(it) })
         store.preflightBackup(string(payload, "text_backup"))
         val legacy = objectOf(string(payload, "text_backup"))
         require(legacy.getString("format") == "daiyu-neutral-text" && legacy.getInt("version") in 1..2)
@@ -224,9 +289,10 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         repeat(encoded.length()) { val blob = encoded.getJSONObject(it); fields(blob, setOf("sha256", "bytes", "data"))
             val hash = string(blob, "sha256"); require(hash.matches(Regex("[0-9a-f]{64}")) && hash !in bytes)
             val size = integer(blob, "bytes"); require(size in 0..PrivateBlobs.MAX_BLOB)
+            total += size; require(total <= MAX_BYTES) // Reserve before allocating decoded originals.
             val data = string(blob, "data"); require(data.length.toLong() <= (size + 2) / 3 * 4)
             val decoded = Base64.decode(data, Base64.NO_WRAP); require(decoded.size.toLong() == size && PrivateBlobs.digest(decoded) == hash)
-            total += size; require(total <= MAX_BYTES); bytes[hash] = decoded
+            bytes[hash] = decoded
         }
         val used = mutableSetOf<String>()
         val imageReferences = BackupImageManifest.References().apply { addRows(messages) }
@@ -260,7 +326,10 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         }
         val images = BackupImageManifest.validate(payload, imageReferences, bytes)
         images.forEach { used.add(it.sha256) }
-        require(used == bytes.keys) { "附件/归档/图片清单不一致" }
+        val videos = BackupVideoManifest.validate(
+            if (payload.has("message_videos")) payload.getJSONObject("message_videos") else null, messages, bytes)
+        videos.references.forEach { used.add(it.sha256) }
+        require(used == bytes.keys) { "附件/归档/图片/视频清单不一致" }
         validateConfig(payload.getJSONObject("config"))
         val excluded = payload.getJSONArray("excluded"); require(excluded.length() <= 20)
         repeat(excluded.length()) { require(excluded.get(it) is String && excluded.getString(it).length <= 200) }
@@ -270,7 +339,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         expected.keys().forEach { key -> require(declared.get(key) == expected.get(key) ||
             declared.get(key) is Number && expected.get(key) is Number &&
                 integer(declared, key) == integer(expected, key)) { "数量或字节清单不一致" } }
-        return Parsed(id, payload, bytes, inventory, images)
+        return Parsed(id, payload, bytes, inventory, images, videos)
     }
     private fun inventory(payload: JSONObject): BackupInventory {
         val legacy = objectOf(payload.getString("text_backup")); val tables = payload.getJSONObject("tables")
@@ -279,7 +348,9 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val excluded = payload.getJSONArray("excluded")
         return BackupInventory(legacy.getInt("conversation_count"), legacy.getInt("message_count"),
             tables.getJSONArray("context_branches").length(), tables.getJSONArray("context_archives").length(),
-            tables.getJSONArray("neutral_assets").length() + (payload.optJSONArray("message_images")?.length() ?: 0),
+            tables.getJSONArray("neutral_assets").length() + (payload.optJSONArray("message_images")?.length() ?: 0) +
+                BackupVideoManifest.decode(if (payload.has("message_videos")) payload.getJSONObject("message_videos") else null,
+                    objectOf(legacy.getString("payload")).getJSONArray("messages")).references.size,
             size, payload.getJSONObject("config").length(),
             (0 until excluded.length()).map { excluded.getString(it) })
     }

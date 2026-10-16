@@ -1,7 +1,8 @@
 package app.daiyu.android
 
 import android.content.ContextWrapper
-import androidx.test.espresso.Espresso
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -64,7 +65,10 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     }
     private fun fetchReady(): SemanticsNodeInteraction {
         ui.waitForIdle()
-        Espresso.closeSoftKeyboard()
+        mainThread {
+            WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                .hide(WindowInsetsCompat.Type.ime())
+        }
         ui.waitForIdle()
         reveal("model-catalog-fetch")
         ui.waitUntil(timeoutMillis = 5_000) {

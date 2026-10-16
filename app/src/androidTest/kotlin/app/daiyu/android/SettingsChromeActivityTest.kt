@@ -128,7 +128,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         val preferences = activity.getSharedPreferences("appearance-settings", android.content.Context.MODE_PRIVATE)
         val previous = preferences.all.toMap()
         try {
-            menu("设置")
+            openSettings()
             reveal("settings-row:外观与主题", "设置").performClick()
             node("settings-radio:深色").performClick()
             val black = reveal("settings-switch:纯黑背景", "外观与主题")
@@ -137,7 +137,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
             activity = recreateActivity(activity)
             assertEquals("dark", preferences.getString("theme", null))
             assertTrue(preferences.getBoolean("pure_black", false))
-            menu("设置")
+            openSettings()
             reveal("settings-row:外观与主题", "设置").performClick()
             node("settings-radio:深色").assertIsSelected()
             reveal("settings-switch:纯黑背景", "外观与主题").assertIsOn()

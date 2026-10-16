@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicReference
 /** The old FeatureHub entry contract now belongs to the retained Compose settings home. */
 class FeatureHubActivityTest : WiredActivityTestCase() {
     private val entries get() = SettingsCatalog.entries
-    private fun openHub() { menu("设置") }
+    private fun openHub() { openSettings() }
     private fun entry(id: String): SemanticsNodeInteraction {
         val item = entries.single { it.id == id }
         reveal("settings-search", "设置").performTextReplacement(item.title)
@@ -98,7 +98,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
                 assertFalse(fixture.controller.runState(owner)!!.pauseRequested)
                 assertEquals(1L, session.cancelled.count); assertEquals(1, fixture.opens.get())
             }
-            for (id in listOf("default_reasoning", "logging", "hotword", "gesture_search")) {
+            for (id in listOf("default_reasoning", "logging", "browser_tools", "device_tools")) {
                 entry(id).performClick(); node("page:设置").assertExists()
                 assertEquals(owner.id, fixture.controller.active!!.id)
                 assertFalse(fixture.controller.runState(owner)!!.pauseRequested)
@@ -110,7 +110,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     }
     fun testButtonsFromPreviousDetailPageAreInert() {
         openHub(); entry("providers"); val oldOpen = retainedClick(activity, "settings-row:模型提供商")
-        backToChat(activity); menu("设置"); entry("backup").performClick()
+        backToChat(activity); openSettings(); entry("backup").performClick()
         mainThread { oldOpen() }
         node("page:备份与导入").assertExists(); node("page:模型设置").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())

@@ -4,6 +4,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import app.daiyu.android.domain.*
+import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.storage.ConversationDatabase
 import java.util.UUID
@@ -44,7 +45,7 @@ class ActivityTest : WiredActivityTestCase() {
         mainThread { db.save(tail.copy(blocks = listOf(MessageBlock.Text("a", "新正文\n".repeat(100))))) }
         refresh()
         assertEquals("touch stops streaming follow", top, node(tag).fetchSemanticsNode().boundsInRoot.top, 1f)
-        menu("加载更早消息")
+        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.LOAD_EARLIER) }
         assertEquals("prepend preserves visible key offset", top, node(tag).fetchSemanticsNode().boundsInRoot.top, 1f)
         val shownField = MainActivity::class.java.getDeclaredField("shown").apply { isAccessible = true }
         mainThread {
@@ -52,12 +53,12 @@ class ActivityTest : WiredActivityTestCase() {
             assertTrue(shown.size > 50)
             assertEquals(RunStatus.RUNNING, shown.last().second.status)
         }
-        menu("定位用户消息")
+        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.LOCATE_USER) }
         node("prompt-choice:1").performClick()
         // After prepend, the second loaded user is su-21 (the original page began at su-45).
         node("chat-turn:su-21").assertIsDisplayed()
         assertTrue(node("chat-turn:su-21").fetchSemanticsNode().boundsInRoot.top >= viewport.top - 2f)
-        menu("回到底部"); node("chat-turn:sa-69").assertIsDisplayed()
+        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.BOTTOM) }; node("chat-turn:sa-69").assertIsDisplayed()
         node("chat-messages").performTouchInput { click(center) }
         mainThread { db.save(tail.copy(blocks = listOf(MessageBlock.Text("a", "点击后正文\n".repeat(160))))) }
         refresh()

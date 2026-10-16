@@ -121,6 +121,39 @@ class RunChildTasksTest {
         } finally { close(supervisor, model) }
     }
 
+    @Test fun pauseAndResumeForwardExactOwnerWithoutReopeningOrReadmittingAfterParentClose() {
+        val journal = Journal(); val model = Held(); val owner = owner()
+        val caps = SessionCapabilities("session", setOf(RunChildTasks.CAPABILITY)); val auth = TaskAuthorization("session", "run")
+        val supervisor = RetainedChildTasks(journal)
+        val binding = supervisor.bind(owner, caps, auth, mapOf("review" to ChildModelDefinition("pool", 1) { model }))
+        val adapter = RunChildTasks(supervisor, binding, setOf("review"))
+        val dispatcher = ToolDispatcher(ToolRegistry().register(adapter.tool()).snapshot(), caps, ToolLedger(InMemoryToolLedgerStore()))
+        try {
+            assertTrue(dispatcher.dispatchOwned(auth, listOf(call()), owner).single().outcome is DispatchOutcome.Confirmed)
+            assertTrue(model.entered.await(3, TimeUnit.SECONDS))
+            adapter.close()
+            val child = adapter.snapshots().single().record.owner
+            val impostors = listOf(child.copy(conversationId = "other"), child.copy(parentRunId = "other"),
+                child.copy(taskGroupId = "other"), child.copy(generation = child.generation + 1),
+                child.copy(childRunId = "other"), child.copy(assistantMessageId = "other"))
+            impostors.forEach {
+                assertEquals(ChildTaskControlReceipt.STALE, adapter.pause(it))
+                assertEquals(ChildTaskControlReceipt.STALE, adapter.resume(it))
+            }
+            assertEquals(ChildTaskControlReceipt.PENDING, adapter.pause(child))
+            assertEquals(ChildTaskPauseState.PENDING, adapter.snapshots().single().pauseState)
+            // An in-flight read is not PAUSED. Resume retracts intent on the same session.
+            assertEquals(ChildTaskControlReceipt.RESUMED, adapter.resume(child))
+            assertEquals(ChildTaskPauseState.ACTIVE, adapter.snapshots().single().pauseState)
+            assertEquals(1, model.opened.get()); assertEquals(1, journal.enqueues.get())
+            assertEquals(1L, model.cancelled.count)
+            assertEquals(ChildTaskStop.REQUESTED, adapter.stop(child))
+            assertEquals(ChildTaskControlReceipt.STALE, adapter.pause(child))
+            assertEquals(ChildTaskControlReceipt.STALE, adapter.resume(child))
+            assertEquals(ChildTaskPauseState.ACTIVE, adapter.snapshots().single().pauseState)
+        } finally { close(supervisor, model) }
+    }
+
     @Test fun schemaDoesNotExposeToolsWritesOrRecursiveDelegation() {
         val model = Held(); val owner = owner(); val caps = SessionCapabilities("session", setOf(RunChildTasks.CAPABILITY))
         val auth = TaskAuthorization("session", "run"); val supervisor = RetainedChildTasks(Journal())

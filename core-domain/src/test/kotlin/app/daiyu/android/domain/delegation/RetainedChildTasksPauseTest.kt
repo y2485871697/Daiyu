@@ -16,6 +16,7 @@ class RetainedChildTasksPauseTest {
     private class Journal : ChildTaskStore {
         private val rows = linkedMapOf<String, ChildTaskRecord>()
         var onStarted: () -> Unit = {}
+        var failFinished = false
         @Synchronized override fun enqueue(parent: RunExecutionOwner, tasks: List<ChildTaskRecord>) {
             tasks.forEach { rows[it.owner.childRunId] = it }
         }
@@ -24,6 +25,7 @@ class RetainedChildTasksPauseTest {
             onStarted()
         }
         @Synchronized override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) {
+            check(!failFinished) { "injected terminal journal failure" }
             rows[task.owner.childRunId] = task.copy(status = status, text = text, detail = detail)
         }
         @Synchronized override fun list(conversationId: String, limit: Int) = rows.values.toList().take(limit)
@@ -96,6 +98,23 @@ class RetainedChildTasksPauseTest {
         val done = CountDownLatch(1)
         supervisor.closeWhenIdle { done.countDown() }
         assertTrue("real worker and transport drain", done.await(5, TimeUnit.SECONDS))
+    }
+
+    @Test fun unconfirmedJournalCannotResumeAStillRetainedChild() {
+        val journal = Journal().apply { failFinished = true }
+        val model = Model(fail = false, holdCancel = true)
+        val parent = Parent("unconfirmed")
+        val supervisor = RetainedChildTasks(journal)
+        val binding = parent.bind(supervisor, model)
+        try {
+            val child = owner(supervisor, binding, parent)
+            assertTrue(model.entered.await(5, TimeUnit.SECONDS))
+            model.releaseRead.countDown()
+            await { snapshot(supervisor, binding).journalUnconfirmed }
+            assertEquals(ChildTaskControlReceipt.STALE, supervisor.pause(binding, child))
+            assertEquals(ChildTaskControlReceipt.STALE, supervisor.resume(binding, child))
+            assertEquals(1, model.opens.get())
+        } finally { drain(supervisor, model) }
     }
 
     @Test fun blockedReadIsOnlyPendingThenSameSessionResumesWithoutPostOrLateEvents() {

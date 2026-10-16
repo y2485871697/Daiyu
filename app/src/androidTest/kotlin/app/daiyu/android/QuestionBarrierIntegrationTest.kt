@@ -3,10 +3,7 @@ package app.daiyu.android
 import android.app.Application
 import android.content.Context
 import android.content.Intent
-import android.test.InstrumentationTestCase
-import android.view.View
-import android.view.ViewGroup
-import android.widget.*
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.question.*
@@ -14,7 +11,6 @@ import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.LedgerState
 import app.daiyu.android.integration.tools.SQLiteToolLedgerStore
 import app.daiyu.android.question.PrivateQuestionStore
-import app.daiyu.android.question.QuestionCardView
 import app.daiyu.android.storage.*
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -92,8 +88,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             if(done) {instrumentation.waitForIdleSync();return}
             Thread.sleep(20)
         }
-        var details="";main {details=diagnostic()}
-        fail("$description $details")
+        fail("$description ${diagnostic()}")
     }
     private fun fresh(seed:(Fixture)->Unit={}):Fixture {
         val f=Fixture(instrumentation.targetContext);fixtures.add(f)
@@ -108,11 +103,25 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         instrumentation.waitForIdleSync()
         if(conversation!=null) main {checkNotNull(activity).select(conversation)}
     }
-    private fun views(v:View):List<View> = listOf(v)+if(v is ViewGroup) (0 until v.childCount).flatMap {views(v.getChildAt(it))} else emptyList()
-    private fun all()=views(checkNotNull(activity).window.decorView)
-    private fun card()=all().filterIsInstance<QuestionCardView>().single()
-    private fun submits(v:View)=views(v).filterIsInstance<Button>().filterNot {it is CompoundButton}
-    private fun insideCard(v:View):Boolean {var p=v.parent;while(p!=null) {if(p is QuestionCardView) return true;p=p.parent};return false}
+    private fun waitForCard(readOnly:Boolean=false) {
+        ui.waitUntil(timeoutMillis=8_000) {
+            ui.onAllNodesWithTag("question-card").fetchSemanticsNodes().size==1 &&
+                node("question-card").isDisplayed() &&
+                (!readOnly || ui.onAllNodesWithTag("question-submit").fetchSemanticsNodes().isEmpty())
+        }
+        node("question-card").assertIsDisplayed()
+        node("question-other").assertDoesNotExist()
+        node("question-note").assertDoesNotExist()
+        if(readOnly) {
+            node("question-submit").assertDoesNotExist()
+            node("question-option:0").assertIsNotEnabled()
+            node("question-option:1").assertIsNotEnabled()
+        }
+    }
+    // Invoke the attached semantics callback twice in one main-thread turn: recomposition must not
+    // turn the duplicate-submit / stop race into a lookup of a new or already removed button.
+    private fun submitAction():()->Boolean = node("question-submit").assertIsEnabled()
+        .fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
     private fun send(f:Fixture):Message {
         setDraft("Ask for a route");node("chat-send").performClick()
         return checkNotNull(f.c.active)
@@ -122,20 +131,24 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
     }
     private fun checkpoint(f:Fixture,m:Message):RunCheckpoint=checkNotNull(checkpointOrNull(f,m))
     private fun waitingDiagnostic(f:Fixture,owner:Message):String {
-        val saved=checkpointOrNull(f,owner)
-        val identity=saved?.let {QuestionIdentity(owner.conversationId.value,owner.runId.value,it.owner,CALL)}
-        val record=identity?.let {id->PrivateQuestionStore(f.app).use {it.get(id.storageKey)}}
-        @Suppress("UNCHECKED_CAST")
-        val shown=MainActivity::class.java.getDeclaredField("shown").apply {isAccessible=true}.get(checkNotNull(activity)) as List<Pair<Long,Message>>
-        val message=shown.singleOrNull {it.second.id==owner.id}?.second
-        val tools=message?.blocks?.filterIsInstance<MessageBlock.Tool>().orEmpty()
-        val projection=tools.singleOrNull()?.let {f.c.questionProjection(checkNotNull(message),it.invocation)}
-        val cards=all().filterIsInstance<QuestionCardView>()
-        return "checkpointPresent=${saved!=null} phase=${saved?.phase} pendingCallMatches=${saved?.pending?.callId==ToolCallId(CALL)} " +
-            "checkpointTools=${saved?.tools?.size} recordPresent=${record!=null} answered=${record?.answer!=null} interrupted=${record?.interrupted} " +
-            "activePresent=${f.c.active!=null} activeMatchesOwner=${f.c.active?.id==owner.id} controllerReady=${f.c.ready} problemPresent=${f.c.problem!=null} " +
-            "ownerTurnPresent=${message!=null} ownerToolCount=${tools.size} projectionPresent=${projection!=null} canAnswer=${projection?.canAnswer} " +
-            "bindingPresent=${projection?.binding!=null} nativeCardCount=${cards.size} shownNativeCardCount=${cards.count {it.isShown}}"
+        val cardCount=ui.onAllNodesWithTag("question-card").fetchSemanticsNodes().size
+        var details=""
+        main {
+            val saved=checkpointOrNull(f,owner)
+            val identity=saved?.let {QuestionIdentity(owner.conversationId.value,owner.runId.value,it.owner,CALL)}
+            val record=identity?.let {id->PrivateQuestionStore(f.app).use {it.get(id.storageKey)}}
+            @Suppress("UNCHECKED_CAST")
+            val shown=MainActivity::class.java.getDeclaredField("shown").apply {isAccessible=true}.get(checkNotNull(activity)) as List<Pair<Long,Message>>
+            val message=shown.singleOrNull {it.second.id==owner.id}?.second
+            val tools=message?.blocks?.filterIsInstance<MessageBlock.Tool>().orEmpty()
+            val projection=tools.singleOrNull()?.let {f.c.questionProjection(checkNotNull(message),it.invocation)}
+            details="checkpointPresent=${saved!=null} phase=${saved?.phase} pendingCallMatches=${saved?.pending?.callId==ToolCallId(CALL)} " +
+                "checkpointTools=${saved?.tools?.size} recordPresent=${record!=null} answered=${record?.answer!=null} interrupted=${record?.interrupted} " +
+                "activePresent=${f.c.active!=null} activeMatchesOwner=${f.c.active?.id==owner.id} controllerReady=${f.c.ready} problemPresent=${f.c.problem!=null} " +
+                "ownerTurnPresent=${message!=null} ownerToolCount=${tools.size} projectionPresent=${projection!=null} canAnswer=${projection?.canAnswer} " +
+                "bindingPresent=${projection?.binding!=null} composeCardCount=$cardCount"
+        }
+        return details
     }
     private fun row(f:Fixture,id:QuestionIdentity):QuestionRecord=PrivateQuestionStore(f.app).use {checkNotNull(it.get(id.storageKey))}
     private fun drainWorker(f:Fixture) {
@@ -151,7 +164,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         assertEquals(owner.conversationId,pending.message.conversationId)
         val identity=QuestionIdentity(owner.conversationId.value,owner.runId.value,pending.owner,CALL)
         await(f,"durable public question record",{waitingDiagnostic(f,owner)}) {PrivateQuestionStore(f.app).use {it.get(identity.storageKey)!=null}}
-        await(f,"real public question card",{waitingDiagnostic(f,owner)}) {all().filterIsInstance<QuestionCardView>().singleOrNull()?.isShown==true}
+        waitForCard()
         val saved=checkpoint(f,owner)
         assertEquals(ExecutionPhase.WAITING_USER,saved.phase);assertEquals(ToolCallId(CALL),saved.pending!!.callId)
         assertEquals(ToolDisposition.IN_FLIGHT,saved.tools.single().disposition)
@@ -169,19 +182,12 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
     }
     fun testPublicQuestionReleasesWorkerAndDurableAnswerContinuesExactlyOnce() {
         val f=fresh();launch(f);val owner=send(f);val id=waiting(f,owner)
-        lateinit var originalCard:QuestionCardView
-        var selectedOptionId=0
-        main {
-            originalCard=card()
-            val choices=views(originalCard).filterIsInstance<RadioGroup>().single()
-            selectedOptionId=choices.getChildAt(0).id;choices.check(selectedOptionId)
-            MainActivity::class.java.getDeclaredMethod("refresh").apply {isAccessible=true}.invoke(checkNotNull(activity))
-        }
+        node("question-option:0").performClick().assertIsSelected()
+        val originalCardId=node("question-card").fetchSemanticsNode().id
+        main {MainActivity::class.java.getDeclaredMethod("refresh").apply {isAccessible=true}.invoke(checkNotNull(activity))}
         ui.waitForIdle()
-        main {
-            assertSame("same question refresh retains the native card",originalCard,card())
-            assertEquals(selectedOptionId,views(card()).filterIsInstance<RadioGroup>().single().checkedRadioButtonId)
-        }
+        assertEquals("same question refresh retains the Compose card",originalCardId,node("question-card").fetchSemanticsNode().id)
+        node("question-option:0").assertIsSelected()
         recreate();waiting(f,owner)
         val durable=AtomicInteger()
         f.probe.beforeContinuation={outputs ->
@@ -191,10 +197,9 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             val entries=SQLiteToolLedgerStore(f.db).use {store->store.transaction {it.toList()}}
             assertEquals(1,entries.size);assertEquals(LedgerState.CONFIRMED,entries.single().state);durable.incrementAndGet()
         }
-        main {
-            val c=card();val group=views(c).filterIsInstance<RadioGroup>().single();group.check(group.getChildAt(1).id)
-            val submit=submits(c).single();assertTrue(submit.isEnabled);submit.performClick();submit.performClick()
-        }
+        node("question-option:1").performClick().assertIsSelected()
+        val submit=submitAction()
+        main {submit();submit()}
         await(f,"answered completion") {f.c.active==null};drainWorker(f)
         assertEquals(1,durable.get());assertEquals(1,f.probe.opens.get());assertEquals(2,f.probe.nexts.get())
         assertEquals(QuestionAnswer.Selected("two"),row(f,id).answer)
@@ -203,10 +208,9 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
     }
     fun testStopFencesPendingCardAndNeverContinuesModel() {
         val f=fresh();launch(f);val owner=send(f);val id=waiting(f,owner)
-        main {
-            val c=card();val group=views(c).filterIsInstance<RadioGroup>().single();group.check(group.getChildAt(1).id)
-            val old=submits(c).single();assertTrue(f.c.stop(owner));old.performClick();old.performClick()
-        }
+        node("question-option:1").performClick().assertIsSelected()
+        val old=submitAction()
+        main {assertTrue(f.c.stop(owner));old();old()}
         await(f,"durable stop") {f.c.active==null};drainWorker(f)
         assertEquals(1,f.probe.opens.get());assertEquals(1,f.probe.nexts.get())
         val record=row(f,id);assertNull(record.answer);assertTrue(record.interrupted)
@@ -219,7 +223,8 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         worker.execute {entered.countDown();check(release.await(10,TimeUnit.SECONDS))}
         assertTrue(entered.await(5,TimeUnit.SECONDS))
         try {
-            main {val c=card();val group=views(c).filterIsInstance<RadioGroup>().single();group.check(group.getChildAt(1).id);submits(c).single().performClick()}
+            node("question-option:1").performClick().assertIsSelected()
+            node("question-submit").assertIsEnabled().performClick()
             await(f,"answer resume queued in same blocked slot") {
                 val current=ChatController::class.java.getDeclaredField("resources").apply {isAccessible=true}.get(f.c)
                 current!=null && current.javaClass.getDeclaredField("busy").apply {isAccessible=true}.getBoolean(current)
@@ -244,7 +249,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
                 main {assertNull(f.c.send(null,"must remain fenced"))}
             } finally {store.writableDatabase.execSQL("DROP TRIGGER reject_question_stop")}
         }
-        ui.onNodeWithText("重试停止清理").performClick()
+        node("question-retry-cleanup").performClick()
         await(f,"retry reaches durable stop") {f.c.active==null};drainWorker(f)
         assertNull(f.c.problem);assertTrue(row(f,id).interrupted)
         assertEquals(RunStatus.STOPPED,checkpoint(f,owner).message.status)
@@ -279,12 +284,12 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             } finally {f.db.close();runtime.close()}
         }
         launch(f,f.db.conversations().single())
-        await(f,"recovered readonly card") {all().filterIsInstance<QuestionCardView>().singleOrNull()?.let {it.isShown && submits(it).isEmpty()}==true}
+        waitForCard(readOnly=true)
         drainWorker(f);assertNull(f.c.active);assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())
         val saved=checkpoint(f,old.message);assertEquals(RunStatus.INTERRUPTED,saved.message.status);assertEquals(ExecutionPhase.TERMINAL,saved.phase);assertNull(saved.pending)
         assertTrue(saved.owner!=old.owner);assertEquals(ToolDisposition.UNKNOWN,saved.tools.single().disposition)
         assertEquals(answer,row(f,id).answer);if(answer==null) assertTrue(row(f,id).interrupted)
-        recreate();await(f,"recreated readonly card") {all().filterIsInstance<QuestionCardView>().singleOrNull()?.let {submits(it).isEmpty()}==true}
+        recreate();waitForCard(readOnly=true)
         drainWorker(f);assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())
     }
     fun testRecoveryOfPendingQuestionOnlyDisplaysAndDoesNotResend()=recovery(null)

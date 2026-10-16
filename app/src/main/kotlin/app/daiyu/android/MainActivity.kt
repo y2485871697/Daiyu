@@ -13,7 +13,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.platform.testTag
 import app.daiyu.android.assistants.AssistantSkill
 import app.daiyu.android.assistants.FileAssistantAssets
 import app.daiyu.android.assistants.SharedPreferencesAssistantStore
@@ -24,7 +24,6 @@ import app.daiyu.android.delegation.ConversationSubAgentPreferences
 import app.daiyu.android.delegation.ReasoningEffort
 import app.daiyu.android.domain.*
 import app.daiyu.android.model.ProviderRequestOptions
-import app.daiyu.android.skills.SkillManagementDialog
 import app.daiyu.android.storage.EditingSettings
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.ui.FeatureRoute
@@ -85,7 +84,6 @@ class MainActivity : ComponentActivity() {
     private var previousPreferredRefreshRate: Float? = null
     private var requestedPreferredRefreshRate: Float? = null
     private val refreshRateRequest = Runnable { applyPreferredRefreshRate() }
-    private var skillManagementDialog: SkillManagementDialog? = null
 
     // Prompts are one-shot capabilities, not saved state. A replaced/dismissed prompt cannot commit.
     private sealed interface Prompt { val backup: Boolean }
@@ -151,6 +149,10 @@ class MainActivity : ComponentActivity() {
                         onOpenHistoryHit = { hit -> guard { openHistoryHit(hit) } },
                     )
                     "usage" -> UsageStatsScreen(onBack = { returnToChat() }, load = { retainedData.stats() })
+                    "skills" -> SkillManagementScreen(
+                        managementFactory = { controller.skillManagement() },
+                        onBack = { returnToChat() },
+                    )
                     "settings" -> DaiyuSettingsScreen(
                         onBack = { returnToChat() }, onRoute = { route -> openSettingsFromPage(route) },
                         onOpenEntry = { entry ->
@@ -345,18 +347,21 @@ class MainActivity : ComponentActivity() {
         val row = questionRows[id] ?: return
         row.projections.forEach { question ->
             key(question.identity) {
-                // The existing question binding owns durable replies and stop races; keep its adapter.
-                AndroidView(factory = { app.daiyu.android.question.QuestionCardView(it) }, update = { view ->
-                    val binding = question.binding
-                    if (binding != null) view.bind(question.identity, question.record, question.canAnswer, binding)
-                    else view.bind(question.identity, question.record, false) { _, _, complete ->
-                        complete(app.daiyu.android.question.QuestionCardView.Reply.STOPPED)
-                    }
-                })
+                val binding = question.binding
+                if (binding != null) {
+                    QuestionCard(question.identity, question.record, question.canAnswer, binding)
+                } else {
+                    QuestionCard(question.identity, question.record, canAnswer = false,
+                        submit = { _, _, complete ->
+                            complete(app.daiyu.android.question.QuestionCardView.Reply.STOPPED)
+                        })
+                }
             }
         }
         if (row.retryCleanup) {
-            top.yukonga.miuix.kmp.basic.TextButton(text = "重试停止清理", onClick = { guard { controller.stop(row.message) } })
+            top.yukonga.miuix.kmp.basic.TextButton(text = "重试停止清理",
+                modifier = Modifier.testTag("question-retry-cleanup"),
+                onClick = { guard { controller.stop(row.message) } })
         }
     }
 
@@ -392,7 +397,6 @@ class MainActivity : ComponentActivity() {
         activityCallbacksAllowed = false; refreshRateWindowResumed = false
         window.decorView.removeCallbacks(refreshRateRequest); invalidateCatalog()
         cancelRestorePreview(); prompt = null
-        skillManagementDialog?.dismiss(); skillManagementDialog = null
         controller.unobserve(listener); super.onDestroy()
     }
     private fun returnToChat() {
@@ -401,9 +405,7 @@ class MainActivity : ComponentActivity() {
         if (activityUsable()) refresh()
     }
     private fun openSkillManagement() {
-        skillManagementDialog?.dismiss()
-        val owner = controller
-        skillManagementDialog = SkillManagementDialog(this) { owner.skillManagement() }.also { it.show() }
+        retainedPage = "skills"
     }
     private fun openSettingsRoute(route: FeatureRoute) {
         when (route) {

@@ -112,18 +112,22 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         val f=fresh();val c=f.db.create();val s=session(f)
         val reading=CountDownLatch(1);val release=CountDownLatch(1)
         val firstResult=AtomicReference<Conversation?>();val secondResult=AtomicReference<Conversation?>()
+        val secondStarted=CountDownLatch(1);val secondFinished=CountDownLatch(1)
         val failure=AtomicReference<Throwable?>()
         f.app.settingsRead={reading.countDown();check(release.await(10,TimeUnit.SECONDS))}
         val first=Thread {try {firstResult.set(f.controller.send(c,"first"))} catch(t:Throwable) {failure.set(t)}}
-        val second=Thread {try {secondResult.set(f.controller.send(c,"second"))} catch(t:Throwable) {failure.set(t)}}
+        val second=Thread {
+            secondStarted.countDown()
+            try {secondResult.set(f.controller.send(c,"second"))} catch(t:Throwable) {failure.set(t)}
+            finally {secondFinished.countDown()}
+        }
         first.start()
         try {
             assertTrue(reading.await(5,TimeUnit.SECONDS));second.start()
-            // Both implementations block here: baseline on the settings lock AFTER its gate,
-            // fixed Controller on its entry monitor BEFORE evaluating the second gate.
-            val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
-            while(second.state!=Thread.State.BLOCKED && second.isAlive && System.nanoTime()<deadline) Thread.yield()
-            assertEquals(Thread.State.BLOCKED,second.state)
+            assertTrue(secondStarted.await(5,TimeUnit.SECONDS))
+            // Observe the queued call, not the VM's transient monitor-state projection.
+            assertFalse("second send returned before the first preparation was released",
+                secondFinished.await(200,TimeUnit.MILLISECONDS))
             release.countDown();first.join(5000);second.join(5000)
             assertFalse(first.isAlive);assertFalse(second.isAlive);failure.get()?.let {throw it}
             assertNotNull(firstResult.get());assertNull(secondResult.get())

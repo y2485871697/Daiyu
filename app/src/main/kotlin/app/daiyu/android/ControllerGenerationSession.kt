@@ -58,6 +58,9 @@ internal class ControllerGenerationSession(
      * This accessor NEVER authorizes editor consumption; use consumeAccepted instead.
      */
     val persistenceReceipt get() = synchronized(this) { persistence }
+    val pendingAcceptedReceipt get() = synchronized(this) {
+        if (receiptConsumed) null else persistence as? GenerationPersistenceReceipt.Accepted
+    }
     val cleanupRequested get() = synchronized(this) { cleanupPending }
     val closeResult get() = synchronized(this) { cleanupResult }
     val canRetire get() = synchronized(this) {
@@ -167,6 +170,31 @@ internal class ControllerGenerationSession(
             !token.preview.editor.matches(currentEditor)) return null
         receiptConsumed = true
         return accepted
+    }
+
+    /** Match the original draft CAS separately from the approved form's revision namespace. */
+    @Synchronized fun consumeAcceptedForOriginalEditor(
+        originalEditor: GenerationEditorSnapshot,
+        currentEditor: GenerationEditorSnapshot,
+        currentIdentity: GenerationPreparationIdentity,
+    ): GenerationPersistenceReceipt.Accepted? {
+        val accepted = persistence as? GenerationPersistenceReceipt.Accepted ?: return null
+        if (!ownerValidated || receiptConsumed || currentIdentity != identity ||
+            !originalEditor.matches(currentEditor) ||
+            originalEditor.text != token.preview.editor.text ||
+            originalEditor.attachmentIds != token.preview.editor.attachmentIds) return null
+        receiptConsumed = true
+        return accepted
+    }
+
+    /** Explicit receipt-only acknowledgement. This never consumes or changes any editor. */
+    @Synchronized fun acknowledgeAccepted(
+        receiptIdentity: GenerationPreparationIdentity,
+        expectedReceipt: GenerationPersistenceReceipt.Accepted,
+    ): Boolean {
+        if (receiptIdentity != identity || persistence !== expectedReceipt || receiptConsumed) return false
+        receiptConsumed = true
+        return true
     }
 
     /** Synchronous cheap revocation first. Schedule cleanup separately; never close under UI or

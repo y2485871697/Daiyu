@@ -39,6 +39,8 @@ import app.daiyu.android.model.catalog.ModelCatalogService
 import app.daiyu.android.model.catalog.RemoteModel
 import app.daiyu.android.model.ModelFactory
 import app.daiyu.android.model.ProviderSnapshot
+import app.daiyu.android.model.generation.*
+import app.daiyu.android.media.GenerationAssetOwner
 import app.daiyu.android.media.AndroidImageAttachments
 import app.daiyu.android.media.ImageAttachmentOwner
 import app.daiyu.android.media.MessageImageAssetStore
@@ -178,6 +180,303 @@ class ChatController internal constructor(private val application:Application,
     private val imageJournal by lazy { application.getSharedPreferences("image-send-identities",0) }
     private var imageProvider:ProviderSnapshot?=null
     private var imageReaders=0
+
+    // One fixed application DB/account, not a resolver of whichever account is active later.
+    @Volatile private var generationScope: String? = null
+    private var generationResources: ControllerGenerationResources? = null
+    private val generationCleanup = ControllerGenerationCleanupQueue(workers = 2, capacity = 8)
+    private var generationEntry: GenerationEntry? = null
+    private var generationPreparation: Preparation? = null
+    private var generationReaders = 0
+
+    internal class GenerationEntry internal constructor(
+        val conversation: Conversation?, val editorGeneration: Long,
+        val initialEditor: GenerationEditorSnapshot, val identity: GenerationPreparationIdentity,
+        val settings: GenerationSettingsSnapshot,
+    ) {
+        lateinit var handoff: GenerationConfirmationHandoff
+        var session: ControllerGenerationSession? = null
+        var submitted = false
+        var abandoned = false
+        var runner: ChatRunner? = null
+        var catalog: RunCatalogTools? = null
+        val persistenceDone = CountDownLatch(1)
+        val runnerDone = CountDownLatch(1)
+    }
+
+    @Synchronized internal fun currentGenerationEntry(): GenerationEntry? = generationEntry
+    @Synchronized internal fun generationSubmissionPending(): Boolean = generationEntry?.submitted == true
+
+    /** Worker-only settings load. The reservation spans the form, approval and physical drain. */
+    internal fun prepareGeneration(conversation: Conversation?, editorGeneration: Long,
+        editor: GenerationEditorSnapshot): GenerationEntry? {
+        check(Looper.myLooper() != Looper.getMainLooper())
+        val reserved = synchronized(this) {
+            if (!idleAvailable() || editor.text.isBlank() || editor.attachmentIds.isNotEmpty()) return null
+            reservePreparation().also { generationPreparation = it }
+        }
+        return try {
+            val snapshot = GenerationSettingsStore(application).loadSnapshot()
+            synchronized(this) {
+                check(!preparationCancelled(reserved))
+                check(generationScope == null || generationScope == snapshot.accountScope) {
+                    "generation_account_changed"
+                }
+                generationScope = snapshot.accountScope
+                if (generationResources == null) generationResources = ControllerGenerationResources(
+                    snapshot.accountScope, { database.writableDatabase }, { generationScope },
+                    File(application.filesDir, "media-message-generation"))
+                val identity = GenerationPreparationIdentity(snapshot.accountScope,
+                    conversation?.id ?: ConversationId(UUID.randomUUID().toString()),
+                    RunId(UUID.randomUUID().toString()), MessageId(UUID.randomUUID().toString()))
+                GenerationEntry(conversation, editorGeneration, editor, identity, snapshot).also { entry ->
+                    entry.handoff = GenerationConfirmationHandoff { abandonGeneration(entry) }
+                    generationEntry = entry
+                }
+            }
+        } catch (_: Exception) {
+            synchronized(this) { generationPreparation = null }
+            finishPreparation(reserved)
+            problem = "独立生成配置不可用或已变化；请先保存生成设置。草稿保留，未生成。"
+            notifyChanged(); null
+        }
+    }
+
+    private fun generationSession(entry: GenerationEntry): ControllerGenerationSession = synchronized(this) {
+        entry.session ?: ControllerGenerationSession(checkNotNull(entry.handoff.token),
+            parentStop = { stopGenerationParent(entry) }, parentDrain = { timeout ->
+            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeout)
+            fun await(latch: CountDownLatch): Boolean = latch.await(
+                (deadline - System.nanoTime()).coerceAtLeast(0), TimeUnit.NANOSECONDS)
+            if (!await(entry.persistenceDone) || !await(entry.runnerDone))
+                GenerationToolsCloseResult.Unknown("generation_parent_runner_not_drained")
+            else {
+                val drained = CountDownLatch(1)
+                var result: RunCatalogCloseResult? = null
+                val catalog = entry.catalog
+                if (catalog == null) GenerationToolsCloseResult.Drained else {
+                    catalog.closeWithResult { result = it; drained.countDown() }
+                    if (await(drained) && result == RunCatalogCloseResult.Drained)
+                        GenerationToolsCloseResult.Drained
+                    else GenerationToolsCloseResult.Unknown("generation_parent_catalog_not_drained")
+                }
+            }
+        }).also { entry.session = it }
+    }
+
+    private fun stopGenerationParent(entry: GenerationEntry) {
+        val lifetime = synchronized(this) {
+            resources?.takeIf { it.runner === entry.runner }?.also { fenceRun(it) }
+        }
+        entry.runner?.stop()
+        entry.catalog?.close()
+        if (lifetime != null) handler.post { synchronized(this) { cleanupRun(lifetime) } }
+    }
+
+    internal fun abandonGeneration(entry: GenerationEntry) {
+        val reserved = synchronized(this) {
+            if (generationEntry !== entry || entry.submitted || entry.abandoned) return
+            entry.abandoned = true
+            generationPreparation.also { generationPreparation = null }
+        }
+        if (entry.handoff.token == null) {
+            synchronized(this) { if (generationEntry === entry) generationEntry = null }
+        } else {
+            val session = generationSession(entry)
+            session.recordPersistence(entry.identity, GenerationPersistenceReceipt.Rejected)
+            entry.persistenceDone.countDown(); entry.runnerDone.countDown()
+            scheduleGenerationCleanup(entry)
+        }
+        reserved?.let(::finishPreparation)
+    }
+
+    /** Invoked ONLY by GenerationApprovalHost's exact paid-confirmation handoff. */
+    internal fun sendGeneration(entry: GenerationEntry, current: GenerationEditorSnapshot): Boolean {
+        val reserved = synchronized(this) {
+            val confirmed = entry.handoff.token ?: return false
+            if (generationEntry !== entry || entry.submitted || entry.abandoned || closed ||
+                confirmed.preview.identity != entry.identity || !confirmed.preview.editor.matches(current) ||
+                entry.initialEditor.text != current.text || current.attachmentIds.isNotEmpty()) return false
+            if (!confirmed.preview.config.batches.all { batch -> entry.settings.profiles.any { profile ->
+                    profile.freeze(batch.id, batch.items).fingerprint == batch.fingerprint
+                } }) return false
+            checkNotNull(generationPreparation).also { entry.submitted = true }
+        }
+        val session = generationSession(entry)
+        try { executor.execute {
+            try {
+                // Compare saved configuration on the worker before any preparation or model work.
+                val latest = GenerationSettingsStore(application).loadSnapshot()
+                check(latest.accountScope == entry.settings.accountScope && latest.revision == entry.settings.revision)
+                sendPrepared(reserved, entry.conversation, current.text,
+                    expectedDraftText = current.text, generation = entry)
+            } catch (_: Exception) {
+                problem = "生成配置或发送准备已变化；草稿保留，未自动重试"
+            } finally {
+                if (session.persistenceReceipt == null) session.recordPersistence(entry.identity,
+                    if (reserved.persistenceUnconfirmed) GenerationPersistenceReceipt.Unknown
+                    else GenerationPersistenceReceipt.Rejected)
+                entry.persistenceDone.countDown()
+                if (entry.runner == null) entry.runnerDone.countDown()
+                synchronized(this) { if (generationPreparation === reserved) generationPreparation = null }
+                finishPreparation(reserved)
+                if (entry.runner == null) scheduleGenerationCleanup(entry)
+                notifyChanged()
+            }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            session.recordPersistence(entry.identity, GenerationPersistenceReceipt.Rejected)
+            entry.persistenceDone.countDown(); entry.runnerDone.countDown()
+            synchronized(this) { generationPreparation = null }
+            finishPreparation(reserved); scheduleGenerationCleanup(entry); return false
+        }
+        return true
+    }
+
+    internal data class GenerationReceiptNotice(
+        val entry: GenerationEntry,
+        val identity: GenerationPreparationIdentity,
+        val receipt: GenerationPersistenceReceipt.Accepted,
+    )
+
+    @Synchronized internal fun pendingGenerationReceiptNotice(): GenerationReceiptNotice? {
+        val entry = generationEntry?.takeIf { it.submitted } ?: return null
+        val receipt = entry.session?.pendingAcceptedReceipt ?: return null
+        return GenerationReceiptNotice(entry, entry.identity, receipt)
+    }
+
+    @Synchronized internal fun acknowledgeGenerationReceipt(notice: GenerationReceiptNotice): Boolean {
+        val entry = generationEntry ?: return false
+        if (entry !== notice.entry || !entry.submitted || notice.identity != entry.identity ||
+            entry.session?.acknowledgeAccepted(notice.identity, notice.receipt) != true) return false
+        generationCleanupChanged(entry)
+        return true
+    }
+
+    /** UI CAS and session receipt consumption share this monitor. Never consumes a newer editor. */
+    @Synchronized internal fun consumeGenerationReceipt(entry: GenerationEntry, editorGeneration: Long,
+        current: GenerationEditorSnapshot, consume: (Conversation) -> Unit): Boolean {
+        if (generationEntry !== entry || editorGeneration != entry.editorGeneration) return false
+        val receipt = entry.session?.consumeAcceptedForOriginalEditor(entry.initialEditor, current, entry.identity) ?: return false
+        consume(receipt.conversation)
+        generationCleanupChanged(entry)
+        return true
+    }
+
+    private fun scheduleGenerationCleanup(entry: GenerationEntry) {
+        val session = entry.session ?: return
+        session.revokeAdmission()
+        if (!generationCleanup.offer(session) {
+            handler.post { synchronized(this) { generationCleanupChanged(entry) } }
+        }) {
+            // Rejection does not run close on the caller and cannot discard the reservation.
+            handler.postDelayed({ scheduleGenerationCleanup(entry) }, 100)
+        }
+    }
+
+    // The queue callback observes a published result AFTER the real worker exits its marker.
+    private fun generationCleanupChanged(entry: GenerationEntry) {
+        if (generationEntry !== entry) return
+        val session = entry.session ?: return
+        if (session.canRetire) {
+            generationEntry = null
+            if (closed) closeStorageWhenIdle() else notifyChanged()
+        } else if (session.closeResult is GenerationToolsCloseResult.Unknown ||
+            session.persistenceReceipt === GenerationPersistenceReceipt.Unknown) {
+            problem = "生成保存或清理结果 UNKNOWN；原资源和草稿保留，禁止自动重试"
+            notifyChanged()
+        } else if (session.closeResult == GenerationToolsCloseResult.Drained &&
+            session.persistenceReceipt is GenerationPersistenceReceipt.Accepted) {
+            problem = "消息已保存，但原编辑器收据尚未匹配；保留草稿和运行槽，不自动重发"
+            notifyChanged()
+        }
+        // Accepted without a matching editor remains retained; reopening history is not a receipt.
+
+    }
+
+    internal data class GenerationAssetDisplay(val metadata: ControllerGenerationOutputMetadata,
+        val thumbnail: android.graphics.Bitmap?)
+    private val generationOutputReaders = linkedMapOf<String, ControllerGenerationOutputReader>()
+    private val revokedGenerationConversations = mutableSetOf<String>()
+    private val generationOutputConversations = mutableMapOf<String, String>()
+
+    /** Same account and owner reuse one read fence. Only the controller worker touches this map. */
+    internal fun loadGenerationOutputs(conversation: ConversationId,
+        complete: (List<GenerationAssetDisplay>?) -> Unit): Boolean {
+        synchronized(this) {
+            if (closed || !ready || dataBusy) return false
+            generationReaders++
+        }
+        try { executor.execute {
+            val result = runCatching {
+                check(conversation.value !in revokedGenerationConversations)
+                val snapshot = GenerationSettingsStore(application).loadForEditing()
+                val retained = synchronized(this) {
+                    check(generationScope == null || generationScope == snapshot.accountScope)
+                    generationScope = snapshot.accountScope
+                    generationResources ?: ControllerGenerationResources(snapshot.accountScope,
+                        { database.writableDatabase }, { generationScope },
+                        File(application.filesDir, "media-message-generation")).also { generationResources = it }
+                }
+                val displays = mutableListOf<GenerationAssetDisplay>()
+                // Side table is authoritative, including registered outputs beside central UNKNOWN.
+                retained.database().rawQuery("SELECT operation_id,item_id,output_index,fingerprint,protocol," +
+                    "assistant_id,run_id,tool_call_id,tool_name FROM generation_outputs " +
+                    "WHERE account_scope=? AND conversation_id=? ORDER BY rowid DESC LIMIT 32",
+                    arrayOf(snapshot.accountScope, conversation.value)).use { rows ->
+                    while (rows.moveToNext()) {
+                        val binding = GenerationAttemptBinding(conversation.value, rows.getString(5),
+                            rows.getString(6), rows.getString(7), rows.getString(8))
+                        val owner = GenerationAssetOwner(snapshot.accountScope, binding)
+                        val key = snapshot.accountScope + ":" + binding.operationId
+                        val reader = generationOutputReaders.getOrPut(key) { retained.openOutputs(owner) }
+                        generationOutputConversations[key] = conversation.value
+                        val attempt = GenerationAttempt(GenerationIdentity(rows.getString(0), rows.getString(1)),
+                            rows.getString(3), GenerationProtocol.valueOf(rows.getString(4)))
+                        val index = rows.getInt(2)
+                        val metadata = reader.metadata(attempt, index) ?: continue
+                        val thumbnail = if (metadata.kind == GenerationKind.IMAGE) {
+                            // Decode bounded display pixels, not a rewritten/published original.
+                            reader.openOriginal(attempt, index)?.use { stream ->
+                                android.graphics.BitmapFactory.decodeStream(stream, null,
+                                    android.graphics.BitmapFactory.Options().apply {
+                                        inSampleSize = Integer.highestOneBit(
+                                            (maxOf(metadata.width, metadata.height) / 512).coerceAtLeast(1))
+                                    })
+                            }
+                        } else {
+                            // Authenticate the real video descriptor too; external file/URL exposure is denied.
+                            reader.openOriginal(attempt, index)?.use { it.read() }
+                            null
+                        }
+                        displays.add(GenerationAssetDisplay(metadata, thumbnail))
+                    }
+                }
+                displays.toList()
+            }.getOrNull()
+            handler.post {
+                synchronized(this) {
+                    generationReaders--
+                    if (closed) closeStorageWhenIdle()
+                }
+                complete(result)
+            }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { generationReaders-- }; return false
+        }
+        return true
+    }
+
+    /** Worker-only, BEFORE owner deletion/replacement. Tombstones forbid same-scalar resurrection. */
+    private fun revokeGenerationOutputOwners(owners: Set<String>? = null) {
+        check(Looper.myLooper() != Looper.getMainLooper())
+        val keys = generationOutputConversations.filterValues { owners == null || it in owners }.keys.toList()
+        revokedGenerationConversations.addAll(keys.mapNotNull { generationOutputConversations[it] })
+        val readers = keys.mapNotNull { key ->
+            generationOutputConversations.remove(key)
+            generationOutputReaders.remove(key)
+        }
+        readers.forEach { it.close() }
+    }
 
     /** Worker-thread only. Preview gets read authority, never draft mutation or a raw URI. */
     internal fun messageImageResolver(conversation:ConversationId):app.daiyu.android.media.MessageImageResolver {
@@ -358,7 +657,7 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
-        resources==null && pendingShizuku==null && unacceptedTools.isEmpty() &&
+        resources==null && generationEntry==null && generationReaders==0 && pendingShizuku==null && unacceptedTools.isEmpty() &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
     internal val selections=mutableMapOf<ConversationId?,Pair<Int,Int>>()
     @Volatile var active:Message?=null;private set
@@ -444,6 +743,7 @@ class ChatController internal constructor(private val application:Application,
     private fun fenceRun(lifetime:RunResources) {
         if(lifetime.fenced) return
         lifetime.fenced=true
+        generationEntry?.takeIf { it.runner === lifetime.runner }?.session?.revokeAdmission()
         runRevocationListeners.toList().forEach { listener ->
             try {listener(lifetime.initial)} catch (_:Exception) { /* Optional feedback only. */ }
         }
@@ -768,8 +1068,10 @@ class ChatController internal constructor(private val application:Application,
         shizukuAuthorization:app.daiyu.android.domain.tools.TaskAuthorization?=null,
         expectedDraftText:String?=null,
         browserPreparation:ControllerBrowserPreparation?=null,
-        browserBinding:CatalogBrowserBinding?=null):Conversation? {
+        browserBinding:CatalogBrowserBinding?=null,
+        generation:GenerationEntry?=null):Conversation? {
         require(shizukuPreparation==null || (imageAttempt==null && shizukuAuthorization!=null))
+        require(generation == null || (shizukuPreparation == null && browserBinding == null && imageAttempt == null))
         if(preparationCancelled(token)) return null
         // Freeze the persisted draft before any model/history preparation. Legacy send callers
         // may send text different from their persisted draft; CAS still protects that exact draft.
@@ -817,13 +1119,13 @@ class ChatController internal constructor(private val application:Application,
             if(imageAttempt!=null) require(selected?.asModelSettings()==config) {"stale_image_provider"}
             selected?.takeIf {it.asModelSettings()==config} ?: ProviderSnapshot.capture(config)
         } catch (_:Exception) {problem="图片模型配置已变化；草稿保留，未发起网络请求";notifyChanged();return null}
-        val conversationId=browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
+        val conversationId=generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
-        val run=browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
+        val run=generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
         val user=try {imageAttempt?.prepare(imageAttachments.store,messageImageAssets) ?:
             Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
         } catch (_:Exception) {problem="图片冻结失败或模型不支持；草稿保留，未发起网络请求";notifyChanged();return null}
-        val assistant=Message(browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
+        val assistant=Message(generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
         val physicalVideoHistory = try {
             ControllerVideoHistory(database).capture(conversationId).also {
                 check(it.inputs.isEmpty()) { "original_video_authorization_required" }
@@ -884,7 +1186,8 @@ class ChatController internal constructor(private val application:Application,
                     (if (interactiveSnapshot.enabled) setOf(AndroidToolRegistry.ASK_USER_CAPABILITY) else emptySet()) +
                     (if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY,RunChildTasks.CAPABILITY)) +
                     (if (shizukuPreparation == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)) +
-                    (if (browserBinding == null) emptySet() else setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY)))
+                    (if (browserBinding == null) emptySet() else setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY)) +
+                    (if (generation == null) emptySet() else setOf(RunGenerationTools.CAPABILITY)))
             val backgroundFactory: ((app.daiyu.android.domain.runtime.RunExecutionOwner, SessionCapabilities,
                 app.daiyu.android.domain.tools.TaskAuthorization) -> RunChildTasks)? =
                 if(childModels.isEmpty()) null else { owner, grants, authorization ->
@@ -901,11 +1204,37 @@ class ChatController internal constructor(private val application:Application,
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
                 backgroundFactory, authorization=shizukuAuthorization ?: browserBinding?.let {
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value, it.requiredWrites)
-                }, shizuku=shizuku, browser=browserBinding) { grants, authorization ->
+                }, shizuku=shizuku, browser=browserBinding,
+                authorizationFactory = if (generation == null) null else { realOwner ->
+                    synchronized(this) {
+                        check(generationEntry === generation)
+                        val session = checkNotNull(generation.session)
+                        if (closed || session.cleanupRequested) {
+                            // This real Runner owner can validate a late durable receipt, never paid work.
+                            session.validateOwnerForReceipt(realOwner, session.token.preview.editor, generation.identity)
+                            notifyChanged()
+                            error("generation_session_stopped")
+                        }
+                        session.bindOwner(realOwner, session.token.preview.editor, generation.identity,
+                            capabilities.sessionId).also { notifyChanged() }
+                    }
+                },
+                generationFactory = if (generation == null) null else { realOwner, grants, task ->
+                    val retained = synchronized(this) {
+                        check(generationEntry === generation && !closed)
+                        checkNotNull(generationResources)
+                    }
+                    checkNotNull(generation.session).openLeaf(realOwner, grants, task, retained,
+                        isCurrentOwner = { synchronized(this) {
+                            generationEntry === generation && !closed &&
+                                resources?.let { !it.fenced && realOwner.owns(it.initial) } == true
+                        } }, networkPolicy = ControllerGenerationResources.DENY_DOWNLOADS)
+                }) { grants, authorization ->
                 SkillToolRegistry(application).captureForRun(grants, authorization,
                     selection = assistantContext.enabledSkillIds.toSet())
             }
             preparingTools = tools
+            generation?.catalog = tools
             val owned = ChatRunner(preparedModel, database, tools,
                 RunnerOptions(runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools,
                     onReasoning={ event -> publishReasoning(assistant,event) })) {
@@ -971,6 +1300,7 @@ class ChatController internal constructor(private val application:Application,
         }
         // database.send returns only after its real two-row transaction receipt succeeds.
         imageAttempt?.accepted(saved)
+        generation?.session?.recordPersistence(generation.identity, GenerationPersistenceReceipt.Accepted(saved))
         val lifetime=RunResources(assistant,owned,tools)
         val installed=synchronized(this) {
             if(closed || token.revoked || token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true ||
@@ -978,6 +1308,7 @@ class ChatController internal constructor(private val application:Application,
                 if(imageAttempt!=null) imageProvider=provider
                 problem=null;active=assistant
                 runner=owned;runTools=tools;resources=lifetime
+                generation?.let { it.runner=owned; it.catalog=tools }
                 enqueueSlice(lifetime,allowStopped=true) {
                     if(synchronized(this) {closed || token.revoked || lifetime.fenced}) {
                         val interrupted=assistant.copy(status=RunStatus.INTERRUPTED)
@@ -1139,6 +1470,11 @@ class ChatController internal constructor(private val application:Application,
         if(!lifetime.deviceCleanup.drained) return
         lifetime.writer.shutdown();lifetime.waiter.shutdown()
         resources=null;runner=null;runTools=null
+        generationEntry?.takeIf { it.runner === lifetime.runner }?.let {
+            // Slice completion + receipt persistence + catalog physical drain, not HTTP cancel.
+            it.runnerDone.countDown()
+            scheduleGenerationCleanup(it)
+        }
         val result=checkNotNull(lifetime.result)
         if(!closed) {
             if(result.error?.startsWith("保存失败")==true) {active=result;problem=result.error}
@@ -1153,7 +1489,8 @@ class ChatController internal constructor(private val application:Application,
     }==true
     private fun closeStorageWhenIdle() {
         pruneBackgroundRuns()
-        if(resources!=null || preparing || unacceptedTools.isNotEmpty() || imageReaders!=0 || closingStorage) return
+        if(resources!=null || preparing || generationEntry!=null || generationReaders!=0 ||
+            unacceptedTools.isNotEmpty() || imageReaders!=0 || closingStorage) return
         if(!childrenClosed) {
             if(!childrenClosing) {
                 childrenClosing=true
@@ -1174,7 +1511,7 @@ class ChatController internal constructor(private val application:Application,
         if(backgroundRuns.isNotEmpty()) return
         closingStorage=true
         executor.execute {
-            try {questionStore?.close();database.close();runtimeStore?.close();runtimeStore=null}
+            try {revokeGenerationOutputOwners();generationCleanup.close();questionStore?.close();database.close();runtimeStore?.close();runtimeStore=null}
             finally {executor.shutdown();closeDone.countDown()}
         }
     }
@@ -1288,6 +1625,16 @@ class ChatController internal constructor(private val application:Application,
             .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
             .decode(java.nio.ByteBuffer.wrap(out.toByteArray())).toString()
     }
+    internal fun mutateGenerationOwners(owners: Set<String>? = null, completed: (Boolean) -> Unit,
+        mutation: () -> Unit) {
+        dataTask(failureNotice = "删除未确认；原生成读取授权已撤销", completed = completed, work = {
+            revokedGenerationConversations.addAll(owners ?: database.conversations().map { it.id.value })
+            revokeGenerationOutputOwners(owners)
+            mutation()
+            "删除已完成"
+        })
+    }
+
     @Synchronized internal fun dataTask(importing:Boolean=false,failureNotice:String?=null,
         completed:(Boolean)->Unit = {},work:()->String) {
         check(idleAvailable() && !hasLiveChildTasks()) { "请等待后台子任务实际结束" }
@@ -1295,7 +1642,13 @@ class ChatController internal constructor(private val application:Application,
         try {executor.execute {
             var value=failureNotice ?: if(importing) "导入失败；原会话保留，格式、校验或身份冲突" else "导出失败；目标文件可能不完整，原会话保留"
             var success=false
-            try {value=work();success=true} catch(failure:Exception) {
+            try {
+                if (importing) {
+                    revokedGenerationConversations.addAll(database.conversations().map { it.id.value })
+                    revokeGenerationOutputOwners()
+                }
+                value=work();success=true
+            } catch(failure:Exception) {
                 value=failureNotice ?: when(failure) {
                     is SecurityException -> "备份文件访问权限不足或已失效；请重新选择文件。原会话保留，导出目标可能不完整"
                     is java.nio.charset.CharacterCodingException -> "导入失败；备份不是有效UTF-8文本。原会话保留，未执行历史请求"
@@ -1372,6 +1725,9 @@ class ChatController internal constructor(private val application:Application,
         return true
     }
     fun stop() {
+        synchronized(this) { generationEntry }?.let { entry ->
+            if (!entry.submitted) abandonGeneration(entry) else entry.session?.revokeAdmission()
+        }
         cancelPreparation()
         synchronized(this) {pendingImage}?.cancel()
         synchronized(this) {pendingShizuku}?.let(::rejectShizuku)
@@ -1380,6 +1736,9 @@ class ChatController internal constructor(private val application:Application,
         handler.post {synchronized(this) {cleanupRun(lifetime)}}
     }
     internal fun close() {
+        synchronized(this) { generationEntry }?.let { entry ->
+            if (!entry.submitted) abandonGeneration(entry) else entry.session?.revokeAdmission()
+        }
         val lifetime=synchronized(this) {
             if(!closed) {
                 closed=true;ready=false;dataBusy=false;active=null

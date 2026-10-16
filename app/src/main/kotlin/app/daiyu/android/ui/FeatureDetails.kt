@@ -447,12 +447,15 @@ internal object FeatureDetails {
             )),
         ),
         "R09" to listOf(
+            FeatureSection("actions", "操作", listOf(
+                FeatureControl("open", "打开终端", FeatureControlKind.ACTION, route = FeatureRoute.TERMINAL),
+            )),
             FeatureSection("content", "设置与内容", listOf(
                 FeatureControl("session", "终端会话与 PTY", FeatureControlKind.INFO),
-                FeatureControl("async", "异步任务与守护进程", FeatureControlKind.INFO),
+                FeatureControl("async", "异步读写与退出确认", FeatureControlKind.INFO),
                 FeatureControl("mapping", "路径映射与共享目录", FeatureControlKind.INFO),
                 FeatureControl("identity", "Android 身份", FeatureControlKind.INFO),
-                FeatureControl("installation", "Linux 环境安装", FeatureControlKind.INFO),
+                FeatureControl("installation", "Linux 可信安装配置（未提供安装器）", FeatureControlKind.INFO),
                 FeatureControl("cancel", "取消", FeatureControlKind.INFO),
             )),
         ),

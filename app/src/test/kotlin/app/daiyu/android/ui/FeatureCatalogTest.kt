@@ -39,11 +39,12 @@ class FeatureCatalogTest {
             "P23" to FeatureRoute.CHAT,
             "P33" to FeatureRoute.SKILLS,
             "R12" to FeatureRoute.BACKUP,
+            "R09" to FeatureRoute.TERMINAL,
             "P41" to FeatureRoute.USER_MESSAGE
         ), entries.mapNotNull { entry -> entry.route?.let { entry.id to it } }.toMap())
     }
     @Test fun unwiredMediaAndAssistantHaveNoReplacementAction() {
-        for (id in listOf("P01", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P32", "R06", "R07", "R08", "R09"))
+        for (id in listOf("P01", "P14", "P15", "P16", "P17", "P18", "P19", "P20", "P32", "R06", "R07", "R08"))
             assertNull(id, entries.single { it.id == id }.route)
     }
     @Test fun chatControlSlotsNavigateWithoutExecutingACommand() {
@@ -59,7 +60,7 @@ class FeatureCatalogTest {
     @Test fun detailsCoverEveryEntryWithStableUniqueControls() {
         assertEquals(entries.map { it.id }.toSet(), FeatureDetails.pages.keys)
         val controls = FeatureDetails.pages.values.flatten().flatMap { it.controls }
-        assertEquals(256, controls.size)
+        assertEquals(257, controls.size)
         assertEquals(FeatureControlKind.entries.toSet(), controls.map { it.kind }.toSet())
         FeatureDetails.pages.forEach { (id, sections) ->
             assertTrue(id, sections.isNotEmpty())
@@ -81,7 +82,7 @@ class FeatureCatalogTest {
             "SIDEBAR" to "P07", "MANAGE_CHATS" to "P22", "USAGE_STATS" to "P21",
             "CONVERSATION_SEARCH" to "P28", "FOLDERS" to "P28.folders",
             "MODEL_SETTINGS" to "R03 P02 P04 P06", "CHAT" to "P11 P12 P13 P23",
-            "SKILLS" to "P33", "BACKUP" to "P38.files R12", "USER_MESSAGE" to "P41"
+            "SKILLS" to "P33", "TERMINAL" to "R09", "BACKUP" to "P38.files R12", "USER_MESSAGE" to "P41"
         ).flatMap { (route, ids) -> ids.split(' ').map { "$it:open" to FeatureRoute.valueOf(route) } }.toMap()
         val actual = FeatureDetails.pages.flatMap { (id, sections) -> sections.flatMap { it.controls }.mapNotNull {
             control -> control.route?.let { "$id:${control.id}" to it }

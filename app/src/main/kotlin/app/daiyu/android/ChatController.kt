@@ -44,6 +44,8 @@ import java.util.UUID
 import java.util.concurrent.Executors
 
 class ChatApplication:Application() {
+    private val terminalOwnerDelegate = lazy { app.daiyu.android.terminal.TerminalUiOwner.android(this) }
+    internal val terminalOwner by terminalOwnerDelegate
     val shizuku by lazy { app.daiyu.android.shizuku.ShizukuAuthorization(this) }
     lateinit var controller:ChatController
     lateinit var hapticsRuntime: app.daiyu.android.haptics.HapticsRuntime
@@ -60,6 +62,7 @@ class ChatApplication:Application() {
     }
     override fun onTerminate() {
         // Android normally kills the process without this callback; useful for hosted runtimes.
+        if (terminalOwnerDelegate.isInitialized()) terminalOwner.close()
         touchHaptics?.close(); touchHaptics = null
         hapticsRuntime.close()
         super.onTerminate()

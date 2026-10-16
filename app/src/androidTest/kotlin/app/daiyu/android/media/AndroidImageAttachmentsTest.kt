@@ -1,6 +1,7 @@
 package app.daiyu.android.media
 
 import android.content.ContentProvider
+import android.content.pm.ProviderInfo
 import android.content.ContentValues
 import android.database.Cursor
 import android.graphics.Bitmap
@@ -31,8 +32,8 @@ class AndroidImageAttachmentsTest : InstrumentationTestCase() {
         root = File(instrumentation.targetContext.cacheDir, "image-fixture-${UUID.randomUUID()}")
         check(root.mkdirs())
         source = File(root, "picked")
-        val resolver = MockContentResolver()
-        resolver.addProvider(uri.authority, object : ContentProvider() {
+        val resolver = MockContentResolver(instrumentation.targetContext)
+        val provider = object : ContentProvider() {
             override fun onCreate() = true
             override fun getType(uri: Uri) = "image/gif"
             override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
@@ -45,7 +46,9 @@ class AndroidImageAttachmentsTest : InstrumentationTestCase() {
             override fun insert(uri: Uri, values: ContentValues?): Uri? = null
             override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = 0
             override fun update(uri: Uri, values: ContentValues?, selection: String?, selectionArgs: Array<out String>?) = 0
-        })
+        }
+        provider.attachInfo(instrumentation.targetContext, ProviderInfo().apply { authority = uri.authority })
+        resolver.addProvider(uri.authority, provider)
         store = ImageAttachmentStore(File(root, "private"), AndroidImageInspector())
         images = AndroidImageAttachments(resolver, store)
     }
@@ -98,11 +101,14 @@ class AndroidImageAttachmentsTest : InstrumentationTestCase() {
     }
 
     fun testJpegPreviewHonorsOrientationWithoutReencodingOriginal() {
-        source.writeBytes(encoded(Bitmap.CompressFormat.JPEG, 64, 32))
-        val exif = ExifInterface(source.absolutePath)
-        exif.setAttribute(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_ROTATE_90.toString())
-        exif.saveAttributes()
-        val original = source.readBytes()
+        val jpeg = encoded(Bitmap.CompressFormat.JPEG, 64, 32)
+        // A fixed EXIF orientation fixture does not depend on the device's metadata writer.
+        val app1 = "ffe1002245786966000049492a0008000000010012010300010000000600000000000000"
+            .chunked(2).map { it.toInt(16).toByte() }.toByteArray()
+        val original = jpeg.copyOfRange(0, 2) + app1 + jpeg.copyOfRange(2, jpeg.size)
+        source.writeBytes(original)
+        assertEquals(ExifInterface.ORIENTATION_ROTATE_90,
+            ExifInterface(source.absolutePath).getAttributeInt(ExifInterface.TAG_ORIENTATION, 0))
         val ref = images.import(owner, uri)
         val preview = images.decodePreview(owner, ref)
         try { assertEquals(32, preview.width); assertEquals(64, preview.height) }

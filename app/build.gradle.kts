@@ -35,6 +35,29 @@ android {
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
         versionCode = 1
         versionName = "0.1.0"
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+        }
+        externalNativeBuild {
+            cmake {
+                // Keep the helper usable on the app's minimum Android version.
+                arguments += "-DANDROID_PLATFORM=android-26"
+                // Executables must be selected explicitly for AGP packaging.
+                targets += "daiyu_pty"
+            }
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/kotlin/app/daiyu/android/terminal/native/CMakeLists.txt")
+        }
+    }
+    packaging {
+        jniLibs {
+            // A ProcessBuilder executable needs an installed file, not an APK mmap entry.
+            // AGP merges extractNativeLibs=true; the package installer owns extraction.
+            useLegacyPackaging = true
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

@@ -55,7 +55,9 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     protected fun setDraft(text: String) { node("chat-draft").performTextReplacement(text) }
     protected fun assertDraft(text: String) { node("chat-draft").assertEditableText(text).assertTextEquals(text) }
     protected fun setSelection(start: Int, end: Int) {
-        node("chat-draft").performSemanticsAction(SemanticsActions.SetSelection) { it(start, end, false) }
+        node("chat-draft").performSemanticsAction(SemanticsActions.SetSelection) { assertTrue(it(start, end, false)) }
+        ui.waitForIdle()
+        assertSelection(start, end)
     }
     protected fun assertSelection(start: Int, end: Int) {
         val range = node("chat-draft").fetchSemanticsNode().config[SemanticsProperties.TextSelectionRange]

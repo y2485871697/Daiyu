@@ -9,20 +9,16 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.produceState
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import app.daiyu.android.MarkdownText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
@@ -41,14 +37,8 @@ internal fun MessageContent(
         content.forEachIndexed { index, block ->
             when (block) {
                 is MessageContentUi.Text -> {
-                    val text = remember(block.text, markdown) {
-                        if (markdown) MarkdownText.render(block.text).toString() else block.text
-                    }
-                    if (text.isNotBlank()) SelectionContainer {
-                        Text(text, modifier = Modifier.testTag("message-content-text:$index"),
-                            color = MiuixTheme.colorScheme.onSurface,
-                            style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 25.sp))
-                    }
+                    if (block.text.isNotBlank()) MessageMarkdown(block.text,
+                        modifier = Modifier.testTag("message-content-text:$index"), markdown = markdown)
                 }
                 is MessageContentUi.Image -> MessageImage(block.image, ++imageNumber, imageLoader)
                 is MessageContentUi.Tool -> {

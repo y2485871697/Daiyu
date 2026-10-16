@@ -23,7 +23,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -41,7 +40,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
-import app.daiyu.android.MarkdownText
 import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.ui.icons.DaiyuIcons
 import kotlinx.coroutines.launch
@@ -197,11 +195,7 @@ internal fun AssistantTurn(turn: ChatTurnUi.Assistant, actions: ChatScreenAction
 private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions) {
     turn.workProcess?.let { WorkProcessCard(it, actions.onRetryStep) }
     if (turn.finalText.isNotBlank()) {
-        val answer = remember(turn.finalText) { MarkdownText.render(turn.finalText).toString() }
-        SelectionContainer {
-            Text(answer, color = MiuixTheme.colorScheme.onSurface,
-                style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 25.sp))
-        }
+        MessageMarkdown(turn.finalText)
     } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {
         Text("正在思考…", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, style = MiuixTheme.textStyles.body2)
     }

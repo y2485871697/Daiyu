@@ -44,6 +44,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
     private var cleanupPins = 0
     private var generation = 0L
     private val runners = mutableSetOf<ChatRunner>()
+    private var pauseControl: ChildTaskPauseControl? = null
     private val observers = mutableListOf<() -> Unit>()
 
     init { require(timeoutMillis in 1..120_000); require(this.models.keys.all { it.isNotBlank() && it.length <= 200 }) }
@@ -58,13 +59,16 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
     private data class Completion(val index: Int, val child: ChildRunOwner, val message: Message, val text: String)
 
     fun execute(context: ToolExecutionContext, tasks: List<ChildModelTask>): ExecutionReceipt =
-        executeBatch(context, tasks, null)
+        executeBatch(context, tasks, null, null)
 
-    internal fun executeQueued(context: ToolExecutionContext, records: List<ChildTaskRecord>): ExecutionReceipt =
-        executeBatch(context, records.map { ChildModelTask(it.profileId, it.prompt) }, records)
+    internal fun executeQueued(context: ToolExecutionContext, records: List<ChildTaskRecord>,
+        pause: ChildTaskPauseControl? = null): ExecutionReceipt {
+        require(pause == null || records.size == 1) { "pause_requires_exact_child" }
+        return executeBatch(context, records.map { ChildModelTask(it.profileId, it.prompt) }, records, pause)
+    }
 
     private fun executeBatch(context: ToolExecutionContext, tasks: List<ChildModelTask>,
-        queued: List<ChildTaskRecord>?): ExecutionReceipt {
+        queued: List<ChildTaskRecord>?, pause: ChildTaskPauseControl?): ExecutionReceipt {
         val snapshot = tasks.toList()
         if (snapshot.size !in 1..MAX_TASKS || snapshot.any {
             it.profileId !in models || it.prompt.isBlank() || it.prompt.length > 4096 || bytes(it.prompt) > 16 * 1024
@@ -90,13 +94,16 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
             }
             if (closed || busy || outstanding != 0 || cleanupPins != 0) return ExecutionReceipt.NotExecuted("child_batch_unavailable")
             busy = true; current = ++generation
+            pauseControl = pause
         }
         val group = queued?.first()?.owner?.taskGroupId ?: UUID.randomUUID().toString()
         val recordGeneration = queued?.first()?.owner?.generation ?: current
         val started = AtomicBoolean(false)
         val completions = LinkedBlockingQueue<Completion>()
         val failures = AtomicBoolean(false)
+        val pausedAtStart = pause?.pausedNanos() ?: 0L
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
+        fun beforeDeadline(): Boolean = System.nanoTime() - ((pause?.pausedNanos() ?: 0L) - pausedAtStart) < deadline
         fun cancelled() = synchronized(gate) { closed || generation != current } || context.cancelled()
         fun uncertain(code: String): ExecutionReceipt {
             close()
@@ -140,9 +147,9 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                             notifyIfIdle()
                         }
                         try {
-                            while (!acquired && !cancelled() && System.nanoTime() < deadline)
+                            while (!acquired && !cancelled() && beforeDeadline())
                                 acquired = pool.tryAcquire(25, TimeUnit.MILLISECONDS)
-                            if (acquired && !cancelled() && System.nanoTime() < deadline) {
+                            if (acquired && !cancelled() && beforeDeadline()) {
                                 val child = record.owner
                                 val scope = ChildRunScope.capture(child, parentSession, parentAuthorization, emptySet())
                                 val initial = Message(MessageId(child.assistantMessageId), parent.conversationId, RunId(child.childRunId),
@@ -160,12 +167,16 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                     override fun open(history: List<Message>): ModelSession = open(history, noTools.definitions)
                                     override fun open(history: List<Message>, definitions: List<app.daiyu.android.domain.ToolDefinition>): ModelSession {
                                         check(definitions.isEmpty())
-                                        check(!cancelled() && System.nanoTime() < deadline)
+                                        check(!cancelled() && beforeDeadline())
+                                        check(pause?.awaitBoundary() != false)
+                                        check(!cancelled() && beforeDeadline())
                                         val port = definition.create()
                                         store?.started(record)
+                                        // Persistence/factory callbacks may have raced a new pause intent.
+                                        check(pause?.awaitBoundary() != false)
                                         val revoked = context.cancelled()
                                         synchronized(gate) {
-                                            check(!closed && generation == current && !revoked && System.nanoTime() < deadline)
+                                            check(!closed && generation == current && !revoked && beforeDeadline())
                                             requestStarted = true
                                             started.set(true)
                                         }
@@ -184,8 +195,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                                                 val texts = mutableMapOf<String, Int>()
                                                 var rejected: Exception? = null
-                                                transport.next(outputs) { event ->
-                                                    if (cancelled()) return@next
+                                                val checkedSink: (ModelEvent) -> Unit = checkedSink@ { event ->
+                                                    if (cancelled()) return@checkedSink
                                                     rejected?.let { throw it }
                                                     try { when (event) {
                                                         is ModelEvent.TextDelta, is ModelEvent.TextFinal -> {
@@ -204,6 +215,38 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                         // No continuation or reasoning projection in this first stage.
                                                         else -> Unit
                                                     } } catch (failure: Exception) { rejected = failure; throw failure }
+                                                }
+                                                var continuing = false
+                                                while (true) {
+                                                    try {
+                                                        val delivery = ProviderEventDeliveryGate()
+                                                        try {
+                                                            val attemptSink: (ModelEvent) -> Unit = { event ->
+                                                                delivery.deliver { checkedSink(event) }
+                                                            }
+                                                            if (continuing) (transport as ResumableModelSession).resume(attemptSink)
+                                                            else transport.next(outputs, attemptSink)
+                                                        } finally {
+                                                            // Fence late callbacks and drain acknowledged delivery
+                                                            // before publishing a resumable pause boundary.
+                                                            delivery.close()
+                                                        }
+                                                        break
+                                                    } catch (failure: Exception) {
+                                                        // A blocked read is never interrupted for pause. Only a
+                                                        // transport-reported safe continuation may park here.
+                                                        val resumable = transport as? ResumableModelSession
+                                                        val kind = (failure as? ModelRequestException)?.failure
+                                                        if (rejected != null || cancelled() || !beforeDeadline() ||
+                                                            kind !in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT) ||
+                                                            resumable?.canResume != true) throw failure
+                                                        // Claim intent and boundary together: retracting an intent
+                                                        // before this point must not silently enable reconnect.
+                                                        if (pause == null || !pause.awaitBoundary(requireRequest = true)) throw failure
+                                                        check(!cancelled() && beforeDeadline())
+                                                        // Never call open or next(outputs) again for this request.
+                                                        continuing = true
+                                                    }
                                                 }
                                                 rejected?.let { throw it }
                                             }
@@ -229,6 +272,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                             }
                         } catch (_: Exception) { /* A sent request is uncertain; never reopen it. */ }
                         finally {
+                            pause?.terminate()
                             try {
                                 val result = completion
                                 if (result != null) store?.finished(record, ChildTaskStatus.COMPLETED, result.text)
@@ -254,7 +298,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
             var remaining = snapshot.size
             while (remaining > 0) {
                 if (cancelled()) return uncertain("child_batch_cancelled")
-                if (System.nanoTime() >= deadline) return uncertain("child_batch_timeout")
+                if (!beforeDeadline()) return uncertain("child_batch_timeout")
                 if (failures.get()) return uncertain("child_result_unconfirmed")
                 val result = completions.poll(25, TimeUnit.MILLISECONDS) ?: continue
                 check(result.child.taskGroupId == group && result.child.generation == recordGeneration &&
@@ -278,7 +322,11 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
     }
 
     override fun close() {
-        val active = synchronized(gate) { closed = true; runners.toList() }
+        val active = synchronized(gate) {
+            closed = true
+            pauseControl?.terminate()
+            runners.toList()
+        }
         active.forEach { it.stop() }
         workers.shutdown()
         notifyIfIdle()

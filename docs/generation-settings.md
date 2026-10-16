@@ -6,6 +6,7 @@ This change adds only:
 
 - `model/generation/GenerationSettingsStore.kt`: the production source of explicit generation configuration, detached snapshots and a narrow encrypted-credential adapter.
 - `ui/screens/settings/GenerationSettingsScreen.kt`: a controlled Miuix settings component and memory-only editing drafts.
+- `ui/GenerationSettingsHost.kt` and app-private `GenerationSettingsEditor.kt`: an independently mountable production editor host with per-visit ownership and background I/O. See [the exact parent API, admission contract and regression sources](generation-settings-host.md).
 - Independent tests and this document.
 
 It does **not** connect navigation, Controller, Main, or the existing `GenerationApprovalHost`. Merely installing or opening the component cannot send a request, discover models, download content, or authorize a run. There is no chat-model fallback or provider capability inference.
@@ -18,7 +19,7 @@ Construct `GenerationSettingsStore(context)`. Perform its synchronous I/O off th
 
 - `loadSnapshot(): GenerationSettingsSnapshot` returns a detached, validated configuration with `accountScope`, `revision`, `profiles`, `downloads`, `maxPolls`, and complete editable `values`.
 - `loadForEditing(): GenerationSettingsEditingSnapshot` preserves every non-secret original field, the stable IDs, and all still-valid keys. Missing/stale credentials are represented by an empty key **only in this editing result**, accompanied by `credentialUnavailableIds`. `incompleteSave` requires a separate explicit recovery confirmation. This result is not accepted as a runnable configuration.
-- `save(values, expectedRevision, confirmIncompleteSaveRecovery = false): GenerationSettingsSnapshot` validates, durably commits and reads back the configuration and credentials. Adopt the returned snapshot; do not treat a draft or a successful button click as persisted state. `expectedRevision` is null only before the first save. A stale editor is rejected.
+- `save(values, expectedRevision, confirmIncompleteSaveRecovery = false, admitSave = { true }): GenerationSettingsSnapshot` validates, durably commits and reads back the configuration and credentials. Adopt the returned snapshot; do not treat a draft or a successful button click as persisted state. `expectedRevision` is null only before the first save. A stale editor is rejected. The optional fast, memory-only owner predicate runs once under the shared store lock before store reads/writes/fencing; false rejects with `STALE_EDIT`. Once admitted, the store completes real readback even if the editor leaves.
 
 `GenerationSettingsException.reason` distinguishes missing configuration, corrupt configuration, unavailable credentials, an incomplete/unconfirmed save, stale editing and invalid input. Its message contains no configuration values. For **MISSING only**, the host may show a new blank `GenerationSettingsDraftUi()`. For credential loss, use `loadForEditing()` and show its explicit warning. For corruption, surface the error and fail closed; do not substitute a blank runnable model or silently repair unknown fields.
 

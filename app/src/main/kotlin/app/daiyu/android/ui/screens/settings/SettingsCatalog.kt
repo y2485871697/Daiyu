@@ -20,6 +20,7 @@ internal object SettingsCatalog {
         )),
         SettingsGroup("models", "模型功能", "压缩、视觉、子代理与标题模型", listOf(
             SettingsEntry("compression", "上下文压缩", DaiyuIcons.Compress, SettingControl.PAGE, FeatureRoute.COMPRESSION_SETTINGS),
+            SettingsEntry("generation", "独立生成模型", DaiyuIcons.Vision, SettingControl.PAGE, FeatureRoute.GENERATION_SETTINGS),
             SettingsEntry("vision", "辅助视觉模型", DaiyuIcons.Vision, SettingControl.PAGE),
             SettingsEntry("subagents", "子代理", DaiyuIcons.SubAgent, SettingControl.PAGE),
             SettingsEntry("title_model", "标题模型", DaiyuIcons.Title, SettingControl.PAGE),

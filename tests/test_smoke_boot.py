@@ -12,6 +12,22 @@ spec = importlib.util.spec_from_file_location('smoke_source', ROOT / 'scripts/ve
 source = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(source)
 
+JAVA_FIRST_SOURCE = (
+    'package app.daiyu.android;\n'
+    'public class FirstTest extends android.test.InstrumentationTestCase {\n'
+    ' public void testOne() throws Exception {}\n'
+    '}\n')
+JAVA_SECOND_SOURCE = (
+    'package app.daiyu.android.other;\n'
+    'public class SecondTest extends android.test.InstrumentationTestCase {\n'
+    ' public void testTwo() {}\n'
+    ' public void testThree() throws Exception {}\n'
+    ' public void testFour() {}\n'
+    ' public void testFive() {}\n'
+    ' private void testPrivateHelper() {}\n'
+    ' public void testWithArgument(int ignored) {}\n'
+    '}\n')
+
 
 class SourceTests(unittest.TestCase):
     def test_identity_and_unchanged_application(self):
@@ -75,17 +91,26 @@ class ProcessTests(unittest.TestCase):
         self.assertNotEqual(subprocess.run(cmd, cwd=self.root, env=env, capture_output=True).returncode, 0)
         self.assertEqual((sdk / 'adb.real').read_bytes(), first)
 
-    def smoke(self, api=26, case='ok', source_text=None, extra_source=None):
+    def smoke(self, api=26, case='ok', source_text=None, extra_source=None,
+              source_name='Test.kt', extra_sources=None, expected_classes=None, reported_count=None):
         (self.root / 'delivery/tests').mkdir(parents=True, exist_ok=True)
         (self.root / 'delivery/app.apk').touch()
         (self.root / 'delivery/tests/platform-test.apk').touch()
-        (self.root / 'app/src/androidTest').mkdir(parents=True, exist_ok=True)
-        (self.root / 'app/src/androidTest/Test.kt').write_text(
-            source_text if source_text is not None else
-            'package app.daiyu.android\nclass FirstTest : android.test.InstrumentationTestCase() {\n fun testOne() {}\n}\n')
-        (self.root / 'app/src/androidTest/Helper.kt').write_text('class SupportHelper {}\n')
+        source_root = self.root / 'app/src/androidTest'
+        source_root.mkdir(parents=True, exist_ok=True)
+        sources = {
+            source_name: source_text if source_text is not None else
+            'package app.daiyu.android\nclass FirstTest : android.test.InstrumentationTestCase() {\n fun testOne() {}\n}\n',
+            'Helper.kt': 'class SupportHelper {}\n',
+            'Helper.java': 'public class SupportHelper {}\n',
+        }
         if extra_source is not None:
-            (self.root / 'app/src/androidTest/Second.kt').write_text(extra_source)
+            sources['Second.kt'] = extra_source
+        sources.update(extra_sources or {})
+        for name, text in sources.items():
+            path = source_root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
         self.executable('sleep', '#!/bin/sh\nexit 0\n')
         self.executable('timeout', '#!/bin/sh\nshift 2\nexec "$@"\n')
         self.executable('adb', '''#!/usr/bin/env python3
@@ -102,9 +127,9 @@ elif a[0]=='install':
  print('Success');sys.exit(7 if case=='install-fail' else 0)
 elif a[:3]==['shell','am','instrument']:
  Path('smoke/instrumentation-args.txt').write_text('\\n'.join(a))
- classes='app.daiyu.android.FirstTest,app.daiyu.android.other.SecondTest' if case=='multi' else 'app.daiyu.android.FirstTest'
+ classes=os.environ['TEST_CLASSES']
  if a!=['shell','am','instrument','-w','-e','class',classes,'app.daiyu.android.test/android.test.InstrumentationTestRunner']: sys.exit(11)
- print('OK (3 tests)' if case=='multi' else 'OK (2 tests)' if case=='count' else 'OK (1 tests)',flush=True)
+ print('OK ('+os.environ['TEST_COUNT']+' tests)',flush=True)
  if case=='failure': print('FAILURES!!!')
  sys.exit(9 if case=='instrument-fail' else 0)
 elif a[:3]==['shell','am','start']: print('Status: ok')
@@ -124,7 +149,13 @@ elif a[0]=='logcat': print('FATAL EXCEPTION' if case=='crash' else '')
 elif a[0]=='exec-out': sys.stdout.buffer.write(b'bad' if case=='png' else b'\\x89PNG\\r\\n\\x1a\\n')
 elif a[:3]==['emu','screenrecord','screenshot']: Path(a[-1],'Screenshot_fake.png').write_bytes(b'\\x89PNG\\r\\n\\x1a\\n')
 ''')
-        env = dict(self.env, API=str(api), CASE=case)
+        if expected_classes is None:
+            expected_classes = ('app.daiyu.android.FirstTest,app.daiyu.android.other.SecondTest'
+                                if case == 'multi' else 'app.daiyu.android.FirstTest')
+        if reported_count is None:
+            reported_count = 3 if case == 'multi' else 2 if case == 'count' else 1
+        env = dict(self.env, API=str(api), CASE=case,
+                   TEST_CLASSES=expected_classes, TEST_COUNT=str(reported_count))
         return subprocess.run(['bash', str(ROOT / 'scripts/smoke_boot.sh')], cwd=self.root, env=env, capture_output=True, timeout=15)
 
     def test_api26_success_and_png_isolation(self):
@@ -143,6 +174,74 @@ elif a[:3]==['emu','screenrecord','screenshot']: Path(a[-1],'Screenshot_fake.png
         args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
         self.assertEqual(args[6], 'app.daiyu.android.FirstTest,app.daiyu.android.other.SecondTest')
         self.assertEqual((self.root / 'smoke/instrumentation-targets.txt').read_text().splitlines()[0], '3')
+
+    def test_java_only_classes_are_selected_on_both_apis(self):
+        classes = 'app.daiyu.android.FirstTest,app.daiyu.android.other.SecondTest'
+        for api in (26, 37):  # API 37.2 images report integer SDK 37 to adb.
+            with self.subTest(api=api):
+                result = self.smoke(
+                    api=api, source_name='java/FirstTest.java', source_text=JAVA_FIRST_SOURCE,
+                    extra_sources={'java/other/SecondTest.java': JAVA_SECOND_SOURCE},
+                    expected_classes=classes, reported_count=5)
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
+                self.assertEqual(args[3:7], ['-w', '-e', 'class', classes])
+                self.assertEqual((self.root / 'smoke/instrumentation-targets.txt').read_text().splitlines(),
+                                 ['5', classes])
+
+    def test_kotlin_and_java_classes_are_selected(self):
+        classes = 'app.daiyu.android.FirstTest,app.daiyu.android.other.SecondTest'
+        result = self.smoke(
+            extra_sources={'java/other/SecondTest.java': JAVA_SECOND_SOURCE},
+            expected_classes=classes, reported_count=5)
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
+        self.assertEqual(args[3:7], ['-w', '-e', 'class', classes])
+        self.assertEqual((self.root / 'smoke/instrumentation-targets.txt').read_text().splitlines(),
+                         ['5', classes])
+
+    def test_java_source_count_must_match_instrumentation(self):
+        result = self.smoke(
+            source_name='FirstTest.java', source_text=JAVA_FIRST_SOURCE, reported_count=2)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.root / 'smoke/instrumentation-targets.txt').read_text().splitlines(),
+                         ['1', 'app.daiyu.android.FirstTest'])
+        self.assertIn('OK (2 tests)', (self.root / 'smoke/platform-tests.txt').read_text())
+
+    def test_mixed_source_count_must_include_java_methods(self):
+        classes = 'app.daiyu.android.FirstTest,app.daiyu.android.other.SecondTest'
+        result = self.smoke(
+            extra_sources={'SecondTest.java': JAVA_SECOND_SOURCE},
+            expected_classes=classes, reported_count=1)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual((self.root / 'smoke/instrumentation-targets.txt').read_text().splitlines(),
+                         ['5', classes])
+        self.assertIn('OK (1 tests)', (self.root / 'smoke/platform-tests.txt').read_text())
+
+    def test_java_discovery_rejects_missing_or_ambiguous_declarations(self):
+        for text in (
+                JAVA_FIRST_SOURCE.replace('package app.daiyu.android;\n', ''),
+                'package another;\n' + JAVA_FIRST_SOURCE,
+                JAVA_FIRST_SOURCE + 'public class AnotherTest extends android.test.InstrumentationTestCase {}\n'):
+            with self.subTest(source=text):
+                result = self.smoke(source_name='FirstTest.java', source_text=text)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('Ambiguous instrumentation test declaration', result.stderr.decode())
+                self.assertFalse((self.root / 'smoke/instrumentation-args.txt').exists())
+
+    def test_java_discovery_rejects_duplicate_class(self):
+        result = self.smoke(
+            source_name='java/FirstTest.java', source_text=JAVA_FIRST_SOURCE,
+            extra_sources={'other/FirstTest.java': JAVA_FIRST_SOURCE})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Duplicate instrumentation test class: app.daiyu.android.FirstTest', result.stderr.decode())
+        self.assertFalse((self.root / 'smoke/instrumentation-args.txt').exists())
+
+    def test_mixed_discovery_rejects_duplicate_class(self):
+        result = self.smoke(extra_sources={'FirstTest.java': JAVA_FIRST_SOURCE})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Duplicate instrumentation test class: app.daiyu.android.FirstTest', result.stderr.decode())
+        self.assertFalse((self.root / 'smoke/instrumentation-args.txt').exists())
 
     def test_discovery_rejects_missing_package(self):
         result = self.smoke(source_text='class FirstTest : android.test.InstrumentationTestCase() {\n fun testOne() {}\n}\n')

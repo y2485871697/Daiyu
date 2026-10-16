@@ -133,7 +133,9 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(sidebarVisible, retainedPage) {
                     if (sidebarVisible || retainedPage != "chat") focus.clearFocus()
                 }
-                BackHandler(enabled = retainedPage != "chat") { returnToChat() }
+                BackHandler(enabled = retainedPage != "chat") {
+                    if (retainedPage == "appearance") retainedPage = "settings" else returnToChat()
+                }
                 when (retainedPage) {
                     "manage" -> ManageChatsScreen(
                         conversations = paneState.historyConversations,
@@ -155,11 +157,9 @@ class MainActivity : ComponentActivity() {
                     )
                     "settings" -> DaiyuSettingsScreen(
                         onBack = { returnToChat() }, onRoute = { route -> openSettingsFromPage(route) },
-                        onOpenEntry = { entry ->
-                            if (activityUsable() && retainedPage == "settings" && entry.id in setOf("P24", "P29", "P30", "P31", "P35", "P36", "P40")) retainedPage = "appearance"
-                        },
                         onOpenSubAgents = { retainedPage = "subagents" },
                         onOpenAssistants = { assistantPicker = true },
+                        onOpenAppearance = { retainedPage = "appearance" },
                     )
                     "models" -> modelDraft?.let { value ->
                         ModelSettingsScreen(
@@ -185,14 +185,9 @@ class MainActivity : ComponentActivity() {
                         busy = backupBusy,
                     )
                     "appearance" -> AppearanceSettingsScreen(
-                        state = AppearanceSettingsUi(SettingsThemeMode.valueOf(appearance.themeMode.name),
-                            appearance.interfaceScale, appearance.messageTimestampsEnabled, appearance.monetEnabled),
-                        onThemeModeChange = { saveAppearance(appearance.copy(themeMode = AppearanceThemeMode.valueOf(it.name))) },
-                        onInterfaceScaleChange = { saveAppearance(appearance.copy(interfaceScale = it)) },
-                        onWallpaperColorsChange = { saveAppearance(appearance.copy(monetEnabled = it)) },
-                        onMessageTimestampsChange = { saveAppearance(appearance.copy(messageTimestampsEnabled = it)) },
-                        onOpenAppIcon = {}, onOpenIconAppearance = {}, onOpenPet = {}, onOpenVibration = {},
-                        onOpenRefreshRate = {}, onBack = { returnToChat() },
+                        state = appearance,
+                        onChange = { saveAppearance(it) },
+                        onBack = { retainedPage = "settings" },
                     )
                     "subagents" -> SubAgentSettingsScreen(onBack = { returnToChat() },
                         repositoryFactory = { subAgentRepository }, isCurrentRoute = retainedPage == "subagents")
@@ -792,13 +787,21 @@ class MainActivity : ComponentActivity() {
         val preferences = getSharedPreferences("appearance-settings", MODE_PRIVATE)
         return AppearanceSettings(themeMode = AppearanceThemeMode.fromPersistedValue(preferences.getString("theme", null)),
             interfaceScale = preferences.getFloat("scale", 1f), messageTimestampsEnabled = preferences.getBoolean("timestamps", false),
-            monetEnabled = preferences.getBoolean("monet", false)).normalized()
+            monetEnabled = preferences.getBoolean("monet", false),
+            pureBlackEnabled = preferences.getBoolean("pure_black", false),
+            paletteStyle = app.daiyu.android.data.model.AppearancePaletteStyle.fromPersistedValue(preferences.getString("palette", null)),
+            accentColor = app.daiyu.android.data.model.AppearanceAccentColor.fromPersistedValue(preferences.getString("accent", null)),
+            blurEnabled = preferences.getBoolean("blur", true),
+            topBarBlurStyle = app.daiyu.android.data.model.AppearanceTopBarBlurStyle.fromPersistedValue(preferences.getString("blur_style", null)),
+        ).normalized()
     }
     private fun saveAppearance(value: AppearanceSettings) { guard {
         val normalized = value.normalized()
         check(getSharedPreferences("appearance-settings", MODE_PRIVATE).edit().putString("theme", normalized.themeMode.persistedValue)
             .putFloat("scale", normalized.interfaceScale).putBoolean("timestamps", normalized.messageTimestampsEnabled)
-            .putBoolean("monet", normalized.monetEnabled).commit())
+            .putBoolean("monet", normalized.monetEnabled).putBoolean("pure_black", normalized.pureBlackEnabled)
+            .putString("palette", normalized.paletteStyle.persistedValue).putString("accent", normalized.accentColor.persistedValue)
+            .putBoolean("blur", normalized.blurEnabled).putString("blur_style", normalized.topBarBlurStyle.persistedValue).commit())
         appearance = normalized
     } }
 }

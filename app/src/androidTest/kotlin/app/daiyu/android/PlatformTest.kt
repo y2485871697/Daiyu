@@ -224,7 +224,7 @@ class PlatformTest:InstrumentationTestCase() {
         assertEquals("",db.draft());assertEquals("旧草稿",db.conversations().single().draft)
         assertEquals(MessageId("old"),db.messages(ConversationId("legacy")).single().second.id)
         assertEquals("",db.conversations().single().folder);assertFalse(db.conversations().single().pinned)
-        assertEquals(7,db.readableDatabase.version)
+        assertEquals(8,db.readableDatabase.version)
         for(table in listOf("context_archives","context_branches","context_usage","neutral_assets","neutral_config","neutral_imports")) {
             db.readableDatabase.rawQuery("SELECT * FROM $table LIMIT 0",null).use {assertTrue(it.columnCount>0)}
         }
@@ -266,7 +266,7 @@ class PlatformTest:InstrumentationTestCase() {
         assertEquals("新会话草稿",db.draft());assertEquals("旧草稿",db.conversations().single().draft)
         assertEquals(MessageId("history"),db.messages(ConversationId("old")).single().second.id)
         assertEquals("",db.conversations().single().folder);assertFalse(db.conversations().single().pinned)
-        assertEquals(7,db.readableDatabase.version)
+        assertEquals(8,db.readableDatabase.version)
         for(table in listOf("context_archives","context_branches","context_usage","neutral_assets","neutral_config","neutral_imports")) {
             db.readableDatabase.rawQuery("SELECT * FROM $table LIMIT 0",null).use {assertTrue(it.columnCount>0)}
         }

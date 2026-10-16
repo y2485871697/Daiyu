@@ -9,6 +9,7 @@ import app.daiyu.android.context.ContextRegistry
 import app.daiyu.android.context.ContextRegistryScope
 import app.daiyu.android.integration.tools.*
 import app.daiyu.android.delegation.*
+import app.daiyu.android.domain.delegation.ChildTaskRecord
 import app.daiyu.android.domain.delegation.ChildModelBatch
 import app.daiyu.android.domain.delegation.ChildModelDefinition
 import app.daiyu.android.domain.tools.SessionCapabilities
@@ -141,6 +142,10 @@ class ChatController internal constructor(private val application:Application,
             sendPrepared(conversation, text, models)
         } finally { preparing = false }
     }
+    @Synchronized internal fun childTasks(conversationId: ConversationId, limit: Int = 20): List<ChildTaskRecord> {
+        check(!closed && ready && !recoveryFailed) { "child_tasks_unavailable" }
+        return checkNotNull(runtimeStore).childTasks.list(conversationId.value, limit)
+    }
     private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
     internal val selections=mutableMapOf<ConversationId?,Pair<Int,Int>>()
@@ -227,7 +232,8 @@ class ChatController internal constructor(private val application:Application,
             val contextTools = ScopedContextTools.create(
                 ContextRegistry(contextService), ContextRegistryScope(conversationId),
                 run, preparedContext?.archiveId)
-            val children = if (childModels.isEmpty()) null else RunChildModels(ChildModelBatch(childModels), childModels.keys)
+            val children = if (childModels.isEmpty()) null else RunChildModels(
+                ChildModelBatch(childModels, store = checkNotNull(runtimeStore).childTasks), childModels.keys)
             preparingChildren = children
             val devices = RunDeviceResources(application)
             preparingDevices = devices

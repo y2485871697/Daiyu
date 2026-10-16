@@ -5,6 +5,7 @@ import android.content.Context
 import android.test.InstrumentationTestCase
 import app.daiyu.android.delegation.*
 import app.daiyu.android.domain.*
+import app.daiyu.android.domain.delegation.ChildTaskStatus
 import app.daiyu.android.storage.*
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -77,7 +78,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
     }
     override fun tearDown() { try { fixtures.forEach { it.close() } } finally { super.tearDown() } }
 
-    fun testExplicitBindingRunsChildAndPersistsOnlyParentReceipt() {
+    fun testExplicitBindingRunsChildAndPersistsParentReceiptAndTaskRecord() {
         val f = fresh()
         controlMain {
             assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
@@ -90,8 +91,17 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         val assistant = rows.single { it.role == Message.ASSISTANT_ROLE }
         assertEquals(RunStatus.COMPLETED, assistant.status)
         assertTrue(assistant.blocks.filterIsInstance<MessageBlock.Tool>().single().result!!.contains("independent answer"))
+        val task = f.controller.childTasks(f.conversation.id).single()
+        assertEquals(ChildTaskStatus.COMPLETED, task.status); assertEquals("independent answer", task.text)
+        assertEquals(assistant.id.value, task.parentMessageId)
+        assertEquals(assistant.runId.value, task.owner.parentRunId)
+        assertEquals("review", task.profileId); assertEquals("review task", task.prompt)
+        assertTrue(f.controller.childTasks(ConversationId("other")).isEmpty())
         val reopened = ConversationDatabase(f.app)
-        try { assertEquals(rows, reopened.messages(f.conversation.id).map { it.second }) } finally { reopened.close() }
+        try {
+            assertEquals(rows, reopened.messages(f.conversation.id).map { it.second })
+            assertEquals(listOf(task), SQLiteChildTaskStore(reopened).list(f.conversation.id.value, 20))
+        } finally { reopened.close() }
     }
 
     fun testUnboundWrongScopeAndFailedRebindNeverOpenOrConsumeDraft() {
@@ -127,5 +137,6 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         f.release.countDown(); awaitControl("child drained and parent released") { f.controller.active == null }
         assertEquals(1, f.parentOpened.get()); assertEquals(1, f.childOpened.get())
         assertEquals(RunStatus.STOPPED, f.database.messages(f.conversation.id).single { it.second.id == owner.id }.second.status)
+        assertEquals(ChildTaskStatus.UNKNOWN, f.controller.childTasks(f.conversation.id).single().status)
     }
 }

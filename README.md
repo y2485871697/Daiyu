@@ -6,7 +6,7 @@
 - 显示名：代鱼；工作目录：`/workspace/代鱼`
 - Android 8.0 / API 26 起；目标 API 37；构建 JDK 27（应用字节码目标17）。
 - `app`：Android 启动壳；`core-domain`：纯 Kotlin 产品领域层。
-- 不依赖旧应用安装、代码、资源、数据格式。
+- 不依赖旧应用安装、运行时框架、资源或数据格式；复用代码来源见权利状态与来源说明。
 - 首个模型协议为 Responses HTTPS SSE；配置在应用内填写，API密钥由Android Keystore加密。仅允许显式启用的只读电量工具。
 - SQLite会话、独立未创建草稿槽、消息块及状态持久化；重启标记中断，不自动重发。当前模型输入窗口为最近50条已保存消息，界面历史每页50条。
 - 当前为M0首个增量，不代表24项M0验收全部通过；真实供应商及性能门槛待实测。
@@ -16,7 +16,7 @@
 
 ## 权利状态
 
-本项目按 GNU Affero General Public License version 3 发布，见 [LICENSE](LICENSE)。对应源码公开于 https://github.com/y2485871697/Daiyu ，APK 的精确源码提交见构建记录。RikkaHub 复用来源、固定版本和修改说明见 [THIRD_PARTY/rikkahub/NOTICE.md](THIRD_PARTY/rikkahub/NOTICE.md)；其他第三方保留各自适用许可及署名。官方 Gradle wrapper 的适用许可与来源单独记录。
+本项目按 GNU Affero General Public License version 3 发布，见 [LICENSE](LICENSE)。对应源码公开于 https://github.com/y2485871697/Daiyu ，APK 的精确源码提交见构建记录。RikkaHub 复用来源、固定版本和修改说明见 [THIRD_PARTY/rikkahub/NOTICE.md](THIRD_PARTY/rikkahub/NOTICE.md)；其他第三方保留各自适用许可及署名。R08 第一阶段 VirtualDisplay owner 保留原 PolyForm Noncommercial 1.0.0 许可和署名；版权拥有者已明确授权本项目迁入、修改和集成，该授权不自动替代第三方权利审查，来源和 Required Notice 见 [owner NOTICE](docs/third-party/virtual-display-owner/NOTICE.md)。官方 Gradle wrapper 的适用许可与来源单独记录。
 
 ## 已确认的范围删减
 

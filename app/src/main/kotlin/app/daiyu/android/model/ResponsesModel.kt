@@ -2,6 +2,8 @@ package app.daiyu.android.model
 
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ModelSettings
+import app.daiyu.android.model.videos.FrozenMessageVideoPlan
+import app.daiyu.android.model.videos.OpenRouterVideoCapability
 import org.json.JSONObject
 import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
@@ -12,11 +14,13 @@ class ResponsesModel internal constructor(
     private val connect: (URL) -> HttpsURLConnection,
     private val imageInputSupported: Boolean?,
     private val assistantInstructions: String? = null,
+    private val videoInputCapability: OpenRouterVideoCapability? = null,
 ) : ModelPort {
     internal constructor(settings: ModelSettings, connect: (URL) -> HttpsURLConnection) : this(settings, connect, null)
     constructor(settings: ModelSettings) : this(settings, { it.openConnection() as HttpsURLConnection }, null)
-    internal constructor(snapshot: ProviderSnapshot, assistantInstructions: String? = null) : this(snapshot.asModelSettings(),
-        { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported, assistantInstructions)
+    internal constructor(snapshot: ProviderSnapshot, assistantInstructions: String? = null,
+                         videoInputCapability: OpenRouterVideoCapability? = null) : this(snapshot.asModelSettings(),
+        { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported, assistantInstructions, videoInputCapability)
     override fun open(history: List<Message>): ModelSession = open(history, settings.enabledTools())
     override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = open(history, tools.map {
         ToolDefinition(it.toolName, it.description, """{"type":"object","properties":{},"required":[],"additionalProperties":false}""")
@@ -26,6 +30,14 @@ class ResponsesModel internal constructor(
     override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
         Session(settings, history, connect, definitions.toList(), imageInputSupported, images, assistantInstructions)
 
+    /** Explicit OpenRouter extension only. Generic ModelPort/ModelFactory paths remain unchanged.
+     * Pass the same run-local permission used to freeze videos to this model's constructor.
+     */
+    fun open(history: List<Message>, definitions: List<ToolDefinition>, videos: FrozenMessageVideoPlan,
+             images: ModelImagePlan? = null): ModelSession =
+        Session(settings, history, connect, definitions.toList(), imageInputSupported, images,
+            assistantInstructions, videoInputCapability, videos)
+
     private class Session(
         private val settings: ModelSettings,
         history: List<Message>,
@@ -34,12 +46,15 @@ class ResponsesModel internal constructor(
         capability: Boolean?,
         images: ModelImagePlan?,
         private val assistantInstructions: String?,
+        videoCapability: OpenRouterVideoCapability? = null,
+        videos: FrozenMessageVideoPlan? = null,
     ) : ModelSession {
         private val cancelled = AtomicBoolean(false)
         @Volatile private var connection: HttpsURLConnection? = null
         private val historySnapshot = app.daiyu.android.model.images.FrozenMessageImagePlan.snapshot(history)
         private val imagePlan = ImageRequestPreflight.history(settings, ProviderProtocol.RESPONSES, capability, historySnapshot, images)
-        private val input = ResponsesRequest.history(historySnapshot, imagePlan)
+        private val videoPlan = videos?.also { it.validate(settings, videoCapability, historySnapshot) }
+        private val input = ResponsesRequest.history(historySnapshot, imagePlan, videoPlan)
         private val ownItems = mutableListOf<String>()
         private var usable = true
         private var started = false
@@ -62,6 +77,9 @@ class ResponsesModel internal constructor(
                 settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools), ProviderProtocol.RESPONSES),
                 assistantInstructions,
             )
+            // Video-only allowlist and exact history binding apply to the final merged payload
+            // on EVERY round, before serialization/connect. Ordinary provider options stay flexible.
+            videoPlan?.validateRequest(settings, request, input)
             val requestBytes = ImageRequestPreflight.bytes(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null
             val deliver: (ModelEvent) -> Unit = { event ->

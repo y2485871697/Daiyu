@@ -168,6 +168,36 @@ class VideoAssetStore internal constructor(
         }
     } }
 
+    /** Run-local original bytes for protocol encoding, not a preview. The caller must preflight
+     * the WHOLE request's metadata budget first. Rehash the actual bounded copy as well as the
+     * descriptor verified by openOriginal, so in-place changes cannot become a wire payload.
+     */
+    internal fun readForModel(
+        owner: MessageVideoOwner,
+        reference: MessageVideoReference,
+        maxBytes: Long,
+        isCancelled: () -> Boolean,
+    ): ByteArray = synchronized(gate) { videoIo {
+        checkVideoCancellation(isCancelled)
+        if (reference.bytes <= 0) videoFail(VideoAttachmentFailure.CORRUPT)
+        if (reference.bytes > maxBytes || reference.bytes > Int.MAX_VALUE) videoFail(VideoAttachmentFailure.TOO_LARGE)
+        openOriginal(owner, reference, isCancelled).use { source ->
+            val bytes = ByteArray(reference.bytes.toInt())
+            var offset = 0
+            while (offset < bytes.size) {
+                checkVideoCancellation(isCancelled)
+                val count = source.read(bytes, offset, minOf(16 * 1024, bytes.size - offset))
+                if (count < 0) videoFail(VideoAttachmentFailure.CORRUPT)
+                if (count == 0) continue
+                offset += count
+            }
+            checkVideoCancellation(isCancelled)
+            if (source.read() != -1 || videoDigest(bytes) != reference.sha256) videoFail(VideoAttachmentFailure.CORRUPT)
+            checkVideoCancellation(isCancelled)
+            bytes
+        }
+    } }
+
     fun list(owner: VideoAttachmentOwner): List<VideoAttachment> = synchronized(gate) { videoIo {
         listLocked(owner).map { it as VideoAttachment }
     } }

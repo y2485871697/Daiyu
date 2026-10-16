@@ -7,7 +7,8 @@ import org.json.JSONObject
 
 /** Shared by the actual transport and JVM request-builder tests. */
 internal object ResponsesRequest {
-    fun history(history: List<Message>, images: FrozenMessageImagePlan? = null): JSONArray {
+    fun history(history: List<Message>, images: FrozenMessageImagePlan? = null,
+                videos: app.daiyu.android.model.videos.FrozenMessageVideoPlan? = null): JSONArray {
         val expanded = MessageHistory.expand(history)
         FrozenMessageImagePlan.rejectRawImages(expanded)
         val input = JSONArray()
@@ -24,8 +25,9 @@ internal object ResponsesRequest {
                         is MessageBlock.Tool -> error("Tool calls require assistant history")
                     }
                 }
+                videos?.blocks(messageIndex)?.forEach { content.put(it) }
                 // Preserve the legacy text-only wire shape; mixed content uses ordered blocks.
-                val wireContent: Any = if (message.blocks.any { it is MessageBlock.Image }) content
+                val wireContent: Any = if (message.blocks.any { it is MessageBlock.Image } || videos?.hasVideos(messageIndex) == true) content
                     else message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
                 input.put(JSONObject().put("role", "user").put("content", wireContent))
             } else if (message.status == RunStatus.COMPLETED ||

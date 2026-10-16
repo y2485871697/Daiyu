@@ -40,6 +40,18 @@ class BrowserFetchBackend(
     private val lock = Any()
     private val requests = mutableSetOf<Request>()
     private var closed = false
+    private val closeFailures = mutableSetOf<String>()
+
+    fun closeWithResult(): BrowserCloseResult { close(); return closeStatus() }
+    fun closeStatus(): BrowserCloseResult {
+        val own = synchronized(lock) {
+            BrowserCloseResult(closed,
+                if (requests.isEmpty()) emptySet() else setOf("FETCH_CALLER_OR_FILES"),
+                closeFailures.toSet())
+        }
+        // Never hold the caller-pool lock while entering the raw downloader.
+        return own.merge(downloads.closeStatus())
+    }
     private val capacity: Int
     private val worker: ThreadPoolExecutor
 
@@ -163,10 +175,14 @@ class BrowserFetchBackend(
                 try {
                     if (!synchronized(lock) { delivered }) {
                         // A real receipt can exist if close/invalidation wins the return window.
-                        receipt?.let { try { Files.deleteIfExists(it.path) } catch (_: Exception) { } }
+                        receipt?.let { try { Files.deleteIfExists(it.path) } catch (_: Exception) {
+                            synchronized(lock) { closeFailures.add("FETCH_FILE_DELETE") }
+                        } }
                     }
                 } finally {
-                    try { registration?.close() } finally {
+                    try { registration?.close() }
+                    catch (_: Exception) { synchronized(lock) { closeFailures.add("FETCH_SUBSCRIPTION_CLEANUP") } }
+                    finally {
                         synchronized(lock) {
                             caller = null
                             requests.remove(this)

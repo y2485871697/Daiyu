@@ -3,6 +3,7 @@ package app.daiyu.android.browser.openminis
 import app.daiyu.android.browser.bridge.BrowserCommand
 import app.daiyu.android.browser.bridge.BrowserExecutionResult
 import app.daiyu.android.browser.host.BrowserTabLifecycle
+import app.daiyu.android.browser.network.BrowserCloseResult
 import app.daiyu.android.browser.runtime.AsyncBrowserBackend
 import app.daiyu.android.browser.runtime.UiDispatcher
 import app.daiyu.android.browser.session.BrowserSessionRegistry
@@ -24,6 +25,8 @@ internal interface BlankBrowserResource {
     /** Thread-safe, bounded snapshot. False while any native callback/operation can still target
      * upstream's untagged deferreds. The Android implementation must track those callbacks. */
     val isIdle: Boolean get() = true
+    /** Runs after allocation has an owner, so partial initialization remains destroyable. */
+    fun initialize() {}
     suspend fun execute(input: BrowserActionInput): BrowserActionResult
     /** UI only. Update callback/history lease, without replacing the page or manager. */
     fun rebind(lease: BrowserTabLease) {}
@@ -51,6 +54,9 @@ internal class LeaseBrowserHost(
         var pending: CompletableFuture<BrowserExecutionResult>? = null
         var job: Job? = null
         val created = CompletableFuture<Unit>()
+        // Unlike created (which retirement settles early), this tracks the real factory frame.
+        var making = true
+        var activeExecutions = 0
         var cleanup: (() -> Unit)? = null
         var cleanupQueued = false
         var cleanupFailure: Exception? = null
@@ -58,6 +64,7 @@ internal class LeaseBrowserHost(
     }
     private val lock = Any()
     private val slots = mutableMapOf<BrowserTabLease, Slot>()
+    private var closed = false
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
 
     init {
@@ -69,9 +76,11 @@ internal class LeaseBrowserHost(
     override fun create(lease: BrowserTabLease) {
         val slot = Slot(lease)
         synchronized(lock) {
+            check(!closed) { "BROWSER_OPENMINIS_CLOSED" }
             check(lease !in slots) { "BROWSER_OPENMINIS_RESOURCE_EXISTS" }
             slots[lease] = slot
         }
+        var dispatched = false
         try {
             val subscription = sessions.observeOwnership(lease,
                 beforeTakeover = {
@@ -94,13 +103,18 @@ internal class LeaseBrowserHost(
                 if (slot.retired) true else { slot.invalidation = subscription; false }
             }
             if (closeNow) subscription.close()
-            if (ui.isUiThread()) makeBlank(slot) else {
+            if (ui.isUiThread()) {
+                dispatched = true
+                makeBlank(slot)
+            } else {
                 ui.post { makeBlank(slot) }
+                dispatched = true
                 slot.created.get(createTimeoutMillis, TimeUnit.MILLISECONDS)
             }
             // On UI, makeBlank reports construction errors through the same future (no waiting).
             slot.created.join()
         } catch (failure: Exception) {
+            if (!dispatched) synchronized(lock) { slot.making = false }
             retire(slot, "BROWSER_OPENMINIS_CREATE_FAILED")
             if (failure is InterruptedException) Thread.currentThread().interrupt()
             throw failure
@@ -116,6 +130,7 @@ internal class LeaseBrowserHost(
             unattached = createBlank(slot.lease, { reason -> retire(slot, reason) }, {
                 isLive(slot)
             })
+            checkNotNull(unattached).initialize()
             synchronized(lock) {
                 check(!slot.retired) { "BROWSER_OPENMINIS_RESOURCE_RETIRED" }
                 slot.resource = unattached
@@ -129,6 +144,8 @@ internal class LeaseBrowserHost(
             }
             slot.created.completeExceptionally(failure)
             retire(slot, "BROWSER_OPENMINIS_CREATE_FAILED")
+        } finally {
+            synchronized(lock) { slot.making = false }
         }
     }
 
@@ -176,6 +193,7 @@ internal class LeaseBrowserHost(
                     check(slot.pending === pending && slot.operation == operation && !slot.suspended && !slot.needsRebind) { "BROWSER_OPENMINIS_BUSY" }
                     checkNotNull(slot.resource)
                 }
+                synchronized(lock) { slot.activeExecutions++ }
                 scope.launch(start = CoroutineStart.UNDISPATCHED) {
                     try {
                         val answer = withTimeout(timeout) { resource.execute(input) }
@@ -193,6 +211,8 @@ internal class LeaseBrowserHost(
                         // Fixed-source deferreds have no callback token: unknown means never reuse.
                         try { retire(slot, "BROWSER_OPENMINIS_EXECUTION_UNKNOWN") }
                         finally { pending.completeExceptionally(failure) }
+                    } finally {
+                        synchronized(lock) { slot.activeExecutions-- }
                     }
                 }
             }
@@ -301,6 +321,27 @@ internal class LeaseBrowserHost(
             }
             block(resource)
         }
+    }
+
+    /** Seal admission and request every tombstone's cleanup; never wait for the UI queue. */
+    fun closeWithResult(): BrowserCloseResult {
+        val selected = synchronized(lock) { closed = true; slots.values.toList() }
+        selected.forEach { slot ->
+            try { retire(slot, "BROWSER_OPENMINIS_CLOSED"); scheduleCleanup(slot) }
+            catch (_: Exception) { /* rejected enqueue is retained on the slot */ }
+        }
+        return closeStatus()
+    }
+
+    fun closeStatus(): BrowserCloseResult = synchronized(lock) {
+        BrowserCloseResult(closed, buildSet {
+            if (slots.values.any { it.making }) add("WEBVIEW_CREATION")
+            if (slots.values.any { !it.retired || it.cleanup != null }) add("WEBVIEW_CLEANUP")
+            if (slots.values.any { it.activeExecutions != 0 }) add("WEBVIEW_EXECUTION")
+        }, buildSet {
+            if (slots.values.any { it.cleanupFailure != null }) add("WEBVIEW_CLEANUP_QUEUE")
+            if (slots.values.any { it.nativeCleanupFailure != null }) add("WEBVIEW_DESTROY")
+        })
     }
 
     /** Trusted host may retry only rejected enqueue, never replay a native destroy attempt. */

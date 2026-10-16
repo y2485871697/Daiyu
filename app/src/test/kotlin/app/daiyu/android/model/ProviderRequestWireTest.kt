@@ -219,7 +219,7 @@ class ProviderRequestWireTest {
         )
         val conn = Connection(events.joinToString("") { "event: ${it.getString("type")}\ndata: $it\n\n" })
         val config = ModelSettings("https://example.invalid/v1/messages", "claude-fixture", "messages-key", false,
-            protocol = ProviderProtocol.MESSAGES, requestOptions = ProviderRequestOptions("""{"max_tokens":99,"metadata":{"user_id":"fixture"}}"""))
+            protocol = ProviderProtocol.MESSAGES, requestOptions = ProviderRequestOptions("""{"max_tokens":99,"service_tier":"standard_only","metadata":{"user_id":"fixture"}}"""))
         val user = Message(MessageId("u"), ConversationId("c"), RunId("r"), "user", listOf(MessageBlock.Text("u", "hi")), RunStatus.COMPLETED)
         var requestedUrl: URL? = null
         MessagesModel(config) { url -> requestedUrl = url; conn }.open(listOf(user)).next(emptyList()) {}
@@ -227,7 +227,7 @@ class ProviderRequestWireTest {
         assertEquals("POST", conn.requestMethod); assertTrue(conn.doOutput); assertFalse(conn.instanceFollowRedirects)
         assertEquals(99, conn.body().getInt("max_tokens"))
         assertEquals("fixture", conn.body().getJSONObject("metadata").getString("user_id"))
-        assertFalse(conn.body().has("service_tier"))
+        assertEquals("standard_only", conn.body().getString("service_tier"))
         assertEquals("messages-key", conn.getRequestProperty("x-api-key")); assertTrue(conn.closed)
         expectRejected { ModelFactory.create(config.copy(requestOptions = ProviderRequestOptions(speedMode = GptSpeedMode.FAST))) }
     }
@@ -264,6 +264,27 @@ class ProviderRequestWireTest {
                 }.open(emptyList()).next(emptyList()) {}
             }
             assertEquals(body, 0, connections)
+        }
+    }
+
+    @Test fun invalidServiceTierNeverReachesEitherTransport() {
+        for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES)) {
+            val invalid = mutableListOf<Any>(7, false, JSONObject(), JSONArray(), "", "   ")
+            if (protocol == ProviderProtocol.MESSAGES) invalid.addAll(listOf(JSONObject.NULL, "priority", "fast", "ultrafast"))
+            for (tier in invalid) {
+                val options = ProviderRequestOptions(JSONObject().put("service_tier", tier).toString(),
+                    if (protocol == ProviderProtocol.RESPONSES) GptSpeedMode.FAST else null)
+                val config = settings.copy(protocol = protocol, requestOptions = options,
+                    endpoint = if (protocol == ProviderProtocol.MESSAGES) "https://example.invalid/v1/messages" else settings.endpoint)
+                var connections = 0
+                expectRejected {
+                    val factory: (URL) -> HttpsURLConnection = { connections++; Connection("") }
+                    val model: ModelPort = if (protocol == ProviderProtocol.RESPONSES) ResponsesModel(config, factory)
+                        else MessagesModel(config, factory)
+                    model.open(emptyList()).next(emptyList()) {}
+                }
+                assertEquals("$protocol must reject a malformed tier before connecting", 0, connections)
+            }
         }
     }
 

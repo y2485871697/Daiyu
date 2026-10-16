@@ -1,5 +1,34 @@
 # F11/F19 接缝（接口冻结）
 
+## 当前增量：R11 / P09 / P10 / P42（基线 65db994）
+
+本节覆盖下方历史记录中“生产未用 Context”的过时判断，旧记录保留作来源，不据此重复接线。只读核对当前 `ChatController.sendPrepared`：已在 `database.send` 前调用共享 helper 的 `ContextService.prepareSend(conversationId)`，将 `prepared.messages + user` 交给 runner，且将同一结果的 `archiveId` 交给 `ScopedContextTools`。但该调用仍使用默认未知窗口、不传 summarizer / 待发输入 / 取消标志；不能据此认自动压缩和 P42 已闭环。此次不改 Controller、数据库、runtime、model settings 或已保留的边界/估算/修订算法。
+
+新增的向后兼容可选参数：
+
+```kotlin
+val prepared = contextService.prepareSend(
+    conversationId,
+    policy = frozenPolicy,
+    summarizer = frozenSummarizer,
+    pendingMessages = listOf(user),
+    cancelled = { preparationCancelled() }
+)
+// 在同一 owner 的准入/提交保护下复查取消与历史版本，再执行原 database.send。
+// prior = prepared.messages，runner 输入仍是 prior + user（不能重复附加 user）。
+// ScopedContextTools 的 locator 必须来自这个 prepared.archiveId。
+```
+
+- `pendingMessages` 只用于当前会话归属校验、自动压缩阈值和总发送预算，不写库、不包含在返回的 `messages` / `estimatedTokens` 中。返回估算继续表示该历史快照，不是 provider usage。宿主需冻结 user、policy、summarizer，发送前不能换一份输入。
+- `CompressionPolicy.sendBudgetTokens = contextTokens - reserveTokens`，`fitsSendBudget` 独立于 enabled：关闭自动压缩也不能发送已知超限内容；未知窗口仍未知、不猜容量。宿主 reserve 应覆盖输出及未列入 messages 的提示/工具等开销。估算沿用现有 UTF-8 策略，不等同供应商 tokenizer 的精确上限保证。
+- 超限抛 `ContextCapacityExceededException(estimatedTokens, budgetTokens)`。有安全压缩前缀时，先校验**实际包裹摘要 + 保留尾部 + 待发输入**的预算，再写新档案；缩小但仍超限的结果不发布，原消息和旧 active 档案不变。无安全前缀 / 无 summarizer 时超限同样拒绝准备，不偷偷截断。
+- `compress` 同样新增可选 `pendingMessages` / `cancelled`；取消检查在模型前、模型后、事务内写入前和提交前。最后一次取消可回滚新档案及旧 active 失活；线程 interrupted 状态也拒绝且不清除。取消用 `CancellationException`，宿主应与普通失败分别处理，保留草稿，不发网络请求。
+- 检查是协作式的，不会强行中断同步 `ContextSummarizer` 中的 I/O；摘要 adapter 须把宿主取消继续传给底层模型连接。提交后的取消不能撤回已提交档案；最终返回与 `database.send` 之间也不是本服务能覆盖的跨调用事务。宿主仍须在 owner/准备令牌保护下复查取消及历史版本，避免换会话/删改后的迟到结果发送；恢复不得自动再次请求模型。
+- P42 复用已保留 `conversationCompressionBlocksSend(conversationId, isCompressingContext, jobActive, jobConversationId, hasPending, pendingConversationId)`。共享压缩队列必须传真实 owner；null 仅匹配未保存草稿，不是全局通配。当前 owner executor / 队列的参数传递和生命周期属于父代理接线范围，本增量不制造另一份共享队列或改根 domain 类型。
+- 原有 scope 防御复制、完整 archive owner 校验、缺档拒发和事务回滚已具实现/测试，本轮未重写。`ContextRegistryScopeTest` 明确覆盖跨页和空页不能绕过授权。
+
+验证：新增 `ContextPolicyTest` 2 项 JVM 测试源码、`ContextServiceTest` 9 项仪器测试源码（已知超限、待发预算/阈值、无安全前缀、仍超限保旧档、摘要中取消、提交前取消回滚、线程中断、跨会话输入）；只做源码及调用兼容性静态核对，未执行构建/测试，不转授下方历史通过记录。完整测试留父代理统一执行；唯一清单由父代理按实际集成结果更新。
+
 来源：当前重写项目 `ConversationDatabase.kt`（生产 SQLite schema4；中立文本备份 format version1（沿用历史 schema3 契约））、`ModelSettings.kt`、`ResponsesModel.kt`；验收 `docs/refactor-input/acceptance.json` AC-033–035/050–052，features F11/F19。Context 最终来源 `f7f51c10`、配置人工恢复来源 `faa1a1d2`，随本次集成提交；进度与证据统一见 `docs/重构清单.md` 的 R03/R11/R12 三项成品集成记录。没有读取工作树外旧策略或复用 Eta 源码。保留候选压缩策略由父代理提供；这里的保守默认边界不能作为旧策略被取代的审查证据。
 
 ## 主数据库唯一接线（v4 已实现；Context 生产分派仍未接通）

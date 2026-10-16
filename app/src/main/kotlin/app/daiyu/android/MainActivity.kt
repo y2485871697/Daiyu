@@ -162,6 +162,113 @@ class MainActivity : ComponentActivity() {
     private val imageHost by lazy { ImageChatHost.obtain(controller, { if (activityUsable()) publishChat() },
         { if (activityUsable()) toast(it) }, ::settleImageReceipt) }
     private var imagePanelVisible by mutableStateOf(false)
+    private var videoPanelVisible by mutableStateOf(false)
+    private var videoSending by mutableStateOf(false)
+    private var videoReceiptRequest: VideoDraftRequest? = null
+    private var videoReceiptEditor: ControllerVideoEditor? = null
+    private var videoDialog: android.app.AlertDialog? = null
+    private val videoHost get() = controller.videoHost
+    private val videoUi = object : ControllerVideoUi {
+        override fun editor() = ControllerVideoEditor(selected?.id?.value, editorGeneration, draftRevision,
+            draft, activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible)
+        override fun showRun(prompt: app.daiyu.android.model.videos.VideoApprovalGate.Prompt,
+            text: String, decision: (Boolean) -> Unit) {
+            showVideoPermission("批准本次原视频运行", prompt.disclosure +
+                "\n模型：${prompt.request.provider.model}\n端点：${prompt.request.provider.asModelSettings().requestEndpoint()}" +
+                "\n\n原文：\n" + text +
+                "\n\n" + prompt.inventory.joinToString("\n") { "${it.mime} · ${it.bytes} 字节 · SHA-256 ${it.sha256}" }, decision)
+        }
+        override fun showPost(prompt: ControllerVideoPostPrompt, decision: (Boolean) -> Unit) {
+            showVideoPermission("许可本次 POST #${prompt.postNumber}", prompt.disclosure +
+                "\n正文 SHA-256：${prompt.requestSha256}\n\n" + prompt.references.joinToString("\n") {
+                    "${it.mime} · ${it.bytes} 字节 · SHA-256 ${it.sha256}"
+                }, decision)
+        }
+    }
+    private fun showVideoPermission(title: String, message: String, decision: (Boolean) -> Unit) {
+        videoDialog?.dismiss()
+        val decided = AtomicBoolean(false)
+        fun answer(value: Boolean) { if (decided.compareAndSet(false, true)) decision(value) }
+        videoDialog = android.app.AlertDialog.Builder(this).setTitle(title).setMessage(message)
+            .setPositiveButton("明确允许") { _, _ -> answer(true) }
+            .setNegativeButton("拒绝") { _, _ -> answer(false) }
+            .setOnCancelListener { answer(false) }.create().also { dialog ->
+                dialog.setOnDismissListener { answer(false); if (videoDialog === dialog) videoDialog = null }
+                dialog.show()
+            }
+    }
+    private fun fenceVideoRoute() {
+        controller.invalidateVideo(videoUi) // Gate and real session first; dismiss is not revocation.
+        videoDialog?.dismiss(); videoDialog = null
+        if (controller.ownsVideoUi(videoUi)) videoHost.detach()
+    }
+    private fun videoComposerAvailable() = terminalEditor == null && virtualDisplayEditor == null &&
+        shizukuEditor == null && browserApproval == null && generationApproval == null &&
+        pendingTextSend == null && controller.textSendState() == null &&
+        !imageHost.hasAttachments && !imageHost.busy && !shizukuWritesBlocked
+    @Composable private fun VideoComposerPanel() {
+        app.daiyu.android.ui.screens.chat.attachments.VideoAttachments(videoHost, selected?.id?.value,
+            app.daiyu.android.ui.screens.chat.attachments.VideoDraftText(draft, editorGeneration, draftRevision),
+            onHandoff = { request, text, settle ->
+                handoffVideo(request, ControllerVideoEditor(request.conversation, text.editorGeneration,
+                    text.revision, text.text, true), settle)
+            }, enabled = videoComposerAvailable(),
+            parentBusy = videoSending || controller.active != null || !controller.ready || controller.dataBusy)
+    }
+    private fun handoffVideo(request: VideoDraftRequest, original: ControllerVideoEditor,
+        settle: (VideoDraftReceipt) -> Boolean) {
+        if (videoSending || videoUi.editor() != original || !videoComposerAvailable()) { settle(VideoDraftReceipt(request.conversation, request.owner, request.revision,
+                request.videos, VideoDraftOutcome.REJECTED)); return }
+        videoSending = true
+        videoReceiptRequest = request; videoReceiptEditor = original
+        val queued = controller.sendVideos(selected, request, original) { receipt, _ ->
+            // Settle the retained host even when the originating Activity has been destroyed.
+            settle(receipt)
+            if (activityUsable()) { settleRetainedVideoReceipt(); publishChat() }
+        }
+        if (!queued) {
+            videoSending = false
+            videoReceiptRequest = null; videoReceiptEditor = null
+            settle(VideoDraftReceipt(request.conversation, request.owner, request.revision, request.videos,
+                VideoDraftOutcome.REJECTED))
+        }
+    }
+    private fun settleRetainedVideoReceipt() {
+        if (!activityUsable() || !selectionReady) return
+        val sending = controller.videoSendState() ?: return
+        val request = sending.request
+        val now = videoUi.editor()
+        videoSending = sending.receipt == null
+        if (videoReceiptRequest !== request) {
+            if (!now.visible) return
+            // A replacement Activity adopts once, after its initial DB draft has loaded. A route
+            // departure in this Activity keeps its old captured editor and cannot re-adopt it.
+            videoReceiptRequest = request
+            if (now.conversation == request.conversation &&
+                (now.text == request.text || sending.receipt?.outcome == VideoDraftOutcome.ACCEPTED && now.text.isEmpty())) {
+                videoReceiptEditor = now
+            } else videoReceiptEditor = null
+        }
+        videoSending = sending.receipt == null
+        val receipt = sending.receipt ?: return
+        videoHost.settle(receipt)
+        val original = videoReceiptEditor
+        val accepted = original != null && (
+            videoEditorReceiptMatches(original, now, request, receipt) ||
+                // The recreated editor may have loaded the already-consumed empty DB draft.
+                original == now && original.visible && original.text.isEmpty() &&
+                original.conversation == request.conversation && videoReceiptMatches(request, receipt) &&
+                receipt.outcome == VideoDraftOutcome.ACCEPTED)
+        val conversation = sending.conversation
+        controller.acknowledgeVideoSend(request)
+        videoSending = false
+        if (accepted && conversation != null) {
+            selected = conversation; editorGeneration++; draftRevision++
+            draft = ""; selectionStart = 0; selectionEnd = 0
+            controller.preferences.edit().putString("selected", conversation.id.value).apply()
+            publishChat(); loadAcceptedHistory(conversation)
+        }
+    }
     // A mount is an editor capability, never saved across Activity recreation or A -> A entry.
     private class ShizukuEditor(val conversation: Conversation?, val generation: Long,
         val revision: Long, val text: String) {
@@ -179,14 +286,14 @@ class MainActivity : ComponentActivity() {
     private var sidebarVisible: Boolean
         get() = sidebarVisibleState
         set(value) {
-            if (value && !sidebarVisibleState) { cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor() }
+            if (value && !sidebarVisibleState) { fenceVideoRoute(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor() }
             sidebarVisibleState = value
         }
     private var retainedPageState by mutableStateOf("chat")
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
-            if (value != retainedPageState) { cancelGenerationOutputs(); cancelVirtualDisplayEditor() }
+            if (value != retainedPageState) { fenceVideoRoute(); cancelGenerationOutputs(); cancelVirtualDisplayEditor() }
             if (value != "generation-settings") {
                 generationSettingsVisit?.active?.set(false)
                 generationSettingsVisit = null
@@ -636,6 +743,7 @@ class MainActivity : ComponentActivity() {
                                     )
                                 }
                                 if (imagePanelVisible) ImageComposerPanel()
+                                if (videoPanelVisible && !sidebarVisible) VideoComposerPanel()
                                 DictationComposerEntry()
                                 ShizukuComposerEntry()
                             }
@@ -775,7 +883,9 @@ class MainActivity : ComponentActivity() {
         onSend = { text -> if (editorMatches() && terminalEditor == null && text == draft && pendingTextSend == null && !shizukuWritesBlocked) guard {
             cancelShizukuEditor()
             cancelBrowserEditor()
-            if (imageHost.hasAttachments) sendImageDraft(text) else if (!imageHost.busy) sendDraft(text)
+            if (videoHost.state.items.isNotEmpty()) videoPanelVisible = true
+            else if (imageHost.hasAttachments) sendImageDraft(text)
+            else if (!imageHost.busy && !videoSending) sendDraft(text)
         } },
         onSupplement = { text -> if (editorMatches() && text == draft && !imageHost.sending && !shizukuWritesBlocked) guard {
             gestureOwner()?.let { submitPausedText(it, text) }
@@ -798,7 +908,15 @@ class MainActivity : ComponentActivity() {
         onAssistantClick = { openAssistantPicker() }, onCopy = { id -> copyMessage(id) },
         onMenuAction = { action -> guard { when (action) {
             ChatMenuAction.ATTACH_IMAGE -> {
-                if (editorMatches()) { imagePanelVisible = true; pickImages() }
+                if (editorMatches() && videoHost.state.items.isEmpty() && !videoSending) {
+                    videoPanelVisible = false; imagePanelVisible = true; pickImages()
+                }
+            }
+            ChatMenuAction.ATTACH_VIDEO -> {
+                if (editorMatches() && !imageHost.hasAttachments && !imageHost.busy && !shizukuWritesBlocked) {
+                    cancelShizukuEditor(); cancelBrowserEditor(); cancelGenerationEditor()
+                    imagePanelVisible = false; videoPanelVisible = true
+                }
             }
             ChatMenuAction.NEW_CHAT -> select(null)
             ChatMenuAction.RENAME -> selected?.let { conversation ->
@@ -838,7 +956,7 @@ class MainActivity : ComponentActivity() {
 
     @Composable private fun ShizukuComposerEntry() {
         val images by imageHost.session.attachments.state.collectAsStateWithLifecycle()
-        val hasImages = images.items.isNotEmpty()
+        val hasImages = images.items.isNotEmpty() || videoHost.state.items.isNotEmpty() || videoSending
         val generation = editorGeneration
         val revision = draftRevision
         val available = activityUsable() && retainedPage == "chat" && !sidebarVisible && selectionReady &&
@@ -910,7 +1028,7 @@ class MainActivity : ComponentActivity() {
                     onPrepare = { _, _ -> false },
                     onConfirm = { confirmed, displayed, current ->
                         if (!activityUsable() || browserApproval !== confirmed || current != confirmed.draft ||
-                            imageHost.hasAttachments || pendingTextSend != null || !confirmed.confirm(displayed, current)) false
+                            imageHost.hasAttachments || videoHost.state.items.isNotEmpty() || pendingTextSend != null || !confirmed.confirm(displayed, current)) false
                         else {
                             val owner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
                             val submitted = PendingTextSend(owner, draft)
@@ -943,7 +1061,8 @@ class MainActivity : ComponentActivity() {
 
     private fun terminalEditorCurrent(editor: TerminalEditor): Boolean = activityUsable() &&
         terminalEditor === editor && retainedPage == "chat" && !sidebarVisible && selectionReady &&
-        terminalDraft() == editor.draft && !imageHost.hasAttachments && pendingTextSend == null &&
+        terminalDraft() == editor.draft && !imageHost.hasAttachments &&
+        videoHost.state.items.isEmpty() && !videoSending && pendingTextSend == null &&
         shizukuEditor == null && browserApproval == null && generationApproval == null
 
     private fun terminalInputEditable(editor: TerminalEditor) = terminalEditorCurrent(editor) &&
@@ -961,15 +1080,15 @@ class MainActivity : ComponentActivity() {
         val application = (appState as? app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application
         val canEnter = activityUsable() && retainedPage == "chat" && !sidebarVisible && selectionReady &&
             controller.ready && !controller.dataBusy && controller.active == null && !imageHost.busy &&
-            !imageHost.hasAttachments && !shizukuWritesBlocked && pendingTextSend == null &&
-            controller.textSendState() == null && draft.isNotBlank() && terminalEditor == null &&
+            !imageHost.hasAttachments && videoHost.state.items.isEmpty() && !videoSending &&
+            !shizukuWritesBlocked && pendingTextSend == null && controller.textSendState() == null && draft.isNotBlank() && terminalEditor == null &&
             shizukuEditor == null && browserApproval == null && !browserPreparing && generationApproval == null
         val renderedDraft = terminalDraft()
         top.yukonga.miuix.kmp.basic.TextButton(text = "终端精确命令审批",
             enabled = canEnter, modifier = Modifier.testTag("terminal-chat-entry"), onClick = {
                 if (canEnter && activityUsable() && retainedPage == "chat" && !sidebarVisible &&
                     renderedDraft == terminalDraft() && terminalEditor == null && !imageHost.hasAttachments &&
-                    pendingTextSend == null && shizukuEditor == null && browserApproval == null && generationApproval == null) {
+                    videoHost.state.items.isEmpty() && !videoSending && pendingTextSend == null && shizukuEditor == null && browserApproval == null && generationApproval == null) {
                     cancelBrowserEditor(); cancelShizukuEditor(); dictationHost.invalidate()
                     terminalEditor = TerminalEditor(selected, terminalDraft())
                 }
@@ -1097,6 +1216,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openGenerationApproval() {
+        if (videoHost.state.items.isNotEmpty() || videoSending) return
         if (!activityUsable() || retainedPage != "chat" || sidebarVisible || !selectionReady ||
             pendingTextSend != null || imageHost.hasAttachments || draft.isBlank() ||
             controller.generationSubmissionPending()) return
@@ -1117,7 +1237,7 @@ class MainActivity : ComponentActivity() {
                 }
                 if (activityUsable() && generationRequest === request && generation == editorGeneration &&
                     revision == draftRevision && text == draft && conversation?.id == selected?.id &&
-                    retainedPage == "chat" && !sidebarVisible && !imageHost.hasAttachments) {
+                    retainedPage == "chat" && !sidebarVisible && !imageHost.hasAttachments && videoHost.state.items.isEmpty()) {
                     generationApproval = entry
                     generationForm = app.daiyu.android.ui.GenerationApprovalForm(prompt = text,
                         maxPolls = entry?.settings?.maxPolls?.toString() ?: "4")
@@ -1156,7 +1276,7 @@ class MainActivity : ComponentActivity() {
                                 val valid = activityUsable() && generationApproval === entry &&
                                     selected?.id == entry.conversation?.id && editorGeneration == entry.editorGeneration &&
                                     draftRevision == entry.initialEditor.revision && draft == entry.initialEditor.text &&
-                                    !imageHost.hasAttachments
+                                    !imageHost.hasAttachments && videoHost.state.items.isEmpty()
                                 val accepted = valid && controller.sendGeneration(entry,
                                     GenerationEditorSnapshot(generationFormRevision, draft))
                                 generationApproval = null
@@ -1241,6 +1361,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openVirtualDisplayPreparation() {
+        if (videoHost.state.items.isNotEmpty() || videoSending) return
         if (!activityUsable() || retainedPage != "chat" || sidebarVisible || !selectionReady ||
             pendingTextSend != null || imageHost.busy || imageHost.hasAttachments || draft.isBlank()) return
         cancelBrowserEditor(); cancelShizukuEditor()
@@ -1255,6 +1376,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun submitVirtualDisplay(entry: ControllerVirtualDisplayEntry) {
+        if (videoHost.state.items.isNotEmpty() || videoSending) return
         if (!activityUsable() || virtualDisplayEditor !== entry || retainedPage != "chat" || sidebarVisible ||
             pendingTextSend != null || imageHost.hasAttachments || entry.text != draft ||
             entry.editor != ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)) return
@@ -1307,6 +1429,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun openBrowserApproval() {
+        if (videoHost.state.items.isNotEmpty() || videoSending) return
         if (!activityUsable() || pendingTextSend != null || imageHost.hasAttachments || draft.isBlank()) return
         val snapshot = BrowserDraftSnapshot(BrowserDraftOwner(selected?.id, editorGeneration, draftRevision), draft)
         val conversation = selected
@@ -1428,6 +1551,7 @@ class MainActivity : ComponentActivity() {
 
     private fun launchImagePicker() { imagePicker.launch("image/*") }
     private fun pickImages() {
+        if (videoHost.state.items.isNotEmpty() || videoSending) return
         if (!selectionReady || sidebarVisible || retainedPage != "chat" || controller.active != null || imageHost.busy) return
         if (shizukuWritesBlocked) return
         cancelShizukuEditor()
@@ -1449,6 +1573,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun sendImageDraft(text: String) {
+        if (videoHost.state.items.isNotEmpty() || videoSending) return
         if (!selectionReady || retainedPage != "chat" || sidebarVisible || controller.active != null || text != draft) return
         val generation = editorGeneration
         val revision = draftRevision
@@ -1588,6 +1713,9 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); offerOpenedBackup(intent) }
     override fun onResume() {
         super.onResume(); voiceForeground = true; speechHost.setForeground(true)
+        controller.attachVideoUi(videoUi)
+        settleRetainedVideoReceipt()
+        controller.recoverVideos { if (activityUsable()) publishChat() }
         refreshRateWindowResumed = true; applyPreferredRefreshRate()
         window.decorView.post(refreshRateRequest)
     }
@@ -1601,6 +1729,8 @@ class MainActivity : ComponentActivity() {
         requestedPreferredRefreshRate = rate; attributes.preferredRefreshRate = rate; window.attributes = attributes
     }
     override fun onPause() {
+        controller.invalidateVideo(videoUi)
+        videoDialog?.dismiss(); videoDialog = null
         voiceForeground = false
         dictationHost.invalidate()
         cancelShizukuEditor()
@@ -1616,6 +1746,7 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
     override fun onStop() {
+        controller.invalidateVideo(videoUi)
         // Idempotent fallback as well as the earlier onPause cancellation.
         voiceForeground = false
         dictationHost.invalidate()
@@ -1623,6 +1754,8 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        fenceVideoRoute()
+        controller.detachVideoUi(videoUi)
         pendingTextSend?.let { controller.cancelTextSend(it.ticket) }
         linuxSettingsVisit = null
         linuxSettingsPageOwner?.close()
@@ -1856,6 +1989,8 @@ class MainActivity : ComponentActivity() {
     }
     private fun updateDraft(value: String) {
         if (!activityUsable() || sidebarVisible || controller.dataBusy || !controller.ready || controller.textSendState() != null || pendingTextSend != null || imageHost.sending || shizukuWritesBlocked) return
+        controller.invalidateVideo(videoUi)
+        videoDialog?.dismiss(); videoDialog = null
         dictationHost.invalidate()
         cancelShizukuEditor()
         cancelBrowserEditor()
@@ -1868,6 +2003,7 @@ class MainActivity : ComponentActivity() {
     }
     internal fun select(conversation: Conversation?) {
         requireActivityUsable()
+        fenceVideoRoute()
         check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null)) { "请等待本次发送结果" }
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
         val shizukuOwned = shizukuEditor != null || shizukuWritesBlocked
@@ -1879,12 +2015,12 @@ class MainActivity : ComponentActivity() {
             val id = selected?.id
             // A submitted image revision is already persisted and frozen. Its DB acceptance
             // may precede the UI receipt; writing it again here could resurrect sent text.
-            if (!imageHost.sending && !shizukuOwned) {
+            if (!imageHost.sending && !shizukuOwned && !videoSending) {
                 if (id == null) controller.database.draft(draft) else if (list.any { it.id == id }) controller.database.draft(id, draft)
             }
             selections[id] = selectionStart to selectionEnd
         }
-        if (selectionReady && selected?.id == conversation?.id && !imageHost.sending && !shizukuOwned) targetDraft = draft
+        if (selectionReady && selected?.id == conversation?.id && !imageHost.sending && !shizukuOwned && !videoSending) targetDraft = draft
         // Commit the owner before allowing any text callbacks to write to it.
         check(controller.preferences.edit().apply {
             if (conversation == null) remove("selected") else putString("selected", conversation.id.value)
@@ -1893,6 +2029,8 @@ class MainActivity : ComponentActivity() {
         // Even A -> A re-entry gets a new capability; old click lambdas cannot act on it.
         speechHost.enter(conversation?.id?.value)
         imageHost.enter(conversation?.id?.value)
+        videoHost.enter(conversation?.id?.value)
+        videoPanelVisible = videoHost.state.items.isNotEmpty() || videoHost.state.fenced
         draftRevision = maxOf(draftRevision + 1, imageHost.session.attachments.state.value.draft.revision)
         imagePanelVisible = false
         selected = conversation; selectionReady = true; draft = targetDraft
@@ -1902,6 +2040,7 @@ class MainActivity : ComponentActivity() {
         shown = if (conversation == null) mutableListOf() else controller.database.messages(conversation.id).toMutableList()
         imagePanelVisible = imageHost.hasAttachments || imageHost.fenced ||
             MessageHistory.expand(shown.map { it.second }).any { row -> row.blocks.any { it is MessageBlock.Image } }
+        if (videoPanelVisible) imagePanelVisible = false
         collaborationOwner = null; collaborationVisible = false; publishChat(); jumpToBottom(); refresh()
     }
     private fun sendDraft(text: String) {
@@ -2038,6 +2177,9 @@ class MainActivity : ComponentActivity() {
                 draft = latest?.draft ?: controller.database.draft()
                 selectionStart = selectionStart.coerceIn(0, draft.length); selectionEnd = selectionEnd.coerceIn(0, draft.length)
             }
+            val beforeVideoReceipt = editorGeneration
+            settleRetainedVideoReceipt()
+            if (editorGeneration != beforeVideoReceipt) return@guard
             // Capture the replacement editor only after its initial data revision has been restored.
             val sending = controller.textSendState()
             if (sending != null) {

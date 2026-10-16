@@ -6,8 +6,24 @@ plugins {
 abstract class StageBrowserCore:Sync() {
     @get:OutputDirectory abstract val outputDirectory:DirectoryProperty
 }
+// The only new build input is the pinned sherpa-ncnn JNI runtime (no model weights).
+abstract class PrepareOfflineSpeechRuntime:Exec() {
+    @get:OutputDirectory abstract val outputDirectory:DirectoryProperty
+}
+val prepareOfflineSpeechRuntime=tasks.register<PrepareOfflineSpeechRuntime>("prepareOfflineSpeechRuntime") {
+    val script=rootProject.layout.projectDirectory.file("scripts/prepare-speech-runtime.py")
+    val archive=providers.environmentVariable("DAIYU_SPEECH_RUNTIME_ARCHIVE").orNull
+    outputDirectory.set(layout.buildDirectory.dir("generated/offlineSpeech/jniLibs"))
+    inputs.file(script)
+    if(archive != null) inputs.file(file(archive))
+    val python=if(System.getProperty("os.name").startsWith("Windows",ignoreCase=true)) "python" else "python3"
+    val args=mutableListOf(python,script.asFile.absolutePath,outputDirectory.get().asFile.absolutePath)
+    if(archive != null) args.addAll(listOf("--archive",file(archive).absolutePath))
+    commandLine(args)
+}
 val browserRoot=rootProject.layout.projectDirectory.dir("components/openminis-browser")
 androidComponents.onVariants { variant ->
+    variant.sources.jniLibs?.addGeneratedSourceDirectory(prepareOfflineSpeechRuntime,PrepareOfflineSpeechRuntime::outputDirectory)
     val stageBrowserCore=tasks.register<StageBrowserCore>("stage${variant.name.replaceFirstChar {it.uppercaseChar()}}BrowserCore") {
         from(browserRoot.dir("upstream/src/main/kotlin")) {
             include(listOf("BrowserAction.kt","BrowserActionInput.kt","BrowserActionResult.kt",
@@ -32,6 +48,7 @@ android {
         applicationId = "app.daiyu.android"
         minSdk = 26
         targetSdk = 37
+        proguardFiles("offline-speech-rules.pro")
         testInstrumentationRunner = "android.test.InstrumentationTestRunner"
         versionCode = 1
         versionName = "0.1.0"

@@ -79,7 +79,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             "chat-control" -> retainedControls(activity).onPrimaryTap
             else -> {
                 val title = tag.removePrefix("settings-row:")
-                val route = checkNotNull(app.daiyu.android.ui.FeatureCatalog.groups.flatMap { it.entries }
+                val route = checkNotNull(app.daiyu.android.ui.screens.settings.SettingsCatalog.entries
                     .single { it.title == title }.route);
                 { invokeHost(activity, "openSettingsFromPage", route); Unit }
             }

@@ -124,12 +124,21 @@ class GenerationSettingsStore internal constructor(
     /** Call only for an explicit settings save, not on composition, selection, or run preparation.
      * expectedRevision is null ONLY for a first save. IDs and scope are minted once into the
      * durable manifest, then retained through edits, reopening and explicit incomplete-save recovery.
+     * admitSave is a fast, memory-only owner check, invoked once under the shared store lock
+     * before any store read/write/fence. False rejects as STALE_EDIT. After true the save is admitted and
+     * must drain through readback, independent of later UI revocation. Default preserves callers.
      */
     fun save(
         values: GenerationSettingsValues,
         expectedRevision: String?,
         confirmIncompleteSaveRecovery: Boolean = false,
+        admitSave: () -> Boolean = { true },
     ): GenerationSettingsSnapshot = synchronized(lock) {
+        // Linearization point for a page-owned save. Check AFTER acquiring the shared store
+        // lock, BEFORE reads, ID minting, fencing or writes. A revoked queued page must not
+        // save, even when its coroutine was dispatched while it was still current. Once
+        // admitted, finish the full commit/readback even if the page leaves in the meantime.
+        if (!admitSave()) fail(GenerationSettingsFailure.STALE_EDIT)
         validate(values, requireIds = false)
         val previous = readRecord()
         if (previous?.revision != expectedRevision) fail(GenerationSettingsFailure.STALE_EDIT)

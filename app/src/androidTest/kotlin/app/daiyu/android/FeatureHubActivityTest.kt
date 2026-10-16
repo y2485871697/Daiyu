@@ -35,7 +35,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     }
     fun testOriginalSettingsAppearOutsideExistingChatTreeWithoutStateLabels() {
         openHub()
-        assertEquals(37, entries.size)
+        assertEquals(38, entries.size)
         entries.forEach { item -> entry(item.id).assertIsEnabled().assertTextContains(item.title) }
         ui.onAllNodes(SemanticsMatcher("forbidden state marker") { semantics ->
             val texts = semantics.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text).orEmpty()
@@ -73,6 +73,30 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         modelField("模型名").assertEditableText(before.model)
         backToChat(activity); assertDraft("原草稿")
         assertEquals(0, fixture.opens.get()); assertEquals(before, fixture.settings.loadForEditing().settings)
+    }
+    fun testIndependentGenerationSettingsNavigationDoesNotSendOrChangeChatConfiguration() {
+        setDraft("独立生成设置保留草稿")
+        val before = fixture.database.exportBackup()
+        val chatSettings = fixture.settings.loadForEditing().settings
+        openHub(); entry("generation").performClick()
+        node("page:独立生成模型设置").assertExists()
+        assertEquals(0, fixture.opens.get())
+        assertNull(fixture.controller.active)
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(chatSettings, fixture.settings.loadForEditing().settings)
+        backToChat(activity); node("page:设置").assertExists()
+        backToChat(activity); assertDraft("独立生成设置保留草稿")
+    }
+    fun testOldGenerationSettingsEntryCannotOpenAfterActivityRecreation() {
+        setDraft("设置旧入口保留草稿")
+        openHub(); entry("generation")
+        val oldOpen = retainedClick(activity, "settings-row:独立生成模型")
+        val old = activity; activity = recreateActivity(activity)
+        mainThread { oldOpen() }
+        node("page:独立生成模型设置").assertDoesNotExist()
+        assertTrue(old.isDestroyed)
+        assertDraft("设置旧入口保留草稿")
+        assertEquals(0, fixture.opens.get())
     }
     fun testRecreationClosesHubAndStaleButtonsCannotOpenTheNewActivity() {
         setDraft("重建保留草稿"); openHub(); entry("providers")

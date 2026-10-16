@@ -108,6 +108,10 @@ class MainActivity : ComponentActivity() {
     private var terminalPageOwner: Any? = null
     private val browserSettings by lazy { app.daiyu.android.browser.BrowserSettingsStore(applicationContext) }
     private var compressionSettingsPageOwner: app.daiyu.android.context.CompressionSettingsEditor? = null
+    private class GenerationSettingsVisit(val editor: GenerationSettingsEditor) {
+        val active = AtomicBoolean(true)
+    }
+    private var generationSettingsVisit by mutableStateOf<GenerationSettingsVisit?>(null)
     private var browserSettingsPageOwner: app.daiyu.android.browser.BrowserSettingsSaveOwner? = null
     private var hapticsHost: app.daiyu.android.haptics.HapticsActivityHost? = null
     private fun syncHaptics() {
@@ -174,6 +178,10 @@ class MainActivity : ComponentActivity() {
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
+            if (value != "generation-settings") {
+                generationSettingsVisit?.active?.set(false)
+                generationSettingsVisit = null
+            }
             if (value != "compression-settings") {
                 compressionSettingsPageOwner?.revoke()
                 compressionSettingsPageOwner = null
@@ -437,6 +445,16 @@ class MainActivity : ComponentActivity() {
                             })
                         }
                     }
+                    "generation-settings" -> generationSettingsVisit?.let { visit -> key(visit) {
+                        app.daiyu.android.ui.GenerationSettingsHost(
+                            editor = visit.editor,
+                            ownerCurrent = { visit.active.get() },
+                            onBack = {
+                                if (activityUsable() && generationSettingsVisit === visit && retainedPage == "generation-settings")
+                                    retainedPage = "settings"
+                            },
+                        )
+                    } }
                     "compression-settings" -> compressionSettingsPageOwner?.let { page -> key(page) {
                         CompressionSettingsScreen(page, onBack = {
                             if (activityUsable() && compressionSettingsPageOwner === page && retainedPage == "compression-settings")
@@ -1157,6 +1175,8 @@ class MainActivity : ComponentActivity() {
         linuxSettingsVisit = null
         linuxSettingsPageOwner?.close()
         linuxSettingsPageOwner = null
+        generationSettingsVisit?.active?.set(false)
+        generationSettingsVisit = null
         compressionSettingsPageOwner?.revoke()
         compressionSettingsPageOwner = null
         browserSettingsPageOwner?.revoke()
@@ -1183,6 +1203,12 @@ class MainActivity : ComponentActivity() {
     }
     private fun openSkillManagement() {
         retainedPage = "skills"
+    }
+    private fun openGenerationSettings() {
+        requireActivityUsable()
+        generationSettingsVisit?.active?.set(false)
+        generationSettingsVisit = GenerationSettingsVisit(GenerationSettingsEditor(applicationContext))
+        retainedPage = "generation-settings"
     }
     private fun openCompressionSettings() {
         requireActivityUsable()
@@ -1257,6 +1283,7 @@ class MainActivity : ComponentActivity() {
             FeatureRoute.LINUX_SETTINGS -> openLinuxSettings()
             FeatureRoute.BROWSER_SETTINGS -> openBrowserSettings()
             FeatureRoute.COMPRESSION_SETTINGS -> openCompressionSettings()
+            FeatureRoute.GENERATION_SETTINGS -> openGenerationSettings()
             // Settings entries are navigation, never implicit execution/send/stop operations.
             FeatureRoute.CHAT, FeatureRoute.USER_MESSAGE -> Unit
         }

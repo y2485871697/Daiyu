@@ -129,6 +129,74 @@ class VideoAssetStore internal constructor(
         }
     } }
 
+    /** Restore immutable message originals without minting IDs or granting draft/upload authority.
+     * Exact existing pairs are verified, never overwritten. On failure only directories created by
+     * this call are removed; the host still owns DB atomicity and must hold its acceptance lock.
+     * A successful call followed by a DB rollback may leave unreferenced originals, not data loss.
+     */
+    fun restore(
+        owner: MessageVideoOwner,
+        references: List<MessageVideoReference>,
+        contents: List<ByteArray>,
+        isCancelled: () -> Boolean = { Thread.currentThread().isInterrupted },
+    ) = synchronized(gate) { videoIo {
+        checkVideoCancellation(isCancelled)
+        require(references.size == contents.size)
+        require(references.map { it.id }.distinct().size == references.size)
+        references.forEachIndexed { index, reference ->
+            checkVideoCancellation(isCancelled)
+            authorize(owner, reference)
+            if (contents[index].size.toLong() != reference.bytes || videoDigest(contents[index]) != reference.sha256) {
+                videoFail(VideoAttachmentFailure.CORRUPT)
+            }
+        }
+        val existing = listLocked(owner)
+        val additions = references.filter { wanted -> existing.none { it.id == wanted.id } }
+        if (existing.size + additions.size > limits.maxVideos) videoFail(VideoAttachmentFailure.TOO_MANY)
+        if (existing.sumOf { it.bytes } + additions.sumOf { it.bytes } > limits.maxOwnerBytes) {
+            videoFail(VideoAttachmentFailure.TOO_LARGE)
+        }
+        val staged = mutableListOf<Pair<File, File>>()
+        val published = mutableListOf<File>()
+        try {
+            references.forEachIndexed { index, reference ->
+                checkVideoCancellation(isCancelled)
+                val destination = assetDirectory(owner, reference.id)
+                if (exists(assetDirectory(owner, reference.id, ".deleting"))) videoFail(VideoAttachmentFailure.STORAGE)
+                if (exists(destination)) {
+                    // A marker/metadata file is not proof that the original still exists.
+                    openOriginal(owner, reference, isCancelled).use { }
+                    val actual = inspector.inspect(checked(destination, ORIGINAL), limits, isCancelled)
+                    validateVideo(actual, limits)
+                    if (actual != reference.metadata()) videoFail(VideoAttachmentFailure.CORRUPT)
+                } else {
+                    val pending = assetDirectory(owner, reference.id, ".pending")
+                    if (exists(pending) || !pending.mkdir()) videoFail(VideoAttachmentFailure.STORAGE)
+                    staged.add(pending to destination)
+                    val copied = contents[index].inputStream().use {
+                        copy(it, checked(pending, ORIGINAL), limits.maxVideoBytes, isCancelled)
+                    }
+                    if (copied.first != reference.bytes || copied.second != reference.sha256) videoFail(VideoAttachmentFailure.CORRUPT)
+                    val actual = inspector.inspect(checked(pending, ORIGINAL), limits, isCancelled)
+                    validateVideo(actual, limits)
+                    if (actual != reference.metadata()) videoFail(VideoAttachmentFailure.CORRUPT)
+                    // Local recovery provenance only: this must never authorize a source draft.
+                    writeRecord(pending, reference, "restored-backup")
+                }
+            }
+            staged.forEach { (pending, destination) ->
+                checkVideoCancellation(isCancelled)
+                Files.move(pending.toPath(), destination.toPath(), ATOMIC_MOVE)
+                published.add(destination)
+            }
+            checkVideoCancellation(isCancelled)
+        } catch (failure: Exception) {
+            published.asReversed().forEach { cleanupAfterFailure(it, failure) }
+            staged.forEach { (pending, _) -> cleanupAfterFailure(pending, failure) }
+            throw failure
+        }
+    } }
+
     /** Exact owner AND complete immutable reference must match stored metadata. Caller closes it.
      * The same read-only descriptor is hashed, rewound and returned; no path/URI is exported.
      */

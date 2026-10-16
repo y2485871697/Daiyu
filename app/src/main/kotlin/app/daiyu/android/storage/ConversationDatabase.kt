@@ -329,13 +329,39 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     }
     fun exportBackup():String = exportBackup(null)
     fun exportConversationBackup(conversationId:ConversationId):String = exportBackup(conversationId)
-    private fun exportBackup(conversationId:ConversationId?):String {
+    internal fun exportBackupForVideoAssets(
+        db: SQLiteDatabase,
+        conversationId: ConversationId?,
+        assets: app.daiyu.android.backup.BackupVideoAssets,
+    ): String {
+        check(db === writableDatabase && db.inTransaction())
+        return exportBackup(conversationId, assets)
+    }
+    internal fun restoreVideoBackupSidecars(
+        db: SQLiteDatabase,
+        sidecars: List<app.daiyu.android.backup.BackupVideoSidecar>,
+    ) {
+        check(db === writableDatabase && db.inTransaction())
+        sidecars.forEach { sidecar ->
+            val conversation = db.rawQuery("SELECT conversation_id FROM messages WHERE id=?",
+                arrayOf(sidecar.messageId)).use { cursor ->
+                check(cursor.moveToFirst()) { "视频物理消息不存在" }
+                ConversationId(cursor.getString(0))
+            }
+            val physical = storedMessage(db, conversation, sidecar.messageId)
+            val inputs = MessageVideoInputCodec.decode(physical, sidecar.payload)
+            check(inputs.isNotEmpty())
+            SQLiteMessageVideoStore.insert(db, physical, inputs)
+        }
+    }
+    private fun exportBackup(conversationId:ConversationId?,
+        videoAssets: app.daiyu.android.backup.BackupVideoAssets? = null):String {
         var result=""
         val conversationWhere=if(conversationId==null) "" else " WHERE id=?"
         val messageWhere=if(conversationId==null) "" else " WHERE conversation_id=?"
         val args=conversationId?.let {arrayOf(it.value)}
         transaction {db->
-            check(!SQLiteMessageVideoStore.hasVideos(db, conversationId?.value)) {
+            check(videoAssets != null || !SQLiteMessageVideoStore.hasVideos(db, conversationId?.value)) {
                 "文本备份不能保留原视频，请使用支持视频原件的备份格式"
             }
             val conversationCount=db.rawQuery("SELECT count(*) FROM conversations$conversationWhere",args).use {it.moveToFirst();it.getLong(0)}
@@ -438,15 +464,33 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         val (imported,restored,draft)=parseBackup(text)
         transaction {db->
             // Append only. Any identity collision aborts the entire transaction.
-            imported.forEach {c->db.insertOrThrow("conversations",null,ContentValues().apply {
+            imported.forEach {c->check(db.insertOrThrow("conversations",null,ContentValues().apply {
                 put("id",c.id.value);put("title",c.title);put("draft",c.draft);put("updated",c.updatedAt);put("folder",c.folder);put("pinned",if(c.pinned) 1 else 0);put("assistant_id",c.assistantId)
-            })}
-            restored.forEach {db.insertOrThrow("messages",null,values(it))}
+            }) != -1L) { "备份会话未写入" }}
+            restored.forEach {check(db.insertOrThrow("messages",null,values(it)) != -1L) { "备份消息未写入" }}
             val existing=db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
             require(draft.isEmpty() || existing.isEmpty() || draft==existing) {"未创建会话草稿冲突；未覆盖"}
             if(existing.isEmpty()) check(db.update("composer",ContentValues().apply {put("draft",draft)},"id=1",null)==1)
+            check(db.rawQuery("SELECT 1 FROM composer WHERE id=1 AND draft=?",
+                arrayOf(if (existing.isEmpty()) draft else existing)).use { it.moveToFirst() })
+            verifyBackupRows(db, imported, restored)
         }
         return imported.size to restored.size
+    }
+    internal fun verifyRestoredBackup(db: SQLiteDatabase, text: String) {
+        check(db === writableDatabase && db.inTransaction())
+        val (imported, restored, _) = parseBackup(text)
+        verifyBackupRows(db, imported, restored)
+    }
+    private fun verifyBackupRows(db: SQLiteDatabase, imported: List<Conversation>, restored: List<Message>) {
+        imported.forEach { c ->
+            check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND title=? AND draft=? AND updated=? AND folder=? AND pinned=? AND assistant_id IS ?",
+                arrayOf(c.id.value, c.title, c.draft, c.updatedAt.toString(), c.folder,
+                    if (c.pinned) "1" else "0", c.assistantId)).use { it.moveToFirst() }) { "备份会话回执不匹配" }
+        }
+        restored.forEach { message ->
+            check(storedMessage(db, message.conversationId, message.id.value) == message) { "备份消息回执不匹配" }
+        }
     }
     private fun string(value:JSONObject,key:String):String = (value.get(key) as? String) ?: error("字段须为文本")
     private fun integer(value:JSONObject,key:String):Long {

@@ -38,7 +38,7 @@ class ContextPreparationCoordinatorTest : InstrumentationTestCase() {
         super.tearDown()
     }
     private fun seed(turns: Int = 6): ConversationId {
-        val owner = db.create().id
+        val owner = db.create("default").id
         repeat(turns) { n ->
             val run = RunId("r-$n")
             val user = Message(MessageId("u-$n"), owner, run, "user",

@@ -25,7 +25,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         lateinit var conversation: Conversation
         lateinit var first: Message
         mainThread {
-            conversation = fixture.database.create()
+            conversation = fixture.database.create("default")
             repeat(later + 1) { index ->
                 val user = Message(MessageId("$key-user-$index"), conversation.id, RunId("$key-run-$index"), "user",
                     listOf(MessageBlock.Text("text", if (index == 0) body else "后续消息 $index")), RunStatus.COMPLETED)

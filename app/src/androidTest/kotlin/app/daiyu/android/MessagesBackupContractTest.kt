@@ -24,7 +24,7 @@ class MessagesBackupContractTest : InstrumentationTestCase() {
         try {
             assertFalse(instrumentation.targetContext.getDatabasePath("conversations.db").canonicalPath == f.source.getDatabasePath("conversations.db").canonicalPath)
             assertFalse(f.source.getDatabasePath("conversations.db").canonicalPath == f.target.getDatabasePath("conversations.db").canonicalPath)
-            assertEquals(9, f.from.readableDatabase.version); assertEquals(9, f.to.readableDatabase.version)
+            assertEquals(10, f.from.readableDatabase.version); assertEquals(10, f.to.readableDatabase.version)
             test(f)
         } finally {
             try { f.from.close() } finally {
@@ -56,7 +56,7 @@ class MessagesBackupContractTest : InstrumentationTestCase() {
         return MessagesStream.read(body.reader().buffered(), { false }, events::add) to events
     }
     private fun seed(db: ConversationDatabase, suffix: String, finished: Boolean = true): Message {
-        val conversation = db.create(); val run = RunId("run-$suffix")
+        val conversation = db.create("default"); val run = RunId("run-$suffix")
         val user = Message(MessageId("user-$suffix"), conversation.id, run, "user",
             listOf(MessageBlock.Text("question", "查询\n\"原文\"")), RunStatus.COMPLETED)
         val assistant = Message(MessageId("assistant-$suffix"), conversation.id, run, "assistant", emptyList(), RunStatus.RUNNING)
@@ -238,7 +238,7 @@ class MessagesBackupContractTest : InstrumentationTestCase() {
             put(event("tool_result", "tool_use_id" to it.invocation.id.value, "content" to requireNotNull(it.result)))
         } }
         val savedResults = " \n" + JSONObject().put("role", "user").put("content", results).toString() + "\t "
-        val c = f.from.create(); val run = RunId("batch-run")
+        val c = f.from.create("default"); val run = RunId("batch-run")
         val user = Message(MessageId("batch-user"), c.id, run, "user", listOf(MessageBlock.Text("question", "完整批次问题")), RunStatus.COMPLETED)
         val initial = Message(MessageId("batch-owner"), c.id, run, "assistant", emptyList(), RunStatus.RUNNING)
         f.from.send(user, initial)
@@ -253,11 +253,11 @@ class MessagesBackupContractTest : InstrumentationTestCase() {
         assertEquals(expected, f.from.messages(c.id).last().second); assertEquals(backup, f.from.exportBackup())
         f.to.preflightBackup(backup); assertEquals(1 to 2, f.to.importBackup(backup))
         f.to.close(); f.to = ConversationDatabase(f.target)
-        assertEquals(9, f.to.readableDatabase.version); assertEquals(listOf(user, expected), f.to.messages(c.id).map { it.second })
+        assertEquals(10, f.to.readableDatabase.version); assertEquals(listOf(user, expected), f.to.messages(c.id).map { it.second })
         assertReplay(f.to, expected); assertEquals(backup, f.to.exportBackup())
     }
     fun testLegacyResponsesBackupKeepsOldPathAndRejectsMissingTypeOrMixedItems() = fixture { f ->
-        val c = f.from.create(); val run = RunId("legacy-responses-run")
+        val c = f.from.create("default"); val run = RunId("legacy-responses-run")
         val user = Message(MessageId("legacy-responses-user"), c.id, run, "user", listOf(MessageBlock.Text("question", "旧 Responses 问题")), RunStatus.COMPLETED)
         val initial = Message(MessageId("legacy-responses-owner"), c.id, run, "assistant", emptyList(), RunStatus.RUNNING)
         val protocol = listOf(event("reasoning", "summary" to JSONArray(), "encrypted_content" to "synthetic").toString(),
@@ -283,7 +283,7 @@ class MessagesBackupContractTest : InstrumentationTestCase() {
         assertEquals("既有未创建草稿", f.to.draft()); assertEquals(1 to 2, f.to.importBackup(backup))
         assertEquals(expected, f.to.messages(c.id).last().second); assertEquals(existing, f.to.messages(existing.conversationId).last().second)
         val after = f.to.exportBackup(); f.to.close(); f.to = ConversationDatabase(f.target)
-        assertEquals(9, f.to.readableDatabase.version); assertEquals(after, f.to.exportBackup())
+        assertEquals(10, f.to.readableDatabase.version); assertEquals(after, f.to.exportBackup())
         assertEquals(protocol, f.to.messages(c.id).last().second.protocolItems)
         assertTrue(f.to.messages(c.id).last().second.historySegments.isEmpty()); assertEquals("既有未创建草稿", f.to.draft())
     }

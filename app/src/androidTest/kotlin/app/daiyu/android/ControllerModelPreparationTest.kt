@@ -80,7 +80,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             if (reject) error("synthetic-secret-must-not-escape")
             ModelPort { opens.incrementAndGet(); session("accepted") }
         }
-        val conversation = f.db.create()
+        val conversation = f.db.create("default")
         f.db.draft(conversation.id, "retained conversation draft"); f.db.draft("retained composer draft")
         val before = f.db.conversations()
         main {
@@ -140,7 +140,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
                 }
             }
         }
-        conversation = f.db.create(); f.db.draft(conversation.id, "keep until accepted")
+        conversation = f.db.create("default"); f.db.draft(conversation.id, "keep until accepted")
         main { assertNotNull(f.controller.send(conversation, "accepted")) }
         awaitState(f) { f.controller.active == null }
         assertEquals(1, factories.get()); assertEquals(1, opens.get())
@@ -157,7 +157,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             factories.incrementAndGet()
             ModelPort { opens.incrementAndGet(); session("must not run") }
         }
-        val conversation = f.db.create(); f.db.draft(conversation.id, "retained")
+        val conversation = f.db.create("default"); f.db.draft(conversation.id, "retained")
         f.db.writableDatabase.execSQL("CREATE TRIGGER reject_send BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT,'synthetic'); END")
         main { assertNull(f.controller.send(conversation, "retained")) }
         assertEquals(1, factories.get()); assertEquals(0, opens.get())
@@ -189,7 +189,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
     }
     private data class Archived(val conversation:Conversation,val id:String,val original:List<Message>)
     private fun archived(f:Fixture):Archived {
-        val conversation=f.db.create()
+        val conversation=f.db.create("default")
         repeat(3) {n ->
             val run=RunId(UUID.randomUUID().toString())
             val user=Message(MessageId("u-$run"),conversation.id,run,"user",
@@ -218,7 +218,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
     fun testInteractiveModeMissingPreferenceDoesNotAdvertiseOrExecuteQuestion() {
         val probe = CatalogProbe()
         val f = fresh(interactiveEnabled = null) { probe }
-        val c = f.db.create()
+        val c = f.db.create("default")
         probe.batches = listOf(listOf(call("ungranted-question", "ask_user", org.json.JSONObject())))
         finish(f, c)
         assertFalse(f.controller.preferences.contains("interactive_mode"))
@@ -234,7 +234,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             check(f.controller.preferences.edit().putBoolean("interactive_mode", true).commit())
             probe
         }
-        val c = f.db.create()
+        val c = f.db.create("default")
         finish(f, c)
         assertTrue(probe.definitions.none { it.name == "ask_user" })
         finish(f, c)
@@ -248,7 +248,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             check(f.controller.preferences.edit().putBoolean("interactive_mode", false).commit())
             probe
         }
-        val c = f.db.create()
+        val c = f.db.create("default")
         finish(f, c)
         assertEquals(1, probe.definitions.count { it.name == "ask_user" })
         finish(f, c)
@@ -260,7 +260,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         f=fresh {config ->
             f.settings.save(config.copy(batteryEnabled=false,deviceStatusEnabled=true));probe
         }
-        val c=f.db.create();finish(f,c)
+        val c=f.db.create("default");finish(f,c)
         assertEquals(setOf("get_battery_status","context_usage","ask_user"),probe.definitions.map {it.name}.toSet())
         assertEquals(setOf("ask_user"),probe.definitions.filter {it.sideEffect}.map {it.name}.toSet())
         val usage=probe.definitions.single {it.name=="context_usage"}
@@ -316,7 +316,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         assertEquals(b.original,app.daiyu.android.context.ContextService(f.app,f.db).displayHistory(b.conversation.id))
     }
     fun testCatalogInvalidArgumentsRejectWholeBatchBeforeReservation() {
-        val probe=CatalogProbe();val f=fresh {probe};val c=f.db.create()
+        val probe=CatalogProbe();val f=fresh {probe};val c=f.db.create("default")
         probe.batches=listOf(listOf(call("valid-first","get_battery_status",org.json.JSONObject()),
             call("forged-scope","context_usage",org.json.JSONObject().put("branch_id",c.id.value)
                 .put("scope",org.json.JSONObject().put("conversation_id","forged-owner")))))
@@ -339,7 +339,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
 
     fun testSkillsActualCatalogFreezesIndexAndBodyButRejectsChangedResource() {
         val probe=CatalogProbe();val f=fresh {probe};val old=installSkill(f)
-        val c=f.db.create();var changed=false
+        val c=f.db.create("default");var changed=false
         probe.batches=listOf(listOf(call("skill-list","skills_list",org.json.JSONObject()),
             call("skill-body","skills_read",skillArguments(old.revision)),
             call("skill-resource","skills_read_resource",skillArguments(old.revision).put("path","references/guide.md"))))
@@ -370,7 +370,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         assertEquals(3,ledger(f).size)
     }
     fun testSkillsInvalidWholeBatchDoesNotReserveAndInstallIsNotReachable() {
-        val probe=CatalogProbe();val f=fresh {probe};val old=installSkill(f);val c=f.db.create()
+        val probe=CatalogProbe();val f=fresh {probe};val old=installSkill(f);val c=f.db.create("default")
         probe.batches=listOf(listOf(call("valid-skill","skills_read",skillArguments(old.revision)),
             call("bad-skill","skills_read_resource",skillArguments(old.revision).put("path","../secret"))))
         finish(f,c)
@@ -389,7 +389,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
     fun testSkillsCaptureFailurePersistsFailedWithoutOpeningModelAndCanStartNextRun() {
         val opens=AtomicInteger();val f=fresh {ModelPort {opens.incrementAndGet();session("next-run")}}
         val broken=File(f.app.filesDir,"agent-builtin-skills-v1");broken.writeText("not a directory")
-        val c=f.db.create()
+        val c=f.db.create("default")
         main {assertNotNull(f.controller.send(c,"accepted before worker capture"))}
         awaitState(f) {f.controller.active==null}
         assertEquals(0,opens.get());assertEquals(RunStatus.FAILED,f.db.messages(c.id).last().second.status)
@@ -397,7 +397,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         finish(f,c);assertEquals(1,opens.get())
     }
     fun testStopBeforeSkillBatchExecutionPreventsReadAndLedgerReservation() {
-        val probe=CatalogProbe();val f=fresh {probe};installSkill(f);val c=f.db.create()
+        val probe=CatalogProbe();val f=fresh {probe};installSkill(f);val c=f.db.create("default")
         val entered=CountDownLatch(1);val release=CountDownLatch(1)
         probe.batches=listOf(listOf(call("stopped-skill","skills_list",org.json.JSONObject())))
         probe.beforeReturn={entered.countDown();check(release.await(10,TimeUnit.SECONDS))}

@@ -33,7 +33,7 @@ class ContextRegistryScopeTest : InstrumentationTestCase() {
 
     private data class Fixture(val owner: ConversationId, val runs: List<RunId>, val archive: String, val originals: List<Message>)
     private fun seed(): Fixture {
-        val owner = db.create().id
+        val owner = db.create("default").id
         val runs = (0 until 4).map { RunId("run-$it-${owner.value}") }
         runs.forEachIndexed { n, run ->
             val user = Message(MessageId("u-$n-${owner.value}"), owner, run, "user",

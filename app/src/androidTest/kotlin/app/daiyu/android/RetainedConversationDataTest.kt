@@ -46,7 +46,7 @@ class RetainedConversationDataTest : android.test.AndroidTestCase() {
         assertEquals("原目录", database.conversations().single().folder)
     }
     fun testFullHistorySearchReturnsExactOlderMessageIdentityAndStatsDoNotInventUsage() {
-        val conversation = database.create()
+        val conversation = database.create("default")
         val run = RunId("search-run")
         val user = Message(MessageId("older-user"), conversation.id, run, "user", listOf(MessageBlock.Text("needle-text", "before Needle after")), RunStatus.COMPLETED)
         val assistant = Message(MessageId("older-answer"), conversation.id, run, "assistant", emptyList(), RunStatus.RUNNING)
@@ -71,7 +71,7 @@ class RetainedConversationDataTest : android.test.AndroidTestCase() {
         assertFalse(summary.isActiveRun); assertFalse(summary.hasCompletionMarker)
     }
     fun testMixedImageHistorySearchKeepsSegmentAndNavigationOwnerWithoutMetadataLeaks() {
-        val conversation = database.create(); val run = RunId("image-history-run")
+        val conversation = database.create("default"); val run = RunId("image-history-run")
         val initial = Message(MessageId("initial-user"), conversation.id, run, Message.USER_ROLE,
             listOf(MessageBlock.Text("initial", "start")), RunStatus.COMPLETED)
         val assistant = initial.copy(id = MessageId("history-owner"), role = Message.ASSISTANT_ROLE,
@@ -101,7 +101,7 @@ class RetainedConversationDataTest : android.test.AndroidTestCase() {
     }
 
     fun testStatsConsumesCommittedRunnerUsageReplacementReopenAndDeletion() {
-        val conversation = database.create(); val run = RunId("usage-run")
+        val conversation = database.create("default"); val run = RunId("usage-run")
         val user = Message(MessageId("usage-user"), conversation.id, run, "user", emptyList(), RunStatus.COMPLETED)
         val assistant = user.copy(id = MessageId("usage-answer"), role = "assistant", status = RunStatus.RUNNING)
         app.daiyu.android.storage.SQLiteRuntimeStore.acquire(database).use { runtime ->
@@ -146,10 +146,11 @@ class RetainedConversationDataTest : android.test.AndroidTestCase() {
         database.draft(conversation.id, "迁移草稿")
         database.organize(conversation.id, "已有目录", true)
         database.writableDatabase.execSQL("DROP TABLE conversation_folders")
+        removeAssistantSchemaForLegacyFixture(database.writableDatabase)
         database.writableDatabase.version = 6
         database.close(); database = ConversationDatabase(scoped)
         data = RetainedConversationData(database, ContextService(scoped, database))
-        assertEquals(9, database.readableDatabase.version)
+        assertEquals(10, database.readableDatabase.version)
         val restored = database.conversations().single()
         assertEquals(conversation.id, restored.id); assertEquals("迁移草稿", restored.draft)
         assertEquals("已有目录", restored.folder); assertTrue(restored.pinned)

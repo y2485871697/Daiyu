@@ -27,7 +27,7 @@ class ContextServiceTest : InstrumentationTestCase() {
         db.close(); context.deleteDatabase("conversations.db"); context.filesDir.deleteRecursively(); super.tearDown()
     }
     private fun seed(turns: Int = 6): ConversationId {
-        val owner = db.create().id
+        val owner = db.create("default").id
         repeat(turns) { n -> val run = RunId("run-$n-${owner.value}")
             val user = Message(MessageId("u-$n-${owner.value}"), owner, run, "user", listOf(MessageBlock.Text("u", "事实$n ".repeat(100))), RunStatus.COMPLETED)
             val reply = Message(MessageId("a-$n-${owner.value}"), owner, run, "assistant", listOf(MessageBlock.Text("a", "已确认$n ".repeat(100))), RunStatus.RUNNING)

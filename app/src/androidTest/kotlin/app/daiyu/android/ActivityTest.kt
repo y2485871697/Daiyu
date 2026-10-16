@@ -15,7 +15,7 @@ class ActivityTest : WiredActivityTestCase() {
     private fun refresh() { mainThread { MainActivity::class.java.getDeclaredMethod("refresh").apply { isAccessible = true }.invoke(activity) } }
     fun testStreamingFollowStopsOnTouchAndEarlierHistory() {
         val db = fixture.database
-        val conversation = db.create()
+        val conversation = db.create("default")
         repeat(70) { i ->
             val run = RunId("scroll-$i")
             val user = Message(MessageId("su-$i"), conversation.id, run, "user", listOf(MessageBlock.Text("u", "历史用户 $i")), RunStatus.COMPLETED)

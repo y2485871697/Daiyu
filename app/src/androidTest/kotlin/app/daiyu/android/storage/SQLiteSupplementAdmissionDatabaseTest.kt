@@ -20,7 +20,7 @@ class SQLiteSupplementAdmissionDatabaseTest : InstrumentationTestCase() {
         context = testContext(instrumentation.targetContext, "supplement-${UUID.randomUUID()}-")
         database = ConversationDatabase(context)
         runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
-        val c = database.create(); val r = RunId("run")
+        val c = database.create("default"); val r = RunId("run")
         val user = Message(MessageId("user"), c.id, r, Message.USER_ROLE, listOf(MessageBlock.Text("user", "initial")), RunStatus.COMPLETED)
         val answer = user.copy(id = MessageId("answer"), role = Message.ASSISTANT_ROLE, blocks = emptyList(), status = RunStatus.RUNNING)
         database.send(user, answer); database.draft(c.id, "draft remains")

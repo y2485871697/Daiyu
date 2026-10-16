@@ -11,7 +11,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 9), ConversationStore {
+class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 10), ConversationStore {
+    private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
+    private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
+        db, assistantPreferences.getString(app.daiyu.android.assistants.LegacyAssistantCodec.KEY, null))
     internal val runtimeLockFile = java.io.File(context.getDatabasePath("conversations.db").canonicalPath + ".runtime-owner")
     /** A message row keeps the v4 columns as the legacy projection.  This column is an
      * append-only, lossless history of the provider attempts.  Empty means an old row and
@@ -22,11 +25,12 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.execSQL("PRAGMA synchronous=FULL")
     }
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0)")
+        db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0,assistant_id TEXT)")
         db.execSQL("CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL,role TEXT NOT NULL,blocks TEXT NOT NULL,status TEXT NOT NULL,error TEXT,protocol TEXT NOT NULL,history_segments TEXT NOT NULL DEFAULT '[]')")
         db.execSQL("CREATE INDEX messages_tail ON messages(conversation_id,seq)")
         createUiFolders(db)
         createComposer(db)
+        installAssistants(db)
         ContextStorage.installSchema(db)
         SQLiteRuntimeStore.installSchema(db)
         SQLiteChildTaskStore.installSchema(db)
@@ -37,7 +41,9 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..8 && newVersion==9) {"不支持此数据库版本，保留原数据"}
+        check(oldVersion in 1..9 && newVersion==10) {"不支持此数据库版本，保留原数据"}
+        db.execSQL("ALTER TABLE conversations ADD COLUMN assistant_id TEXT")
+        installAssistants(db)
         if(oldVersion==1) createComposer(db)
         if(oldVersion<=2) {
             db.execSQL("ALTER TABLE conversations ADD COLUMN folder TEXT NOT NULL DEFAULT ''")
@@ -92,8 +98,8 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         val conditions=mutableListOf<String>();val args=mutableListOf<String>()
         if(folder!=null) {conditions.add("folder=?");args.add(folder)}
         val where=if(conditions.isEmpty()) "" else " WHERE "+conditions.joinToString(" AND ")
-        val list=readableDatabase.rawQuery("SELECT id,title,draft,updated,folder,pinned FROM conversations$where ORDER BY pinned DESC,updated DESC,id ASC",args.toTypedArray()).use {c->
-            buildList {while(c.moveToNext()) add(Conversation(ConversationId(c.getString(0)),c.getString(1),c.getString(2),c.getLong(3),c.getString(4),c.getInt(5)!=0))}
+        val list=readableDatabase.rawQuery("SELECT id,title,draft,updated,folder,pinned,assistant_id FROM conversations$where ORDER BY pinned DESC,updated DESC,id ASC",args.toTypedArray()).use {c->
+            buildList {while(c.moveToNext()) add(Conversation(ConversationId(c.getString(0)),c.getString(1),c.getString(2),c.getLong(3),c.getString(4),c.getInt(5)!=0,c.getString(6)))}
         }
         if(query.isEmpty()) return list
         val matches=mutableSetOf<String>()
@@ -112,10 +118,37 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         require(folder.length<=200)
         check(writableDatabase.update("conversations",ContentValues().apply {put("folder",folder);put("pinned",if(pinned) 1 else 0)},"id=?",arrayOf(id.value))==1) {"会话不存在"}
     }
-    fun create():Conversation {
-        val db=writableDatabase
-        val value=Conversation(ConversationId(UUID.randomUUID().toString()),"新会话","",System.currentTimeMillis())
-        db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt)})
+    fun selectedAssistantId(): String = readableDatabase.rawQuery("SELECT selected_id FROM assistant_selection WHERE id=1", null).use {
+        check(it.moveToFirst()) { "助手选择不存在" }; it.getString(0)
+    }
+    fun assistantId(id: ConversationId): String? = readableDatabase.rawQuery("SELECT assistant_id FROM conversations WHERE id=?", arrayOf(id.value)).use {
+        check(it.moveToFirst()) { "会话不存在" }; it.getString(0)
+    }
+    private fun requireAssistant(db: SQLiteDatabase, id: String?) {
+        if (id == null) throw app.daiyu.android.assistants.MissingAssistantBindingException()
+        if (!db.rawQuery("SELECT 1 FROM assistants WHERE id=?", arrayOf(id)).use { it.moveToFirst() })
+            throw app.daiyu.android.assistants.AssistantNotFoundException(id)
+    }
+    /** Explicit repair only. NULL and dangling IDs are distinct expected states. */
+    fun bindAssistant(id: ConversationId, expected: String?, replacement: String): Boolean {
+        var changed = false
+        transaction { db ->
+            requireAssistant(db, replacement)
+            check(!db.rawQuery("SELECT 1 FROM messages WHERE conversation_id=? AND status='RUNNING'", arrayOf(id.value)).use { it.moveToFirst() }) { "会话正在运行" }
+            changed = db.update("conversations", ContentValues().apply { put("assistant_id", replacement) },
+                if(expected==null) "id=? AND assistant_id IS NULL" else "id=? AND assistant_id=?",
+                if(expected==null) arrayOf(id.value) else arrayOf(id.value, expected)) == 1
+            if (changed) check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND assistant_id=?", arrayOf(id.value, replacement)).use { it.moveToFirst() }) { "助手绑定回执不匹配" }
+        }
+        return changed
+    }
+    fun create(assistantId: String? = null):Conversation {
+        val value=Conversation(ConversationId(UUID.randomUUID().toString()),"新会话","",System.currentTimeMillis(),assistantId=assistantId)
+        transaction { db ->
+            // NULL is reserved for explicit legacy/import fixtures, never a global fallback.
+            if (assistantId != null) requireAssistant(db, assistantId)
+            check(db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt);put("assistant_id",assistantId)}) != -1L)
+        }
         return value
     }
     fun draft(id: ConversationId, text: String) {check(writableDatabase.update("conversations",ContentValues().apply {put("draft",text)},"id=?",arrayOf(id.value))==1) {"会话不存在"}}
@@ -147,16 +180,20 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             arrayOf(id.value,run.value)).use { c -> buildList { while(c.moveToNext()) add(c.getString(0)) } }
         MessageHistory.validate(ids.map { storedMessage(db,id,it) })
     }
-    fun send(user:Message,assistant:Message,newConversation:Boolean=false):Conversation {
+    fun send(user:Message,assistant:Message,newConversation:Boolean=false,
+        expectedAssistantId:String? = if(newConversation) selectedAssistantId() else assistantId(user.conversationId)):Conversation {
         require(user.conversationId==assistant.conversationId && user.runId==assistant.runId)
         require(user.role=="user" && user.status==RunStatus.COMPLETED && assistant.role=="assistant" && assistant.status==RunStatus.RUNNING)
         var conversation:Conversation?=null
         transaction { db ->
+            requireAssistant(db, expectedAssistantId)
+            if (!newConversation) check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND assistant_id=?",
+                arrayOf(user.conversationId.value, expectedAssistantId)).use { it.moveToFirst() }) { "会话助手绑定已变化；草稿保留" }
             val expectedComposer=if(newConversation) "" else composerDraft(db)
             var newConversationRowId:Long?=null
             if(newConversation) {
-                val value=Conversation(user.conversationId,"新会话","",System.currentTimeMillis())
-                newConversationRowId=db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt)})
+                val value=Conversation(user.conversationId,"新会话","",System.currentTimeMillis(),assistantId=expectedAssistantId)
+                newConversationRowId=db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt);put("assistant_id",expectedAssistantId)})
                 check(newConversationRowId != -1L) {"新会话未持久化"}
                 check(db.update("composer",ContentValues().apply {put("draft","")},"id=1",null)==1)
             }
@@ -174,10 +211,12 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 check(storedMessage(db,message.conversationId,message.id.value)==message) {"发送消息内容不匹配"}
             }
             validateRunHistory(db,user.conversationId,user.runId)
-            conversation=db.rawQuery("SELECT title,updated,folder,pinned,rowid,length(CAST(draft AS BLOB))=0 FROM conversations WHERE id=?",arrayOf(user.conversationId.value)).use {
+            conversation=db.rawQuery("SELECT title,updated,folder,pinned,rowid,length(CAST(draft AS BLOB))=0,assistant_id FROM conversations WHERE id=?",arrayOf(user.conversationId.value)).use {
                 check(it.moveToFirst() && (newConversationRowId==null || it.getLong(4)==newConversationRowId)) {"发送会话身份不匹配"}
                 check(it.getInt(5)==1) {"发送会话草稿未清空"}
-                Conversation(user.conversationId,it.getString(0),"",it.getLong(1),it.getString(2),it.getInt(3)!=0)
+                check(it.getString(6)==expectedAssistantId) { "发送助手绑定回执不匹配" }
+                requireAssistant(db, expectedAssistantId)
+                Conversation(user.conversationId,it.getString(0),"",it.getLong(1),it.getString(2),it.getInt(3)!=0,it.getString(6))
             }
             check(composerDraft(db)==expectedComposer) {"发送草稿不匹配"}
         }
@@ -246,8 +285,8 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 require(encodedBytes<=16*1024*1024) {"备份超过16MiB上限"}
             }
             val conversations=JSONArray()
-            db.rawQuery("SELECT id,title,draft,updated,folder,pinned FROM conversations$conversationWhere ORDER BY id",args).use {c->while(c.moveToNext()) {
-                val value=JSONObject().put("id",c.getString(0)).put("title",c.getString(1)).put("draft",c.getString(2)).put("updated",c.getLong(3)).put("folder",c.getString(4)).put("pinned",c.getInt(5)!=0)
+            db.rawQuery("SELECT id,title,draft,updated,folder,pinned,assistant_id FROM conversations$conversationWhere ORDER BY id",args).use {c->while(c.moveToNext()) {
+                val value=JSONObject().put("id",c.getString(0)).put("title",c.getString(1)).put("draft",c.getString(2)).put("updated",c.getLong(3)).put("folder",c.getString(4)).put("pinned",c.getInt(5)!=0).put("assistant_id",c.getString(6) ?: JSONObject.NULL)
                 reserve(value);conversations.put(value)
             }}
             val messages=JSONArray()
@@ -270,7 +309,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             val draft=if(conversationId==null) db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)} else ""
             reserve(JSONObject().put("draft",draft))
             val payload=JSONObject().put("conversations",conversations).put("messages",messages).put("draft",draft).toString()
-            result=JSONObject().put("format","daiyu-neutral-text").put("version",1).put("conversation_count",conversations.length()).put("message_count",messages.length()).put("sha256",backupDigest(payload)).put("payload",payload).toString()
+            result=JSONObject().put("format","daiyu-neutral-text").put("version",2).put("conversation_count",conversations.length()).put("message_count",messages.length()).put("sha256",backupDigest(payload)).put("payload",payload).toString()
         }
         require(result.toByteArray(Charsets.UTF_8).size<=16*1024*1024) {"备份超过16MiB上限"}
         parseBackup(result)
@@ -280,7 +319,8 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         require(text.toByteArray(Charsets.UTF_8).size<=16*1024*1024)
         val envelope=backupObject(text)
         require(envelope.keys().asSequence().toSet()==setOf("format","version","conversation_count","message_count","sha256","payload"))
-        require(string(envelope,"format")=="daiyu-neutral-text" && integer(envelope,"version")==1L)
+        val version=integer(envelope,"version")
+        require(string(envelope,"format")=="daiyu-neutral-text" && version in 1L..2L)
         val payload=string(envelope,"payload");require(backupDigest(payload)==string(envelope,"sha256"))
         val data=backupObject(payload);require(data.keys().asSequence().toSet()==setOf("conversations","messages","draft"))
         val conversations=data.getJSONArray("conversations");val messages=data.getJSONArray("messages")
@@ -289,9 +329,13 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         val ids=mutableSetOf<String>();val messageIds=mutableSetOf<String>()
         fun identity(value:String):String {require(value.isNotBlank() && value.length<=200);return value}
         val imported=(0 until conversations.length()).map {i->val c=conversations.getJSONObject(i)
-            require(c.keys().asSequence().toSet()==setOf("id","title","draft","updated","folder","pinned"))
+            val fields=setOf("id","title","draft","updated","folder","pinned")
+            require(c.keys().asSequence().toSet()==if(version==1L) fields else fields+"assistant_id")
             val id=identity(string(c,"id"));require(ids.add(id));val folder=string(c,"folder");require(folder.length<=200)
-            Conversation(ConversationId(id),string(c,"title"),string(c,"draft"),integer(c,"updated"),folder,boolean(c,"pinned"))
+            // v1 has no binding: keep NULL. v2 retains the exact ID, including a deleted ID;
+            // importing never selects the global assistant or creates replacement profiles.
+            val assistantId=if(version==1L || c.isNull("assistant_id")) null else app.daiyu.android.assistants.AssistantStorage.id(string(c,"assistant_id"))
+            Conversation(ConversationId(id),string(c,"title"),string(c,"draft"),integer(c,"updated"),folder,boolean(c,"pinned"),assistantId)
         }
         val restored=(0 until messages.length()).map {i->val m=messages.getJSONObject(i)
             require(m.keys().asSequence().toSet().let {it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol") || it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol","history_segments")})
@@ -329,7 +373,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         transaction {db->
             // Append only. Any identity collision aborts the entire transaction.
             imported.forEach {c->db.insertOrThrow("conversations",null,ContentValues().apply {
-                put("id",c.id.value);put("title",c.title);put("draft",c.draft);put("updated",c.updatedAt);put("folder",c.folder);put("pinned",if(c.pinned) 1 else 0)
+                put("id",c.id.value);put("title",c.title);put("draft",c.draft);put("updated",c.updatedAt);put("folder",c.folder);put("pinned",if(c.pinned) 1 else 0);put("assistant_id",c.assistantId)
             })}
             restored.forEach {db.insertOrThrow("messages",null,values(it))}
             val existing=db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}

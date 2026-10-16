@@ -89,7 +89,7 @@ fun AssistantPickerDialog(
     actionProfile?.let { profile ->
         AssistantActionsDialog(profile, canDelete = assistants.size > 1,
             onCopy = { actionProfile = null; onCopy(profile.id) },
-            onEdit = { actionProfile = null; onDismiss(); onEdit(profile.id) },
+            onEdit = { actionProfile = null; onEdit(profile.id); onDismiss() },
             onDelete = { actionProfile = null; deleteProfile = profile }, onDismiss = { actionProfile = null })
     }
     deleteProfile?.let { profile ->
@@ -108,14 +108,20 @@ fun AssistantPickerDialog(
     onEdit: (String) -> Unit,
     onDismiss: () -> Unit,
     selectedId: String? = null,
+    useGlobalSelection: Boolean = true,
+    canMutate: () -> Boolean = { true },
 ) {
     val profiles by store.assistants.collectAsState()
     val active by store.selectedId.collectAsState()
     val scope = rememberCoroutineScope()
     fun mutate(action: () -> Unit) {
-        scope.launch { withContext(Dispatchers.IO) { action() } }
+        scope.launch {
+            // Admit on the UI thread before handing an accepted write to the worker.
+            if (!canMutate()) return@launch
+            withContext(Dispatchers.IO) { action() }
+        }
     }
-    AssistantPickerDialog(show, profiles, selectedId ?: active, onSelect, onEdit, onDismiss,
+    AssistantPickerDialog(show, profiles, if(useGlobalSelection) selectedId ?: active else selectedId, onSelect, onEdit, onDismiss,
         onCopy = { id -> mutate {
             val source = requireNotNull(store.read(id)) { "助手不存在" }
             val copy = store.duplicate(id)

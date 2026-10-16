@@ -73,18 +73,8 @@ class SharedPreferencesAssistantStore(private val preferences: SharedPreferences
     private fun load(): Pair<List<AssistantProfile>, String> {
         val raw = preferences.getString(KEY, null)
         if (raw == null) return listOf(defaultProfile()) to AssistantPrompt.DEFAULT_ID
-        val root = JSONObject(raw)
-        val array = root.getJSONArray("profiles")
-        val items = (0 until array.length()).map { index ->
-            val p = array.getJSONObject(index)
-            val skills = p.optJSONArray("enabledSkillIds")
-            AssistantProfile(id = AssistantStorage.id(p.getString("id")), name = p.getString("name"), prompt = p.optString("prompt", ""),
-                avatarFileName = if (p.isNull("avatarFileName")) null else p.getString("avatarFileName"),
-                createdAt = p.optLong("createdAt", 0L), memoryEnabled = p.optBoolean("memoryEnabled", true),
-                enabledSkillIds = if (skills == null) AssistantDefaults.ENABLED_SKILL_IDS else (0 until skills.length()).map { skills.getString(it) })
-        }.ifEmpty { listOf(defaultProfile()) }
-        require(items.map { it.id }.distinct().size == items.size) { "助手 ID 重复" }
-        return items to root.optString("activeId").takeIf { id -> items.any { it.id == id } }.orEmpty().ifEmpty { items.first().id }
+        val snapshot = LegacyAssistantCodec.decode(raw)
+        return snapshot.profiles to snapshot.selectedId
     }
 
     companion object {

@@ -50,7 +50,7 @@ class ConversationHistoryDatabaseTest : InstrumentationTestCase() {
             old.version = 4
         }
         var db = open(context)
-        assertEquals(9, db.readableDatabase.version)
+        assertEquals(10, db.readableDatabase.version)
         assertEquals("[]", db.readableDatabase.rawQuery("SELECT history_segments FROM messages", null).use { it.moveToFirst(); it.getString(0) })
         db.close(); databases.remove(db)
         db = open(context)
@@ -58,7 +58,7 @@ class ConversationHistoryDatabaseTest : InstrumentationTestCase() {
     }
 
     fun testNonEmptySegmentsRoundTripKeepsAggregateBlocksAndTextBackup() {
-        val source = fresh(); val db = open(source); val owner = db.create().id; val run = RunId("run-${UUID.randomUUID()}")
+        val source = fresh(); val db = open(source); val owner = db.create("default").id; val run = RunId("run-${UUID.randomUUID()}")
         val user = Message(MessageId("user-${UUID.randomUUID()}"), owner, run, "user", listOf(MessageBlock.Text("u", "问题")), RunStatus.COMPLETED)
         val pending = assistant(owner, run)
         db.send(user, pending); db.save(pending.copy(status = RunStatus.COMPLETED))
@@ -92,7 +92,7 @@ class ConversationHistoryDatabaseTest : InstrumentationTestCase() {
     }
 
     fun testRecoverPreservesSegmentsAndDeleteRejectsLateSave() {
-        val context = fresh(); val db = open(context); val owner = db.create().id; val run = RunId("run-${UUID.randomUUID()}")
+        val context = fresh(); val db = open(context); val owner = db.create("default").id; val run = RunId("run-${UUID.randomUUID()}")
         val user = Message(MessageId("user-${UUID.randomUUID()}"), owner, run, "user", emptyList(), RunStatus.COMPLETED)
         val pending = assistant(owner, run)
         db.send(user, pending)
@@ -104,7 +104,7 @@ class ConversationHistoryDatabaseTest : InstrumentationTestCase() {
         assertTrue(db.messages(owner).isEmpty()); assertTrue(db.conversations().none { it.id == owner })
     }
     fun testRealRunnerSegmentsSurviveCloseReopenAndContextSend() {
-        val context=fresh();var db=open(context);val conversation=db.create().id
+        val context=fresh();var db=open(context);val conversation=db.create("default").id
         val run=RunId("runner-run");val id=MessageId("runner-owner")
         val user=Message(MessageId("runner-user"),conversation,run,"user",listOf(MessageBlock.Text("u","question")),RunStatus.COMPLETED)
         val initial=Message(id,conversation,run,"assistant",emptyList(),RunStatus.RUNNING)
@@ -138,7 +138,7 @@ class ConversationHistoryDatabaseTest : InstrumentationTestCase() {
         assertTrue(duplicateRejected);assertEquals(backup,db.exportBackup())
     }
     fun testInvalidSupplementSaveRollsBackAcrossCloseReopen() {
-        val context=fresh();var db=open(context);val conversation=db.create().id;val run=RunId("conflict-run")
+        val context=fresh();var db=open(context);val conversation=db.create("default").id;val run=RunId("conflict-run")
         val user=Message(MessageId("conflict-user"),conversation,run,"user",listOf(MessageBlock.Text("u","original")),RunStatus.COMPLETED)
         val initial=Message(MessageId("conflict-owner"),conversation,run,"assistant",emptyList(),RunStatus.RUNNING)
         db.send(user,initial);val before=db.messages(conversation)

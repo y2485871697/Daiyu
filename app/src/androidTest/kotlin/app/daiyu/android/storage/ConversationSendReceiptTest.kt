@@ -47,7 +47,7 @@ class ConversationSendReceiptTest : android.test.AndroidTestCase() {
     }
 
     private fun retainedConversation(): ConversationId {
-        val id = database.create().id
+        val id = database.create("default").id
         val (user, assistant) = messages(id)
         database.send(user, assistant)
         database.save(assistant.copy(status = RunStatus.COMPLETED))

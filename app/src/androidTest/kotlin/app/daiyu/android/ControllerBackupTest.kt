@@ -86,7 +86,7 @@ class ControllerBackupTest:InstrumentationTestCase() {
         }} finally {super.tearDown()}
     }
     private fun seed(f:Fixture) {
-        val owner=f.db.create().id;val run=RunId("fixture-run-${owner.value}")
+        val owner=f.db.create("default").id;val run=RunId("fixture-run-${owner.value}")
         val user=Message(MessageId("u-${owner.value}"),owner,run,"user",listOf(MessageBlock.Text("u","question")),RunStatus.COMPLETED)
         val reply=Message(MessageId("a-${owner.value}"),owner,run,"assistant",listOf(MessageBlock.Text("a","answer")),RunStatus.RUNNING)
         f.db.send(user,reply);f.db.save(reply.copy(status=RunStatus.COMPLETED))

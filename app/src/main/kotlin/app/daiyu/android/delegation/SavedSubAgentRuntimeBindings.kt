@@ -40,7 +40,8 @@ internal class SavedSubAgentRuntimeBindings(
         owned[profile.id] = Approval(detached, saved, child)
     }
 
-    @Synchronized fun freeze(owner: SubAgentConfigKey.Conversation, config: ConversationSubAgentConfig): Map<String, ChildModelDefinition> {
+    @Synchronized fun freeze(owner: SubAgentConfigKey.Conversation, config: ConversationSubAgentConfig,
+        runModel: (ProviderSnapshot) -> ModelPort = createModel): Map<String, ChildModelDefinition> {
         val frozen = config.detached(); frozen.validate()
         require(frozen.enabled) { "Sub-agent configuration is disabled" }
         val enabled = frozen.profiles.filter { it.enabled }
@@ -53,7 +54,7 @@ internal class SavedSubAgentRuntimeBindings(
         require(selected.all { it.saved == current }) { "Saved model settings changed after binding" }
         return selected.associate { grant ->
             val model = SubAgentParallelModel(grant.profile.providerId, grant.child.model)
-            grant.profile.id to ChildModelDefinition(frozen.poolKey(owner, model), frozen.parallelLimit(model)) { createModel(grant.child) }
+            grant.profile.id to ChildModelDefinition(frozen.poolKey(owner, model), frozen.parallelLimit(model)) { runModel(grant.child) }
         }
     }
 

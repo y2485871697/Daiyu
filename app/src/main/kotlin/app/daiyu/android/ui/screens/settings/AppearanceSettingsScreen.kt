@@ -86,6 +86,7 @@ internal fun AppearanceSettingsScreen(
     onChange: (AppearanceSettings) -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onOpenIcon: () -> Unit = {},
     scaleRange: ClosedFloatingPointRange<Float> =
         app.daiyu.android.data.model.MIN_INTERFACE_SCALE..app.daiyu.android.data.model.MAX_INTERFACE_SCALE,
 ) {
@@ -123,7 +124,7 @@ internal fun AppearanceSettingsScreen(
                 SettingsRow("强调色", summary = if (state.monetEnabled) accents[state.accentColor.ordinal] else "墨绿",
                     onClick = { choice = "accent" })
                 SettingsSwitchRow("纯黑背景", state.pureBlackEnabled) { onChange(state.copy(pureBlackEnabled = it)) }
-                SettingsRow("图标", onClick = {},
+                SettingsRow("图标", onClick = onOpenIcon,
                     leading = { SettingsIcon(DaiyuIcons.AppIcon) })
             }
         }

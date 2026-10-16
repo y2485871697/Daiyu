@@ -91,6 +91,7 @@ class ProcessTests(unittest.TestCase):
         self.executable('adb', '''#!/usr/bin/env python3
 import os,sys
 from pathlib import Path
+import xml.etree.ElementTree as ET
 a=sys.argv[1:];case=os.environ['CASE'];api=os.environ['API']
 if a==['shell','getprop','ro.build.version.sdk']: print(api)
 elif a==['shell','getprop','sys.boot_completed']: print('1')
@@ -108,7 +109,17 @@ elif a[:3]==['shell','am','instrument']:
  sys.exit(9 if case=='instrument-fail' else 0)
 elif a[:3]==['shell','am','start']: print('Status: ok')
 elif a[:3]==['shell','pm','list']: print('package:io.github.mangi.eta' if case=='old-package' else 'package:app.daiyu.android')
-elif a[0]=='pull': Path(a[-1]).write_text('代鱼 · 聊天 发送', encoding='utf-8')
+elif a[:3]==['shell','uiautomator','dump'] and case=='dump-fail': sys.exit(8)
+elif a[0]=='pull':
+ if case=='pull-fail': sys.exit(8)
+ root=ET.Element('hierarchy')
+ package='other.app' if case=='foreign-ui' else 'app.daiyu.android'
+ for desc in ['打开侧边栏','更多','发送']:
+  if case=='missing-send' and desc=='发送': continue
+  ET.SubElement(root,'node',{'package':package,'class':'android.view.View','content-desc':desc})
+ if case!='missing-editor': ET.SubElement(root,'node',{'package':package,'class':'android.widget.EditText'})
+ ET.SubElement(root,'node',{'package':package,'class':'android.widget.TextView','text':'代鱼'})
+ Path(a[-1]).write_text('<broken' if case=='malformed-ui' else '代鱼 · 聊天 发送' if case=='old-title-only' else ET.tostring(root,encoding='unicode'),encoding='utf-8')
 elif a[0]=='logcat': print('FATAL EXCEPTION' if case=='crash' else '')
 elif a[0]=='exec-out': sys.stdout.buffer.write(b'bad' if case=='png' else b'\\x89PNG\\r\\n\\x1a\\n')
 elif a[:3]==['emu','screenrecord','screenshot']: Path(a[-1],'Screenshot_fake.png').write_bytes(b'\\x89PNG\\r\\n\\x1a\\n')
@@ -161,8 +172,17 @@ elif a[:3]==['emu','screenrecord','screenshot']: Path(a[-1],'Screenshot_fake.png
     def test_pipefail_preserves_instrumentation_failure(self):
         self.assertEqual(self.smoke(case='instrument-fail').returncode, 9)
 
+    def test_failed_dump_or_pull_cannot_reuse_local_xml(self):
+        result = self.smoke()
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        for case in ['dump-fail', 'pull-fail']:
+            with self.subTest(case=case):
+                self.assertNotEqual(self.smoke(case=case).returncode, 0)
+                self.assertFalse((self.root / 'smoke/boot.xml').exists())
+
     def test_business_gates_remain(self):
-        for case in ['count', 'failure', 'old-package', 'crash', 'png']:
+        for case in ['count', 'failure', 'old-package', 'crash', 'png', 'foreign-ui',
+                     'missing-send', 'missing-editor', 'malformed-ui', 'old-title-only']:
             with self.subTest(case=case):
                 self.assertNotEqual(self.smoke(case=case).returncode, 0)
 

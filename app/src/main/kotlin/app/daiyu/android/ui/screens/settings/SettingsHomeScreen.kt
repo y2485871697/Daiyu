@@ -118,8 +118,7 @@ internal fun DaiyuSettingsScreen(
             item(key = "category_entries") {
                 SettingsCard {
                     selectedGroup.entries.filter { relayExpanded || it.id !in setOf("relay_st", "relay_moyu") }
-                        .forEachIndexed { index, entry ->
-                            if (index > 0) SettingsDivider()
+                        .forEach { entry ->
                             OriginalSettingsRow(entry) { open(entry) }
                         }
                 }
@@ -153,8 +152,7 @@ internal fun DaiyuSettingsScreen(
                 item(key = "settings_common") {
                     SettingsSectionTitle("常用设置")
                     SettingsCard {
-                        listOf("providers", "appearance", "assistants", "subagents").forEachIndexed { index, id ->
-                            if (index > 0) SettingsDivider()
+                        listOf("providers", "appearance", "assistants", "subagents").forEach { id ->
                             val entry = SettingsCatalog.entry(id)
                             SettingsRow(entry.title, onClick = { open(entry) },
                                 summary = when (id) {
@@ -169,8 +167,7 @@ internal fun DaiyuSettingsScreen(
                 item(key = "settings_tools") {
                     SettingsSectionTitle("工具与数据")
                     SettingsCard {
-                        listOf("usage", "backup").forEachIndexed { index, id ->
-                            if (index > 0) SettingsDivider()
+                        listOf("usage", "backup").forEach { id ->
                             val entry = SettingsCatalog.entry(id)
                             SettingsRow(entry.title, onClick = { open(entry) },
                                 leading = { SettingsIcon(entry.icon) })
@@ -180,8 +177,7 @@ internal fun DaiyuSettingsScreen(
                 item(key = "settings_categories_heading") { SettingsSectionTitle("全部设置") }
                 item(key = "settings_categories") {
                     SettingsCard {
-                        SettingsCatalog.groups.forEachIndexed { index, group ->
-                            if (index > 0) SettingsDivider()
+                        SettingsCatalog.groups.forEach { group ->
                             SettingsRow(group.title, summary = group.summary,
                                 onClick = { section = group.id }, leading = { SettingsIcon(group.entries.first().icon) })
                         }

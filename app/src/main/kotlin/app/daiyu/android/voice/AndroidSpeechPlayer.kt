@@ -14,13 +14,13 @@ import kotlinx.coroutines.flow.StateFlow
  * microphone access, audio files, downloads, network clients, or provider credentials.
  * The application context (not the Activity) is retained until close.
  */
-class AndroidSpeechPlayer(context: Context) : AutoCloseable {
-    private val applicationContext = context.applicationContext
-    private val handler = Handler(Looper.getMainLooper())
-    private val controller = SpeechPlaybackController(
-        backendFactory = { AndroidSpeechBackend(applicationContext, handler) },
-        dispatch = { callback -> handler.post { callback() }; Unit },
-    )
+class AndroidSpeechPlayer internal constructor(
+    private val controller: SpeechPlaybackController,
+    private val checkMainThread: () -> Unit,
+) : AutoCloseable {
+    constructor(context: Context) : this(androidSpeechController(context), {
+        check(Looper.myLooper() == Looper.getMainLooper()) { "Speech player must be called on main thread" }
+    })
 
     val state: StateFlow<SpeechPlaybackState> = controller.state
 
@@ -36,13 +36,25 @@ class AndroidSpeechPlayer(context: Context) : AutoCloseable {
 
     fun stop(owner: String): Boolean = onMain { controller.stop(owner) }
 
-    /** Terminal and idempotent. Use stop on backgrounding and close when the hosting scope ends. */
+    /** Terminal, idempotent best-effort cleanup for lifecycle callers; not proof of audio release. */
     override fun close() = onMain { controller.close() }
 
+    /** Production ownership handoff must fail closed if stop/shutdown could not confirm release. */
+    internal fun closeStrict() = onMain { controller.closeStrict() }
+
     private inline fun <T> onMain(block: () -> T): T {
-        check(Looper.myLooper() == Looper.getMainLooper()) { "Speech player must be called on main thread" }
+        checkMainThread()
         return block()
     }
+}
+
+private fun androidSpeechController(context: Context): SpeechPlaybackController {
+    val applicationContext = context.applicationContext
+    val handler = Handler(Looper.getMainLooper())
+    return SpeechPlaybackController(
+        backendFactory = { AndroidSpeechBackend(applicationContext, handler) },
+        dispatch = { callback -> handler.post { callback() }; Unit },
+    )
 }
 
 private class AndroidSpeechBackend(

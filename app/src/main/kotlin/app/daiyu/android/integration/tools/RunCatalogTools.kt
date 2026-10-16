@@ -15,6 +15,7 @@ internal class RunCatalogTools(
     private val conversationId: ConversationId,
     private val runId: RunId,
     private val deviceResources: RunDeviceResources? = null,
+    private val children: RunChildModels? = null,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
     private val authorization = TaskAuthorization(capabilities.sessionId, runId.value)
@@ -27,8 +28,14 @@ internal class RunCatalogTools(
         check(!closed.get()) { "run_closed" }
         require(owner.conversationId == conversationId && owner.runId == runId) { "tool_run_owner_mismatch" }
         check(this.owner == null || this.owner === owner) { "tool_owner_already_bound" }
-        deviceResources?.bind(owner, authorization, capabilities)
-        this.owner = owner
+        try {
+            deviceResources?.bind(owner, authorization, capabilities)
+            children?.bind(owner, capabilities, authorization)
+            this.owner = owner
+        } catch (failure: Exception) {
+            close()
+            throw failure
+        }
     }
 
     override val definitions: List<app.daiyu.android.domain.ToolDefinition> get() = initialized().definitions
@@ -45,6 +52,7 @@ internal class RunCatalogTools(
         try {
             check(!closed.get()) { "run_closed" }
             ScopedSkillTools.create(scope, authorization).forEach { registry.register(it) }
+            children?.let { registry.register(it.tool()) }
             val result = CatalogModelBridge(registry.snapshot(), capabilities, ledger, conversationId, runId, authorization)
             result.bindOwner(bound)
             check(!closed.get()) { "run_closed" }
@@ -75,11 +83,13 @@ internal class RunCatalogTools(
     }
     // Do not wait for capture or in-flight reads on the UI/control thread.
     override fun close() {
-        closed.set(true); deviceResources?.close(); skills?.close()
+        closed.set(true); children?.close(); deviceResources?.close(); skills?.close()
     }
     internal fun closeWhenIdle(onClosed: () -> Unit) {
         close()
         val devices = deviceResources
-        if (devices == null) onClosed() else devices.closeWhenIdle(onClosed)
+        val devicesDrained = { if (devices == null) onClosed() else devices.closeWhenIdle(onClosed) }
+        val children = children
+        if (children == null) devicesDrained() else children.closeWhenIdle(devicesDrained)
     }
 }

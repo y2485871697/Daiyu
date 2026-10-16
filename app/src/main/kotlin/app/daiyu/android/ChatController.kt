@@ -8,6 +8,9 @@ import app.daiyu.android.context.ContextService
 import app.daiyu.android.context.ContextRegistry
 import app.daiyu.android.context.ContextRegistryScope
 import app.daiyu.android.integration.tools.*
+import app.daiyu.android.delegation.*
+import app.daiyu.android.domain.delegation.ChildModelBatch
+import app.daiyu.android.domain.delegation.ChildModelDefinition
 import app.daiyu.android.domain.tools.SessionCapabilities
 import app.daiyu.android.domain.tools.ToolLedger
 import android.os.Handler
@@ -103,6 +106,41 @@ class ChatController internal constructor(private val application:Application,
         return QuestionProjection(identity,record,session?.binding,writable)
     }
     private val toolLedger = ToolLedger(SQLiteToolLedgerStore(database))
+    private val childPreferences by lazy { ConversationSubAgentPreferences(application.getSharedPreferences("subagent_configuration", 0)) }
+    private fun conversationExists(id: ConversationId): Boolean = database.readableDatabase.rawQuery(
+        "SELECT 1 FROM conversations WHERE id=?", arrayOf(id.value)).use { it.moveToFirst() }
+    private val childBindings = SavedSubAgentRuntimeBindings(settings::load) { model(it.asModelSettings()) }
+    @Synchronized internal fun bindChildSavedModel(conversationId: ConversationId, profileId: String,
+        expectedApiModel: String, provider: SubAgentProvider): Boolean {
+        childBindings.revoke(SubAgentConfigKey.Conversation(conversationId.value), profileId)
+        if (!idleAvailable()) return false
+        return try {
+            require(conversationExists(conversationId)) { "Conversation no longer exists" }
+            val owner = SubAgentConfigKey.Conversation(conversationId.value)
+            val config = childPreferences.snapshot(owner)
+            require(config.enabled)
+            val profile = requireNotNull(config.profiles.singleOrNull { it.id == profileId })
+            childBindings.authorizeSavedModel(owner, profile, expectedApiModel, provider)
+            problem = null; notifyChanged(); true
+        } catch (_: Exception) { problem = "子模型绑定失败；未发起请求，请核对明确选择及已保存配置"; notifyChanged(); false }
+    }
+    @Synchronized internal fun revokeChildSavedModel(conversationId: ConversationId, profileId: String) {
+        childBindings.revoke(SubAgentConfigKey.Conversation(conversationId.value), profileId)
+    }
+    @Synchronized internal fun sendWithChildren(conversation: Conversation, text: String): Conversation? {
+        if (!idleAvailable() || text.isBlank()) return null
+        preparing = true
+        return try {
+            val models = try {
+                require(conversationExists(conversation.id))
+                val key = SubAgentConfigKey.Conversation(conversation.id.value)
+                childBindings.freeze(key, childPreferences.snapshot(key))
+            } catch (_: Exception) {
+                problem = "子模型配置未绑定、已变更或不支持；草稿保留，未切换到主模型"; notifyChanged(); return null
+            }
+            sendPrepared(conversation, text, models)
+        } finally { preparing = false }
+    }
     private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
     internal val selections=mutableMapOf<ConversationId?,Pair<Int,Int>>()
@@ -164,7 +202,7 @@ class ChatController internal constructor(private val application:Application,
         preparing=true
         return try {sendPrepared(conversation,text)} finally {preparing=false}
     }
-    private fun sendPrepared(conversation:Conversation?,text:String):Conversation? {
+    private fun sendPrepared(conversation:Conversation?,text:String, childModels:Map<String,ChildModelDefinition> = emptyMap()):Conversation? {
         val config=try {settings.load().also {it.validate()}} catch (_:CredentialUnavailableException) {
             problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
         } catch (_:Exception) {problem="请在模型设置里配置Responses地址、模型与密钥";notifyChanged();return null}
@@ -184,17 +222,21 @@ class ChatController internal constructor(private val application:Application,
         }
         var preparingTools: RunCatalogTools? = null
         var preparingDevices: RunDeviceResources? = null
+        var preparingChildren: RunChildModels? = null
         val prepared = try {
             val contextTools = ScopedContextTools.create(
                 ContextRegistry(contextService), ContextRegistryScope(conversationId),
                 run, preparedContext?.archiveId)
+            val children = if (childModels.isEmpty()) null else RunChildModels(ChildModelBatch(childModels), childModels.keys)
+            preparingChildren = children
             val devices = RunDeviceResources(application)
             preparingDevices = devices
             val registry = AndroidToolRegistry.create(devices, contextTools, enableUserBarrier=true)
             val capabilities = SessionCapabilities(run.value,
                 AndroidToolRegistry.capabilitiesFor(config.enabledTools()) + contextTools.map { it.definition.capability } +
-                    setOf(SkillRunSession.READ, SkillRunSession.RESOURCE, AndroidToolRegistry.ASK_USER_CAPABILITY))
-            val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices) { grants, authorization ->
+                    setOf(SkillRunSession.READ, SkillRunSession.RESOURCE, AndroidToolRegistry.ASK_USER_CAPABILITY) +
+                    if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY))
+            val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children) { grants, authorization ->
                 SkillToolRegistry(application).captureForRun(grants, authorization)
             }
             preparingTools = tools
@@ -209,6 +251,7 @@ class ChatController internal constructor(private val application:Application,
         } catch (_: Exception) {
             preparingTools?.close()
             preparingDevices?.close()
+            preparingChildren?.close()
             problem="运行准备失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
         val (owned, tools) = prepared
@@ -547,7 +590,7 @@ class ChatController internal constructor(private val application:Application,
         val lifetime=synchronized(this) {
             if(!closed) {
                 closed=true;ready=false;dataBusy=false;active=null
-                configurationRestorePreview=null;dataNotice=null;listeners.clear()
+                configurationRestorePreview=null;dataNotice=null;listeners.clear();childBindings.clear()
             }
             resources?.also {it.fenced=true}
         }

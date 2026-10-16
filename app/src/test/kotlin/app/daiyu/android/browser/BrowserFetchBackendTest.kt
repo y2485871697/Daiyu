@@ -140,10 +140,10 @@ class BrowserFetchBackendTest {
                     checkNotNull(queue.poll(3, TimeUnit.SECONDS)).invoke()
                     val result = await(pending)
                     val path = java.nio.file.Paths.get(checkNotNull(result.filePath))
-                    assertEquals(f.root, path.parent)
+                    assertEquals(f.root.toRealPath(), path.parent)
                     assertEquals("abc", String(Files.readAllBytes(path)))
                     assertEquals(
-                        "{\"path\":\"$path\",\"size\":3,\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"}",
+                        "{\"path\":${org.json.JSONObject.quote(path.toString())},\"size\":3,\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"}",
                         result.text,
                     )
                     assertFalse(result.text.contains("secret"))

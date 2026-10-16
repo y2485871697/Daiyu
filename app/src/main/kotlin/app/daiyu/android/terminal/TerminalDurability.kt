@@ -8,13 +8,14 @@ import java.nio.file.StandardCopyOption
 import java.nio.file.StandardOpenOption
 
 internal object TerminalDurability {
-    fun ensureDirectory(directory: File) {
+    fun ensureDirectory(directory: File, directorySync: (File) -> Unit = ::syncDirectory) {
         check(directory.mkdirs() || directory.isDirectory) { "Cannot create terminal directory" }
-        syncDirectory(directory)
-        directory.parentFile?.let(::syncDirectory)
+        directorySync(directory)
+        directory.parentFile?.let(directorySync)
     }
 
-    fun replace(file: File, bytes: ByteArray, beforeDirectorySync: (() -> Unit)? = null) {
+    fun replace(file: File, bytes: ByteArray, beforeDirectorySync: (() -> Unit)? = null,
+                directorySync: (File) -> Unit = ::syncDirectory) {
         val temp = File(file.parentFile, file.name + ".tmp")
         FileOutputStream(temp).use { output ->
             output.write(bytes)
@@ -23,7 +24,7 @@ internal object TerminalDurability {
         // The private files directory is one filesystem. Never degrade to non-atomic copying.
         Files.move(temp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
         beforeDirectorySync?.invoke()
-        syncDirectory(file.parentFile!!)
+        directorySync(file.parentFile!!)
     }
 
     fun syncDirectory(directory: File) {

@@ -12,7 +12,13 @@ import java.util.concurrent.locks.ReentrantLock
 
 /** Durable at-most-once ledger. Pending entries are never evicted or executed again.
  * Reservation and commit locks are short: command execution is outside the ledger lock. */
-class OperationJournal(directory: File, scope: String, private val limit: Int = 256, binding: JSONObject? = null) {
+class OperationJournal internal constructor(
+    directory: File, scope: String, private val limit: Int, binding: JSONObject?,
+    private val directorySync: (File) -> Unit,
+) {
+    constructor(directory: File, scope: String, limit: Int = 256, binding: JSONObject? = null) :
+        this(directory, scope, limit, binding, TerminalDurability::syncDirectory)
+
     private val bindingDigest = binding?.let { digest(canonical(it)) }
     private val file: File
     private val lockFile: File
@@ -24,7 +30,7 @@ class OperationJournal(directory: File, scope: String, private val limit: Int = 
     init {
         require(scope.matches(Regex("[A-Za-z0-9_-]{1,128}")))
         require(limit in 1..256)
-        TerminalDurability.ensureDirectory(directory)
+        TerminalDurability.ensureDirectory(directory, directorySync)
         file = File(directory, "$scope.json")
         lockFile = File(directory, "$scope.lock")
         lock = synchronized(locks) {
@@ -130,7 +136,7 @@ class OperationJournal(directory: File, scope: String, private val limit: Int = 
             if (!state.enveloped) save(state.entries)
             else {
                 beforeDirectorySync?.invoke()
-                TerminalDurability.syncDirectory(file.parentFile!!)
+                directorySync(file.parentFile!!)
             }
             JSONObject().put("ok", true)
         }
@@ -201,7 +207,7 @@ class OperationJournal(directory: File, scope: String, private val limit: Int = 
             .put("lifecycle", if (retired) "retired" else "active").put("entries", value)
         val bytes = envelope.toString().toByteArray(Charsets.UTF_8)
         check(bytes.size <= MAX_BYTES) { "Journal size limit" }
-        TerminalDurability.replace(file, bytes, beforeDirectorySync)
+        TerminalDurability.replace(file, bytes, beforeDirectorySync, directorySync)
     }
 
     private fun <T> withFileLock(block: () -> T): T {

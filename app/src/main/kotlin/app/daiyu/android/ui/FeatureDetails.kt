@@ -417,6 +417,9 @@ internal object FeatureDetails {
                 FeatureControl("takeover", "可见接管", FeatureControlKind.INFO),
                 FeatureControl("downloads", "下载", FeatureControlKind.INFO),
             )),
+            FeatureSection("actions", "操作", listOf(
+                FeatureControl("open", "打开浏览器设置", FeatureControlKind.ACTION, FeatureRoute.BROWSER_SETTINGS),
+            )),
         ),
         "R06" to listOf(
             FeatureSection("content", "设置与内容", listOf(

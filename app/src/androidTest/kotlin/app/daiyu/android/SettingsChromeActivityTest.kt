@@ -158,7 +158,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         val rows = ui.onAllNodes(SemanticsMatcher("settings rows") {
             it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("settings-row:") == true
         }).fetchSemanticsNodes().map { it.config[SemanticsProperties.TestTag].removePrefix("settings-row:") }
-        assertEquals(listOf("工作区与文件", "终端", "Linux 工具环境", "Agent任务偏好"), rows)
+        assertEquals(listOf("工作区与文件", "终端", "浏览器", "Linux 工具环境", "Agent任务偏好"), rows)
         capture("tools-refined")
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
         reveal("settings-row:扩展", "设置").performClick()

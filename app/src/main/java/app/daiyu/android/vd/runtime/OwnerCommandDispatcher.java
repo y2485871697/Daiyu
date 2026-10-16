@@ -3,7 +3,8 @@ package app.daiyu.android.vd.runtime;
 import org.json.JSONObject;
 
 /**
- * Maps protocol operations onto {@link VirtualDisplayOwner}. Runs on the owner looper thread.
+ * Maps already receipt-gated operations onto {@link VirtualDisplayOwner} on the owner looper.
+ * Not an IPC Dispatcher: production reaches this backend only through OwnerReceiptCoordinator.
  *
  * <p>An operation is only ever reported as {@code ok=true} when the owner returned a body. Every
  * {@link OwnerException} becomes {@code ok=false} with its code, and any unexpected throwable
@@ -15,7 +16,7 @@ import org.json.JSONObject;
  * inventory could not identify. Attaching the diagnostic never changes the ok/error outcome and
  * never relaxes a launch / handoff / release gate.
  */
-final class OwnerCommandDispatcher implements OwnerIpcServer.Dispatcher {
+final class OwnerCommandDispatcher implements OwnerReceiptCoordinator.Backend {
     private final VirtualDisplayOwner owner;
     private volatile boolean stop;
 
@@ -32,19 +33,19 @@ final class OwnerCommandDispatcher implements OwnerIpcServer.Dispatcher {
                 return OwnerProtocol.ok(request.op, body);
             }
             if (OwnerProtocol.OP_LAUNCH.equals(request.op)) {
-                return OwnerProtocol.ok(request.op, owner.launch(request.payload));
+                return OwnerProtocol.ok(request.op, owner.launch(OwnerProtocol.ownerBusinessPayload(request)));
             }
             if (OwnerProtocol.OP_INPUT.equals(request.op)) {
-                return OwnerProtocol.ok(request.op, owner.input(request.payload));
+                return OwnerProtocol.ok(request.op, owner.input(OwnerProtocol.ownerBusinessPayload(request)));
             }
             if (OwnerProtocol.OP_SNAPSHOT.equals(request.op)) {
-                return OwnerProtocol.ok(request.op, owner.snapshot(request.payload));
+                return OwnerProtocol.ok(request.op, owner.snapshot(OwnerProtocol.ownerBusinessPayload(request)));
             }
             if (OwnerProtocol.OP_HANDOFF.equals(request.op)) {
-                return OwnerProtocol.ok(request.op, owner.handoff(request.payload));
+                return OwnerProtocol.ok(request.op, owner.handoff(OwnerProtocol.ownerBusinessPayload(request)));
             }
             if (OwnerProtocol.OP_RELEASE.equals(request.op)) {
-                JSONObject body = owner.release(request.payload);
+                JSONObject body = owner.release(OwnerProtocol.ownerBusinessPayload(request));
                 stop = true;
                 return OwnerProtocol.ok(request.op, body);
             }
@@ -96,6 +97,10 @@ final class OwnerCommandDispatcher implements OwnerIpcServer.Dispatcher {
             // Never turn a reported outcome into a different one.
         }
     }
+
+    @Override public int displayId() { return owner.displayId(); }
+
+    @Override public String uniqueId() { return owner.uniqueId(); }
 
     @Override
     public boolean shouldStop() {

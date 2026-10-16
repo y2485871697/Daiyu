@@ -179,3 +179,8 @@ IGNORE/ABORT/变更 trigger、deferred-FK commit 失败以及失败后保留文�
 本任务只做源代码静态检查；**未构建、未执行 JVM/instrumentation 测试、未运行真实设备、未推送**。
 未运行范围包括本测试类及新增回归、全量测试、父数据库迁移/端到端集成；未构建 APK。
 测试代码是待执行验证，不构成已经通过的证据。
+
+
+## 父库 v11 接线更新
+
+ConversationDatabase 的新建及 v1..v10 升级已安装 attempt/output 表。旧 output 表复制前核对原始 storage class 与五列数值范围，再事务内重建严格表；不使用目标 affinity 清洗旧坏数据。会话删除在同事务内清 output 引用且检查删除结果，attempt 墓碑保留。上文以 v10 为前提的待接线说明仅为组件原始边界；Controller、reader 与备份端到端接线仍待完成，测试尚未运行。

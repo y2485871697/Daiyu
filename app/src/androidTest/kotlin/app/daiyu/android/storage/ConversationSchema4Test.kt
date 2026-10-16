@@ -34,7 +34,7 @@ class ConversationSchema4Test : InstrumentationTestCase() {
     private fun count(db: ConversationDatabase, table: String): Int =
         db.readableDatabase.rawQuery("SELECT count(*) FROM $table", null).use { it.moveToFirst(); it.getInt(0) }
     private fun assertSchema(db: ConversationDatabase) {
-        assertEquals(10, db.readableDatabase.version)
+        assertEquals(11, db.readableDatabase.version)
         db.readableDatabase.rawQuery("SELECT history_segments FROM messages LIMIT 0",null).use { assertEquals(1,it.columnCount) }
         for (table in listOf("context_archives", "context_branches", "context_usage", "neutral_assets", "neutral_config", "neutral_imports")) {
             db.readableDatabase.rawQuery("SELECT * FROM $table LIMIT 0", null).use { assertTrue(it.columnCount > 0) }

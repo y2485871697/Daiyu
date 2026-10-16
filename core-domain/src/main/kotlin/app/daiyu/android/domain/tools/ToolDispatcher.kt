@@ -80,6 +80,13 @@ class ToolDispatcher(
         }
         val effects = requests.mapNotNull { it.effectKey }
         if (effects.distinct().size != effects.size) return rejected("duplicate_batch_effect")
+        val contexts = invocations.map { call -> owner?.let { ToolExecutionContext(it, call, task, cancelled) } }
+        // Admission covers both fresh execution and receipt replay, before ANY ledger access.
+        for ((index, plan) in plans.withIndex()) {
+            val denial = try { plan.admit(contexts[index]) }
+                catch (_: Exception) { return rejected("context_admission_failed") }
+            if (denial != null) return rejected(denial.code)
+        }
         if (cancelled()) return rejected("cancelled_before_execution")
         val reservation = try { ledger.reserve(session.sessionId, task.taskId, requests) }
             catch (_: Exception) { return rejected("ledger_unavailable") }
@@ -96,7 +103,7 @@ class ToolDispatcher(
             if (entry.state == LedgerState.NOT_EXECUTED) return@mapIndexed ToolDispatchResult(call.id,
                 DispatchOutcome.NotExecuted(entry.code))
             val receipt = if (stop || cancelled()) ExecutionReceipt.NotExecuted("batch_stopped_before_execution") else if (plans[index].isUserBarrier) {
-                val context = ToolExecutionContext(checkNotNull(owner), call, task, cancelled)
+                val context = checkNotNull(contexts[index])
                 return ReceiptBatchStart.Suspended(BarrierOffer(context, PendingToolCheckpoint(call.id)) { receipt ->
                     val outcome = try {
                         ledger.finish(entry, receipt)
@@ -109,7 +116,7 @@ class ToolDispatcher(
                     ToolDispatchResult(call.id, outcome)
                 })
             } else {
-                try { plans[index].execute(owner?.let { ToolExecutionContext(it, call, task, cancelled) }) }
+                try { plans[index].execute(contexts[index]) }
                 // Once execution starts, exceptions (including interruption) do NOT prove non-execution.
                 catch (_: Exception) { ExecutionReceipt.Unknown("adapter_result_unconfirmed") }
             }

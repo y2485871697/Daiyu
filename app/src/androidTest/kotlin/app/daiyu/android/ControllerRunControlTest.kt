@@ -170,11 +170,12 @@ class ControllerRunControlTest:InstrumentationTestCase() {
                 awaitControl("retained admission stopped") {f.controller.active==null}
             }
             f.controller.close()
-            app.daiyu.android.storage.ConversationDatabase(f.application).use { reopened ->
+            val reopened=app.daiyu.android.storage.ConversationDatabase(f.application)
+            try {
                 val messages=reopened.messages(owner.conversationId).map {it.second}
                 assertEquals(1,messages.count {it.id==id});assertEquals(RunStatus.STOPPED,messages.single {it.id==owner.id}.status)
                 assertEquals("kept after close",reopened.conversations().single().draft)
-            }
+            } finally {reopened.close()}
             assertEquals(1,f.opens.get())
         }
     }

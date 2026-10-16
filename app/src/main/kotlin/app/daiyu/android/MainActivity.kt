@@ -102,6 +102,8 @@ class MainActivity : ComponentActivity() {
     private val controller get() = (application as ChatApplication).controller
     private val terminalOwner get() = (application as ChatApplication).terminalOwner
     private var terminalPageOwner: Any? = null
+    private val browserSettings by lazy { app.daiyu.android.browser.BrowserSettingsStore(applicationContext) }
+    private var browserSettingsPageOwner: app.daiyu.android.browser.BrowserSettingsSaveOwner? = null
     private var hapticsHost: app.daiyu.android.haptics.HapticsActivityHost? = null
     private fun syncHaptics() {
         hapticsHost?.sync(selected?.id?.value, retainedPage == "chat" && !sidebarVisible,
@@ -168,6 +170,10 @@ class MainActivity : ComponentActivity() {
         get() = retainedPageState
         set(value) {
             if (value != "terminal") terminalPageOwner = null
+            if (value != "browser-settings") {
+                browserSettingsPageOwner?.revoke()
+                browserSettingsPageOwner = null
+            }
             if (value != "chat") { dictationHost.invalidate(); cancelShizukuEditor() }
             speechHost.setVisible(value == "chat" && !sidebarVisible)
             imageHost.setVisible(value == "chat" && !sidebarVisible, selected?.id?.value)
@@ -309,7 +315,7 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "appearance", "haptics", "terminal" -> retainedPage = "settings"
+                        "appearance", "haptics", "terminal", "browser-settings" -> retainedPage = "settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
                         else -> returnToChat()
@@ -387,6 +393,16 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                     }
+                    "browser-settings" -> browserSettingsPageOwner?.let { page -> key(page) {
+                        BrowserSettingsScreen(browserSettings,
+                            onBack = {
+                                if (activityUsable() && browserSettingsPageOwner === page && retainedPage == "browser-settings")
+                                    retainedPage = "settings"
+                            },
+                            ownerCurrent = {
+                                activityUsable() && browserSettingsPageOwner === page && retainedPage == "browser-settings"
+                            }, saveOwner = page)
+                    } }
                     "skills" -> SkillManagementScreen(
                         managementFactory = { controller.skillManagement() },
                         onBack = { returnToChat() },
@@ -988,6 +1004,8 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        browserSettingsPageOwner?.revoke()
+        browserSettingsPageOwner = null
         hapticsHost?.close(); hapticsHost = null
         voiceForeground = false
         dictationHost.close()
@@ -1009,6 +1027,12 @@ class MainActivity : ComponentActivity() {
     }
     private fun openSkillManagement() {
         retainedPage = "skills"
+    }
+    private fun openBrowserSettings() {
+        requireActivityUsable()
+        browserSettingsPageOwner?.revoke()
+        browserSettingsPageOwner = app.daiyu.android.browser.BrowserSettingsSaveOwner()
+        retainedPage = "browser-settings"
     }
     private fun openTerminalAndroid(page: Any) {
         if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
@@ -1035,6 +1059,7 @@ class MainActivity : ComponentActivity() {
             FeatureRoute.FOLDERS -> browseFolders()
             FeatureRoute.SKILLS -> openSkillManagement()
             FeatureRoute.TERMINAL -> openTerminal()
+            FeatureRoute.BROWSER_SETTINGS -> openBrowserSettings()
             // Settings entries are navigation, never implicit execution/send/stop operations.
             FeatureRoute.CHAT, FeatureRoute.USER_MESSAGE -> Unit
         }

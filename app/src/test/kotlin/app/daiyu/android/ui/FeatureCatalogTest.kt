@@ -40,6 +40,7 @@ class FeatureCatalogTest {
             "P33" to FeatureRoute.SKILLS,
             "R12" to FeatureRoute.BACKUP,
             "R09" to FeatureRoute.TERMINAL,
+            "P34" to FeatureRoute.BROWSER_SETTINGS,
             "P41" to FeatureRoute.USER_MESSAGE
         ), entries.mapNotNull { entry -> entry.route?.let { entry.id to it } }.toMap())
     }
@@ -60,7 +61,7 @@ class FeatureCatalogTest {
     @Test fun detailsCoverEveryEntryWithStableUniqueControls() {
         assertEquals(entries.map { it.id }.toSet(), FeatureDetails.pages.keys)
         val controls = FeatureDetails.pages.values.flatten().flatMap { it.controls }
-        assertEquals(257, controls.size)
+        assertEquals(258, controls.size)
         assertEquals(FeatureControlKind.entries.toSet(), controls.map { it.kind }.toSet())
         FeatureDetails.pages.forEach { (id, sections) ->
             assertTrue(id, sections.isNotEmpty())
@@ -82,7 +83,7 @@ class FeatureCatalogTest {
             "SIDEBAR" to "P07", "MANAGE_CHATS" to "P22", "USAGE_STATS" to "P21",
             "CONVERSATION_SEARCH" to "P28", "FOLDERS" to "P28.folders",
             "MODEL_SETTINGS" to "R03 P02 P04 P06", "CHAT" to "P11 P12 P13 P23",
-            "SKILLS" to "P33", "TERMINAL" to "R09", "BACKUP" to "P38.files R12", "USER_MESSAGE" to "P41"
+            "SKILLS" to "P33", "TERMINAL" to "R09", "BROWSER_SETTINGS" to "P34", "BACKUP" to "P38.files R12", "USER_MESSAGE" to "P41"
         ).flatMap { (route, ids) -> ids.split(' ').map { "$it:open" to FeatureRoute.valueOf(route) } }.toMap()
         val actual = FeatureDetails.pages.flatMap { (id, sections) -> sections.flatMap { it.controls }.mapNotNull {
             control -> control.route?.let { "$id:${control.id}" to it }

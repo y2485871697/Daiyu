@@ -10,10 +10,10 @@ class SettingsPresentationTest {
     @Test
     fun retainedSettingsHaveUniqueIdsAndNineGroups() {
         val entries = SettingsCatalog.entries
-        assertEquals(36, entries.size)
+        assertEquals(37, entries.size)
         assertEquals(entries.size, entries.map { it.id }.toSet().size)
         assertEquals(9, SettingsCatalog.groups.size)
-        assertEquals(listOf("workspace", "terminal", "linux", "task_surface"),
+        assertEquals(listOf("workspace", "terminal", "browser", "linux", "task_surface"),
             SettingsCatalog.groups.single { it.id == "tools" }.entries.map { it.id })
         assertEquals(listOf("extensions"), SettingsCatalog.groups.filter { group ->
             group.entries.any { it.id == "skills" }

@@ -98,14 +98,14 @@ private fun QuestionCardContent(
     val noteText = if (confirmedAnswer != null) confirmedAnswer.note.orEmpty() else draft.note
     val editable = canAnswer && !completed && !session.busy && !session.blocked
     val status = when {
-        value.answer != null && draft.reply == Reply.SAVED_REFRESH_FAILED -> "答案已保存，刷新失败"
+        value.answer != null && draft.reply == Reply.SAVED_REFRESH_FAILED -> "答案已保存，消息刷新失败；请稍后查看状态"
         value.answer != null -> "答案已保存"
         value.interrupted -> "提问已中断"
         session.busy -> "正在保存答案…"
         session.validation.isNotEmpty() -> session.validation
-        draft.reply == Reply.REJECTED -> "答案未接受，可修改重试"
-        draft.reply == Reply.UNCONFIRMED -> "结果未确认，请刷新状态"
-        draft.reply == Reply.STOPPED -> "本轮已停止"
+        draft.reply == Reply.REJECTED -> "答案未被接受；可修改后重试，若提问已过期请刷新状态"
+        draft.reply == Reply.UNCONFIRMED -> "提交结果未确认，请刷新状态；不会自动重复提交"
+        draft.reply == Reply.STOPPED -> "本轮已停止，不能再回答"
         else -> ""
     }
     val isError = draft.reply == Reply.SAVED_REFRESH_FAILED || (!completed &&
@@ -261,6 +261,7 @@ private class QuestionCardSession(
     private var attachmentEpoch = 0L
     private var generation = 0L
     private var shownRecord: QuestionRecord? = null
+    private var shownIncoming: QuestionRecord? = null
     private var writable = false
     private var submitting = false
     private var detachedSubmission = false
@@ -274,7 +275,24 @@ private class QuestionCardSession(
         submit: (QuestionIdentity, QuestionAnswer, (Reply) -> Unit) -> Unit) {
         if (incoming.answer != null) draft.saved = incoming.answer
         else if (!retained && incoming.interrupted) draft.saved = null
-        if (shownRecord != value) { shownRecord = value; generation++ }
+        val previous = shownIncoming
+        shownIncoming = incoming
+        if (previous != null && previous != incoming && previous.question != incoming.question) {
+            // A different pending question replaced this card: drop transient form state. The
+            // retained binding keeps owning its draft; only the callback overload resets its own.
+            validation = ""
+            submitting = false
+            detachedSubmission = false
+            if (!retained && incoming.answer == null) {
+                draft.selection = null; draft.other = ""; draft.note = ""
+                draft.saving = false; draft.reply = null
+            }
+        }
+        if (shownRecord != value) {
+            // Completions for the previous record are fenced by generation; release their local saving.
+            if (shownRecord != null && submitting && !retained) { submitting = false; draft.saving = false }
+            shownRecord = value; generation++
+        }
         writable = canAnswer
         submitAction = submit
     }
@@ -325,7 +343,7 @@ private class QuestionCardSession(
             null -> null
         }
         if (answer == null) {
-            validation = if (draft.selection is QuestionAnswer.Other && value.question.allowOther) "请填写其他答案" else "请选择一个答案"
+            validation = if (draft.selection is QuestionAnswer.Other && value.question.allowOther) "请填写其他答案" else "请选择一个答案；推荐选项不会自动选择"
             revision++
             return
         }

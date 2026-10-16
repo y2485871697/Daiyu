@@ -41,7 +41,7 @@ internal object SettingsCatalog {
             SettingsEntry("workspace", "工作区与文件", DaiyuIcons.Folder, SettingControl.PAGE),
             SettingsEntry("terminal", "终端", DaiyuIcons.Terminal, SettingControl.PAGE, FeatureRoute.TERMINAL),
             SettingsEntry("browser", "浏览器", DaiyuIcons.Browser, SettingControl.PAGE, FeatureRoute.BROWSER_SETTINGS),
-            SettingsEntry("linux", "Linux 工具环境", DaiyuIcons.Terminal, SettingControl.PAGE),
+            SettingsEntry("linux", "Linux 工具环境", DaiyuIcons.Terminal, SettingControl.PAGE, FeatureRoute.LINUX_SETTINGS),
             SettingsEntry("task_surface", "Agent任务偏好", DaiyuIcons.VirtualScreen, SettingControl.PAGE),
         )),
         SettingsGroup("haptics", "震动", "震动反馈与试听", listOf(

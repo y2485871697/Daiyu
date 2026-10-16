@@ -45,12 +45,18 @@ fun TerminalScreen(
     onOpenAndroid: () -> Unit,
     onOpenLinux: (LinuxGenerationRef) -> Unit,
     onBack: () -> Unit,
+    isCurrent: () -> Boolean = { true },
 ) {
     val state by host.state.collectAsStateWithLifecycle()
-    LaunchedEffect(host) { host.refreshLinux() } // Inspection only; all I/O remains on the worker.
-    TerminalScreenContent(state, onOpenAndroid, onOpenLinux,
-        onSelectLinux = { host.selectLinux(it) }, onRefresh = { host.refreshLinux() },
-        onSend = { host.send(caller, it) }, onClose = { host.requestClose(caller) }, onBack = onBack)
+    LaunchedEffect(host) { if (isCurrent()) host.refreshLinux() }
+    TerminalScreenContent(state,
+        onOpenAndroid = { if (isCurrent()) onOpenAndroid() },
+        onOpenLinux = { if (isCurrent()) onOpenLinux(it) },
+        onSelectLinux = { if (isCurrent()) host.selectLinux(it) },
+        onRefresh = { if (isCurrent()) host.refreshLinux() },
+        onSend = { if (isCurrent()) host.send(caller, it) },
+        onClose = { if (isCurrent()) host.requestClose(caller) },
+        onBack = { if (isCurrent()) onBack() })
 }
 
 /** Stateless rendering seam for parent previews and UI tests; entering it has no side effects. */

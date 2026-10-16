@@ -26,4 +26,18 @@
     <string name="business_task_expand">展开</string>
     <string name="business_task_collapse">收起</string>
     <string name="business_task_stop">请求停止</string>
+    <string name="business_task_live_scope">暂停和继续仅适用于本次进程中的实时任务。继续使用同一会话，不会重新派发请求。请刷新查看实时状态；重启应用无法恢复已暂停任务。</string>
+    <string name="business_task_live_load_failed">读取实时状态失败，暂不可暂停或继续；请刷新重查。</string>
+    <string name="business_task_pause">暂停</string>
+    <string name="business_task_resume">继续</string>
+    <string name="business_task_retract_pause">撤回暂停请求</string>
+    <string name="business_task_pause_pending">等待安全暂停</string>
+    <string name="business_task_pause_requested">已请求暂停，须等待安全点确认；实时状态见记录。</string>
+    <string name="business_task_pause_confirmed">暂停已获确认；实时状态见记录。</string>
+    <string name="business_task_paused">已暂停</string>
+    <string name="business_task_pause_retracted">已撤回暂停请求，同一任务可继续运行。</string>
+    <string name="business_task_resumed">已允许同一任务继续，未重新派发请求。</string>
+    <string name="business_task_control_stale">此任务已不可控制，已请求重新读取当前状态。</string>
+    <string name="business_task_control_failed">无法确认操作结果，请刷新查看当前状态。</string>
+    <string name="business_task_stop_requested">已请求停止。这不是暂停，之后不能继续。</string>
 </resources>

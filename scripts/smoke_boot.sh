@@ -91,14 +91,35 @@ if grep -q 'package:io.github.mangi.eta$' smoke/packages.txt; then exit 1; fi
 adb_stage launch 30 shell am start -W -n app.daiyu.android/.MainActivity > smoke/start.txt
 cat smoke/start.txt
 grep -q 'Status: ok' smoke/start.txt
+chat_ready() {
+  python3 - <<'PYUI'
+from pathlib import Path
+import sys
+import xml.etree.ElementTree as ET
+try:
+    root = ET.parse(Path('smoke/boot.xml')).getroot()
+except (OSError, ET.ParseError):
+    sys.exit(1)
+nodes = [n for n in root.iter('node') if n.get('package') == 'app.daiyu.android']
+descriptions = {n.get('content-desc') for n in nodes}
+ready = root.tag == 'hierarchy' and {'打开侧边栏', '更多', '发送'} <= descriptions and any(
+    n.get('class') == 'android.widget.EditText' for n in nodes)
+sys.exit(0 if ready else 1)
+PYUI
+}
+ready=0
 for attempt in $(seq 1 20); do
-  adb_stage ui-dump 10 shell uiautomator dump /sdcard/boot.xml >/dev/null 2>&1 || true
-  adb_stage ui-pull 10 pull /sdcard/boot.xml smoke/boot.xml >/dev/null 2>&1 || true
-  if test -f smoke/boot.xml && grep -q '代鱼 · 聊天' smoke/boot.xml; then break; fi
+  remote_xml="/sdcard/daiyu-boot-${attempt}.xml"
+  rm -f smoke/boot.xml
+  if adb_stage ui-dump 10 shell uiautomator dump "$remote_xml" >/dev/null 2>&1 &&
+     adb_stage ui-pull 10 pull "$remote_xml" smoke/boot.xml >/dev/null 2>&1 &&
+     chat_ready; then
+    ready=1
+    break
+  fi
   sleep 1
 done
-grep -q '代鱼 · 聊天' smoke/boot.xml
-grep -q '发送' smoke/boot.xml
+test "$ready" = 1
 adb_stage activity 20 shell dumpsys activity activities > smoke/activity.txt
 adb_stage logcat 20 logcat -d > smoke/logcat.txt
 if grep -q 'FATAL EXCEPTION' smoke/logcat.txt; then exit 1; fi

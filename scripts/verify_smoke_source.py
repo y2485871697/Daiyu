@@ -1,4 +1,4 @@
-"""Bind API26-only regression to an existing, unchanged application build."""
+"""Bind dual-API regression to an existing, unchanged application build."""
 import json
 import os
 from pathlib import Path

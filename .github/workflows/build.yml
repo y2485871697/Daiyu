@@ -1,5 +1,5 @@
 name: 代鱼构建
-run-name: ${{ inputs.mode == 'smoke' && format('代鱼API26补检 {0}', inputs.check_id) || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || '代鱼构建' }}
+run-name: ${{ inputs.mode == 'smoke' && format('代鱼双API补检 {0}', inputs.check_id) || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || '代鱼构建' }}
 on:
   workflow_dispatch:
     inputs:
@@ -26,11 +26,11 @@ on:
         type: string
         default: manual
       source_run_id:
-        description: API26补检使用的既有开发包run ID（不重新打包）
+        description: 双API补检使用的既有开发包run ID（不重新打包）
         type: string
         default: ''
       source_sha:
-        description: API26补检开发包的完整源码SHA
+        description: 双API补检开发包的完整源码SHA
         type: string
         default: ''
 env:
@@ -176,7 +176,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.mode == 'smoke' && '[{"api":"26","target":"google_apis","ram":4096}]' || '[{"api":"26","target":"google_apis","ram":4096},{"api":"37.2","target":"google_apis_ps16k","ram":6144}]') }}
+        include:
+          - {api: '26', target: google_apis, ram: 4096}
+          - {api: '37.2', target: google_apis_ps16k, ram: 6144}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

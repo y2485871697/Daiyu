@@ -15,6 +15,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
+import android.content.res.Configuration
 import app.daiyu.android.data.model.AppearanceAccentColor
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
@@ -122,6 +124,42 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertTrue(state.morphLoadingIndicator) }
         node("page:外观与主题").performScrollToIndex(0)
         capture("appearance-dark")
+    }
+
+    fun testSystemBarIconsFollowThemeAndActivityRecreation() {
+        val preferences = activity.getSharedPreferences("appearance-settings", android.content.Context.MODE_PRIVATE)
+        val hadTheme = preferences.contains("theme")
+        val oldTheme = preferences.getString("theme", null)
+        fun assertBars(dark: Boolean) {
+            ui.waitForIdle()
+            mainThread {
+                val bars = WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                assertEquals(!dark, bars.isAppearanceLightStatusBars)
+                assertEquals(!dark, bars.isAppearanceLightNavigationBars)
+            }
+        }
+        try {
+            openSettings()
+            reveal("settings-row:外观与主题", "设置").performClick()
+            for ((label, dark) in listOf("浅色" to false, "深色" to true)) {
+                node("settings-radio:$label").performClick().assertIsSelected()
+                assertBars(dark)
+            }
+            activity = recreateActivity(activity)
+            assertBars(true)
+            openSettings()
+            reveal("settings-row:外观与主题", "设置").performClick()
+            node("settings-radio:跟随系统").performClick().assertIsSelected()
+            val systemDark = activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+            assertBars(systemDark)
+            node("settings-radio:浅色").performClick()
+            backToChat(activity); backToChat(activity)
+            assertBars(false)
+        } finally {
+            val editor = preferences.edit()
+            if (hadTheme) editor.putString("theme", oldTheme) else editor.remove("theme")
+            check(editor.commit())
+        }
     }
 
     fun testAppearanceSurvivesActivityRecreation() {

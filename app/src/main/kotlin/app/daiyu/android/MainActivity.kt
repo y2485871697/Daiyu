@@ -12,8 +12,10 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.core.view.WindowCompat
 import app.daiyu.android.assistants.AssistantSkill
 import app.daiyu.android.assistants.FileAssistantAssets
 import app.daiyu.android.assistants.SharedPreferencesAssistantStore
@@ -30,6 +32,7 @@ import app.daiyu.android.ui.FeatureRoute
 import app.daiyu.android.ui.RetainedConversationData
 import app.daiyu.android.ui.SubAgentSettingsScreen
 import app.daiyu.android.ui.app.AgentAppTheme
+import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.components.*
 import app.daiyu.android.ui.components.subagent.SubAgentThinkingEffortPickerDialog
 import app.daiyu.android.ui.model.ConversationPaneUiState
@@ -127,7 +130,7 @@ class MainActivity : ComponentActivity() {
         activityCallbacksAllowed = true
         pendingBackupRequest = state?.getInt("pending-backup-request", 0)?.takeIf { it != 0 }
         setContent {
-            AgentAppTheme(appearance, applyInterfaceScale = true) {
+            AgentAppTheme(appearance, applyInterfaceScale = true, onResolvedDarkModeChange = ::updateSystemBars) {
                 val focus = LocalFocusManager.current
                 val chatPageState = rememberSaveableStateHolder()
                 val assistantProfiles by assistantStore.assistants.collectAsState()
@@ -275,6 +278,16 @@ class MainActivity : ComponentActivity() {
         refresh()
         // Recreating an Activity never replays an external VIEW/import confirmation.
         if (state == null) offerOpenedBackup(intent)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun updateSystemBars(isDark: Boolean) {
+        val background = if (isDark) DaiyuPalette.dark.background else DaiyuPalette.light.background
+        window.statusBarColor = background.toArgb()
+        window.navigationBarColor = background.toArgb()
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.isAppearanceLightStatusBars = !isDark
+        controller.isAppearanceLightNavigationBars = !isDark
     }
 
     private fun chatActions(): ChatScreenActions {

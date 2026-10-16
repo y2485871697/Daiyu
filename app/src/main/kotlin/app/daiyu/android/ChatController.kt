@@ -118,11 +118,15 @@ class ChatController internal constructor(private val application:Application,
     private var closed=false
     // The existing preparation lane is retained until the worker (and device cleanup) exits.
     // Identity, not a Boolean reset, prevents an old completion from clearing a newer owner.
-    private class Preparation(val assistantId: String?, val textTicket: TextSendTicket? = null) {
+    private class Preparation(val assistantId: String?, var textTicket: TextSendTicket? = null) {
         val cancellation = ContextPreparationCancellation()
         var revoked = false
         var committing = false
         var persistenceUnconfirmed = false
+        var browser: ControllerBrowserPreparation? = null
+        var browserContext: AssistantRunContext? = null
+        var submitted = false
+        var cleanupDeadline = 0L
     }
     private var preparation: Preparation? = null
     private val preparing: Boolean get() = preparation != null
@@ -139,6 +143,8 @@ class ChatController internal constructor(private val application:Application,
     private fun cancelPreparation() {
         val token = synchronized(this) { preparation?.also { it.revoked = true } }
         token?.cancellation?.cancel()
+        token?.browser?.cancel()
+        if (token?.browser != null && !token.submitted) finishPreparation(token)
     }
     internal fun bindConversationAssistant(owner: ConversationId, expected: String?, replacement: String): Boolean {
         val token = synchronized(this) {
@@ -510,6 +516,7 @@ class ChatController internal constructor(private val application:Application,
             preparation?.takeIf { it.textTicket === ticket }?.also { it.revoked = true }
         } ?: return false
         token.cancellation.cancel()
+        token.browser?.cancel()
         return true
     }
     /** Optional entry point. Ordinary send()/sendImages() never grant Shizuku access.
@@ -587,11 +594,129 @@ class ChatController internal constructor(private val application:Application,
             }
         }
     }
-    private fun finishPreparation(token: Preparation) = synchronized(this) {
-        if(preparation !== token) return@synchronized
-        preparation=null
-        pendingImage=null
-        if(closed) closeStorageWhenIdle() else notifyChanged()
+    private fun finishPreparation(token: Preparation) {
+        val browser = token.browser
+        if (browser != null && browser.state != ControllerBrowserPreparation.State.TRANSFERRED) {
+            if (!browser.isCancelled) browser.cancel()
+            when (browser.pollCleanup()) {
+                RunCatalogCloseResult.Drained -> Unit
+                is RunCatalogCloseResult.Unknown -> {
+                    synchronized(this) {
+                        problem = "浏览器准备清理结果 UNKNOWN；保留原资源，不自动重发"
+                        notifyChanged()
+                    }
+                    return
+                }
+                null -> {
+                    if (token.cleanupDeadline == 0L) token.cleanupDeadline = android.os.SystemClock.uptimeMillis() + 30_000
+                    if (android.os.SystemClock.uptimeMillis() < token.cleanupDeadline) {
+                        handler.postDelayed({ finishPreparation(token) }, 100)
+                    } else synchronized(this) {
+                        problem = "浏览器准备清理尚未确认；保留原资源，不自动重发"
+                        notifyChanged()
+                    }
+                    return
+                }
+            }
+        }
+        synchronized(this) {
+            if (preparation !== token) return
+            preparation = null
+            pendingImage = null
+            if (closed) closeStorageWhenIdle() else notifyChanged()
+        }
+    }
+
+    @Synchronized internal fun browserPreparation(): ControllerBrowserPreparation? = preparation?.browser
+
+    /** Worker-only snapshot. Merely opening approval never creates a browser or calls a model. */
+    internal fun prepareBrowserSend(conversation: Conversation?, draft: BrowserDraftSnapshot,
+                                   writes: List<String>): ControllerBrowserPreparation? {
+        check(Looper.myLooper() != Looper.getMainLooper()) { "browser_prepare_requires_worker" }
+        val token = synchronized(this) {
+            if (!idleAvailable() || draft.text.isBlank() || draft.owner.conversationId != conversation?.id) return null
+            reservePreparation()
+        }
+        try {
+            val id = if (conversation == null) token.assistantId else database.assistantId(conversation.id)
+            val profile = assistantStore.read(checkNotNull(id) { "会话未绑定助手" })
+                ?.let { it.copy(enabledSkillIds = it.enabledSkillIds.toList()) }
+                ?: error("会话助手不存在")
+            val memory = if (profile.memoryEnabled) assistantAssets.memory(profile.id).content else ""
+            val frozen = object : AssistantStore by assistantStore {
+                override fun read(id: String): AssistantProfile? = profile.takeIf { it.id == id }
+            }
+            val context = AssistantRunContext.capture(frozen, profile.id, memory)
+            val config = settings.load().also { it.validate() }
+            val browserSettings = app.daiyu.android.browser.BrowserSettingsStore(application).snapshot()
+            val run = RunId(UUID.randomUUID().toString())
+            val grant = app.daiyu.android.browser.session.BrowserGrant(
+                app.daiyu.android.browser.session.BrowserOwner(run.value,
+                    app.daiyu.android.browser.session.BrowserOwnerKind.MAIN), browserSettings.access)
+            val actions = app.daiyu.android.browser.session.BrowserSessionRegistry.readOnlyActions +
+                "list_tabs" + writes.map { org.json.JSONObject(it).getString("action") }
+            val pending = ControllerBrowserPreparation.prepare(conversation, draft, profile,
+                ProviderSnapshot.capture(config), browserSettings, grant, actions, writes, runId = run)
+            synchronized(this) {
+                check(preparation === token && !token.revoked && !closed) { "浏览器准备已取消" }
+                token.browser = pending
+                token.browserContext = context
+            }
+            notifyChanged()
+            return pending
+        } catch (failure: Exception) {
+            problem = failure.message ?: "浏览器准备失败；草稿保留"
+            finishPreparation(token)
+            notifyChanged()
+            return null
+        }
+    }
+
+    internal fun rejectBrowser(pending: ControllerBrowserPreparation) {
+        val token = synchronized(this) {
+            preparation?.takeIf { it.browser === pending }?.also { it.revoked = true }
+        } ?: return
+        token.cancellation.cancel()
+        pending.cancel()
+        if (!token.submitted) finishPreparation(token)
+    }
+
+    internal fun sendBrowser(pending: ControllerBrowserPreparation, current: BrowserDraftSnapshot,
+                             ticket: TextSendTicket, complete: (TextSendResult) -> Unit): Boolean {
+        val owner = TextSendOwner(current.owner.conversationId, current.owner.editorGeneration, current.owner.draftRevision)
+        val token = synchronized(this) {
+            val candidate = preparation ?: return false
+            if (candidate.browser !== pending || candidate.submitted || candidate.revoked || closed ||
+                current != pending.draft || pending.state != ControllerBrowserPreparation.State.CONFIRMED ||
+                pendingTextState != null) return false
+            candidate.submitted = true
+            candidate.textTicket = ticket
+            pendingTextState = TextSendState(ticket, owner, current.text)
+            candidate
+        }
+        try { executor.execute {
+            val saved = try {
+                val binding = pending.openOnWorker(application, File(application.filesDir, "browser-runs").toPath())
+                if (binding == null) null else sendPrepared(token, pending.conversation, pending.text,
+                    expectedDraftText = pending.text, browserPreparation = pending, browserBinding = binding)
+            } catch (_: Exception) { null }
+            val result = when {
+                saved != null -> TextSendResult.Accepted(owner, saved)
+                token.persistenceUnconfirmed || pending.state == ControllerBrowserPreparation.State.UNKNOWN -> TextSendResult.Unknown(owner)
+                else -> TextSendResult.Rejected(owner)
+            }
+            synchronized(this) {
+                if (pendingTextState?.ticket === ticket) pendingTextState = pendingTextState?.copy(result = result)
+            }
+            finishPreparation(token)
+            handler.post { try { complete(result) } catch (_: Exception) {} }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { if (pendingTextState?.ticket === ticket) pendingTextState = null }
+            rejectBrowser(pending)
+            finishPreparation(token)
+            return false
+        }
+        return true
     }
     /** Queue acceptance, NOT a receipt. complete always carries the exact owner + revision.
      * The host must retain/freeze that editor revision until completion and remove ONLY the
@@ -638,7 +763,9 @@ class ChatController internal constructor(private val application:Application,
         withChildren:Boolean = false, imageAttempt:ControllerImageAttempt?=null,
         shizukuPreparation:ControllerShizukuPreparation?=null,
         shizukuAuthorization:app.daiyu.android.domain.tools.TaskAuthorization?=null,
-        expectedDraftText:String?=null):Conversation? {
+        expectedDraftText:String?=null,
+        browserPreparation:ControllerBrowserPreparation?=null,
+        browserBinding:CatalogBrowserBinding?=null):Conversation? {
         require(shizukuPreparation==null || (imageAttempt==null && shizukuAuthorization!=null))
         if(preparationCancelled(token)) return null
         // Freeze the persisted draft before any model/history preparation. Legacy send callers
@@ -649,7 +776,7 @@ class ChatController internal constructor(private val application:Application,
                     "SELECT draft FROM conversations WHERE id=?", arrayOf(conversation.id.value)
                 ).use { check(it.moveToFirst()); it.getString(0) }
         } catch (_:Exception) { return null }
-        val assistantContext = try {
+        val assistantContext = token.browserContext ?: try {
             val binding=if(conversation==null) token.assistantId
                 else database.assistantId(conversation.id)
             if(binding==null) throw MissingAssistantBindingException()
@@ -679,21 +806,21 @@ class ChatController internal constructor(private val application:Application,
             problem="子模型配置未绑定、已变更或不支持；草稿保留，未切换到主模型";notifyChanged();return null
         }
         val interactiveSnapshot = interactiveMode.snapshot()
-        val config=try {settings.load().also {it.validate()}} catch (_:CredentialUnavailableException) {
+        val config=try {(browserPreparation?.provider?.asModelSettings() ?: settings.load()).also {it.validate()}} catch (_:CredentialUnavailableException) {
             problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
         } catch (_:Exception) {problem="请在模型设置里配置Responses地址、模型与密钥";notifyChanged();return null}
         val provider=try {
-            val selected=imageAttempt?.provider ?: synchronized(this) {imageProvider}
+            val selected=browserPreparation?.provider ?: imageAttempt?.provider ?: synchronized(this) {imageProvider}
             if(imageAttempt!=null) require(selected?.asModelSettings()==config) {"stale_image_provider"}
             selected?.takeIf {it.asModelSettings()==config} ?: ProviderSnapshot.capture(config)
         } catch (_:Exception) {problem="图片模型配置已变化；草稿保留，未发起网络请求";notifyChanged();return null}
-        val conversationId=shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
+        val conversationId=browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
-        val run=shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
+        val run=browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
         val user=try {imageAttempt?.prepare(imageAttachments.store,messageImageAssets) ?:
             Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
         } catch (_:Exception) {problem="图片冻结失败或模型不支持；草稿保留，未发起网络请求";notifyChanged();return null}
-        val assistant=Message(imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
+        val assistant=Message(browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
         val preparedContext = try {
             // All sends, including the very first message, share the same frozen policy/budget.
             val coordinator = contextPreparation
@@ -736,7 +863,8 @@ class ChatController internal constructor(private val application:Application,
                     setOf(SkillRunSession.READ, SkillRunSession.RESOURCE) +
                     (if (interactiveSnapshot.enabled) setOf(AndroidToolRegistry.ASK_USER_CAPABILITY) else emptySet()) +
                     (if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY,RunChildTasks.CAPABILITY)) +
-                    (if (shizukuPreparation == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)))
+                    (if (shizukuPreparation == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)) +
+                    (if (browserBinding == null) emptySet() else setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY)))
             val backgroundFactory: ((app.daiyu.android.domain.runtime.RunExecutionOwner, SessionCapabilities,
                 app.daiyu.android.domain.tools.TaskAuthorization) -> RunChildTasks)? =
                 if(childModels.isEmpty()) null else { owner, grants, authorization ->
@@ -751,7 +879,9 @@ class ChatController internal constructor(private val application:Application,
             // The SAME frozen authorization reaches Dispatcher and RunShizukuCommands.bind.
             val shizuku=shizukuPreparation?.open(shizukuAccess)
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
-                backgroundFactory, authorization=shizukuAuthorization, shizuku=shizuku) { grants, authorization ->
+                backgroundFactory, authorization=shizukuAuthorization ?: browserBinding?.let {
+                    app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value, it.requiredWrites)
+                }, shizuku=shizuku, browser=browserBinding) { grants, authorization ->
                 SkillToolRegistry(application).captureForRun(grants, authorization)
             }
             preparingTools = tools
@@ -778,13 +908,14 @@ class ChatController internal constructor(private val application:Application,
         val mayCommit=synchronized(this) {
             if(preparation !== token || closed || token.revoked || token.committing ||
                 token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true ||
-                (imageAttempt!=null && !imageAttempt.beginCommit())) false
+                browserPreparation?.isCancelled==true || (imageAttempt!=null && !imageAttempt.beginCommit())) false
             else { token.committing=true; true }
         }
         if (!mayCommit) { closeUnacceptedTools(tools); return null }
         var databaseSendEntered=false
         val saved=try {
-            DatabaseTransactions { database.writableDatabase }.run { db ->
+            val commit: () -> Conversation? = {
+                try { DatabaseTransactions { database.writableDatabase }.run { db ->
                 val ownerExists=db.rawQuery("SELECT 1 FROM conversations WHERE id=?",
                     arrayOf(conversationId.value)).use {it.moveToFirst()}
                 check(ownerExists == (conversation != null)) { "send_owner_changed" }
@@ -799,8 +930,15 @@ class ChatController internal constructor(private val application:Application,
                     "send_history_changed"
                 }
                 databaseSendEntered=true
-                database.send(user,assistant,conversation==null,assistantContext.assistantId)
+                    database.send(user,assistant,conversation==null,assistantContext.assistantId)
+                } } catch (failure: Exception) {
+                    // A failed pre-write CAS is definitely rejected, not an ambiguous commit.
+                    if (browserPreparation != null && !databaseSendEntered) null else throw failure
+                }
             }
+            if (browserPreparation == null) checkNotNull(commit())
+            else browserPreparation.accept(checkNotNull(browserBinding), commit)?.conversation
+                ?: throw IllegalStateException("browser_acceptance_unconfirmed")
         } catch (_:Exception) {
             token.persistenceUnconfirmed=databaseSendEntered
             if(databaseSendEntered) imageAttempt?.unknown() else imageAttempt?.draftChanged()
@@ -813,7 +951,8 @@ class ChatController internal constructor(private val application:Application,
         imageAttempt?.accepted(saved)
         val lifetime=RunResources(assistant,owned,tools)
         val installed=synchronized(this) {
-            if(closed || token.revoked || token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true) false else {
+            if(closed || token.revoked || token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true ||
+                browserPreparation?.isCancelled==true) false else {
                 if(imageAttempt!=null) imageProvider=provider
                 problem=null;active=assistant
                 runner=owned;runTools=tools;resources=lifetime

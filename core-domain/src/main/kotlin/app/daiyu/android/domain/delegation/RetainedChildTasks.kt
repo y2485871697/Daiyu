@@ -6,8 +6,12 @@ import app.daiyu.android.domain.tools.SessionCapabilities
 import app.daiyu.android.domain.tools.TaskAuthorization
 import app.daiyu.android.domain.tools.ToolExecutionContext
 import app.daiyu.android.domain.usage.ChildUsageRecorder
+import java.lang.ref.WeakReference
+import java.nio.ByteBuffer
+import java.security.MessageDigest
 import java.util.Collections
 import java.util.UUID
+import java.util.WeakHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
@@ -27,40 +31,61 @@ data class RetainedChildTask(
     val journalUnconfirmed: Boolean
 )
 
+internal class ChildTaskResources(
+    val session: SessionCapabilities,
+    val authorization: TaskAuthorization,
+    val models: Map<String, ChildModelDefinition>,
+    val onChanged: () -> Unit
+)
+
+/** A digest is a replay tombstone, not a retained prompt or permission to run again. */
+internal class ChildTaskRequest(val fingerprint: ByteArray, var remaining: Int) {
+    var admission: ChildTaskAdmission? = null
+}
+
 /** Host-owned capability. Finishing its parent does not revoke accepted child work. */
 class ChildTaskBinding internal constructor(
     internal val supervisor: RetainedChildTasks,
     internal val owner: RunExecutionOwner,
-    internal val session: SessionCapabilities,
-    internal val authorization: TaskAuthorization,
-    internal val models: Map<String, ChildModelDefinition>,
-    internal val onChanged: () -> Unit
+    internal var resources: ChildTaskResources?
 ) {
+    // All mutable fields are protected by the supervisor gate. Once sealed and drained,
+    // only this lightweight handle/history stays with its host, never with the supervisor.
+    internal val authorization = WeakReference(checkNotNull(resources).authorization)
     internal var accepting = true
+    internal var outstanding = 0
+    internal val requests = mutableMapOf<String, ChildTaskRequest>()
+    internal val recent = linkedMapOf<String, RetainedChildTask>()
 }
 
-/** Controller-lifetime execution; durable records remain owned by the existing runtime store. */
+/** Controller-lifetime execution; durable records remain owned by the existing runtime store.
+ * maxRetainedTasks bounds live reservations (including draining transports), not lifetime admissions.
+ * Terminal snapshots are a bounded UI cache per handle; complete history belongs to ChildTaskStore.
+ * maxRequestsPerBinding (1..4096, default 1024) independently bounds replay tombstones.
+ * They are never evicted to admit work: new calls fail with child_request_budget_exhausted at the limit.
+ */
 class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutMillis: Long = 120_000,
-    private val maxRetainedTasks: Int = 64, private val usageRecorder: ChildUsageRecorder? = null) : AutoCloseable {
+    private val maxRetainedTasks: Int = 64, private val usageRecorder: ChildUsageRecorder? = null,
+    private val maxRequestsPerBinding: Int = 1024) : AutoCloseable {
     private class Pool(val limit: Int) {
         val permits = Semaphore(if (limit == 0) MAX_WORKERS else minOf(limit, MAX_WORKERS), true)
+        var bindings = 0
     }
-    private class Task(val binding: ChildTaskBinding, val initial: ChildTaskRecord, val invocation: ToolInvocation,
-        val deadline: Long) {
+    private class Task(val binding: ChildTaskBinding, val request: ChildTaskRequest,
+        val initial: ChildTaskRecord, val invocation: ToolInvocation, val deadline: Long) {
         var record = initial
         var stopRequested = false
         var settled = false
         var journalUnconfirmed = false
         var batch: ChildModelBatch? = null
     }
-    private class Request(val tasks: List<ChildModelTask>) {
-        var admission: ChildTaskAdmission? = null
-    }
     private val gate = Any()
     private val pools = mutableMapOf<String, Pool>()
     private val bindings = java.util.IdentityHashMap<RunExecutionOwner, ChildTaskBinding>()
+    // RunExecutionOwner has identity equality. A reachable old owner cannot be rebound after
+    // its resources are released; dead owners need not be retained for the controller lifetime.
+    private val seenOwners = WeakHashMap<RunExecutionOwner, Unit>()
     private val tasks = linkedMapOf<String, Task>()
-    private val requests = mutableMapOf<Pair<ChildTaskBinding, String>, Request>()
     private val workers = Executors.newFixedThreadPool(MAX_WORKERS) { action ->
         Thread(action, "retained-child-task").apply { isDaemon = true }
     }
@@ -69,13 +94,16 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     private var outstanding = 0
     private var closed = false
 
-    init { require(timeoutMillis in 1..120_000); require(maxRetainedTasks in 1..256) }
+    init {
+        require(timeoutMillis in 1..120_000); require(maxRetainedTasks in 1..256)
+        require(maxRequestsPerBinding in 1..4096) { "invalid_child_request_budget" }
+    }
 
     fun bind(owner: RunExecutionOwner, session: SessionCapabilities, authorization: TaskAuthorization,
         models: Map<String, ChildModelDefinition>, onChanged: () -> Unit = {}): ChildTaskBinding = synchronized(gate) {
         check(!closed) { "child_supervisor_closed" }
         require(authorization.sessionId == session.sessionId && authorization.taskId == owner.runId.value)
-        check(!bindings.containsKey(owner)) { "child_parent_already_bound" }
+        check(!seenOwners.containsKey(owner)) { "child_parent_already_bound" }
         val frozen = models.toMap()
         require(frozen.isNotEmpty() && frozen.keys.all { it.isNotBlank() && it.length <= 200 })
         val limits = frozen.values.groupBy { it.poolKey }.mapValues { (_, definitions) ->
@@ -83,42 +111,58 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             definitions.first().parallelLimit
         }
         require(limits.all { (key, limit) -> pools[key]?.limit?.let { it == limit } != false }) { "child_pool_limit_conflict" }
-        limits.forEach { (key, limit) -> pools.getOrPut(key) { Pool(limit) } }
-        ChildTaskBinding(this, owner, session, authorization, Collections.unmodifiableMap(frozen), onChanged).also { bindings[owner] = it }
+        limits.forEach { (key, limit) -> pools.getOrPut(key) { Pool(limit) }.bindings++ }
+        ChildTaskBinding(this, owner, ChildTaskResources(session, authorization,
+            Collections.unmodifiableMap(frozen), onChanged)).also {
+            bindings[owner] = it
+            seenOwners[owner] = Unit
+        }
     }
 
     fun submit(binding: ChildTaskBinding, context: ToolExecutionContext, input: List<ChildModelTask>): ChildTaskAdmission {
         requireBinding(binding)
-        require(context.owner === binding.owner && context.authorization === binding.authorization) { "child_parent_owner_mismatch" }
+        require(context.owner === binding.owner && context.authorization === binding.authorization.get()) {
+            "child_parent_owner_mismatch"
+        }
+        // Bound retained map keys as well as their count; rejected ids consume no reservation.
+        val callId = context.invocation.id.value
+        if (callId.isBlank() || callId.length > 200) return ChildTaskAdmission.Rejected("invalid_child_call_id")
         val inputSnapshot = input.toList()
         if (inputSnapshot.size !in 1..8 || inputSnapshot.any {
-            it.profileId !in binding.models || it.prompt.isBlank() || it.prompt.length > 4096 ||
-                it.prompt.toByteArray(Charsets.UTF_8).size > 16 * 1024
+            it.profileId.isBlank() || it.profileId.length > 200 || it.prompt.isBlank() ||
+                it.prompt.length > 4096 || it.prompt.toByteArray(Charsets.UTF_8).size > 16 * 1024
         }) return ChildTaskAdmission.Rejected("invalid_child_tasks")
+        val fingerprint = fingerprint(inputSnapshot)
         val cancelled = context.cancelled()
-        val key = binding to context.invocation.id.value
         val reserved: List<Task>
-        val request: Request
+        val request: ChildTaskRequest
         synchronized(gate) {
-            requests[key]?.let { previous ->
-                return if (previous.tasks != inputSnapshot) ChildTaskAdmission.Rejected("child_request_conflict")
+            binding.requests[callId]?.let { previous ->
+                return if (!previous.fingerprint.contentEquals(fingerprint)) ChildTaskAdmission.Rejected("child_request_conflict")
                 else previous.admission ?: ChildTaskAdmission.Unconfirmed("child_admission_pending")
             }
+            val resources = binding.resources ?: return ChildTaskAdmission.Rejected("child_binding_closed")
             if (closed || !binding.accepting) return ChildTaskAdmission.Rejected("child_binding_closed")
+            if (inputSnapshot.any { it.profileId !in resources.models }) return ChildTaskAdmission.Rejected("invalid_child_tasks")
             if (cancelled) return ChildTaskAdmission.Rejected("cancelled_before_admission")
+            // Old calls are resolved above even at this limit. Never drop a sent-call tombstone
+            // to make room: that would turn a replay into a second provider request.
+            if (binding.requests.size >= maxRequestsPerBinding) return ChildTaskAdmission.Rejected("child_request_budget_exhausted")
             if (tasks.size + inputSnapshot.size > maxRetainedTasks) return ChildTaskAdmission.Rejected("child_retention_limit")
             val group = UUID.randomUUID().toString()
             val epoch = Math.incrementExact(generation).also { generation = it }
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
+            request = ChildTaskRequest(fingerprint, inputSnapshot.size)
+            binding.requests[callId] = request
             reserved = inputSnapshot.mapIndexed { index, inputTask ->
                 val owner = binding.owner
                 val record = ChildTaskRecord(ChildRunOwner(owner.conversationId.value, owner.runId.value,
                     group, epoch, UUID.randomUUID().toString(), UUID.randomUUID().toString()),
                     owner.assistantMessageId.value, owner.ownerId, index, inputTask.profileId, inputTask.prompt)
-                Task(binding, record, context.invocation, deadline).also { tasks[record.owner.childRunId] = it }
+                Task(binding, request, record, context.invocation, deadline).also { tasks[record.owner.childRunId] = it }
             }
             outstanding += reserved.size
-            request = Request(inputSnapshot).also { requests[key] = it }
+            binding.outstanding += reserved.size
         }
         try {
             store.enqueue(binding.owner, reserved.map { it.initial })
@@ -147,7 +191,19 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
 
     fun finishParent(binding: ChildTaskBinding) {
         requireBinding(binding)
-        synchronized(gate) { binding.accepting = false }
+        val callback = synchronized(gate) {
+            binding.accepting = false
+            binding.resources?.onChanged.also { releaseBindingIfIdle(binding) }
+        }
+        callback?.let { runCatching(it) }
+    }
+
+    /** True only once admission is sealed AND every reserved task has really drained.
+     * Hosts may then remove their handle; durable history is still in ChildTaskStore.
+     */
+    fun isReleased(binding: ChildTaskBinding): Boolean {
+        requireBinding(binding)
+        return synchronized(gate) { binding.resources == null }
     }
 
     fun stop(binding: ChildTaskBinding, owner: ChildRunOwner): ChildTaskStop {
@@ -155,8 +211,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         val batch: ChildModelBatch?
         synchronized(gate) {
             val task = tasks[owner.childRunId]?.takeIf { it.binding === binding && it.initial.owner == owner }
-                ?: return ChildTaskStop.NOT_FOUND
-            if (task.settled) return ChildTaskStop.ALREADY_SETTLED
+            if (task == null) return if (binding.recent[owner.childRunId]?.record?.owner == owner)
+                ChildTaskStop.ALREADY_SETTLED else ChildTaskStop.NOT_FOUND
             task.stopRequested = true
             batch = task.batch
         }
@@ -167,28 +223,31 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
 
     fun revoke(binding: ChildTaskBinding) {
         requireBinding(binding)
+        val callback: (() -> Unit)?
         val active = synchronized(gate) {
             binding.accepting = false
-            tasks.values.filter { it.binding === binding && !it.settled }.onEach { it.stopRequested = true }
-                .mapNotNull { it.batch }
+            callback = binding.resources?.onChanged
+            tasks.values.filter { it.binding === binding }.onEach { it.stopRequested = true }
+                .mapNotNull { it.batch }.also { releaseBindingIfIdle(binding) }
         }
         active.forEach { it.close() }
-        notifyChanged(binding)
+        callback?.let { runCatching(it) }
     }
 
     fun snapshots(binding: ChildTaskBinding): List<RetainedChildTask> {
         requireBinding(binding)
         return synchronized(gate) {
-            tasks.values.filter { it.binding === binding }.map {
-                RetainedChildTask(it.record, it.stopRequested, it.settled, it.journalUnconfirmed)
-            }
+            (binding.recent.values + tasks.values.filter { it.binding === binding }.map {
+                RetainedChildTask(it.record, it.stopRequested, false, it.journalUnconfirmed)
+            }).sortedWith(compareBy({ it.record.owner.generation }, { it.record.index }))
         }
     }
 
     override fun close() {
         val active = synchronized(gate) {
             closed = true
-            tasks.values.filter { !it.settled }.onEach { it.stopRequested = true }.mapNotNull { it.batch }
+            bindings.values.toList().forEach { it.accepting = false; releaseBindingIfIdle(it) }
+            tasks.values.onEach { it.stopRequested = true }.mapNotNull { it.batch }
         }
         active.forEach { it.close() }
         workers.shutdown()
@@ -207,7 +266,9 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     private fun stopped(task: Task) = synchronized(gate) { closed || task.stopRequested }
 
     private fun execute(task: Task) {
-        val definition = task.binding.models.getValue(task.initial.profileId)
+        // Resources and pool references stay pinned until this task's real batch drain.
+        val resources = synchronized(gate) { checkNotNull(task.binding.resources) }
+        val definition = resources.models.getValue(task.initial.profileId)
         val pool = synchronized(gate) { pools.getValue(definition.poolKey) }
         var acquired = false
         var batch: ChildModelBatch? = null
@@ -220,12 +281,12 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             }
             val remaining = TimeUnit.NANOSECONDS.toMillis(task.deadline - System.nanoTime()).coerceAtLeast(1)
             batch = ChildModelBatch(mapOf(task.initial.profileId to definition), remaining, journal(task), usageRecorder)
-            batch.bind(task.binding.owner, task.binding.session, task.binding.authorization)
+            batch.bind(task.binding.owner, resources.session, resources.authorization)
             synchronized(gate) { task.batch = batch }
             if (stopped(task)) {
                 finishUnsent(task, "child_not_sent")
             } else {
-                val context = ToolExecutionContext(task.binding.owner, task.invocation, task.binding.authorization) { stopped(task) }
+                val context = ToolExecutionContext(task.binding.owner, task.invocation, resources.authorization) { stopped(task) }
                 batch.executeQueued(context, listOf(task.initial))
             }
         } catch (_: InterruptedException) {
@@ -278,18 +339,45 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     }
 
     private fun settled(task: Task) {
-        synchronized(gate) {
+        val callback = synchronized(gate) {
             check(!task.settled)
             task.settled = true
             task.batch = null
+            tasks.remove(task.initial.owner.childRunId)
+            val binding = task.binding
+            binding.recent[task.initial.owner.childRunId] =
+                RetainedChildTask(task.record, task.stopRequested, true, task.journalUnconfirmed)
+            while (binding.recent.size > maxRetainedTasks) binding.recent.remove(binding.recent.keys.first())
+            task.request.remaining--
+            if (task.request.remaining == 0 && task.request.admission is ChildTaskAdmission.Accepted)
+                task.request.admission = ChildTaskAdmission.Rejected("child_request_settled")
             outstanding--
+            binding.outstanding--
+            binding.resources?.onChanged.also { releaseBindingIfIdle(binding) }
         }
-        notifyChanged(task.binding)
+        callback?.let { runCatching(it) }
         notifyIfIdle()
     }
 
+    /** Under gate only. Never called as a substitute for waiting for model/session exit. */
+    private fun releaseBindingIfIdle(binding: ChildTaskBinding) {
+        if (binding.accepting || binding.outstanding != 0) return
+        val resources = binding.resources ?: return
+        resources.models.values.map { it.poolKey }.toSet().forEach { key ->
+            val pool = pools.getValue(key)
+            pool.bindings--
+            if (pool.bindings == 0) pools.remove(key)
+        }
+        binding.resources = null
+        // Only a failed enqueue needs its small, stable Unknown receipt after sealing.
+        // All other calls are denied by the sealed handle; seenOwners forbids rebinding.
+        binding.requests.entries.removeAll { it.value.admission !is ChildTaskAdmission.Unconfirmed }
+        bindings.remove(binding.owner)
+    }
+
     private fun notifyChanged(binding: ChildTaskBinding) {
-        runCatching(binding.onChanged)
+        val callback = synchronized(gate) { binding.resources?.onChanged }
+        callback?.let { runCatching(it) }
     }
 
     private fun notifyIfIdle() {
@@ -297,6 +385,18 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             if (!closed || outstanding != 0) emptyList() else observers.toList().also { observers.clear() }
         }
         callbacks.forEach { callback -> runCatching(callback) }
+    }
+
+    private fun fingerprint(tasks: List<ChildModelTask>): ByteArray {
+        val digest = MessageDigest.getInstance("SHA-256")
+        tasks.forEach { task ->
+            listOf(task.profileId, task.prompt).forEach { text ->
+                val bytes = text.toByteArray(Charsets.UTF_8)
+                digest.update(ByteBuffer.allocate(4).putInt(bytes.size).array())
+                digest.update(bytes)
+            }
+        }
+        return digest.digest()
     }
 
     private companion object { const val MAX_WORKERS = 8 }

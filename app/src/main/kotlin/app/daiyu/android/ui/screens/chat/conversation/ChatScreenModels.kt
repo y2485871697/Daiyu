@@ -68,7 +68,7 @@ data class ComposerUi(
     val selectionEnd: Int = text.length,
     val phase: ComposerPhase = ComposerPhase.IDLE,
     val modelLabel: String = "模型",
-    val reasoningLabel: String = "推理强度",
+    val reasoningLabel: String = "默认",
     val assistantLabel: String = "助手",
     val contextFraction: Float? = null,
     val contextLabel: String = "上下文",

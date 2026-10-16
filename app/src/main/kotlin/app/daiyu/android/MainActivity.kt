@@ -233,7 +233,7 @@ class MainActivity : ComponentActivity() {
                         onOpenPermissions = { dismissSidebar(); retainedPage = "settings" },
                     ) {
                         chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
-                            DaiyuChatScreen(chatState, chatActions(), turnExtras = { id -> QuestionExtras(id) })
+                            DaiyuChatScreen(chatState, chatActions(), turnExtras = { id -> QuestionExtras(id, chatState.contentRevision) })
                         }
                     }
                 }
@@ -315,7 +315,8 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun QuestionExtras(id: String) {
+    @Suppress("UNUSED_PARAMETER")
+    @Composable private fun QuestionExtras(id: String, revision: Long) {
         val message = shown.firstOrNull { it.second.id.value == id }?.second ?: return
         message.blocks.filterIsInstance<MessageBlock.Tool>().forEach { tool ->
             val question = controller.questionProjection(message, tool.invocation)
@@ -567,6 +568,7 @@ class MainActivity : ComponentActivity() {
         val phase = composerPhaseForRun(state?.pauseRequested)
         val allowed = !sidebarVisible && controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
+            contentRevision = chatState.contentRevision + 1,
             turns = ChatTurnMapper.map(shown.map { it.second }), canJumpToPreviousUser = shown.any { it.second.role == "user" },
             balanceText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,
@@ -626,11 +628,11 @@ class MainActivity : ComponentActivity() {
         try {
             requireActivityUsable(); check(retainedPage == "models" && modelDraft === value)
             check(controller.active == null && !controller.dataBusy)
+            invalidateCatalog()
             val editing = checkNotNull(editingSettings)
             require(value.savedProtocol == editing.settings.protocol)
             require(value.protocol == editing.settings.protocol || value.protocolChangeAuthorized)
             require(!editing.requestOptionsUnavailable || value.requestOptionsReplacementAuthorized)
-            invalidateCatalog()
             controller.settings.save(value.toSettings(editing.settings), protocolChangeAuthorized = value.protocolChangeAuthorized,
                 requestOptionsReplacementAuthorized = value.requestOptionsReplacementAuthorized)
             returnToChat(); toast("模型设置已保存")

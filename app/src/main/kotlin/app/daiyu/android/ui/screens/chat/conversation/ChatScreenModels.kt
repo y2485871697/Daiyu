@@ -11,6 +11,7 @@ data class ChatScreenState(
     val canJumpToPreviousUser: Boolean = false,
     val conversationKey: String? = null,
     val scrollRequest: ChatScrollRequest? = null,
+    val contentRevision: Long = 0L,
 )
 
 /** A new serial consumes a host navigation request, never a model execution state. */

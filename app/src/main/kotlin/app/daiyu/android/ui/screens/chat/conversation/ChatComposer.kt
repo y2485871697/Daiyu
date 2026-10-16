@@ -89,6 +89,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically) {
                         ChatIconButton(DaiyuIcons.Attach, "附件", { actions.onAttach(); attachments = true }, enabled = state.enabled)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
                         if (hasText && state.phase != ComposerPhase.IDLE) {
                             ChatIconButton(if (state.phase == ComposerPhase.PAUSED) DaiyuIcons.Resume else DaiyuIcons.Pause,
                                 if (state.phase == ComposerPhase.PAUSED) "继续" else "暂停", actions.onPrimaryTap,
@@ -105,6 +106,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             enabled = state.enabled && (hasText || state.phase != ComposerPhase.IDLE),
                             tint = if (state.phase == ComposerPhase.PAUSED || (!hasText && state.phase == ComposerPhase.RUNNING)) colors.surface else colors.onPrimary,
                             onLongClick = if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
+                        }
                     }
                     SpeechMorphButton(
                         generating = state.phase == ComposerPhase.RUNNING,

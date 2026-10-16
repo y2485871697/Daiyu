@@ -161,8 +161,12 @@ class FrozenMessageImagePlan private constructor(
         }
 
         private fun rejectImageBlock(block: JSONObject) {
-            require(block.optString("type") !in setOf("image", "input_image", "image_url", "output_image") &&
-                !block.has("image_url")) { "Raw protocol image input is not authorized" }
+            // Raw protocol media is never an alternative authority to a verified local plan.
+            // This also makes Messages and default Responses fail closed for video input.
+            require(block.optString("type") !in setOf("image", "input_image", "image_url", "output_image",
+                "video", "input_video", "video_url") && !block.has("image_url") && !block.has("video_url")) {
+                "Raw protocol image/video input is not authorized"
+            }
         }
     }
 }

@@ -83,6 +83,8 @@ internal class ControllerBrowserPreparation private constructor(
     private val lock = Any()
     private var phase = State.PREVIEW
     private var cancelled = false
+    // READY remains visible during commit, but only its claimant may publish or release the binding.
+    private var acceptInFlight = false
     private var authorization: BrowserRunAuthorization? = null
     private var binding: CatalogBrowserBinding? = null
     // Retain the ORIGINAL exception, not just its message/cause or a fabricated close receipt.
@@ -169,43 +171,48 @@ internal class ControllerBrowserPreparation private constructor(
      * Invoke on the parent worker INSIDE its existing acceptance/stop gate, before publishing tools.
      * commit must durably save these exact conversation/run/assistant-message IDs, text, profile and
      * frozen provider, then return that saved conversation. Null means definitely not accepted.
-     * An exception is an ambiguous commit: pin UNKNOWN; never manufacture a receipt or auto-resend.
-     * The callback must not wait on main or re-enter this object. Actual Runner bindOwner is later.
+     * An exception or wrong ID is ambiguous: pin UNKNOWN; never manufacture a receipt or auto-resend.
+     * The callback runs WITHOUT this object's lock and must not wait on main or execute a model.
+     * Cancellation during commit fences admission, not the DB outcome: a definite success still
+     * transfers the original binding. The stopped parent must then close it without execution.
      */
     fun accept(opened: CatalogBrowserBinding, commit: () -> Conversation?): BrowserSendReceipt? {
-        var failed = false
+        synchronized(lock) {
+            if (phase != State.READY || cancelled || binding !== opened || acceptInFlight) return null
+            acceptInFlight = true
+        }
+        var ambiguous = false
+        val saved = try { commit() } catch (_: Exception) {
+            ambiguous = true
+            null
+        }
         val result = synchronized(lock) {
-            if (phase != State.READY || cancelled || binding !== opened) return null
-            val saved = try { commit() } catch (_: Exception) {
-                stickyUnknown = true
-                null
-            }
-            if (saved == null || saved.id != identity.conversationId || cancelled || phase != State.READY) {
-                // Also fail closed if an integration callback synchronously re-entered cancel().
-                if (saved != null) stickyUnknown = true // A committed/mismatched receipt is not a rejection.
+            acceptInFlight = false
+            if (ambiguous || saved == null || saved.id != identity.conversationId) {
+                stickyUnknown = stickyUnknown || ambiguous || saved != null
                 cancelled = true
                 authorization?.revoke()
                 phase = if (stickyUnknown) State.UNKNOWN else State.CLOSING
-                failed = true
                 null
             } else {
                 phase = State.TRANSFERRED
-                // Parent's accepted run now owns this same binding and its cleanup, not this owner.
+                // Even after stop, durable success belongs to the parent, never to rejection cleanup.
                 binding = null
                 BrowserSendReceipt(this, saved)
             }
         }
-        if (failed) requestCleanup()
+        if (result == null) requestCleanup()
         return result
     }
 
-    /** Before transfer, synchronously fences token admission, then requests nonblocking cleanup. */
+    /** Short admission fence; an in-flight accept owns publication and defers native cleanup. */
     fun cancel() {
         val clean = synchronized(lock) {
             if (phase == State.TRANSFERRED || phase == State.DRAINED) return
             cancelled = true
             preparation.cancel()
             authorization?.revoke()
+            if (acceptInFlight) return // Commit still borrows the binding; its result decides ownership.
             when (phase) {
                 State.PREVIEW, State.CONFIRMED -> { phase = State.DRAINED; false }
                 State.OPENING -> false // The queued constructor owns the final publication/cleanup.
@@ -220,7 +227,8 @@ internal class ControllerBrowserPreparation private constructor(
 
     private fun requestCleanup() {
         val handles = synchronized(lock) {
-            if (!cancelled || phase == State.OPENING || phase == State.TRANSFERRED || phase == State.DRAINED) return
+            if (!cancelled || acceptInFlight || phase == State.OPENING ||
+                phase == State.TRANSFERRED || phase == State.DRAINED) return
             cleanupRequests++
             binding to constructionFailure
         }

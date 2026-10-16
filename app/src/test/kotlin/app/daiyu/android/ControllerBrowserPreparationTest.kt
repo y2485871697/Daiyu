@@ -20,6 +20,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /** Actual preparation/token/binding; fake main queue and native lifetime, no WebView or network. */
@@ -259,14 +260,181 @@ class ControllerBrowserPreparationTest {
         assertEquals(ControllerBrowserPreparation.State.UNKNOWN, p.state)
     }
 
-    @Test fun reentrantCancellationDuringCommitCannotPublishAReceipt() {
+    @Test fun reentrantCancellationDuringSuccessfulCommitStillTransfersTheOriginalBinding() {
         val p = prepare()
         p.confirm(p.preview, draft)
         val host = NativeHost(grant)
         val binding = open(p, MainQueue()) { token -> CatalogBrowserBinding.create(p.assistant, token) { host } }.second.get()!!
-        assertNull(p.accept(binding) { p.cancel(); conversation })
-        assertTrue(host.closes >= 1)
+        val receipt = p.accept(binding) { p.cancel(); conversation }
+        assertNotNull(receipt)
+        assertSame(conversation, receipt!!.conversation)
+        assertTrue(p.isCancelled)
+        assertEquals(ControllerBrowserPreparation.State.TRANSFERRED, p.state)
+        assertEquals(0, host.closes)
+        assertNull(p.pollCleanup())
+        binding.close() // The stopped parent's resources, not the preparation, close this binding.
+        assertEquals(1, host.closes)
+    }
+
+    @Test fun cancelDoesNotWaitForCommitAndLateSuccessTransfersWithoutPrematureClose() {
+        val p = prepare()
+        p.confirm(p.preview, draft)
+        val host = NativeHost(grant)
+        val binding = open(p, MainQueue()) { token -> CatalogBrowserBinding.create(p.assistant, token) { host } }.second.get()!!
+        val commitEntered = CountDownLatch(1)
+        val releaseCommit = CountDownLatch(1)
+        val result = AtomicReference<BrowserSendReceipt?>()
+        val worker = Thread {
+            result.set(p.accept(binding) {
+                commitEntered.countDown()
+                releaseCommit.await()
+                conversation
+            })
+        }
+        val cancel = Thread { p.cancel() }
+        worker.start()
+        try {
+            assertTrue(commitEntered.await(5, TimeUnit.SECONDS))
+            cancel.start()
+            cancel.join(1000)
+            assertFalse("cancel must finish while commit is still blocked", cancel.isAlive)
+            assertTrue(p.isCancelled)
+            assertEquals(ControllerBrowserPreparation.State.READY, p.state)
+            p.retryCleanup() // Explicit cleanup cannot steal the claimant's borrowed handle either.
+            assertNull(p.pollCleanup())
+            assertEquals(0, host.closes)
+            assertNull(result.get())
+            assertEquals(1L, releaseCommit.count)
+        } finally {
+            releaseCommit.countDown()
+            worker.join(5000)
+            cancel.join(5000)
+        }
+        assertFalse(worker.isAlive)
+        val receipt = result.get()
+        assertNotNull(receipt)
+        assertSame(conversation, receipt!!.conversation)
+        assertEquals(ControllerBrowserPreparation.State.TRANSFERRED, p.state)
+        p.cancel(); p.retryCleanup()
+        assertNull(p.pollCleanup())
+        assertEquals(0, host.closes)
+        assertEquals(0, host.tabs)
+        assertEquals(0, host.network)
+        assertTrue(receipt.consume(draft))
+        binding.close() // Simulates the stopped parent's accepted-resource cleanup, no model run.
+        assertEquals(1, host.closes)
+    }
+
+    @Test fun cancelDoesNotWaitForCommitAndLateExceptionRemainsUnknownWithCleanupHandle() {
+        val p = prepare()
+        p.confirm(p.preview, draft)
+        val host = NativeHost(grant)
+        val binding = open(p, MainQueue()) { token -> CatalogBrowserBinding.create(p.assistant, token) { host } }.second.get()!!
+        val commitEntered = CountDownLatch(1)
+        val releaseCommit = CountDownLatch(1)
+        val result = AtomicReference<BrowserSendReceipt?>()
+        val worker = Thread {
+            result.set(p.accept(binding) {
+                commitEntered.countDown()
+                releaseCommit.await()
+                throw IllegalStateException("ambiguous late DB commit")
+            })
+        }
+        val cancel = Thread { p.cancel() }
+        worker.start()
+        try {
+            assertTrue(commitEntered.await(5, TimeUnit.SECONDS))
+            cancel.start()
+            cancel.join(1000)
+            assertFalse("cancel must not wait for a throwing commit either", cancel.isAlive)
+            p.retryCleanup()
+            assertNull(p.pollCleanup())
+            assertEquals(0, host.closes)
+            assertEquals(1L, releaseCommit.count)
+        } finally {
+            releaseCommit.countDown()
+            worker.join(5000)
+            cancel.join(5000)
+        }
+        assertFalse(worker.isAlive)
+        assertNull(result.get())
+        assertEquals(1, host.closes)
+        assertEquals(ControllerBrowserPreparation.State.UNKNOWN, p.state)
         assertTrue(p.pollCleanup() is RunCatalogCloseResult.Unknown)
+        p.retryCleanup()
+        assertEquals(2, host.closes) // The original binding remains retained even after native success.
+        p.cancel()
+        assertTrue(p.pollCleanup() is RunCatalogCloseResult.Unknown)
+        assertNull(p.accept(binding) { error("UNKNOWN cannot be retried as a send") })
+    }
+
+    @Test fun concurrentAcceptClaimsCommitOnlyOnceWithoutWaitingForFirstCommit() {
+        val p = prepare()
+        p.confirm(p.preview, draft)
+        val host = NativeHost(grant)
+        val binding = open(p, MainQueue()) { token -> CatalogBrowserBinding.create(p.assistant, token) { host } }.second.get()!!
+        val commitEntered = CountDownLatch(1)
+        val releaseCommit = CountDownLatch(1)
+        val commits = AtomicInteger()
+        val firstResult = AtomicReference<BrowserSendReceipt?>()
+        val secondResult = AtomicReference<BrowserSendReceipt?>()
+        val first = Thread {
+            firstResult.set(p.accept(binding) {
+                commits.incrementAndGet()
+                commitEntered.countDown()
+                releaseCommit.await()
+                conversation
+            })
+        }
+        val second = Thread {
+            secondResult.set(p.accept(binding) { commits.incrementAndGet(); conversation })
+        }
+        first.start()
+        try {
+            assertTrue(commitEntered.await(5, TimeUnit.SECONDS))
+            second.start()
+            second.join(1000)
+            assertFalse("duplicate accept must not wait for the claimed commit", second.isAlive)
+            assertNull(secondResult.get())
+            assertEquals(1, commits.get())
+            assertEquals(0, host.closes)
+            assertEquals(1L, releaseCommit.count)
+        } finally {
+            releaseCommit.countDown()
+            first.join(5000)
+            second.join(5000)
+        }
+        assertFalse(first.isAlive)
+        assertNotNull(firstResult.get())
+        assertNull(secondResult.get())
+        assertEquals(1, commits.get())
+        assertEquals(ControllerBrowserPreparation.State.TRANSFERRED, p.state)
+        assertNull(p.accept(binding) { error("no second commit after publication") })
+        binding.close()
+    }
+
+    @Test fun wrongConversationAfterCancellationIsStickyUnknownNotDefiniteRejection() {
+        val p = prepare()
+        p.confirm(p.preview, draft)
+        val host = NativeHost(grant)
+        val binding = open(p, MainQueue()) { token -> CatalogBrowserBinding.create(p.assistant, token) { host } }.second.get()!!
+        assertNull(p.accept(binding) { p.cancel(); conversation.copy(id = ConversationId("wrong")) })
+        assertEquals(1, host.closes)
+        assertEquals(ControllerBrowserPreparation.State.UNKNOWN, p.state)
+        p.retryCleanup()
+        assertEquals(2, host.closes)
+        assertTrue(p.pollCleanup() is RunCatalogCloseResult.Unknown)
+    }
+
+    @Test fun nullCommitAfterCancellationIsDefiniteNonAcceptance() {
+        val p = prepare()
+        p.confirm(p.preview, draft)
+        val host = NativeHost(grant)
+        val binding = open(p, MainQueue()) { token -> CatalogBrowserBinding.create(p.assistant, token) { host } }.second.get()!!
+        assertNull(p.accept(binding) { p.cancel(); null })
+        assertEquals(1, host.closes)
+        assertEquals(ControllerBrowserPreparation.State.DRAINED, p.state)
+        assertSame(RunCatalogCloseResult.Drained, p.pollCleanup())
     }
 
     @Test fun rejectedMainQueueAndRejectedCommitAreDefiniteNoAcceptance() {

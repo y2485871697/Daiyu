@@ -1,7 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,7 +18,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
@@ -57,16 +55,9 @@ internal fun SettingsCard(modifier: Modifier = Modifier, content: @Composable Co
     Column(
         modifier = modifier.padding(horizontal = 20.dp).fillMaxWidth()
             .clip(RoundedCornerShape(22.dp))
-            .background(MiuixTheme.colorScheme.surface)
-            .border(0.5.dp, MiuixTheme.colorScheme.outline, RoundedCornerShape(22.dp)),
+            .background(MiuixTheme.colorScheme.surface),
         content = content,
     )
-}
-
-@Composable
-internal fun SettingsDivider() {
-    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp,
-        color = MiuixTheme.colorScheme.dividerLine)
 }
 
 @Composable

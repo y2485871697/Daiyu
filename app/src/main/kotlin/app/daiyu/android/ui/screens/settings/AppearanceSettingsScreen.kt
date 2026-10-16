@@ -118,15 +118,11 @@ internal fun AppearanceSettingsScreen(
                         ThemeChoice(mode, state.themeMode == mode, { onChange(state.copy(themeMode = mode)) }, Modifier.weight(1f))
                     }
                 }
-                SettingsDivider()
                 SettingsRow("色彩风格", summary = if (state.monetEnabled) palettes[state.paletteStyle.ordinal] else "代鱼默认配色",
                     onClick = { choice = "palette" })
-                SettingsDivider()
                 SettingsRow("强调色", summary = if (state.monetEnabled) accents[state.accentColor.ordinal] else "墨绿",
                     onClick = { choice = "accent" })
-                SettingsDivider()
                 SettingsSwitchRow("纯黑背景", state.pureBlackEnabled) { onChange(state.copy(pureBlackEnabled = it)) }
-                SettingsDivider()
                 SettingsRow("图标", onClick = {},
                     leading = { SettingsIcon(DaiyuIcons.AppIcon) })
             }
@@ -163,25 +159,18 @@ internal fun AppearanceSettingsScreen(
             SettingsSectionTitle("界面与效果")
             SettingsCard {
                 SettingsSwitchRow("消息时间戳", state.messageTimestampsEnabled) { onChange(state.copy(messageTimestampsEnabled = it)) }
-                SettingsDivider()
                 if (blurSupported) {
                     SettingsSwitchRow("模糊效果", state.blurEnabled) { onChange(state.copy(blurEnabled = it)) }
                     if (state.blurEnabled) {
-                        SettingsDivider()
                         SettingsRow("顶栏模糊样式", summary = blurStyles[state.topBarBlurStyle.ordinal], onClick = { choice = "blur" })
                     }
                 } else {
                     SettingsRow("模糊效果", onClick = {})
-                    SettingsDivider()
                     SettingsRow("顶栏模糊样式", onClick = {})
                 }
-                SettingsDivider()
                 SettingsRow("圆形加载指示器", onClick = {})
-                SettingsDivider()
                 SettingsRow("仅消息生成前", onClick = {})
-                SettingsDivider()
                 SettingsRow("横移返回手势", onClick = {})
-                SettingsDivider()
                 SettingsRow("预测性返回手势", onClick = {})
             }
         }

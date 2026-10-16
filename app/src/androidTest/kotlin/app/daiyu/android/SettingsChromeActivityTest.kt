@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -74,6 +75,26 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         reveal("settings-row:助手", "设置").performClick()
         reveal("settings-row:子代理", "设置").performClick()
         ui.runOnIdle { assertEquals(listOf("MODEL_SETTINGS", "appearance", "assistants", "subagents"), events) }
+    }
+
+    fun testSettingsCardsHaveNoOutlineOrRowDividersInBothThemes() {
+        for (dark in listOf(false, true)) {
+            showHome(mutableListOf(), dark)
+            val first = node("settings-row:模型提供商").fetchSemanticsNode().boundsInRoot
+            val second = node("settings-row:外观与主题").fetchSemanticsNode().boundsInRoot
+            assertEquals(first.bottom, second.top, 0.1f)
+            val pixels = ui.onRoot().captureToImage().toPixelMap()
+            val density = activity.resources.displayMetrics.density
+            val x = (first.left + 18 * density).toInt()
+            val boundary = first.bottom.toInt()
+            val surface = pixels[x, boundary - 4]
+            for (y in boundary - 3..boundary + 3) {
+                assertEquals("Row boundary must remain one continuous surface", surface, pixels[x, y])
+            }
+            val middle = ((first.left + first.right) / 2).toInt()
+            val top = first.top.toInt()
+            assertEquals("Card top must not draw an outline", pixels[middle, top + 4], pixels[middle, top])
+        }
     }
 
     fun testSearchUsesOriginalButtonsAndUnwiredTapIsANoOp() {

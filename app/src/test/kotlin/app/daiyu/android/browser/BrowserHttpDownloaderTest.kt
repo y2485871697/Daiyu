@@ -125,7 +125,7 @@ class BrowserHttpDownloaderTest {
                     assertEquals(3L, receipt.size)
                     assertEquals("abc", String(Files.readAllBytes(receipt.path)))
                     assertEquals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", receipt.sha256)
-                    assertEquals(f.root, receipt.path.parent)
+                    assertEquals(f.root.toRealPath(), receipt.path.parent)
                     assertTrue(receipt.path.fileName.toString().endsWith(".download"))
                     assertTrue(server.requests.poll(1, TimeUnit.SECONDS)!!.line.startsWith("GET /start "))
                     assertTrue(server.requests.poll(1, TimeUnit.SECONDS)!!.line.startsWith("GET /final "))

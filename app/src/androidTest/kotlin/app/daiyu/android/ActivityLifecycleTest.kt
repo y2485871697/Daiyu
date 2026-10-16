@@ -18,7 +18,7 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Real callbacks retained from Compose semantics exercise the same stale-authority regressions. */
+/** Real callbacks retained from the rendered host exercise the same stale-authority regressions. */
 @Suppress("DEPRECATION")
 class ActivityLifecycleTest : ComposeActivityTestCase() {
     private class Documents(private val document: File) : ContentProvider() {
@@ -126,27 +126,26 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
     }
     fun testQueuedImportConfirmationRejectsFinishBeforeListenerDelivery() {
         val current = start(open = true); val before = controller.database.exportBackup(); confirmation()
-        val positive = retainedClick("dialog-confirm")
-        // Compose dispatches synchronously, unlike Builder's queued listener. Retain the semantics
-        // callback and deliver it after finish to test the identical lifecycle authority boundary.
+        val positive = retainedClick(checkNotNull(activity), "dialog-confirm")
+        // Deliver the real host callback after finish, without invoking a detached Compose node.
         mainThread { current.finish(); assertTrue(current.isFinishing); positive() }
         assertNoImport(before)
     }
     fun testDestroyedImportDialogButtonCannotImportAfterFrameworkRecreation() {
         val current = start(open = true); val before = controller.database.exportBackup(); confirmation()
-        val positive = retainedClick("dialog-confirm")
+        val positive = retainedClick(checkNotNull(activity), "dialog-confirm")
         activity = recreateActivity(current)
         node("dialog-confirm").assertDoesNotExist(); mainThread { positive() }; assertNoImport(before)
     }
     fun testCancelledImportConfirmationCannotAuthorizeRetainedPositiveCallback() {
         start(open = true); val before = controller.database.exportBackup(); confirmation()
-        val positive = retainedClick("dialog-confirm")
+        val positive = retainedClick(checkNotNull(activity), "dialog-confirm")
         node("dialog-cancel").performClick(); node("dialog-confirm").assertDoesNotExist()
         mainThread { positive() }; assertNoImport(before)
     }
     fun testBusyReplacementRevokesRetainedImportConfirmationBeforeAndAfterCompletion() {
         start(open = true); val before = controller.database.exportBackup(); confirmation()
-        val positive = retainedClick("dialog-confirm")
+        val positive = retainedClick(checkNotNull(activity), "dialog-confirm")
         val entered = java.util.concurrent.CountDownLatch(1)
         val release = java.util.concurrent.CountDownLatch(1)
         try {
@@ -164,7 +163,7 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
         val current = start(); openModels()
         editModel("Base URL", "https://fixture.invalid"); editModel("模型名", "fixture-model")
         editModel("API Key", "synthetic-lifecycle-key"); reveal("model-save")
-        val save = retainedClick("model-save")
+        val save = retainedClick(checkNotNull(activity), "model-save")
         val before = HashMap(fixture.getSharedPreferences("model-settings", 0).all)
         activity = recreateActivity(current)
         node("model-save").assertDoesNotExist(); mainThread { save() }

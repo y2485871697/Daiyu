@@ -144,9 +144,7 @@ class MainActivity : ComponentActivity() {
                     )
                     "usage" -> UsageStatsScreen(onBack = { returnToChat() }, load = { retainedData.stats() })
                     "settings" -> DaiyuSettingsScreen(
-                        onBack = { returnToChat() }, onRoute = { route ->
-                            if (activityUsable() && retainedPage == "settings") guard { openSettingsRoute(route) }
-                        },
+                        onBack = { returnToChat() }, onRoute = { route -> openSettingsFromPage(route) },
                         onOpenEntry = { entry ->
                             if (activityUsable() && retainedPage == "settings" && entry.id in setOf("P24", "P29", "P30", "P31", "P35", "P36", "P40")) retainedPage = "appearance"
                         },
@@ -311,8 +309,15 @@ class MainActivity : ComponentActivity() {
             is ChoicePrompt -> DaiyuChoiceSheet(current.title, current.options,
                 onSelect = { index -> if (valid()) { prompt = null; current.action(index) } }, onDismiss = { if (valid()) prompt = null })
             is ConfirmPrompt -> DaiyuConfirmDialog(current.title, current.message, current.confirm, current.destructive,
-                onConfirm = { if (valid()) { prompt = null; current.action() } }, onDismiss = { if (valid()) prompt = null })
+                onConfirm = { confirmPrompt(current) }, onDismiss = { if (valid()) prompt = null })
         }
+    }
+
+    private fun confirmPrompt(expected: ConfirmPrompt) {
+        if (activityUsable() && prompt === expected) { prompt = null; expected.action() }
+    }
+    private fun openSettingsFromPage(route: FeatureRoute) {
+        if (activityUsable() && retainedPage == "settings") guard { openSettingsRoute(route) }
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -572,7 +577,7 @@ class MainActivity : ComponentActivity() {
             turns = ChatTurnMapper.map(shown.map { it.second }), canJumpToPreviousUser = shown.any { it.second.role == "user" },
             balanceText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,
-                phase = phase, modelLabel = savedModelLabel(),
+                phase = phase, controlOwnerKey = controlOwner?.id?.value, modelLabel = savedModelLabel(),
                 assistantLabel = assistantStore.read(assistantStore.selectedId.value)?.name ?: "助手", enabled = allowed))
     }
     private fun requestScroll(id: String? = null, follow: Boolean = true) {

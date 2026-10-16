@@ -57,14 +57,14 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     fun testConnectedModelEntryOpensTheExistingSettingsWithoutSaving() {
         setDraft("原草稿"); val before = fixture.settings.loadForEditing().settings
         openHub(); entry("P02").performClick()
-        modelField("Base URL").assertTextEquals(before.endpoint)
-        modelField("模型名").assertTextEquals(before.model)
+        modelField("Base URL").assertEditableText(before.endpoint)
+        modelField("模型名").assertEditableText(before.model)
         backToChat(activity); assertDraft("原草稿")
         assertEquals(0, fixture.opens.get()); assertEquals(before, fixture.settings.loadForEditing().settings)
     }
     fun testRecreationClosesHubAndStaleButtonsCannotOpenTheNewActivity() {
         setDraft("重建保留草稿"); openHub(); entry("R03")
-        val oldOpen = retainedClick("settings-row:模型设置")
+        val oldOpen = retainedClick(activity, "settings-row:模型设置")
         val old = activity; activity = recreateActivity(activity)
         mainThread { oldOpen() }
         node("page:模型设置").assertDoesNotExist(); node("page:设置").assertDoesNotExist()
@@ -89,7 +89,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         awaitControl("original finishes") { fixture.controller.active == null }; assertEquals(1, fixture.opens.get())
     }
     fun testButtonsFromPreviousDetailPageAreInert() {
-        openHub(); entry("R03"); val oldOpen = retainedClick("settings-row:模型设置")
+        openHub(); entry("R03"); val oldOpen = retainedClick(activity, "settings-row:模型设置")
         backToChat(activity); menu("设置"); entry("R12").performClick()
         mainThread { oldOpen() }
         node("page:备份与导入").assertExists(); node("page:模型设置").assertDoesNotExist()

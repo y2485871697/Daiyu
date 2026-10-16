@@ -18,7 +18,7 @@ internal object RunCheckpointCodec {
     fun encode(value: RunCheckpoint): String {
         validate(value)
         fun messages(rows: List<Message>) = JSONArray(String(ArchiveCodec.encode(rows), Charsets.UTF_8))
-        return JSONObject().put("version", 2).put("message", messages(listOf(value.message)))
+        return JSONObject().put("version", 3).put("message", messages(listOf(value.message)))
             .put("history", messages(value.history)).put("phase", value.phase.name)
             .put("tools", JSONArray().apply { value.tools.forEach { record -> put(JSONObject()
                 .put("id", record.invocation.id.value).put("name", record.invocation.name)
@@ -29,6 +29,9 @@ internal object RunCheckpointCodec {
             .put("supplements", messages(value.supplements)).put("round", value.round)
             .put("request_unconfirmed", value.requestUnconfirmed).put("message_reconciled", value.messageReconciled)
             .put("owner", value.owner).put("revision", value.revision)
+            .put("request", value.request?.let { JSONObject().put("request_id", it.requestId)
+                .put("attempt_id", it.attemptId).put("owner", it.owner).put("operation", it.operation.name) }
+                ?: JSONObject.NULL)
             .put("pending", value.pending?.let { JSONObject().put("call_id", it.callId.value) }
                 ?: JSONObject.NULL).toString().also {
                 checkEncodedSize(it.toByteArray(Charsets.UTF_8).size, value.message.status == RunStatus.RUNNING)
@@ -40,14 +43,20 @@ internal object RunCheckpointCodec {
         val value = parser.nextValue()
         require(value is JSONObject && parser.nextClean() == '\u0000')
         val version = integer(value, "version")
-        require(version == 1L || version == 2L)
+        require(version in 1L..3L)
         val keys = arrayOf("version", "message", "history", "phase", "tools", "outputs", "supplements", "round",
             "request_unconfirmed", "message_reconciled", "owner", "revision")
-        fields(value, *(if (version == 1L) keys else keys + "pending"))
+        fields(value, *(when (version) { 1L -> keys; 2L -> keys + "pending"; else -> keys + arrayOf("pending", "request") }))
         val pending = if (version == 1L || value.isNull("pending")) null else {
             val p = value.get("pending"); require(p is JSONObject)
             fields(p, "call_id")
             PendingToolCheckpoint(ToolCallId(string(p, "call_id")))
+        }
+        val request = if (version < 3L || value.isNull("request")) null else {
+            val r = value.get("request"); require(r is JSONObject)
+            fields(r, "request_id", "attempt_id", "owner", "operation")
+            RequestCheckpoint(string(r, "request_id"), string(r, "attempt_id"), string(r, "owner"),
+                RequestOperation.valueOf(string(r, "operation")))
         }
         fun messages(key: String) = ArchiveCodec.decode(value.getJSONArray(key).toString().toByteArray(Charsets.UTF_8))
         val message = messages("message").single()
@@ -63,13 +72,14 @@ internal object RunCheckpointCodec {
             (0 until outputs.length()).map { i -> val o = outputs.getJSONObject(i)
                 fields(o, "id", "output"); ToolOutput(ToolCallId(string(o, "id")), string(o, "output")) },
             messages("supplements"), round.toInt(), boolean(value, "request_unconfirmed"), boolean(value, "message_reconciled"),
-            string(value, "owner"), integer(value, "revision"), pending).also(::validate)
+            string(value, "owner"), integer(value, "revision"), pending, request).also(::validate)
     }
     private fun validate(value: RunCheckpoint) {
         require(value.owner.isNotBlank() && value.owner.length <= 200 && value.revision in 1 until Long.MAX_VALUE)
         require(value.round in 0..100 && value.messageReconciled)
         val m = value.message
         require(m.role == Message.ASSISTANT_ROLE)
+        value.request?.let { require(value.phase == ExecutionPhase.TERMINAL || it.owner == value.owner) }
         require((m.status == RunStatus.RUNNING) == (value.phase != ExecutionPhase.TERMINAL))
         require(value.history.all { it.conversationId == m.conversationId })
         require(value.supplements.all { it.conversationId == m.conversationId && it.runId == m.runId &&

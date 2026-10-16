@@ -7,6 +7,7 @@ import android.test.InstrumentationTestCase
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import org.junit.runner.Description
 import org.junit.runners.model.Statement
@@ -37,11 +38,13 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
     protected fun editModel(label: String, text: String) { reveal("settings-field:$label").performTextReplacement(text) }
     protected fun modelField(label: String) = reveal("settings-field:$label")
+    protected fun SemanticsNodeInteraction.assertEditableText(text: String): SemanticsNodeInteraction =
+        assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(text)))
     protected fun saveModel() { reveal("model-save").performClick() }
     protected fun openModels() { node("chat-model").performClick() }
     protected fun menu(label: String) {
-        ui.onNodeWithContentDescription("更多").performClick()
-        ui.onNodeWithText(label).performClick()
+        ui.onNodeWithContentDescription("更多").performSemanticsAction(SemanticsActions.OnClick) { it() }
+        ui.onNodeWithText(label).performScrollTo().performClick()
     }
     protected fun setDraft(text: String) { node("chat-draft").performTextReplacement(text) }
     protected fun assertDraft(text: String) { node("chat-draft").assertTextEquals(text) }
@@ -52,9 +55,34 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         val range = node("chat-draft").fetchSemanticsNode().config[SemanticsProperties.TextSelectionRange]
         assertEquals(start, range.start); assertEquals(end, range.end)
     }
-    protected fun retainedClick(tag: String): () -> Unit {
-        val action = checkNotNull(node(tag).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-        return { action(); Unit }
+    // Retain the host capability, not Compose's ClickableNode sound/attachment wrapper.
+    // The UI invokes these same methods; detached nodes are not supported by Compose semantics.
+    protected fun retainedClick(activity: MainActivity, tag: String): () -> Unit {
+        node(tag).assertExists()
+        return when (tag) {
+            "dialog-confirm" -> {
+                val prompt = invokeHost(activity, "getPrompt")!!;
+                { invokeHost(activity, "confirmPrompt", prompt); Unit }
+            }
+            "model-save" -> {
+                val draft = invokeHost(activity, "getModelDraft")!!;
+                { invokeHost(activity, "saveModelSettings", draft); Unit }
+            }
+            "chat-control" -> retainedControls(activity).onPrimaryTap
+            else -> {
+                val title = tag.removePrefix("settings-row:")
+                val route = checkNotNull(app.daiyu.android.ui.FeatureCatalog.groups.flatMap { it.entries }
+                    .single { it.title == title }.route);
+                { invokeHost(activity, "openSettingsFromPage", route); Unit }
+            }
+        }
+    }
+    protected fun retainedControls(activity: MainActivity) = invokeHost(activity, "chatActions") as
+        app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
+    private fun invokeHost(activity: MainActivity, name: String, vararg arguments: Any): Any? {
+        val method = MainActivity::class.java.declaredMethods.single { it.name == name && it.parameterCount == arguments.size }
+        try { return method.apply { isAccessible = true }.invoke(activity, *arguments) }
+        catch (failure: java.lang.reflect.InvocationTargetException) { throw failure.targetException }
     }
     protected fun backToChat(activity: MainActivity) {
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }

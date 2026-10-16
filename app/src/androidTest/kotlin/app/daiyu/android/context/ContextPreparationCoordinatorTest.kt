@@ -53,7 +53,7 @@ class ContextPreparationCoordinatorTest : InstrumentationTestCase() {
         "user", listOf(MessageBlock.Text("input", "new input")), RunStatus.COMPLETED)
     private fun settings() = CompressionSettings(true, 10000, 1000, 10, 2, binding)
     private fun bound(onRequest: () -> Unit = {}): BoundSummaryModel = BoundSummaryModel(binding,
-        SummaryModelTransport {
+        SummaryModelTransport { _, _ ->
             object : ModelSession {
                 override fun cancel() { }
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
@@ -61,7 +61,7 @@ class ContextPreparationCoordinatorTest : InstrumentationTestCase() {
                     sink(ModelEvent.TextFinal("summary", "已确认的事实摘要"))
                 }
             }
-        }, 100000, 90000)
+        }, 100000, 90000, { SummaryRequestDeadline(60000) })
     private fun coordinator(settings: () -> CompressionSettings,
         models: SummaryModelResolver = SummaryModelResolver { bound() }) =
         ContextPreparationCoordinator(service, settings, policies, models)

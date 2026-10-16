@@ -2,6 +2,8 @@ package app.daiyu.android.ui
 
 import android.content.ContentValues
 import app.daiyu.android.context.ContextService
+import app.daiyu.android.context.DatabaseTransactions
+import app.daiyu.android.storage.RecordedUsageReader
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.ui.model.*
@@ -54,10 +56,11 @@ internal class RetainedConversationData(private val database: ConversationDataba
         }.distinctBy { it.conversationId to it.messageId }
     }
 
-    fun stats(): UsageStatsSnapshot {
-        val conversations = database.conversations()
-        val messages = database.readableDatabase.rawQuery("SELECT COUNT(*) FROM messages", null).use { it.moveToFirst(); it.getInt(0) }
-        return UsageStatsSnapshot(currentDataAvailable = true, currentConversations = conversations.size, currentMessages = messages)
+    fun stats(): UsageStatsSnapshot = DatabaseTransactions { database.readableDatabase }.run { db ->
+        val conversations = db.rawQuery("SELECT COUNT(*) FROM conversations", null).use { it.moveToFirst(); it.getInt(0) }
+        val messages = db.rawQuery("SELECT COUNT(*) FROM messages", null).use { it.moveToFirst(); it.getInt(0) }
+        UsageStatsSnapshot(currentDataAvailable = true, currentConversations = conversations,
+            currentMessages = messages, recordedUsage = RecordedUsageReader.read(db))
     }
 
     fun folders(): List<ConversationFolderUi> {

@@ -89,3 +89,13 @@ val capability = approvals.capabilityFor(run, current)
 - `VideoUploadApprovalTest`：精确 Prompt/Ticket 对象身份、单次消费、撤销/替换、未来 run/编辑/owner/配置/历史变化、draft + 完整历史计数大小、原文和同一个 draft handoff。
 - `parseOpenRouterVideoFacts` / `fetchOpenRouterVideoFacts` 只返回 **facts**，绝不返回 runtime evidence。`VideoApprovalGate` 是纯生命周期 seam，只返回本 gate 的票据/消费结果，不能独立生成 capability。测试不伪造生产证据，也不将假 HTTPS 连接的结果冒充真实官方证据。
 - 正向真实 evidence→run 激活需官方网络与已保存真实配置，未在离线测试中伪造。无 Shell 权限，**未构建、未运行测试、未实测上传**；由父执行构建/测试并审核接线。
+
+
+## Responses inline 协议依据补充
+
+- 官方 InputVideo 定义明确 videoUrl 为 base64 data URL 或远端视频 URL：
+  https://openrouter.ai/docs/client-sdks/typescript/models/inputvideo
+- 官方 ResponsesRequest → InputsUnion → EasyInputMessage → content union → InputVideo 类型链将该类型用于 Responses 请求；Videos 页面提供 `/api/v1/responses` 的 `input_video` 示例。
+- 官方 SDK 将 `videoUrl` 序列化为字符串字段 `video_url`，不是 Chat Completions 的对象形态。核验源码固定于 SDK 提交 `7bfa806ca7a53ca4cca1871999739c7a41fae0ab`：
+  https://github.com/OpenRouterTeam/typescript-sdk/blob/7bfa806ca7a53ca4cca1871999739c7a41fae0ab/src/models/inputvideo.ts
+- 这里的 evidence 是官方目录新鲜声明加官方协议文档，不是成功上传/解码/推理探测。具体账户、模型和 provider 的运行兼容性仍需实际验证；本次没有发送付费请求。

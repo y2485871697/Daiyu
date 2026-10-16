@@ -2,6 +2,7 @@ package app.daiyu.android.storage
 
 import android.content.ContentValues
 import android.content.Context
+import app.daiyu.android.ControllerVideoManifestWitness
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import app.daiyu.android.domain.*
@@ -11,7 +12,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 12), ConversationStore {
+class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 13), ConversationStore {
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
         db, assistantPreferences.getString(app.daiyu.android.assistants.LegacyAssistantCodec.KEY, null))
@@ -37,6 +38,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         app.daiyu.android.model.usage.SQLiteChildUsageStore.installSchema(db)
         installGenerationSchema(db)
         SQLiteMessageVideoStore.installSchema(db)
+        ControllerVideoManifestWitness.installSchema(db)
     }
     private fun installGenerationSchema(db: SQLiteDatabase) {
         SQLiteGenerationAttemptStore.installSchema(db)
@@ -47,7 +49,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..11 && newVersion == 12) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..12 && newVersion == 13) { "不支持此数据库版本，保留原数据" }
         if (oldVersion < 10) {
             db.execSQL("ALTER TABLE conversations ADD COLUMN assistant_id TEXT")
             installAssistants(db)
@@ -65,6 +67,15 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         }
         if (oldVersion < 11) upgradeGenerationSchema(db)
         SQLiteMessageVideoStore.installSchema(db)
+        ControllerVideoManifestWitness.installSchema(db)
+        check(!db.rawQuery("SELECT 1 FROM message_video_inputs v LEFT JOIN messages m ON m.id=v.message_id WHERE m.id IS NULL LIMIT 1", null).use { it.moveToFirst() })
+        val keys = db.rawQuery("SELECT conversation_id,id FROM messages ORDER BY seq", null).use { c ->
+            buildList { while (c.moveToNext()) add(c.getString(0) to c.getString(1)) }
+        }
+        keys.forEach { (conversation, id) ->
+            val row = storedMessage(db, ConversationId(conversation), id, verifyVideoWitness = false)
+            ControllerVideoManifestWitness.migrateLegacy(db, listOf(row), emptyIsProven = oldVersion < 12)
+        }
     }
     private fun upgradeGenerationSchema(db: SQLiteDatabase) {
         val hasOutputs = db.rawQuery("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -145,7 +156,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         val candidates=list.map {it.id.value}.toSet()
         readableDatabase.rawQuery("SELECT conversation_id,id FROM messages ORDER BY seq",null).use {c->while(c.moveToNext()) {
             val id=c.getString(0)
-            if(id in candidates && id !in matches && storedMessage(readableDatabase,ConversationId(id),c.getString(1)).blocks.any {block->when(block) {
+            if(id in candidates && id !in matches && storedMessage(readableDatabase,ConversationId(id),c.getString(1), verifyVideoWitness = false).blocks.any {block->when(block) {
                 is MessageBlock.Text->query in block.text
                 is MessageBlock.Image->false // References are not searchable text or local paths.
                 is MessageBlock.Tool->query in block.invocation.arguments || block.result?.contains(query)==true
@@ -206,7 +217,8 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.delete("messages","conversation_id=?",arrayOf(id.value))
         db.delete("conversations","id=?",arrayOf(id.value))
     } }
-    internal fun storedMessage(db: SQLiteDatabase, conversation: ConversationId, messageId: String): Message {
+    internal fun storedMessage(db: SQLiteDatabase, conversation: ConversationId, messageId: String,
+        verifyVideoWitness: Boolean = true): Message {
         val metadata = db.rawQuery("SELECT run_id,role,status FROM messages WHERE id=? AND conversation_id=?",
             arrayOf(messageId, conversation.value)).use { c ->
             check(c.moveToFirst()) { "消息不存在" }; Triple(c.getString(0), c.getString(1), c.getString(2))
@@ -218,7 +230,8 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             MessageHistoryCodec.decode(JSONArray(requireNotNull(text(historyColumn))))).also {
                 MessageHistoryCodec.validate(it)
                 MessageImages.validate(it)
-                SQLiteMessageVideoStore.read(db, it)
+                if (verifyVideoWitness) SQLiteMessageVideoStore.readVerified(db, it)
+                else SQLiteMessageVideoStore.read(db, it)
             }
     }
     internal fun videoInputs(messages: List<Message>): List<app.daiyu.android.model.videos.MessageVideoInput> {
@@ -228,7 +241,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             val result = messages.flatMap { expected ->
                 val stored = storedMessage(db, expected.conversationId, expected.id.value)
                 check(stored == expected) { "video_history_changed" }
-                SQLiteMessageVideoStore.read(db, stored)
+                SQLiteMessageVideoStore.readVerified(db, stored)
             }
             db.setTransactionSuccessful()
             return result
@@ -264,6 +277,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             val assistantRowId=db.insertOrThrow("messages",null,values(assistant))
             check(assistantRowId != -1L) {"运行消息未持久化"}
             SQLiteMessageVideoStore.insert(db, user, videoInputs)
+            SQLiteMessageVideoStore.insert(db, assistant, emptyList())
             // Verify both receipts after all inserts, so trigger side effects cannot leave a half-run.
             for((rowId,message) in listOf(userRowId to user,assistantRowId to assistant)) {
                 check(db.rawQuery("SELECT 1 FROM messages WHERE seq=? AND id=? AND conversation_id=? AND run_id=? AND role=? AND status=?",
@@ -301,7 +315,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 }
                 check(identical) {"消息已结束或所属会话不存在，拒绝迟到回执"}
             }
-            SQLiteMessageVideoStore.read(db, message)
+            SQLiteMessageVideoStore.readVerified(db, message)
             validateRunHistory(db,message.conversationId,message.runId)
         } } catch(e:Exception) {throw PersistenceException(e)}
     }
@@ -319,12 +333,13 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             supplement.id != assistant.id && supplement.role == Message.USER_ROLE && supplement.status == RunStatus.COMPLETED &&
             supplement.error == null && supplement.historySegments.isEmpty() && supplement.protocolItems.isEmpty() &&
             supplement.blocks.isNotEmpty() && supplement.blocks.all { it is MessageBlock.Text })
-        db.insertOrThrow("messages", null, values(supplement))
+        check(db.insertOrThrow("messages", null, values(supplement)) != -1L)
+        SQLiteMessageVideoStore.insert(db, supplement, emptyList())
     }
     internal fun writeRuntimeMessage(db: SQLiteDatabase, message: Message) {
         check(db.update("messages", values(message), "id=? AND conversation_id=? AND run_id=? AND role='assistant' AND status='RUNNING'",
             arrayOf(message.id.value, message.conversationId.value, message.runId.value)) == 1) { "运行消息已结束，拒绝迟到检查点" }
-        SQLiteMessageVideoStore.read(db, message)
+        SQLiteMessageVideoStore.readVerified(db, message)
         validateRunHistory(db, message.conversationId, message.runId)
     }
     fun exportBackup():String = exportBackup(null)
@@ -348,7 +363,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 check(cursor.moveToFirst()) { "视频物理消息不存在" }
                 ConversationId(cursor.getString(0))
             }
-            val physical = storedMessage(db, conversation, sidecar.messageId)
+            val physical = storedMessage(db, conversation, sidecar.messageId, verifyVideoWitness = false)
             val inputs = MessageVideoInputCodec.decode(physical, sidecar.payload)
             check(inputs.isNotEmpty())
             SQLiteMessageVideoStore.insert(db, physical, inputs)
@@ -391,6 +406,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 val projection=Message(MessageId(c.getString(0)),ConversationId(c.getString(1)),RunId(c.getString(2)),c.getString(3),decode(blocks),RunStatus.valueOf(c.getString(5)),c.getString(6),jsonStrings(protocol),historySegments=segments)
                 MessageHistoryCodec.validate(projection)
                 MessageImages.validate(projection)
+                SQLiteMessageVideoStore.readVerified(db, projection)
                 if (segments.isNotEmpty()) {
                     segments.forEach { validateProtocol(JSONArray(it.protocolItems), it.blocks, it.role) }
                     value.put("history_segments", JSONArray(rawSegments))
@@ -460,20 +476,28 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         return Triple(imported,restored,string(data,"draft"))
     }
     internal fun preflightBackup(text:String) { parseBackup(text) }
-    fun importBackup(text:String):Pair<Int,Int> {
+    fun importBackup(text:String):Pair<Int,Int> = importBackup(text, deferVideoWitness = false)
+    internal fun importBackupForVideoAssets(db: SQLiteDatabase, text: String): Pair<Int, Int> {
+        check(db === writableDatabase && db.inTransaction())
+        return importBackup(text, deferVideoWitness = true)
+    }
+    private fun importBackup(text: String, deferVideoWitness: Boolean): Pair<Int, Int> {
         val (imported,restored,draft)=parseBackup(text)
         transaction {db->
             // Append only. Any identity collision aborts the entire transaction.
             imported.forEach {c->check(db.insertOrThrow("conversations",null,ContentValues().apply {
                 put("id",c.id.value);put("title",c.title);put("draft",c.draft);put("updated",c.updatedAt);put("folder",c.folder);put("pinned",if(c.pinned) 1 else 0);put("assistant_id",c.assistantId)
             }) != -1L) { "备份会话未写入" }}
-            restored.forEach {check(db.insertOrThrow("messages",null,values(it)) != -1L) { "备份消息未写入" }}
+            restored.forEach {
+                check(db.insertOrThrow("messages",null,values(it)) != -1L) { "备份消息未写入" }
+                if (!deferVideoWitness) SQLiteMessageVideoStore.insert(db, it, emptyList())
+            }
             val existing=db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
             require(draft.isEmpty() || existing.isEmpty() || draft==existing) {"未创建会话草稿冲突；未覆盖"}
             if(existing.isEmpty()) check(db.update("composer",ContentValues().apply {put("draft",draft)},"id=1",null)==1)
             check(db.rawQuery("SELECT 1 FROM composer WHERE id=1 AND draft=?",
                 arrayOf(if (existing.isEmpty()) draft else existing)).use { it.moveToFirst() })
-            verifyBackupRows(db, imported, restored)
+            verifyBackupRows(db, imported, restored, verifyVideoWitness = !deferVideoWitness)
         }
         return imported.size to restored.size
     }
@@ -482,14 +506,26 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         val (imported, restored, _) = parseBackup(text)
         verifyBackupRows(db, imported, restored)
     }
-    private fun verifyBackupRows(db: SQLiteDatabase, imported: List<Conversation>, restored: List<Message>) {
+    internal fun completeVideoBackupWitnesses(db: SQLiteDatabase, text: String,
+        sidecars: List<app.daiyu.android.backup.BackupVideoSidecar>) {
+        check(db === writableDatabase && db.inTransaction())
+        val (_, rows, _) = parseBackup(text)
+        val manifests = sidecars.associate { it.messageId to it.payload }
+        check(manifests.size == sidecars.size && manifests.keys.all { id -> rows.any { it.id.value == id } })
+        rows.forEach { row ->
+            val expected = manifests[row.id.value]?.let { MessageVideoInputCodec.decode(row, it) } ?: emptyList()
+            ControllerVideoManifestWitness.insert(db, row, expected)
+        }
+    }
+    private fun verifyBackupRows(db: SQLiteDatabase, imported: List<Conversation>, restored: List<Message>,
+        verifyVideoWitness: Boolean = true) {
         imported.forEach { c ->
             check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND title=? AND draft=? AND updated=? AND folder=? AND pinned=? AND assistant_id IS ?",
                 arrayOf(c.id.value, c.title, c.draft, c.updatedAt.toString(), c.folder,
                     if (c.pinned) "1" else "0", c.assistantId)).use { it.moveToFirst() }) { "备份会话回执不匹配" }
         }
         restored.forEach { message ->
-            check(storedMessage(db, message.conversationId, message.id.value) == message) { "备份消息回执不匹配" }
+            check(storedMessage(db, message.conversationId, message.id.value, verifyVideoWitness) == message) { "备份消息回执不匹配" }
         }
     }
     private fun string(value:JSONObject,key:String):String = (value.get(key) as? String) ?: error("字段须为文本")
@@ -595,7 +631,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 arrayOf(id.value,before.toString(),limit.toString())).use { c ->
                 buildList { while(c.moveToNext()) add(c.getLong(0) to c.getString(1)) }.reversed()
             }
-            val result=ids.map { (seq,key) -> seq to storedMessage(db,id,key) }
+            val result=ids.map { (seq,key) -> seq to storedMessage(db,id,key, verifyVideoWitness = false) }
             db.setTransactionSuccessful();return result
         } finally { db.endTransaction() }
     }

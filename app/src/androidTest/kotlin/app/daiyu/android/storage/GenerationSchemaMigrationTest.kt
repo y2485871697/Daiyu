@@ -403,7 +403,7 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
         assertTrue(rejected { db.execSQL("UPDATE generation_outputs SET width=4294967297") } is SQLiteConstraintException)
         helper.close()
         val reopened = f.helper()
-        assertEquals(12, reopened.readableDatabase.version)
+        assertEquals(13, reopened.readableDatabase.version)
         assertVideoSidecarSchema(reopened.readableDatabase)
         assertEquals(found, f.outputStore(reopened).find(f.attempt, 0))
         reopened.readableDatabase.rawQuery("SELECT outcome FROM generation_attempts", null).use {

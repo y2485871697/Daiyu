@@ -2,6 +2,7 @@ package app.daiyu.android.backup
 
 import android.database.sqlite.SQLiteDatabase
 import app.daiyu.android.context.PrivateBlobs
+import app.daiyu.android.ControllerVideoManifestWitness
 import app.daiyu.android.domain.*
 import app.daiyu.android.media.video.MessageVideoOwner
 import app.daiyu.android.media.video.MessageVideoReference
@@ -114,7 +115,9 @@ internal object BackupVideoManifest {
             val segments = JSONArray(requireNotNull(field("history_segments")))
             if (segments.length() != 0) row.put("history_segments", segments)
             val current = message(row)
-            require(MessageVideoInputCodec.encode(current, MessageVideoInputCodec.decode(current, sidecar.payload)) == sidecar.payload)
+            val inputs = MessageVideoInputCodec.decode(current, sidecar.payload)
+            require(MessageVideoInputCodec.encode(current, inputs) == sidecar.payload)
+            ControllerVideoManifestWitness.verify(db, current, inputs)
         }
     }
 

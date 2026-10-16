@@ -188,7 +188,8 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                 return@run ImportResult(parsed.id, parsed.inventory, true)
             }
             // Existing parser validates text protocol, IDs, drafts and collisions; nested transaction shares helper.
-            store.importBackup(parsed.payload.getString("text_backup"))
+            if (video == null) store.importBackup(parsed.payload.getString("text_backup"))
+            else store.importBackupForVideoAssets(db, parsed.payload.getString("text_backup"))
             parsed.bytes.forEach { (hash, bytes) -> require(blobs.put(bytes) == hash) }
             COLUMNS.forEach { (table, columns) -> val rows = parsed.payload.getJSONObject("tables").getJSONArray(table)
                 repeat(rows.length()) { val row = rows.getJSONObject(it); val values = ContentValues()
@@ -210,6 +211,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             if (video != null) {
                 // Parent persists against the actual imported physical rows, in THIS transaction.
                 video.restoreSidecars(db, parsed.videos.sidecars)
+                store.completeVideoBackupWitnesses(db, parsed.payload.getString("text_backup"), parsed.videos.sidecars)
                 BackupVideoManifest.verifySidecars(db, parsed.videos.sidecars)
             }
             // All package bytes/references were checked before the transaction; publish immutable

@@ -132,6 +132,7 @@ elif a[:3]==['emu','screenrecord','screenshot']: Path(a[-1],'Screenshot_fake.png
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         self.assertEqual((self.root / 'smoke/启动.png').read_bytes(), b'\x89PNG\r\n\x1a\n')
         self.assertIn('phase=instrumentation exit=0', (self.root / 'smoke/stages.txt').read_text())
+        self.assertIn('phase=instrumentation budget=600s', (self.root / 'smoke/stages.txt').read_text())
         args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
         self.assertEqual(args[3:7], ['-w', '-e', 'class', 'app.daiyu.android.FirstTest'])
 

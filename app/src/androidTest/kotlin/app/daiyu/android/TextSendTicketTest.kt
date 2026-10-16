@@ -35,6 +35,80 @@ class TextSendTicketTest : InstrumentationTestCase() {
         } finally { super.tearDown() }
     }
 
+    fun testSameTicketCancellationAfterCommittedReceiptKeepsAcceptedUntilAcknowledgement() {
+        val controller = fixture.controller
+        val ticket = ChatController.TextSendTicket()
+        val owner = ChatController.TextSendOwner(null, 7, 11)
+        val text = "  committed before cancellation\nexact trailing bytes  "
+        val result = AtomicReference<ChatController.TextSendResult>()
+        val completed = CountDownLatch(1)
+        val callbacks = AtomicInteger()
+        val session = fixture.session(holdSeconds = 120)
+        fixture.database.draft(text)
+        lateinit var delivery: TextSendDeliveryGate
+        controlMain {
+            delivery = TextSendDeliveryGate(controller)
+            delivery.hold()
+        }
+        try {
+            controlMain {
+                assertTrue(controller.sendText(null, owner.editorGeneration, owner.draftRevision, text, ticket) {
+                    callbacks.incrementAndGet(); result.set(it); completed.countDown()
+                })
+            }
+            assertTrue(gates[0].entered.await(5, TimeUnit.SECONDS))
+            gates[0].release.countDown()
+            // startSlice runs on the same executor AFTER result publication and callback post.
+            assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+            lateinit var accepted: ChatController.TextSendResult.Accepted
+            controlMain {
+                val committed = checkNotNull(controller.textSendState())
+                assertSame(ticket, committed.ticket)
+                assertEquals(owner, committed.owner)
+                assertEquals(text, committed.text)
+                accepted = committed.result as ChatController.TextSendResult.Accepted
+                assertEquals(owner, accepted.owner)
+                assertEquals(0, callbacks.get())
+                assertEquals(1L, completed.count)
+                assertNull(result.get())
+                // Preparation has ended. A late cancel of this EXACT ticket is a no-op,
+                // not a rejection or permission to replace the unacknowledged receipt.
+                assertFalse(controller.cancelTextSend(ticket))
+                val afterCancel = checkNotNull(controller.textSendState())
+                assertSame(ticket, afterCancel.ticket)
+                assertSame(accepted, afterCancel.result)
+            }
+            val rows = fixture.database.messages(accepted.conversation.id)
+            assertEquals(2, rows.size)
+            val user = rows.single { it.second.role == "user" }.second
+            assertEquals(listOf(MessageBlock.Text("user", text)), user.blocks)
+            assertEquals(user.runId, rows.single { it.second.role == "assistant" }.second.runId)
+            assertEquals("", fixture.database.draft())
+            assertEquals("", fixture.database.conversations().single().draft)
+            assertEquals(1, fixture.opens.get()); assertEquals(1, preparations.get())
+
+            var held = 0
+            controlMain { held = delivery.release() }
+            assertTrue("real callback must have been deferred", held > 0)
+            assertTrue(completed.await(5, TimeUnit.SECONDS))
+            instrumentation.waitForIdleSync()
+            assertEquals(held, delivery.deliveredCount)
+            assertEquals(1, callbacks.get())
+            assertSame(accepted, result.get())
+            controlMain {
+                assertSame(accepted, checkNotNull(controller.textSendState()).result)
+                assertFalse(controller.cancelTextSend(ticket))
+                controller.acknowledgeTextSend(ticket)
+                assertNull(controller.textSendState())
+            }
+            session.release.countDown()
+            awaitControl("committed run completed") { controller.active == null }
+            assertEquals(1, fixture.opens.get())
+        } finally {
+            controlMain { delivery.close() }
+        }
+    }
+
     fun testCancelledOldTicketCannotCancelNewPreparationOrReleaseItsReservation() {
         val controller = fixture.controller
         val oldTicket = ChatController.TextSendTicket()

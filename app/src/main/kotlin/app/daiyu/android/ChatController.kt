@@ -184,6 +184,23 @@ class ChatController internal constructor(private val application:Application,
     // One fixed application DB/account, not a resolver of whichever account is active later.
     @Volatile private var generationScope: String? = null
     private var generationResources: ControllerGenerationResources? = null
+    // Deletion also works before any generation settings/resource exists. These in-memory
+    // seals are inherited by the first (and only) resource, never cleared by a later import.
+    private val generationConversationPublicationSeals = mutableSetOf<String>()
+    // The only Resources constructor in the parent. Never reset this on stop, import, deletion
+    // or reader close: its permanent owner gates belong to this actual account/DB lifetime.
+    @Synchronized private fun retainGenerationResources(accountScope: String): ControllerGenerationResources {
+        check(generationScope == null || generationScope == accountScope) { "generation_account_changed" }
+        generationScope = accountScope
+        return generationResources ?: ControllerGenerationResources(accountScope,
+            { database.writableDatabase }, { generationScope },
+            File(application.filesDir, "media-message-generation")).also { retained ->
+            generationResources = retained
+            // No existing gates/publications exist in a newly constructed resource, so these
+            // seals need no wait. Every future fence inherits them before it can be returned.
+            generationConversationPublicationSeals.forEach { retained.sealConversationPublicationAdmission(it) }
+        }
+    }
     private val generationCleanup = ControllerGenerationCleanupQueue(workers = 2, capacity = 8)
     private var generationEntry: GenerationEntry? = null
     private var generationPreparation: Preparation? = null
@@ -212,20 +229,16 @@ class ChatController internal constructor(private val application:Application,
         editor: GenerationEditorSnapshot): GenerationEntry? {
         check(Looper.myLooper() != Looper.getMainLooper())
         val reserved = synchronized(this) {
-            if (!idleAvailable() || editor.text.isBlank() || editor.attachmentIds.isNotEmpty()) return null
+            if (!idleAvailable() ||
+                (conversation != null && conversation.id.value in generationConversationPublicationSeals) ||
+                editor.text.isBlank() || editor.attachmentIds.isNotEmpty()) return null
             reservePreparation().also { generationPreparation = it }
         }
         return try {
             val snapshot = GenerationSettingsStore(application).loadSnapshot()
             synchronized(this) {
                 check(!preparationCancelled(reserved))
-                check(generationScope == null || generationScope == snapshot.accountScope) {
-                    "generation_account_changed"
-                }
-                generationScope = snapshot.accountScope
-                if (generationResources == null) generationResources = ControllerGenerationResources(
-                    snapshot.accountScope, { database.writableDatabase }, { generationScope },
-                    File(application.filesDir, "media-message-generation"))
+                retainGenerationResources(snapshot.accountScope)
                 val identity = GenerationPreparationIdentity(snapshot.accountScope,
                     conversation?.id ?: ConversationId(UUID.randomUUID().toString()),
                     RunId(UUID.randomUUID().toString()), MessageId(UUID.randomUUID().toString()))
@@ -396,7 +409,6 @@ class ChatController internal constructor(private val application:Application,
     internal data class GenerationAssetDisplay(val metadata: ControllerGenerationOutputMetadata,
         val thumbnail: android.graphics.Bitmap?)
     private val generationOutputReaders = linkedMapOf<String, ControllerGenerationOutputReader>()
-    private val revokedGenerationConversations = mutableSetOf<String>()
     private val generationOutputConversations = mutableMapOf<String, String>()
 
     /** Same account and owner reuse one read fence. Only the controller worker touches this map. */
@@ -408,15 +420,11 @@ class ChatController internal constructor(private val application:Application,
         }
         try { executor.execute {
             val result = runCatching {
-                check(conversation.value !in revokedGenerationConversations)
-                val snapshot = GenerationSettingsStore(application).loadForEditing()
-                val retained = synchronized(this) {
-                    check(generationScope == null || generationScope == snapshot.accountScope)
-                    generationScope = snapshot.accountScope
-                    generationResources ?: ControllerGenerationResources(snapshot.accountScope,
-                        { database.writableDatabase }, { generationScope },
-                        File(application.filesDir, "media-message-generation")).also { generationResources = it }
+                synchronized(this) {
+                    check(conversation.value !in generationConversationPublicationSeals)
                 }
+                val snapshot = GenerationSettingsStore(application).loadForEditing()
+                val retained = retainGenerationResources(snapshot.accountScope)
                 val displays = mutableListOf<GenerationAssetDisplay>()
                 // Side table is authoritative, including registered outputs beside central UNKNOWN.
                 retained.database().rawQuery("SELECT operation_id,item_id,output_index,fingerprint,protocol," +
@@ -466,11 +474,10 @@ class ChatController internal constructor(private val application:Application,
         return true
     }
 
-    /** Worker-only, BEFORE owner deletion/replacement. Tombstones forbid same-scalar resurrection. */
-    private fun revokeGenerationOutputOwners(owners: Set<String>? = null) {
+    /** Worker-only LOCAL reader cleanup. This is not a publication barrier or a history seal. */
+    private fun closeGenerationOutputReaders(owners: Set<String>? = null) {
         check(Looper.myLooper() != Looper.getMainLooper())
         val keys = generationOutputConversations.filterValues { owners == null || it in owners }.keys.toList()
-        revokedGenerationConversations.addAll(keys.mapNotNull { generationOutputConversations[it] })
         val readers = keys.mapNotNull { key ->
             generationOutputConversations.remove(key)
             generationOutputReaders.remove(key)
@@ -1511,7 +1518,7 @@ class ChatController internal constructor(private val application:Application,
         if(backgroundRuns.isNotEmpty()) return
         closingStorage=true
         executor.execute {
-            try {revokeGenerationOutputOwners();generationCleanup.close();questionStore?.close();database.close();runtimeStore?.close();runtimeStore=null}
+            try {closeGenerationOutputReaders();generationCleanup.close();questionStore?.close();database.close();runtimeStore?.close();runtimeStore=null}
             finally {executor.shutdown();closeDone.countDown()}
         }
     }
@@ -1625,14 +1632,38 @@ class ChatController internal constructor(private val application:Application,
             .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
             .decode(java.nio.ByteBuffer.wrap(out.toByteArray())).toString()
     }
-    internal fun mutateGenerationOwners(owners: Set<String>? = null, completed: (Boolean) -> Unit,
+    /** Destructive owner boundary used by both conversation deletion and delete-all in Main.
+     * Seal is only in-memory under the short admission lock. Waiting for publications, closing
+     * readers and the caller's actual deletion transaction all run on the worker, in that order.
+     * A failed/ambiguous delete remains sealed; neither retry nor import may reopen that owner.
+     */
+    @Synchronized internal fun mutateGenerationOwners(owners: Set<String>? = null, completed: (Boolean) -> Unit,
         mutation: () -> Unit) {
-        dataTask(failureNotice = "删除未确认；原生成读取授权已撤销", completed = completed, work = {
-            revokedGenerationConversations.addAll(owners ?: database.conversations().map { it.id.value })
-            revokeGenerationOutputOwners(owners)
+        check(idleAvailable() && !hasLiveChildTasks()) { "请等待后台子任务实际结束" }
+        val selected = owners?.toSet()
+        require(selected == null || selected.all { it.isNotBlank() })
+        val captured = selected?.let(::sealGenerationOwners)
+        dataTask(failureNotice = "删除未确认；原生成发布和读取授权已撤销", completed = completed, work = {
+            check(Looper.myLooper() != Looper.getMainLooper())
+            // Clear history deletes existing conversations, not the account. dataBusy prevents
+            // new preparation/read admission while the worker captures and seals this scope.
+            val revocations = captured ?: run {
+                val deleted = database.conversations().map { it.id.value }.toSet()
+                synchronized(this) { sealGenerationOwners(deleted) }
+            }
+            revocations.forEach { it.revokeOnWorker() }
+            closeGenerationOutputReaders(selected)
             mutation()
             "删除已完成"
         })
+    }
+
+    // Called only under the controller monitor; no DB/FS/validator or wait in these APIs.
+    private fun sealGenerationOwners(owners: Set<String>): List<ControllerGenerationPublicationRevocation> {
+        generationConversationPublicationSeals.addAll(owners)
+        return generationResources?.let { retained ->
+            owners.map { retained.sealConversationPublicationAdmission(it) }
+        }.orEmpty()
     }
 
     @Synchronized internal fun dataTask(importing:Boolean=false,failureNotice:String?=null,
@@ -1643,10 +1674,8 @@ class ChatController internal constructor(private val application:Application,
             var value=failureNotice ?: if(importing) "导入失败；原会话保留，格式、校验或身份冲突" else "导出失败；目标文件可能不完整，原会话保留"
             var success=false
             try {
-                if (importing) {
-                    revokedGenerationConversations.addAll(database.conversations().map { it.id.value })
-                    revokeGenerationOutputOwners()
-                }
+                // Both backup importers append new identities or roll back on conflict; even
+                // an attempted/duplicate import must leave old owners and their gates untouched.
                 value=work();success=true
             } catch(failure:Exception) {
                 value=failureNotice ?: when(failure) {

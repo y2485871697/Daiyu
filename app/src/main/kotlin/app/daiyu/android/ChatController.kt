@@ -59,6 +59,11 @@ class ChatController internal constructor(private val application:Application,
     private var closed=false
     private var preparing=false
     private var pendingImage:ImageSendHandle?=null
+    private var pendingShizuku:ControllerShizukuPreparation?=null
+    @Synchronized internal fun shizukuPreparation():ControllerShizukuPreparation? = pendingShizuku
+    private val shizukuAccess by lazy { checkNotNull((application as? ChatApplication)?.shizuku) {
+        "shizuku_application_host_required"
+    } }
     // Use this app-scoped importer in the host, rather than creating another draft store instance.
     internal val imageAttachments by lazy { AndroidImageAttachments(application.contentResolver,
         app.daiyu.android.media.ImageAttachmentStore(File(application.filesDir,"media-draft-images"),
@@ -120,10 +125,24 @@ class ChatController internal constructor(private val application:Application,
         var cleanupConfirmed=false
         var cleanupFailed=false
         var devicesClosing=false
-        var devicesClosed=false
+        val deviceCleanup=ControllerShizukuCleanup()
         var result:Message?=null
     }
     private var resources:RunResources?=null
+    // Tools can exist before database acceptance. An UNKNOWN close must pin those too.
+    private val unacceptedTools=mutableMapOf<RunCatalogTools,ControllerShizukuCleanup>()
+    private fun closeUnacceptedTools(tools:RunCatalogTools) {
+        val observation=synchronized(this) {
+            if(unacceptedTools.containsKey(tools)) return
+            ControllerShizukuCleanup().also {unacceptedTools[tools]=it}
+        }
+        tools.closeWithResult { result -> handler.post {synchronized(this) {
+            observation.observe(result)
+            if(observation.drained) unacceptedTools.remove(tools)
+            else problem="运行准备清理结果 UNKNOWN；原资源保留，不自动重连或重发"
+            if(closed) closeStorageWhenIdle() else notifyChanged()
+        }}}
+    }
     internal data class QuestionProjection(val identity:QuestionIdentity,val record:QuestionRecord,
         val binding:QuestionCardBinding?,val canAnswer:Boolean)
     private val questionHistory=linkedMapOf<String,Pair<QuestionIdentity,QuestionRecord>>()
@@ -240,6 +259,7 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
+        resources==null && pendingShizuku==null && unacceptedTools.isEmpty() &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
     internal val selections=mutableMapOf<ConversationId?,Pair<Int,Int>>()
     @Volatile var active:Message?=null;private set
@@ -303,6 +323,77 @@ class ChatController internal constructor(private val application:Application,
         }
         return try {sendPrepared(conversation,text)} finally {finishPreparation()}
     }
+    /** Optional entry point. Ordinary send()/sendImages() never grant Shizuku access.
+     * Reservation performs no I/O and blocks other sends until rejected or submitted.
+     * Parent must discard this preview if it changes the conversation or editor revision.
+     */
+    @Synchronized internal fun prepareShizukuSend(conversation:Conversation?, text:String,
+        command:String, uidInput:String, timeoutInput:String):ControllerShizukuPreparation? {
+        if(!idleAvailable()) return null
+        val uid=ControllerShizukuPreparation.parseUid(uidInput) ?: return null
+        val timeout=ControllerShizukuPreparation.parseTimeout(timeoutInput) ?: return null
+        val preview=runCatching {ControllerShizukuPreparation(conversation,text,uid,command,timeout)}.getOrNull()
+            ?: return null
+        preparing=true;pendingShizuku=preview;notifyChanged()
+        return preview
+    }
+    internal fun rejectShizuku(preview:ControllerShizukuPreparation) {
+        val draft=synchronized(this) {
+            if(pendingShizuku!==preview) return
+            (!preview.isSubmitted()).also { if(it) preview.cancel() }
+        }
+        if(!draft) preview.cancel()
+        // A submitted worker, possibly in connect(), retains ownership until its own cleanup.
+        if(draft) finishShizukuPreparation(preview,installed=false)
+    }
+    /** Call only from an explicit confirmation of the immutable preview. Queues one attempt;
+     * acceptance is the database receipt in complete, NOT a guarantee of command completion.
+     * No Shizuku permission prompt, probe, new call ID or automatic retry occurs here.
+     */
+    internal fun confirmShizukuSend(preview:ControllerShizukuPreparation,
+        complete:(Conversation?)->Unit):Boolean {
+        val authorization=synchronized(this) {
+            if(closed || pendingShizuku!==preview || preview.isSubmitted() || preview.isCancelled()) return false
+            preview.approve().also {notifyChanged()}
+        }
+        try {executor.execute {
+            val saved=try {
+                if(preview.isCancelled()) null else sendPrepared(preview.conversation,preview.messageText,
+                    shizukuPreparation=preview,shizukuAuthorization=authorization)
+            } catch (_:Exception) {
+                synchronized(this) {problem="Shizuku 运行准备失败；未自动重发";notifyChanged()}
+                null
+            }
+            val installed=synchronized(this) {resources?.initial?.runId==preview.runId}
+            finishShizukuPreparation(preview,installed)
+            handler.post {
+                if(synchronized(this) {!closed}) try {complete(saved)} catch (_:Exception) {}
+            }
+        }} catch (_:java.util.concurrent.RejectedExecutionException) {
+            preview.cancel();finishShizukuPreparation(preview,installed=false);return false
+        }
+        return true
+    }
+    private fun finishShizukuPreparation(preview:ControllerShizukuPreparation,installed:Boolean) {
+        fun release() = synchronized(this) {
+            if(pendingShizuku===preview) {
+                pendingShizuku=null
+                finishPreparation()
+            }
+        }
+        if(installed) release() else preview.closeWithResult { result ->
+            when(result) {
+                app.daiyu.android.shizuku.ShizukuCloseResult.Drained -> release()
+                is app.daiyu.android.shizuku.ShizukuCloseResult.Unknown -> synchronized(this) {
+                    // Keep preparation and storage pinned. Stop/close must not reopen this run.
+                    if(pendingShizuku===preview) {
+                        problem="Shizuku 清理结果 UNKNOWN；资源保留，不自动重连或重发，请核实设备状态"
+                        notifyChanged()
+                    }
+                }
+            }
+        }
+    }
     private fun finishPreparation() = synchronized(this) {
         preparing=false
         pendingImage=null
@@ -348,7 +439,10 @@ class ChatController internal constructor(private val application:Application,
         return handle
     }
     private fun sendPrepared(conversation:Conversation?,text:String,
-        childModels:Map<String,ChildModelDefinition> = emptyMap(), imageAttempt:ControllerImageAttempt?=null):Conversation? {
+        childModels:Map<String,ChildModelDefinition> = emptyMap(), imageAttempt:ControllerImageAttempt?=null,
+        shizukuPreparation:ControllerShizukuPreparation?=null,
+        shizukuAuthorization:app.daiyu.android.domain.tools.TaskAuthorization?=null):Conversation? {
+        require(shizukuPreparation==null || (imageAttempt==null && shizukuAuthorization!=null))
         val config=try {settings.load().also {it.validate()}} catch (_:CredentialUnavailableException) {
             problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
         } catch (_:Exception) {problem="请在模型设置里配置Responses地址、模型与密钥";notifyChanged();return null}
@@ -357,9 +451,9 @@ class ChatController internal constructor(private val application:Application,
             if(imageAttempt!=null) require(selected?.asModelSettings()==config) {"stale_image_provider"}
             selected?.takeIf {it.asModelSettings()==config} ?: ProviderSnapshot.capture(config)
         } catch (_:Exception) {problem="图片模型配置已变化；草稿保留，未发起网络请求";notifyChanged();return null}
-        val conversationId=conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
+        val conversationId=shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
-        val run=imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
+        val run=shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
         val user=try {imageAttempt?.prepare(imageAttachments.store,messageImageAssets) ?:
             Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
         } catch (_:Exception) {problem="图片冻结失败或模型不支持；草稿保留，未发起网络请求";notifyChanged();return null}
@@ -367,7 +461,7 @@ class ChatController internal constructor(private val application:Application,
         val contextService = ContextService(application, database)
         val preparedContext = try {
             if (conversation == null) null else contextService.prepareSend(conversationId,
-                pendingMessages=listOf(user), cancelled={ imageAttempt?.handle?.isCancelled()==true })
+                pendingMessages=listOf(user), cancelled={ imageAttempt?.handle?.isCancelled()==true || shizukuPreparation?.isCancelled()==true })
         } catch (_: Exception) {
             problem="读取历史失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
@@ -376,7 +470,7 @@ class ChatController internal constructor(private val application:Application,
             // Preflight the complete expanded history BEFORE DB acceptance or any model open.
             // Later opens re-authorize against persisted rows; candidate authorization ends here.
             val plan=messageImages.freeze(prior+user,provider,user) {
-                imageAttempt?.handle?.isCancelled()==true || synchronized(this) {closed}
+                imageAttempt?.handle?.isCancelled()==true || shizukuPreparation?.isCancelled()==true || synchronized(this) {closed}
             }
             val delegate=if(plan.hasImages) imageModel(provider) else model(config)
             messageImages.wrap(delegate,provider,conversationId)
@@ -400,7 +494,8 @@ class ChatController internal constructor(private val application:Application,
             val capabilities = SessionCapabilities(run.value,
                 AndroidToolRegistry.capabilitiesFor(config.enabledTools()) + contextTools.map { it.definition.capability } +
                     setOf(SkillRunSession.READ, SkillRunSession.RESOURCE, AndroidToolRegistry.ASK_USER_CAPABILITY) +
-                    if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY,RunChildTasks.CAPABILITY))
+                    (if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY,RunChildTasks.CAPABILITY)) +
+                    (if (shizukuPreparation == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)))
             val backgroundFactory: ((app.daiyu.android.domain.runtime.RunExecutionOwner, SessionCapabilities,
                 app.daiyu.android.domain.tools.TaskAuthorization) -> RunChildTasks)? =
                 if(childModels.isEmpty()) null else { owner, grants, authorization ->
@@ -411,8 +506,11 @@ class ChatController internal constructor(private val application:Application,
                         RunChildTasks(supervisor,binding,childModels.keys).also { backgroundRuns[run]=it }
                     }
                 }
+            // Only the consumed, controller-owned approval may open the real Android transport.
+            // The SAME frozen authorization reaches Dispatcher and RunShizukuCommands.bind.
+            val shizuku=shizukuPreparation?.open(shizukuAccess)
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
-                backgroundFactory) { grants, authorization ->
+                backgroundFactory, authorization=shizukuAuthorization, shizuku=shizuku) { grants, authorization ->
                 SkillToolRegistry(application).captureForRun(grants, authorization)
             }
             preparingTools = tools
@@ -425,18 +523,32 @@ class ChatController internal constructor(private val application:Application,
             }
             owned to tools
         } catch (_: Exception) {
-            preparingTools?.close()
-            preparingDevices?.close()
-            preparingChildren?.close()
+            if(preparingTools!=null) closeUnacceptedTools(preparingTools)
+            else {
+                preparingDevices?.close()
+                preparingChildren?.close()
+            }
             problem="运行准备失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
         val (owned, tools) = prepared
         val mayCommit=synchronized(this) {
-            !closed && (imageAttempt==null || imageAttempt.beginCommit())
+            !closed && shizukuPreparation?.isCancelled()!=true &&
+                (imageAttempt==null || imageAttempt.beginCommit())
         }
-        if (!mayCommit) { tools.close(); return null }
+        if (!mayCommit) { closeUnacceptedTools(tools); return null }
         val saved=try {
-            if(imageAttempt==null) database.send(user,assistant,conversation==null)
+            if(shizukuPreparation!=null) app.daiyu.android.context.DatabaseTransactions { database.writableDatabase }.run { db ->
+                // Approval/connect is asynchronous: never erase a newer persisted editor draft.
+                val sameDraft=if(conversation==null) db.rawQuery(
+                    "SELECT 1 FROM composer WHERE id=1 AND draft=?", arrayOf(shizukuPreparation.text)
+                ).use {it.moveToFirst()} else db.rawQuery(
+                    "SELECT 1 FROM conversations WHERE id=? AND draft=?",
+                    arrayOf(conversationId.value,shizukuPreparation.text)
+                ).use {it.moveToFirst()}
+                if(!sameDraft) throw ControllerShizukuDraftChangedException()
+                database.send(user,assistant,conversation==null)
+            }
+            else if(imageAttempt==null) database.send(user,assistant,conversation==null)
             else app.daiyu.android.context.DatabaseTransactions { database.writableDatabase }.run { db ->
                 // The text CAS and both message rows share one outer SQLite transaction.
                 // Do not clear a newer persisted editor draft while images are being frozen.
@@ -450,8 +562,9 @@ class ChatController internal constructor(private val application:Application,
                 database.send(user,assistant,conversation==null)
             }
         } catch (failure:Exception) {
-            if(failure is ImageDraftChangedException) imageAttempt?.draftChanged() else imageAttempt?.unknown()
-            tools.close();problem=if(failure is ImageDraftChangedException) "编辑草稿已变化；保留当前草稿，未发起请求"
+            val draftChanged=failure is ImageDraftChangedException || failure is ControllerShizukuDraftChangedException
+            if(draftChanged) imageAttempt?.draftChanged() else imageAttempt?.unknown()
+            closeUnacceptedTools(tools);problem=if(draftChanged) "编辑草稿已变化；保留当前草稿，未发起请求"
                 else "发送保存结果未确认；保留草稿和图片，不自动重发"
             notifyChanged();return null
         }
@@ -459,7 +572,7 @@ class ChatController internal constructor(private val application:Application,
         imageAttempt?.accepted(saved)
         val lifetime=RunResources(assistant,owned,tools)
         val installed=synchronized(this) {
-            if(closed) false else {
+            if(closed || shizukuPreparation?.isCancelled()==true) false else {
                 if(imageAttempt!=null) imageProvider=provider
                 problem=null;active=assistant
                 runner=owned;runTools=tools;resources=lifetime
@@ -469,7 +582,7 @@ class ChatController internal constructor(private val application:Application,
         }
         if(!installed) {
             // close won AFTER acceptance: receipt still wins, but no provider request is opened.
-            tools.close()
+            closeUnacceptedTools(tools)
             try {database.save(assistant.copy(status=RunStatus.INTERRUPTED))} catch (_:Exception) { }
         }
         return saved
@@ -599,17 +712,23 @@ class ChatController internal constructor(private val application:Application,
             // Closing tools can reach a model/device transport. Fence under the monitor,
             // but invoke close and wait for its drain callback outside the monitor.
             handler.post {
-                lifetime.tools.closeWhenIdle {
+                lifetime.tools.closeWithResult { result ->
                     handler.post {synchronized(this) {
                         if(resources===lifetime) {
-                            lifetime.devicesClosed=true
-                            cleanupRun(lifetime)
+                            lifetime.deviceCleanup.observe(result)
+                            if(lifetime.deviceCleanup.drained) cleanupRun(lifetime)
+                            else {
+                                problem="运行清理结果 UNKNOWN；原资源保留，不自动重连或重发，请核实设备状态"
+                                if(!closed) active=(active ?: lifetime.initial).copy(
+                                    status=RunStatus.INTERRUPTED,error=problem)
+                                notifyChanged()
+                            }
                         }
                     }}
                 }
             }
         }
-        if(!lifetime.devicesClosed) return
+        if(!lifetime.deviceCleanup.drained) return
         lifetime.writer.shutdown();lifetime.waiter.shutdown()
         resources=null;runner=null;runTools=null
         val result=checkNotNull(lifetime.result)
@@ -626,7 +745,7 @@ class ChatController internal constructor(private val application:Application,
     }==true
     private fun closeStorageWhenIdle() {
         pruneBackgroundRuns()
-        if(resources!=null || preparing || imageReaders!=0 || closingStorage) return
+        if(resources!=null || preparing || unacceptedTools.isNotEmpty() || imageReaders!=0 || closingStorage) return
         if(!childrenClosed) {
             if(!childrenClosing) {
                 childrenClosing=true
@@ -817,6 +936,7 @@ class ChatController internal constructor(private val application:Application,
         return true
     }
     fun stop() {
+        synchronized(this) {pendingShizuku}?.let(::rejectShizuku)
         val lifetime=synchronized(this) {resources?.also {it.fenced=true}} ?: return
         lifetime.runner.stop();lifetime.tools.revokeChildren();lifetime.tools.close()
         handler.post {synchronized(this) {cleanupRun(lifetime)}}
@@ -830,6 +950,7 @@ class ChatController internal constructor(private val application:Application,
             }
             resources?.also {it.fenced=true}
         }
+        synchronized(this) {pendingShizuku}?.let(::rejectShizuku)
         lifetime?.runner?.stop();lifetime?.tools?.close()
         handler.post {synchronized(this) {
             if(lifetime!=null && resources===lifetime) cleanupRun(lifetime) else closeStorageWhenIdle()

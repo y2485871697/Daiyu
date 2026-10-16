@@ -89,6 +89,148 @@ class ContextServiceTest : InstrumentationTestCase() {
         assertTrue(service.usage(owner.value, "task").incomplete)
     }
 
+    fun testKnownOversizeContextIsRejectedEvenWithoutAutomaticCompression() {
+        val owner = seed(); val original = service.displayHistory(owner)
+        val before = service.prepareSend(owner)
+        for (enabled in listOf(false, true)) {
+            val error = compressionFailure {
+                service.prepareSend(owner, CompressionPolicy(enabled, 1024, reserveTokens = 0))
+            }
+            assertTrue(error is ContextCapacityExceededException)
+            assertEquals(estimateTokens(original), (error as ContextCapacityExceededException).estimatedTokens)
+            assertEquals(1024L, error.budgetTokens)
+            assertCompressionState(owner, original, before, emptyList())
+        }
+        // Unknown provider capacity is not fabricated, and the estimate is never a usage receipt.
+        assertEquals(before, service.prepareSend(owner, CompressionPolicy(enabled = true)))
+        assertEquals(0L, service.usage(owner.value).requests)
+    }
+
+    fun testPendingInputCountsTowardsBudgetButIsNotReturnedOrPersisted() {
+        val owner = seed(1); val original = service.displayHistory(owner)
+        val pending = Message(MessageId("pending"), owner, RunId("pending-run"), "user",
+            listOf(MessageBlock.Text("input", "new input")), RunStatus.COMPLETED)
+        val budget = estimateTokens(original + pending)
+        val policy = CompressionPolicy(contextTokens = budget + 17, reserveTokens = 17)
+        val prepared = service.prepareSend(owner, policy, pendingMessages = listOf(pending))
+        assertEquals(original, prepared.messages)
+        assertEquals(estimateTokens(original), prepared.estimatedTokens)
+        assertEquals(original, service.displayHistory(owner))
+        val larger = pending.copy(blocks = listOf(MessageBlock.Text("input", "new input!")))
+        assertTrue(compressionFailure {
+            service.prepareSend(owner, policy, pendingMessages = listOf(larger))
+        } is ContextCapacityExceededException)
+        assertEquals(original, service.displayHistory(owner))
+        assertTrue(compressionRows(owner).isEmpty())
+    }
+
+    fun testPendingInputTriggersCompressionAndMatchesSubsequentPreparation() {
+        val owner = seed(3); val original = service.displayHistory(owner)
+        val pending = Message(MessageId("pending"), owner, RunId("pending-run"), "user",
+            listOf(MessageBlock.Text("input", "x".repeat(2000))), RunStatus.COMPLETED)
+        val policy = CompressionPolicy(true, 10000, 80, 1000, 1)
+        assertFalse(policy.shouldCompress(estimateTokens(original)))
+        assertTrue(policy.shouldCompress(estimateTokens(original + pending)))
+        var calls = 0
+        val prepared = service.prepareSend(owner, policy, ContextSummarizer { calls++; "已确认事实" },
+            pendingMessages = listOf(pending))
+        assertEquals(1, calls)
+        assertNotNull(prepared.archiveId)
+        assertEquals(original.takeLast(2), prepared.messages.takeLast(2))
+        assertEquals(estimateTokens(prepared.messages), prepared.estimatedTokens)
+        assertTrue(policy.fitsSendBudget(estimateTokens(prepared.messages + pending)))
+        assertEquals(prepared, service.prepareSend(owner, policy, pendingMessages = listOf(pending)))
+        assertEquals(original, service.displayHistory(owner))
+        assertEquals(original.take(4), service.archivePage(prepared.archiveId!!).messages)
+    }
+
+    fun testStillOversizeSummaryDoesNotReplaceActiveArchive() {
+        val owner = seed(); val original = service.displayHistory(owner)
+        service.compress(owner, CompressionPolicy(keepTurns = 2), ContextSummarizer { "旧有效摘要" })!!
+        val prepared = service.prepareSend(owner); val rows = compressionRows(owner)
+        var calls = 0
+        val summary = "更短的新摘要"
+        // Raw summary + tail fits exactly; the real untrusted-summary wrapper must also count.
+        val budget = estimateTokens(original.takeLast(2)) + summary.toByteArray(Charsets.UTF_8).size + 16L
+        val error = compressionFailure {
+            service.prepareSend(owner, CompressionPolicy(true, budget, 80, 0, 1), ContextSummarizer {
+                calls++; summary
+            })
+        }
+        assertEquals(1, calls)
+        assertTrue(error is ContextCapacityExceededException)
+        assertTrue((error as ContextCapacityExceededException).estimatedTokens > budget)
+        assertCompressionState(owner, original, prepared, rows)
+    }
+
+    fun testNoSafeCompressionCutCannotReturnOversizePreparation() {
+        val owner = seed(1); val original = service.displayHistory(owner)
+        val before = service.prepareSend(owner)
+        assertTrue(compressionFailure {
+            service.prepareSend(owner, CompressionPolicy(true, 1024, 80, 0, 1), ContextSummarizer {
+                throw AssertionError("protected tail cannot be summarized")
+            })
+        } is ContextCapacityExceededException)
+        assertCompressionState(owner, original, before, emptyList())
+    }
+
+    fun testCancellationBeforeAndDuringSummaryKeepsPriorArchiveAfterReopen() {
+        val owner = seed(); val original = service.displayHistory(owner)
+        service.compress(owner, CompressionPolicy(keepTurns = 2), ContextSummarizer { "旧有效摘要" })!!
+        val prepared = service.prepareSend(owner); val rows = compressionRows(owner)
+        var cancelled = true
+        var calls = 0
+        val policy = CompressionPolicy(true, 10000, 10, 1000, 2)
+        val summarizer = ContextSummarizer { calls++; cancelled = true; "取消后不得发布的摘要" }
+        assertTrue(compressionFailure {
+            service.prepareSend(owner, policy, summarizer, cancelled = { cancelled })
+        } is java.util.concurrent.CancellationException)
+        assertEquals(0, calls)
+        cancelled = false
+        assertTrue(compressionFailure {
+            service.prepareSend(owner, policy, summarizer, cancelled = { cancelled })
+        } is java.util.concurrent.CancellationException)
+        assertEquals(1, calls)
+        assertCompressionState(owner, original, prepared, rows)
+    }
+
+    fun testCancellationAfterInsertRollsBackNewArchiveAndOldDeactivation() {
+        val owner = seed(); val original = service.displayHistory(owner)
+        service.compress(owner, CompressionPolicy(keepTurns = 2), ContextSummarizer { "旧有效摘要" })!!
+        val prepared = service.prepareSend(owner); val rows = compressionRows(owner)
+        assertTrue(compressionFailure {
+            service.compress(owner, CompressionPolicy(keepTurns = 2), ContextSummarizer { "不得提交的新摘要" },
+                cancelled = { compressionRows(owner).size > rows.size })
+        } is java.util.concurrent.CancellationException)
+        assertCompressionState(owner, original, prepared, rows)
+    }
+
+    fun testInterruptedThreadNeverPreparesOrCallsSummarizer() {
+        val owner = seed(); val original = service.displayHistory(owner)
+        Thread.currentThread().interrupt()
+        try {
+            assertTrue(compressionFailure {
+                service.prepareSend(owner, CompressionPolicy(true, 10000, 10, 1000, 2), ContextSummarizer {
+                    throw AssertionError("interrupted preparation cannot call model")
+                })
+            } is java.util.concurrent.CancellationException)
+            assertTrue(Thread.currentThread().isInterrupted)
+        } finally { Thread.interrupted() }
+        assertCompressionState(owner, original, PreparedContext(original, estimateTokens(original), null), emptyList())
+    }
+
+    fun testPendingInputCannotIntroduceAnotherConversationIntoPreparation() {
+        val owner = seed(); val other = seed(1); val original = service.displayHistory(owner)
+        val foreign = service.displayHistory(other).first()
+        assertTrue(compressionFailure {
+            service.prepareSend(owner, CompressionPolicy(true, 10000, 10, 1000, 2), ContextSummarizer {
+                throw AssertionError("scope must be checked before model")
+            }, pendingMessages = listOf(foreign))
+        } is IllegalArgumentException)
+        assertEquals(original, service.displayHistory(owner))
+        assertTrue(compressionRows(owner).isEmpty())
+    }
+
     private fun compressionRows(owner: ConversationId): List<List<String>> =
         db.readableDatabase.rawQuery(
             "SELECT id,prefix_count,revision,summary,blob_hash,created,active " +

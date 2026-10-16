@@ -76,41 +76,49 @@ class AndroidImageAttachments(
     }
 
     /** A caller owns/recycles this bitmap; original persisted bytes are never recompressed. */
-    fun decodePreview(owner: ImageAttachmentOwner, attachment: ImageAttachment, maxEdge: Int = 1024): Bitmap {
-        require(maxEdge in 1..2048)
-        val bytes = store.read(owner, attachment)
-        val orientation = if (attachment.mime == "image/jpeg") {
-            try {
-                bytes.inputStream().use {
-                    ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-                }
-            } catch (failure: IOException) {
-                throw ImageAttachmentException(ImageAttachmentFailure.INVALID_IMAGE, failure)
+    fun decodePreview(owner: ImageAttachmentOwner, attachment: ImageAttachment, maxEdge: Int = 1024): Bitmap =
+        decodeImagePreview(attachment, store.read(owner, attachment), maxEdge)
+}
+
+/** History has only the read capability; preview never looks up a draft or a provider URI. */
+class AndroidMessageImagePreviews(private val resolver: MessageImageResolver) {
+    fun decodePreview(owner: MessageImageOwner, reference: MessageImageReference, maxEdge: Int = 1024): Bitmap =
+        decodeImagePreview(reference.asAttachment(), resolver.read(owner, reference), maxEdge)
+}
+
+private fun decodeImagePreview(attachment: ImageAttachment, bytes: ByteArray, maxEdge: Int): Bitmap {
+    require(maxEdge in 1..2048)
+    val orientation = if (attachment.mime == "image/jpeg") {
+        try {
+            bytes.inputStream().use {
+                ExifInterface(it).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
             }
-        } else ExifInterface.ORIENTATION_NORMAL
-        var sample = 1
-        while ((maxOf(attachment.width, attachment.height).toLong() + sample - 1) / sample > maxEdge) {
-            sample *= 2
+        } catch (failure: IOException) {
+            throw ImageAttachmentException(ImageAttachmentFailure.INVALID_IMAGE, failure)
         }
-        val options = BitmapFactory.Options().apply {
-            inSampleSize = sample
-            inPreferredConfig = Bitmap.Config.ARGB_8888
-        }
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-            ?: throw ImageAttachmentException(ImageAttachmentFailure.INVALID_IMAGE)
-        val matrix = Matrix()
-        when (orientation) {
-            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
-            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
-            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.setScale(1f, -1f)
-            ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.setRotate(90f); matrix.postScale(-1f, 1f) }
-            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
-            ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.setRotate(-90f); matrix.postScale(-1f, 1f) }
-            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(-90f)
-            else -> return bitmap
-        }
-        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true).also {
-            if (it !== bitmap) bitmap.recycle()
-        }
+    } else ExifInterface.ORIENTATION_NORMAL
+    var sample = 1
+    while ((maxOf(attachment.width, attachment.height).toLong() + sample - 1) / sample > maxEdge) {
+        sample *= 2
+    }
+    val options = BitmapFactory.Options().apply {
+        inSampleSize = sample
+        inPreferredConfig = Bitmap.Config.ARGB_8888
+    }
+    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
+        ?: throw ImageAttachmentException(ImageAttachmentFailure.INVALID_IMAGE)
+    val matrix = Matrix()
+    when (orientation) {
+        ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.setScale(-1f, 1f)
+        ExifInterface.ORIENTATION_ROTATE_180 -> matrix.setRotate(180f)
+        ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.setScale(1f, -1f)
+        ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.setRotate(90f); matrix.postScale(-1f, 1f) }
+        ExifInterface.ORIENTATION_ROTATE_90 -> matrix.setRotate(90f)
+        ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.setRotate(-90f); matrix.postScale(-1f, 1f) }
+        ExifInterface.ORIENTATION_ROTATE_270 -> matrix.setRotate(-90f)
+        else -> return bitmap
+    }
+    return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true).also {
+        if (it !== bitmap) bitmap.recycle()
     }
 }

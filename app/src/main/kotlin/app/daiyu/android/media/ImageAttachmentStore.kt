@@ -13,15 +13,12 @@ import java.util.UUID
 
 /** One app-scoped instance. Private draft assets are distinct from committed message/backup blobs. */
 class ImageAttachmentStore(
-    private val root: File,
+    root: File,
     private val inspector: ImageInspector,
     private val limits: ImageAttachmentLimits = ImageAttachmentLimits(),
 ) {
+    private val root = initializeMediaRoot(root)
     private val gate = Any()
-    init {
-        require(root.mkdirs() || root.isDirectory)
-        require(!Files.isSymbolicLink(root.toPath()))
-    }
 
     /** Takes ownership of input, including on rejection. Blocking IO must run off the UI thread. */
     fun import(
@@ -106,7 +103,7 @@ class ImageAttachmentStore(
         }.also { checkImageCancellation(isCancelled) }
     }
 
-    /** The host must not remove a draft asset while committed history still depends on it. */
+    /** Draft-only deletion. Accepted history must use MessageImageAssetStore references. */
     fun remove(owner: ImageAttachmentOwner, attachment: ImageAttachment): Boolean = synchronized(gate) {
         verifyOwner(owner, attachment)
         val directory = ownerDirectory(owner, create = false)
@@ -142,10 +139,7 @@ class ImageAttachmentStore(
     }
 
     private fun ownerDirectory(owner: ImageAttachmentOwner, create: Boolean): File {
-        val directory = File(root, owner.directoryName())
-        if (create && !(directory.mkdir() || directory.isDirectory)) fail(ImageAttachmentFailure.STORAGE)
-        if (Files.isSymbolicLink(directory.toPath())) fail(ImageAttachmentFailure.CORRUPT)
-        return directory
+        return mediaDirectory(root, owner.directoryName(), create)
     }
 
     private fun readSource(input: InputStream, isCancelled: () -> Boolean): ByteArray {
@@ -175,9 +169,7 @@ class ImageAttachmentStore(
     }
 
     private fun validateDimensions(value: ImageDimensions) {
-        if (value.mime !in SUPPORTED_MIMES) fail(ImageAttachmentFailure.UNSUPPORTED_IMAGE)
-        if (value.width <= 0 || value.height <= 0) fail(ImageAttachmentFailure.INVALID_IMAGE)
-        if (value.width.toLong() * value.height > limits.maxPixels) fail(ImageAttachmentFailure.TOO_LARGE)
+        validateImageDimensions(value, limits)
     }
 
     private fun verifyOwner(owner: ImageAttachmentOwner, value: ImageAttachment) {

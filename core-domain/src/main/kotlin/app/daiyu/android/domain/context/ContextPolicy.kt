@@ -46,6 +46,13 @@ data class CompressionPolicy(val enabled: Boolean = false, val contextTokens: Lo
     /** Unknown provider window remains unknown; never guess a capacity for automatic compression. */
     fun shouldCompress(estimatedTokens: Long): Boolean = enabled && contextTokens != null &&
         estimatedTokens >= (contextTokens - reserveTokens) * triggerPercent / 100
+
+    /** Sending capacity is independent of automatic compression. Unknown stays unknown. */
+    val sendBudgetTokens: Long? get() = contextTokens?.minus(reserveTokens)
+    fun fitsSendBudget(estimatedTokens: Long): Boolean {
+        require(estimatedTokens >= 0)
+        return sendBudgetTokens?.let { estimatedTokens <= it } ?: true
+    }
 }
 
 /** Deliberately an estimate, never presented as provider usage. UTF-8 bytes is conservative. */

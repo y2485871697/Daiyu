@@ -114,6 +114,11 @@ android {
 kotlin { jvmToolchain(27) }
 dependencies {
     implementation(project(":core-domain"))
+    // P32: bounded RFC6455 decoding + one-shot HTTPS; licenses/API26 evidence in docs/P32-voice-network.md.
+    implementation("org.java-websocket:Java-WebSocket:1.6.0")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    // Java-WebSocket TRACE includes wire data. Never install a logging backend for this stack.
+    runtimeOnly("org.slf4j:slf4j-nop:2.0.13")
     // Streaming rootfs extraction; XZ decoder memory is separately capped at 128 MiB.
     implementation("org.apache.commons:commons-compress:1.28.0")
     implementation("org.tukaani:xz:1.12")

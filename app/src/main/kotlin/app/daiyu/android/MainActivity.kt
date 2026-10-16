@@ -10,6 +10,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -131,8 +132,87 @@ class MainActivity : ComponentActivity() {
     // The host is cheap; its Android player (and system TTS) exist only after an explicit click.
     // Process-lifetime gate survives recreation, including an unconfirmed Android release.
     private val audioGate = ActivityVoiceAudio.gate
+    private val voiceRuntime get() = controller.voiceRuntime
+    private var preparedSpeech: FrozenVoiceSpeech? = null
+    private var voiceConsent: android.app.AlertDialog? = null
+    private var voiceRequestEpoch = 0L
     private val speechHost by lazy {
-        VoiceHost(lifecycleScope, audioGate) { AndroidVoiceHostPlayer(AndroidSpeechPlayer(applicationContext)) }
+        VoiceHost(lifecycleScope, audioGate) {
+            val frozen = checkNotNull(preparedSpeech) { "voice_not_prepared" }
+            check(voiceRuntime.current(frozen.configuration)) { "voice_configuration_changed" }
+            preparedSpeech = null
+            if (frozen.configuration.engine == "SYSTEM") AndroidVoiceHostPlayer(AndroidSpeechPlayer(applicationContext))
+            else RemoteVoiceHostPlayer(applicationContext, lifecycleScope, voiceRuntime, frozen)
+        }
+    }
+    private fun voiceEditorCurrent(target: DictationDraftTarget) =
+        activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+            selectionReady && controller.ready && !controller.dataBusy &&
+            !imageHost.sending && !shizukuWritesBlocked && terminalEditor == null &&
+            virtualDisplayEditor == null && !videoSending && pendingTextSend == null &&
+            controller.textSendState() == null &&
+            target.conversationId == selected?.id?.value &&
+            target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
+    private val remoteVoice by lazy {
+        ActivityRemoteVoiceHost(applicationContext, lifecycleScope, voiceRuntime, ::voiceEditorCurrent,
+            applyDraft = { target, text ->
+                if (voiceEditorCurrent(target)) {
+                    updateDraft(text); check(draft == text) { "remote_dictation_draft_not_saved" }
+                    selectionStart = text.length; selectionEnd = text.length; publishChat()
+                }
+            }, requestPermission = { microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO) })
+    }
+    private val cascadeVoice by lazy {
+        ActivityCascadeVoiceHost(applicationContext, voiceRuntime) {
+            activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+                controller.ready && !controller.dataBusy
+        }
+    }
+    private fun stopCascadeVoice() {
+        try { cascadeVoice.close() } catch (_: Exception) { toast("级联音频释放未确认，后续音频已阻止") }
+    }
+    private fun invalidatePreparedSpeech() {
+        voiceRequestEpoch++
+        voiceConsent?.dismiss(); voiceConsent = null; preparedSpeech = null
+    }
+    private fun invalidateConfiguredVoice() {
+        invalidatePreparedSpeech()
+        try { remoteVoice.invalidate() } catch (_: Exception) { toast("语音资源释放未确认，新的音频操作已阻止") }
+    }
+    private fun requestConfiguredSpeech(expectedOwner: String?, id: String, text: String) {
+        if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
+            speechHost.owner != expectedOwner || voiceHostText(chatState.turns, id) != text) return
+        invalidateConfiguredVoice()
+        val epoch = voiceRequestEpoch
+        val frozen = try { voiceRuntime.prepareSpeech() } catch (_: Exception) {
+            toast("语音未配置或凭据不可用，请打开语音设置"); return
+        }
+        fun current() = activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+            speechHost.owner == expectedOwner && epoch == voiceRequestEpoch &&
+            voiceRuntime.current(frozen.configuration) && voiceHostText(chatState.turns, id) == text
+        fun play(value: FrozenVoiceSpeech) {
+            if (!current()) return
+            preparedSpeech = value
+            try { speechHost.speak(expectedOwner, id, text) } finally { preparedSpeech = null }
+        }
+        val config = frozen.configuration
+        if (!config.voice.startsWith(app.daiyu.android.voice.personal.MimoPersonalVoices.PREFIX)) {
+            play(frozen); return
+        }
+        val reference = voiceRuntime.personal.state.value.firstOrNull {
+            it.id == config.voice && it.providerId == config.referenceOwner()
+        }
+        if (config.engine != "MIMO" || reference == null) { toast("参考录音已删除或账户已更换，请重新选择"); return }
+        voiceConsent = android.app.AlertDialog.Builder(this)
+            .setTitle("本次发送参考录音？")
+            .setMessage("将向 ${config.provider}（${config.endpoint}）发送参考录音「${reference.name}」及本条回答文本用于合成，可能收费。仅授权本次请求，不长期授权。")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("确认本次发送") { _, _ ->
+                if (current()) lifecycleScope.launch {
+                    try { play(voiceRuntime.authorizeReference(frozen)) }
+                    catch (_: Exception) { if (current()) toast("参考录音或配置已失效；未发送") }
+                }
+            }.create().also { it.show() }
     }
     private var voiceForeground = false
     private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
@@ -148,6 +228,8 @@ class MainActivity : ComponentActivity() {
                 activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
                     selectionReady && controller.ready && !controller.dataBusy &&
                     !imageHost.sending && !shizukuWritesBlocked && terminalEditor == null &&
+                    virtualDisplayEditor == null && !videoSending && pendingTextSend == null &&
+                    controller.textSendState() == null &&
                     target.conversationId == selected?.id?.value &&
                     target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
             },
@@ -182,6 +264,7 @@ class MainActivity : ComponentActivity() {
             })
     }
     private fun startOfflineDictation() {
+        invalidateConfiguredVoice()
         dictationHost.invalidate()
         offlineHost.start(DictationDraftTarget(selected?.id?.value, editorGeneration, draftRevision),
             draft, selectionStart, selectionEnd)
@@ -313,14 +396,14 @@ class MainActivity : ComponentActivity() {
     private var sidebarVisible: Boolean
         get() = sidebarVisibleState
         set(value) {
-            if (value && !sidebarVisibleState) { fenceVideoRoute(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor() }
+            if (value && !sidebarVisibleState) { stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor() }
             sidebarVisibleState = value
         }
     private var retainedPageState by mutableStateOf("chat")
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
-            if (value != retainedPageState) { fenceVideoRoute(); cancelGenerationOutputs(); cancelVirtualDisplayEditor() }
+            if (value != retainedPageState) { stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationOutputs(); cancelVirtualDisplayEditor() }
             if (value != "generation-settings") {
                 generationSettingsVisit?.active?.set(false)
                 generationSettingsVisit = null
@@ -356,12 +439,12 @@ class MainActivity : ComponentActivity() {
     private var selectionReady = false
     private var editorGeneration = 0L
         set(value) {
-            if (field != value) { dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private var draftRevision = 0L
         set(value) {
-            if (field != value) { dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private data class PendingTextSend(val owner: ChatController.TextSendOwner, val text: String,
@@ -477,6 +560,7 @@ class MainActivity : ComponentActivity() {
         // An Activity mount never inherits an approval capability from an older mount.
         controller.virtualDisplayEntry()?.let(controller::cancelVirtualDisplay)
         app.daiyu.android.voice.offline.OfflineSpeechPack.initialize(applicationContext)
+        lifecycleScope.launch { try { voiceRuntime.load() } catch (_: Exception) { /* Settings page offers explicit repair. */ } }
         if (state?.getBoolean("terminal-page", false) == true) {
             terminalPageOwner = Any()
             retainedPageState = "terminal"
@@ -646,7 +730,16 @@ class MainActivity : ComponentActivity() {
                         managementFactory = { controller.skillManagement() },
                         onBack = { returnToChat() },
                     )
-                    "settings" -> DaiyuSettingsScreen(
+                    "voice-settings" -> VoiceSettingsPanel(voiceRuntime, remoteVoice,
+                        isCurrent = { activityUsable() && voiceForeground && retainedPage == "voice-settings" },
+                        invalidate = { invalidateConfiguredVoice(); speechHost.stop(speechHost.owner); dictationHost.invalidate() },
+                        onBack = { if (activityUsable()) retainedPage = "settings" })
+                    "settings" -> Column(Modifier.fillMaxSize()) {
+                        top.yukonga.miuix.kmp.basic.TextButton(text = "语音设置 / 实时通话",
+                            modifier = Modifier.testTag("open-voice-settings"), onClick = {
+                                if (activityUsable() && retainedPage == "settings") retainedPage = "voice-settings"
+                            })
+                        Box(Modifier.weight(1f)) { DaiyuSettingsScreen(
                         onBack = { returnToChat() }, onRoute = { route -> openSettingsFromPage(route) },
                         onOpenSubAgents = { retainedPage = "subagents" },
                         onOpenAssistants = { openAssistantPicker(global = true) },
@@ -654,7 +747,7 @@ class MainActivity : ComponentActivity() {
                         onOpenHaptics = {
                             if (activityUsable() && retainedPage == "settings") retainedPage = "haptics"
                         },
-                    )
+                    ) } }
                     "offline-speech" -> app.daiyu.android.ui.screens.settings.OfflineSpeechSettingsScreen(
                         applicationContext, onBack = { retainedPage = "settings" },
                         ownerCurrent = { activityUsable() && retainedPage == "offline-speech" })
@@ -890,19 +983,28 @@ class MainActivity : ComponentActivity() {
         return ChatScreenActions(
         onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
         onVoice = {
-            if (editorMatches() && terminalEditor == null && draftRevision == renderedDraftRevision && voiceForeground &&
+            if (editorMatches() && terminalEditor == null && virtualDisplayEditor == null && !videoSending &&
+                draftRevision == renderedDraftRevision && voiceForeground &&
                 retainedPage == "chat" && !sidebarVisible &&
                 controller.ready && !controller.dataBusy && !imageHost.sending && !shizukuWritesBlocked) {
                 if (app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.enabled) startOfflineDictation()
-                else dictationHost.start(DictationDraftTarget(selected?.id?.value, editorGeneration, draftRevision))
+                else {
+                    val target = DictationDraftTarget(selected?.id?.value, editorGeneration, draftRevision)
+                    val config = try { voiceRuntime.snapshot() } catch (_: Exception) { null }
+                    when (config?.dictation) {
+                        "SYSTEM" -> { invalidateConfiguredVoice(); dictationHost.start(target) }
+                        "DOUBAO" -> { invalidatePreparedSpeech(); dictationHost.invalidate(); offlineHost.invalidate(); remoteVoice.dictate(target) }
+                        else -> toast("听写未配置或凭据不可用，请打开语音设置")
+                    }
+                }
             }
         }, onContextClick = { pendingFeature() },
         onRegenerate = { pendingFeature() }, onSpeak = { id ->
-            if (activityUsable() && controller.ready && !controller.dataBusy &&
-                selected?.id?.value == renderedConversation) {
+            if (editorMatches() && controller.ready && !controller.dataBusy &&
+                speechHost.owner == renderedSpeechOwner && selected?.id?.value == renderedConversation) {
                 // Resolve the CURRENT displayed answer, never a captured stream/tool payload.
                 voiceHostText(chatState.turns, id)?.let { text ->
-                    speechHost.speak(renderedSpeechOwner, id, text)
+                    requestConfiguredSpeech(renderedSpeechOwner, id, text)
                 }
             }
         },
@@ -916,11 +1018,13 @@ class MainActivity : ComponentActivity() {
             }
         },
         onSend = { text -> if (editorMatches() && terminalEditor == null && text == draft && pendingTextSend == null && !shizukuWritesBlocked) guard {
+            invalidateConfiguredVoice()
+            dictationHost.invalidate()
             offlineHost.invalidate()
             cancelShizukuEditor()
             cancelBrowserEditor()
-            if (videoHost.state.items.isNotEmpty()) videoPanelVisible = true
-            else if (imageHost.hasAttachments) sendImageDraft(text)
+            if (videoHost.state.items.isNotEmpty()) { stopCascadeVoice(); videoPanelVisible = true }
+            else if (imageHost.hasAttachments) { stopCascadeVoice(); sendImageDraft(text) }
             else if (!imageHost.busy && !videoSending) sendDraft(text)
         } },
         onSupplement = { text -> if (editorMatches() && text == draft && !imageHost.sending && !shizukuWritesBlocked) guard {
@@ -980,6 +1084,16 @@ class MainActivity : ComponentActivity() {
         val capturedGeneration = editorGeneration
         val capturedRevision = draftRevision
         val capturedConversation = selected?.id?.value
+        val capturedVoiceEpoch = voiceRequestEpoch
+        val capturedCascadeToken = cascadeVoice.operationToken
+        val capturedRemoteToken = remoteVoice.operationToken
+        val capturedSpeechOwner = speechHost.owner
+        fun currentEditor() = activityUsable() && voiceForeground && retainedPage == "chat" &&
+            !sidebarVisible && editorGeneration == capturedGeneration && draftRevision == capturedRevision &&
+            selected?.id?.value == capturedConversation
+        fun currentVoiceControls() = currentEditor() && voiceRequestEpoch == capturedVoiceEpoch &&
+            cascadeVoice.operationToken == capturedCascadeToken && remoteVoice.operationToken == capturedRemoteToken &&
+            speechHost.owner == capturedSpeechOwner
         top.yukonga.miuix.kmp.basic.TextButton(text = "离线语音设置", modifier = Modifier.testTag("offline-speech-open"),
             onClick = { if (activityUsable() && retainedPage == "chat" && !sidebarVisible) retainedPage = "offline-speech" })
         if (pack.enabled) top.yukonga.miuix.kmp.basic.TextButton(
@@ -994,6 +1108,36 @@ class MainActivity : ComponentActivity() {
             modifier = Modifier.testTag("offline-speech-status").semantics { liveRegion = LiveRegionMode.Polite })
         if (offline.preview.isNotEmpty()) top.yukonga.miuix.kmp.basic.Text(text = "离线识别预览（尚未写入草稿）：${offline.preview}",
             modifier = Modifier.testTag("offline-speech-preview"))
+        val cascadeStatus by cascadeVoice.status.collectAsStateWithLifecycle()
+        val voiceConfig by voiceRuntime.configuration.collectAsStateWithLifecycle()
+        top.yukonga.miuix.kmp.basic.Text("听写：${if (voiceConfig?.dictation == "DOUBAO") "豆包联网" else "系统 / 未配置"}；最终结果只填草稿")
+        top.yukonga.miuix.kmp.basic.TextButton(text = "级联：听写后手动确认发送，朗读下一条回答",
+            modifier = Modifier.testTag("voice-cascade-arm"), onClick = {
+                if (currentVoiceControls() && controller.active == null && voiceEditorCurrent(
+                        DictationDraftTarget(capturedConversation, capturedGeneration, capturedRevision))) {
+                    try { cascadeVoice.arm() }
+                    catch (_: Exception) { toast("级联未启用：检查语音配置；个人参考录音请使用单条朗读逐次确认") }
+                }
+            })
+        if (cascadeStatus.isNotEmpty()) {
+            top.yukonga.miuix.kmp.basic.Text(cascadeStatus,
+                modifier = Modifier.testTag("voice-cascade-status").semantics { liveRegion = LiveRegionMode.Polite })
+            top.yukonga.miuix.kmp.basic.TextButton(text = "停止级联", modifier = Modifier.testTag("voice-cascade-stop"), onClick = {
+                if (currentVoiceControls()) {
+                    stopCascadeVoice(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
+                }
+            })
+        }
+        val remoteStatus by remoteVoice.status.collectAsStateWithLifecycle()
+        if (remoteStatus.isNotEmpty()) {
+            top.yukonga.miuix.kmp.basic.Text(remoteStatus,
+                modifier = Modifier.testTag("remote-voice-status").semantics { liveRegion = LiveRegionMode.Polite })
+            top.yukonga.miuix.kmp.basic.TextButton(text = "停止云端语音", modifier = Modifier.testTag("remote-voice-stop"), onClick = {
+                if (currentVoiceControls()) {
+                    stopCascadeVoice(); invalidateConfiguredVoice(); speechHost.stop(capturedSpeechOwner)
+                }
+            })
+        }
         val state by dictationHost.state.collectAsStateWithLifecycle()
         if (state.status.isNotEmpty()) {
             top.yukonga.miuix.kmp.basic.Text(text = state.status,
@@ -1788,6 +1932,8 @@ class MainActivity : ComponentActivity() {
         controller.invalidateVideo(videoUi)
         videoDialog?.dismiss(); videoDialog = null
         voiceForeground = false
+        stopCascadeVoice()
+        invalidateConfiguredVoice()
         dictationHost.invalidate()
         offlineHost.invalidate()
         cancelShizukuEditor()
@@ -1806,6 +1952,8 @@ class MainActivity : ComponentActivity() {
         controller.invalidateVideo(videoUi)
         // Idempotent fallback as well as the earlier onPause cancellation.
         voiceForeground = false
+        stopCascadeVoice()
+        invalidateConfiguredVoice()
         dictationHost.invalidate()
         offlineHost.invalidate()
         speechHost.setForeground(false)
@@ -1826,6 +1974,8 @@ class MainActivity : ComponentActivity() {
         browserSettingsPageOwner = null
         hapticsHost?.close(); hapticsHost = null
         voiceForeground = false
+        stopCascadeVoice()
+        invalidateConfiguredVoice()
         dictationHost.close()
         offlineHost.close()
         interactiveModeObservation?.close()
@@ -2088,6 +2238,7 @@ class MainActivity : ComponentActivity() {
         }.commit())
         editorGeneration++
         // Even A -> A re-entry gets a new capability; old click lambdas cannot act on it.
+        stopCascadeVoice()
         speechHost.enter(conversation?.id?.value)
         imageHost.enter(conversation?.id?.value)
         videoHost.enter(conversation?.id?.value)
@@ -2111,6 +2262,7 @@ class MainActivity : ComponentActivity() {
         if (owner.conversationId == null) controller.database.draft(text)
         else controller.database.draft(owner.conversationId, text)
         val pending = PendingTextSend(owner, text)
+        cascadeVoice.reserve(pending.ticket)
         pendingTextSend = pending
         val queued = try {
             controller.sendText(selected, owner.editorGeneration, owner.draftRevision, text, pending.ticket) { result ->
@@ -2121,6 +2273,7 @@ class MainActivity : ComponentActivity() {
             false
         }
         if (!queued && pendingTextSend === pending) {
+            cascadeVoice.rejected(pending.ticket)
             pendingTextSend = null
             toast("本次发送未受理；草稿保留")
         }
@@ -2140,7 +2293,7 @@ class MainActivity : ComponentActivity() {
         val matches = result.owner == pending.owner && selected?.id == pending.editorOwner.conversationId &&
             editorGeneration == pending.editorOwner.editorGeneration && draftRevision == pending.editorOwner.draftRevision &&
             draft == pending.text
-        if (!matches) { refresh(); return }
+        if (!matches) { cascadeVoice.rejected(pending.ticket); refresh(); return }
         when (result) {
             is ChatController.TextSendResult.Accepted -> {
                 val saved = result.conversation
@@ -2149,6 +2302,8 @@ class MainActivity : ComponentActivity() {
                 selected = saved; selectionReady = true
                 controlOwner = controller.active?.takeIf { it.conversationId == saved.id && it.status == RunStatus.RUNNING }
                 draft = ""; selectionStart = 0; selectionEnd = 0
+                try { cascadeVoice.accepted(pending.ticket, result.assistant) }
+                catch (_: Exception) { stopCascadeVoice(); toast("级联未启动，聊天发送不受影响") }
                 val savedSelection = runCatching {
                     controller.preferences.edit().putString("selected", saved.id.value).commit()
                 }.getOrDefault(false)
@@ -2157,10 +2312,12 @@ class MainActivity : ComponentActivity() {
                 if (!savedSelection) toast("消息已保存；最后选中会话未保存")
             }
             is ChatController.TextSendResult.Rejected -> {
+                cascadeVoice.rejected(pending.ticket)
                 toast(controller.problem ?: "本次发送未受理；草稿保留")
                 publishChat()
             }
             is ChatController.TextSendResult.Unknown -> {
+                cascadeVoice.rejected(pending.ticket)
                 toast("发送保存结果未确认；草稿保留，不会自动重发")
                 publishChat()
             }
@@ -2297,6 +2454,7 @@ class MainActivity : ComponentActivity() {
         return result
     }
     private fun publishChat() {
+        cascadeVoice.update(controller.active, shown.map { it.second }, selected?.id?.value)
         syncHaptics()
         // Also catches new-chat -> persisted conversation after sending, without auto-playing.
         speechHost.syncConversation(selected?.id?.value)

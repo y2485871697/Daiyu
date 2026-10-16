@@ -11,10 +11,9 @@ object ModelFactory {
     fun create(snapshot: ProviderSnapshot): ModelPort {
         return when (snapshot.protocol) {
             ProviderProtocol.RESPONSES -> {
-                val settings = snapshot.asModelSettings()
-                ResponsesModel(settings)
+                ResponsesModel(snapshot)
             }
-            ProviderProtocol.MESSAGES -> MessagesModel(snapshot.asModelSettings())
+            ProviderProtocol.MESSAGES -> MessagesModel(snapshot)
             ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(snapshot.protocol.wireName)
         }
     }

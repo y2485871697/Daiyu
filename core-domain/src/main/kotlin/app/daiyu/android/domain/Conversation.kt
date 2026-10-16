@@ -6,6 +6,8 @@ data class ToolInvocation(val id: ToolCallId, val name: String, val arguments: S
 sealed interface MessageBlock {
     data class Text(val itemId: String, val text: String) : MessageBlock
     data class Tool(val invocation: ToolInvocation, val result: String? = null) : MessageBlock
+    /** Stable asset reference only; original bytes remain in the message asset store. */
+    data class Image(val reference: MessageImageReference) : MessageBlock
 }
 
 /** One ordered item in an assistant owner's persisted history. */
@@ -42,6 +44,7 @@ object MessageHistory {
      * output because the segment supplies its position in the owner's authoritative order.
      */
     fun expand(history: List<Message>): List<Message> {
+        history.forEach(MessageImages::validate)
         if (history.none { it.historySegments.isNotEmpty() }) return history
         val supplements = validatedSupplements(history)
 
@@ -66,9 +69,13 @@ object MessageHistory {
         }
     }
 
-    fun validate(history: List<Message>) { validatedSupplements(history) }
+    fun validate(history: List<Message>) {
+        history.forEach(MessageImages::validate)
+        validatedSupplements(history)
+    }
 
     fun validateOwner(owner: Message) {
+        MessageImages.validate(owner)
         if (owner.historySegments.isEmpty()) return
         identity(owner.id.value); identity(owner.conversationId.value); identity(owner.runId.value)
         require(owner.role == Message.ASSISTANT_ROLE)
@@ -83,9 +90,11 @@ object MessageHistory {
     fun validateSegment(segment: MessageHistorySegment) {
         identity(segment.messageId.value)
         require(segment.role == Message.USER_ROLE || segment.role == Message.ASSISTANT_ROLE)
+        MessageImages.validateSegment(segment)
         val calls = mutableSetOf<ToolCallId>()
         segment.blocks.forEach { block -> when (block) {
             is MessageBlock.Text -> identity(block.itemId)
+            is MessageBlock.Image -> Unit // Metadata and owner checked above.
             is MessageBlock.Tool -> {
                 require(segment.role == Message.ASSISTANT_ROLE)
                 identity(block.invocation.id.value); identity(block.invocation.name)

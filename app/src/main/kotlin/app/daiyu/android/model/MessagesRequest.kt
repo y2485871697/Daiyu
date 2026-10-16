@@ -150,9 +150,15 @@ internal object MessagesRequest {
         return messagesEndpoint(settings.endpoint)
     }
 
-    fun history(history: List<Message>): JSONArray {
+    fun history(history: List<Message>, images: app.daiyu.android.model.images.FrozenMessageImagePlan? = null): JSONArray {
         val messages = JSONArray()
-        MessageHistory.expand(history).forEach { message ->
+        val expanded = MessageHistory.expand(history)
+        app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImages(expanded)
+        expanded.forEachIndexed { messageIndex, message ->
+            require(message.role == "user" || message.blocks.none { it is MessageBlock.Image }) { "Images require user history" }
+            require(message.protocolItems.isEmpty() || message.blocks.none { it is MessageBlock.Image }) {
+                "Images cannot also replay protocolItems"
+            }
             // No system channel exists in ModelPort. Never silently discard privileged input.
             require(message.role == "user" || message.role == "assistant") {
                 "Messages supports only user and assistant history; system messages are unsupported"
@@ -166,17 +172,20 @@ internal object MessagesRequest {
                         .put("text", "$text\n\n[回复已中断]"))
                     messages.put(MessagesRequest.message("assistant", content))
                 }
-                return@forEach
+                return@forEachIndexed
             }
-            if (message.role == "assistant" && message.status != RunStatus.COMPLETED) return@forEach
+            if (message.role == "assistant" && message.status != RunStatus.COMPLETED) return@forEachIndexed
             if (message.protocolItems.isNotEmpty()) {
                 replayHistory(message).forEach { messages.put(it) }
             } else {
                 val content = JSONArray()
                 val results = JSONArray()
-                message.blocks.forEach { block ->
+                message.blocks.forEachIndexed { blockIndex, block ->
                     when (block) {
                         is MessageBlock.Text -> content.put(JSONObject().put("type", "text").put("text", block.text))
+                        is MessageBlock.Image -> content.put(requireNotNull(images) {
+                            "Images require a frozen plan"
+                        }.block(messageIndex, blockIndex))
                         is MessageBlock.Tool -> {
                             require(message.role == "assistant") { "Tool calls require assistant history" }
                             // Public core-domain properties cannot be smart-cast in the app module.

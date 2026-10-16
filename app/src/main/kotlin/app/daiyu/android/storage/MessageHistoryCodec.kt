@@ -62,6 +62,7 @@ object MessageHistoryCodec {
         fun field(value: String) { require(value.toByteArray(Charsets.UTF_8).size <= 4 * 1024 * 1024) }
         segment.blocks.forEach { block -> when (block) {
             is MessageBlock.Text -> field(block.text)
+            is MessageBlock.Image -> Unit // Immutable metadata was validated by core-domain.
             is MessageBlock.Tool -> { field(block.invocation.arguments); block.result?.let(::field) }
         } }
         segment.protocolItems.forEach { require(it.length <= 1_000_000); field(it) }
@@ -70,6 +71,7 @@ object MessageHistoryCodec {
     private fun encodeBlocks(blocks: List<MessageBlock>) = JSONArray().apply {
         blocks.forEach { block -> put(when (block) {
             is MessageBlock.Text -> JSONObject().put("type", "text").put("item", block.itemId).put("text", block.text)
+            is MessageBlock.Image -> MessageImageReferenceCodec.encodeBlock(block)
             is MessageBlock.Tool -> JSONObject().put("type", "tool").put("id", block.invocation.id.value)
                 .put("name", block.invocation.name).put("arguments", block.invocation.arguments)
                 .put("result", block.result ?: JSONObject.NULL)
@@ -79,6 +81,7 @@ object MessageHistoryCodec {
     private fun decodeBlocks(array: JSONArray): List<MessageBlock> = (0 until array.length()).map { index ->
         val block = array.getJSONObject(index)
         when (text(block, "type")) {
+            "image" -> MessageImageReferenceCodec.decodeBlock(block)
             "text" -> {
                 require(block.keys().asSequence().toSet() == setOf("type", "item", "text"))
                 MessageBlock.Text(text(block, "item"), text(block, "text"))
@@ -96,6 +99,7 @@ object MessageHistoryCodec {
         repeat(array.length()) { index ->
             val block = array.getJSONObject(index)
             when (text(block, "type")) {
+                "image" -> MessageImageReferenceCodec.decodeBlock(block)
                 "text" -> { require(block.keys().asSequence().toSet() == setOf("type", "item", "text")); text(block, "item"); text(block, "text") }
                 "tool" -> {
                     require(block.keys().asSequence().toSet() == setOf("type", "id", "name", "arguments", "result"))

@@ -54,7 +54,34 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.execSQL("CREATE TABLE IF NOT EXISTS conversation_folders(name TEXT PRIMARY KEY NOT NULL CHECK(length(name)>0 AND length(name)<=200))")
         db.execSQL("INSERT OR IGNORE INTO conversation_folders(name) SELECT DISTINCT folder FROM conversations WHERE folder<>''")
     }
-    fun draft():String=readableDatabase.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
+    fun draft():String {
+        val db=readableDatabase
+        db.beginTransaction()
+        try {
+            val result=composerDraft(db)
+            db.setTransactionSuccessful()
+            return result
+        } finally { db.endTransaction() }
+    }
+    private fun composerDraft(db: SQLiteDatabase): String {
+        // Same byte-based 64 KiB reads as SQLiteText; composer has no message-size ceiling.
+        // Reading a whole draft into a CursorWindow breaks unrelated sends in old chats.
+        val length=db.rawQuery("SELECT length(CAST(draft AS BLOB)) FROM composer WHERE id=1",null).use {
+            check(it.moveToFirst()) {"发送草稿不存在"}; it.getLong(0)
+        }
+        val bytes=java.io.ByteArrayOutputStream(); var start=1L
+        while(start<=length) {
+            val part=db.rawQuery("SELECT substr(CAST(draft AS BLOB),?,65536) FROM composer WHERE id=1",arrayOf(start.toString())).use {
+                check(it.moveToFirst()) {"发送草稿不存在"}; it.getBlob(0)
+            }
+            check(part.isNotEmpty() && bytes.size().toLong()+part.size<=length)
+            bytes.write(part); start+=part.size
+        }
+        check(bytes.size().toLong()==length)
+        return Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+            .decode(java.nio.ByteBuffer.wrap(bytes.toByteArray())).toString()
+    }
     fun draft(text:String) {check(writableDatabase.update("composer",ContentValues().apply {put("draft",text)},"id=1",null)==1)}
     fun recover() { SQLiteRuntimeStore.acquire(this).use { it.recoverPending() } }
     internal fun recoverUncheckpointed(db: SQLiteDatabase) {
@@ -71,10 +98,11 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         if(query.isEmpty()) return list
         val matches=mutableSetOf<String>()
         val candidates=list.map {it.id.value}.toSet()
-        readableDatabase.rawQuery("SELECT conversation_id,blocks FROM messages ORDER BY seq",null).use {c->while(c.moveToNext()) {
+        readableDatabase.rawQuery("SELECT conversation_id,id FROM messages ORDER BY seq",null).use {c->while(c.moveToNext()) {
             val id=c.getString(0)
-            if(id in candidates && id !in matches && decode(JSONArray(c.getString(1))).any {block->when(block) {
+            if(id in candidates && id !in matches && storedMessage(readableDatabase,ConversationId(id),c.getString(1)).blocks.any {block->when(block) {
                 is MessageBlock.Text->query in block.text
+                is MessageBlock.Image->false // References are not searchable text or local paths.
                 is MessageBlock.Tool->query in block.invocation.arguments || block.result?.contains(query)==true
             }}) matches.add(id)
         }}
@@ -109,7 +137,10 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         return Message(MessageId(messageId), conversation, RunId(metadata.first), metadata.second,
             decode(JSONArray(requireNotNull(text("blocks")))), RunStatus.valueOf(metadata.third), text("error"),
             jsonStrings(JSONArray(requireNotNull(text("protocol")))),
-            MessageHistoryCodec.decode(JSONArray(requireNotNull(text(historyColumn))))).also { MessageHistoryCodec.validate(it) }
+            MessageHistoryCodec.decode(JSONArray(requireNotNull(text(historyColumn))))).also {
+                MessageHistoryCodec.validate(it)
+                MessageImages.validate(it)
+            }
     }
     private fun validateRunHistory(db: SQLiteDatabase, id: ConversationId, run: RunId) {
         val ids = db.rawQuery("SELECT id FROM messages WHERE conversation_id=? AND run_id=? ORDER BY seq",
@@ -121,15 +152,34 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         require(user.role=="user" && user.status==RunStatus.COMPLETED && assistant.role=="assistant" && assistant.status==RunStatus.RUNNING)
         var conversation:Conversation?=null
         transaction { db ->
+            val expectedComposer=if(newConversation) "" else composerDraft(db)
+            var newConversationRowId:Long?=null
             if(newConversation) {
                 val value=Conversation(user.conversationId,"新会话","",System.currentTimeMillis())
-                db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt)})
+                newConversationRowId=db.insertOrThrow("conversations",null,ContentValues().apply {put("id",value.id.value);put("title",value.title);put("draft","");put("updated",value.updatedAt)})
+                check(newConversationRowId != -1L) {"新会话未持久化"}
                 check(db.update("composer",ContentValues().apply {put("draft","")},"id=1",null)==1)
             }
             check(db.update("conversations",ContentValues().apply {put("draft","");put("updated",System.currentTimeMillis())},"id=?",arrayOf(user.conversationId.value))==1) {"会话不存在"}
-            db.insertOrThrow("messages",null,values(user));db.insertOrThrow("messages",null,values(assistant))
+            // RAISE(IGNORE) can return -1 without throwing, even from insertOrThrow.
+            val userRowId=db.insertOrThrow("messages",null,values(user))
+            check(userRowId != -1L) {"用户消息未持久化"}
+            val assistantRowId=db.insertOrThrow("messages",null,values(assistant))
+            check(assistantRowId != -1L) {"运行消息未持久化"}
+            // Verify both receipts after all inserts, so trigger side effects cannot leave a half-run.
+            for((rowId,message) in listOf(userRowId to user,assistantRowId to assistant)) {
+                check(db.rawQuery("SELECT 1 FROM messages WHERE seq=? AND id=? AND conversation_id=? AND run_id=? AND role=? AND status=?",
+                    arrayOf(rowId.toString(),message.id.value,message.conversationId.value,message.runId.value,message.role,message.status.name)).use {it.moveToFirst()}) {"发送消息身份不匹配"}
+                // Reuse the chunked reader rather than putting large blocks in one CursorWindow.
+                check(storedMessage(db,message.conversationId,message.id.value)==message) {"发送消息内容不匹配"}
+            }
             validateRunHistory(db,user.conversationId,user.runId)
-            conversation=db.rawQuery("SELECT title,updated,folder,pinned FROM conversations WHERE id=?",arrayOf(user.conversationId.value)).use {it.moveToFirst();Conversation(user.conversationId,it.getString(0),"",it.getLong(1),it.getString(2),it.getInt(3)!=0)}
+            conversation=db.rawQuery("SELECT title,updated,folder,pinned,rowid,length(CAST(draft AS BLOB))=0 FROM conversations WHERE id=?",arrayOf(user.conversationId.value)).use {
+                check(it.moveToFirst() && (newConversationRowId==null || it.getLong(4)==newConversationRowId)) {"发送会话身份不匹配"}
+                check(it.getInt(5)==1) {"发送会话草稿未清空"}
+                Conversation(user.conversationId,it.getString(0),"",it.getLong(1),it.getString(2),it.getInt(3)!=0)
+            }
+            check(composerDraft(db)==expectedComposer) {"发送草稿不匹配"}
         }
         return checkNotNull(conversation)
     }
@@ -206,10 +256,11 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 val protocol=JSONArray(c.getString(7))
                 val value=JSONObject().put("id",c.getString(0)).put("conversation_id",c.getString(1)).put("run_id",c.getString(2)).put("role",c.getString(3)).put("blocks",blocks).put("status",c.getString(5)).put("error",c.getString(6) ?: JSONObject.NULL).put("protocol",protocol)
                 val rawSegments=c.getString(8)
-                if (JSONArray(rawSegments).length()!=0) {
-                    val segments=MessageHistoryCodec.decode(JSONArray(rawSegments))
-                    val projection=Message(MessageId(c.getString(0)),ConversationId(c.getString(1)),RunId(c.getString(2)),c.getString(3),decode(blocks),RunStatus.valueOf(c.getString(5)),c.getString(6),jsonStrings(protocol),historySegments=segments)
-                    MessageHistoryCodec.validate(projection)
+                val segments=MessageHistoryCodec.decode(JSONArray(rawSegments))
+                val projection=Message(MessageId(c.getString(0)),ConversationId(c.getString(1)),RunId(c.getString(2)),c.getString(3),decode(blocks),RunStatus.valueOf(c.getString(5)),c.getString(6),jsonStrings(protocol),historySegments=segments)
+                MessageHistoryCodec.validate(projection)
+                MessageImages.validate(projection)
+                if (segments.isNotEmpty()) {
                     segments.forEach { validateProtocol(JSONArray(it.protocolItems), it.blocks, it.role) }
                     value.put("history_segments", JSONArray(rawSegments))
                 }
@@ -250,6 +301,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             val protocol=m.getJSONArray("protocol")
             blocks.forEach {b->when(b) {
                 is MessageBlock.Text->identity(b.itemId)
+                is MessageBlock.Image->Unit // Strict wire fields checked by validateBlocks; owner below.
                 is MessageBlock.Tool->{require(role=="assistant");identity(b.invocation.id.value);identity(b.invocation.name)}
             }}
             require(blocks.filterIsInstance<MessageBlock.Tool>().map {it.invocation.id}.distinct().size==blocks.filterIsInstance<MessageBlock.Tool>().size)
@@ -265,6 +317,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 if(status==RunStatus.RUNNING) "导入时原运行未结束；未自动重发请求或工具" else originalError,jsonStrings(protocol),
                 historySegments = segments)
             MessageHistoryCodec.validate(restored)
+            MessageImages.validate(restored)
             restored
         }
         MessageHistory.validate(restored)
@@ -305,6 +358,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     private fun validateBlocks(array:JSONArray) {
         repeat(array.length()) {i->val block=array.getJSONObject(i)
             when(string(block,"type")) {
+                "image"->MessageImageReferenceCodec.decodeBlock(block)
                 "text"->{require(block.keys().asSequence().toSet()==setOf("type","item","text"));string(block,"item");string(block,"text")}
                 "tool"->{require(block.keys().asSequence().toSet()==setOf("type","id","name","arguments","result"));string(block,"id");string(block,"name");string(block,"arguments");if(!block.isNull("result")) string(block,"result")}
                 else->error("文本备份不支持此消息块")
@@ -372,6 +426,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     private fun backupDigest(value:String)=java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)).joinToString("") {"%02x".format(it.toInt() and 255)}
     private fun values(message:Message)=ContentValues().apply {
         MessageHistoryCodec.validate(message)
+        MessageImages.validate(message)
         put("id",message.id.value);put("conversation_id",message.conversationId.value);put("run_id",message.runId.value)
         put("role",message.role);put("blocks",encode(message.blocks).toString());put("status",message.status.name);put("error",message.error);put("protocol",JSONArray(message.protocolItems).toString())
         put(historyColumn, if (message.historySegments.isEmpty()) "[]" else MessageHistoryCodec.encode(message.historySegments).toString())
@@ -392,11 +447,13 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     }
     private fun jsonStrings(array:JSONArray) = (0 until array.length()).map {array.getString(it)}
     private fun encode(blocks:List<MessageBlock>)=JSONArray().apply { blocks.forEach { b -> put(when(b) {
+        is MessageBlock.Image -> MessageImageReferenceCodec.encodeBlock(b)
         is MessageBlock.Text -> JSONObject().put("type","text").put("item",b.itemId).put("text",b.text)
         is MessageBlock.Tool -> JSONObject().put("type","tool").put("id",b.invocation.id.value).put("name",b.invocation.name).put("arguments",b.invocation.arguments).put("result",b.result ?: JSONObject.NULL)
     }) } }
     private fun decode(array:JSONArray):List<MessageBlock> = (0 until array.length()).map { i -> val b=array.getJSONObject(i)
         when(b.getString("type")) {
+            "image" -> MessageImageReferenceCodec.decodeBlock(b)
             "text" -> MessageBlock.Text(b.getString("item"),b.getString("text"))
             "tool" -> MessageBlock.Tool(ToolInvocation(ToolCallId(b.getString("id")),b.getString("name"),b.getString("arguments")),if(b.isNull("result")) null else b.getString("result"))
             else -> error("无法识别的消息块，保留数据")

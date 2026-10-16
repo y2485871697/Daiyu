@@ -38,7 +38,12 @@ fun interface ModelPort {
     fun open(history: List<Message>): ModelSession
     fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = open(history)
     fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession = open(history)
+    /** Explicit platform-frozen image input; legacy transports must not silently drop it. */
+    fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
+        throw UnsupportedOperationException("This model does not accept frozen image input")
 }
+/** Opaque platform input, with no filesystem or permission API in the domain. */
+interface ModelImagePlan
 /** parameters is a JSON Schema supplied by the platform tool catalogue. */
 data class ToolDefinition(val name: String, val description: String, val parameters: String, val sideEffect: Boolean = false)
 fun interface BatteryTool { fun execute(invocation: ToolInvocation): String }

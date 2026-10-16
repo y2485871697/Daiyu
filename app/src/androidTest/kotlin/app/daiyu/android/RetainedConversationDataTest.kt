@@ -70,6 +70,36 @@ class RetainedConversationDataTest : android.test.AndroidTestCase() {
         val summary = data.summaries(null).single()
         assertFalse(summary.isActiveRun); assertFalse(summary.hasCompletionMarker)
     }
+    fun testMixedImageHistorySearchKeepsSegmentAndNavigationOwnerWithoutMetadataLeaks() {
+        val conversation = database.create(); val run = RunId("image-history-run")
+        val initial = Message(MessageId("initial-user"), conversation.id, run, Message.USER_ROLE,
+            listOf(MessageBlock.Text("initial", "start")), RunStatus.COMPLETED)
+        val assistant = initial.copy(id = MessageId("history-owner"), role = Message.ASSISTANT_ROLE,
+            blocks = emptyList(), status = RunStatus.RUNNING)
+        database.send(initial, assistant)
+        val imageOwner = MessageImageOwner(conversation.id.value, "historical-supplement")
+        val reference = MessageImageReference(imageOwner, "00000000-0000-0000-0000-000000000001",
+            "image/png", 12, "b".repeat(64), 2, 2)
+        database.save(assistant.copy(status = RunStatus.COMPLETED, historySegments = listOf(
+            MessageHistorySegment(assistant.id, Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("before", "before"))),
+            MessageHistorySegment(MessageId(imageOwner.messageId), Message.USER_ROLE, listOf(
+                MessageBlock.Text("needle", "historical needle"), MessageBlock.Image(reference),
+                MessageBlock.Text("after", "after image"))),
+            MessageHistorySegment(assistant.id, Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("final", "final"))),
+        )))
+        database.close(); database = ConversationDatabase(scoped)
+        data = RetainedConversationData(database, ContextService(scoped, database))
+        val hit = data.search("needle").single()
+        assertEquals(conversation.id.value, hit.conversationId)
+        assertEquals(imageOwner.messageId, hit.messageId)
+        assertEquals(assistant.id.value, hit.ownerMessageId)
+        assertTrue(hit.snippet.contains("after image"))
+        assertFalse(hit.snippet.contains(reference.id))
+        assertTrue(data.search(reference.id).isEmpty())
+        assertTrue(data.search(reference.sha256).isEmpty())
+        assertTrue(data.search(reference.mime).isEmpty())
+    }
+
     fun testStatsConsumesCommittedRunnerUsageReplacementReopenAndDeletion() {
         val conversation = database.create(); val run = RunId("usage-run")
         val user = Message(MessageId("usage-user"), conversation.id, run, "user", emptyList(), RunStatus.COMPLETED)

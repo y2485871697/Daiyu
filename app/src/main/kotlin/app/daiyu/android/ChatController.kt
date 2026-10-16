@@ -32,6 +32,11 @@ import app.daiyu.android.skills.SkillManagement
 import app.daiyu.android.model.catalog.ModelCatalogService
 import app.daiyu.android.model.catalog.RemoteModel
 import app.daiyu.android.model.ModelFactory
+import app.daiyu.android.model.ProviderSnapshot
+import app.daiyu.android.media.AndroidImageAttachments
+import app.daiyu.android.media.ImageAttachmentOwner
+import app.daiyu.android.media.MessageImageAssetStore
+import java.io.File
 import app.daiyu.android.storage.*
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -43,7 +48,8 @@ class ChatApplication:Application() {
 }
 class ChatController internal constructor(private val application:Application,
     val database:ConversationDatabase, val settings:ModelSettingsStore, val preferences:SharedPreferences,
-    private val model:(ModelSettings)->ModelPort) {
+    private val model:(ModelSettings)->ModelPort,
+    private val imageModel: (ProviderSnapshot)->ModelPort = { ModelFactory.create(it) }) {
     constructor(application:Application):this(application,ConversationDatabase(application),ModelSettingsStore(application),application.getSharedPreferences("conversation-ui",0),{ModelFactory.create(it)})
     private val executor=Executors.newSingleThreadExecutor()
     private val handler=Handler(Looper.getMainLooper())
@@ -52,6 +58,47 @@ class ChatController internal constructor(private val application:Application,
     private val listeners=mutableMapOf<()->Unit,Any>()
     private var closed=false
     private var preparing=false
+    private var pendingImage:ImageSendHandle?=null
+    // Use this app-scoped importer in the host, rather than creating another draft store instance.
+    internal val imageAttachments by lazy { AndroidImageAttachments(application.contentResolver,
+        app.daiyu.android.media.ImageAttachmentStore(File(application.filesDir,"media-draft-images"),
+            app.daiyu.android.media.AndroidImageInspector())) }
+    private val messageImageAssets by lazy { MessageImageAssetStore(File(application.filesDir,"media-message-images")) }
+    private val messageImages by lazy { ControllerMessageImages(database,messageImageAssets) }
+    private val imageJournal by lazy { application.getSharedPreferences("image-send-identities",0) }
+    private var imageProvider:ProviderSnapshot?=null
+    private var imageReaders=0
+
+    /** Worker-thread only. Preview gets read authority, never draft mutation or a raw URI. */
+    internal fun messageImageResolver(conversation:ConversationId):app.daiyu.android.media.MessageImageResolver {
+        val scoped=messageImages.resolver(conversation)
+        return object : app.daiyu.android.media.MessageImageResolver {
+            override fun read(owner:app.daiyu.android.media.MessageImageOwner,
+                reference:app.daiyu.android.media.MessageImageReference):ByteArray =
+                imageRead {scoped.read(owner,reference)}
+            override fun freeze(owner:app.daiyu.android.media.MessageImageOwner,
+                references:List<app.daiyu.android.media.MessageImageReference>, imageInputSupported:Boolean,
+                isCancelled:()->Boolean):List<app.daiyu.android.media.FrozenImageAttachment> =
+                imageRead {scoped.freeze(owner,references,imageInputSupported,isCancelled)}
+        }
+    }
+    private fun <T> imageRead(work:()->T):T {
+        check(Looper.myLooper()!=Looper.getMainLooper()) {"image_read_requires_worker"}
+        synchronized(this) {check(!closed && ready && !recoveryFailed);imageReaders++}
+        try {return work()} finally {synchronized(this) {
+            imageReaders--
+            if(closed) closeStorageWhenIdle()
+        }}
+    }
+
+    /** Host capability grant for this exact saved endpoint/protocol/model/configuration.
+     * Unknown/false is deliberately not upgraded based on a model name. */
+    internal fun authorizeImageProvider(provider:ProviderSnapshot):Boolean {
+        val matches=try { provider.asModelSettings()==settings.load() } catch (_:Exception) { false }
+        return synchronized(this) {
+            if(!idleAvailable() || !matches) false else { imageProvider=provider; true }
+        }
+    }
     private var recoveryFailed=false
     private var runtimeStore:SQLiteRuntimeStore?=null
     private var childSupervisor:app.daiyu.android.domain.delegation.RetainedChildTasks?=null
@@ -114,7 +161,10 @@ class ChatController internal constructor(private val application:Application,
     private val childPreferences by lazy { ConversationSubAgentPreferences(application.getSharedPreferences("subagent_configuration", 0)) }
     private fun conversationExists(id: ConversationId): Boolean = database.readableDatabase.rawQuery(
         "SELECT 1 FROM conversations WHERE id=?", arrayOf(id.value)).use { it.moveToFirst() }
-    private val childBindings = SavedSubAgentRuntimeBindings(settings::load) { model(it.asModelSettings()) }
+    private val childBindings = SavedSubAgentRuntimeBindings(settings::load) {
+        val config=it.asModelSettings()
+        messageImages.wrap(model(config), ProviderSnapshot.capture(config))
+    }
     @Synchronized internal fun bindChildSavedModel(conversationId: ConversationId, profileId: String,
         expectedApiModel: String, provider: SubAgentProvider): Boolean {
         childBindings.revoke(SubAgentConfigKey.Conversation(conversationId.value), profileId)
@@ -161,9 +211,11 @@ class ChatController internal constructor(private val application:Application,
             if(closed) closeStorageWhenIdle() else notifyChanged()
         }}
     }
-    @Synchronized internal fun sendWithChildren(conversation: Conversation, text: String): Conversation? {
-        if (!idleAvailable() || text.isBlank()) return null
-        preparing = true
+    internal fun sendWithChildren(conversation: Conversation, text: String): Conversation? {
+        synchronized(this) {
+            if (!idleAvailable() || text.isBlank()) return null
+            preparing = true
+        }
         return try {
             val models = try {
                 require(conversationExists(conversation.id))
@@ -173,7 +225,7 @@ class ChatController internal constructor(private val application:Application,
                 problem = "子模型配置未绑定、已变更或不支持；草稿保留，未切换到主模型"; notifyChanged(); return null
             }
             sendPrepared(conversation, text, models)
-        } finally { preparing = false }
+        } finally { finishPreparation() }
     }
     @Synchronized internal fun childTasks(conversationId: ConversationId, limit: Int = 20): List<ChildTaskRecord> {
         check(!closed && ready && !recoveryFailed) { "child_tasks_unavailable" }
@@ -243,29 +295,93 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     private fun notifyChanged() {handler.post {dispatchChanged()} }
-    @Synchronized fun send(conversation:Conversation?,text:String):Conversation? {
-        if(!idleAvailable() || text.isBlank()) return null
-        // Reserve before settings/history reads (also protects against reentrant entry).
-        preparing=true
-        return try {sendPrepared(conversation,text)} finally {preparing=false}
+    fun send(conversation:Conversation?,text:String):Conversation? {
+        synchronized(this) {
+            if(!idleAvailable() || text.isBlank()) return null
+            // Reserve before I/O, but never keep the monitor across I/O or model factories.
+            preparing=true
+        }
+        return try {sendPrepared(conversation,text)} finally {finishPreparation()}
     }
-    private fun sendPrepared(conversation:Conversation?,text:String, childModels:Map<String,ChildModelDefinition> = emptyMap()):Conversation? {
+    private fun finishPreparation() = synchronized(this) {
+        preparing=false
+        pendingImage=null
+        if(closed) closeStorageWhenIdle() else notifyChanged()
+    }
+    /** Queue acceptance, NOT a receipt. complete always carries the exact owner + revision.
+     * The host must retain/freeze that editor revision until completion and remove ONLY the
+     * Accepted.images after comparing owner/revision. No callback here deletes a draft.
+     * provider must be an explicit host capability snapshot matching the saved configuration.
+     * expectedDraftText is the exact persisted composer/conversation text at this revision;
+     * it is compared atomically before accepting, never inferred from image labels or URIs.
+     * Null means busy/closed/invalid input, no task and no callback. Cancellation is via handle.
+     */
+    internal fun sendImages(conversation:Conversation?, owner:ImageAttachmentOwner, draftRevision:Long,
+        parts:List<ImageSendPart>, provider:ProviderSnapshot, expectedDraftText:String,
+        complete:(ImageSendResult)->Unit):ImageSendHandle? {
+        val handle=ImageSendHandle(owner,draftRevision)
+        val snapshot=parts.toList()
+        synchronized(this) {
+            if(!idleAvailable() || draftRevision<0 || snapshot.none {it is ImageSendPart.Image} ||
+                conversation!=null && conversation.id.value!=owner.conversationId) return null
+            preparing=true;pendingImage=handle
+        }
+        try { executor.execute {
+            var attempt:ControllerImageAttempt?=null
+            val result=try {
+                attempt=ControllerImageAttempt(owner,draftRevision,snapshot,provider,handle,imageJournal,expectedDraftText)
+                val replay=try {attempt.reserve(database)} catch (_:Exception) {attempt.unknown()}
+                if(replay!=null) replay else {
+                    sendPrepared(conversation,"",imageAttempt=attempt)
+                    attempt.result ?: attempt.rejected("发送准备被拒绝；草稿保留，未发起请求")
+                }
+            } catch (_:Exception) {
+                attempt?.result ?: attempt?.rejected("图片发送失败；草稿保留，未自动重发")
+                    ?: ImageSendResult.Rejected(owner,draftRevision,"图片身份或存储无效；草稿保留")
+            }
+            finishPreparation()
+            // A receipt belongs to the submitted revision, not whichever editor is visible now.
+            handler.post {try {complete(result)} catch (_:Exception) {}}
+        } } catch (_:java.util.concurrent.RejectedExecutionException) {
+            finishPreparation();return null
+        }
+        return handle
+    }
+    private fun sendPrepared(conversation:Conversation?,text:String,
+        childModels:Map<String,ChildModelDefinition> = emptyMap(), imageAttempt:ControllerImageAttempt?=null):Conversation? {
         val config=try {settings.load().also {it.validate()}} catch (_:CredentialUnavailableException) {
             problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
         } catch (_:Exception) {problem="请在模型设置里配置Responses地址、模型与密钥";notifyChanged();return null}
-        val conversationId=conversation?.id ?: ConversationId(UUID.randomUUID().toString())
-        val run=RunId(UUID.randomUUID().toString())
-        val user=Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
-        val assistant=Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
+        val provider=try {
+            val selected=imageAttempt?.provider ?: synchronized(this) {imageProvider}
+            if(imageAttempt!=null) require(selected?.asModelSettings()==config) {"stale_image_provider"}
+            selected?.takeIf {it.asModelSettings()==config} ?: ProviderSnapshot.capture(config)
+        } catch (_:Exception) {problem="图片模型配置已变化；草稿保留，未发起网络请求";notifyChanged();return null}
+        val conversationId=conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
+            ?: ConversationId(UUID.randomUUID().toString())
+        val run=imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
+        val user=try {imageAttempt?.prepare(imageAttachments.store,messageImageAssets) ?:
+            Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
+        } catch (_:Exception) {problem="图片冻结失败或模型不支持；草稿保留，未发起网络请求";notifyChanged();return null}
+        val assistant=Message(imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
         val contextService = ContextService(application, database)
         val preparedContext = try {
-            if (conversation == null) null else contextService.prepareSend(conversationId)
+            if (conversation == null) null else contextService.prepareSend(conversationId,
+                pendingMessages=listOf(user), cancelled={ imageAttempt?.handle?.isCancelled()==true })
         } catch (_: Exception) {
             problem="读取历史失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
         val prior = preparedContext?.messages.orEmpty()
-        val preparedModel=try {model(config)} catch (_:Exception) {
-            problem="模型初始化失败；草稿保留，未发起网络请求";notifyChanged();return null
+        val preparedModel=try {
+            // Preflight the complete expanded history BEFORE DB acceptance or any model open.
+            // Later opens re-authorize against persisted rows; candidate authorization ends here.
+            val plan=messageImages.freeze(prior+user,provider,user) {
+                imageAttempt?.handle?.isCancelled()==true || synchronized(this) {closed}
+            }
+            val delegate=if(plan.hasImages) imageModel(provider) else model(config)
+            messageImages.wrap(delegate,provider,conversationId)
+        } catch (_:Exception) {
+            problem="图片历史读取、能力检查或模型初始化失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
         var preparingTools: RunCatalogTools? = null
         var preparingDevices: RunDeviceResources? = null
@@ -315,16 +431,48 @@ class ChatController internal constructor(private val application:Application,
             problem="运行准备失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
         val (owned, tools) = prepared
-        if (closed) { tools.close(); return null }
+        val mayCommit=synchronized(this) {
+            !closed && (imageAttempt==null || imageAttempt.beginCommit())
+        }
+        if (!mayCommit) { tools.close(); return null }
         val saved=try {
-            database.send(user,assistant,conversation==null)
-        } catch (_:Exception) {tools.close();problem="发送内容保存失败；草稿保留，未发起网络请求";notifyChanged();return null}
-        problem=null;active=assistant
-        runner=owned;runTools=tools
+            if(imageAttempt==null) database.send(user,assistant,conversation==null)
+            else app.daiyu.android.context.DatabaseTransactions { database.writableDatabase }.run { db ->
+                // The text CAS and both message rows share one outer SQLite transaction.
+                // Do not clear a newer persisted editor draft while images are being frozen.
+                val sameDraft=if(conversation==null) db.rawQuery(
+                    "SELECT 1 FROM composer WHERE id=1 AND draft=?", arrayOf(imageAttempt.expectedDraftText)
+                ).use {it.moveToFirst()} else db.rawQuery(
+                    "SELECT 1 FROM conversations WHERE id=? AND draft=?",
+                    arrayOf(conversationId.value,imageAttempt.expectedDraftText)
+                ).use {it.moveToFirst()}
+                if(!sameDraft) throw ImageDraftChangedException()
+                database.send(user,assistant,conversation==null)
+            }
+        } catch (failure:Exception) {
+            if(failure is ImageDraftChangedException) imageAttempt?.draftChanged() else imageAttempt?.unknown()
+            tools.close();problem=if(failure is ImageDraftChangedException) "编辑草稿已变化；保留当前草稿，未发起请求"
+                else "发送保存结果未确认；保留草稿和图片，不自动重发"
+            notifyChanged();return null
+        }
+        // database.send returns only after its real two-row transaction receipt succeeds.
+        imageAttempt?.accepted(saved)
         val lifetime=RunResources(assistant,owned,tools)
-        resources=lifetime
-        enqueueSlice(lifetime,allowStopped=true) {owned.startSlice(assistant,prior+user)}
-        notifyChanged();return saved
+        val installed=synchronized(this) {
+            if(closed) false else {
+                if(imageAttempt!=null) imageProvider=provider
+                problem=null;active=assistant
+                runner=owned;runTools=tools;resources=lifetime
+                enqueueSlice(lifetime,allowStopped=true) {owned.startSlice(assistant,prior+user)}
+                notifyChanged();true
+            }
+        }
+        if(!installed) {
+            // close won AFTER acceptance: receipt still wins, but no provider request is opened.
+            tools.close()
+            try {database.save(assistant.copy(status=RunStatus.INTERRUPTED))} catch (_:Exception) { }
+        }
+        return saved
     }
     private fun enqueueSlice(lifetime:RunResources,allowStopped:Boolean=false,work:()->RunSlice) {
         check(!lifetime.busy)
@@ -478,7 +626,7 @@ class ChatController internal constructor(private val application:Application,
     }==true
     private fun closeStorageWhenIdle() {
         pruneBackgroundRuns()
-        if(resources!=null || closingStorage) return
+        if(resources!=null || preparing || imageReaders!=0 || closingStorage) return
         if(!childrenClosed) {
             if(!childrenClosing) {
                 childrenClosing=true
@@ -504,7 +652,7 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     internal fun skillManagement():SkillManagement = SkillManagement.create {SkillToolRegistry(application)}
-    private val neutralBackup by lazy { NeutralBackupService(application, database) }
+    private val neutralBackup by lazy { NeutralBackupService(application, database, app.daiyu.android.backup.MessageImageBackupAssets(messageImageAssets)) }
     internal class ConfigurationRestorePreview internal constructor(
         val plan:NonSecretRestorePlan, internal val metadata:String
     )
@@ -677,6 +825,7 @@ class ChatController internal constructor(private val application:Application,
         val lifetime=synchronized(this) {
             if(!closed) {
                 closed=true;ready=false;dataBusy=false;active=null
+                pendingImage?.cancel();imageProvider=null
                 configurationRestorePreview=null;dataNotice=null;listeners.clear();childBindings.clear()
             }
             resources?.also {it.fenced=true}

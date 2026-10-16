@@ -49,6 +49,7 @@ class MessageHistoryTest {
                 when (block) {
                     is MessageBlock.Text -> block.text
                     is MessageBlock.Tool -> block.result
+                    is MessageBlock.Image -> error("Text/tool fixture unexpectedly contains an image")
                 }
             }
         })

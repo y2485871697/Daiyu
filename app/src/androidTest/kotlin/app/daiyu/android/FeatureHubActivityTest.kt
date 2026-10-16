@@ -120,6 +120,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
                     }
                 }
             }
+            ui.waitForIdle()
             assertTrue("Top bar draw: $style enabled=$enabled", drawn.await(5, TimeUnit.SECONDS))
             val expected = enabled && android.os.Build.VERSION.SDK_INT >= 33; val actual = checkNotNull(observation.get())
             assertEquals(expected, actual.first); assertEquals(!expected, actual.second); assertEquals(!expected, actual.third)
@@ -127,6 +128,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     }
     fun testOriginalSidebarOpensOverChatAndBackDoesNotLoseOrSendDraft() {
         setDraft("抽屉草稿"); ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        ui.waitForIdle()
         mainThread {
             val sidebar = MainActivity::class.java.getDeclaredField("sidebarVisible\$delegate").apply { isAccessible = true }.get(activity) as androidx.compose.runtime.State<*>
             assertEquals(true, sidebar.value)

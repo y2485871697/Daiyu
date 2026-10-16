@@ -5,6 +5,7 @@ import android.os.Bundle
 import androidx.test.platform.app.InstrumentationRegistry
 import android.test.InstrumentationTestCase
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.AnnotatedString
@@ -38,8 +39,13 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
     protected fun editModel(label: String, text: String) { reveal("settings-field:$label").performTextReplacement(text) }
     protected fun modelField(label: String) = reveal("settings-field:$label")
-    protected fun SemanticsNodeInteraction.assertEditableText(text: String): SemanticsNodeInteraction =
-        assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(text)))
+    protected fun SemanticsNodeInteraction.assertEditableText(text: String): SemanticsNodeInteraction {
+        val expected = AnnotatedString(text)
+        ui.waitUntil(timeoutMillis = 5_000) {
+            fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText) == expected
+        }
+        return assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, expected))
+    }
     protected fun saveModel() { reveal("model-save").performClick() }
     protected fun openModels() { node("chat-model").performClick() }
     protected fun menu(label: String) {
@@ -47,7 +53,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         ui.onNodeWithText(label).performScrollTo().performClick()
     }
     protected fun setDraft(text: String) { node("chat-draft").performTextReplacement(text) }
-    protected fun assertDraft(text: String) { node("chat-draft").assertTextEquals(text) }
+    protected fun assertDraft(text: String) { node("chat-draft").assertEditableText(text).assertTextEquals(text) }
     protected fun setSelection(start: Int, end: Int) {
         node("chat-draft").performSemanticsAction(SemanticsActions.SetSelection) { it(start, end, false) }
     }

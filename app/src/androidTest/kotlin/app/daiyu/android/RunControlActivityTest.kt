@@ -31,7 +31,7 @@ class RunControlActivityTest : WiredActivityTestCase() {
         assertEquals(2, fixture.opens.get()); assertEquals(2, fixture.database.messages(owner.conversationId).size)
     }
     fun testOtherConversationCannotControlOwnerAndLongClickStopsWithoutPause() {
-        val session = fixture.session(); val owner = send(); assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+        val session = fixture.session(holdSeconds = 120); val owner = send(); assertTrue(session.entered.await(5, TimeUnit.SECONDS))
         val ownedConversation = fixture.database.conversations().single(); val other = fixture.database.create()
         val staleTap = retainedClick(activity, "chat-control")
         val staleLong = retainedControls(activity).onPrimaryLongPress
@@ -39,10 +39,20 @@ class RunControlActivityTest : WiredActivityTestCase() {
         mainThread { staleTap(); staleLong() }
         assertFalse(fixture.controller.runState(owner)!!.pauseRequested); assertEquals(1L, session.cancelled.count)
         mainThread { activity.select(ownedConversation) }; setDraft("owner draft")
+        mainThread {
+            val active = checkNotNull(fixture.controller.active)
+            assertEquals(owner.id, active.id); assertEquals(owner.runId, active.runId)
+            assertEquals(owner.conversationId, active.conversationId)
+            assertEquals(RunStatus.RUNNING, active.status)
+            assertFalse(checkNotNull(fixture.controller.runState(owner)).pauseRequested)
+            assertEquals(1L, session.cancelled.count)
+        }
         node("chat-control").performTouchInput { longClick() }
+        assertTrue("long press cancels owner session", session.cancelled.await(5, TimeUnit.SECONDS))
         awaitControl("long gesture stops without short pause") { fixture.controller.active == null }
         val saved = fixture.database.messages(owner.conversationId).last().second
         assertEquals(RunStatus.STOPPED, saved.status); assertEquals(1, fixture.opens.get())
+        assertEquals(0L, session.cancelled.count)
         assertDraft("owner draft"); node("chat-control").assertDoesNotExist()
         assertEquals("other draft", fixture.database.conversations().single { it.id == other.id }.draft)
     }

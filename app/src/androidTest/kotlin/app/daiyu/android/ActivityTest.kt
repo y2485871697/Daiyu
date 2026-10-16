@@ -94,7 +94,13 @@ class ActivityTest : WiredActivityTestCase() {
         val a = fixture.database.create(); val b = fixture.database.create()
         mainThread { activity.select(a) }; setDraft("A草稿"); setSelection(1, 2)
         mainThread { activity.select(b) }; setDraft(" B草稿\n "); setSelection(0, 1)
-        menu("新建会话"); assertDraft(unattached); assertSelection(2, 4)
+        menu("新建会话"); ui.waitForIdle()
+        mainThread {
+            assertNull("new-chat menu must select the unattached slot", fixture.controller.preferences.getString("selected", null))
+            assertEquals("unattached slot survives the menu action", unattached, fixture.database.draft())
+            assertEquals("previous slot survives the menu action", " B草稿\n ", fixture.database.conversations().single { it.id == b.id }.draft)
+        }
+        assertDraft(unattached); assertSelection(2, 4)
         mainThread { activity.select(a) }; assertDraft("A草稿"); assertSelection(1, 2)
         fixture.settings.save(original)
         val session = fixture.session("A回复")

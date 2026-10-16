@@ -1,5 +1,8 @@
 package app.daiyu.android
 
+import android.app.Activity
+import android.app.Application
+import android.os.Bundle
 import android.os.Looper
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
@@ -12,7 +15,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 /** Real MainActivity -> sendText -> preparation -> SQLite receipt -> Activity callback.
- * Only model initialization is gated; neither sendText nor its result is replaced by a fake.
+ * Model initialization and (where stated) real main-message delivery are gated;
+ * neither sendText nor its result/callback is replaced by a fake.
  */
 class TextSendActivityTest : WiredActivityTestCase() {
     private val preparing = CountDownLatch(1)
@@ -202,11 +206,147 @@ class TextSendActivityTest : WiredActivityTestCase() {
         assertEquals(2, fixture.database.conversations().size)
     }
 
-    fun testReplacementFreezesRetainedPendingUntilLateAcceptedResult() = restoreAcceptedReceipt(beforeCompletion = true)
+    fun testUiSendCommittedReceiptSurvivesRecreationBeforeDelivery() =
+        destroyAfterUiSendCommit(recreate = true)
 
-    fun testRetainedAcceptedReceiptDoesNotResurrectDraftOnRecreation() = restoreAcceptedReceipt(beforeCompletion = false)
+    fun testUiSendCommittedReceiptSurvivesFinishAndRestartBeforeDelivery() =
+        destroyAfterUiSendCommit(recreate = false)
 
-    private fun restoreAcceptedReceipt(beforeCompletion: Boolean) {
+    private fun pendingSend(host: MainActivity): Any? = MainActivity::class.java.declaredMethods
+        .single { it.name == "getPendingTextSend" && it.parameterCount == 0 }
+        .apply { isAccessible = true }.invoke(host)
+
+    private class DestructionReceiptProbe(private val target: MainActivity,
+        private val controller: ChatController) : Application.ActivityLifecycleCallbacks {
+        val destroyed = CountDownLatch(1)
+        var state: ChatController.TextSendState? = null
+            private set
+        override fun onActivityDestroyed(activity: Activity) {
+            if (activity === target) {
+                // Application callback runs from super.onDestroy, AFTER Main's cancellation.
+                state = controller.textSendState()
+                destroyed.countDown()
+            }
+        }
+        override fun onActivityCreated(activity: Activity, state: Bundle?) {}
+        override fun onActivityStarted(activity: Activity) {}
+        override fun onActivityResumed(activity: Activity) {}
+        override fun onActivityPaused(activity: Activity) {}
+        override fun onActivityStopped(activity: Activity) {}
+        override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) {}
+    }
+
+    private fun destroyAfterUiSendCommit(recreate: Boolean) {
+        val source = fixture.database.create()
+        val text = "  UI 实际发送的精确原文\n末尾  "
+        val newer = "  重建后新草稿\n不能被旧 callback 清除  "
+        val session = fixture.session(holdSeconds = 120)
+        mainThread { activity.select(source) }
+        setDraft(text); setSelection(2, 5)
+        val oldActivity = activity
+        val oldEditor = retainedControls(oldActivity)
+        val destruction = DestructionReceiptProbe(oldActivity, fixture.controller)
+
+        // Admission MUST originate in the attached chat-send semantics, never in sendText.
+        node("chat-send").performClick()
+        awaitPreparing()
+        lateinit var submission: ChatController.TextSendState
+        lateinit var oldPending: Any
+        lateinit var delivery: TextSendDeliveryGate
+        mainThread {
+            submission = checkNotNull(fixture.controller.textSendState())
+            assertNull(submission.result)
+            assertEquals(text, submission.text)
+            assertEquals(source.id, submission.owner.conversationId)
+            oldPending = checkNotNull(pendingSend(oldActivity))
+            val ticket = oldPending.javaClass.getDeclaredField("ticket").apply { isAccessible = true }.get(oldPending)
+            assertSame("retain the ticket created by the real UI", submission.ticket, ticket)
+            delivery = TextSendDeliveryGate(fixture.controller)
+            delivery.hold()
+            oldActivity.application.registerActivityLifecycleCallbacks(destruction)
+        }
+        try {
+            releasePreparation.countDown()
+            // The same single-thread executor posts the result BEFORE starting this session.
+            // Thus this latch proves both the real commit and the old callback's enqueue attempt.
+            assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+            lateinit var receipt: ChatController.TextSendResult.Accepted
+            mainThread {
+                val committed = checkNotNull(fixture.controller.textSendState())
+                assertSame(submission.ticket, committed.ticket)
+                assertEquals(submission.owner, committed.owner)
+                receipt = committed.result as ChatController.TextSendResult.Accepted
+                assertEquals(submission.owner, receipt.owner)
+                assertEquals(source.id, receipt.conversation.id)
+                assertSame("old UI has not consumed the committed receipt", oldPending, pendingSend(oldActivity))
+                assertTrue("real controller notifications/callback are deferred", delivery.heldCount > 0)
+            }
+            assertUserText(source.id, text)
+            assertEquals("", fixture.database.conversations().single().draft)
+            assertDraft(text); assertSelection(2, 5)
+            node("chat-draft").assertIsNotEnabled()
+
+            // Framework onDestroy runs while the SAME committed ticket is still UI-pending;
+            // its cancelTextSend must not downgrade or lose Accepted.
+            if (recreate) activity = recreateActivity(oldActivity)
+            else {
+                mainThread { oldActivity.finish() }
+                ui.waitUntil(5_000) { oldActivity.isDestroyed }
+                mainThread {
+                    val retained = checkNotNull(fixture.controller.textSendState())
+                    assertSame(submission.ticket, retained.ticket)
+                    assertSame(receipt, retained.result)
+                }
+                activity = startMain()
+            }
+            assertTrue(oldActivity.isDestroyed)
+            assertTrue("observe real framework destruction", destruction.destroyed.await(5, TimeUnit.SECONDS))
+            val atDestruction = checkNotNull(destruction.state)
+            assertSame("onDestroy must keep the UI-created ticket", submission.ticket, atDestruction.ticket)
+            assertSame("onDestroy cancellation must preserve Accepted", receipt, atDestruction.result)
+            awaitTextSendResult(activity) // synchronous replacement refresh adopts the real receipt
+            assertDraft(""); assertSelection(0, 0)
+            node("chat-draft").assertIsEnabled()
+            assertEquals("", fixture.database.conversations().single().draft)
+            assertEquals(source.id.value, fixture.controller.preferences.getString("selected", null))
+            mainThread { assertSame(oldPending, pendingSend(oldActivity)) }
+
+            // Queue still closed: install a new revision BEFORE delivering the original callback.
+            setDraft(newer); setSelection(1, 4)
+            val held = delivery.heldCount
+            mainThread { assertEquals(held, delivery.release()) }
+            assertEquals("all real deferred messages have now run on main", held, delivery.deliveredCount)
+            mainThread {
+                assertSame("destroyed callback must remain inert", oldPending, pendingSend(oldActivity))
+                assertNull(pendingSend(activity))
+                assertNull(fixture.controller.textSendState())
+                oldEditor.onTextChange(text); oldEditor.onSend(text)
+            }
+            assertDraft(newer); assertSelection(1, 4)
+            assertEquals(newer, fixture.database.conversations().single().draft)
+            assertUserText(source.id, text)
+            finish(session)
+            activity = recreateActivity(activity)
+            assertDraft(newer); assertSelection(1, 4)
+            assertEquals(newer, fixture.database.conversations().single().draft)
+            assertUserText(source.id, text)
+        } finally {
+            mainThread {
+                oldActivity.application.unregisterActivityLifecycleCallbacks(destruction)
+                delivery.close()
+            }
+        }
+    }
+
+    // These two tests intentionally seed sendText with NO Activity. They cover retained-state
+    // adoption only, unlike the real chat-send / post-commit destruction cases above.
+    fun testRetainedControllerTicketAdoptionFreezesReplacementUntilAccepted() =
+        adoptRetainedControllerReceipt(beforeCompletion = true)
+
+    fun testRetainedControllerAcceptedReceiptAdoptionDoesNotResurrectDraft() =
+        adoptRetainedControllerReceipt(beforeCompletion = false)
+
+    private fun adoptRetainedControllerReceipt(beforeCompletion: Boolean) {
         val source = fixture.database.create()
         val text = "  已提交的精确草稿\n  "
         mainThread { activity.select(source) }
@@ -222,8 +362,8 @@ class TextSendActivityTest : WiredActivityTestCase() {
         }
         ui.waitUntil(5_000) { oldActivity.isDestroyed }
 
-        // Seed a REAL retained ticket while there is no Activity. Reattach either side of
-        // the DB receipt to cover pending takeover AND the post-commit/pre-UI boundary.
+        // Seed a REAL retained controller ticket while there is no Activity. Reattach
+        // either side of its DB receipt to cover adoption only, NOT a UI-originated send.
         val ticket = ChatController.TextSendTicket()
         val result = AtomicReference<ChatController.TextSendResult>()
         val completed = CountDownLatch(1)

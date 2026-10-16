@@ -48,6 +48,10 @@ internal class SpeechPlaybackController(
     private var backend: SpeechBackend? = null
     private var ready = false
     private var closed = false
+    // Sticky across backend replacement: losing the reference is not proof of resource release.
+    private var backendReleaseFailed = false
+    private var backendDisposals = 0
+    private var backendCreations = 0
     private var engineGeneration = 0L
     private var requestGeneration = 0L
     private var commandGeneration = 0L
@@ -102,12 +106,26 @@ internal class SpeechPlaybackController(
         return true
     }
 
+    /** Best-effort lifecycle cleanup. CLOSED fences playback; it does not certify release. */
     fun close() {
         if (closed) return
         closed = true
         invalidateRequest()
         releaseBackend()
         publish(SpeechPhase.CLOSED)
+    }
+
+    /**
+     * Ownership may only be surrendered after confirmed disposal. Keep close() lenient for UI
+     * lifecycle callers, but never turn an earlier failed disposal into a successful strict close.
+     * Reentrant close during stop/shutdown cannot certify the still-running outer disposal either.
+     * Release failures use a fixed diagnostic rather than engine exception text.
+     */
+    fun closeStrict() {
+        close()
+        check(!backendReleaseFailed && backendDisposals == 0 && backendCreations == 0) {
+            "speech_release_failed"
+        }
     }
 
     private fun owns(expectedOwner: String) = !closed && owner != null && owner == expectedOwner
@@ -122,20 +140,26 @@ internal class SpeechPlaybackController(
         publish(SpeechPhase.INITIALIZING, pending?.id)
         // In particular, stop/close/bindOwner from INITIALIZING must not create an engine.
         if (!creationIsCurrent()) return
-        val instance = try { backendFactory() } catch (_: Exception) {
-            if (creationIsCurrent()) {
-                val id = pending?.id
-                pending = null
-                fail(SpeechError.ENGINE_UNAVAILABLE, id)
+        val instance: SpeechBackend
+        ++backendCreations
+        try {
+            instance = try { backendFactory() } catch (_: Exception) {
+                if (creationIsCurrent()) {
+                    val id = pending?.id
+                    pending = null
+                    fail(SpeechError.ENGINE_UNAVAILABLE, id)
+                }
+                return
             }
-            return
+            // A factory can reenter too. An engine not yet assigned is still our resource to release.
+            if (!creationIsCurrent()) {
+                disposeBackend(instance)
+                return
+            }
+            backend = instance
+        } finally {
+            --backendCreations
         }
-        // A factory can reenter too. An engine not yet assigned is still our resource to release.
-        if (!creationIsCurrent()) {
-            disposeBackend(instance)
-            return
-        }
-        backend = instance
         var awaitingInitialization = true
         try {
             instance.initialize(
@@ -246,8 +270,15 @@ internal class SpeechPlaybackController(
     }
 
     private fun disposeBackend(instance: SpeechBackend) {
-        try { instance.stop() } catch (_: Exception) { /* shutdown still required */ }
-        try { instance.shutdown() } catch (_: Exception) { /* never expose engine exception text */ }
+        ++backendDisposals
+        try {
+            val stopped = try { instance.stop() } catch (_: Exception) { false }
+            if (!stopped) backendReleaseFailed = true
+        } finally {
+            // Also attempt shutdown if stop throws, and detach/fence before either callback can reenter.
+            try { instance.shutdown() } catch (_: Exception) { backendReleaseFailed = true }
+            finally { --backendDisposals }
+        }
     }
 
     private fun fail(error: SpeechError, requestId: String?, code: Int? = null) {

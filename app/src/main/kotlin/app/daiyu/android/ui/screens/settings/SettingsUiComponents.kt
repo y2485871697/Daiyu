@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -12,10 +13,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
@@ -27,6 +31,8 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -40,20 +46,27 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun SettingsSectionTitle(title: String) {
     Text(
         text = title,
-        style = MiuixTheme.textStyles.body2,
+        style = MiuixTheme.textStyles.body2.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium),
         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 8.dp),
+        modifier = Modifier.padding(start = 26.dp, end = 26.dp, top = 24.dp, bottom = 10.dp),
     )
 }
 
 @Composable
 internal fun SettingsCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        modifier = modifier.padding(horizontal = 12.dp).fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MiuixTheme.colorScheme.surfaceContainerHigh),
+        modifier = modifier.padding(horizontal = 20.dp).fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp))
+            .background(MiuixTheme.colorScheme.surface)
+            .border(0.5.dp, MiuixTheme.colorScheme.outline, RoundedCornerShape(22.dp)),
         content = content,
     )
+}
+
+@Composable
+internal fun SettingsDivider() {
+    HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp), thickness = 0.5.dp,
+        color = MiuixTheme.colorScheme.dividerLine)
 }
 
 @Composable
@@ -63,11 +76,13 @@ internal fun SettingsRow(
     summary: String? = null,
     leading: (@Composable () -> Unit)? = null,
     trailing: (@Composable () -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    tag: String = "settings-row:$title",
 ) {
     Row(
-        modifier = Modifier.testTag("settings-row:$title").fillMaxWidth()
+        modifier = Modifier.testTag(tag).then(modifier).fillMaxWidth()
             .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 12.dp),
+            .heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (leading != null) {
@@ -75,15 +90,16 @@ internal fun SettingsRow(
             Spacer(Modifier.width(12.dp))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MiuixTheme.textStyles.body1, color = MiuixTheme.colorScheme.onSurface)
+            Text(title, style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium),
+                color = MiuixTheme.colorScheme.onSurface)
             if (!summary.isNullOrBlank()) {
-                Text(summary, style = MiuixTheme.textStyles.body2,
+                Text(summary, style = MiuixTheme.textStyles.body2.copy(fontSize = 12.sp, lineHeight = 18.sp),
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
         }
         if (trailing != null) {
             Spacer(Modifier.width(8.dp))
-            trailing()
+            Row(Modifier.widthIn(max = 112.dp), verticalAlignment = Alignment.CenterVertically) { trailing() }
         } else if (onClick != null) {
             DaiyuIcon(DaiyuIcons.ChevronRight, contentDescription = null,
                 tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 20.dp)
@@ -94,11 +110,12 @@ internal fun SettingsRow(
 @Composable
 internal fun SettingsSwitchRow(title: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
     val colors = MiuixTheme.colorScheme
-    SettingsRow(title = title, trailing = {
+    SettingsRow(title = title, tag = "settings-switch:$title", modifier = Modifier.toggleable(
+        value = checked, role = Role.Switch, onValueChange = onCheckedChange
+    ), trailing = {
         Switch(
-            modifier = Modifier.testTag("settings-switch:$title"),
             checked = checked,
-            onCheckedChange = onCheckedChange,
+            onCheckedChange = null,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = colors.onPrimary,
                 checkedTrackColor = colors.primary,
@@ -148,8 +165,8 @@ internal fun SettingsTextField(
             cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
             visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else KeyboardType.Text),
-            modifier = Modifier.testTag("settings-field:$label").fillMaxWidth().clip(RoundedCornerShape(24.dp))
-                .background(MiuixTheme.colorScheme.surface).padding(12.dp)
+            modifier = Modifier.testTag("settings-field:$label").fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                .background(MiuixTheme.colorScheme.surfaceVariant).padding(14.dp)
                 .semantics { contentDescription = label },
             decorationBox = { editor ->
                 Box {

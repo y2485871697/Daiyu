@@ -1,7 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
 import app.daiyu.android.model.ProviderProtocol
-import app.daiyu.android.ui.FeatureCatalog
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -9,32 +8,28 @@ import org.junit.Test
 
 class SettingsPresentationTest {
     @Test
-    fun everyCatalogEntryHasAnExplicitIcon() {
-        val ids = FeatureCatalog.groups.flatMap { it.entries }.map { it.id }
-        assertEquals("Catalog entry IDs must be unique", ids.size, ids.toSet().size)
-        assertEquals(ids.toSet(), settingsEntryIcons.keys)
+    fun originalSettingsHaveUniqueIdsAndThirteenGroups() {
+        val entries = SettingsCatalog.entries
+        assertEquals(52, entries.size)
+        assertEquals(entries.size, entries.map { it.id }.toSet().size)
+        assertEquals(13, SettingsCatalog.groups.size)
+        assertTrue(entries.all { it.title.isNotBlank() && it.icon.name.isNotBlank() })
+        assertEquals(SettingsCatalog.groups, filterSettingsGroups("  "))
     }
 
     @Test
-    fun blankSearchPreservesAllEightGroupsAndTheirOrder() {
-        assertEquals(8, FeatureCatalog.groups.size)
-        assertEquals(FeatureCatalog.groups, filterSettingsGroups("  "))
+    fun chatCommandsAreNotSettingsButtons() {
+        val titles = SettingsCatalog.entries.map { it.title }.toSet()
+        assertTrue(titles.containsAll(setOf("模型提供商", "默认启用推理", "MCP 服务器", "权限检查", "导出日志")))
+        assertTrue(titles.intersect(setOf("发送消息", "暂停与继续", "停止回复", "追加与追问",
+            "发送图片", "发送视频", "侧边栏", "聊天记录搜索", "搜索会话")).isEmpty())
     }
 
     @Test
-    fun searchMatchesTitlesIgnoringCaseAndKeepsCatalogOrder() {
-        val result = filterSettingsGroups("  gpt  ")
-        assertEquals(listOf("model"), result.map { it.id })
-        assertEquals(listOf("P02"), result.flatMap { it.entries }.map { it.id })
-        assertEquals(
-            FeatureCatalog.groups.flatMap { it.entries }.filter { it.title.contains("模型") },
-            filterSettingsGroups("模型").flatMap { it.entries },
-        )
-    }
-
-    @Test
-    fun searchDoesNotMatchGroupTitlesOrEntryIds() {
-        assertTrue(filterSettingsGroups("外观与阅读").isEmpty())
+    fun searchMatchesOriginalTitlesAndPreservesTheirOrder() {
+        assertEquals(listOf("mcp"), filterSettingsGroups(" McP ").flatMap { it.entries }.map { it.id })
+        assertEquals(SettingsCatalog.entries.filter { it.title.contains("模型") },
+            filterSettingsGroups("模型").flatMap { it.entries })
         assertTrue(filterSettingsGroups("R03").isEmpty())
         assertTrue(filterSettingsGroups("not-a-setting").isEmpty())
     }

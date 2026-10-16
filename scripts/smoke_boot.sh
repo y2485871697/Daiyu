@@ -86,6 +86,7 @@ printf '%s\n' "$target_spec" > smoke/instrumentation-targets.txt
 adb_stage instrumentation 600 shell am instrument -w -e class "$test_classes" app.daiyu.android.test/android.test.InstrumentationTestRunner 2>&1 | tee smoke/platform-tests.txt
 grep -q "OK ($expected tests)" smoke/platform-tests.txt
 if grep -q 'FAILURES!!!' smoke/platform-tests.txt; then exit 1; fi
+adb_stage settings-previews 30 pull /sdcard/Android/data/app.daiyu.android/files/settings-ui smoke/settings-ui
 adb_stage packages 20 shell pm list packages > smoke/packages.txt
 if grep -q 'package:io.github.mangi.eta$' smoke/packages.txt; then exit 1; fi
 adb_stage launch 30 shell am start -W -n app.daiyu.android/.MainActivity > smoke/start.txt

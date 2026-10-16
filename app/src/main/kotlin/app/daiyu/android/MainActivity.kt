@@ -100,6 +100,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : ComponentActivity() {
     private val controller get() = (application as ChatApplication).controller
+    private val terminalOwner get() = (application as ChatApplication).terminalOwner
+    private var terminalPageOwner: Any? = null
     private var hapticsHost: app.daiyu.android.haptics.HapticsActivityHost? = null
     private fun syncHaptics() {
         hapticsHost?.sync(selected?.id?.value, retainedPage == "chat" && !sidebarVisible,
@@ -165,6 +167,7 @@ class MainActivity : ComponentActivity() {
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
+            if (value != "terminal") terminalPageOwner = null
             if (value != "chat") { dictationHost.invalidate(); cancelShizukuEditor() }
             speechHost.setVisible(value == "chat" && !sidebarVisible)
             imageHost.setVisible(value == "chat" && !sidebarVisible, selected?.id?.value)
@@ -275,6 +278,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        if (state?.getBoolean("terminal-page", false) == true) {
+            terminalPageOwner = Any()
+            retainedPageState = "terminal"
+        }
         hapticsHost = app.daiyu.android.haptics.HapticsActivityHost(
             (application as ChatApplication).hapticsRuntime, window.decorView, this, controller)
         interactiveModeObservation = controller.interactiveMode.observe { interactiveModeEnabled = it }
@@ -302,7 +309,7 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "appearance", "haptics" -> retainedPage = "settings"
+                        "appearance", "haptics", "terminal" -> retainedPage = "settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
                         else -> returnToChat()
@@ -367,6 +374,19 @@ class MainActivity : ComponentActivity() {
                         onBack = { returnToChat() },
                         onReady = { _, commands -> commands.close() }, // No run is owned by this permission page.
                     )
+                    "terminal" -> terminalPageOwner?.let { page ->
+                        val owner = terminalOwner
+                        val caller by owner.caller.collectAsStateWithLifecycle()
+                        app.daiyu.android.ui.screens.terminal.TerminalScreen(
+                            host = owner.host, caller = caller,
+                            onOpenAndroid = { openTerminalAndroid(page) },
+                            onOpenLinux = { reference -> openTerminalLinux(page, reference) },
+                            onBack = {
+                                if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
+                                    retainedPage = "settings"
+                            },
+                        )
+                    }
                     "skills" -> SkillManagementScreen(
                         managementFactory = { controller.skillManagement() },
                         onBack = { returnToChat() },
@@ -630,6 +650,7 @@ class MainActivity : ComponentActivity() {
             ChatMenuAction.BOTTOM -> jumpToBottom()
             ChatMenuAction.SEARCH -> openSearch("message-search")
             ChatMenuAction.SETTINGS -> retainedPage = "settings"
+            ChatMenuAction.OPEN_TERMINAL -> openTerminal()
             ChatMenuAction.CONVERSATION_ID -> selected?.let {
                 (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("会话 ID", it.id.value))
             }
@@ -920,6 +941,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onSaveInstanceState(state: Bundle) {
+        state.putBoolean("terminal-page", retainedPage == "terminal")
         state.putInt("pending-backup-request", pendingBackupRequest ?: 0)
         state.putString("pending-conversation-export", conversationExport.pendingConversationId)
         if (retainedPage == "conversation-export") {
@@ -988,6 +1010,19 @@ class MainActivity : ComponentActivity() {
     private fun openSkillManagement() {
         retainedPage = "skills"
     }
+    private fun openTerminalAndroid(page: Any) {
+        if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
+            terminalOwner.openAndroid(selected?.id)
+    }
+    private fun openTerminalLinux(page: Any, reference: app.daiyu.android.terminal.LinuxGenerationRef) {
+        if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
+            terminalOwner.openLinux(reference, selected?.id)
+    }
+    private fun openTerminal() {
+        requireActivityUsable()
+        terminalPageOwner = Any()
+        retainedPage = "terminal"
+    }
     private fun openSettingsRoute(route: FeatureRoute) {
         when (route) {
             FeatureRoute.MODEL_SETTINGS -> modelSettings()
@@ -999,6 +1034,7 @@ class MainActivity : ComponentActivity() {
             FeatureRoute.CONVERSATION_SEARCH -> searchConversations()
             FeatureRoute.FOLDERS -> browseFolders()
             FeatureRoute.SKILLS -> openSkillManagement()
+            FeatureRoute.TERMINAL -> openTerminal()
             // Settings entries are navigation, never implicit execution/send/stop operations.
             FeatureRoute.CHAT, FeatureRoute.USER_MESSAGE -> Unit
         }

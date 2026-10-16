@@ -47,12 +47,12 @@ internal fun SubAgentChoiceField(label: String, value: String, enabled: Boolean,
     }
 }
 
-/** Intentionally retain this original Material menu: EtaDropdownMenu has a different appearance. */
+/** Retains the original menu interaction with the shared conversation palette. */
 @Composable
 internal fun SubAgentDropdownMenu(expanded: Boolean, onDismissRequest: () -> Unit, modifier: Modifier = Modifier,
     offset: DpOffset = DpOffset.Zero, content: @Composable ColumnScope.() -> Unit) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismissRequest, modifier = modifier, offset = offset,
-        shape = RoundedCornerShape(12.dp), containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(12.dp), containerColor = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 0.dp, shadowElevation = 0.dp,
         border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.45f))) {
         Column(Modifier.width(IntrinsicSize.Max).widthIn(min = 96.dp, max = 220.dp), content = content)
@@ -63,12 +63,13 @@ internal fun SubAgentSelectionItem(text: String, selected: Boolean, onClick: () 
     val colors = MaterialTheme.colorScheme
     val view = LocalView.current
     Box(Modifier.fillMaxWidth().padding(horizontal = 3.dp, vertical = 1.dp).clip(RoundedCornerShape(7.dp))
-        .background(if (selected) colors.surfaceVariant else Color.Transparent)
+        .background(if (selected) colors.primaryContainer else Color.Transparent)
         .selectable(selected = selected, role = Role.RadioButton, interactionSource = remember { MutableInteractionSource() },
             indication = null, onClick = { TouchHaptics.click(view); onClick() }).height(32.dp).padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center) {
         Text(text, style = MaterialTheme.typography.bodyMedium, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
-            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal, color = colors.onSurface)
+            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
+            color = if (selected) colors.onPrimaryContainer else colors.onSurface)
     }
 }
 @Composable

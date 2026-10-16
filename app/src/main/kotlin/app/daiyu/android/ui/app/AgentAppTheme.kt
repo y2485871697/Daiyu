@@ -113,7 +113,7 @@ fun AgentAppTheme(
                 surfaceTint = miuixColors.primary,
                 surfaceContainer = miuixColors.surfaceContainer,
                 surfaceContainerHigh = miuixColors.surfaceContainerHigh,
-                surfaceContainerHighest = miuixColors.surfaceContainerHigh,
+                surfaceContainerHighest = miuixColors.surfaceContainerHighest,
                 surfaceContainerLow = miuixColors.surface,
                 surfaceContainerLowest = miuixColors.surface,
             )
@@ -142,7 +142,7 @@ fun AgentAppTheme(
                 surfaceTint = miuixColors.primary,
                 surfaceContainer = miuixColors.surfaceContainer,
                 surfaceContainerHigh = miuixColors.surfaceContainerHigh,
-                surfaceContainerHighest = miuixColors.surfaceContainerHigh,
+                surfaceContainerHighest = miuixColors.surfaceContainerHighest,
                 surfaceContainerLow = miuixColors.surface,
                 surfaceContainerLowest = miuixColors.surface,
             )
@@ -155,7 +155,7 @@ fun AgentAppTheme(
             LocalPlatformDensity provides platformDensity,
             LocalDensity provides appDensity,
         ) {
-            // MaterialTheme 仅向 markdown-renderer-m3 提供与 Miuix 一致的颜色上下文。
+            // Retained Material components and Markdown share the native Miuix palette.
             MaterialTheme(
                 colorScheme = materialColors,
             ) {

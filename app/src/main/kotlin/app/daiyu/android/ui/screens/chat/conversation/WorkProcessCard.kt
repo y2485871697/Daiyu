@@ -38,17 +38,18 @@ internal fun WorkProcessCard(work: WorkProcessUi, onRetryStep: (String) -> Unit,
     var expanded by rememberSaveable { mutableStateOf(false) }
     val colors = MiuixTheme.colorScheme
     val stepCount = work.segments.sumOf { it.steps.size }
-    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(colors.surface)
-        .border(1.dp, colors.onSurfaceVariantSummary.copy(alpha = 0.15f), RoundedCornerShape(16.dp))) {
+    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainer)
+        .border(1.dp, colors.outline, RoundedCornerShape(16.dp))) {
         Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { expanded = !expanded }
             .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Box(Modifier.size(8.dp).clip(CircleShape)
                 .background(if (work.running) colors.primary else colors.onSurfaceVariantSummary))
-            Text("工作过程", Modifier.weight(1f), color = colors.onSurface, style = MiuixTheme.textStyles.body2,
+            Text("工作过程", color = colors.onSurface, style = MiuixTheme.textStyles.body2,
                 maxLines = 1)
-            Text("${work.segments.size} 段 · $stepCount 步 · ${work.summary}",
-                color = colors.onSurfaceVariantSummary, style = MiuixTheme.textStyles.footnote1, maxLines = 1)
+            Text("${work.segments.size} 段 · $stepCount 步 · ${work.summary}", Modifier.weight(1f),
+                color = colors.onSurfaceVariantSummary, style = MiuixTheme.textStyles.footnote1,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
             Icon(if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
                 if (expanded) "收起工作过程" else "展开工作过程", Modifier.size(18.dp), tint = colors.onSurfaceVariantSummary)
         }

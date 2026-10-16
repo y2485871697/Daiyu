@@ -499,7 +499,8 @@ private fun PaneSearchRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
-            .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+            .background(MiuixTheme.colorScheme.surfaceContainer)
+            .border(1.dp, MiuixTheme.colorScheme.outline, RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
             .clickable(
                 enabled = searchFocusEnabled && !searchActive,
                 interactionSource = remember { MutableInteractionSource() },
@@ -576,7 +577,8 @@ private fun DrawerActionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
-            .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+            .background(MiuixTheme.colorScheme.surfaceContainer)
+            .border(1.dp, MiuixTheme.colorScheme.outline, RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
             .pointerInput(onClick) {
                 detectTapGestures(onTap = {
                     TouchHaptics.click(view)
@@ -781,7 +783,7 @@ private fun DrawerChip(
     val background = if (selected) {
         MiuixTheme.colorScheme.primary
     } else {
-        MiuixTheme.colorScheme.surfaceContainerHigh
+        MiuixTheme.colorScheme.surfaceContainer
     }
     val contentColor = if (selected) {
         MiuixTheme.colorScheme.onPrimary
@@ -873,7 +875,7 @@ private fun ConversationTextRow(
                 .clip(RoundedCornerShape(DrawerMetrics.RowCornerRadius))
                 .background(
                     if (selected) {
-                        MiuixTheme.colorScheme.surfaceContainerHigh
+                        MiuixTheme.colorScheme.primaryContainer
                     } else {
                         Color.Transparent
                     },
@@ -897,7 +899,7 @@ private fun ConversationTextRow(
         ) {
             Text(
                 text = conversation.title.ifBlank { conversation.preview },
-                color = MiuixTheme.colorScheme.onSurface,
+                color = if (selected) MiuixTheme.colorScheme.onPrimaryContainer else MiuixTheme.colorScheme.onSurface,
                 style = MiuixTheme.textStyles.body1,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 1,
@@ -1149,7 +1151,7 @@ private fun DrawerCircleButton(
             imageVector = icon,
             contentDescription = label,
             modifier = Modifier.size(DrawerMetrics.ActionIconSize),
-            tint = MiuixTheme.colorScheme.onSurface,
+            tint = MiuixTheme.colorScheme.onPrimaryContainer,
         )
     }
 }

@@ -21,6 +21,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
@@ -100,7 +101,7 @@ internal fun DaiyuChoiceSheet(
         properties = DialogProperties(usePlatformDefaultWidth = false),
     ) {
         Box(
-            Modifier.fillMaxSize().background(colors.onSurface.copy(alpha = 0.32f))
+            Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.32f))
                 .clickable(
                     interactionSource = remember { MutableInteractionSource() },
                     indication = null,
@@ -110,7 +111,7 @@ internal fun DaiyuChoiceSheet(
             Column(
                 modifier = Modifier.align(Alignment.BottomCenter).widthIn(max = 640.dp)
                     .fillMaxWidth().padding(12.dp).heightIn(max = 560.dp)
-                    .clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerHigh)
+                    .clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainer)
                     .semantics { paneTitle = title }
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },

@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -75,7 +76,9 @@ internal fun SubAgentPresetDirectoryStatus(directory: SubAgentPresetDirectory) {
 internal fun SubAgentPresetCard(preset: SubAgentPreset, enabled: Boolean, actionLabel: String,
     onClick: () -> Unit, selected: Boolean = false, trailing: @Composable (() -> Unit)? = null) {
     val view = LocalView.current
-    Surface(shape = RoundedCornerShape(24.dp), color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.38f),
+    Surface(shape = RoundedCornerShape(24.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outline),
         contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f).heightIn(min = 96.dp).semantics { contentDescription = actionLabel }

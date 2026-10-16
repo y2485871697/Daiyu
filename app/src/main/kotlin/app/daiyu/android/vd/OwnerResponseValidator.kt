@@ -11,6 +11,7 @@ internal object OwnerResponseValidator {
         "attemptedTaskIds", "relocatedTaskIds", "completedTaskIds", "handoffProgress", "focusSamples", "rootTaskInventory")
     private val fields = mapOf(
         "initialize" to setOf("initialized", "displayId", "uniqueId"),
+        "shutdown_uninitialized" to setOf("initialized", "receiptsClosed"),
         "receipt" to setOf("executed"),
         "status" to setOf("ready", "displayId", "uniqueId", "name", "width", "height", "densityDpi", "flags",
             "ownerPackage", "frameCount", "hasFrame", "frameTimestampNs", "session", "sourceState", "sourceEmpty",
@@ -24,7 +25,7 @@ internal object OwnerResponseValidator {
         "release" to setOf("released", "displayId", "uniqueId", "executed"))
     private val bools = setOf("ok", "receiptOnly", "found", "initialized", "executed", "ready", "hasFrame", "sourceEmpty",
         "sourcePackagesKnown", "finishing", "handoffComplete", "handoffCleanupOnly", "releaseAttempted", "mutationUncertain",
-        "launched", "reused", "handedOff", "cleanupOnly", "released", "retryable", "sideEffectsAttempted")
+        "launched", "reused", "handedOff", "cleanupOnly", "released", "receiptsClosed", "retryable", "sideEffectsAttempted")
     private val ints = setOf("v", "displayId", "width", "height", "densityDpi", "flags", "frameCount", "sourceTaskCount",
         "exitCode", "reusedTaskId", "bytes")
     private val intArrays = setOf("retainedTaskIds", "liveTaskIds", "goneTaskIds", "taskIds", "keptTaskIds", "removedTaskIds",
@@ -56,6 +57,19 @@ internal object OwnerResponseValidator {
                 key == "data" -> require(v is String && v.length <= 8 * 1024 * 1024)
                 else -> require(v is String && v.length <= 4096 && v.none { it == '\u0000' })
             }
+        }
+        if (wireOp == "shutdown_uninitialized") {
+            // This is process control, not a generation or operation receipt. Never accept a
+            // release-shaped success, receipt-only success, or unknown fields as proof of close.
+            keys(o, setOf("v", "op", "ok") + if (ok) setOf("initialized", "receiptsClosed")
+                else setOf("error", "message"))
+            require(o.length() == 5)
+            if (ok) require(o.get("initialized") == false && o.get("receiptsClosed") == true)
+            else {
+                require(Regex("[A-Z][A-Z0-9_]{0,95}").matches(o.getString("error")))
+                require(o.getString("message").length <= 200)
+            }
+            return o
         }
         if (o.has("generation")) require(o.get("generation") == generation)
         val receiptOnly = o.opt("receiptOnly") == true

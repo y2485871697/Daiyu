@@ -243,8 +243,8 @@ final class OwnerIpcServer {
                     catch (IOException ex) { mutationFence.responseLost(request.op); throw ex; }
                 } finally {
                     // Success, failed flush and abandoned waiters all complete the delivery attempt.
-                    // If dispatch is still running, it will observe this and stop only after release
-                    // is verified. The existing write watchdog bounds a stalled response attempt.
+                    // If dispatch is still running, it will stop only after verified release or
+                    // never-initialized store closure. The watchdog bounds a stalled response.
                     if (completion.responseFinished()) stopAndQuit();
                 }
             }
@@ -272,8 +272,8 @@ final class OwnerIpcServer {
                         }
                         box.complete(response);
                     } finally {
-                        // A running release may finish after its waiter timed out/disconnected.
-                        // Response delivery is not evidence of release; only the owner is.
+                        // A terminal operation may finish after its waiter timed out/disconnected.
+                        // Response delivery is not terminal proof; only the coordinator is.
                         if (completion.dispatchFinished(dispatcher.shouldStop())) stopAndQuit();
                     }
                 }
@@ -301,7 +301,7 @@ final class OwnerIpcServer {
                 @Override
                 public void run() {
                     onStop.run();
-                    // Main callback terminates ONLY after confirmed release.
+                    // Main callback verifies release/finals or never-initialized store closure.
                 }
             });
         }

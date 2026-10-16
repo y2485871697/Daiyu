@@ -11,14 +11,14 @@ public class OwnerIpcServerFenceTest {
         for (String op : new String[]{"status", "snapshot", "receipt", "handoff", "release"}) {
             assertTrue(op, fence.allows(op));
         }
-        for (String op : new String[]{"initialize", "launch", "input", "unknown"}) {
+        for (String op : new String[]{"initialize", "shutdown_uninitialized", "launch", "input", "unknown"}) {
             assertFalse(op, fence.allows(op));
         }
         assertFalse(fence.allows(null));
     }
 
     @Test public void failedMutationDeliveryAllowsCleanupButNeverOriginalMutation() {
-        for (String op : new String[]{"initialize", "launch", "input", "handoff", "release"}) {
+        for (String op : new String[]{"initialize", "shutdown_uninitialized", "launch", "input", "handoff", "release"}) {
             OwnerIpcServer.MutationFence fence = new OwnerIpcServer.MutationFence();
             assertTrue(fence.allows(op));
             fence.responseLost(op);
@@ -27,7 +27,7 @@ public class OwnerIpcServerFenceTest {
     }
 
     @Test public void abandonedStartedMutationHasSameFenceAsLostReply() {
-        for (String op : new String[]{"initialize", "launch", "input", "handoff", "release"}) {
+        for (String op : new String[]{"initialize", "shutdown_uninitialized", "launch", "input", "handoff", "release"}) {
             OwnerIpcServer.MutationFence fence = new OwnerIpcServer.MutationFence();
             fence.waitAbandoned(op, false);
             assertFalse(fence.isUncertain());

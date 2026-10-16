@@ -108,6 +108,9 @@ class MainActivity : ComponentActivity() {
     private var catalogStatus by mutableStateOf<String?>(null)
     private var catalogGeneration = 0L
     private var catalogCancelled = AtomicBoolean(false)
+    private var chatModelPicker by mutableStateOf<ChatModelPickerState?>(null)
+    private var chatModelSettings: ModelSettings? = null
+    private var chatModelCancelled = AtomicBoolean(false)
     private var assistantPicker by mutableStateOf(false)
     private var assistantEditingId by mutableStateOf<String?>(null)
     private var collaborationOwner by mutableStateOf<String?>(null)
@@ -242,6 +245,11 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 PromptSurface()
+                chatModelPicker?.let { picker ->
+                    ChatModelPicker(picker, onSelect = ::selectChatModel, onRefresh = ::fetchChatModels,
+                        onSettings = { dismissChatModels(); guard { modelSettings() } },
+                        onDismiss = ::dismissChatModels)
+                }
                 AssistantPickerDialog(show = assistantPicker, store = assistantStore, assets = assistantAssets,
                     onSelect = { id -> guard { assistantStore.select(id); refresh() } },
                     onEdit = { id -> assistantPicker = false; assistantEditingId = id; retainedPage = "assistant-edit" },
@@ -303,7 +311,7 @@ class MainActivity : ComponentActivity() {
             val generation = controlTouchGeneration
             window.decorView.post { if (controlTouchGeneration == generation) { controlTouchActive = false; controlTouchOwner = null } }
         },
-        onModelClick = { guard { modelSettings() } }, onReasoningClick = { thinkingPicker = true },
+        onModelClick = { guard { openChatModels() } }, onReasoningClick = { thinkingPicker = true },
         onAssistantClick = { assistantPicker = true }, onCopy = { id -> copyMessage(id) },
         onMenuAction = { action -> guard { when (action) {
             ChatMenuAction.NEW_CHAT -> select(null)
@@ -396,12 +404,12 @@ class MainActivity : ComponentActivity() {
     }
     override fun onDestroy() {
         activityCallbacksAllowed = false; refreshRateWindowResumed = false
-        window.decorView.removeCallbacks(refreshRateRequest); invalidateCatalog()
+        window.decorView.removeCallbacks(refreshRateRequest); invalidateCatalog(); dismissChatModels()
         cancelRestorePreview(); prompt = null
         controller.unobserve(listener); super.onDestroy()
     }
     private fun returnToChat() {
-        invalidateCatalog(); modelDraft = null; editingSettings = null; modelError = null
+        dismissChatModels(); invalidateCatalog(); modelDraft = null; editingSettings = null; modelError = null
         cancelRestorePreview(); prompt = null; retainedPage = "chat"
         if (activityUsable()) refresh()
     }
@@ -541,6 +549,7 @@ class MainActivity : ComponentActivity() {
     private fun refresh() {
         if (!activityUsable()) return
         backupBusy = controller.dataBusy
+        chatModelPicker = chatModelPicker?.copy(enabled = controller.active == null && !controller.dataBusy && controller.ready)
         controlOwner = controller.active?.takeIf { it.conversationId == selected?.id && it.status == RunStatus.RUNNING }
         if (controller.dataBusy) {
             if (prompt?.backup == true) prompt = null
@@ -641,6 +650,57 @@ class MainActivity : ComponentActivity() {
             is MessageBlock.Tool -> "${block.invocation.name}: ${block.result ?: "未完成"}"
         } }
         (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("代鱼消息", text))
+    }
+
+    private fun openChatModels() {
+        requireActivityUsable()
+        dismissChatModels()
+        val saved = try { controller.settings.load() } catch (_: Exception) { null }
+        chatModelSettings = saved
+        val current = saved?.model.orEmpty()
+        chatModelPicker = ChatModelPickerState(current,
+            if (current.isBlank()) emptyList() else listOf(ModelCatalogEntryUi(current)),
+            enabled = controller.active == null && !controller.dataBusy && controller.ready,
+            message = if (saved == null || saved.endpoint.isBlank() || saved.apiKey.isBlank()) "请先配置模型提供商" else null)
+        if (saved != null && saved.endpoint.isNotBlank() && saved.apiKey.isNotBlank()) fetchChatModels()
+    }
+    private fun dismissChatModels() {
+        chatModelCancelled.set(true)
+        chatModelPicker = null; chatModelSettings = null
+    }
+    private fun fetchChatModels() {
+        if (!activityUsable() || retainedPage != "chat") return
+        val picker = chatModelPicker ?: return
+        val saved = chatModelSettings ?: return
+        if (!picker.enabled || picker.loading || saved.endpoint.isBlank() || saved.apiKey.isBlank()) return
+        chatModelCancelled.set(true)
+        val cancelled = AtomicBoolean(false); chatModelCancelled = cancelled
+        chatModelPicker = picker.copy(loading = true, message = null)
+        val accepted = controller.fetchModelCatalog(saved, { cancelled.get() }) { models ->
+            if (activityUsable() && !cancelled.get() && chatModelCancelled === cancelled) {
+                chatModelPicker = chatModelPicker?.let { current ->
+                    val options = models.orEmpty().map { ModelCatalogEntryUi(it.id, it.displayName) }.toMutableList()
+                    if (current.current.isNotBlank() && options.none { it.id == current.current })
+                        options.add(0, ModelCatalogEntryUi(current.current))
+                    current.copy(models = options.distinctBy { it.id }, loading = false,
+                        message = when { models == null -> "获取失败，可刷新重试"; models.isEmpty() -> "服务商没有返回其他模型"; else -> null })
+                }
+            }
+        }
+        if (!accepted) chatModelPicker = picker.copy(message = "当前不可查询，请稍后刷新")
+    }
+    private fun selectChatModel(id: String) {
+        val picker = chatModelPicker ?: return
+        val saved = chatModelSettings ?: return
+        try {
+            requireActivityUsable()
+            check(retainedPage == "chat" && controller.ready && controller.active == null && !controller.dataBusy)
+            require(picker.models.any { it.id == id })
+            controller.settings.selectModel(saved, id)
+            dismissChatModels(); refresh()
+        } catch (_: Exception) {
+            chatModelPicker = picker.copy(message = "切换未保存，请关闭后重新选择")
+        }
     }
 
     private fun modelSettings() {

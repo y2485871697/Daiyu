@@ -51,25 +51,6 @@ internal object SettingsCatalog {
         SettingsGroup("haptics", "震动", "震动反馈与试听", listOf(
             SettingsEntry("haptics", "震动列表", DaiyuIcons.Vibration, SettingControl.PAGE),
         )),
-        SettingsGroup("system", "系统助手接管", "默认助理与电源键设置", listOf(
-            SettingsEntry("system_assistant", "代鱼 系统助手", DaiyuIcons.Assistant, SettingControl.PAGE),
-            SettingsEntry("power_key", "电源键长按", DaiyuIcons.Device, SettingControl.CHOICE),
-            SettingsEntry("auto_assistant", "自动设置默认助理", DaiyuIcons.Settings, SettingControl.TOGGLE),
-        )),
-        SettingsGroup("vendor", "小布/小爱兼容入口", "厂商助手模型与接管方式", listOf(
-            SettingsEntry("vendor_model", "启用厂商助手自定义模型", DaiyuIcons.Model, SettingControl.TOGGLE),
-            SettingsEntry("agent_prefix", "仅以 /agent 前缀接管", DaiyuIcons.Context, SettingControl.TOGGLE),
-        )),
-        SettingsGroup("gemini", "Gemini", "语音唤醒与系统增强", listOf(
-            SettingsEntry("hotword", "息屏后维持 Hey Google 检测", DaiyuIcons.Voice, SettingControl.TOGGLE),
-            SettingsEntry("lock_voice", "锁屏唤起自动语音输入", DaiyuIcons.Voice, SettingControl.TOGGLE),
-            SettingsEntry("screen_voice", "亮屏唤起自动语音输入", DaiyuIcons.Voice, SettingControl.TOGGLE),
-            SettingsEntry("systemizer", "将 Google App 转为系统应用", DaiyuIcons.Device, SettingControl.ACTION),
-        )),
-        SettingsGroup("circle", "一圈即搜", "手势触发方式", listOf(
-            SettingsEntry("gesture_search", "手势条长按触发一圈即搜", DaiyuIcons.Search, SettingControl.TOGGLE),
-            SettingsEntry("finger_search", "双指长按触发一圈即搜", DaiyuIcons.Search, SettingControl.TOGGLE),
-        )),
         SettingsGroup("diagnostics", "诊断", "日志记录、导出与清理", listOf(
             SettingsEntry("logging", "记录诊断日志", DaiyuIcons.File, SettingControl.TOGGLE),
             SettingsEntry("export_logs", "导出日志", DaiyuIcons.Export, SettingControl.ACTION),

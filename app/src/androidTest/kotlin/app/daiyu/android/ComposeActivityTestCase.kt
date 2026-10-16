@@ -47,7 +47,10 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         })
     }
     protected fun saveModel() { reveal("model-save").performClick() }
-    protected fun openModels() { node("chat-model").performClick() }
+    protected fun openModels() {
+        menu("设置")
+        reveal("settings-row:模型提供商", "设置").performClick()
+    }
     protected fun menu(label: String) {
         ui.onNodeWithContentDescription("更多").performSemanticsAction(SemanticsActions.OnClick) { it() }
         ui.onNodeWithText(label).performScrollTo().performClick()

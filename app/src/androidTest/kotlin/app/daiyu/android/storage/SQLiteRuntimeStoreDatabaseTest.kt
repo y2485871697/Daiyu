@@ -185,7 +185,7 @@ class SQLiteRuntimeStoreDatabaseTest:InstrumentationTestCase() {
         db.save(text);db.draft(first.message.conversationId,"draft");val before=db.messages(first.message.conversationId)
         db.writableDatabase.execSQL("DROP TABLE runtime_checkpoints");app.daiyu.android.removeAssistantSchemaForLegacyFixture(db.writableDatabase);db.writableDatabase.version=5;db.close()
         val runtime=lease(db)
-        assertEquals(10,db.readableDatabase.version);val restored=db.messages(first.message.conversationId)
+        assertEquals(11,db.readableDatabase.version);val restored=db.messages(first.message.conversationId)
         assertEquals(before.map {it.first},restored.map {it.first});assertEquals(text.blocks,restored.last().second.blocks)
         assertEquals(text.historySegments,restored.last().second.historySegments)
         assertEquals("draft",db.conversations().single().draft)

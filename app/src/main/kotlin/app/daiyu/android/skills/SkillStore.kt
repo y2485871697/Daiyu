@@ -14,6 +14,7 @@ data class SkillSnapshot(val skills: List<EnabledSkill>) {
 data class EnabledSkill(val name: String, val description: String, val revision: String, val instructions: String)
 data class InstalledSkill(val name: String, val description: String, val revision: String, val enabled: Boolean, val source: String?, val commit: String?)
 data class SkillBundle(val files: Map<String, ByteArray>, val source: String? = null, val commit: String? = null)
+internal data class SkillBundlePreview(val header: SkillHeader, val revision: String, val compatibility: SkillCompatibilityResult)
 class SkillConflict(val skillName: String, val currentRevision: String?) : IllegalStateException("skill_conflict")
 /** Publication succeeded; callers must not retry the write or describe it as rolled back. */
 class SkillCleanupPending(val installedSkills: List<InstalledSkill>, cause: Throwable) : IllegalStateException("skill_cleanup_pending", cause)
@@ -45,7 +46,9 @@ class SkillStore(private val root: File, builtinNames: Set<String> = emptySet())
             val metadata = JSONObject(SkillFiles.text(SkillFiles.readAtomic(SkillFiles.path(directory, ".skill.json"), MAX_FILE_BYTES)))
             val bytes = SkillFiles.read(SkillFiles.path(directory, "SKILL.md"), MAX_FILE_BYTES)
             require(SkillFiles.hash(bytes) == metadata.getJSONObject("files").getString("SKILL.md")) { "resource_changed" }
-            EnabledSkill(it.name, it.description, it.revision, SkillFiles.text(bytes))
+            val markdown = SkillFiles.text(bytes)
+            SkillCompatibilityPolicy.requireAvailable(markdown)
+            EnabledSkill(it.name, it.description, it.revision, markdown)
         }))
     }
     /** Names only: resolving run selection must not parse an unselected skill's metadata/body. */
@@ -71,10 +74,12 @@ class SkillStore(private val root: File, builtinNames: Set<String> = emptySet())
                 }
                 val bytes = SkillFiles.read(SkillFiles.path(directory, "SKILL.md"), MAX_FILE_BYTES)
                 require(SkillFiles.hash(bytes) == hashes["SKILL.md"]) { "resource_changed" }
+                val markdown = SkillFiles.text(bytes)
+                SkillCompatibilityPolicy.requireAvailable(markdown)
                 total += bytes.size + info.description.toByteArray(Charsets.UTF_8).size +
                     hashes.entries.sumOf { it.key.toByteArray(Charsets.UTF_8).size.toLong() + it.value.length } + info.name.length + info.revision.length
                 require(total <= maxBytes) { "snapshot_too_large" }
-                CapturedSkill(info.name, info.description, info.revision, SkillFiles.text(bytes),
+                CapturedSkill(info.name, info.description, info.revision, markdown,
                     Collections.unmodifiableMap(hashes), total.toInt())
             }
             Collections.unmodifiableList(captured)
@@ -94,6 +99,9 @@ class SkillStore(private val root: File, builtinNames: Set<String> = emptySet())
         val directory = File(installed, name)
         val metadata = JSONObject(SkillFiles.text(SkillFiles.readAtomic(SkillFiles.path(directory, ".skill.json"), MAX_FILE_BYTES)))
         require(metadata.getJSONObject("files").has(relativePath)) { "resource_not_found" }
+        val skillBytes = SkillFiles.read(SkillFiles.path(directory, "SKILL.md"), MAX_FILE_BYTES)
+        require(SkillFiles.hash(skillBytes) == metadata.getJSONObject("files").getString("SKILL.md")) { "resource_changed" }
+        SkillCompatibilityPolicy.requireAvailable(SkillFiles.text(skillBytes))
         val bytes = SkillFiles.read(SkillFiles.path(directory, relativePath), maxBytes)
         require(SkillFiles.hash(bytes) == metadata.getJSONObject("files").getString(relativePath)) { "resource_changed" }
         SkillFiles.text(bytes)
@@ -117,10 +125,12 @@ class SkillStore(private val root: File, builtinNames: Set<String> = emptySet())
         val bundles = inputBundles.map { it.copy(files = it.files.mapValues { (_, bytes) -> bytes.copyOf() }) }
         require(bundles.size in 1..MAX_SKILLS) { "invalid_selection" }
         val prepared = bundles.map(::validateBundle)
-        val names = prepared.map { it.first.name }
+        // Re-evaluate detached incoming bytes on every install, before any journal/staging write.
+        prepared.forEach { SkillCompatibilityPolicy.requireAvailable(it.compatibility) }
+        val names = prepared.map { it.header.name }
         require(names.none { it in builtinNames }) { "builtin_conflict" }
         if (expectedIncomingRevisions != null) {
-            require(expectedIncomingRevisions.keys == names.toSet() && prepared.all { expectedIncomingRevisions[it.first.name] == it.second }) { "incoming_revision_conflict" }
+            require(expectedIncomingRevisions.keys == names.toSet() && prepared.all { expectedIncomingRevisions[it.header.name] == it.revision }) { "incoming_revision_conflict" }
         }
         require(names.distinct().size == names.size && expectedRevisions.keys.all { it in names }) { "duplicate_skill" }
         val old = names.associateWith(::infoLocked)
@@ -183,7 +193,12 @@ class SkillStore(private val root: File, builtinNames: Set<String> = emptySet())
         catch (failure: Throwable) { throw SkillCleanupPending(result, failure) }
         result
     }
-    fun preview(bundle: SkillBundle): Pair<SkillHeader, String> = access {
+    fun preview(bundle: SkillBundle): Pair<SkillHeader, String> = previewForManagement(bundle).let {
+        SkillCompatibilityPolicy.requireAvailable(it.compatibility)
+        it.header to it.revision
+    }
+    /** Structured denial is displayed by settings, never treated as install approval. */
+    internal fun previewForManagement(bundle: SkillBundle): SkillBundlePreview = access {
         validateBundleLimits(bundle)
         validateBundle(bundle.copy(files = bundle.files.mapValues { (_, bytes) -> bytes.copyOf() }))
     }
@@ -196,7 +211,7 @@ class SkillStore(private val root: File, builtinNames: Set<String> = emptySet())
             require(total <= MAX_SKILL_BYTES) { "skill_too_large" }
         }
     }
-    private fun validateBundle(bundle: SkillBundle): Pair<SkillHeader, String> {
+    private fun validateBundle(bundle: SkillBundle): SkillBundlePreview {
         validateBundleLimits(bundle)
         bundle.files.forEach { (path, bytes) ->
             require(path.length <= 512 && path.split('/').none { it.startsWith('.') } && bytes.size <= MAX_FILE_BYTES) { "unsafe_resource" }
@@ -204,10 +219,11 @@ class SkillStore(private val root: File, builtinNames: Set<String> = emptySet())
         }
         // Also disallow a file being the parent of another file.
         SkillFiles.validateResourceTree(bundle.files.keys)
-        val header = SkillFrontmatter.parse(SkillFiles.text(bundle.files["SKILL.md"] ?: error("missing_skill")))
+        val markdown = SkillFiles.text(bundle.files["SKILL.md"] ?: error("missing_skill"))
+        val header = SkillFrontmatter.parse(markdown)
         val revision = SkillFiles.hash(bundle.files.toSortedMap().entries.joinToString("\n") { "${it.key}\u0000${SkillFiles.hash(it.value)}" }.toByteArray(Charsets.UTF_8))
         metadataBytes(bundle, header, revision)
-        return header to revision
+        return SkillBundlePreview(header, revision, SkillCompatibilityPolicy.evaluate(header, markdown))
     }
     private fun metadataBytes(bundle: SkillBundle, header: SkillHeader, revision: String): ByteArray {
         require(bundle.source == null || (bundle.source.length <= 4096 && bundle.source.toByteArray(Charsets.UTF_8).size <= 4096)) { "source_too_large" }

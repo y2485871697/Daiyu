@@ -120,7 +120,7 @@ class SkillToolRegistry(
     // Trusted settings-only building blocks. Do not expose these through a run catalog.
     internal fun inspectForManagement(url: String): JSONObject = github.inspect(url)
     internal fun downloadForManagement(selection: GitHubSkills.Selection): List<SkillBundle> = github.download(selection)
-    internal fun previewForManagement(bundle: SkillBundle): Pair<SkillHeader, String> = userStore.preview(bundle)
+    internal fun previewForManagement(bundle: SkillBundle): SkillBundlePreview = userStore.previewForManagement(bundle)
     internal class ManagementBuiltinConflict : IllegalArgumentException("builtin_conflict")
     internal fun installForManagement(
         bundles: List<SkillBundle>, replacements: Map<String, String>, incoming: Map<String, String>,

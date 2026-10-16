@@ -73,6 +73,7 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
     fun testCreateOnlyInstallNeedsPreviewAndShowsCommittedResult() {
         show()
         preview()
+        node("skills-compatibility:demo").assertTextContains("兼容性静态检查通过", substring = true)
         assertTrue(skills.user.list().isEmpty())
         node("skills-confirm-install").performClick()
         ui.waitUntil(timeoutMillis = 10_000) {
@@ -81,6 +82,21 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
         assertEquals(skills.commit, skills.user.list().single().commit)
         ui.onNodeWithText("安装成功", substring = true).assertExists()
         node("skills-confirm-install").assertDoesNotExist()
+    }
+
+    fun testIncompatiblePreviewShowsOriginalReasonAndDisablesConfirmation() {
+        skills.content = "---\nname: demo\ndescription: Install test\nmetadata:\n  runtime: android-a11y-cli\n---\nPortable-looking body\n".toByteArray()
+        show()
+        inspect()
+        ready("skills-directory:demo")
+        node("skills-directory:demo").performClick()
+        node("skills-preview").performClick()
+        ui.waitUntil(timeoutMillis = 10_000) {
+            ui.onAllNodesWithTag("skills-compatibility:demo").fetchSemanticsNodes().isNotEmpty()
+        }
+        node("skills-compatibility:demo").assertTextEquals("不兼容：依赖 MiniS 专属 Android CLI，Eta 无法运行")
+        node("skills-confirm-install").assertIsNotEnabled()
+        assertTrue(skills.user.list().isEmpty())
     }
 
     fun testReplacementRequiresExplicitCheckboxAndCancelDoesNotInstall() {

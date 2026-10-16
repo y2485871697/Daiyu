@@ -91,16 +91,29 @@ internal object SkillFiles {
     }
 }
 
-data class SkillHeader(val name: String, val description: String)
+data class SkillHeader(
+    val name: String,
+    val description: String,
+    val metadata: Map<String, String> = emptyMap(),
+    val compatibility: String? = null,
+)
 
 /** Deliberately supports the portable SKILL frontmatter subset, not executable YAML. */
 object SkillFrontmatter {
+    /** Called only after parse has validated the same document; excludes frontmatter keys. */
+    internal fun body(markdown: String): String {
+        val lines = markdown.removePrefix("\uFEFF").replace("\r\n", "\n").split('\n')
+        val end = (1 until minOf(lines.size, 200)).first { lines[it] == "---" }
+        return lines.drop(end + 1).joinToString("\n")
+    }
+
     fun parse(markdown: String): SkillHeader {
         require(markdown.length <= 256 * 1024) { "skill_too_large" }
         val lines = markdown.removePrefix("\uFEFF").replace("\r\n", "\n").split('\n')
         require(lines.firstOrNull() == "---") { "missing_frontmatter" }
         val end = (1 until minOf(lines.size, 200)).firstOrNull { lines[it] == "---" } ?: error("missing_frontmatter_end")
         val fields = mutableMapOf<String, String>()
+        val metadata = linkedMapOf<String, String>()
         var index = 1
         while (index < end) {
             val line = lines[index++]
@@ -109,7 +122,25 @@ object SkillFrontmatter {
             val key = line.substringBefore(':').trim()
             require(key.matches(Regex("[A-Za-z][A-Za-z0-9_-]*")) && key !in fields) { "invalid_frontmatter" }
             var value = line.substringAfter(':').trim()
-            if (value == "|" || value == ">" || value == "|-" || value == ">-") {
+            if (key == "metadata") {
+                require(value.isEmpty() || value == "{}") { "invalid_frontmatter" }
+                // Flat scalar metadata only: retain compatibility hints without a YAML engine,
+                // tags, aliases or executable deserialization. Other nested values fail closed.
+                while (index < end && (lines[index].startsWith(' ') || lines[index].isBlank())) {
+                    val nested = lines[index++]
+                    if (nested.isBlank() || nested.trimStart().startsWith('#')) continue
+                    val entry = nested.trimStart()
+                    val nestedKey = entry.substringBefore(':').trim()
+                    require(':' in entry && nestedKey.matches(Regex("[A-Za-z][A-Za-z0-9_.-]*")) && nestedKey !in metadata) { "invalid_frontmatter" }
+                    var nestedValue = entry.substringAfter(':').trim()
+                    require(nestedValue.isNotEmpty()) { "invalid_frontmatter" }
+                    if (nestedValue.startsWith('"') || nestedValue.startsWith('\'')) {
+                        require(nestedValue.length >= 2 && nestedValue.last() == nestedValue.first()) { "invalid_frontmatter" }
+                        nestedValue = nestedValue.substring(1, nestedValue.length - 1)
+                    }
+                    metadata[nestedKey] = nestedValue
+                }
+            } else if (value == "|" || value == ">" || value == "|-" || value == ">-") {
                 val block = mutableListOf<String>()
                 while (index < end && (lines[index].startsWith(' ') || lines[index].isBlank())) block.add(lines[index++].trim())
                 value = block.joinToString(if (value.startsWith('>')) " " else "\n").trim()
@@ -123,6 +154,7 @@ object SkillFrontmatter {
         val description = fields["description"] ?: error("missing_description")
         require(name.matches(Regex("[a-z0-9]+(?:-[a-z0-9]+)*")) && name.length <= 64) { "invalid_name" }
         require(description.isNotBlank() && description.length <= 2048) { "invalid_description" }
-        return SkillHeader(name, description)
+        return SkillHeader(name, description,
+            java.util.Collections.unmodifiableMap(LinkedHashMap(metadata)), fields["compatibility"])
     }
 }

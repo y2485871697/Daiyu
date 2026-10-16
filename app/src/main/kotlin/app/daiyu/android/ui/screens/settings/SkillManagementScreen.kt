@@ -235,10 +235,16 @@ private fun SkillInstallSheet(controller: SkillManagementPageState, inspection: 
                         }
                     }
                 } else {
-                    Text("已通过现有文件/路径/大小静态校验；不代表可执行脚本或平台兼容性认证。", color = colors.onSurfaceVariantSummary)
+                    Text("已完成文件/路径/大小与运行时依赖静态检查；通过不保证运行成功，也不会执行脚本。", color = colors.onSurfaceVariantSummary)
                     preview.changes.forEach { change ->
                         val candidate = change.candidate
                         Text("${candidate.name}\n目录：${candidate.directory.ifEmpty { "(根目录)" }}\n新版本：${candidate.incomingRevision}", color = colors.onSurface)
+                        Text(
+                            if (change.compatibility.available) "兼容性静态检查通过（未发现已知不支持的运行时依赖）"
+                            else "不兼容：${change.compatibility.reason}",
+                            color = if (change.compatibility.available) colors.onSurfaceVariantSummary else colors.error,
+                            modifier = Modifier.testTag("skills-compatibility:${candidate.name}"),
+                        )
                         change.previousRevision?.let { old ->
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Checkbox(checked = candidate.name in approved, enabled = !controller.busy,
@@ -261,7 +267,7 @@ private fun SkillInstallSheet(controller: SkillManagementPageState, inspection: 
                 } else {
                     val needed = preview.changes.filter { it.previousRevision != null }.map { it.candidate.name }.toSet()
                     Button(onClick = { controller.install(preview, preview.replacements) },
-                        enabled = !controller.busy && approved.containsAll(needed),
+                        enabled = !controller.busy && preview.compatible && approved.containsAll(needed),
                         modifier = Modifier.testTag("skills-confirm-install")) { Text("确认安装") }
                 }
             }

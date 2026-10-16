@@ -825,8 +825,17 @@ class ChatController internal constructor(private val application:Application,
             // All sends, including the very first message, share the same frozen policy/budget.
             val coordinator = contextPreparation
             coordinator.prepare(coordinator.freeze(conversationId,listOf(user),token.cancellation))
-        } catch (_: Exception) {
-            problem="上下文准备失败、超出预算或已取消；草稿保留，未发起网络请求";notifyChanged();return null
+        } catch (failure: Exception) {
+            problem = when (failure) {
+                is java.util.concurrent.CancellationException ->
+                    "上下文准备已取消；草稿保留，未启动聊天模型请求"
+                is app.daiyu.android.context.ContextCapacityExceededException ->
+                    "上下文超出发送预算；草稿保留，未启动聊天模型请求"
+                is app.daiyu.android.context.SummaryProfileUnavailableException ->
+                    "独立摘要配置不可用（${failure.reason.name}）；请重新保存，草稿保留，未回退聊天模型"
+                else -> "上下文或摘要准备失败；草稿保留，未启动聊天模型请求"
+            }
+            notifyChanged(); return null
         }
         if(preparationCancelled(token)) return null
         val preparedModel=try {
@@ -841,7 +850,7 @@ class ChatController internal constructor(private val application:Application,
                 ?: if(plan.hasImages) imageModel(provider) else model(config)
             messageImages.wrap(delegate,provider,conversationId)
         } catch (_:Exception) {
-            problem="图片历史读取、能力检查或模型初始化失败；草稿保留，未发起网络请求";notifyChanged();return null
+            problem="图片历史读取、能力检查或模型初始化失败；草稿保留，未启动聊天模型请求";notifyChanged();return null
         }
         if(preparationCancelled(token)) return null
         var preparingTools: RunCatalogTools? = null
@@ -901,7 +910,7 @@ class ChatController internal constructor(private val application:Application,
                 preparingDevices?.close()
                 preparingChildren?.close()
             }
-            problem="运行准备失败；草稿保留，未发起网络请求";notifyChanged();return null
+            problem="运行准备失败；草稿保留，未启动聊天模型请求";notifyChanged();return null
         }
         val (owned, tools) = prepared
         // Only the in-memory admission gate is under the controller monitor. In particular,
@@ -944,7 +953,7 @@ class ChatController internal constructor(private val application:Application,
             token.persistenceUnconfirmed=databaseSendEntered
             if(databaseSendEntered) imageAttempt?.unknown() else imageAttempt?.draftChanged()
             closeUnacceptedTools(tools)
-            problem=if(!databaseSendEntered) "会话、原文或编辑草稿已变化；保留当前草稿，未发起请求"
+            problem=if(!databaseSendEntered) "会话、原文或编辑草稿已变化；保留当前草稿，未启动聊天模型请求"
                 else "发送保存结果未确认；保留草稿和图片，不自动重发"
             notifyChanged();return null
         }

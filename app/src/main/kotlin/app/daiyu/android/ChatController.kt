@@ -129,20 +129,37 @@ class ChatController internal constructor(private val application:Application,
             problem = null; notifyChanged(); true
         } catch (_: Exception) { problem = "子模型绑定失败；未发起请求，请核对明确选择及已保存配置"; notifyChanged(); false }
     }
-    @Synchronized internal fun revokeChildSavedModel(conversationId: ConversationId, profileId: String) {
-        childBindings.revoke(SubAgentConfigKey.Conversation(conversationId.value), profileId)
-        backgroundRuns.values.forEach { tasks -> tasks.snapshots().filter {
-            it.record.owner.conversationId == conversationId.value && it.record.profileId == profileId && !it.settled
-        }.forEach { tasks.stop(it.record.owner) } }
+    internal fun revokeChildSavedModel(conversationId: ConversationId, profileId: String) {
+        val targets=synchronized(this) {
+            childBindings.revoke(SubAgentConfigKey.Conversation(conversationId.value), profileId)
+            backgroundRuns.values.flatMap { tasks -> tasks.snapshots().filter {
+                it.record.owner.conversationId == conversationId.value && it.record.profileId == profileId && !it.settled
+            }.map { tasks to it.record.owner } }
+        }
+        // A provider's cancel implementation must never run with the Controller monitor held.
+        targets.forEach { (tasks, owner) -> tasks.stop(owner) }
     }
     @Synchronized internal fun hasLiveChildTasks(conversationId:ConversationId?=null):Boolean =
         backgroundRuns.values.any { tasks -> tasks.snapshots().any {
             !it.settled && (conversationId==null || it.record.owner.conversationId==conversationId.value)
         } }
-    @Synchronized internal fun stopChildTask(record:ChildTaskRecord):app.daiyu.android.domain.delegation.ChildTaskStop {
-        if(closed || !ready) return app.daiyu.android.domain.delegation.ChildTaskStop.NOT_FOUND
-        return backgroundRuns[RunId(record.owner.parentRunId)]?.stop(record.owner)
-            ?: app.daiyu.android.domain.delegation.ChildTaskStop.NOT_FOUND
+    internal fun stopChildTask(record:ChildTaskRecord):app.daiyu.android.domain.delegation.ChildTaskStop {
+        val tasks=synchronized(this) {
+            if(closed || !ready) null else backgroundRuns[RunId(record.owner.parentRunId)]
+        }
+        return tasks?.stop(record.owner) ?: app.daiyu.android.domain.delegation.ChildTaskStop.NOT_FOUND
+    }
+    // Only the supervisor knows when admission is sealed and every actual transport has exited.
+    // Terminal history, cancellation requests, and an empty snapshot are not release boundaries.
+    private fun pruneBackgroundRuns() {
+        val entries=backgroundRuns.entries.iterator()
+        while(entries.hasNext()) if(entries.next().value.isReleased()) entries.remove()
+    }
+    private fun backgroundTasksChanged() {
+        handler.post {synchronized(this) {
+            pruneBackgroundRuns()
+            if(closed) closeStorageWhenIdle() else notifyChanged()
+        }}
     }
     @Synchronized internal fun sendWithChildren(conversation: Conversation, text: String): Conversation? {
         if (!idleAvailable() || text.isBlank()) return null
@@ -274,7 +291,7 @@ class ChatController internal constructor(private val application:Application,
                     synchronized(this) {
                         check(!closed)
                         val supervisor=checkNotNull(childSupervisor)
-                        val binding=supervisor.bind(owner,grants,authorization,childModels,::notifyChanged)
+                        val binding=supervisor.bind(owner,grants,authorization,childModels,::backgroundTasksChanged)
                         RunChildTasks(supervisor,binding,childModels.keys).also { backgroundRuns[run]=it }
                     }
                 }
@@ -334,7 +351,7 @@ class ChatController internal constructor(private val application:Application,
                             lifetime.result=(active ?: lifetime.initial).copy(error="保存失败，运行已停止；原检查点保留，重新打开后仅恢复历史")
                             problem=lifetime.result?.error
                             lifetime.fenced=true
-                            lifetime.runner.stop()
+                            handler.post {lifetime.runner.stop()}
                         }
                     })
                 if(lifetime.result!=null || lifetime.fenced) cleanupRun(lifetime)
@@ -388,12 +405,15 @@ class ChatController internal constructor(private val application:Application,
     }
     private fun stopRun(lifetime:RunResources) {
         lifetime.fenced=true
-        lifetime.runner.stop()
-        lifetime.tools.revokeChildren()
-        lifetime.tools.close()
-        cleanupRun(lifetime)
+        handler.post {
+            lifetime.runner.stop()
+            lifetime.tools.revokeChildren()
+            lifetime.tools.close()
+            synchronized(this) {cleanupRun(lifetime)}
+        }
     }
     private fun cleanupRun(lifetime:RunResources) {
+        pruneBackgroundRuns()
         if(resources!==lifetime) return
         lifetime.fenced=true
         if(!lifetime.cleanupConfirmed && !lifetime.cleaning) {
@@ -428,13 +448,17 @@ class ChatController internal constructor(private val application:Application,
         if(lifetime.result==null) return
         if(!lifetime.devicesClosing) {
             lifetime.devicesClosing=true
-            lifetime.tools.closeWhenIdle {
-                handler.post {synchronized(this) {
-                    if(resources===lifetime) {
-                        lifetime.devicesClosed=true
-                        cleanupRun(lifetime)
-                    }
-                }}
+            // Closing tools can reach a model/device transport. Fence under the monitor,
+            // but invoke close and wait for its drain callback outside the monitor.
+            handler.post {
+                lifetime.tools.closeWhenIdle {
+                    handler.post {synchronized(this) {
+                        if(resources===lifetime) {
+                            lifetime.devicesClosed=true
+                            cleanupRun(lifetime)
+                        }
+                    }}
+                }
             }
         }
         if(!lifetime.devicesClosed) return
@@ -453,16 +477,26 @@ class ChatController internal constructor(private val application:Application,
             it.initial.conversationId==message.conversationId && it.cleanupFailed && !it.cleaning
     }==true
     private fun closeStorageWhenIdle() {
+        pruneBackgroundRuns()
         if(resources!=null || closingStorage) return
         if(!childrenClosed) {
             if(!childrenClosing) {
                 childrenClosing=true
-                val supervisor=childSupervisor
-                val drained={ handler.post {synchronized(this) {childrenClosed=true;closeStorageWhenIdle()} }; Unit }
-                if(supervisor==null) drained() else supervisor.closeWhenIdle(drained)
+                // Resolve after the initialization task: close may race with runtime recovery.
+                // This also keeps provider cancellation outside the Controller monitor.
+                executor.execute {
+                    val supervisor=childSupervisor
+                    val drained={ handler.post {synchronized(this) {
+                        childrenClosed=true
+                        closeStorageWhenIdle()
+                    }}; Unit }
+                    if(supervisor==null) drained() else supervisor.closeWhenIdle(drained)
+                }
             }
             return
         }
+        // Even close acknowledgement must not replace the per-binding release boundary.
+        if(backgroundRuns.isNotEmpty()) return
         closingStorage=true
         executor.execute {
             try {questionStore?.close();database.close();runtimeStore?.close();runtimeStore=null}

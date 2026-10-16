@@ -39,6 +39,9 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
     private var closed = false
     private var busy = false
     private var outstanding = 0
+    // Registered before exposing a transport to ChatRunner, whose cancel is asynchronous.
+    // Worker exit alone does not prove provider cleanup has returned.
+    private var cleanupPins = 0
     private var generation = 0L
     private val runners = mutableSetOf<ChatRunner>()
     private val observers = mutableListOf<() -> Unit>()
@@ -85,7 +88,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                         record.status == ChildTaskStatus.QUEUED && record.text.isEmpty() && record.detail == null
                 }) { "queued_child_owner_mismatch" }
             }
-            if (closed || busy || outstanding != 0) return ExecutionReceipt.NotExecuted("child_batch_unavailable")
+            if (closed || busy || outstanding != 0 || cleanupPins != 0) return ExecutionReceipt.NotExecuted("child_batch_unavailable")
             busy = true; current = ++generation
         }
         val group = queued?.first()?.owner?.taskGroupId ?: UUID.randomUUID().toString()
@@ -120,6 +123,22 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                         val definition = models.getValue(task.profileId)
                         val pool = limits.getValue(definition.poolKey)
                         var acquired = false
+                        // A permit belongs to this item until BOTH its worker and transport drain.
+                        // Keep outstanding pinned through the lock-free release as well, so idle
+                        // observers cannot retire the batch while a release is still in flight.
+                        var workerFinished = false
+                        var cleanupFinished = true // No transport exists on pre-open failures.
+                        var itemReleased = false
+                        fun releaseItemIfReady() {
+                            val release = synchronized(gate) {
+                                if (!workerFinished || !cleanupFinished || itemReleased) false
+                                else { itemReleased = true; true }
+                            }
+                            if (!release) return
+                            if (acquired) pool.release()
+                            synchronized(gate) { outstanding-- }
+                            notifyIfIdle()
+                        }
                         try {
                             while (!acquired && !cancelled() && System.nanoTime() < deadline)
                                 acquired = pool.tryAcquire(25, TimeUnit.MILLISECONDS)
@@ -151,8 +170,17 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                             started.set(true)
                                         }
                                         val transport = port.open(history, definitions)
+                                        val cancelStarted = AtomicBoolean(false)
+                                        synchronized(gate) { cleanupFinished = false; cleanupPins++ }
                                         return object : ModelSession {
-                                            override fun cancel() = transport.cancel()
+                                            override fun cancel() {
+                                                if (!cancelStarted.compareAndSet(false, true)) return
+                                                try { transport.cancel() }
+                                                finally {
+                                                    synchronized(gate) { cleanupFinished = true; cleanupPins-- }
+                                                    releaseItemIfReady()
+                                                }
+                                            }
                                             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                                                 val texts = mutableMapOf<String, Int>()
                                                 var rejected: Exception? = null
@@ -201,7 +229,6 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                             }
                         } catch (_: Exception) { /* A sent request is uncertain; never reopen it. */ }
                         finally {
-                            if (acquired) pool.release()
                             try {
                                 val result = completion
                                 if (result != null) store?.finished(record, ChildTaskStatus.COMPLETED, result.text)
@@ -211,9 +238,9 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                             } catch (_: Exception) {
                                 completion = null
                             } finally {
-                                synchronized(gate) { outstanding-- }
                                 if (completion == null) failures.set(true) else completions.offer(completion)
-                                notifyIfIdle()
+                                synchronized(gate) { workerFinished = true }
+                                releaseItemIfReady()
                             }
                         }
                     }
@@ -264,7 +291,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
 
     private fun notifyIfIdle() {
         val callbacks = synchronized(gate) {
-            if (!closed || busy || outstanding != 0) emptyList()
+            if (!closed || busy || outstanding != 0 || cleanupPins != 0) emptyList()
             else observers.toList().also { observers.clear() }
         }
         callbacks.forEach { it() }

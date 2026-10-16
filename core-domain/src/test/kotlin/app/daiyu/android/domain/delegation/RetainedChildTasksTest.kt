@@ -393,10 +393,12 @@ class RetainedChildTasksTest {
         })
         val binding = parent.bind(supervisor, mapOf("p" to definition(model)))
         try {
-            val accepted = submit(supervisor, binding, parent, "p")
+            submit(supervisor, binding, parent, "p")
             await("usage failure settles") { supervisor.snapshots(binding).single().settled }
             assertEquals(ChildTaskStatus.UNKNOWN, supervisor.snapshots(binding).single().record.status)
-            assertEquals(accepted, submit(supervisor, binding, parent, "p")); assertEquals(1, calls.get())
+            assertEquals(ChildTaskAdmission.Rejected("child_request_settled"),
+                supervisor.submit(binding, parent.context(), listOf(ChildModelTask("p", "Review p"))))
+            assertEquals(1, calls.get())
         } finally { drained(supervisor) }
     }
 

@@ -824,6 +824,14 @@ class ChatController internal constructor(private val application:Application,
             Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
         } catch (_:Exception) {problem="图片冻结失败或模型不支持；草稿保留，未发起网络请求";notifyChanged();return null}
         val assistant=Message(browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
+        val physicalVideoHistory = try {
+            ControllerVideoHistory(database).capture(conversationId).also {
+                check(it.inputs.isEmpty()) { "original_video_authorization_required" }
+            }
+        } catch (_: Exception) {
+            problem="原视频历史未获得匹配模型的上传授权，或视频来源无法确认；草稿保留，未启动模型请求"
+            notifyChanged(); return null
+        }
         val preparedContext = try {
             // All sends, including the very first message, share the same frozen policy/budget.
             val coordinator = contextPreparation
@@ -942,6 +950,7 @@ class ChatController internal constructor(private val application:Application,
                 check(contextService.matchesHistoryRevision(db,conversationId,preparedContext.expectedHistoryRevision)) {
                     "send_history_changed"
                 }
+                ControllerVideoHistory(database).assertCurrent(db, physicalVideoHistory)
                 databaseSendEntered=true
                     database.send(user,assistant,conversation==null,assistantContext.assistantId)
                 } } catch (failure: Exception) {

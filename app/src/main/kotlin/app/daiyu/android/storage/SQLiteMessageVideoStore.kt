@@ -2,6 +2,7 @@ package app.daiyu.android.storage
 
 import android.content.ContentValues
 import android.database.sqlite.SQLiteDatabase
+import app.daiyu.android.ControllerVideoManifestWitness
 import app.daiyu.android.domain.Message
 import app.daiyu.android.model.videos.MessageVideoInput
 
@@ -30,16 +31,19 @@ internal object SQLiteMessageVideoStore {
         return MessageVideoInputCodec.decode(message, encoded)
     }
 
+    fun readVerified(db: SQLiteDatabase, message: Message): List<MessageVideoInput> =
+        read(db, message).also { ControllerVideoManifestWitness.verify(db, message, it) }
+
     /** Call in the very same transaction that inserts the two accepted message rows. */
     fun insert(db: SQLiteDatabase, message: Message, inputs: List<MessageVideoInput>) {
         check(db.inTransaction())
-        if (inputs.isEmpty()) return
         val encoded = MessageVideoInputCodec.encode(message, inputs)
-        check(db.insertOrThrow(TABLE, null, ContentValues().apply {
+        if (inputs.isNotEmpty()) check(db.insertOrThrow(TABLE, null, ContentValues().apply {
             put("message_id", message.id.value)
             put("payload", encoded)
         }) != -1L) { "video_sidecar_not_inserted" }
-        check(MessageVideoInputCodec.encode(message, read(db, message)) == encoded) {
+        ControllerVideoManifestWitness.insert(db, message, inputs)
+        check(MessageVideoInputCodec.encode(message, readVerified(db, message)) == encoded) {
             "video_sidecar_receipt_mismatch"
         }
     }
@@ -48,11 +52,16 @@ internal object SQLiteMessageVideoStore {
         check(db.inTransaction())
         db.execSQL("DELETE FROM $TABLE WHERE message_id IN (SELECT id FROM messages WHERE conversation_id=?)",
             arrayOf(conversationId))
-        check(!hasVideos(db, conversationId)) { "video_sidecar_delete_unconfirmed" }
+        ControllerVideoManifestWitness.deleteConversation(db, conversationId)
+        for (table in listOf(TABLE, ControllerVideoManifestWitness.TABLE)) {
+            check(!db.rawQuery("SELECT 1 FROM $table WHERE message_id IN (SELECT id FROM messages WHERE conversation_id=?) LIMIT 1",
+                arrayOf(conversationId)).use { it.moveToFirst() }) { "video_metadata_delete_unconfirmed" }
+        }
     }
 
     fun hasVideos(db: SQLiteDatabase, conversationId: String?): Boolean =
-        db.rawQuery("SELECT 1 FROM $TABLE v JOIN messages m ON m.id=v.message_id" +
-            if (conversationId == null) " LIMIT 1" else " WHERE m.conversation_id=? LIMIT 1",
+        db.rawQuery("SELECT 1 FROM messages m LEFT JOIN message_video_witnesses w ON w.message_id=m.id " +
+            "WHERE (w.message_id IS NULL OR w.reference_count<>0 OR EXISTS(SELECT 1 FROM message_video_inputs v WHERE v.message_id=m.id))" +
+            (if (conversationId == null) "" else " AND m.conversation_id=?") + " LIMIT 1",
             conversationId?.let { arrayOf(it) }).use { it.moveToFirst() }
 }

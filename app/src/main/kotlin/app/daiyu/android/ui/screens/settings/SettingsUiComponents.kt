@@ -44,9 +44,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun SettingsSectionTitle(title: String) {
     Text(
         text = title,
-        style = MiuixTheme.textStyles.body2.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium),
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        modifier = Modifier.padding(start = 26.dp, end = 26.dp, top = 24.dp, bottom = 10.dp),
+        style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+        color = MiuixTheme.colorScheme.onSurface,
+        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 10.dp),
     )
 }
 
@@ -54,7 +54,7 @@ internal fun SettingsSectionTitle(title: String) {
 internal fun SettingsCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = modifier.padding(horizontal = 20.dp).fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
+            .clip(RoundedCornerShape(16.dp))
             .background(MiuixTheme.colorScheme.surface),
         content = content,
     )
@@ -81,10 +81,10 @@ internal fun SettingsRow(
             Spacer(Modifier.width(12.dp))
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(title, style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp, fontWeight = FontWeight.Medium),
+            Text(title, style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, fontWeight = FontWeight.Medium),
                 color = MiuixTheme.colorScheme.onSurface)
             if (!summary.isNullOrBlank()) {
-                Text(summary, style = MiuixTheme.textStyles.body2.copy(fontSize = 12.sp, lineHeight = 18.sp),
+                Text(summary, style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 19.sp),
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
             }
         }

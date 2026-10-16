@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.icons.DaiyuIcons
+import app.daiyu.android.ui.icons.daiyuIconColor
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -65,8 +66,8 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
     val maxHeight = minOf(336.dp, (LocalConfiguration.current.screenHeightDp * 0.55f).dp)
     DropdownMenu(expanded, onDismiss, modifier = Modifier.testTag("chat-overflow-menu")
         .widthIn(min = 232.dp, max = 280.dp).heightIn(max = maxHeight),
-        shape = RoundedCornerShape(16.dp), containerColor = colors.surfaceContainer,
-        tonalElevation = 0.dp, shadowElevation = 6.dp, border = BorderStroke(1.dp, colors.outline)) {
+        shape = RoundedCornerShape(12.dp), containerColor = colors.surfaceContainer,
+        tonalElevation = 0.dp, shadowElevation = 3.dp, border = BorderStroke(1.dp, colors.outline)) {
         groups.forEachIndexed { index, entries ->
             if (index > 0) HorizontalDivider(Modifier.padding(vertical = 4.dp), color = colors.outline)
             entries.forEach { entry -> ChatMenuItem(entry, onDismiss, onAction, Modifier.height(40.dp)) }
@@ -84,7 +85,7 @@ private fun ChatMenuItem(entry: MenuEntry, onDismiss: () -> Unit, onAction: (Cha
     DropdownMenuItem(
         modifier = modifier.testTag("chat-menu:${entry.action.name}"),
         text = { Text(entry.title, style = MiuixTheme.textStyles.body1, color = MiuixTheme.colorScheme.onSurface) },
-        leadingIcon = { Icon(entry.icon, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary) },
+        leadingIcon = { Icon(entry.icon, null, Modifier.size(18.dp), tint = daiyuIconColor(entry.icon)) },
         onClick = { onDismiss(); onAction(entry.action) },
     )
 }
@@ -107,7 +108,7 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
                 Row(Modifier.fillMaxWidth().clickable { onDismiss(); onAction(entry.action) }
                     .padding(horizontal = 24.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(entry.icon, null, Modifier.size(22.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                    Icon(entry.icon, null, Modifier.size(22.dp), tint = daiyuIconColor(entry.icon))
                     Text(entry.title, style = MiuixTheme.textStyles.body1, color = MiuixTheme.colorScheme.onSurface)
                 }
             }
@@ -118,7 +119,7 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
 @Composable
 internal fun UserTurnMenu(expanded: Boolean, onDismiss: () -> Unit, id: String, actions: ChatScreenActions) {
     DropdownMenu(expanded, onDismiss, containerColor = MiuixTheme.colorScheme.surfaceContainer,
-        shape = RoundedCornerShape(16.dp), tonalElevation = 0.dp,
+        shape = RoundedCornerShape(12.dp), tonalElevation = 0.dp,
         border = BorderStroke(1.dp, MiuixTheme.colorScheme.outline)) {
         listOf(
             Triple("复制", DaiyuIcons.Copy, actions.onCopy),
@@ -136,7 +137,7 @@ internal fun UserTurnMenu(expanded: Boolean, onDismiss: () -> Unit, id: String, 
 
 @Composable
 internal fun ChatVoiceModeMenu(expanded: Boolean, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit) {
-    DropdownMenu(expanded, onDismiss, shape = RoundedCornerShape(16.dp),
+    DropdownMenu(expanded, onDismiss, shape = RoundedCornerShape(12.dp),
         containerColor = MiuixTheme.colorScheme.surfaceContainer, tonalElevation = 0.dp,
         border = BorderStroke(1.dp, MiuixTheme.colorScheme.outline)) {
         listOf(

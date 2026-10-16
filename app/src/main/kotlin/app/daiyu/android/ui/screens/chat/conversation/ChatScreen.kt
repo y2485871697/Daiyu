@@ -53,7 +53,6 @@ internal fun DaiyuChatScreen(
             .statusBarsPadding().navigationBarsPadding().imePadding(),
     ) {
         ChatTopBar(state.title, state.balanceText, actions, assistantLabel = state.composer.assistantLabel)
-        androidx.compose.material3.HorizontalDivider(color = MiuixTheme.colorScheme.outline)
         androidx.compose.runtime.key(state.conversationKey) {
             ChatMessageList(state.turns, state.canJumpToPreviousUser, actions, Modifier.weight(1f), state.scrollRequest, turnExtras)
         }

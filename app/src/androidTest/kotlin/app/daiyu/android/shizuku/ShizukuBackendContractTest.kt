@@ -14,6 +14,13 @@ import java.util.concurrent.atomic.AtomicInteger
 /** Android Binder/Bundle/journal contracts; no installed Shizuku server or permission prompt. */
 @Suppress("DEPRECATION")
 class ShizukuBackendContractTest : InstrumentationTestCase() {
+    fun testConnectRequiresExplicitUidWithoutKotlinDefault() {
+        val type = ShizukuAuthorization::class.java
+        assertEquals(ShizukuConnection::class.java,
+            type.getDeclaredMethod("connect", Int::class.javaPrimitiveType!!).returnType)
+        assertFalse(type.declaredMethods.any { it.name == "connect" && it.parameterTypes.isEmpty() })
+        assertFalse(type.declaredMethods.any { it.name == "connect\$default" })
+    }
     private class Endpoint : IShizukuExecutor.Stub() {
         val executions = AtomicInteger()
         var malformed = false

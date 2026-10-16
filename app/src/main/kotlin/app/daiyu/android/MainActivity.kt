@@ -50,6 +50,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.assistants.AssistantSkill
 import app.daiyu.android.assistants.AssistantSelectionOwner
 import app.daiyu.android.context.ContextService
@@ -93,8 +96,6 @@ import app.daiyu.android.ui.screens.settings.*
 import app.daiyu.android.ui.screens.search.ConversationSearchScreen
 import app.daiyu.android.ui.screens.search.MessageSearchScreen
 import app.daiyu.android.ui.screens.stats.UsageStatsScreen
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : ComponentActivity() {
@@ -237,15 +238,12 @@ class MainActivity : ComponentActivity() {
     private var editingSettings: EditingSettings? = null
     private var modelDraft by mutableStateOf<ModelSettingsDraftUi?>(null)
     private var modelError by mutableStateOf<String?>(null)
-    private var catalog by mutableStateOf(emptyList<ModelCatalogEntryUi>())
-    private var catalogForDraft by mutableStateOf<ModelSettingsDraftUi?>(null)
-    private var catalogBusy by mutableStateOf(false)
-    private var catalogStatus by mutableStateOf<String?>(null)
-    private var catalogGeneration = 0L
-    private var catalogCancelled = AtomicBoolean(false)
+    private var editingCatalogIdentity by mutableStateOf<String?>(null)
+    private var modelEditingOwner by mutableStateOf<Any?>(null)
     private var chatModelPicker by mutableStateOf<ChatModelPickerState?>(null)
     private var chatModelSettings: ModelSettings? = null
     private var chatModelCancelled = AtomicBoolean(false)
+    private var chatModelOwner: Any? = null
     private var assistantPicker by mutableStateOf(false)
     private var assistantSelectionOwner by mutableStateOf<AssistantSelectionOwner?>(null)
     private fun openAssistantPicker(global: Boolean = false) {
@@ -394,15 +392,25 @@ class MainActivity : ComponentActivity() {
                         } }
                     }
                     "models" -> modelDraft?.let { value ->
-                        ModelSettingsScreen(
+                        val identity = editingCatalogIdentity
+                        if (identity == null) ModelSettingsScreen(
                             draft = value, onDraftChange = { changeModelDraft(it) },
-                            onSave = { saveModelSettings(it) }, onFetchCatalog = { fetchCatalog(it) },
+                            onSave = { saveModelSettings(it) }, onFetchCatalog = {},
                             onBack = { returnToChat() }, errorText = modelError,
                             credentialUnavailable = editingSettings?.credentialUnavailable == true,
                             requestOptionsUnavailable = editingSettings?.requestOptionsUnavailable == true,
-                            catalog = catalog, isFetchingCatalog = catalogBusy,
-                            catalogStatusText = catalogStatus, catalogForDraft = catalogForDraft,
-                        )
+                            catalogEnabled = false, enabled = !controller.dataBusy,
+                        ) else key(modelEditingOwner) { ProviderCatalogSettingsScreen(
+                            draft = value, onDraftChange = { changeModelDraft(it) },
+                            onSave = { saveModelSettings(it) }, onBack = { returnToChat() },
+                            providerIdentity = identity, persistence = controller.settings.modelCatalog,
+                            createModel = { CatalogModelParameters.newModel(it) },
+                            fetchCatalog = ::requestSettingsCatalog,
+                            enabled = controller.ready && controller.active == null && !controller.dataBusy,
+                            errorText = modelError,
+                            credentialUnavailable = editingSettings?.credentialUnavailable == true,
+                            requestOptionsUnavailable = editingSettings?.requestOptionsUnavailable == true,
+                        ) }
                     }
                     "backup" -> BackupScreen(
                         onBack = { returnToChat() },
@@ -489,9 +497,13 @@ class MainActivity : ComponentActivity() {
                 }
                 PromptSurface()
                 chatModelPicker?.let { picker ->
-                    ChatModelPicker(picker, onSelect = ::selectChatModel, onRefresh = ::fetchChatModels,
-                        onSettings = { dismissChatModels(); guard { modelSettings() } },
-                        onDismiss = ::dismissChatModels)
+                    val owner = chatModelOwner
+                    ChatModelPicker(picker, onSelect = { selectChatModel(it, owner) },
+                        onRefresh = { if (chatModelOwner === owner && owner != null) fetchChatModels() },
+                        onSettings = { if (chatModelOwner === owner && owner != null) {
+                            dismissChatModels(); guard { modelSettings() }
+                        } },
+                        onDismiss = { if (chatModelOwner === owner) dismissChatModels() })
                 }
                 assistantSelectionOwner?.let { owner -> key(owner) {
                     AssistantPickerDialog(show = assistantPicker, store = assistantStore, assets = assistantAssets,
@@ -963,12 +975,12 @@ class MainActivity : ComponentActivity() {
         imageHost.close()
         speechHost.close()
         activityCallbacksAllowed = false; refreshRateWindowResumed = false
-        window.decorView.removeCallbacks(refreshRateRequest); invalidateCatalog(); dismissChatModels()
+        window.decorView.removeCallbacks(refreshRateRequest); dismissChatModels()
         cancelRestorePreview(); prompt = null
         controller.unobserve(listener); super.onDestroy()
     }
     private fun returnToChat() {
-        dismissChatModels(); invalidateCatalog(); modelDraft = null; editingSettings = null; modelError = null
+        dismissChatModels(); modelDraft = null; editingSettings = null; editingCatalogIdentity = null; modelEditingOwner = null; modelError = null
         cancelRestorePreview(); prompt = null; searchPage = null; retainedPage = "chat"
         exportConversationId = null; exportConversationTitle = ""; taskRecordsConversationId = null
         if (activityUsable()) refresh()
@@ -1272,9 +1284,9 @@ class MainActivity : ComponentActivity() {
             balanceText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中";
                 imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,
-                phase = phase, controlOwnerKey = controlOwner?.id?.value, modelLabel = savedModelLabel(),
+                phase = phase, controlOwnerKey = controlOwner?.id?.value, modelLabel = if (controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
                 reasoningLabel = reasoningPreference.get(selected?.id?.value).displayName,
-                assistantLabel = currentAssistantLabel(), enabled = allowed && !imageHost.sending && !shizukuWritesBlocked,
+                assistantLabel = if (controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && !imageHost.sending && !shizukuWritesBlocked,
                 supplementAvailable = state?.phase == ExecutionPhase.PAUSED && supplementDraft.pending == null,
                 supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&
                     supplementDraft.pending != null))
@@ -1309,6 +1321,7 @@ class MainActivity : ComponentActivity() {
     private fun openChatModels() {
         requireActivityUsable()
         dismissChatModels()
+        chatModelOwner = Any()
         val saved = try { controller.settings.load() } catch (_: Exception) { null }
         chatModelSettings = saved
         val current = saved?.model.orEmpty()
@@ -1320,7 +1333,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun dismissChatModels() {
         chatModelCancelled.set(true)
-        chatModelPicker = null; chatModelSettings = null
+        chatModelPicker = null; chatModelSettings = null; chatModelOwner = null
     }
     private fun fetchChatModels() {
         if (!activityUsable() || retainedPage != "chat") return
@@ -1343,16 +1356,23 @@ class MainActivity : ComponentActivity() {
         }
         if (!accepted) chatModelPicker = picker.copy(message = "当前不可查询，请稍后刷新")
     }
-    private fun selectChatModel(id: String) {
+    private fun selectChatModel(id: String, owner: Any?) {
+        if (owner == null || chatModelOwner !== owner) return
         val picker = chatModelPicker ?: return
         val saved = chatModelSettings ?: return
         try {
             requireActivityUsable()
             check(retainedPage == "chat" && controller.ready && controller.active == null && !controller.dataBusy)
             require(picker.models.any { it.id == id })
-            controller.settings.selectModel(saved, id)
-            imageHost.configurationChanged()
-            dismissChatModels(); refresh()
+            controller.selectConfiguredModel(saved, id) { success ->
+                if (activityUsable()) {
+                    if (success) imageHost.configurationChanged()
+                    if (chatModelOwner === owner && retainedPage == "chat") {
+                        if (success) { dismissChatModels(); refresh() }
+                        else chatModelPicker = chatModelPicker?.copy(message = "切换未保存，请关闭后重新选择")
+                    }
+                }
+            }
         } catch (_: Exception) {
             chatModelPicker = picker.copy(message = "切换未保存，请关闭后重新选择")
         }
@@ -1361,19 +1381,29 @@ class MainActivity : ComponentActivity() {
     private fun modelSettings() {
         requireActivityUsable(); check(!controller.dataBusy)
         if (controller.active != null) { toast("当前运行使用冻结配置，请结束后修改"); return }
-        invalidateCatalog()
+        editingCatalogIdentity = null
+        val owner = Any(); modelEditingOwner = owner
         val editing = controller.settings.loadForEditing(); editingSettings = editing
         val saved = editing.settings
         modelDraft = ModelSettingsDraftUi(protocol = saved.protocol, endpoint = saved.endpoint, responsesPath = saved.responsesPath,
             apiKey = saved.apiKey, model = saved.model, batteryEnabled = saved.batteryEnabled, deviceStatusEnabled = saved.deviceStatusEnabled,
             customBody = saved.requestOptions.customBody, speedMode = saved.requestOptions.speedMode, codex = saved.requestOptions.codex)
         modelError = null; retainedPage = "models"
+        if (saved.endpoint.isNotBlank() && saved.model.isNotBlank()) lifecycleScope.launch {
+            val catalogResult = withContext(Dispatchers.IO) {
+                runCatching { controller.settings.modelCatalogSnapshot() }
+            }
+            if (activityUsable() && retainedPage == "models" && modelEditingOwner === owner && editingSettings === editing) {
+                catalogResult.fold(
+                    onSuccess = { editingCatalogIdentity = it.providerIdentity },
+                    onFailure = { modelError = "模型目录不可用；未启动导入，请检查配置或目录存储" },
+                )
+            }
+        }
     }
-    private fun invalidateCatalog() {
-        catalogCancelled.set(true); catalogGeneration++; catalogBusy = false
-        catalog = emptyList(); catalogForDraft = null; catalogStatus = null
+    private fun changeModelDraft(value: ModelSettingsDraftUi) {
+        if (activityUsable() && retainedPage == "models" && !controller.dataBusy) modelDraft = value
     }
-    private fun changeModelDraft(value: ModelSettingsDraftUi) { invalidateCatalog(); modelDraft = value }
     private fun ModelSettingsDraftUi.toSettings(base: ModelSettings) = base.copy(endpoint = endpoint.trim(), model = model.trim(),
         apiKey = apiKey, protocol = protocol, responsesPath = responsesPath.trim(), batteryEnabled = batteryEnabled,
         deviceStatusEnabled = deviceStatusEnabled, requestOptions = ProviderRequestOptions(customBody, speedMode, codex))
@@ -1381,34 +1411,36 @@ class MainActivity : ComponentActivity() {
         try {
             requireActivityUsable(); check(retainedPage == "models" && modelDraft === value)
             check(controller.active == null && !controller.dataBusy)
-            invalidateCatalog()
             val editing = checkNotNull(editingSettings)
             require(value.savedProtocol == editing.settings.protocol)
             require(value.protocol == editing.settings.protocol || value.protocolChangeAuthorized)
             require(!editing.requestOptionsUnavailable || value.requestOptionsReplacementAuthorized)
-            controller.settings.save(value.toSettings(editing.settings), protocolChangeAuthorized = value.protocolChangeAuthorized,
-                requestOptionsReplacementAuthorized = value.requestOptionsReplacementAuthorized)
-            imageHost.configurationChanged()
-            returnToChat(); toast("模型设置已保存")
-        } catch (_: Exception) { modelError = "设置未保存" }
-    }
-    private fun fetchCatalog(value: ModelSettingsDraftUi) {
-        try {
-            requireActivityUsable(); check(retainedPage == "models" && modelDraft == value && !controller.dataBusy)
-            val editing = checkNotNull(editingSettings)
-            invalidateCatalog(); catalogCancelled = AtomicBoolean(false)
-            val cancelled = catalogCancelled; val generation = ++catalogGeneration
-            val draft = value.toSettings(editing.settings)
-            catalogBusy = true
-            val accepted = controller.fetchModelCatalog(draft, { cancelled.get() }) { models ->
-                if (activityUsable() && retainedPage == "models" && !cancelled.get() && generation == catalogGeneration && modelDraft == value) {
-                    catalogBusy = false; catalogForDraft = value
-                    catalog = models.orEmpty().map { ModelCatalogEntryUi(it.id, it.displayName) }
-                    catalogStatus = when { models == null -> "获取失败"; models.isEmpty() -> "模型目录为空"; else -> null }
+            val owner = checkNotNull(modelEditingOwner)
+            controller.saveModelSettings(value.toSettings(editing.settings), value.protocolChangeAuthorized,
+                value.requestOptionsReplacementAuthorized) { success ->
+                if (activityUsable()) {
+                    if (success) imageHost.configurationChanged()
+                    if (retainedPage == "models" && modelEditingOwner === owner && editingSettings === editing) {
+                        if (success) returnToChat() else modelError = "设置未保存"
+                    }
                 }
             }
-            if (!accepted) { catalogBusy = false; catalogForDraft = value; catalogStatus = "当前不可查询" }
-        } catch (_: Exception) { catalogBusy = false; catalogForDraft = value; catalogStatus = "获取失败" }
+        } catch (_: Exception) { modelError = "设置未保存" }
+    }
+    private fun requestSettingsCatalog(
+        value: ModelSettingsDraftUi,
+        cancelled: () -> Boolean,
+        deliver: (List<app.daiyu.android.model.catalog.RemoteModel>?) -> Unit,
+    ): Boolean {
+        if (!activityUsable() || retainedPage != "models" || modelDraft != value ||
+            controller.dataBusy || cancelled()) return false
+        val editing = editingSettings ?: return false
+        return try {
+            controller.fetchModelCatalog(value.toSettings(editing.settings), cancelled) { models ->
+                if (activityUsable() && retainedPage == "models" && editingSettings === editing &&
+                    modelDraft == value && !cancelled()) deliver(models)
+            }
+        } catch (_: Exception) { false }
     }
 
     private fun checkBackupAvailable() {
@@ -1527,7 +1559,9 @@ class MainActivity : ComponentActivity() {
             prompt = ConfirmPrompt("恢复模型配置", "", "确认恢复", action = {
                 backupGuard {
                     check(configurationRestorePreview === preview)
-                    try { controller.restoreImportedConfiguration(preview, authorized = true); toast("配置已恢复") }
+                    try { controller.restoreImportedConfiguration(preview, authorized = true) { success ->
+                        if (success && activityUsable()) imageHost.configurationChanged()
+                    } }
                     finally { cancelRestorePreview() }
                 }
             }, backup = true)

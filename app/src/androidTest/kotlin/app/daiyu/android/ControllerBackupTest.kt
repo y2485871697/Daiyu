@@ -190,6 +190,21 @@ class ControllerBackupTest:InstrumentationTestCase() {
     private fun restoreRejected(work:()->Unit) {
         try {work();fail("manual restore must reject")} catch(_:IllegalArgumentException) {} catch(_:IllegalStateException) {}
     }
+    private fun preview(f:Fixture):ChatController.ConfigurationRestorePreview {
+        val result=AtomicReference<ChatController.ConfigurationRestorePreview>()
+        main {result.set(f.controller.previewImportedConfiguration())}
+        return result.get()
+    }
+    private fun restore(f:Fixture,preview:ChatController.ConfigurationRestorePreview):Boolean {
+        val result=AtomicReference<Boolean>();val done=CountDownLatch(1)
+        main {f.controller.restoreImportedConfiguration(preview,true) { success ->
+            assertEquals(Looper.getMainLooper(),Looper.myLooper())
+            result.set(success);done.countDown()
+        }}
+        assertTrue("configuration restore timeout",done.await(10,TimeUnit.SECONDS))
+        instrumentation.waitForIdleSync();assertFalse(f.controller.dataBusy)
+        return result.get()
+    }
     fun testImportedConfigurationOnlyAppliesAfterManualConfirmationWithoutCredentialReads() {
         val source=fresh();settings(source);val input=export(source)
         val f=fresh();settings(f,"current-model")
@@ -198,15 +213,17 @@ class ControllerBackupTest:InstrumentationTestCase() {
         task(f) {f.controller.importUserBackup(Uri.fromFile(input),true)}
         assertEquals(before,f.preferences.all)
         val metadata=f.backup.importedConfiguration().toString()
+        val preview=preview(f)
         main {
-            val preview=f.controller.previewImportedConfiguration()
             assertEquals(before,f.preferences.all)
             assertTrue(preview.plan.credentialRebindRequired)
             assertEquals("source-model",preview.plan.after["model"])
             assertEquals(false,preview.plan.after["battery"])
             assertEquals(false,preview.plan.after["device-status"])
             assertFalse(preview.plan.before.toString().contains("SECRET_"))
-            f.controller.restoreImportedConfiguration(preview,true)
+        }
+        assertTrue(restore(f,preview))
+        main {
             assertEquals("source-model",f.preferences.getString("model",null))
             assertEquals("https://example.invalid/gateway",f.preferences.getString("endpoint",null))
             assertFalse(f.preferences.getBoolean("battery",true));assertFalse(f.preferences.getBoolean("device-status",true))
@@ -259,42 +276,33 @@ class ControllerBackupTest:InstrumentationTestCase() {
     fun testRestoreRejectsChangedMetadataAndChangedCurrentSettingsWithoutPartialWrite() {
         val f=fresh();settings(f);f.backup.setNonSecretConfiguration(mapOf("model" to "imported"))
         val before=HashMap(f.preferences.all)
-        main {
-            val staleMetadata=f.controller.previewImportedConfiguration()
-            f.backup.setNonSecretConfiguration(mapOf("model" to "new-imported"))
-            restoreRejected {f.controller.restoreImportedConfiguration(staleMetadata,true)}
-            assertEquals(before,f.preferences.all)
-            val staleSettings=f.controller.previewImportedConfiguration()
-            assertTrue(f.preferences.edit().putString("model","user-changed").commit())
-            val changed=HashMap(f.preferences.all)
-            restoreRejected {f.controller.restoreImportedConfiguration(staleSettings,true)}
-            assertEquals(changed,f.preferences.all)
-        }
+        val staleMetadata=preview(f)
+        f.backup.setNonSecretConfiguration(mapOf("model" to "new-imported"))
+        assertFalse(restore(f,staleMetadata));assertEquals(before,f.preferences.all)
+        val staleSettings=preview(f)
+        assertTrue(f.preferences.edit().putString("model","user-changed").commit())
+        val changed=HashMap(f.preferences.all)
+        assertFalse(restore(f,staleSettings));assertEquals(changed,f.preferences.all)
         assertEquals(0,f.calls.get())
     }
     fun testRestoreCommitFailureCompensatesOriginalConfigurationAndCannotReplay() {
         val f=fresh();settings(f);f.backup.setNonSecretConfiguration(mapOf("model" to "imported"))
         val before=HashMap(f.preferences.all)
-        main {
-            val preview=f.controller.previewImportedConfiguration();f.app.failNextRestoreCommit=true
-            restoreRejected {f.controller.restoreImportedConfiguration(preview,true)}
-            assertEquals(before,f.preferences.all)
-            restoreRejected {f.controller.restoreImportedConfiguration(preview,true)}
-            val retry=f.controller.previewImportedConfiguration();f.controller.restoreImportedConfiguration(retry,true)
-            assertEquals("imported",f.preferences.getString("model",null))
-        }
+        val first=preview(f);f.app.failNextRestoreCommit=true
+        assertFalse(restore(f,first));assertEquals(before,f.preferences.all)
+        main {restoreRejected {f.controller.restoreImportedConfiguration(first,true)}}
+        assertTrue(restore(f,preview(f)))
+        assertEquals("imported",f.preferences.getString("model",null))
         assertEquals(0,f.calls.get());assertEquals(0L,f.controller.dataRevision)
     }
     fun testRestoreEmptyMetadataIsTrueNoOpAndInvalidMetadataPreservesSettings() {
         val f=fresh();settings(f);val before=HashMap(f.preferences.all)
-        main {
-            val empty=f.controller.previewImportedConfiguration();assertTrue(empty.plan.isNoOp)
-            f.controller.restoreImportedConfiguration(empty,true);assertEquals(before,f.preferences.all)
-            // Backup metadata allows model names over 200 chars; active settings must reject them.
-            f.backup.setNonSecretConfiguration(mapOf("model" to "m".repeat(201)))
-            restoreRejected {f.controller.previewImportedConfiguration()}
-            assertEquals(before,f.preferences.all)
-        }
+        val empty=preview(f);assertTrue(empty.plan.isNoOp)
+        assertTrue(restore(f,empty));assertEquals(before,f.preferences.all)
+        // Backup metadata allows model names over 200 chars; active settings must reject them.
+        f.backup.setNonSecretConfiguration(mapOf("model" to "m".repeat(201)))
+        main {restoreRejected {f.controller.previewImportedConfiguration()}}
+        assertEquals(before,f.preferences.all)
         assertEquals(0,f.calls.get());assertEquals(0L,f.controller.dataRevision)
     }
     fun testBoundedReadAndCloseFailureOccurBeforeImport() {

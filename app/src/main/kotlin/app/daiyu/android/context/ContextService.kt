@@ -81,6 +81,9 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         if (count !in 0..original.size || !isCompleteContextPrefix(original, count) ||
             ContextRevision.digest(original.take(count)) != archive[2])
             return PreparedContext(original, estimateTokens(original), null)
+        // Video metadata lives beside physical rows, not in a text archive.
+        if (original.take(count).any { app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty() })
+            return PreparedContext(original, estimateTokens(original), null)
         val archived = ArchiveCodec.decode(blobs.read(archive[4])).also { MessageHistory.expand(it) }
         require(ContextRevision.digest(archived) == archive[2]) { "原文档案不一致" }
         val summary = summaryMessage(id, archive[0], archive[3])
@@ -92,11 +95,18 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         checkCancellation(cancelled)
         val pending = pendingMessages.toList()
         require(pending.all { it.conversationId == id }) { "待发送消息不属于当前会话" }
-        val snapshot = transactions.run { db -> ensureIdle(db, id); read(db, id) }
+        val (snapshot, firstVideo) = transactions.run { db ->
+            ensureIdle(db, id)
+            val messages = read(db, id)
+            messages to messages.indexOfFirst {
+                app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty()
+            }
+        }
         val requested = compressionBoundary(snapshot, policy.keepTurns)
         require(requested in 0..snapshot.size)
         // An injected legacy boundary cannot split 03 owners/supplements or tool runs.
-        val ceiling = minOf(requested, compressiblePrefix(snapshot, policy.keepTurns))
+        val ceiling = minOf(requested, compressiblePrefix(snapshot, policy.keepTurns),
+            if (firstVideo < 0) snapshot.size else firstVideo)
         val count = (ceiling downTo 1).firstOrNull { end ->
             isCompleteContextPrefix(snapshot, end)
         } ?: return null
@@ -113,6 +123,9 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         transactions.run { db ->
             checkCancellation(cancelled)
             ensureIdle(db, id); require(ContextRevision.digest(read(db, id)) == ContextRevision.digest(snapshot)) { "历史已改变；摘要未应用" }
+            require(prefix.none { app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty() }) {
+                "视频历史已改变；摘要未应用"
+            }
             db.execSQL("UPDATE context_archives SET active=0 WHERE conversation_id=?", arrayOf(id.value))
             val inserted = db.insertOrThrow("context_archives", null, ContentValues().apply {
                 put("id", archive); put("conversation_id", id.value); put("prefix_count", count); put("revision", revision)
@@ -165,6 +178,9 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     /** Materializes a true conversation copy. All IDs/run IDs are remapped, original is unchanged. */
     fun branch(id: ConversationId, through: MessageId): ConversationId = transactions.run { db ->
         ensureIdle(db, id); verifyArchives(db, id)
+        check(!app.daiyu.android.storage.SQLiteMessageVideoStore.hasVideos(db, id.value)) {
+            "此操作尚不能重新绑定原视频，未修改会话"
+        }
         val original = read(db, id); val index = original.indexOfFirst { it.id == through }
         require(index >= 0 && original[index].status == RunStatus.COMPLETED) { "只能从已完成消息分支" }
         require(isHistoryClosedPrefix(original, index + 1)) { "截点分离历史所有者与补充消息；请选择闭合截点" }
@@ -208,6 +224,9 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     /** Physical truncation makes paged UI and next model context agree. Optional user correction invalidates every summary. */
     fun revise(id: ConversationId, through: MessageId, replacementUserText: String? = null) = transactions.run { db ->
         ensureIdle(db, id); verifyArchives(db, id)
+        check(!app.daiyu.android.storage.SQLiteMessageVideoStore.hasVideos(db, id.value)) {
+            "此操作尚不能重新绑定原视频，未修改会话"
+        }
         val original = read(db, id); val selected = original.firstOrNull { it.id == through } ?: error("消息不存在")
         require(selected.status == RunStatus.COMPLETED)
         if (replacementUserText != null) require(selected.role == "user" && replacementUserText.isNotBlank())
@@ -274,7 +293,10 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                 val p=JSONArray(requireNotNull(text("protocol")))
                 Message(MessageId(row[0]),id,RunId(row[1]),row[2],ArchiveCodec.decodeBlocks(JSONArray(requireNotNull(text("blocks")))),
                     RunStatus.valueOf(row[3]),text("error"),(0 until p.length()).map {p.getString(it)},
-                    MessageHistoryCodec.decode(JSONArray(requireNotNull(text("history_segments"))))).also {MessageHistoryCodec.validate(it)}
+                    MessageHistoryCodec.decode(JSONArray(requireNotNull(text("history_segments"))))).also {
+                        MessageHistoryCodec.validate(it)
+                        app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it)
+                    }
             }.also {MessageHistory.expand(it)}
         }
         private fun messageValues(m: Message): ContentValues {

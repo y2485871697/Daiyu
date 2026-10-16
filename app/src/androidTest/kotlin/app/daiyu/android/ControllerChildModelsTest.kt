@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger
 @Suppress("DEPRECATION")
 class ControllerChildModelsTest : InstrumentationTestCase() {
     private class FixtureApplication(base: Context) : Application() { init { attachBaseContext(base) } }
-    private class Fixture(base: Context, val held: Boolean = false) {
+    private class Fixture(base: Context, val held: Boolean = false, val background: Boolean = false) {
         val id = UUID.randomUUID().toString()
         val app = FixtureApplication(testContext(base, "controller-child-$id-"))
         val database = ConversationDatabase(app)
@@ -27,6 +27,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         val provider = SubAgentProvider("explicit-provider", "Fixture", listOf(child))
         val profile = SubAgentProfile("review", "Reviewer", "review", providerId = provider.id, modelId = child.id)
         val preferences = ConversationSubAgentPreferences(app.getSharedPreferences("subagent_configuration", 0))
+        val toolName = if (background) "start_child_tasks" else "run_child_models"
         val controller: ChatController
         lateinit var conversation: Conversation
         init {
@@ -37,17 +38,17 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
                     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
                         val isChild = config.model == "child-api"
                         if (isChild) { check(definitions.isEmpty()); childOpened.incrementAndGet() }
-                        else { check(config.model == "parent-api"); parentOpened.incrementAndGet(); check(definitions.any { it.name == "run_child_models" }) }
+                        else { check(config.model == "parent-api"); parentOpened.incrementAndGet(); check(definitions.any { it.name == toolName }) }
                         var rounds = 0
                         return object : ModelSession {
                             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                                 if (isChild) {
-                                    entered.countDown(); check(release.await(10, TimeUnit.SECONDS)); sink(ModelEvent.TextFinal("child", "independent answer"))
-                                } else if (rounds++ == 0) sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("child-call"), "run_child_models",
+                                    entered.countDown(); check(release.await(10, TimeUnit.SECONDS)); sink(ModelEvent.Usage(7, 3)); sink(ModelEvent.TextFinal("child", "independent answer"))
+                                } else if (rounds++ == 0) sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("child-call"), toolName,
                                     """{"tasks":[{"profile_id":"review","prompt":"review task"}]}""")))
                                 else {
                                     check(outputs.single().callId == ToolCallId("child-call"))
-                                    check(outputs.single().output.contains("independent answer")); sink(ModelEvent.TextFinal("parent", "combined answer"))
+                                    check(outputs.single().output.contains(if (background) "accepted" else "independent answer")); sink(ModelEvent.TextFinal("parent", "combined answer"))
                                 }
                             }
                             override fun cancel() { if (isChild) cancelled.countDown() }
@@ -73,7 +74,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         }
     }
     private val fixtures = mutableListOf<Fixture>()
-    private fun fresh(held: Boolean = false) = Fixture(instrumentation.targetContext, held).also {
+    private fun fresh(held: Boolean = false, background: Boolean = false) = Fixture(instrumentation.targetContext, held, background).also {
         fixtures.add(it); awaitControl("recovery ready") { it.controller.ready }; it.prepare()
     }
     override fun tearDown() { try { fixtures.forEach { it.close() } } finally { super.tearDown() } }
@@ -139,4 +140,53 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         assertEquals(RunStatus.STOPPED, f.database.messages(f.conversation.id).single { it.second.id == owner.id }.second.status)
         assertEquals(ChildTaskStatus.UNKNOWN, f.controller.childTasks(f.conversation.id).single().status)
     }
+    fun testBackgroundChildOutlivesParentAndPersistsAttributedUsage() {
+        val f = fresh(held = true, background = true)
+        controlMain {
+            assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
+            assertNotNull(f.controller.sendWithChildren(f.conversation, "background parent"))
+        }
+        assertTrue(f.entered.await(5, TimeUnit.SECONDS))
+        awaitControl("parent released while child is live") { f.controller.active == null }
+        assertTrue(f.controller.hasLiveChildTasks(f.conversation.id))
+        assertFalse(f.cancelled.await(100, TimeUnit.MILLISECONDS))
+        controlMain {
+            try { f.controller.dataTask { "must not run" }; fail("backup must wait for live children") }
+            catch (_: IllegalStateException) { }
+        }
+        f.release.countDown()
+        awaitControl("background child actually drained") { !f.controller.hasLiveChildTasks() }
+        val record = f.controller.childTasks(f.conversation.id).single()
+        assertEquals(ChildTaskStatus.COMPLETED, record.status)
+        assertEquals("independent answer", record.text)
+        val usage = f.controller.recordedRequestUsage(f.conversation.id)
+        assertEquals(1L, usage.summary.child.requestSnapshotCount)
+        assertEquals(7L, usage.summary.child.input.reportedTokens)
+        assertEquals(3L, usage.summary.child.output.reportedTokens)
+        assertEquals(1, f.childOpened.get())
+    }
+
+    fun testIndependentStopKeepsLeaseUntilChildActuallyExits() {
+        val f = fresh(held = true, background = true)
+        controlMain {
+            assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
+            assertNotNull(f.controller.sendWithChildren(f.conversation, "background stop"))
+        }
+        assertTrue(f.entered.await(5, TimeUnit.SECONDS))
+        awaitControl("parent released") { f.controller.active == null }
+        val record = f.controller.childTasks(f.conversation.id).single()
+        controlMain { assertEquals(app.daiyu.android.domain.delegation.ChildTaskStop.REQUESTED, f.controller.stopChildTask(record)) }
+        assertTrue(f.cancelled.await(5, TimeUnit.SECONDS))
+        assertTrue(f.controller.hasLiveChildTasks())
+        val second = ConversationDatabase(f.app)
+        try {
+            try { SQLiteRuntimeStore.acquire(second).close(); fail("live controller owns the lease") }
+            catch (_: IllegalStateException) { }
+        } finally { second.close() }
+        f.release.countDown()
+        awaitControl("stopped child actually drained") { !f.controller.hasLiveChildTasks() }
+        assertEquals(ChildTaskStatus.UNKNOWN, f.controller.childTasks(f.conversation.id).single().status)
+        assertEquals(1, f.childOpened.get())
+    }
+
 }

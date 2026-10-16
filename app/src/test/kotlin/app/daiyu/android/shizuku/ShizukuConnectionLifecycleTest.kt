@@ -17,6 +17,9 @@ class ShizukuConnectionLifecycleTest {
         override fun execute(command: ShizukuCommand): ShizukuDispatch = error("unused")
         override fun poll(handle: ShizukuCommandHandle, offset: Int, limit: Int): ShizukuCommandPage = error("unused")
         override fun cancel(handle: ShizukuCommandHandle): ShizukuOutcome.Unknown = error("unused")
+        override fun closeWithResult(onResult: (ShizukuCloseResult) -> Unit) {
+            close(); onResult(ShizukuCloseResult.Drained)
+        }
         override fun close() { closes.incrementAndGet(); onClose() }
     }
     private fun await(latch: CountDownLatch) { check(latch.await(5, TimeUnit.SECONDS)) { "fixture_timeout" } }
@@ -113,4 +116,25 @@ class ShizukuConnectionLifecycleTest {
         rejected("close_failed") { lifecycle.close() }; lifecycle.close()
         assertFalse(lifecycle.isOpen); assertEquals(1, releases.get()); assertEquals(1, candidate.closes.get())
     }
+    @Test fun connectionReleaseWaitsForBackendCleanupObservation() {
+        val releases = AtomicInteger()
+        val lifecycle = ShizukuConnectionLifecycle { releases.incrementAndGet() }
+        var complete: ((ShizukuCloseResult) -> Unit)? = null
+        val backend = object : ShizukuBackend {
+            override val identity = ShizukuIdentity(2000, "service", "permission")
+            override fun execute(command: ShizukuCommand): ShizukuDispatch = error("unused")
+            override fun poll(handle: ShizukuCommandHandle, offset: Int, limit: Int): ShizukuCommandPage = error("unused")
+            override fun cancel(handle: ShizukuCommandHandle): ShizukuOutcome.Unknown = error("unused")
+            override fun close() {}
+            override fun closeWithResult(onResult: (ShizukuCloseResult) -> Unit) { complete = onResult }
+        }
+        lifecycle.open("scope") { backend }
+        lifecycle.close()
+        lifecycle.close()
+        assertFalse(lifecycle.isOpen)
+        assertEquals(0, releases.get())
+        checkNotNull(complete)(ShizukuCloseResult.Unknown("revoked"))
+        assertEquals(1, releases.get())
+    }
+
 }

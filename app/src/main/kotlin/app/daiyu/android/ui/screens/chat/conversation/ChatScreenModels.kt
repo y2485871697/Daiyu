@@ -75,4 +75,9 @@ data class ComposerUi(
     val listening: Boolean = false,
     val enabled: Boolean = true,
     val controlOwnerKey: String? = null,
+    val supplementAvailable: Boolean = false,
+    val supplementPending: Boolean = false,
 )
+
+internal fun ComposerUi.textActionEnabled(): Boolean = enabled && text.isNotBlank() && !supplementPending &&
+    (phase == ComposerPhase.IDLE || (phase == ComposerPhase.PAUSED && supplementAvailable))

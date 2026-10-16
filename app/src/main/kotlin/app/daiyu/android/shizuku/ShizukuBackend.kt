@@ -30,6 +30,12 @@ sealed interface ShizukuOutcome {
 data class ShizukuCommandPage(val outcome: ShizukuOutcome, val bytes: ByteArray,
     val offset: Int, val nextOffset: Int, val retainedBytes: Int, val truncated: Boolean, val outputComplete: Boolean)
 
+sealed interface ShizukuCloseResult {
+    /** The owned shell, engine workers and local RPCs have exited; not detached descendants. */
+    data object Drained : ShizukuCloseResult
+    data class Unknown(val reason: String) : ShizukuCloseResult
+}
+
 /** Worker-only execution/poll/cancel. close fences immediately and only requests remote cleanup. */
 interface ShizukuBackend : AutoCloseable {
     val identity: ShizukuIdentity
@@ -37,5 +43,6 @@ interface ShizukuBackend : AutoCloseable {
     fun poll(handle: ShizukuCommandHandle, offset: Int = 0, limit: Int = 16_384): ShizukuCommandPage
     /** Cancellation never promises side effects were rolled back or detached descendants stopped. */
     fun cancel(handle: ShizukuCommandHandle): ShizukuOutcome.Unknown
+    fun closeWithResult(onResult: (ShizukuCloseResult) -> Unit)
     override fun close()
 }

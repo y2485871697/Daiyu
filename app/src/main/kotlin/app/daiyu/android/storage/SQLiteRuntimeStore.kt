@@ -6,6 +6,8 @@ import app.daiyu.android.context.DatabaseTransactions
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.delegation.*
 import app.daiyu.android.domain.runtime.*
+import app.daiyu.android.domain.usage.ChildUsageRecorder
+import app.daiyu.android.model.usage.SQLiteChildUsageStore
 import app.daiyu.android.domain.question.ASK_USER_TOOL_NAME
 import app.daiyu.android.domain.question.QuestionIdentity
 import java.io.File
@@ -24,6 +26,10 @@ internal class SQLiteRuntimeStore private constructor(
     private var closed = false
     private fun available() { check(!closed && lock.isValid) { "运行存储所有权已释放" } }
 
+    private val childUsageStore = SQLiteChildUsageStore(database)
+    internal val childUsage = ChildUsageRecorder { task, checkpoint ->
+        childAccess { childUsageStore.record(task, checkpoint) }
+    }
     private val childStore = SQLiteChildTaskStore(database)
     internal val childTasks: ChildTaskStore = object : ChildTaskStore {
         override fun enqueue(parent: RunExecutionOwner, tasks: List<ChildTaskRecord>) = childAccess { childStore.enqueue(parent, tasks) }

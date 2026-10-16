@@ -25,6 +25,13 @@ import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.delegation.ConversationSubAgentPreferences
 import app.daiyu.android.delegation.ReasoningEffort
 import app.daiyu.android.domain.*
+import app.daiyu.android.domain.runtime.ExecutionPhase
+import app.daiyu.android.domain.runtime.SupplementAdmission
+import app.daiyu.android.ui.actions.ConversationExportSelection
+import app.daiyu.android.ui.actions.PausedSupplementDraft
+import app.daiyu.android.ui.actions.SupplementEditor
+import app.daiyu.android.ui.screens.conversation.ChildTaskRecordsScreen
+import app.daiyu.android.ui.screens.conversation.ConversationExportScreen
 import app.daiyu.android.model.ProviderRequestOptions
 import app.daiyu.android.storage.EditingSettings
 import app.daiyu.android.storage.ModelSettings
@@ -70,6 +77,8 @@ class MainActivity : ComponentActivity() {
     private var selectionEnd = 0
     private var selectionReady = false
     private var editorGeneration = 0L
+    private var draftRevision = 0L
+    private val supplementDraft = PausedSupplementDraft()
     private val selections get() = controller.selections
     private var shown = mutableListOf<Pair<Long, Message>>()
     private data class QuestionRowUi(val message: Message,
@@ -99,6 +108,11 @@ class MainActivity : ComponentActivity() {
     private var prompt by mutableStateOf<Prompt?>(null)
     private var lastOpenedBackupUri: String? = null
     private var pendingBackupRequest: Int? = null
+    private var exportPickerPending by mutableStateOf(false)
+    private var conversationExport = ConversationExportSelection()
+    private var exportConversationId by mutableStateOf<String?>(null)
+    private var exportConversationTitle by mutableStateOf("")
+    private var taskRecordsConversationId by mutableStateOf<String?>(null)
     private var configurationRestorePreview by mutableStateOf<ChatController.ConfigurationRestorePreview?>(null)
     private var restorePreviewText by mutableStateOf("")
     private var backupBusy by mutableStateOf(false)
@@ -129,6 +143,14 @@ class MainActivity : ComponentActivity() {
         appearance = loadAppearance()
         activityCallbacksAllowed = true
         pendingBackupRequest = state?.getInt("pending-backup-request", 0)?.takeIf { it != 0 }
+        conversationExport = ConversationExportSelection(
+            state?.getString("pending-conversation-export").takeIf { pendingBackupRequest == 105 })
+        exportPickerPending = pendingBackupRequest == 105
+        exportConversationId = state?.getString("export-page-conversation")
+        exportConversationTitle = state?.getString("export-page-title").orEmpty()
+        taskRecordsConversationId = state?.getString("task-records-conversation")
+        if (exportConversationId != null) retainedPage = "conversation-export"
+        else if (taskRecordsConversationId != null) retainedPage = "child-tasks"
         setContent {
             AgentAppTheme(appearance, applyInterfaceScale = true, onResolvedDarkModeChange = ::updateSystemBars) {
                 val focus = LocalFocusManager.current
@@ -157,6 +179,21 @@ class MainActivity : ComponentActivity() {
                         onOpenHistoryHit = { hit -> guard { openHistoryHit(hit) } },
                     )
                     "usage" -> UsageStatsScreen(onBack = { returnToChat() }, load = { retainedData.stats() })
+                    "conversation-export" -> exportConversationId?.let { id ->
+                        ConversationExportScreen(
+                            conversationTitle = exportConversationTitle,
+                            available = controller.ready && controller.active == null && !controller.hasLiveChildTasks() &&
+                                controller.problem?.startsWith("会话恢复失败") != true,
+                            pending = exportPickerPending || pendingBackupRequest != null, busy = backupBusy,
+                            onExport = { if (exportConversationId == id) backupGuard { pickConversationExport(id) } },
+                            onBack = { returnToChat() },
+                        )
+                    }
+                    "child-tasks" -> taskRecordsConversationId?.let { id ->
+                        ChildTaskRecordsScreen(id, load = { target -> controller.childTasks(ConversationId(target)) },
+                            onStop = { record -> controller.stopChildTask(record) },
+                            onBack = { returnToChat() })
+                    }
                     "skills" -> SkillManagementScreen(
                         managementFactory = { controller.skillManagement() },
                         onBack = { returnToChat() },
@@ -219,7 +256,8 @@ class MainActivity : ComponentActivity() {
                         onConversationDelete = { item -> confirmDelete(item.id) },
                         onMoveConversationToFolder = { item -> editRetainedConversation(item, true) },
                         onConversationTogglePin = { item -> guard { toggleRetainedPin(item.id) } },
-                        onConversationExport = {},
+                        onConversationExport = { item -> backupGuard { openConversationExport(item.id) } },
+                        onConversationTasks = { item -> guard { openChildTaskRecords(item.id) } },
                         onNewConversation = { guard { dismissSidebar(); select(null) } },
                         onOpenManageChats = { guard { dismissSidebar(); updatePane(); retainedPage = "manage" } },
                         onSelectFolder = { id -> paneState = paneState.copy(selectedFolderId = id); updatePane() },
@@ -309,7 +347,10 @@ class MainActivity : ComponentActivity() {
         onSelectionChange = { start, end ->
             if (editorMatches()) { selectionStart = start; selectionEnd = end; publishChat() }
         },
-        onSend = { text -> guard { sendDraft(text) } },
+        onSend = { text -> if (editorMatches() && text == draft) guard { sendDraft(text) } },
+        onSupplement = { text -> if (editorMatches() && text == draft) guard {
+            gestureOwner()?.let { submitPausedText(it, text) }
+        } },
         onPrimaryTap = { guard {
             gestureOwner()?.let { owner -> controller.runState(owner)?.let { state ->
                 val accepted = if (state.pauseRequested) controller.resume(owner) else controller.pause(owner)
@@ -389,6 +430,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(state: Bundle) {
         state.putInt("pending-backup-request", pendingBackupRequest ?: 0)
+        state.putString("pending-conversation-export", conversationExport.pendingConversationId)
+        if (retainedPage == "conversation-export") {
+            state.putString("export-page-conversation", exportConversationId)
+            state.putString("export-page-title", exportConversationTitle)
+        }
+        if (retainedPage == "child-tasks") state.putString("task-records-conversation", taskRecordsConversationId)
         super.onSaveInstanceState(state)
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); offerOpenedBackup(intent) }
@@ -424,6 +471,7 @@ class MainActivity : ComponentActivity() {
     private fun returnToChat() {
         dismissChatModels(); invalidateCatalog(); modelDraft = null; editingSettings = null; modelError = null
         cancelRestorePreview(); prompt = null; retainedPage = "chat"
+        exportConversationId = null; exportConversationTitle = ""; taskRecordsConversationId = null
         if (activityUsable()) refresh()
     }
     private fun openSkillManagement() {
@@ -460,7 +508,9 @@ class MainActivity : ComponentActivity() {
     }
     private fun deleteRetainedConversation(id: String) {
         val conversation = retainedConversation(id)
-        check(controller.active?.conversationId != conversation.id) { "请先停止此会话的运行" }
+        check(controller.active?.conversationId != conversation.id && !controller.hasLiveChildTasks(conversation.id)) {
+            "请先停止此会话的运行和后台子任务"
+        }
         controller.database.delete(conversation.id)
         if (selected?.id == conversation.id) select(null)
         updatePane()
@@ -521,6 +571,7 @@ class MainActivity : ComponentActivity() {
         guard {
             val id = selected?.id
             if (id == null) controller.database.draft(value) else controller.database.draft(id, value)
+            if (draft != value) draftRevision++
             draft = value; publishChat()
         }
     }
@@ -556,6 +607,33 @@ class MainActivity : ComponentActivity() {
         shown = controller.database.messages(saved.id).toMutableList()
         publishChat(); jumpToBottom(); refresh()
         if (!savedSelection) toast("消息已保存；最后选中会话未保存")
+    }
+    private fun supplementEditor() = SupplementEditor(selected?.id?.value, editorGeneration, draftRevision, draft)
+    private fun submitPausedText(owner: Message, text: String) {
+        if (text != draft || controller.runState(owner)?.phase != ExecutionPhase.PAUSED) return
+        val ticket = supplementDraft.begin(MessageId(java.util.UUID.randomUUID().toString()), supplementEditor()) ?: return
+        publishChat()
+        try {
+            controller.admitSupplement(owner, ticket.messageId, text) { result ->
+                if (activityUsable() && supplementDraft.pending === ticket) {
+                    val clear = supplementDraft.finish(ticket, result, supplementEditor())
+                    if (clear) {
+                        updateDraft("")
+                        selectionStart = 0; selectionEnd = 0; editorGeneration++
+                    }
+                    when (result) {
+                        is SupplementAdmission.Accepted -> toast("追加内容已保存，点击继续后发送")
+                        is SupplementAdmission.Rejected -> toast("未接受追加，草稿已保留")
+                        is SupplementAdmission.Unconfirmed -> toast("追加结果未确认，草稿已保留；不会自动重试")
+                    }
+                    refresh()
+                }
+            }
+        } catch (_: Exception) {
+            supplementDraft.finish(ticket, SupplementAdmission.Unconfirmed(ticket.messageId), supplementEditor())
+            toast("追加结果未确认，草稿已保留；不会自动重试")
+            publishChat()
+        }
     }
     private fun currentControlOwner(): Message? =
         (if (controlTouchActive) controlTouchOwner else controlOwner)?.takeIf { it.conversationId == selected?.id }
@@ -633,7 +711,10 @@ class MainActivity : ComponentActivity() {
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,
                 phase = phase, controlOwnerKey = controlOwner?.id?.value, modelLabel = savedModelLabel(),
                 reasoningLabel = reasoningPreference.get(selected?.id?.value).displayName,
-                assistantLabel = assistantStore.read(assistantStore.selectedId.value)?.name ?: "助手", enabled = allowed))
+                assistantLabel = assistantStore.read(assistantStore.selectedId.value)?.name ?: "助手", enabled = allowed,
+                supplementAvailable = state?.phase == ExecutionPhase.PAUSED && supplementDraft.pending == null,
+                supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&
+                    supplementDraft.pending != null))
     }
     private fun requestScroll(id: String? = null, follow: Boolean = true) {
         chatState = chatState.copy(scrollRequest = ChatScrollRequest(++scrollSerial, id, follow))
@@ -792,6 +873,29 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun backupMenu() { checkBackupAvailable(); lastOpenedBackupUri = null; retainedPage = "backup" }
+    private fun openConversationExport(id: String) {
+        val target = retainedConversation(id)
+        dismissSidebar(); exportConversationId = id; exportConversationTitle = target.title
+        retainedPage = "conversation-export"
+    }
+    private fun openChildTaskRecords(id: String) {
+        retainedConversation(id)
+        dismissSidebar(); taskRecordsConversationId = id; retainedPage = "child-tasks"
+    }
+    @Suppress("DEPRECATION") private fun pickConversationExport(id: String) {
+        checkBackupAvailable()
+        check(pendingBackupRequest == null) { "文件选择尚未返回；请先完成或取消选择" }
+        retainedConversation(id)
+        conversationExport.begin(id); pendingBackupRequest = 105; exportPickerPending = true
+        try {
+            startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE); type = "application/json"
+                putExtra(Intent.EXTRA_TITLE, "daiyu-conversation-v1.json")
+            }, 105)
+        } catch (failure: Exception) {
+            pendingBackupRequest = null; exportPickerPending = false; conversationExport.take(); throw failure
+        }
+    }
     @Suppress("DEPRECATION") private fun pickBackup(exporting: Boolean, complete: Boolean) {
         checkBackupAvailable(); check(pendingBackupRequest == null) { "文件选择尚未返回；请先完成或取消选择" }
         val code = if (complete) { if (exporting) 103 else 104 } else { if (exporting) 101 else 102 }
@@ -805,8 +909,19 @@ class MainActivity : ComponentActivity() {
     }
     @Suppress("DEPRECATION") override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode !in setOf(101, 102, 103, 104) || pendingBackupRequest != requestCode) return
+        if (requestCode !in setOf(101, 102, 103, 104, 105) || pendingBackupRequest != requestCode) return
         pendingBackupRequest = null
+        if (requestCode == 105) {
+            exportPickerPending = false
+            val originalId = conversationExport.take()
+            if (resultCode != RESULT_OK) return
+            val uri = data?.data
+            backupGuard {
+                require(originalId != null && uri?.scheme == "content") { "导出目标已失效或文件未返回；请重新选择" }
+                controller.exportConversationBackup(checkNotNull(uri), ConversationId(originalId))
+            }
+            return
+        }
         if (resultCode != RESULT_OK) return
         val uri = data?.data ?: run { toast("文件选择未返回URI；原数据保留，请重新选择"); return }
         val complete = requestCode == 103 || requestCode == 104

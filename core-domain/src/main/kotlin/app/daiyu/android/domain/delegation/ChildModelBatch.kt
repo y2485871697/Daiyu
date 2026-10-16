@@ -3,6 +3,9 @@ package app.daiyu.android.domain.delegation
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.RunExecutionOwner
 import app.daiyu.android.domain.runtime.RunnerOptions
+import app.daiyu.android.domain.runtime.RunCheckpoint
+import app.daiyu.android.domain.runtime.RuntimeStore
+import app.daiyu.android.domain.usage.ChildUsageRecorder
 import app.daiyu.android.domain.tools.*
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -21,7 +24,8 @@ class ChildModelDefinition(val poolKey: String, val parallelLimit: Int, val crea
 
 /** Synchronous parent tool, internally parallel, with optional durable per-child observation. */
 class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val timeoutMillis: Long = 120_000,
-    private val store: ChildTaskStore? = null) : AutoCloseable {
+    private val store: ChildTaskStore? = null,
+    private val usageRecorder: ChildUsageRecorder? = null) : AutoCloseable {
     private val models = models.toMap()
     private val limits = this.models.values.groupBy { it.poolKey }.mapValues { (_, entries) ->
         require(entries.map { it.parallelLimit }.distinct().size == 1) { "child_pool_limit_conflict" }
@@ -50,7 +54,14 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
 
     private data class Completion(val index: Int, val child: ChildRunOwner, val message: Message, val text: String)
 
-    fun execute(context: ToolExecutionContext, tasks: List<ChildModelTask>): ExecutionReceipt {
+    fun execute(context: ToolExecutionContext, tasks: List<ChildModelTask>): ExecutionReceipt =
+        executeBatch(context, tasks, null)
+
+    internal fun executeQueued(context: ToolExecutionContext, records: List<ChildTaskRecord>): ExecutionReceipt =
+        executeBatch(context, records.map { ChildModelTask(it.profileId, it.prompt) }, records)
+
+    private fun executeBatch(context: ToolExecutionContext, tasks: List<ChildModelTask>,
+        queued: List<ChildTaskRecord>?): ExecutionReceipt {
         val snapshot = tasks.toList()
         if (snapshot.size !in 1..MAX_TASKS || snapshot.any {
             it.profileId !in models || it.prompt.isBlank() || it.prompt.length > 4096 || bytes(it.prompt) > 16 * 1024
@@ -63,10 +74,22 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
         synchronized(gate) {
             parent = checkNotNull(owner); parentSession = checkNotNull(session); parentAuthorization = checkNotNull(authorization)
             require(context.owner === parent && context.authorization === parentAuthorization) { "child_parent_owner_mismatch" }
+            if (queued != null) {
+                require(queued.size == snapshot.size && queued.map { it.owner.childRunId }.distinct().size == queued.size)
+                require(queued.map { it.owner.assistantMessageId }.distinct().size == queued.size)
+                val first = queued.first().owner
+                require(queued.all { record ->
+                    record.parentOwnerId == parent.ownerId && record.parentMessageId == parent.assistantMessageId.value &&
+                        record.owner.conversationId == parent.conversationId.value && record.owner.parentRunId == parent.runId.value &&
+                        record.owner.taskGroupId == first.taskGroupId && record.owner.generation == first.generation &&
+                        record.status == ChildTaskStatus.QUEUED && record.text.isEmpty() && record.detail == null
+                }) { "queued_child_owner_mismatch" }
+            }
             if (closed || busy || outstanding != 0) return ExecutionReceipt.NotExecuted("child_batch_unavailable")
             busy = true; current = ++generation
         }
-        val group = UUID.randomUUID().toString()
+        val group = queued?.first()?.owner?.taskGroupId ?: UUID.randomUUID().toString()
+        val recordGeneration = queued?.first()?.owner?.generation ?: current
         val started = AtomicBoolean(false)
         val completions = LinkedBlockingQueue<Completion>()
         val failures = AtomicBoolean(false)
@@ -77,12 +100,12 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
             return if (started.get()) ExecutionReceipt.Unknown(code) else ExecutionReceipt.NotExecuted(code)
         }
         try {
-            val records = snapshot.mapIndexed { index, task ->
+            val records = queued ?: snapshot.mapIndexed { index, task ->
                 ChildTaskRecord(ChildRunOwner(parent.conversationId.value, parent.runId.value, group, current,
                     UUID.randomUUID().toString(), UUID.randomUUID().toString()), parent.assistantMessageId.value,
                     parent.ownerId, index, task.profileId, task.prompt)
             }
-            store?.enqueue(parent, records)
+            if (queued == null) store?.enqueue(parent, records)
             snapshot.forEachIndexed { index, task ->
                 val admitted = synchronized(gate) { if (closed) false else { outstanding++; true } }
                 if (!admitted) {
@@ -149,7 +172,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                             sink(event)
                                                         }
                                                         is ModelEvent.ToolReady -> throw ModelRequestException(ModelFailure.PROTOCOL)
-                                                        // No continuation, reasoning projection, or durable child usage in this first stage.
+                                                        is ModelEvent.Usage -> sink(event)
+                                                        // No continuation or reasoning projection in this first stage.
                                                         else -> Unit
                                                     } } catch (failure: Exception) { rejected = failure; throw failure }
                                                 }
@@ -159,6 +183,9 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                     }
                                 }
                                 val runner = ChatRunner(selected, memory, noTools, RunnerOptions(maxRounds = 1,
+                                    runtimeStore = usageRecorder?.let { recorder -> object : RuntimeStore {
+                                        override fun save(checkpoint: RunCheckpoint) = recorder.record(record, checkpoint)
+                                    } },
                                     validateBatch = { require(it.isEmpty()) { "child_tools_disabled" } })) { scope.requireOwner(it) }
                                 val attached = synchronized(gate) { if (closed) false else { runners.add(runner); true } }
                                 try {
@@ -203,14 +230,14 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                 if (System.nanoTime() >= deadline) return uncertain("child_batch_timeout")
                 if (failures.get()) return uncertain("child_result_unconfirmed")
                 val result = completions.poll(25, TimeUnit.MILLISECONDS) ?: continue
-                check(result.child.taskGroupId == group && result.child.generation == current &&
+                check(result.child.taskGroupId == group && result.child.generation == recordGeneration &&
                     result.child.parentRunId == parent.runId.value && result.child.conversationId == parent.conversationId.value)
                 check(results[result.index] == null)
                 results[result.index] = result; remaining--
             }
             val output = results.map { checkNotNull(it) }
             if (output.sumOf { bytes(it.text).toLong() } > 256 * 1024) return uncertain("child_batch_output_too_large")
-            val payload = output.joinToString(",", "{\"ok\":true,\"task_group_id\":${jsonQuote(group)},\"generation\":$current,\"results\":[", "]}") {
+            val payload = output.joinToString(",", "{\"ok\":true,\"task_group_id\":${jsonQuote(group)},\"generation\":$recordGeneration,\"results\":[", "]}") {
                 "{\"index\":${it.index},\"profile_id\":${jsonQuote(snapshot[it.index].profileId)}," +
                     "\"child_run_id\":${jsonQuote(it.child.childRunId)},\"assistant_message_id\":${jsonQuote(it.message.id.value)},\"text\":${jsonQuote(it.text)}}"
             }

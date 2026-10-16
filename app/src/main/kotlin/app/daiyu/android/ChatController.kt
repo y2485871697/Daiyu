@@ -54,6 +54,10 @@ class ChatController internal constructor(private val application:Application,
     private var preparing=false
     private var recoveryFailed=false
     private var runtimeStore:SQLiteRuntimeStore?=null
+    private var childSupervisor:app.daiyu.android.domain.delegation.RetainedChildTasks?=null
+    private val backgroundRuns=linkedMapOf<RunId,RunChildTasks>()
+    private var childrenClosing=false
+    private var childrenClosed=false
     private var questionStore:PrivateQuestionStore?=null
     private val closeDone=CountDownLatch(1)
     private var closingStorage=false
@@ -127,6 +131,18 @@ class ChatController internal constructor(private val application:Application,
     }
     @Synchronized internal fun revokeChildSavedModel(conversationId: ConversationId, profileId: String) {
         childBindings.revoke(SubAgentConfigKey.Conversation(conversationId.value), profileId)
+        backgroundRuns.values.forEach { tasks -> tasks.snapshots().filter {
+            it.record.owner.conversationId == conversationId.value && it.record.profileId == profileId && !it.settled
+        }.forEach { tasks.stop(it.record.owner) } }
+    }
+    @Synchronized internal fun hasLiveChildTasks(conversationId:ConversationId?=null):Boolean =
+        backgroundRuns.values.any { tasks -> tasks.snapshots().any {
+            !it.settled && (conversationId==null || it.record.owner.conversationId==conversationId.value)
+        } }
+    @Synchronized internal fun stopChildTask(record:ChildTaskRecord):app.daiyu.android.domain.delegation.ChildTaskStop {
+        if(closed || !ready) return app.daiyu.android.domain.delegation.ChildTaskStop.NOT_FOUND
+        return backgroundRuns[RunId(record.owner.parentRunId)]?.stop(record.owner)
+            ?: app.daiyu.android.domain.delegation.ChildTaskStop.NOT_FOUND
     }
     @Synchronized internal fun sendWithChildren(conversation: Conversation, text: String): Conversation? {
         if (!idleAvailable() || text.isBlank()) return null
@@ -145,6 +161,14 @@ class ChatController internal constructor(private val application:Application,
     @Synchronized internal fun childTasks(conversationId: ConversationId, limit: Int = 20): List<ChildTaskRecord> {
         check(!closed && ready && !recoveryFailed) { "child_tasks_unavailable" }
         return checkNotNull(runtimeStore).childTasks.list(conversationId.value, limit)
+    }
+    /** Read on a worker thread; no runtime acquisition, recovery or provider request. */
+    internal fun recordedRequestUsage(conversationId: ConversationId? = null): app.daiyu.android.model.usage.AttributedUsageStats {
+        synchronized(this) { check(!closed && ready && !recoveryFailed) { "recorded_usage_unavailable" } }
+        check(Looper.myLooper() != Looper.getMainLooper()) { "recorded_usage_requires_worker" }
+        return app.daiyu.android.context.DatabaseTransactions { database.readableDatabase }.run {
+            RecordedUsageReader.readAttributed(it, conversationId)
+        }
     }
     private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
@@ -165,6 +189,7 @@ class ChatController internal constructor(private val application:Application,
             val questions=PrivateQuestionStore(application)
             questionStore=questions
             runtime.recoverPending {questions.interruptPending(it.ownerPrefix)}
+            childSupervisor=app.daiyu.android.domain.delegation.RetainedChildTasks(runtime.childTasks, usageRecorder=runtime.childUsage)
             val history=questions.records()
             synchronized(this) {rememberQuestions(history)}
             false
@@ -233,7 +258,8 @@ class ChatController internal constructor(private val application:Application,
                 ContextRegistry(contextService), ContextRegistryScope(conversationId),
                 run, preparedContext?.archiveId)
             val children = if (childModels.isEmpty()) null else RunChildModels(
-                ChildModelBatch(childModels, store = checkNotNull(runtimeStore).childTasks), childModels.keys)
+                ChildModelBatch(childModels, store = checkNotNull(runtimeStore).childTasks,
+                    usageRecorder = checkNotNull(runtimeStore).childUsage), childModels.keys)
             preparingChildren = children
             val devices = RunDeviceResources(application)
             preparingDevices = devices
@@ -241,8 +267,19 @@ class ChatController internal constructor(private val application:Application,
             val capabilities = SessionCapabilities(run.value,
                 AndroidToolRegistry.capabilitiesFor(config.enabledTools()) + contextTools.map { it.definition.capability } +
                     setOf(SkillRunSession.READ, SkillRunSession.RESOURCE, AndroidToolRegistry.ASK_USER_CAPABILITY) +
-                    if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY))
-            val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children) { grants, authorization ->
+                    if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY,RunChildTasks.CAPABILITY))
+            val backgroundFactory: ((app.daiyu.android.domain.runtime.RunExecutionOwner, SessionCapabilities,
+                app.daiyu.android.domain.tools.TaskAuthorization) -> RunChildTasks)? =
+                if(childModels.isEmpty()) null else { owner, grants, authorization ->
+                    synchronized(this) {
+                        check(!closed)
+                        val supervisor=checkNotNull(childSupervisor)
+                        val binding=supervisor.bind(owner,grants,authorization,childModels,::notifyChanged)
+                        RunChildTasks(supervisor,binding,childModels.keys).also { backgroundRuns[run]=it }
+                    }
+                }
+            val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
+                backgroundFactory) { grants, authorization ->
                 SkillToolRegistry(application).captureForRun(grants, authorization)
             }
             preparingTools = tools
@@ -352,6 +389,7 @@ class ChatController internal constructor(private val application:Application,
     private fun stopRun(lifetime:RunResources) {
         lifetime.fenced=true
         lifetime.runner.stop()
+        lifetime.tools.revokeChildren()
         lifetime.tools.close()
         cleanupRun(lifetime)
     }
@@ -416,6 +454,15 @@ class ChatController internal constructor(private val application:Application,
     }==true
     private fun closeStorageWhenIdle() {
         if(resources!=null || closingStorage) return
+        if(!childrenClosed) {
+            if(!childrenClosing) {
+                childrenClosing=true
+                val supervisor=childSupervisor
+                val drained={ handler.post {synchronized(this) {childrenClosed=true;closeStorageWhenIdle()} }; Unit }
+                if(supervisor==null) drained() else supervisor.closeWhenIdle(drained)
+            }
+            return
+        }
         closingStorage=true
         executor.execute {
             try {questionStore?.close();database.close();runtimeStore?.close();runtimeStore=null}
@@ -509,7 +556,7 @@ class ChatController internal constructor(private val application:Application,
             .decode(java.nio.ByteBuffer.wrap(out.toByteArray())).toString()
     }
     @Synchronized internal fun dataTask(importing:Boolean=false,work:()->String) {
-        check(idleAvailable())
+        check(idleAvailable() && !hasLiveChildTasks()) { "请等待后台子任务实际结束" }
         dataBusy=true;notifyChanged()
         try {executor.execute {
             var value=if(importing) "导入失败；原会话保留，格式、校验或身份冲突" else "导出失败；目标文件可能不完整，原会话保留"
@@ -583,13 +630,13 @@ class ChatController internal constructor(private val application:Application,
                 it.initial.conversationId==owner.conversationId && owner.role==Message.ASSISTANT_ROLE}
                 ?.also {it.fenced=true}
         } ?: return false
-        lifetime.runner.stop();lifetime.tools.close()
+        lifetime.runner.stop();lifetime.tools.revokeChildren();lifetime.tools.close()
         handler.post {synchronized(this) {cleanupRun(lifetime)}}
         return true
     }
     fun stop() {
         val lifetime=synchronized(this) {resources?.also {it.fenced=true}} ?: return
-        lifetime.runner.stop();lifetime.tools.close()
+        lifetime.runner.stop();lifetime.tools.revokeChildren();lifetime.tools.close()
         handler.post {synchronized(this) {cleanupRun(lifetime)}}
     }
     internal fun close() {

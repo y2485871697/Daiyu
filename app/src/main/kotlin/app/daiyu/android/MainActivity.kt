@@ -159,6 +159,33 @@ class MainActivity : ComponentActivity() {
                 publishChat()
             })
     }
+    private val offlineMicrophonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (activityUsable()) toast(if (granted) "麦克风权限已授予，请再次点击离线语音" else "麦克风权限被拒绝；草稿未更改")
+    }
+    private val offlineHost by lazy {
+        app.daiyu.android.voice.offline.OfflineComposerHost(applicationContext,
+            requestPermission = { offlineMicrophonePermission.launch(android.Manifest.permission.RECORD_AUDIO) },
+            current = { target ->
+                activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+                    selectionReady && controller.ready && !controller.dataBusy && pendingTextSend == null &&
+                    controller.textSendState() == null && !imageHost.sending && !shizukuWritesBlocked &&
+                    terminalEditor == null && virtualDisplayEditor == null && !videoSending &&
+                    target.conversationId == selected?.id?.value &&
+                    target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
+            },
+            currentText = { draft },
+            applyDraft = { _, text, cursor ->
+                updateDraft(text)
+                check(draft == text) { "offline_dictation_draft_not_saved" }
+                selectionStart = cursor; selectionEnd = cursor
+                publishChat()
+            })
+    }
+    private fun startOfflineDictation() {
+        dictationHost.invalidate()
+        offlineHost.start(DictationDraftTarget(selected?.id?.value, editorGeneration, draftRevision),
+            draft, selectionStart, selectionEnd)
+    }
     private val imageHost by lazy { ImageChatHost.obtain(controller, { if (activityUsable()) publishChat() },
         { if (activityUsable()) toast(it) }, ::settleImageReceipt) }
     private var imagePanelVisible by mutableStateOf(false)
@@ -312,7 +339,7 @@ class MainActivity : ComponentActivity() {
                 browserSettingsPageOwner?.revoke()
                 browserSettingsPageOwner = null
             }
-            if (value != "chat") { dictationHost.invalidate(); cancelShizukuEditor(); cancelBrowserEditor() }
+            if (value != "chat") { dictationHost.invalidate(); offlineHost.invalidate(); cancelShizukuEditor(); cancelBrowserEditor() }
             speechHost.setVisible(value == "chat" && !sidebarVisible)
             imageHost.setVisible(value == "chat" && !sidebarVisible, selected?.id?.value)
             retainedPageState = value
@@ -329,12 +356,12 @@ class MainActivity : ComponentActivity() {
     private var selectionReady = false
     private var editorGeneration = 0L
         set(value) {
-            if (field != value) dictationHost.invalidate()
+            if (field != value) { dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private var draftRevision = 0L
         set(value) {
-            if (field != value) dictationHost.invalidate()
+            if (field != value) { dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private data class PendingTextSend(val owner: ChatController.TextSendOwner, val text: String,
@@ -449,6 +476,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(state)
         // An Activity mount never inherits an approval capability from an older mount.
         controller.virtualDisplayEntry()?.let(controller::cancelVirtualDisplay)
+        app.daiyu.android.voice.offline.OfflineSpeechPack.initialize(applicationContext)
         if (state?.getBoolean("terminal-page", false) == true) {
             terminalPageOwner = Any()
             retainedPageState = "terminal"
@@ -480,7 +508,7 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "appearance", "haptics", "terminal", "browser-settings", "compression-settings", "linux-settings" -> retainedPage = "settings"
+                        "appearance", "haptics", "offline-speech", "terminal", "browser-settings", "compression-settings", "linux-settings" -> retainedPage = "settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
                         else -> returnToChat()
@@ -627,6 +655,9 @@ class MainActivity : ComponentActivity() {
                             if (activityUsable() && retainedPage == "settings") retainedPage = "haptics"
                         },
                     )
+                    "offline-speech" -> app.daiyu.android.ui.screens.settings.OfflineSpeechSettingsScreen(
+                        applicationContext, onBack = { retainedPage = "settings" },
+                        ownerCurrent = { activityUsable() && retainedPage == "offline-speech" })
                     "haptics" -> hapticsHost?.let { host ->
                         host.settingsOwner?.let { owner -> key(owner) {
                             HapticsSettingsScreen(host.runtime, owner.feedback,
@@ -862,7 +893,8 @@ class MainActivity : ComponentActivity() {
             if (editorMatches() && terminalEditor == null && draftRevision == renderedDraftRevision && voiceForeground &&
                 retainedPage == "chat" && !sidebarVisible &&
                 controller.ready && !controller.dataBusy && !imageHost.sending && !shizukuWritesBlocked) {
-                dictationHost.start(DictationDraftTarget(selected?.id?.value, editorGeneration, draftRevision))
+                if (app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.enabled) startOfflineDictation()
+                else dictationHost.start(DictationDraftTarget(selected?.id?.value, editorGeneration, draftRevision))
             }
         }, onContextClick = { pendingFeature() },
         onRegenerate = { pendingFeature() }, onSpeak = { id ->
@@ -878,9 +910,13 @@ class MainActivity : ComponentActivity() {
         onRetryStep = { pendingFeature() },
         onOpenSidebar = { openSidebar() }, onTextChange = { if (editorMatches()) updateDraft(it) },
         onSelectionChange = { start, end ->
-            if (editorMatches()) { selectionStart = start; selectionEnd = end; publishChat() }
+            if (editorMatches()) {
+                if (selectionStart != start || selectionEnd != end) offlineHost.invalidate()
+                selectionStart = start; selectionEnd = end; publishChat()
+            }
         },
         onSend = { text -> if (editorMatches() && terminalEditor == null && text == draft && pendingTextSend == null && !shizukuWritesBlocked) guard {
+            offlineHost.invalidate()
             cancelShizukuEditor()
             cancelBrowserEditor()
             if (videoHost.state.items.isNotEmpty()) videoPanelVisible = true
@@ -888,6 +924,7 @@ class MainActivity : ComponentActivity() {
             else if (!imageHost.busy && !videoSending) sendDraft(text)
         } },
         onSupplement = { text -> if (editorMatches() && text == draft && !imageHost.sending && !shizukuWritesBlocked) guard {
+            offlineHost.invalidate()
             gestureOwner()?.let { submitPausedText(it, text) }
         } },
         onPrimaryTap = { guard {
@@ -938,6 +975,25 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable private fun DictationComposerEntry() {
+        val pack by app.daiyu.android.voice.offline.OfflineSpeechPack.state.collectAsStateWithLifecycle()
+        val offline by offlineHost.state.collectAsStateWithLifecycle()
+        val capturedGeneration = editorGeneration
+        val capturedRevision = draftRevision
+        val capturedConversation = selected?.id?.value
+        top.yukonga.miuix.kmp.basic.TextButton(text = "离线语音设置", modifier = Modifier.testTag("offline-speech-open"),
+            onClick = { if (activityUsable() && retainedPage == "chat" && !sidebarVisible) retainedPage = "offline-speech" })
+        if (pack.enabled) top.yukonga.miuix.kmp.basic.TextButton(
+            text = if (offline.listening) "取消离线听写" else "离线听写（本机麦克风）",
+            modifier = Modifier.testTag("offline-speech-microphone"),
+            onClick = {
+                if (activityUsable() && retainedPage == "chat" && !sidebarVisible && voiceForeground &&
+                    editorGeneration == capturedGeneration && draftRevision == capturedRevision &&
+                    selected?.id?.value == capturedConversation) startOfflineDictation()
+            })
+        if (offline.status.isNotEmpty()) top.yukonga.miuix.kmp.basic.Text(text = offline.status,
+            modifier = Modifier.testTag("offline-speech-status").semantics { liveRegion = LiveRegionMode.Polite })
+        if (offline.preview.isNotEmpty()) top.yukonga.miuix.kmp.basic.Text(text = "离线识别预览（尚未写入草稿）：${offline.preview}",
+            modifier = Modifier.testTag("offline-speech-preview"))
         val state by dictationHost.state.collectAsStateWithLifecycle()
         if (state.status.isNotEmpty()) {
             top.yukonga.miuix.kmp.basic.Text(text = state.status,
@@ -1733,6 +1789,7 @@ class MainActivity : ComponentActivity() {
         videoDialog?.dismiss(); videoDialog = null
         voiceForeground = false
         dictationHost.invalidate()
+        offlineHost.invalidate()
         cancelShizukuEditor()
         cancelBrowserEditor()
         speechHost.setForeground(false)
@@ -1750,6 +1807,7 @@ class MainActivity : ComponentActivity() {
         // Idempotent fallback as well as the earlier onPause cancellation.
         voiceForeground = false
         dictationHost.invalidate()
+        offlineHost.invalidate()
         speechHost.setForeground(false)
         super.onStop()
     }
@@ -1769,6 +1827,7 @@ class MainActivity : ComponentActivity() {
         hapticsHost?.close(); hapticsHost = null
         voiceForeground = false
         dictationHost.close()
+        offlineHost.close()
         interactiveModeObservation?.close()
         interactiveModeObservation = null
         cancelShizukuEditor()
@@ -1875,6 +1934,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun openSidebar() { guard {
         dictationHost.invalidate()
+        offlineHost.invalidate()
         cancelShizukuEditor()
         cancelBrowserEditor()
         updatePane(); speechHost.setVisible(false); imageHost.setVisible(false, selected?.id?.value)
@@ -1992,6 +2052,7 @@ class MainActivity : ComponentActivity() {
         controller.invalidateVideo(videoUi)
         videoDialog?.dismiss(); videoDialog = null
         dictationHost.invalidate()
+        offlineHost.invalidate()
         cancelShizukuEditor()
         cancelBrowserEditor()
         guard {

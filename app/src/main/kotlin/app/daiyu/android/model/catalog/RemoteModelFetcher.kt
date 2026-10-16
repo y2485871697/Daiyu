@@ -99,7 +99,31 @@ class RemoteModelFetcher(
         modelsPath: String = "",
         timeoutMillis: Int = DEFAULT_TIMEOUT_MILLIS,
         isCancelled: () -> Boolean = { false }
-    ): List<RemoteModel> {
+    ): List<RemoteModel> = execute(
+        RemoteModelRequest(baseUrl, apiKey, protocol, modelsPath, timeoutMillis), isCancelled
+    ) { body -> parseModels(body, protocol) }
+
+    /** Pure transport/parser seam: facts from an injected connection are NOT runtime evidence. */
+    internal fun fetchOpenRouterVideoFacts(
+        request: RemoteModelRequest,
+        exactModel: String,
+        isCancelled: () -> Boolean = { false },
+    ): OpenRouterVideoModelFacts {
+        if (request.protocol != RemoteModelProtocol.OPENAI ||
+            remoteModelsEndpoint(request.baseUrl, request.protocol, request.modelsPath) != OPENROUTER_MODELS_ENDPOINT) {
+            throw RemoteModelException(RemoteModelFailure.INVALID_ENDPOINT)
+        }
+        return execute(request, isCancelled) { body ->
+            parseOpenRouterVideoFacts(body, OPENROUTER_MODELS_ENDPOINT, exactModel)
+        }
+    }
+
+    private fun <T> execute(
+        request: RemoteModelRequest,
+        isCancelled: () -> Boolean,
+        parse: (String) -> T,
+    ): T {
+        val (baseUrl, apiKey, protocol, modelsPath, timeoutMillis) = request
         val endpoint = try {
             remoteModelsEndpoint(baseUrl, protocol, modelsPath)
         } catch (_: IllegalArgumentException) {
@@ -150,7 +174,7 @@ class RemoteModelFetcher(
             }
             val body = readBody(connection, isCancelled)
             checkCancelled(isCancelled)
-            val models = parseModels(body, protocol)
+            val models = parse(body)
             checkCancelled(isCancelled)
             return models
         } catch (_: CancellationException) {

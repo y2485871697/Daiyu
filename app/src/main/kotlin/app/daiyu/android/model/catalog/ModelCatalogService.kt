@@ -1,6 +1,7 @@
 package app.daiyu.android.model.catalog
 
 import app.daiyu.android.model.ProviderProtocol
+import app.daiyu.android.model.ProviderSnapshot
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.storage.ModelSettingsStore
 import java.net.URI
@@ -13,6 +14,33 @@ class ModelCatalogService(
 ) {
     constructor(store: ModelSettingsStore, fetcher: RemoteModelFetcher = RemoteModelFetcher()) :
         this(store::load, fetcher)
+
+    /**
+     * Worker-only, uncached production proof for one pending approval. The revision belongs to
+     * the host's saved-config epoch (increment even for edit-away/edit-back and credential reset).
+     * The supplied snapshot must be the exact object the eventual frozen run will retain.
+     * Unlike selector fetches, this intentionally does NOT use an injected/test fetcher.
+     */
+    fun fetchSavedVideoEvidence(
+        snapshot: ProviderSnapshot,
+        configurationRevision: Long,
+        currentConfigurationRevision: () -> Long,
+        isCancelled: () -> Boolean = { false },
+    ): OpenRouterVideoEvidence {
+        fun checkSaved() {
+            if (Thread.currentThread().isInterrupted || isCancelled()) throw InterruptedException()
+            require(configurationRevision >= 0 && currentConfigurationRevision() == configurationRevision) {
+                "Saved video configuration changed"
+            }
+            require(loadSaved() == snapshot.asModelSettings()) { "Video snapshot is not the saved configuration" }
+            require(currentConfigurationRevision() == configurationRevision) { "Saved video configuration changed" }
+        }
+        checkSaved()
+        val evidence = OpenRouterVideoEvidence.fetchFresh(snapshot, configurationRevision, isCancelled,
+            loadSaved, currentConfigurationRevision)
+        checkSaved()
+        return evidence
+    }
 
     fun fetchSaved(isCancelled: () -> Boolean = { false }): List<RemoteModel> {
         if (Thread.currentThread().isInterrupted || isCancelled()) throw InterruptedException()

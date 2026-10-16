@@ -38,6 +38,11 @@ class OpenRouterVideoInputTest {
     @After fun after() { root.deleteRecursively() }
     private fun grant(max: Long = 16L * 1024 * 1024) = OpenRouterVideoCapability.grant(
         settings.model, settings.requestEndpoint(), true, true, maxVideoBytes = max, maxTotalBytes = max)
+    // Synthetic local handoff only: production must adapt the real run permit, not this fixture.
+    private val postApproval = VideoPostApprovalProvider { request ->
+        val spent = java.util.concurrent.atomic.AtomicBoolean(false)
+        request.bindPermitConsumption { check(spent.compareAndSet(false, true)) }
+    }
     private fun reference() = store.prepare(owner, store.import(VideoAttachmentOwner("c", "d"), original.inputStream()))
     private fun freeze(ref: MessageVideoReference, cap: OpenRouterVideoCapability,
                        history: List<Message> = listOf(row), config: ModelSettings = settings,
@@ -75,7 +80,7 @@ class OpenRouterVideoInputTest {
         assertTrue(store.discardUnreferenced(owner, ref))
         val conn = Connection(done)
         val events = mutableListOf<ModelEvent>()
-        val session = ResponsesModel(settings, { conn }, null, videoInputCapability = cap)
+        val session = ResponsesModel(settings, { conn }, null, videoInputCapability = cap, videoPostApprovalProvider = postApproval)
             .open(listOf(row), emptyList(), plan)
         assertEquals(0, conn.sent.size())
         session.next(emptyList(), events::add)
@@ -113,9 +118,9 @@ class OpenRouterVideoInputTest {
         val connect: (URL) -> HttpsURLConnection = { connections++; Connection(done) }
         rejected { ResponsesModel(settings, connect, null).open(listOf(row), emptyList(), plan) }
         rejected { ResponsesModel(settings, connect, null, videoInputCapability = grant()).open(listOf(row), emptyList(), plan) }
-        rejected { ResponsesModel(settings.copy(model = "different"), connect, null, videoInputCapability = cap)
+        rejected { ResponsesModel(settings.copy(model = "different"), connect, null, videoInputCapability = cap, videoPostApprovalProvider = postApproval)
             .open(listOf(row), emptyList(), plan) }
-        rejected { ResponsesModel(settings, connect, null, videoInputCapability = cap)
+        rejected { ResponsesModel(settings, connect, null, videoInputCapability = cap, videoPostApprovalProvider = postApproval)
             .open(listOf(row.copy(blocks = emptyList())), emptyList(), plan) }
         assertEquals(0, connections)
     }
@@ -169,7 +174,7 @@ class OpenRouterVideoInputTest {
         val history = listOf(row, container)
         val plan = freeze(ref, cap, history)
         val conn = Connection(done)
-        ResponsesModel(settings, { conn }, null, videoInputCapability = cap).open(history, emptyList(), plan)
+        ResponsesModel(settings, { conn }, null, videoInputCapability = cap, videoPostApprovalProvider = postApproval).open(history, emptyList(), plan)
             .next(emptyList()) {}
         val input = JSONObject(conn.sent.toString("UTF-8")).getJSONArray("input")
         assertEquals(2, input.length())
@@ -231,7 +236,7 @@ class OpenRouterVideoInputTest {
             } is IllegalArgumentException)
             // A valid plan cannot be reused to bypass the new settings preflight either.
             assertTrue(rejected {
-                ResponsesModel(config, { connections++; Connection(done) }, null, videoInputCapability = cap)
+                ResponsesModel(config, { connections++; Connection(done) }, null, videoInputCapability = cap, videoPostApprovalProvider = postApproval)
                     .open(listOf(row), emptyList(), plan).next(emptyList()) {}
             } is IllegalArgumentException)
         }
@@ -277,7 +282,7 @@ class OpenRouterVideoInputTest {
         val cap = grant()
         val plan = freeze(reference(), cap)
         var connections = 0
-        val cancelled = ResponsesModel(settings, { connections++; Connection(done) }, null, videoInputCapability = cap)
+        val cancelled = ResponsesModel(settings, { connections++; Connection(done) }, null, videoInputCapability = cap, videoPostApprovalProvider = postApproval)
             .open(listOf(row), emptyList(), plan)
         cancelled.cancel()
         assertTrue(rejected { cancelled.next(emptyList()) {} } is InterruptedException)
@@ -288,7 +293,7 @@ class OpenRouterVideoInputTest {
         val cap = grant()
         val plan = freeze(reference(), cap)
         val conn = Connection("data: {\"type\":\"response.output_text.delta\",\"item_id\":\"i\",\"content_index\":0,\"delta\":\"partial\"}\n\n")
-        val session = ResponsesModel(settings, { conn }, null, videoInputCapability = cap).open(listOf(row), emptyList(), plan)
+        val session = ResponsesModel(settings, { conn }, null, videoInputCapability = cap, videoPostApprovalProvider = postApproval).open(listOf(row), emptyList(), plan)
         val events = mutableListOf<ModelEvent>()
         val failure = rejected { session.next(emptyList(), events::add) }
         assertEquals(ModelFailure.INCOMPLETE, (failure as ModelRequestException).failure)
@@ -315,7 +320,7 @@ class OpenRouterVideoInputTest {
             "data: $terminal\n\n")
         val second = Connection(done)
         var connects = 0
-        val session = ResponsesModel(config, { if (connects++ == 0) first else second }, null, videoInputCapability = cap)
+        val session = ResponsesModel(config, { if (connects++ == 0) first else second }, null, videoInputCapability = cap, videoPostApprovalProvider = postApproval)
             .open(listOf(row), emptyList(), plan)
         session.next(emptyList()) {}
         // Routing-looking JSON inside a tool's plain-text result is data, not request options.

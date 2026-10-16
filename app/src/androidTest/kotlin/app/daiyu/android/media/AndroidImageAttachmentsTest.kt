@@ -105,7 +105,11 @@ class AndroidImageAttachmentsTest : InstrumentationTestCase() {
         // A fixed EXIF orientation fixture does not depend on the device's metadata writer.
         val app1 = "ffe1002245786966000049492a0008000000010012010300010000000600000000000000"
             .chunked(2).map { it.toInt(16).toByte() }.toByteArray()
-        val original = jpeg.copyOfRange(0, 2) + app1 + jpeg.copyOfRange(2, jpeg.size)
+        // API 26 probes 5000 bytes before EXIF parsing; avoid a short fixture without reencoding.
+        // APP15's length includes its two length bytes and the 5000-byte padding payload.
+        val app15 = byteArrayOf(0xff.toByte(), 0xef.toByte(), 0x13, 0x8a.toByte()) + ByteArray(5000)
+        val original = jpeg.copyOfRange(0, 2) + app1 + app15 + jpeg.copyOfRange(2, jpeg.size)
+        assertTrue("EXIF fixture must cover the API 26 5000-byte probe", original.size >= 5000)
         source.writeBytes(original)
         assertEquals(ExifInterface.ORIENTATION_ROTATE_90,
             ExifInterface(source.absolutePath).getAttributeInt(ExifInterface.TAG_ORIENTATION, 0))

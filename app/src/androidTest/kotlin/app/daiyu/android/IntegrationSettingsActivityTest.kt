@@ -210,7 +210,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         backToChat(activity)
     }
     private fun openSkills() {
-        openSettings(); reveal("settings-row:Skills", "设置").performClick()
+        openSettings(); reveal("settings-row:扩展", "设置").performClick(); reveal("settings-row:Skills", "扩展").performClick()
         node("page:技能").assertIsDisplayed()
     }
     private fun skillSwitch(tag: String, on: Boolean): SemanticsNodeInteraction {

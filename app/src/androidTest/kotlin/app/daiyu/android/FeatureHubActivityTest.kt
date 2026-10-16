@@ -35,7 +35,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     }
     fun testOriginalSettingsAppearOutsideExistingChatTreeWithoutStateLabels() {
         openHub()
-        assertEquals(41, entries.size)
+        assertEquals(35, entries.size)
         entries.forEach { item -> entry(item.id).assertIsEnabled().assertTextContains(item.title) }
         ui.onAllNodes(SemanticsMatcher("forbidden state marker") { semantics ->
             val texts = semantics.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text).orEmpty()
@@ -49,7 +49,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         openHub()
         val implemented = setOf("assistants", "subagents", "appearance", "relay")
         val unwired = entries.filter { it.route == null && it.id !in implemented }
-        assertEquals(33, unwired.size)
+        assertEquals(27, unwired.size)
         fun assertUnchanged() {
             assertEquals(before, fixture.database.exportBackup()); assertEquals(settings, fixture.settings.loadForEditing().settings)
             assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())
@@ -98,7 +98,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
                 assertFalse(fixture.controller.runState(owner)!!.pauseRequested)
                 assertEquals(1L, session.cancelled.count); assertEquals(1, fixture.opens.get())
             }
-            for (id in listOf("default_reasoning", "logging", "browser_tools", "device_tools")) {
+            for (id in listOf("default_reasoning", "logging", "accessibility_keep", "task_surface")) {
                 entry(id).performClick(); node("page:设置").assertExists()
                 assertEquals(owner.id, fixture.controller.active!!.id)
                 assertFalse(fixture.controller.runState(owner)!!.pauseRequested)

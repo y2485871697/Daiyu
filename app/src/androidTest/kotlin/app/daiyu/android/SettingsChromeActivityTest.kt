@@ -12,6 +12,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -124,6 +126,23 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertTrue(state.morphLoadingIndicator) }
         node("page:外观与主题").performScrollToIndex(0)
         capture("appearance-dark")
+    }
+
+    fun testToolsKeepOnlyRequestedEntriesAndSkillsLivesInExtensions() {
+        val events = mutableListOf<String>()
+        showHome(events)
+        reveal("settings-row:数据备份", "设置").assertExists()
+        node("settings-row:Skills").assertDoesNotExist()
+        reveal("settings-row:工具", "设置").performClick()
+        val rows = ui.onAllNodes(SemanticsMatcher("settings rows") {
+            it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("settings-row:") == true
+        }).fetchSemanticsNodes().map { it.config[SemanticsProperties.TestTag].removePrefix("settings-row:") }
+        assertEquals(listOf("工作区与文件", "Linux 工具环境", "Agent任务偏好"), rows)
+        capture("tools-refined")
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        reveal("settings-row:扩展", "设置").performClick()
+        reveal("settings-row:Skills", "扩展").performClick()
+        ui.runOnIdle { assertEquals(listOf("SKILLS"), events) }
     }
 
     fun testSystemBarIconsFollowThemeAndActivityRecreation() {

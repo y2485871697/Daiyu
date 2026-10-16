@@ -83,10 +83,9 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         val conversation = f.db.create("default")
         f.db.draft(conversation.id, "retained conversation draft"); f.db.draft("retained composer draft")
         val before = f.db.conversations()
-        main {
-            assertNull(f.controller.send(conversation, "retained conversation draft"))
-            assertNull(f.controller.send(null, "retained composer draft"))
-        }
+        // Synchronous compatibility API is worker-only; UI uses owner-aware sendText.
+        assertNull(f.controller.send(conversation, "retained conversation draft"))
+        assertNull(f.controller.send(null, "retained composer draft"))
         assertEquals(before, f.db.conversations())
         assertTrue(f.db.messages(conversation.id).isEmpty())
         assertEquals("retained composer draft", f.db.draft())
@@ -95,7 +94,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         assertTrue(f.controller.problem!!.contains("草稿保留"))
         assertFalse(f.controller.problem!!.contains("synthetic-secret"))
         reject = false
-        main { assertNotNull(f.controller.send(conversation, "accepted")) }
+        assertNotNull(f.controller.send(conversation, "accepted"))
         awaitState(f) { f.controller.active == null }
         assertEquals(3, factories.get()); assertEquals(1, opens.get())
         assertEquals(2, f.db.messages(conversation.id).size)
@@ -141,7 +140,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             }
         }
         conversation = f.db.create("default"); f.db.draft(conversation.id, "keep until accepted")
-        main { assertNotNull(f.controller.send(conversation, "accepted")) }
+        assertNotNull(f.controller.send(conversation, "accepted"))
         awaitState(f) { f.controller.active == null }
         assertEquals(1, factories.get()); assertEquals(1, opens.get())
         assertEquals("later-model", f.settings.load().model)
@@ -159,7 +158,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         }
         val conversation = f.db.create("default"); f.db.draft(conversation.id, "retained")
         f.db.writableDatabase.execSQL("CREATE TRIGGER reject_send BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT,'synthetic'); END")
-        main { assertNull(f.controller.send(conversation, "retained")) }
+        assertNull(f.controller.send(conversation, "retained"))
         assertEquals(1, factories.get()); assertEquals(0, opens.get())
         assertTrue(f.db.messages(conversation.id).isEmpty())
         assertEquals("retained", f.db.conversations().single().draft)
@@ -208,7 +207,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
     }
     private fun call(id:String,name:String,args:org.json.JSONObject)=ToolInvocation(ToolCallId(id),name,args.toString())
     private fun finish(f:Fixture,conversation:Conversation) {
-        main {assertNotNull(f.controller.send(conversation,"catalog check"))}
+        assertNotNull(f.controller.send(conversation,"catalog check"))
         awaitState(f) {f.controller.active==null}
         assertEquals(RunStatus.COMPLETED,f.db.messages(conversation.id).last().second.status)
     }
@@ -278,7 +277,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             call("usage","context_usage",org.json.JSONObject().put("branch_id",a.conversation.id.value))))
         probe.beforeReturn={ready.countDown();check(release.await(10,TimeUnit.SECONDS))}
         try {
-            main {assertNotNull(f.controller.send(a.conversation,"catalog check"))}
+            assertNotNull(f.controller.send(a.conversation,"catalog check"))
             assertTrue(ready.await(5,TimeUnit.SECONDS))
             val pending=f.db.messages(a.conversation.id).last().second.blocks.filterIsInstance<MessageBlock.Tool>()
             assertEquals(2,pending.size);assertTrue(pending.all {it.result==null})
@@ -390,7 +389,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         val opens=AtomicInteger();val f=fresh {ModelPort {opens.incrementAndGet();session("next-run")}}
         val broken=File(f.app.filesDir,"agent-builtin-skills-v1");broken.writeText("not a directory")
         val c=f.db.create("default")
-        main {assertNotNull(f.controller.send(c,"accepted before worker capture"))}
+        assertNotNull(f.controller.send(c,"accepted before worker capture"))
         awaitState(f) {f.controller.active==null}
         assertEquals(0,opens.get());assertEquals(RunStatus.FAILED,f.db.messages(c.id).last().second.status)
         assertTrue(ledger(f).isEmpty());assertTrue(broken.delete())
@@ -402,7 +401,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         probe.batches=listOf(listOf(call("stopped-skill","skills_list",org.json.JSONObject())))
         probe.beforeReturn={entered.countDown();check(release.await(10,TimeUnit.SECONDS))}
         try {
-            main {assertNotNull(f.controller.send(c,"stop before read"))}
+            assertNotNull(f.controller.send(c,"stop before read"))
             assertTrue(entered.await(5,TimeUnit.SECONDS))
             main {f.controller.stop()}
             assertTrue(ledger(f).isEmpty())

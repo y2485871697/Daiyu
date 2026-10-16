@@ -40,9 +40,9 @@ class ControllerModelSettingsTest : InstrumentationTestCase() {
                 if (select) fixture.controller.selectConfiguredModel(before, "selected-model", onComplete)
                 else fixture.controller.saveModelSettings(before.copy(model = "saved-model"), false, false, onComplete)
                 assertTrue(fixture.controller.dataBusy)
-                assertNull(fixture.controller.send(null, "must not start while saving"))
                 assertEquals(0, fixture.opens.get())
             }
+            assertNull(fixture.controller.send(null, "must not start while saving"))
             assertEquals(1L, completed.count)
             release.countDown()
             assertTrue(completed.await(10, TimeUnit.SECONDS))

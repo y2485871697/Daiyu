@@ -30,6 +30,14 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     constructor(context: Context, store: ConversationDatabase) : this(store, PrivateBlobs(context))
 
     fun displayHistory(id: ConversationId): List<Message> = transactions.run { read(it, id) }
+
+    /** Final send CAS over ALL authoritative originals, not an effective/summary projection or
+     * a paginated UI history. The caller must perform owner/draft checks and database.send in
+     * this SAME transaction on the store's connection. No nested snapshot is opened here. */
+    internal fun matchesHistoryRevision(db: SQLiteDatabase, id: ConversationId, expected: String): Boolean {
+        check(db === store.writableDatabase && db.inTransaction()) { "send_revision_requires_store_transaction" }
+        return ContextRevision.digest(read(db, id)) == expected
+    }
     /** pendingMessages are budgeted but not persisted or appended to the returned history.
      * The host must pass its frozen user input and check cancellation again before committing send. */
     fun prepareSend(id: ConversationId, policy: CompressionPolicy = CompressionPolicy(),
@@ -40,7 +48,9 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         require(pending.all { it.conversationId == id }) { "待发送消息不属于当前会话" }
         val before = transactions.run { effective(it, id) }
         checkCancellation(cancelled)
-        if (summarizer != null && policy.shouldCompress(estimateTokens(before.messages + pending)))
+        // Empty history (including a not-yet-created conversation) has no compressible
+        // evidence. Still enforce the pending budget below, without ensureIdle/nonexistent owner.
+        if (before.messages.isNotEmpty() && summarizer != null && policy.shouldCompress(estimateTokens(before.messages + pending)))
             compress(id, policy, summarizer, pending, cancelled)
         val prepared = transactions.run { effective(it, id) }
         requireCapacity(policy, prepared.messages + pending)

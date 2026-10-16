@@ -86,7 +86,9 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     }
     fun testSettingsNavigationDoesNotSendPauseOrStopAnActiveRun() {
         val session = fixture.session(holdSeconds = 120)
-        setDraft("运行正文"); node("chat-send").performClick(); setDraft("保留追加草稿")
+        setDraft("运行正文"); node("chat-send").performClick()
+        awaitTextSendResult(activity)
+        setDraft("保留追加草稿")
         assertTrue(session.entered.await(5, TimeUnit.SECONDS)); val owner = checkNotNull(fixture.controller.active)
         try {
             openHub()

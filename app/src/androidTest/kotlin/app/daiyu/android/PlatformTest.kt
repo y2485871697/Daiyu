@@ -151,7 +151,7 @@ class PlatformTest:InstrumentationTestCase() {
                 val deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
                 while(!controller.ready && System.nanoTime()<deadline) Thread.sleep(10)
                 assertTrue(controller.ready)
-                instrumentation.runOnMainSync {assertNull(controller.send(null,"attempt"));assertNull(controller.send(a,"attempt"))}
+                assertNull(controller.send(null,"attempt"));assertNull(controller.send(a,"attempt"))
                 assertEquals(0,requests.get());assertNull(controller.active);assertEquals(conversations,db.conversations())
                 assertEquals("new draft",db.draft());assertTrue(db.messages(a.id).isEmpty());assertTrue(db.messages(b.id).isEmpty())
                 val repaired=config.copy(apiKey="replacement-key")
@@ -395,8 +395,7 @@ class PlatformTest:InstrumentationTestCase() {
             val deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(5)
             while(!controller.ready && System.nanoTime()<deadline) Thread.sleep(10)
             assertTrue(controller.ready)
-            var saved:Conversation?=null
-            instrumentation.runOnMainSync {saved=controller.send(null,"首条消息")}
+            val saved=controller.send(null,"首条消息")
             assertNotNull(saved);assertTrue(entered.await(5,java.util.concurrent.TimeUnit.SECONDS))
             val b=db.create();db.draft(b.id,"B新稿");db.draft(saved!!.id,"A新稿");db.draft("未创建新稿")
             instrumentation.runOnMainSync {controller.observe {if(controller.active==null) terminal.countDown()}}
@@ -406,7 +405,7 @@ class PlatformTest:InstrumentationTestCase() {
             assertEquals("未创建新稿",db.draft());assertTrue(db.messages(b.id).isEmpty())
             assertEquals(RunStatus.COMPLETED,db.messages(saved!!.id).last().second.status)
             context.getSharedPreferences("model-settings",0).edit().clear().commit()
-            instrumentation.runOnMainSync {assertNull(controller.send(null,"校验失败"))}
+            assertNull(controller.send(null,"校验失败"))
             assertEquals("未创建新稿",db.draft());assertEquals(2,db.conversations().size)
         } finally {release.countDown();controller.close()}
     }

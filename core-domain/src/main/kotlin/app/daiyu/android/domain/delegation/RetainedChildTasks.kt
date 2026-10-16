@@ -28,7 +28,8 @@ data class RetainedChildTask(
     val record: ChildTaskRecord,
     val stopRequested: Boolean,
     val settled: Boolean,
-    val journalUnconfirmed: Boolean
+    val journalUnconfirmed: Boolean,
+    val pauseState: ChildTaskPauseState = ChildTaskPauseState.ACTIVE
 )
 
 internal class ChildTaskResources(
@@ -72,7 +73,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         var bindings = 0
     }
     private class Task(val binding: ChildTaskBinding, val request: ChildTaskRequest,
-        val initial: ChildTaskRecord, val invocation: ToolInvocation, val deadline: Long) {
+        val initial: ChildTaskRecord, val invocation: ToolInvocation, val deadline: Long,
+        val pause: ChildTaskPauseControl) {
         var record = initial
         var stopRequested = false
         var settled = false
@@ -159,7 +161,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                 val record = ChildTaskRecord(ChildRunOwner(owner.conversationId.value, owner.runId.value,
                     group, epoch, UUID.randomUUID().toString(), UUID.randomUUID().toString()),
                     owner.assistantMessageId.value, owner.ownerId, index, inputTask.profileId, inputTask.prompt)
-                Task(binding, request, record, context.invocation, deadline).also { tasks[record.owner.childRunId] = it }
+                Task(binding, request, record, context.invocation, deadline,
+                    ChildTaskPauseControl { notifyChanged(binding) }).also { tasks[record.owner.childRunId] = it }
             }
             outstanding += reserved.size
             binding.outstanding += reserved.size
@@ -206,6 +209,28 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         return synchronized(gate) { binding.resources == null }
     }
 
+    /** The binding is the trusted host capability; every field of the child identity must match.
+     * Parent admission may be sealed without revoking control of its accepted children. */
+    fun pause(binding: ChildTaskBinding, owner: ChildRunOwner): ChildTaskControlReceipt =
+        control(binding, owner, resume = false)
+
+    /** Resumes only this live child, never a persisted row or a replacement request. */
+    fun resume(binding: ChildTaskBinding, owner: ChildRunOwner): ChildTaskControlReceipt =
+        control(binding, owner, resume = true)
+
+    private fun control(binding: ChildTaskBinding, owner: ChildRunOwner, resume: Boolean): ChildTaskControlReceipt {
+        requireBinding(binding)
+        val receipt = synchronized(gate) {
+            val task = tasks[owner.childRunId]?.takeIf { it.binding === binding && it.initial.owner == owner }
+                ?: return ChildTaskControlReceipt.STALE
+            if (closed || task.stopRequested || task.record.status !in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING))
+                return ChildTaskControlReceipt.STALE
+            if (resume) task.pause.resume() else task.pause.pause()
+        }
+        notifyChanged(binding)
+        return receipt
+    }
+
     fun stop(binding: ChildTaskBinding, owner: ChildRunOwner): ChildTaskStop {
         requireBinding(binding)
         val batch: ChildModelBatch?
@@ -214,6 +239,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             if (task == null) return if (binding.recent[owner.childRunId]?.record?.owner == owner)
                 ChildTaskStop.ALREADY_SETTLED else ChildTaskStop.NOT_FOUND
             task.stopRequested = true
+            task.pause.terminate()
             batch = task.batch
         }
         batch?.close()
@@ -227,7 +253,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         val active = synchronized(gate) {
             binding.accepting = false
             callback = binding.resources?.onChanged
-            tasks.values.filter { it.binding === binding }.onEach { it.stopRequested = true }
+            tasks.values.filter { it.binding === binding }.onEach { it.stopRequested = true; it.pause.terminate() }
                 .mapNotNull { it.batch }.also { releaseBindingIfIdle(binding) }
         }
         active.forEach { it.close() }
@@ -238,7 +264,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         requireBinding(binding)
         return synchronized(gate) {
             (binding.recent.values + tasks.values.filter { it.binding === binding }.map {
-                RetainedChildTask(it.record, it.stopRequested, false, it.journalUnconfirmed)
+                RetainedChildTask(it.record, it.stopRequested, false, it.journalUnconfirmed, it.pause.snapshot())
             }).sortedWith(compareBy({ it.record.owner.generation }, { it.record.index }))
         }
     }
@@ -247,7 +273,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         val active = synchronized(gate) {
             closed = true
             bindings.values.toList().forEach { it.accepting = false; releaseBindingIfIdle(it) }
-            tasks.values.onEach { it.stopRequested = true }.mapNotNull { it.batch }
+            tasks.values.onEach { it.stopRequested = true; it.pause.terminate() }.mapNotNull { it.batch }
         }
         active.forEach { it.close() }
         workers.shutdown()
@@ -287,7 +313,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                 finishUnsent(task, "child_not_sent")
             } else {
                 val context = ToolExecutionContext(task.binding.owner, task.invocation, resources.authorization) { stopped(task) }
-                batch.executeQueued(context, listOf(task.initial))
+                batch.executeQueued(context, listOf(task.initial), task.pause)
             }
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
@@ -342,6 +368,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         val callback = synchronized(gate) {
             check(!task.settled)
             task.settled = true
+            task.pause.terminate()
             task.batch = null
             tasks.remove(task.initial.owner.childRunId)
             val binding = task.binding

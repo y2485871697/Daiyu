@@ -5,6 +5,11 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import android.test.InstrumentationTestCase
 import app.daiyu.android.domain.ConversationId
+import app.daiyu.android.domain.Message
+import app.daiyu.android.domain.MessageBlock
+import app.daiyu.android.domain.MessageId
+import app.daiyu.android.domain.RunId
+import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.testContext
 import java.io.File
@@ -81,6 +86,31 @@ class ProductionContextPreparationTest : InstrumentationTestCase() {
         }
         assertTrue(reads.contains(SummaryProfileStore.METADATA_NAMESPACE))
         assertFalse(reads.contains("model-settings"))
+    }
+
+    fun testPersistedProductionBudgetRejectsPendingMessageWithoutSummaryProfileRead() {
+        ProductionCompressionSettingsStore(base).save(
+            ProductionCompressionSettings(false, 2048, 100, summaryModel = binding))
+        val reads = mutableListOf<String>()
+        val coordinator = ProductionContextPreparation.create(guarded { name ->
+            check(name == ProductionCompressionSettingsStore.NAMESPACE) { "unexpected profile/main read" }
+            reads += name
+        }, service)
+        val owner = ConversationId("new-conversation")
+        val text = "too large ".repeat(1000)
+        db.draft(text)
+        val pending = Message(MessageId("pending"), owner, RunId("pending-run"), "user",
+            listOf(MessageBlock.Text("body", text)), RunStatus.COMPLETED)
+        val frozen = coordinator.freeze(owner, listOf(pending))
+        try {
+            coordinator.prepare(frozen)
+            fail("the real persisted production budget must reject before any send")
+        } catch (failure: ContextCapacityExceededException) {
+            assertTrue(failure.estimatedTokens > failure.budgetTokens)
+        }
+        assertEquals(listOf(ProductionCompressionSettingsStore.NAMESPACE), reads)
+        assertEquals(text, db.draft())
+        assertTrue(db.conversations().isEmpty())
     }
 
     fun testFreezeOnMainThreadIsRejectedBeforeAnyPreferenceRead() {

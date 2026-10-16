@@ -24,17 +24,22 @@ class TextSendActivityTest : WiredActivityTestCase() {
     private val preparationCalls = AtomicInteger()
     private val preparationOnMain = AtomicBoolean()
     private val rejectPreparation = AtomicBoolean()
+    private val laterPreparationGate = AtomicReference<CountDownLatch?>()
 
     internal override fun createFixture() = RunControlFixture(instrumentation.targetContext) {
         preparationCalls.incrementAndGet()
         preparationOnMain.set(Looper.myLooper() == Looper.getMainLooper())
         preparing.countDown()
         check(releasePreparation.await(30, TimeUnit.SECONDS)) { "test preparation gate timed out" }
+        laterPreparationGate.get()?.let {
+            check(it.await(30, TimeUnit.SECONDS)) { "test later preparation gate timed out" }
+        }
         check(!rejectPreparation.get()) { "test model initialization rejected" }
     }
 
     override fun tearDown() {
         releasePreparation.countDown()
+        laterPreparationGate.get()?.countDown()
         super.tearDown()
     }
 
@@ -118,6 +123,90 @@ class TextSendActivityTest : WiredActivityTestCase() {
         assertNull(fixture.controller.active)
         assertNotNull("the real preparation rejection is reported", fixture.controller.problem)
         assertEquals(0, fixture.opens.get()); assertEquals(1, preparationCalls.get())
+    }
+
+    fun testCancelButtonKeepsPendingDraftFrozenUntilWorkerExitsAndStaleButtonCannotCancelNextTicket() {
+        val text = "  取消准备保留\n尾部  "
+        node("text-send-cancel").assertDoesNotExist()
+        setDraft(text); setSelection(2, 6)
+        val oldEditor = retainedControls(activity)
+        node("chat-send").performClick()
+        awaitPreparing()
+        node("text-send-cancel").assertIsEnabled()
+        lateinit var submission: ChatController.TextSendState
+        lateinit var pending: Any
+        lateinit var staleCancel: () -> Unit
+        mainThread {
+            submission = checkNotNull(fixture.controller.textSendState())
+            pending = checkNotNull(pendingSend(activity))
+            val ticket = pending.javaClass.getDeclaredField("ticket").apply { isAccessible = true }.get(pending)
+            assertSame("retain the ticket created by the real UI", submission.ticket, ticket)
+            staleCancel = retainedCancel(activity, pending)
+        }
+        // Invoke the attached button, not controller.stop() or a synthetic UI callback.
+        node("text-send-cancel").performClick()
+        mainThread {
+            assertSame("button must not clear the UI pending send", pending, pendingSend(activity))
+            val retained = checkNotNull(fixture.controller.textSendState())
+            assertSame(submission.ticket, retained.ticket)
+            assertNull("cancel is not a completed rejection", retained.result)
+            staleCancel() // repeated host cancellation is still not completion
+            oldEditor.onSend(text)
+            oldEditor.onTextChange("must not unfreeze the pending revision")
+            assertFalse(fixture.controller.sendText(null, 90, 91, "duplicate") { fail("not admitted") })
+        }
+        node("chat-draft").assertIsNotEnabled()
+        node("chat-send").assertIsNotEnabled()
+        node("text-send-cancel").assertExists()
+        assertDraft(text); assertSelection(2, 6)
+        assertEquals(text, fixture.database.draft())
+        assertTrue(fixture.database.conversations().isEmpty())
+        assertEquals(0, fixture.opens.get()); assertEquals(1, preparationCalls.get())
+
+        releasePreparation.countDown()
+        awaitTextSendResult(activity)
+        node("text-send-cancel").assertDoesNotExist()
+        node("chat-draft").assertIsEnabled()
+        node("chat-send").assertIsEnabled()
+        assertDraft(text); assertSelection(2, 6)
+        assertEquals(text, fixture.database.draft())
+        assertTrue(fixture.database.conversations().isEmpty())
+        mainThread {
+            assertNull(pendingSend(activity))
+            assertNull(fixture.controller.textSendState())
+        }
+
+        // The first button's host capability keeps its original pending owner/ticket.
+        // Never fetch the replacement button's action: that would test the new owner instead.
+        val nextGate = CountDownLatch(1)
+        laterPreparationGate.set(nextGate)
+        val nextText = "新的 ticket 可以发送"
+        val session = fixture.session(holdSeconds = 120)
+        setDraft(nextText)
+        node("chat-send").performClick()
+        awaitControl("second preparation entered") { preparationCalls.get() == 2 }
+        mainThread {
+            val nextSubmission = checkNotNull(fixture.controller.textSendState())
+            assertNotSame(submission.ticket, nextSubmission.ticket)
+            val nextPending = checkNotNull(pendingSend(activity))
+            staleCancel()
+            assertSame(nextPending, pendingSend(activity))
+            assertSame(nextSubmission, fixture.controller.textSendState())
+        }
+        node("chat-draft").assertIsNotEnabled()
+        node("chat-send").assertIsNotEnabled()
+        assertDraft(nextText)
+        assertEquals(0, fixture.opens.get())
+        nextGate.countDown()
+        awaitTextSendResult(activity)
+        assertTrue("stale cancel must not reject the new send", session.entered.await(5, TimeUnit.SECONDS))
+        val owner = checkNotNull(fixture.controller.active)
+        assertUserText(owner.conversationId, nextText)
+        assertDraft("")
+        node("text-send-cancel").assertDoesNotExist()
+        session.release.countDown()
+        awaitControl("accepted second run completed") { fixture.controller.active == null }
+        assertEquals(1, fixture.opens.get()); assertEquals(2, preparationCalls.get())
     }
 
     fun testDoubleClickAndPendingRetainedControlsCannotResendOrReplaceDraft() {
@@ -211,6 +300,21 @@ class TextSendActivityTest : WiredActivityTestCase() {
 
     fun testUiSendCommittedReceiptSurvivesFinishAndRestartBeforeDelivery() =
         destroyAfterUiSendCommit(recreate = false)
+
+    // Like ComposeActivityTestCase.retainedClick, retain the host capability rather than
+    // Compose's attachment-dependent ClickableNode wrapper. Both host and pending are captured
+    // now, not looked up when invoked after the next send. The real button must use this same
+    // host method; see P09_UI_REGRESSION_SEAM.md for the required parent-owned extraction.
+    private fun retainedCancel(host: MainActivity, pending: Any): () -> Unit {
+        val cancel = MainActivity::class.java.declaredMethods.single {
+            it.name == "cancelPendingTextSend" && it.parameterCount == 1 &&
+                it.parameterTypes.single().isInstance(pending)
+        }.apply { isAccessible = true }
+        return {
+            try { cancel.invoke(host, pending); Unit }
+            catch (failure: java.lang.reflect.InvocationTargetException) { throw failure.targetException }
+        }
+    }
 
     private fun pendingSend(host: MainActivity): Any? = MainActivity::class.java.declaredMethods
         .single { it.name == "getPendingTextSend" && it.parameterCount == 0 }

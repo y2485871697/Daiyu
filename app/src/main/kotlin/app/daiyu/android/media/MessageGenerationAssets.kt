@@ -26,6 +26,7 @@ import java.nio.file.StandardOpenOption.CREATE
 import java.nio.file.StandardOpenOption.WRITE
 import java.security.MessageDigest
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** The account scope is a stable local account/DB identifier, NEVER a URL or a credential.
  * binding must describe the real persisted assistant invocation, just as for the attempt ledger.
@@ -37,30 +38,73 @@ class GenerationAssetOwner(val accountScope: String, val binding: GenerationAtte
     override fun toString() = "GenerationAssetOwner(<redacted>)"
 }
 
-/** Required live owner admission, separate from the transport cancellation handle.
- * The parent must revoke BEFORE changing/deleting the execution owner, and before cancelling HTTP.
- * revoke, final publication and output registration execute under the SAME monitor: first wins.
- * validateOwner must query/validate the real owner (including account, run and tool call), not just
- * return true. It runs under this monitor; never acquire this fence while holding a DB transaction.
- * The parent must share this fence across all leaves of the same live owner. Recovery cannot
- * replace a revoked fence to resurrect permission. After restart, creating a fence requires both
- * revalidating the persisted owner and the parent's current cancellation/account policy.
+/** Parent-owned persisted-owner publication barrier, shared by writers AND history readers.
+ * Never keep one in a global registry. The actual account owner retains it by stable run scope.
+ * Seal is pure in-memory admission closure; an already admitted operation may still finish.
+ * BEFORE deleting/changing the real owner, the parent must also await revokeOnWorker(), outside
+ * UI/controller locks and BEFORE opening any DB transaction (ordering is gate -> DB, never DB -> gate).
+ * Revocation is terminal. Recovery of the same live owner uses this same gate, not a fresh one.
+ */
+class GenerationAssetPublicationGate {
+    private val monitor = Any()
+    private val admissionSealed = AtomicBoolean(false)
+
+    fun sealAdmission() { admissionSealed.set(true) }
+
+    /** Physical publication barrier: on return no admitted rename/SQL can remain in this gate. */
+    fun revokeOnWorker() {
+        sealAdmission()
+        synchronized(monitor) { Unit }
+    }
+
+    internal fun revokeLocal(action: () -> Unit) { synchronized(monitor) { action() } }
+
+    internal fun checkAdmission() {
+        if (admissionSealed.get() || Thread.currentThread().isInterrupted) reject(GenerationAssetFailure.CANCELLED)
+    }
+
+    internal fun <T> admit(action: () -> T): T = synchronized(monitor) {
+        checkAdmission()
+        action()
+    }
+}
+
+/** Per-execution/reader cancellation layered OVER the persisted owner's shared publication gate.
+ * Closing this fence never revokes another fence or accepted history. validateOwner must validate
+ * the real account/run/tool owner; it and final publication run under publicationGate's monitor.
+ * The two-argument constructor intentionally preserves the legacy, independent-gate behavior.
  */
 class GenerationAssetFence(
     val owner: GenerationAssetOwner,
+    val publicationGate: GenerationAssetPublicationGate,
     private val validateOwner: (GenerationAssetOwner) -> Boolean,
 ) {
-    private val gate = Any()
-    private var revoked = false
+    constructor(owner: GenerationAssetOwner, validateOwner: (GenerationAssetOwner) -> Boolean) :
+        this(owner, GenerationAssetPublicationGate(), validateOwner)
 
-    fun revoke() { synchronized(gate) { revoked = true } }
+    private val revoked = AtomicBoolean(false)
 
-    internal fun <T> admit(action: () -> T): T = synchronized(gate) {
-        if (revoked || Thread.currentThread().isInterrupted) reject(GenerationAssetFailure.CANCELLED)
+    /** Nonblocking local cancellation. Does not close the persisted owner's publication gate. */
+    fun revokeAdmission() { revoked.set(true) }
+
+    /** Worker-only local barrier. An operation already admitted wins unless the caller first
+     * used revokeAdmission(). Never seals the shared gate or changes other fences' admission.
+     */
+    fun revoke() {
+        publicationGate.revokeLocal { revoked.set(true) }
+    }
+
+    internal fun <T> admit(action: () -> T): T = publicationGate.admit {
+        checkLocalAdmission()
         val valid = try { validateOwner(owner) } catch (_: Exception) { false }
         if (!valid) reject(GenerationAssetFailure.OWNER_REJECTED)
-        if (revoked || Thread.currentThread().isInterrupted) reject(GenerationAssetFailure.CANCELLED)
+        publicationGate.checkAdmission()
+        checkLocalAdmission()
         action()
+    }
+
+    private fun checkLocalAdmission() {
+        if (revoked.get() || Thread.currentThread().isInterrupted) reject(GenerationAssetFailure.CANCELLED)
     }
 }
 

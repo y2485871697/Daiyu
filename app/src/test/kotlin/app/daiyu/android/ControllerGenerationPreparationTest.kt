@@ -5,6 +5,8 @@ import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.*
 import app.daiyu.android.integration.tools.*
 import app.daiyu.android.media.GenerationAssetOwner
+import app.daiyu.android.media.GenerationAssetFence
+import app.daiyu.android.media.GenerationAssetPublicationGate
 import app.daiyu.android.model.generation.*
 import app.daiyu.android.storage.GenerationAttemptBinding
 import app.daiyu.android.ui.GenerationApprovalForm
@@ -417,6 +419,28 @@ class ControllerGenerationPreparationTest {
             assertEquals(GenerationToolsCloseResult.Drained, leaf.awaitClose(1_000))
             assertSame(unknown, token.awaitClose(1_000))
         } finally { release.countDown(); worker.join(5_000); token.close() }
+    }
+
+    @Test fun tokenPassesParentFenceFactoryWithoutGivingHistoryItsExecutionCancellation() {
+        val token = confirmed()
+        val realOwner = owner()
+        val task = TaskAuthorization("session", "run", token.paidWrites(realOwner, editor, identity))
+        val gate = GenerationAssetPublicationGate()
+        var captured: GenerationAssetFence? = null
+        val leaf = token.openLeaf(realOwner, task, { error("no database") }, { fence ->
+            assertSame(gate, fence.publicationGate)
+            error("stop before files")
+        }, { true }, GenerationDownloadAuthorization { _, _ -> false }, { true },
+            fenceFactory = { assetOwner, validator ->
+                GenerationAssetFence(assetOwner, gate, validator).also { captured = it }
+            })
+        dispatchLeaf(leaf, realOwner, task)
+        val writer = checkNotNull(captured)
+        val history = GenerationAssetFence(writer.owner, gate) { true }
+        token.revokeAdmission()
+        token.close()
+        assertEquals(GenerationToolsCloseResult.Drained, token.awaitClose(1000))
+        assertTrue(history.admit { true })
     }
 
     @Test fun purePrepareConfirmBindAndToolPrepareDoZeroIoAndUnknownCleanupCannotReopen() {

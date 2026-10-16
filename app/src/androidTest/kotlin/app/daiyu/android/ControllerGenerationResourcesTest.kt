@@ -5,6 +5,8 @@ import android.database.sqlite.SQLiteDatabase
 import android.test.AndroidTestCase
 import app.daiyu.android.domain.*
 import app.daiyu.android.integration.tools.RunGenerationTools
+import app.daiyu.android.media.GenerationAssetException
+import app.daiyu.android.media.GenerationAssetFailure
 import app.daiyu.android.media.GenerationAssetFence
 import app.daiyu.android.media.GenerationAssetOwner
 import app.daiyu.android.model.generation.*
@@ -94,9 +96,66 @@ class ControllerGenerationResourcesTest : AndroidTestCase() {
         try { assertFalse(resources.validateOwner(owner)) } finally { db.endTransaction() }
     }
 
+    private fun cancelled(action: () -> Unit) {
+        try { action(); fail("expected cancellation") }
+        catch (failure: GenerationAssetException) { assertEquals(GenerationAssetFailure.CANCELLED, failure.failure) }
+    }
+
+    fun testStableOwnerGatesAndPermanentScopeSealsDoNotDependOnReaderIdentity() {
+        val first = resources.createFence(owner) { true }
+        val recreatedOwner = GenerationAssetOwner("account", GenerationAttemptBinding("conversation", "assistant",
+            "run", "different-call", RunGenerationTools.VIDEO_TOOL))
+        assertSame(first.publicationGate, resources.createFence(recreatedOwner) { true }.publicationGate)
+        val otherRun = GenerationAssetOwner("account", GenerationAttemptBinding("conversation", "assistant",
+            "other-run", "call", RunGenerationTools.IMAGE_TOOL))
+        val otherConversation = GenerationAssetOwner("account", GenerationAttemptBinding("other-conversation", "assistant",
+            "run", "call", RunGenerationTools.IMAGE_TOOL))
+        assertNotSame(first.publicationGate, resources.createFence(otherRun) { true }.publicationGate)
+        val runRevocation = resources.sealRunPublicationAdmission("conversation", "run")
+        runRevocation.revokeOnWorker()
+        cancelled { first.admit { fail("revoked owner") } }
+        cancelled { resources.createFence(recreatedOwner) { true }.admit { fail("fresh fence reopened owner") } }
+        assertTrue(resources.createFence(otherRun) { true }.admit { true })
+        resources.sealConversationPublicationAdmission("conversation").revokeOnWorker()
+        cancelled { resources.createFence(otherRun) { true }.admit { fail("revoked conversation") } }
+        assertTrue(resources.createFence(otherConversation) { true }.admit { true })
+        resources.sealAccountPublicationAdmission().revokeOnWorker()
+        cancelled { resources.createFence(otherConversation) { true }.admit { fail("revoked account") } }
+        try {
+            resources.assets(GenerationAssetFence(owner) { true })
+            fail("independent gate accepted")
+        } catch (_: IllegalArgumentException) { }
+    }
+
+    fun testReaderCloseDoesNotCancelWriterAndWriterCloseDoesNotCancelAcceptedHistory() {
+        assertEquals(GenerationReservation.Started, SQLiteGenerationAttemptStore({ db }, owner.binding).reserve(attempt))
+        val writerFence = resources.createFence(owner)
+        val assets = resources.assets(writerFence)
+        val info = assets.inspect(GenerationKind.IMAGE, png, "image/png")
+        val first = assets.commit(attempt.identity, 0, GenerationKind.IMAGE, png, info)
+        val store = SQLiteGenerationOutputStore({ db }, owner, assets)
+        store.register(attempt, first)
+        val closedReader = resources.openOutputs(owner)
+        closedReader.close()
+        val second = assets.commit(attempt.identity, 1, GenerationKind.IMAGE, png, info)
+        store.register(attempt, second)
+        rejected { closedReader.metadata(attempt, 0) }
+        writerFence.revokeAdmission()
+        writerFence.revoke()
+        val historyReader = resources.openOutputs(owner)
+        try {
+            assertNotNull(historyReader.metadata(attempt, 0))
+            assertNotNull(historyReader.metadata(attempt, 1))
+            assertTrue(png.contentEquals(historyReader.openOriginal(attempt, 1)!!.use { it.readBytes() }))
+            resources.sealRunPublicationAdmission("conversation", "run").revokeOnWorker()
+            rejected { historyReader.metadata(attempt, 0) }
+            cancelled { resources.createFence(owner).admit { fail("reopened revoked history") } }
+        } finally { historyReader.close() }
+    }
+
     fun testMetadataAndOriginalComeFromRealRegisteredOutputNotToolPayloadOrPath() {
         assertEquals(GenerationReservation.Started, SQLiteGenerationAttemptStore({ db }, owner.binding).reserve(attempt))
-        val assets = resources.assets(GenerationAssetFence(owner, resources::validateOwner))
+        val assets = resources.assets(resources.createFence(owner))
         val info = assets.inspect(GenerationKind.IMAGE, png, "image/png")
         val receipt = assets.commit(attempt.identity, 0, GenerationKind.IMAGE, png, info)
         SQLiteGenerationOutputStore({ db }, owner, assets).register(attempt, receipt)

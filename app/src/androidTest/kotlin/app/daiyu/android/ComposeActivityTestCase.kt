@@ -8,7 +8,6 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import org.junit.runner.Description
 import org.junit.runners.model.Statement
@@ -40,11 +39,12 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     protected fun editModel(label: String, text: String) { reveal("settings-field:$label").performTextReplacement(text) }
     protected fun modelField(label: String) = reveal("settings-field:$label")
     protected fun SemanticsNodeInteraction.assertEditableText(text: String): SemanticsNodeInteraction {
-        val expected = AnnotatedString(text)
         ui.waitUntil(timeoutMillis = 5_000) {
-            fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText) == expected
+            fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text == text
         }
-        return assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, expected))
+        return assert(SemanticsMatcher("EditableText.text exactly equals <$text>") {
+            it.config.getOrNull(SemanticsProperties.EditableText)?.text == text
+        })
     }
     protected fun saveModel() { reveal("model-save").performClick() }
     protected fun openModels() { node("chat-model").performClick() }

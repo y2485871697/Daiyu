@@ -11,7 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 10), ConversationStore {
+class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 11), ConversationStore {
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
         db, assistantPreferences.getString(app.daiyu.android.assistants.LegacyAssistantCodec.KEY, null))
@@ -35,26 +35,63 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         SQLiteRuntimeStore.installSchema(db)
         SQLiteChildTaskStore.installSchema(db)
         app.daiyu.android.model.usage.SQLiteChildUsageStore.installSchema(db)
+        installGenerationSchema(db)
+    }
+    private fun installGenerationSchema(db: SQLiteDatabase) {
+        SQLiteGenerationAttemptStore.installSchema(db)
+        SQLiteGenerationOutputStore.installSchema(db)
     }
     private fun createComposer(db:SQLiteDatabase) {
         db.execSQL("CREATE TABLE composer(id INTEGER PRIMARY KEY CHECK(id=1),draft TEXT NOT NULL)")
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..9 && newVersion==10) {"不支持此数据库版本，保留原数据"}
-        db.execSQL("ALTER TABLE conversations ADD COLUMN assistant_id TEXT")
-        installAssistants(db)
-        if(oldVersion==1) createComposer(db)
-        if(oldVersion<=2) {
-            db.execSQL("ALTER TABLE conversations ADD COLUMN folder TEXT NOT NULL DEFAULT ''")
-            db.execSQL("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+        check(oldVersion in 1..10 && newVersion == 11) { "不支持此数据库版本，保留原数据" }
+        if (oldVersion < 10) {
+            db.execSQL("ALTER TABLE conversations ADD COLUMN assistant_id TEXT")
+            installAssistants(db)
+            if(oldVersion==1) createComposer(db)
+            if(oldVersion<=2) {
+                db.execSQL("ALTER TABLE conversations ADD COLUMN folder TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE conversations ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+            }
+            if(oldVersion<=4) db.execSQL("ALTER TABLE messages ADD COLUMN history_segments TEXT NOT NULL DEFAULT '[]'")
+            ContextStorage.installSchema(db)
+            SQLiteRuntimeStore.installSchema(db)
+            SQLiteChildTaskStore.installSchema(db)
+            app.daiyu.android.model.usage.SQLiteChildUsageStore.installSchema(db)
+            createUiFolders(db)
         }
-        if(oldVersion<=4) db.execSQL("ALTER TABLE messages ADD COLUMN history_segments TEXT NOT NULL DEFAULT '[]'")
-        ContextStorage.installSchema(db)
-        SQLiteRuntimeStore.installSchema(db)
-        SQLiteChildTaskStore.installSchema(db)
-        app.daiyu.android.model.usage.SQLiteChildUsageStore.installSchema(db)
-        createUiFolders(db)
+        upgradeGenerationSchema(db)
+    }
+    private fun upgradeGenerationSchema(db: SQLiteDatabase) {
+        val hasOutputs = db.rawQuery("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            arrayOf(SQLiteGenerationOutputStore.TABLE)).use { it.moveToFirst() }
+        if (!hasOutputs) {
+            installGenerationSchema(db)
+            return
+        }
+        // Check the OLD storage classes before INTEGER/TEXT affinity can normalize bad data.
+        val integerRanges = mapOf("output_index" to "0 AND 31", "byte_count" to "1 AND 9223372036854775807",
+            "width" to "1 AND 2147483647", "height" to "1 AND 2147483647",
+            "duration_ms" to "0 AND 9223372036854775807")
+        val textColumns = listOf("operation_id", "item_id", "fingerprint", "protocol", "account_scope",
+            "conversation_id", "assistant_id", "run_id", "tool_call_id", "tool_name", "receipt", "kind", "mime_type", "sha256")
+        val invalid = (integerRanges.map { (column, range) ->
+            "typeof($column)!='integer' OR $column NOT BETWEEN $range"
+        } + textColumns.map { "typeof($it)!='text'" }).joinToString(" OR ")
+        db.rawQuery("SELECT 1 FROM generation_outputs WHERE $invalid LIMIT 1", null).use {
+            check(!it.moveToFirst()) { "生成数据类型无效，保留原数据库" }
+        }
+        // SQLiteOpenHelper owns this transaction. Reject invalid legacy rows without deleting them.
+        db.execSQL("ALTER TABLE generation_outputs RENAME TO generation_outputs_v10")
+        db.execSQL("DROP INDEX IF EXISTS generation_outputs_owner")
+        installGenerationSchema(db)
+        val columns = "operation_id,item_id,output_index,fingerprint,protocol,account_scope," +
+            "conversation_id,assistant_id,run_id,tool_call_id,tool_name,receipt,kind,mime_type," +
+            "byte_count,sha256,width,height,duration_ms"
+        db.execSQL("INSERT INTO generation_outputs($columns) SELECT $columns FROM generation_outputs_v10")
+        db.execSQL("DROP TABLE generation_outputs_v10")
     }
     private fun createUiFolders(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS conversation_folders(name TEXT PRIMARY KEY NOT NULL CHECK(length(name)>0 AND length(name)<=200))")
@@ -154,6 +191,11 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     fun draft(id: ConversationId, text: String) {check(writableDatabase.update("conversations",ContentValues().apply {put("draft",text)},"id=?",arrayOf(id.value))==1) {"会话不存在"}}
     fun rename(id: ConversationId, title: String) { require(title.isNotBlank());check(writableDatabase.update("conversations",ContentValues().apply {put("title",title)},"id=?",arrayOf(id.value))==1) {"会话不存在"}}
     fun delete(id: ConversationId) { transaction { db ->
+        db.delete(SQLiteGenerationOutputStore.TABLE, "conversation_id=?", arrayOf(id.value))
+        db.rawQuery("SELECT 1 FROM generation_outputs WHERE conversation_id=? LIMIT 1", arrayOf(id.value)).use {
+            check(!it.moveToFirst()) { "生成引用未删除，保留会话" }
+        }
+        // Paid-attempt tombstones outlive deleted messages; deletion never permits a new POST.
         db.execSQL("DELETE FROM neutral_assets WHERE message_id IN (SELECT id FROM messages WHERE conversation_id=?)", arrayOf(id.value))
         db.delete("context_archives","conversation_id=?",arrayOf(id.value))
         db.delete("context_branches","conversation_id=?",arrayOf(id.value))

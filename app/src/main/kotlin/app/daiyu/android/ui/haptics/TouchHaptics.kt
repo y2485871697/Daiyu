@@ -1,21 +1,26 @@
 package app.daiyu.android.ui.haptics
 
-import android.os.Build
-import android.provider.Settings
-import android.view.HapticFeedbackConstants
 import android.view.View
+import app.daiyu.android.domain.haptics.HapticKind
+import app.daiyu.android.haptics.HapticsRuntime
+import java.lang.ref.WeakReference
 
-/** UI feedback uses the platform's motor theme and respects its touch-feedback switch. */
+/** Existing click sites delegate to P31; no second system-click fallback or shadow preferences. */
 internal object TouchHaptics {
-    fun click(view: View?) = perform(view, HapticFeedbackConstants.CONTEXT_CLICK)
-    fun longPress(view: View?) = perform(view, HapticFeedbackConstants.LONG_PRESS)
-    fun gestureThreshold(view: View?) = perform(view,
-        if (Build.VERSION.SDK_INT >= 34) HapticFeedbackConstants.GESTURE_THRESHOLD_ACTIVATE
-        else HapticFeedbackConstants.CLOCK_TICK)
+    private var runtime = WeakReference<HapticsRuntime>(null)
 
-    private fun perform(view: View?, constant: Int) {
-        if (view == null || Settings.System.getInt(view.context.contentResolver,
-                Settings.System.HAPTIC_FEEDBACK_ENABLED, 1) == 0) return
-        view.performHapticFeedback(constant)
+    /** Install the application-owned runtime once; stale disposal cannot unbind its replacement. */
+    fun install(value: HapticsRuntime): AutoCloseable {
+        val registration = WeakReference(value)
+        runtime = registration
+        return AutoCloseable { if (runtime === registration) runtime = WeakReference(null) }
+    }
+
+    fun click(view: View?) = perform(view, HapticKind.CLICK)
+    fun longPress(view: View?) = perform(view, HapticKind.LONG_PRESS)
+    fun gestureThreshold(view: View?) = perform(view, HapticKind.THRESHOLD)
+
+    private fun perform(view: View?, kind: HapticKind) {
+        if (view != null) runtime.get()?.uiTouch(view, kind)
     }
 }

@@ -11,19 +11,20 @@ class ResponsesModel internal constructor(
     private val settings: ModelSettings,
     private val connect: (URL) -> HttpsURLConnection,
     private val imageInputSupported: Boolean?,
+    private val assistantInstructions: String? = null,
 ) : ModelPort {
     internal constructor(settings: ModelSettings, connect: (URL) -> HttpsURLConnection) : this(settings, connect, null)
     constructor(settings: ModelSettings) : this(settings, { it.openConnection() as HttpsURLConnection }, null)
-    internal constructor(snapshot: ProviderSnapshot) : this(snapshot.asModelSettings(),
-        { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported)
+    internal constructor(snapshot: ProviderSnapshot, assistantInstructions: String? = null) : this(snapshot.asModelSettings(),
+        { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported, assistantInstructions)
     override fun open(history: List<Message>): ModelSession = open(history, settings.enabledTools())
     override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = open(history, tools.map {
         ToolDefinition(it.toolName, it.description, """{"type":"object","properties":{},"required":[],"additionalProperties":false}""")
     })
     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession =
-        Session(settings, history, connect, definitions.toList(), imageInputSupported, null)
+        Session(settings, history, connect, definitions.toList(), imageInputSupported, null, assistantInstructions)
     override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
-        Session(settings, history, connect, definitions.toList(), imageInputSupported, images)
+        Session(settings, history, connect, definitions.toList(), imageInputSupported, images, assistantInstructions)
 
     private class Session(
         private val settings: ModelSettings,
@@ -32,6 +33,7 @@ class ResponsesModel internal constructor(
         private val tools: List<ToolDefinition>,
         capability: Boolean?,
         images: ModelImagePlan?,
+        private val assistantInstructions: String?,
     ) : ModelSession {
         private val cancelled = AtomicBoolean(false)
         @Volatile private var connection: HttpsURLConnection? = null
@@ -56,7 +58,10 @@ class ResponsesModel internal constructor(
                 val item = JSONObject().put("type", "function_call_output").put("call_id", it.callId.value).put("output", it.output)
                 input.put(item); ownItems.add(item.toString())
             }
-            val request = settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools), ProviderProtocol.RESPONSES)
+            val request = ResponsesRequest.withAssistantInstructions(
+                settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools), ProviderProtocol.RESPONSES),
+                assistantInstructions,
+            )
             val requestBytes = ImageRequestPreflight.bytes(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null
             val deliver: (ModelEvent) -> Unit = { event ->

@@ -12,6 +12,8 @@ data class ChatScreenState(
     val conversationKey: String? = null,
     val scrollRequest: ChatScrollRequest? = null,
     val contentRevision: Long = 0L,
+    val interactiveModeEnabled: Boolean = false,
+    val interactiveModeChangeEnabled: Boolean = true,
 )
 
 /** A new serial consumes a host navigation request, never a model execution state. */

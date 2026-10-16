@@ -51,6 +51,7 @@ class ChatController internal constructor(private val application:Application,
     private val model:(ModelSettings)->ModelPort,
     private val imageModel: (ProviderSnapshot)->ModelPort = { ModelFactory.create(it) }) {
     constructor(application:Application):this(application,ConversationDatabase(application),ModelSettingsStore(application),application.getSharedPreferences("conversation-ui",0),{ModelFactory.create(it)})
+    internal val interactiveMode = app.daiyu.android.config.InteractiveModePreference(preferences)
     private val executor=Executors.newSingleThreadExecutor()
     private val handler=Handler(Looper.getMainLooper())
     // Entry points and callback commits share this controller's monitor. Runner control and
@@ -443,6 +444,7 @@ class ChatController internal constructor(private val application:Application,
         shizukuPreparation:ControllerShizukuPreparation?=null,
         shizukuAuthorization:app.daiyu.android.domain.tools.TaskAuthorization?=null):Conversation? {
         require(shizukuPreparation==null || (imageAttempt==null && shizukuAuthorization!=null))
+        val interactiveSnapshot = interactiveMode.snapshot()
         val config=try {settings.load().also {it.validate()}} catch (_:CredentialUnavailableException) {
             problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
         } catch (_:Exception) {problem="请在模型设置里配置Responses地址、模型与密钥";notifyChanged();return null}
@@ -490,10 +492,11 @@ class ChatController internal constructor(private val application:Application,
             preparingChildren = children
             val devices = RunDeviceResources(application)
             preparingDevices = devices
-            val registry = AndroidToolRegistry.create(devices, contextTools, enableUserBarrier=true)
+            val registry = AndroidToolRegistry.create(devices, contextTools, enableUserBarrier=interactiveSnapshot.enabled)
             val capabilities = SessionCapabilities(run.value,
                 AndroidToolRegistry.capabilitiesFor(config.enabledTools()) + contextTools.map { it.definition.capability } +
-                    setOf(SkillRunSession.READ, SkillRunSession.RESOURCE, AndroidToolRegistry.ASK_USER_CAPABILITY) +
+                    setOf(SkillRunSession.READ, SkillRunSession.RESOURCE) +
+                    (if (interactiveSnapshot.enabled) setOf(AndroidToolRegistry.ASK_USER_CAPABILITY) else emptySet()) +
                     (if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY,RunChildTasks.CAPABILITY)) +
                     (if (shizukuPreparation == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)))
             val backgroundFactory: ((app.daiyu.android.domain.runtime.RunExecutionOwner, SessionCapabilities,

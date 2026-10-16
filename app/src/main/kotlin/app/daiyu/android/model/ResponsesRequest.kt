@@ -76,6 +76,15 @@ internal object ResponsesRequest {
         return input
     }
 
+    /** Apply after user request options so neither source can silently erase the other. */
+    fun withAssistantInstructions(body: JSONObject, instructions: String?): JSONObject {
+        if (instructions == null) return body
+        val existing = body.opt("instructions")
+        require(existing == null || existing is String) { "Responses instructions must be a string" }
+        body.put("instructions", if (existing is String && existing.isNotEmpty()) "$existing\n\n$instructions" else instructions)
+        return MessagesRequest.validateObject(body, MessagesRequest.MAX_JSON_CONTAINER_DEPTH)
+    }
+
     fun body(model: String, input: JSONArray, tools: List<ToolDefinition>): JSONObject {
         val schemas = JSONArray()
         tools.forEach { definition ->

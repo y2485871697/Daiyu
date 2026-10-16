@@ -62,7 +62,7 @@ internal fun SubAgentModelPickerDialog(state: SubAgentModelPickerUiState, show: 
             Column(Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
                 if (onClearSelection != null) {
                     Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(10.dp))
-                        .modelSelectionBackground(highlightSelection && state.selectedModel == null, MaterialTheme.colorScheme.surfaceVariant)
+                        .modelSelectionBackground(highlightSelection && state.selectedModel == null, MaterialTheme.colorScheme.primaryContainer)
                         .selectable(selected = state.selectedModel == null, role = Role.RadioButton,
                             interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {
                                 TouchHaptics.click(view); onClearSelection()
@@ -88,7 +88,7 @@ internal fun SubAgentModelPickerDialog(state: SubAgentModelPickerUiState, show: 
                         group.models.forEach { model ->
                             val selected = state.selectedModel?.providerId == model.providerId && state.selectedModel?.id == model.id
                             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(RoundedCornerShape(10.dp))
-                                .modelSelectionBackground(highlightSelection && selected, MaterialTheme.colorScheme.surfaceVariant)
+                                .modelSelectionBackground(highlightSelection && selected, MaterialTheme.colorScheme.primaryContainer)
                                 .selectable(selected = selected, role = Role.RadioButton,
                                     interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = {
                                         TouchHaptics.click(view); onModelSelected(model.providerId, model.id)

@@ -66,7 +66,8 @@ private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: Conver
     val context = LocalContext.current
     val view = LocalView.current
     val normalColor = MaterialTheme.colorScheme.onSurface
-    val contentColor by animateColorAsState(targetValue = subAgentGptSpeedChipColor(mode, normalColor),
+    val contentColor by animateColorAsState(targetValue = subAgentGptSpeedChipColor(mode, normalColor,
+        MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.onPrimaryContainer),
         animationSpec = tween(durationMillis = SubAgentGptSpeedAnimationDurationMillis), label = "sub_agent_gpt_speed_color")
     val displayedColor = if (usable) contentColor else contentColor.copy(alpha = 0.38f)
     Row(modifier = modifier.defaultMinSize(minWidth = SubAgentGptSpeedMinTouchSize, minHeight = SubAgentGptSpeedMinTouchSize)

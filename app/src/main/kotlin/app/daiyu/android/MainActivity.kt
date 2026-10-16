@@ -283,7 +283,12 @@ class MainActivity : ComponentActivity() {
         fun gestureOwner() = currentControlOwner()?.takeIf {
             renderedOwner != null && it.id == renderedOwner.id && it.runId == renderedOwner.runId && it.conversationId == renderedOwner.conversationId
         }
+        fun pendingFeature() { Toast.makeText(this, "该功能界面已保留，后端尚未接入", Toast.LENGTH_SHORT).show() }
         return ChatScreenActions(
+        onVoice = { pendingFeature() }, onContextClick = { pendingFeature() },
+        onRegenerate = { pendingFeature() }, onSpeak = { pendingFeature() },
+        onBranch = { pendingFeature() }, onEditUser = { pendingFeature() }, onDeleteTurn = { pendingFeature() },
+        onRetryStep = { pendingFeature() },
         onOpenSidebar = { openSidebar() }, onTextChange = { if (editorMatches()) updateDraft(it) },
         onSelectionChange = { start, end ->
             if (editorMatches()) { selectionStart = start; selectionEnd = end; publishChat() }
@@ -319,7 +324,7 @@ class MainActivity : ComponentActivity() {
             ChatMenuAction.CONVERSATION_ID -> selected?.let {
                 (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("会话 ID", it.id.value))
             }
-            else -> Unit
+            else -> pendingFeature()
         } } },
         )
     }

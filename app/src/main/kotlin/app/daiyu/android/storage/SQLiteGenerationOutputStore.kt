@@ -40,13 +40,21 @@ data class GenerationOutputReference internal constructor(
     override fun toString() = "GenerationOutputReference(kind=$kind, payload=<redacted>)"
 }
 
+/** Exact-slot recovery never authorizes a new POST/download, including when the slot is absent. */
+sealed interface GenerationOutputRecovery {
+    data class Registered(val reference: GenerationOutputReference) : GenerationOutputRecovery
+    data object Missing : GenerationOutputRecovery
+}
+
 /**
  * Additive P19/P20 leaf module. The supplied DB MUST be the account's application DB containing
  * the real messages and generation_attempts; accountScope must be stable across restarts.
  * No helper/version ownership, network, attempt mutation, asset deletion or Tool.result writes.
  *
- * Asset verification releases ALL file/fence locks before the single top-level SQL transaction.
- * Authorization is checked again inside that transaction, including on an idempotent retry.
+ * Asset verification releases ALL file/fence locks before final registration admission.
+ * Registration reacquires ONLY the asset fence, then opens the single top-level SQL transaction.
+ * The gate stays held through COMMIT, ordering registration against same-fence revoke; file IO
+ * stays outside SQLite. Authorization is rechecked in SQL, including on an idempotent retry.
  * Calls from an outer transaction are rejected BEFORE touching assets (lock ordering matters).
  * find authorizes metadata only; open also verifies the private original through the asset fence.
  */
@@ -73,6 +81,32 @@ class SQLiteGenerationOutputStore(
         registerVerified(db, attempt, verified)
     }
 
+    /**
+     * Recover only the original owner/operation/item/index slot. No receipt retention is required.
+     * Verifies mapping + original outside SQLite, then uses the identical registration path.
+     * Missing means no published slot AND no registered row (not permission to regenerate).
+     * The original fingerprint/protocol must still match the persisted attempt even on Missing.
+     */
+    fun recoverPublished(originalAttempt: GenerationAttempt, outputIndex: Int): GenerationOutputRecovery = guarded {
+        validateAttempt(originalAttempt); require(outputIndex in 0..31)
+        val db = readyDatabase()
+        val verified = assets.pending(originalAttempt.identity, outputIndex)
+        if (verified == null) {
+            assets.admitRegistration(owner) {
+                transaction(db) {
+                    authorize(it, originalAttempt)
+                    val previous = read(it, originalAttempt.identity, outputIndex)
+                    previous?.also { row -> validateReference(row, originalAttempt) }
+                    // An existing reference with no publication is corruption, not a missing output.
+                    check(previous == null)
+                    GenerationOutputRecovery.Missing
+                }
+            }
+        } else {
+            GenerationOutputRecovery.Registered(registerVerified(db, originalAttempt, verified))
+        }
+    }
+
     /** Null means an authorized, valid attempt has no registered output at this index. */
     fun find(attempt: GenerationAttempt, outputIndex: Int): GenerationOutputReference? = guarded {
         validateAttempt(attempt); require(outputIndex in 0..31)
@@ -96,18 +130,20 @@ class SQLiteGenerationOutputStore(
     private fun registerVerified(db: SQLiteDatabase, attempt: GenerationAttempt,
         pending: PendingGenerationAsset): GenerationOutputReference {
         val expected = reference(attempt, pending)
-        return transaction(db) {
-            authorize(it, attempt)
-            val previous = read(it, attempt.identity, pending.outputIndex)
-            if (previous == null) {
-                check(it.insertOrThrow(TABLE, null, values(expected)) != -1L)
-            } else {
-                check(previous == expected) // No replace/update, even for a different valid receipt.
-            }
-            // Catch RAISE(IGNORE), mutating triggers and changes to the owner/attempt by a trigger.
-            check(read(it, attempt.identity, pending.outputIndex) == expected)
-            authorize(it, attempt)
-            expected
+        return assets.admitRegistration(owner) {
+            transaction(db) {
+                authorize(it, attempt)
+                val previous = read(it, attempt.identity, pending.outputIndex)
+                if (previous == null) {
+                    check(it.insertOrThrow(TABLE, null, values(expected)) != -1L)
+                } else {
+                    check(previous == expected) // No replace/update, even for a different valid receipt.
+                }
+                // Catch RAISE(IGNORE), mutating triggers and changes to the owner/attempt by a trigger.
+                check(read(it, attempt.identity, pending.outputIndex) == expected)
+                authorize(it, attempt)
+                expected
+            } // Including endTransaction: never release the gate before commit completes.
         }
     }
 

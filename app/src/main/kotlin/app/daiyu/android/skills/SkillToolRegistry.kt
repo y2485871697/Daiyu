@@ -83,6 +83,22 @@ class SkillToolRegistry(
             SkillManagement.State(global, emptyList(), entriesUnavailable = true)
         }
     }
+    // Trusted settings-only building blocks. Do not expose these through a run catalog.
+    internal fun inspectForManagement(url: String): JSONObject = github.inspect(url)
+    internal fun downloadForManagement(selection: GitHubSkills.Selection): List<SkillBundle> = github.download(selection)
+    internal fun previewForManagement(bundle: SkillBundle): Pair<SkillHeader, String> = userStore.preview(bundle)
+    internal class ManagementBuiltinConflict : IllegalArgumentException("builtin_conflict")
+    internal fun installForManagement(
+        bundles: List<SkillBundle>, replacements: Map<String, String>, incoming: Map<String, String>,
+    ): List<InstalledSkill> {
+        // Recheck at publication time as well as preview time, including newly provisioned builtins.
+        val protected = builtin.list().map { it.name }.toSet()
+        if (bundles.any { SkillFrontmatter.parse(SkillFiles.text(it.files.getValue("SKILL.md"))).name in protected }) {
+            throw ManagementBuiltinConflict()
+        }
+        return userStore.install(bundles, replacements, incoming)
+    }
+
     fun setEnabled(id: String, value: Boolean, revision: String): InstalledSkill {
         val (store, name) = resolve(id); return store.setEnabled(name, value, revision)
     }

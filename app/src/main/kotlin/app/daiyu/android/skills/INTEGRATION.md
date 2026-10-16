@@ -76,13 +76,90 @@ Same-change ledger proposal for 01: R10/P33 gains this reviewed read-only run-sc
 
 ## Trusted settings management
 
-`SkillManagementDialog(activity).show()` creates a settings dialog without a new Activity,
-permission, or model tool. Dismiss it from the host Activity lifecycle. Registry construction,
-metadata reads, toggles and read-back use a dedicated worker. Settings contain no installation,
-inspection or script execution action. Individual toggles pin the displayed content revision;
-that revision is not a concurrent toggle version. A failure after mutation is not rollback:
-refresh state before deciding another action, and never automatically repeat a write.
+`SkillManagementScreen(managementFactory, onBack)` owns a worker and a `SkillManagement`
+instance for one page visit. Registry construction, metadata reads, public GitHub inspection,
+preview, installation, toggles and read-back are off the main thread. No new Activity,
+permission, model tool, database schema or run entry-point is introduced. Individual toggles
+pin the displayed content revision (not a concurrent toggle version).
+
+### Settings installation protocol (R10/P33 increment)
+
+1. `inspect(url)` validates the public URL and uses the existing `GitHubSkills.inspect` path.
+   Its opaque `Inspection` retains the resolved 40-hex commit and detached candidate metadata.
+   A new inspection invalidates the previous inspection and pending confirmation.
+2. The user selects directories (including the empty-string repository root). `preview` accepts
+   only candidates belonging to that exact inspection, downloads at its commit and reuses
+   `SkillStore.preview` for file/tree/metadata limits and content revisions. Duplicate names,
+   builtin names and unavailable local metadata reject before issuing a confirmation.
+3. The opaque `Preview` freezes the selected directories, incoming revisions and currently
+   installed user revisions. The UI displays all of these, including full old/new revisions,
+   and requires a separate checkbox for **each** replacement. No old revision means create-only.
+4. `install(preview, approvedReplacements)` accepts only the currently pending preview object
+   from that manager and exact complete `user:id -> old revision` map. The preview is consumed
+   before network or write, including on invalid approval, conflict or failure. Copies, other
+   managers, canceled/superseded previews and double submissions cannot reuse approval.
+5. Installation downloads from the **same commit** (never resolves the branch again), rechecks
+   incoming content, rechecks builtins, and calls the existing all-or-nothing `SkillStore.install`
+   transaction with both exact maps. No ZIP/extraction implementation or script executor changed.
+   Global enablement is preserved; successfully installed skills have their individual flag on.
+
+`Installed(cleanupPending=true)` is a committed success, not rollback. Unknown publication is
+reported as `Unknown`, without automatic retry. The page separately reads back the list; a
+failed read-back cannot turn committed success into a failed install. Refresh is read-only;
+if another install is wanted, the user must explicitly inspect/preview/approve again. Dismissal
+before submission invalidates pending approval. A page visit owns a one-way, non-blocking
+admission gate independent of `SkillManagement`'s I/O lock. Confirming creates a unique ticket
+and queues work; **neither the click nor queue insertion admits an installation**. Immediately
+before calling `management.install`, the worker must consume that ticket with a CAS on the
+same atomic state that `dispose` synchronously and permanently revokes. If revoke wins, that
+queued task cannot download or install, even though queued cleanup has not run yet. If admission
+wins, the one-shot task may finish across departure; the gate holds no lock around network or
+storage and disposal does not wait for either. Disposal is idempotent and an old page owner
+cannot become active again. Late inspection/preview/install callbacks are ignored by the old
+controller and cannot update a new page or use its active state/preview. Unused manager approval
+is separately cleared by ordered worker cleanup; cleanup is not the admission barrier.
+Inspection/download retain the existing bounded timeout behavior.
 
 Global disable affects later run captures; existing captured bodies/results are not withdrawn.
-Individual disable rejects later non-body resource reads while preserving the captured body.
-The settings module does not close active runs or broaden their grants.
+Installed replacements appear on the next run. Captured instructions remain unchanged, while
+non-body resources retain the existing current-revision/enabled/hash rejection policy. The
+settings module does not close active runs, freeze additional resource bytes, broaden grants,
+or register inspect/install/WRITE with `RunCatalogTools` or the model dispatcher.
+
+### Explicit remaining checker/source limitation
+
+No `SkillCompatibilityChecker` implementation/interface exists in this assigned tree; only
+`THIRD_PARTY/task19/openminis.md` records its missing exact source mapping. This increment uses
+existing `SkillStore.preview` structural validation and labels that narrowly in the UI. It
+**does not** claim to restore the OpenMinis Apple/MiniS/iOS static compatibility warning checker,
+its provenance, or full R10/P33/T02 acceptance. Parent integration must provide/review that
+retained implementation separately; no replacement scanner or expanded source audit was added.
+
+### Verification handoff (not executed by this implementation agent)
+
+`SkillInstallManagementTest` adds isolated, injected-response fixtures for root/subdirectory
+selection, fixed commit, precise incoming and replacement revisions, single consumption,
+cross-manager/forged/superseded previews, cancellation, concurrent submissions, duplicate names,
+builtin preflight/recheck, concurrent local replacement, changed download, committed cleanup,
+Unknown no-replay, main-thread rejection, global enablement and current-vs-next-run behavior.
+All disk writes in those test methods target temporary fixture roots; their preferences are
+uniquely namespaced. `SkillInstallScreenTest` retains three real Compose cases for create-only
+confirmation/result, explicit replacement approval/cancel, and leaving an unused preview. It also
+uses the same production page controller with a manually drained worker and UI callback queue to
+cover four lifecycle boundaries deterministically: a late inspection delivered after departure;
+an old confirmation callback and old preview presented while a new page has its own preview;
+a confirmed but queued/unadmitted install revoked before worker start (zero additional fetches
+and zero writes); and a worker admitted before departure (one install, no old/new page result
+mutation). The last case holds an injected fetch at a latch while disposal returns, then releases
+it and requires an explicit refresh to populate the new page. Duplicate confirmations and
+idempotent disposal are checked too. A canceled-inspection/retry case also verifies that an old
+callback cannot clear the newer operation's busy flag. No test uses real GitHub or app-installed
+skills. Existing management, GitHub, store and run-snapshot regression suites should also be
+executed by the parent.
+
+This agent ran no builds, tests, network, skill installation or credential reads. Required parent
+checks: source/type compilation including androidTest; those isolated instrumentation tests on
+API26 and API37.2; UI smoke for URL input -> inspect -> select (including root) -> preview ->
+each replacement checkbox -> submit/read-back; cancel before submission and leave while queued;
+Unknown/cleanup messaging; refresh after stale revision; old run instructions/new run metadata
+and old-resource rejection; model catalog still read-only. No test count here implies passage.

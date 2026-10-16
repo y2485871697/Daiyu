@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 @Suppress("DEPRECATION")
-internal class RunControlFixture(base:Context) : AutoCloseable {
+internal class RunControlFixture(base:Context, beforeModel: () -> Unit = {}) : AutoCloseable {
     private class FixtureApplication(base:Context):Application() {init {attachBaseContext(base)}}
     val application:Application=FixtureApplication(testContext(base,"run-control-${UUID.randomUUID()}-"))
     val database=ConversationDatabase(application)
@@ -26,6 +26,8 @@ internal class RunControlFixture(base:Context) : AutoCloseable {
     init {
         settings.save(ModelSettings("https://example.invalid","run-control","synthetic-key",false))
         controller=ChatController(application,database,settings,application.getSharedPreferences("conversation-ui",0),{
+            // Test-only gate in real preparation, before the SQLite receipt or model open.
+            beforeModel()
             ModelPort {history ->
                 opens.incrementAndGet()
                 synchronized(queued) {histories.add(history);checkNotNull(queued.pollFirst())}

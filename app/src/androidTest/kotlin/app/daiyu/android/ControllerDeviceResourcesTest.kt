@@ -75,7 +75,7 @@ class ControllerDeviceResourcesTest : InstrumentationTestCase() {
         fixtures.add(it); awaitControl("recovery ready") { it.controller.ready }; assertNull(it.controller.problem)
     }
     private fun start(f: Fixture): Message {
-        controlMain { assertNotNull(f.controller.send(null, "device lifetime")) }
+        assertNotNull(f.controller.send(null, "device lifetime"))
         val owner = checkNotNull(f.controller.active)
         assertTrue(f.modelEntered.await(5, TimeUnit.SECONDS)); f.startRead(); assertTrue(f.app.entered.await(5, TimeUnit.SECONDS))
         f.modelRelease.countDown()
@@ -98,13 +98,13 @@ class ControllerDeviceResourcesTest : InstrumentationTestCase() {
         val f = fresh(); val owner = start(f)
         controlMain {
             assertNotNull(Fixture.field(f.controller, "resources")); assertEquals(RunStatus.COMPLETED, f.controller.active!!.status)
-            assertNull(f.controller.send(null, "must remain fenced"))
         }
+        assertNull(f.controller.send(null, "must remain fenced"))
         assertEquals(1, f.database.conversations().size); f.releaseRead()
         awaitControl("device confirmation releases completed run") { f.controller.active == null }
         assertTrue(f.outcome.get() is DispatchOutcome.Confirmed); assertNull(Fixture.field(f.controller, "resources"))
         assertEquals(RunStatus.COMPLETED, f.database.messages(owner.conversationId).last().second.status)
-        controlMain { assertNotNull(f.controller.send(null, "next run")) }
+        assertNotNull(f.controller.send(null, "next run"))
         awaitControl("next run completes independently") { f.controller.active == null }
     }
     fun testMainStopCloseDoNotWaitAndBackgroundCloseRetainsCompatibilityJoin() {
@@ -125,7 +125,8 @@ class ControllerDeviceResourcesTest : InstrumentationTestCase() {
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
             while (backgroundCloser.isAlive && backgroundCloser.state != Thread.State.TIMED_WAITING && System.nanoTime() < deadline) Thread.yield()
             assertEquals(Thread.State.TIMED_WAITING, backgroundCloser.state); assertEquals(1L, backgroundReturned.count)
-            controlMain { assertFalse(f.controller.ready); assertNull(f.controller.send(null, "closed")); assertFalse(f.controller.stop(owner)) }
+            assertNull(f.controller.send(null, "closed"))
+            controlMain { assertFalse(f.controller.ready); assertFalse(f.controller.stop(owner)) }
         } finally { f.releaseRead(); mainRequester.join(5000); if (backgroundCloser.state != Thread.State.NEW) backgroundCloser.join(5000) }
         assertFalse(mainRequester.isAlive); assertFalse(backgroundCloser.isAlive); failure.get()?.let { throw it }
         assertEquals(0L, backgroundReturned.count); assertTrue(f.outcome.get() is DispatchOutcome.Confirmed)

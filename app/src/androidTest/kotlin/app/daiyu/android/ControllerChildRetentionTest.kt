@@ -127,7 +127,7 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
             fixtures.add(it); awaitChange(it, "recovery") { it.controller.ready }; it.prepare()
             main { assertTrue(it.controller.bindChildSavedModel(it.conversation.id, it.profile.id, it.child.modelId, it.provider)) }
         }
-    private fun send(f: Fixture) = main { assertNotNull(f.controller.sendWithChildren(f.conversation, "parent task")) }
+    private fun send(f: Fixture) = assertNotNull(f.controller.sendWithChildren(f.conversation, "parent task"))
     private fun retained(f: Fixture): Int = synchronized(f.controller) {
         val field = ChatController::class.java.getDeclaredField("backgroundRuns").apply { isAccessible = true }
         (field.get(f.controller) as Map<*, *>).size

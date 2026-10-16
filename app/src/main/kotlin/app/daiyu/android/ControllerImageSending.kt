@@ -38,12 +38,17 @@ internal sealed interface ImageSendResult {
 internal class ImageDraftChangedException : IllegalStateException("image_draft_changed")
 
 /** cancel wins only before the DB acceptance gate. It never undoes an accepted send. */
-internal class ImageSendHandle internal constructor(val owner: ImageAttachmentOwner, val revision: Long) {
+internal class ImageSendHandle internal constructor(val owner: ImageAttachmentOwner, val revision: Long,
+    private val onCancel: () -> Unit = {}) {
     private var cancelled = false
     private var committing = false
-    @Synchronized fun cancel(): Boolean {
-        if (committing) return false
-        cancelled = true
+    fun cancel(): Boolean {
+        synchronized(this) {
+            if (committing) return false
+            cancelled = true
+        }
+        // The callback can cancel active summary transport; never invoke it under this monitor.
+        onCancel()
         return true
     }
     @Synchronized internal fun isCancelled(): Boolean = cancelled

@@ -63,8 +63,8 @@ class ControllerHapticsStopTest : InstrumentationTestCase() {
         var stoppedCancels = -1
         try {
             awaitControl("controller ready") { f.controller.ready }
+            val initialConversation = checkNotNull(f.controller.send(null, "hold provider"))
             controlMain {
-                val conversation = checkNotNull(f.controller.send(null, "hold provider"))
                 owner = checkNotNull(f.controller.active)
                 val lifecycle = Owner().also { it.registry.currentState = Lifecycle.State.RESUMED }
                 val r = HapticsRuntime(LocalHapticSettingsStore(f.application.getSharedPreferences(
@@ -72,7 +72,7 @@ class ControllerHapticsStopTest : InstrumentationTestCase() {
                 runtime = r
                 host = HapticsActivityHost(r, View(f.application), lifecycle, f.controller).also {
                     // Genuine stream/background path; visible renderer capability remains unused.
-                    it.sync(conversation.id.value, chatVisible = false, settingsVisible = false)
+                    it.sync(initialConversation.id.value, chatVisible = false, settingsVisible = false)
                 }
                 subscription = f.controller.observeReasoning { _, event ->
                     events += event
@@ -146,10 +146,8 @@ class ControllerHapticsStopTest : InstrumentationTestCase() {
             awaitControl("old provider really exited") { f.controller.active == null }
 
             val next = f.session(releaseOnCancel = false)
-            controlMain {
-                val conversation = f.database.conversations().single()
-                assertNotNull(f.controller.send(conversation, "next run"))
-            }
+            val conversation = f.database.conversations().single()
+            assertNotNull(f.controller.send(conversation, "next run"))
             assertTrue(next.entered.await(5, TimeUnit.SECONDS))
             awaitControl("new run observer mounted") { f.controller.active != null }
             controlMain {

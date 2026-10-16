@@ -165,6 +165,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         ui.onNodeWithText("取消").performClick()
         val session = fixture.session(holdSeconds = 120)
         setDraft("运行时不切模型"); node("chat-send").performClick()
+        awaitTextSendResult(activity)
         assertTrue(session.entered.await(5, TimeUnit.SECONDS))
         val owner = checkNotNull(fixture.controller.active)
         try {

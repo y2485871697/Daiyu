@@ -125,6 +125,8 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         .fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
     private fun send(f:Fixture):Message {
         setDraft("Ask for a route");node("chat-send").performClick()
+        awaitTextSendResult(checkNotNull(activity))
+        assertDraft("")
         return checkNotNull(f.c.active)
     }
     private fun checkpointOrNull(f:Fixture,m:Message):RunCheckpoint?=f.db.readableDatabase.rawQuery("SELECT payload FROM runtime_checkpoints WHERE message_id=?",arrayOf(m.id.value)).use {
@@ -249,7 +251,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
                 await(f,"failed durable interruption retains retry") {f.c.canRetryQuestionCleanup(owner)}
                 assertNotNull(f.c.active);assertEquals(ExecutionPhase.WAITING_USER,checkpoint(f,owner).phase)
                 assertFalse(row(f,id).interrupted);assertNull(row(f,id).answer)
-                main {assertNull(f.c.send(null,"must remain fenced"))}
+                assertNull(f.c.send(null,"must remain fenced"))
             } finally {store.writableDatabase.execSQL("DROP TRIGGER reject_question_stop")}
         }
         node("question-retry-cleanup").performClick()

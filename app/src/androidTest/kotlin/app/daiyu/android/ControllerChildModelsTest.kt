@@ -83,8 +83,8 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         val f = fresh()
         controlMain {
             assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
-            assertNotNull(f.controller.sendWithChildren(f.conversation, "parent task"))
         }
+        assertNotNull(f.controller.sendWithChildren(f.conversation, "parent task"))
         awaitControl("completed with child receipt") { f.controller.active == null }
         assertNull(f.controller.problem); assertEquals(1, f.parentOpened.get()); assertEquals(1, f.childOpened.get())
         val rows = f.database.messages(f.conversation.id).map { it.second }
@@ -107,18 +107,20 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
 
     fun testUnboundWrongScopeAndFailedRebindNeverOpenOrConsumeDraft() {
         val f = fresh()
+        assertNull(f.controller.sendWithChildren(f.conversation, "unbound"))
         controlMain {
-            assertNull(f.controller.sendWithChildren(f.conversation, "unbound"))
             assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
             val key = SubAgentConfigKey.Conversation(f.conversation.id.value)
             assertTrue(f.preferences.update(key) { it.copy(enabled = false) } is ConversationSubAgentPreferences.WriteResult.Saved)
             assertFalse(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
             assertTrue(f.preferences.update(key) { it.copy(enabled = true) } is ConversationSubAgentPreferences.WriteResult.Saved)
-            assertNull(f.controller.sendWithChildren(f.conversation, "failed precheck rebind"))
+        }
+        assertNull(f.controller.sendWithChildren(f.conversation, "failed precheck rebind"))
+        controlMain {
             assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
             assertFalse(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, "different-api", f.provider))
-            assertNull(f.controller.sendWithChildren(f.conversation, "failed rebind"))
         }
+        assertNull(f.controller.sendWithChildren(f.conversation, "failed rebind"))
         assertEquals(0, f.parentOpened.get()); assertEquals(0, f.childOpened.get())
         assertTrue(f.database.messages(f.conversation.id).isEmpty())
         assertEquals("preserve draft", f.database.conversations().single { it.id == f.conversation.id }.draft)
@@ -128,13 +130,14 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         val f = fresh(true)
         controlMain {
             assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
-            assertNotNull(f.controller.sendWithChildren(f.conversation, "held parent"))
         }
+        assertNotNull(f.controller.sendWithChildren(f.conversation, "held parent"))
         assertTrue(f.entered.await(5, TimeUnit.SECONDS))
         val owner = checkNotNull(f.controller.active)
         controlMain { assertTrue(f.controller.stop(owner)) }
         assertTrue(f.cancelled.await(5, TimeUnit.SECONDS))
-        controlMain { assertNotNull(f.controller.active); assertNull(f.controller.sendWithChildren(f.conversation, "blocked next")) }
+        controlMain { assertNotNull(f.controller.active) }
+        assertNull(f.controller.sendWithChildren(f.conversation, "blocked next"))
         f.release.countDown(); awaitControl("child drained and parent released") { f.controller.active == null }
         assertEquals(1, f.parentOpened.get()); assertEquals(1, f.childOpened.get())
         assertEquals(RunStatus.STOPPED, f.database.messages(f.conversation.id).single { it.second.id == owner.id }.second.status)
@@ -144,8 +147,8 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         val f = fresh(held = true, background = true)
         controlMain {
             assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
-            assertNotNull(f.controller.sendWithChildren(f.conversation, "background parent"))
         }
+        assertNotNull(f.controller.sendWithChildren(f.conversation, "background parent"))
         assertTrue(f.entered.await(5, TimeUnit.SECONDS))
         awaitControl("parent released while child is live") { f.controller.active == null }
         assertTrue(f.controller.hasLiveChildTasks(f.conversation.id))
@@ -170,8 +173,8 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         val f = fresh(held = true, background = true)
         controlMain {
             assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
-            assertNotNull(f.controller.sendWithChildren(f.conversation, "background stop"))
         }
+        assertNotNull(f.controller.sendWithChildren(f.conversation, "background stop"))
         assertTrue(f.entered.await(5, TimeUnit.SECONDS))
         awaitControl("parent released") { f.controller.active == null }
         val record = f.controller.childTasks(f.conversation.id).single()

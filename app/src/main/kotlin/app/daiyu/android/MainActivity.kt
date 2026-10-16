@@ -204,6 +204,10 @@ class MainActivity : ComponentActivity() {
             if (field != value) dictationHost.invalidate()
             field = value
         }
+    private data class PendingTextSend(val owner: ChatController.TextSendOwner, val text: String,
+        val ticket: ChatController.TextSendTicket = ChatController.TextSendTicket(),
+        val editorOwner: ChatController.TextSendOwner = owner)
+    private var pendingTextSend by mutableStateOf<PendingTextSend?>(null)
     private val supplementDraft = PausedSupplementDraft()
     private val selections get() = controller.selections
     private var shown = mutableListOf<Pair<Long, Message>>()
@@ -612,7 +616,7 @@ class MainActivity : ComponentActivity() {
         val renderedEditorGeneration = editorGeneration
         val renderedDraftRevision = draftRevision
         val renderedSpeechOwner = speechHost.owner
-        fun editorMatches() = activityUsable() && selectionReady &&
+        fun editorMatches() = activityUsable() && selectionReady && pendingTextSend == null && controller.textSendState() == null &&
             selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration
         fun gestureOwner() = currentControlOwner()?.takeIf {
             renderedOwner != null && it.id == renderedOwner.id && it.runId == renderedOwner.runId && it.conversationId == renderedOwner.conversationId
@@ -642,7 +646,7 @@ class MainActivity : ComponentActivity() {
         onSelectionChange = { start, end ->
             if (editorMatches()) { selectionStart = start; selectionEnd = end; publishChat() }
         },
-        onSend = { text -> if (editorMatches() && text == draft && !shizukuWritesBlocked) guard {
+        onSend = { text -> if (editorMatches() && text == draft && pendingTextSend == null && !shizukuWritesBlocked) guard {
             cancelShizukuEditor()
             if (imageHost.hasAttachments) sendImageDraft(text) else if (!imageHost.busy) sendDraft(text)
         } },
@@ -1017,6 +1021,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        pendingTextSend?.let { controller.cancelTextSend(it.ticket) }
         compressionSettingsPageOwner?.revoke()
         compressionSettingsPageOwner = null
         browserSettingsPageOwner?.revoke()
@@ -1197,7 +1202,7 @@ class MainActivity : ComponentActivity() {
         catch (_: Exception) { toast("操作或保存失败；原数据保留") }
     }
     private fun updateDraft(value: String) {
-        if (!activityUsable() || sidebarVisible || controller.dataBusy || !controller.ready || imageHost.sending || shizukuWritesBlocked) return
+        if (!activityUsable() || sidebarVisible || controller.dataBusy || !controller.ready || controller.textSendState() != null || pendingTextSend != null || imageHost.sending || shizukuWritesBlocked) return
         dictationHost.invalidate()
         cancelShizukuEditor()
         guard {
@@ -1209,6 +1214,7 @@ class MainActivity : ComponentActivity() {
     }
     internal fun select(conversation: Conversation?) {
         requireActivityUsable()
+        check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null)) { "请等待本次发送结果" }
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
         val shizukuOwned = shizukuEditor != null || shizukuWritesBlocked
         cancelShizukuEditor()
@@ -1244,14 +1250,60 @@ class MainActivity : ComponentActivity() {
         collaborationOwner = null; collaborationVisible = false; publishChat(); jumpToBottom(); refresh()
     }
     private fun sendDraft(text: String) {
-        val saved = controller.send(selected, text) ?: return
-        editorGeneration++
-        selected = saved; selectionReady = true
-        val savedSelection = controller.preferences.edit().putString("selected", saved.id.value).commit()
-        draft = ""; selectionStart = 0; selectionEnd = 0
-        shown = controller.database.messages(saved.id).toMutableList()
-        publishChat(); jumpToBottom(); refresh()
-        if (!savedSelection) toast("消息已保存；最后选中会话未保存")
+        if (pendingTextSend != null || text != draft || text.isBlank()) return
+        val owner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+        // Persist the exact source revision before the worker freezes history or calls a summary model.
+        if (owner.conversationId == null) controller.database.draft(text)
+        else controller.database.draft(owner.conversationId, text)
+        val pending = PendingTextSend(owner, text)
+        pendingTextSend = pending
+        val queued = try {
+            controller.sendText(selected, owner.editorGeneration, owner.draftRevision, text, pending.ticket) { result ->
+                completeTextSend(pending, result)
+            }
+        } catch (_: Exception) {
+            controller.cancelTextSend(pending.ticket)
+            false
+        }
+        if (!queued && pendingTextSend === pending) {
+            pendingTextSend = null
+            toast("本次发送未受理；草稿保留")
+        }
+        publishChat()
+    }
+    private fun completeTextSend(pending: PendingTextSend, result: ChatController.TextSendResult) {
+        if (pendingTextSend !== pending) return
+        if (!activityUsable()) return
+        pendingTextSend = null
+        controller.acknowledgeTextSend(pending.ticket)
+        val matches = result.owner == pending.owner && selected?.id == pending.editorOwner.conversationId &&
+            editorGeneration == pending.editorOwner.editorGeneration && draftRevision == pending.editorOwner.draftRevision &&
+            draft == pending.text
+        if (!matches) { refresh(); return }
+        when (result) {
+            is ChatController.TextSendResult.Accepted -> {
+                val saved = result.conversation
+                editorGeneration++; draftRevision++
+                if (selected?.id != saved.id) shown = mutableListOf()
+                selected = saved; selectionReady = true
+                controlOwner = controller.active?.takeIf { it.conversationId == saved.id && it.status == RunStatus.RUNNING }
+                draft = ""; selectionStart = 0; selectionEnd = 0
+                val savedSelection = runCatching {
+                    controller.preferences.edit().putString("selected", saved.id.value).commit()
+                }.getOrDefault(false)
+                publishChat()
+                loadAcceptedHistory(saved)
+                if (!savedSelection) toast("消息已保存；最后选中会话未保存")
+            }
+            is ChatController.TextSendResult.Rejected -> {
+                toast(controller.problem ?: "本次发送未受理；草稿保留")
+                publishChat()
+            }
+            is ChatController.TextSendResult.Unknown -> {
+                toast("发送保存结果未确认；草稿保留，不会自动重发")
+                publishChat()
+            }
+        }
     }
     private fun supplementEditor() = SupplementEditor(selected?.id?.value, editorGeneration, draftRevision, draft)
     private fun submitPausedText(owner: Message, text: String) {
@@ -1310,6 +1362,25 @@ class MainActivity : ComponentActivity() {
                 draft = latest?.draft ?: controller.database.draft()
                 selectionStart = selectionStart.coerceIn(0, draft.length); selectionEnd = selectionEnd.coerceIn(0, draft.length)
             }
+            // Capture the replacement editor only after its initial data revision has been restored.
+            val sending = controller.textSendState()
+            if (sending != null) {
+                if (sending.owner.conversationId == selected?.id) {
+                    var pending = pendingTextSend
+                    if (pending == null) {
+                        // Adopt the same application-owned submission after Activity recreation.
+                        // An accepted transaction has already cleared its DB draft; never write it back.
+                        if (sending.result is ChatController.TextSendResult.Accepted && draft.isEmpty()) draft = sending.text
+                        pending = PendingTextSend(sending.owner, sending.text, sending.ticket,
+                            ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision))
+                        pendingTextSend = pending
+                    }
+                    sending.result?.let { completeTextSend(pending, it); return@guard }
+                } else if (sending.result != null) {
+                    // Another editor may observe completion, but may not consume its text or selection.
+                    controller.acknowledgeTextSend(sending.ticket)
+                }
+            }
             controller.consumeDataNotice()?.let { toast(it) }
             selected?.let { conversation ->
                 if (shown.isEmpty()) shown = controller.database.messages(conversation.id).toMutableList()
@@ -1365,11 +1436,11 @@ class MainActivity : ComponentActivity() {
             contentRevision = chatState.contentRevision + 1,
             turns = ChatTurnMapper.map(shown.map { it.second }), canJumpToPreviousUser = shown.any { it.second.role == "user" },
             balanceText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中";
-                imageHost.sending -> "正在核实图片发送结果"; else -> null },
+                pendingTextSend != null -> "正在准备上下文并核实发送结果"; imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,
                 phase = phase, controlOwnerKey = controlOwner?.id?.value, modelLabel = if (controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
                 reasoningLabel = reasoningPreference.get(selected?.id?.value).displayName,
-                assistantLabel = if (controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && !imageHost.sending && !shizukuWritesBlocked,
+                assistantLabel = if (controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && !shizukuWritesBlocked,
                 supplementAvailable = state?.phase == ExecutionPhase.PAUSED && supplementDraft.pending == null,
                 supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&
                     supplementDraft.pending != null))

@@ -12,7 +12,7 @@ class ControllerRunControlTest:InstrumentationTestCase() {
         fixtures.add(it);awaitControl("recovery ready") {it.controller.ready}
     }
     private fun start(f:RunControlFixture):Message {
-        controlMain {assertNotNull(f.controller.send(null,"initial user"))}
+        assertNotNull(f.controller.send(null,"initial user"))
         return checkNotNull(f.controller.active)
     }
     override fun tearDown() {
@@ -72,7 +72,7 @@ class ControllerRunControlTest:InstrumentationTestCase() {
         val f=fresh();val first=f.session();val stale=start(f);first.release.countDown()
         awaitControl("first terminal") {f.controller.active==null}
         val next=f.session();val resumed=f.session();val conversation=f.database.conversations().single()
-        controlMain {assertNotNull(f.controller.send(conversation,"next user"))}
+        assertNotNull(f.controller.send(conversation,"next user"))
         val owner=checkNotNull(f.controller.active);assertTrue(next.entered.await(5,TimeUnit.SECONDS))
         controlMain {
             assertNull(f.controller.runState(stale));assertFalse(f.controller.pause(stale));assertFalse(f.controller.resume(stale));assertFalse(f.controller.stop(stale))

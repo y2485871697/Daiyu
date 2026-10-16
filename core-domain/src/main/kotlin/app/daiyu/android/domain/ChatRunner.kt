@@ -517,6 +517,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 if (stopped.get() || terminalReserved || breakStream) throw InterruptedException()
                                 setPhase(ExecutionPhase.STREAMING, attempt)
                             }
+                            // Persist the resumed request boundary before invoking transport again.
+                            checkpoint()
                         }
                     }
                 } catch (failure: Exception) { transportFailure = failure }

@@ -206,7 +206,7 @@ private class PetSettingsView(context: Context, private val host: PetHost) : Obs
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         hostObservation = host.observe { next ->
-            permission.text = "系统悬浮权限：${if (next.canDrawOverlays) "已授权" else "未授权"} · ${next.overlayState}\n" +
+            permission.text = "悬浮窗口当前许可：${if (next.canDrawOverlays) "已授权" else "未授权"} · ${next.overlayState}\n" +
                 (next.overlayError ?: "全局悬浮随宿主关闭移除，不会自动授权或跳转设置")
         }
     }

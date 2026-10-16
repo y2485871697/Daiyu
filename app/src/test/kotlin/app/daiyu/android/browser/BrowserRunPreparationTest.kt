@@ -151,6 +151,32 @@ class BrowserRunPreparationTest {
         }
     }
 
+    @Test fun readOnlyFirstBindingPinsActualOwnerAndSessionAndRevocationIsTerminal() {
+        val grant = BrowserGrant(BrowserOwner("run", BrowserOwnerKind.MAIN), BrowserAccess.READ_ONLY)
+        val preparation = BrowserRunPreparation.prepare(identity, BrowserSettings(BrowserAccess.READ_ONLY),
+            grant, setOf("list_tabs"))
+        val confirmed = preparation.confirm(preparation.preview)
+        Fixture(BrowserAccess.READ_ONLY).use { first ->
+            Fixture(BrowserAccess.READ_ONLY).use { replacement ->
+                val owner = owner()
+                confirmed.taskAuthorization(owner, identity.assistantId, first.session)
+                rejected { confirmed.taskAuthorization(owner, identity.assistantId, replacement.session) }
+                rejected { confirmed.taskAuthorization(owner(), identity.assistantId, first.session) }
+                confirmed.checkInvocation(owner, identity.assistantId, first.session,
+                    RunBrowserTools.READ_TOOL_NAME, """{"action":"list_tabs"}""")
+                confirmed.revoke()
+                confirmed.revoke()
+                rejected { confirmed.taskAuthorization(owner, identity.assistantId, first.session) }
+                rejected { confirmed.checkInvocation(owner, identity.assistantId, first.session,
+                    RunBrowserTools.READ_TOOL_NAME, """{"action":"list_tabs"}""") }
+                assertEquals(0, first.lifecycleCalls)
+                assertEquals(0, first.portCalls)
+                assertEquals(0, replacement.lifecycleCalls)
+                assertEquals(0, replacement.portCalls)
+            }
+        }
+    }
+
     @Test fun cancelConsumesUnconfirmedPreparation() {
         Fixture().use { f ->
             val preparation = prepare(f)

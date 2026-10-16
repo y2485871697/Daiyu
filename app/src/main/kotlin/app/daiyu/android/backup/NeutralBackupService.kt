@@ -176,6 +176,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         return transactions.run { db ->
             val duplicate = db.rawQuery("SELECT id FROM neutral_imports WHERE id=?", arrayOf(parsed.id)).use { it.moveToFirst() }
             if (duplicate) {
+                store.verifyImportedVideoWitnesses(db, parsed.payload.getString("text_backup"))
                 // A marker alone is not evidence that the original assets still exist.
                 parsed.images.forEach { reference ->
                     val asset = MessageImageReferenceCodec.toAsset(reference)

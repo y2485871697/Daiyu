@@ -3,13 +3,11 @@ package app.daiyu.android.backup
 import android.content.Context
 import android.content.ContextWrapper
 import android.test.InstrumentationTestCase
-import app.daiyu.android.context.DatabaseTransactions
 import app.daiyu.android.domain.*
 import app.daiyu.android.media.video.MessageVideoOwner
 import app.daiyu.android.media.video.MessageVideoReference
 import app.daiyu.android.model.videos.MessageVideoInput
 import app.daiyu.android.storage.ConversationDatabase
-import app.daiyu.android.storage.MessageVideoInputCodec
 import app.daiyu.android.storage.SQLiteMessageVideoStore
 import app.daiyu.android.testContext
 import app.daiyu.android.context.PrivateBlobs
@@ -48,37 +46,23 @@ class NeutralVideoBackupTest : InstrumentationTestCase() {
         super.tearDown()
     }
     private val bytes = byteArrayOf(8, 7, 6, 5)
-    private fun service(context: Context, db: ConversationDatabase, assets: Assets, snapshot: String? = null) =
+    private fun service(context: Context, db: ConversationDatabase, assets: Assets) =
         NeutralBackupService(context, db, null, BackupVideoIntegration(assets,
-            exportText = { sql, scope ->
-                check(sql.inTransaction())
-                // Snapshot made by the existing exporter before adding the sidecar. Production
-                // host uses the documented asset-only exporter; this is not a guard bypass API.
-                snapshot ?: if (scope == null) db.exportBackup() else db.exportConversationBackup(scope)
-            }, restoreSidecars = { sql, sidecars ->
-                check(sql.inTransaction())
-                sidecars.forEach { sidecar ->
-                    val owner = JSONObject(sidecar.payload).getJSONObject("owner").getString("conversation")
-                    val physical = db.messages(ConversationId(owner)).single { it.second.id.value == sidecar.messageId }.second
-                    SQLiteMessageVideoStore.insert(sql, physical, MessageVideoInputCodec.decode(physical, sidecar.payload))
-                }
-            }))
+            exportText = { sql, scope -> db.exportBackupForVideoAssets(sql, scope, assets) },
+            restoreSidecars = { sql, sidecars -> db.restoreVideoBackupSidecars(sql, sidecars) }))
     private fun source(): Pair<String, MessageVideoReference> {
         val (context, db) = fresh()
         val owner = db.create("default").id
         val user = Message(MessageId("u"), owner, RunId("run"), "user", listOf(MessageBlock.Text("t", "original")), RunStatus.COMPLETED)
         val assistant = Message(MessageId("a"), owner, user.runId, "assistant", emptyList(), RunStatus.RUNNING)
-        db.send(user, assistant); db.save(assistant.copy(status = RunStatus.COMPLETED))
-        val text = db.exportBackup()
         val ref = MessageVideoReference(MessageVideoOwner(owner.value, user.id.value),
             "11111111-1111-1111-1111-111111111111", "video/mp4", bytes.size.toLong(), PrivateBlobs.digest(bytes), 1000, 32, 24)
-        DatabaseTransactions { db.writableDatabase }.run { sql ->
-            SQLiteMessageVideoStore.insert(sql, user, listOf(MessageVideoInput(ref.owner, listOf(ref))))
-        }
+        db.send(user, assistant, videoInputs = listOf(MessageVideoInput(ref.owner, listOf(ref))))
+        db.save(assistant.copy(status = RunStatus.COMPLETED))
         reject { db.exportBackup() }
         reject { NeutralBackupService(context, db).exportPackage() }
         val assets = Assets().apply { restore(ref.owner, listOf(ref), listOf(bytes)) }
-        return service(context, db, assets, text).exportPackage() to ref
+        return service(context, db, assets).exportPackage() to ref
     }
     private fun reject(action: () -> Unit) {
         try { action(); fail("must reject") } catch (_: Exception) { }
@@ -137,4 +121,34 @@ class NeutralVideoBackupTest : InstrumentationTestCase() {
         assertEquals(0, db.readableDatabase.rawQuery("SELECT count(*) FROM neutral_imports", null).use { it.moveToFirst(); it.getInt(0) })
         assertTrue(bytes.contentEquals(assets.read(ref.owner, ref)))
     }
+    fun testDuplicateImportRejectsMissingPlainMessageWitnessWithoutRepair() {
+        val (source, _) = source()
+        val (context, db) = fresh()
+        val backup = service(context, db, Assets())
+        assertFalse(backup.importPackage(source).alreadyImported)
+        db.writableDatabase.execSQL("DELETE FROM message_video_witnesses WHERE message_id='a'")
+        reject { backup.importPackage(source) }
+        assertEquals(0, db.readableDatabase.rawQuery(
+            "SELECT count(*) FROM message_video_witnesses WHERE message_id='a'", null).use {
+            it.moveToFirst(); it.getInt(0)
+        })
+    }
+
+    fun testIgnoredZeroWitnessAndLateWitnessDeletionRollBackImport() {
+        val (source, _) = source()
+        for (trigger in listOf(
+            "BEFORE INSERT ON message_video_witnesses WHEN NEW.message_id='a' BEGIN SELECT RAISE(IGNORE); END",
+            "AFTER INSERT ON neutral_imports BEGIN DELETE FROM message_video_witnesses WHERE message_id='a'; END"
+        )) {
+            val (context, db) = fresh()
+            db.writableDatabase.execSQL("CREATE TRIGGER witness_fault $trigger")
+            reject { service(context, db, Assets()).importPackage(source) }
+            for (table in listOf("messages", "message_video_inputs", "message_video_witnesses", "neutral_imports")) {
+                assertEquals(table, 0, db.readableDatabase.rawQuery("SELECT count(*) FROM $table", null).use {
+                    it.moveToFirst(); it.getInt(0)
+                })
+            }
+        }
+    }
+
 }

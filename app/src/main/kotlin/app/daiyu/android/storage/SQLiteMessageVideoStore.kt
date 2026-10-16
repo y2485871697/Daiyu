@@ -59,9 +59,19 @@ internal object SQLiteMessageVideoStore {
         }
     }
 
-    fun hasVideos(db: SQLiteDatabase, conversationId: String?): Boolean =
-        db.rawQuery("SELECT 1 FROM messages m LEFT JOIN message_video_witnesses w ON w.message_id=m.id " +
+    fun assertNoOrphans(db: SQLiteDatabase) {
+        check(db.inTransaction())
+        check(!db.rawQuery("SELECT 1 FROM message_video_inputs v LEFT JOIN messages m " +
+            "ON m.id=v.message_id WHERE m.id IS NULL LIMIT 1", null).use { it.moveToFirst() }) {
+            "video_orphan_sidecar"
+        }
+    }
+
+    fun hasVideos(db: SQLiteDatabase, conversationId: String?): Boolean {
+        assertNoOrphans(db)
+        return db.rawQuery("SELECT 1 FROM messages m LEFT JOIN message_video_witnesses w ON w.message_id=m.id " +
             "WHERE (w.message_id IS NULL OR w.reference_count<>0 OR EXISTS(SELECT 1 FROM message_video_inputs v WHERE v.message_id=m.id))" +
             (if (conversationId == null) "" else " AND m.conversation_id=?") + " LIMIT 1",
             conversationId?.let { arrayOf(it) }).use { it.moveToFirst() }
+    }
 }

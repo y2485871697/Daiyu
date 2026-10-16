@@ -83,7 +83,7 @@ class MessageVideoDatabaseTest : InstrumentationTestCase() {
         }
 
     private fun snapshot() = listOf("conversations", "composer", "messages", "message_video_inputs",
-        "runtime_checkpoints", "generation_attempts", "generation_outputs").associateWith(::table)
+        "message_video_witnesses", "runtime_checkpoints", "generation_attempts", "generation_outputs").associateWith(::table)
 
     private fun assertUnchanged(before: Map<String, List<List<String?>>>) {
         assertEquals(before, snapshot())
@@ -270,10 +270,11 @@ class MessageVideoDatabaseTest : InstrumentationTestCase() {
         database.send(user, assistant, videoInputs = listOf(userVideo))
         // send attaches only to its physical user. Seed an expanded-user sidecar explicitly to
         // exercise the existing save/runtime compatibility guard on a physical assistant owner.
-        database.writableDatabase.insertOrThrow("message_video_inputs", null, ContentValues().apply {
-            put("message_id", assistant.id.value)
-            put("payload", MessageVideoInputCodec.encode(assistant, listOf(segmentVideo)))
-        })
+        // Construct a pre-v13 expanded-user fixture; runtime paths never replace witnesses.
+        app.daiyu.android.context.DatabaseTransactions { database.writableDatabase }.run { sql ->
+            sql.execSQL("DELETE FROM message_video_witnesses WHERE message_id=?", arrayOf(assistant.id.value))
+            SQLiteMessageVideoStore.insert(sql, assistant, listOf(segmentVideo))
+        }
         return SegmentFixture(user, assistant, userVideo, segmentVideo)
     }
 

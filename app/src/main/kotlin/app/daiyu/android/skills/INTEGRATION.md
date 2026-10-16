@@ -89,8 +89,10 @@ pin the displayed content revision (not a concurrent toggle version).
    A new inspection invalidates the previous inspection and pending confirmation.
 2. The user selects directories (including the empty-string repository root). `preview` accepts
    only candidates belonging to that exact inspection, downloads at its commit and reuses
-   `SkillStore.preview` for file/tree/metadata limits and content revisions. Duplicate names,
-   builtin names and unavailable local metadata reject before issuing a confirmation.
+   `SkillStore.previewForManagement` for file/tree/metadata limits, content revisions and real
+   compatibility results. Duplicate names, builtin names and unavailable local metadata reject
+   before issuing a confirmation. Incompatible selections remain visible with their reason,
+   but cannot be confirmed or installed.
 3. The opaque `Preview` freezes the selected directories, incoming revisions and currently
    installed user revisions. The UI displays all of these, including full old/new revisions,
    and requires a separate checkbox for **each** replacement. No old revision means create-only.
@@ -126,14 +128,23 @@ non-body resources retain the existing current-revision/enabled/hash rejection p
 settings module does not close active runs, freeze additional resource bytes, broaden grants,
 or register inspect/install/WRITE with `RunCatalogTools` or the model dispatcher.
 
-### Explicit remaining checker/source limitation
+### Retained static compatibility checker
 
-No `SkillCompatibilityChecker` implementation/interface exists in this assigned tree; only
-`THIRD_PARTY/task19/openminis.md` records its missing exact source mapping. This increment uses
-existing `SkillStore.preview` structural validation and labels that narrowly in the UI. It
-**does not** claim to restore the OpenMinis Apple/MiniS/iOS static compatibility warning checker,
-its provenance, or full R10/P33/T02 acceptance. Parent integration must provide/review that
-retained implementation separately; no replacement scanner or expanded source audit was added.
+The supplied saved checker is now reused by a thin `SkillCompatibilityPolicy` adapter.
+Settings preview returns each real compatibility result alongside the exact checked revision;
+the UI displays passed/denied text and disables incompatible confirmation. Management also
+rejects that preview, and re-downloads/rechecks the same commit/directories/revisions at install.
+`SkillStore.install` independently checks detached bytes before staging or journaling.
+`captureForRun`, legacy `snapshot` and direct resource reads reparse installed SKILL.md after
+hash verification, including skills installed before this policy existed. Selected/enabled
+filtering still precedes body checks. Metadata values, compatibility and actual body are all
+inputs; ordinary tool names are not a new blacklist and no executor is added. A passed result
+is only absence of known static rejection markers, not a promise of runtime success.
+
+See `docs/skills-compatibility-source.md` for exact inspected copy paths, retained/adapted code,
+production call sites and dedicated test sources. Upstream path/SHA and file-level license
+closure remain unverified; functional wiring does not establish provenance or full audit
+acceptance. No overall inventory or third-party manifest was changed.
 
 ### Verification handoff (not executed by this implementation agent)
 

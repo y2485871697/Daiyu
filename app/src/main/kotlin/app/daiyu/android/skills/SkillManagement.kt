@@ -40,8 +40,9 @@ class SkillManagement private constructor(private val registry: SkillToolRegistr
     class Inspection internal constructor(
         val owner: String, val repo: String, val commit: String, val candidates: List<Candidate>,
     )
-    data class Change(val candidate: Candidate, val previousRevision: String?)
+    data class Change(val candidate: Candidate, val previousRevision: String?, val compatibility: SkillCompatibilityResult)
     class Preview internal constructor(val inspection: Inspection, val changes: List<Change>) {
+        val compatible: Boolean get() = changes.all { it.compatibility.available }
         val replacements: Map<String, String> = java.util.Collections.unmodifiableMap(changes
             .filter { it.previousRevision != null }.associate { "user:${it.candidate.name}" to it.previousRevision!! })
     }
@@ -81,15 +82,17 @@ class SkillManagement private constructor(private val registry: SkillToolRegistr
             require(selected.map { it.name }.distinct().size == selected.size) { "duplicate_skill" }
             val bundles = registry.downloadForManagement(GitHubSkills.Selection(inspection.owner, inspection.repo, inspection.commit, selected.map { it.directory }))
             require(bundles.size == selected.size) { "incoming_revision_conflict" }
-            selected.zip(bundles).forEach { (candidate, bundle) ->
-                val (header, revision) = registry.previewForManagement(bundle)
-                require(header.name == candidate.name && header.description == candidate.description && revision == candidate.incomingRevision) { "incoming_revision_conflict" }
+            val checked = selected.zip(bundles).map { (candidate, bundle) ->
+                val result = registry.previewForManagement(bundle)
+                require(result.header.name == candidate.name && result.header.description == candidate.description && result.revision == candidate.incomingRevision) { "incoming_revision_conflict" }
+                result
             }
             val state = registry.managementState()
             check(!state.entriesUnavailable) { "skills_unavailable" }
             require(selected.none { candidate -> state.entries.any { it.builtin && it.skill.name == candidate.name } }) { "builtin_conflict" }
-            Preview(inspection, frozen(selected.map { candidate ->
-                Change(candidate, state.entries.singleOrNull { it.id == "user:${candidate.name}" }?.skill?.revision)
+            Preview(inspection, frozen(selected.zip(checked).map { (candidate, result) ->
+                Change(candidate, state.entries.singleOrNull { it.id == "user:${candidate.name}" }?.skill?.revision,
+                    result.compatibility)
             })).also { pending = it }
         }
     }
@@ -101,6 +104,7 @@ class SkillManagement private constructor(private val registry: SkillToolRegistr
             if (pending !== preview) return@synchronized InstallResult.Rejected("stale_preview")
             pending = null
             inspected = null
+            if (!preview.compatible) return@synchronized InstallResult.Rejected("skill_incompatible")
             if (approvedReplacements != preview.replacements) return@synchronized InstallResult.Rejected("replacement_approval_required")
             val selection = GitHubSkills.Selection(preview.inspection.owner, preview.inspection.repo,
                 preview.inspection.commit, preview.changes.map { it.candidate.directory })
@@ -110,8 +114,9 @@ class SkillManagement private constructor(private val registry: SkillToolRegistr
                 registry.downloadForManagement(selection).also { downloaded ->
                     require(downloaded.size == preview.changes.size) { "incoming_revision_conflict" }
                     downloaded.zip(preview.changes).forEach { (bundle, change) ->
-                        val (header, revision) = registry.previewForManagement(bundle)
-                        require(header.name == change.candidate.name && revision == incoming[header.name]) { "incoming_revision_conflict" }
+                        val checked = registry.previewForManagement(bundle)
+                        require(checked.header.name == change.candidate.name && checked.revision == incoming[checked.header.name]) { "incoming_revision_conflict" }
+                        SkillCompatibilityPolicy.requireAvailable(checked.compatibility)
                     }
                 }
             } catch (failure: Exception) {
@@ -121,6 +126,8 @@ class SkillManagement private constructor(private val registry: SkillToolRegistr
                 InstallResult.Installed(frozen(registry.installForManagement(bundles, replacements, incoming)))
             } catch (committed: SkillCleanupPending) {
                 InstallResult.Installed(frozen(committed.installedSkills), cleanupPending = true)
+            } catch (_: SkillIncompatible) {
+                InstallResult.Rejected("skill_incompatible")
             } catch (_: SkillConflict) {
                 InstallResult.Rejected("skill_conflict")
             } catch (_: SkillToolRegistry.ManagementBuiltinConflict) {

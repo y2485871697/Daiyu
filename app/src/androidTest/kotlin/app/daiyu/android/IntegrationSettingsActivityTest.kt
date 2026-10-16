@@ -76,6 +76,68 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     private fun finished(connection: AtomicReference<CatalogConnection>) {
         awaitControl("catalog finished") { connection.get()?.disconnected == true }; ui.waitForIdle()
     }
+    fun testChatModelButtonOpensPickerAndSelectionPreservesConfigurationAndDraft() {
+        val (_, _, connection) = catalogue()
+        val before = fixture.settings.load()
+        val database = fixture.database.exportBackup()
+        setDraft("切换模型时保留草稿")
+        node("chat-model").performClick()
+        node("chat-model-picker").assertExists()
+        node("page:模型设置").assertDoesNotExist()
+        finished(connection)
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-option:second").fetchSemanticsNodes().isNotEmpty() }
+        node("chat-model-search").performTextReplacement("second")
+        node("chat-model-option:first").assertDoesNotExist()
+        node("chat-model-option:second").performClick()
+        node("chat-model-picker").assertDoesNotExist()
+        assertEquals(before.copy(model = "second"), fixture.settings.load())
+        assertEquals(database, fixture.database.exportBackup())
+        assertDraft("切换模型时保留草稿")
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testDismissedChatModelPickerCannotReviveFromPendingCatalog() {
+        val (entered, release, connection) = catalogue(held = true)
+        val before = fixture.settings.load()
+        node("chat-model").performClick()
+        assertTrue(entered.await(5, TimeUnit.SECONDS))
+        try { ui.onNodeWithText("取消").performClick() } finally { release.countDown() }
+        finished(connection)
+        node("chat-model-picker").assertDoesNotExist()
+        assertEquals(before, fixture.settings.load())
+        val (retryEntered, _, retryConnection) = catalogue()
+        node("chat-model").performClick()
+        assertTrue(retryEntered.await(5, TimeUnit.SECONDS))
+        finished(retryConnection)
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-option:second").fetchSemanticsNodes().isNotEmpty() }
+        node("chat-model-option:second").assertExists()
+        ui.onNodeWithText("取消").performClick()
+        assertEquals(before, fixture.settings.load())
+    }
+    fun testChatModelPickerRejectsChangedSettingsAndRunningTask() {
+        val (_, _, connection) = catalogue()
+        val before = fixture.settings.load()
+        node("chat-model").performClick(); finished(connection)
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-option:second").fetchSemanticsNodes().isNotEmpty() }
+        val changed = before.copy(model = "external-change")
+        fixture.settings.save(changed)
+        node("chat-model-option:second").performClick()
+        assertEquals(changed, fixture.settings.load())
+        ui.onNodeWithText("切换未保存，请关闭后重新选择").assertExists()
+        ui.onNodeWithText("取消").performClick()
+        val session = fixture.session(holdSeconds = 120)
+        setDraft("运行时不切模型"); node("chat-send").performClick()
+        assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+        val owner = checkNotNull(fixture.controller.active)
+        try {
+            node("chat-model").performClick()
+            node("chat-model-picker").assertExists()
+            node("chat-model-option:external-change").assertIsNotEnabled()
+            node("chat-model-refresh").assertIsNotEnabled()
+            assertEquals(changed, fixture.settings.load())
+            assertEquals(owner, fixture.controller.active)
+            ui.onNodeWithText("取消").performClick()
+        } finally { fixture.controller.stop(owner) }
+    }
     fun testCatalogUsesCurrentEmptyKeyDraftAndOnlyExplicitSavePersistsSelection() {
         val (_, _, connection) = catalogue(); val before = fixture.settings.load()
         openModels(); editModel("Base URL", "https://catalog.invalid/v1/responses")

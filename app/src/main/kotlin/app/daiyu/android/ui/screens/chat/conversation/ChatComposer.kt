@@ -115,7 +115,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             }
                             ChatIconButton(primaryIcon, primaryLabel, {
                                 if (hasText) actions.onSend(state.text) else actions.onPrimaryTap()
-                            }, Modifier.size(40.dp).testTag(if (hasText || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
+                            }, Modifier.size(48.dp).testTag(if (hasText || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
                                 .controlGesture(actions, primaryEnabled).background(
                                 if (!primaryEnabled) colors.disabledPrimaryButton
                                 else if (state.phase == ComposerPhase.PAUSED || (!hasText && state.phase == ComposerPhase.RUNNING)) colors.onSurface else colors.primary,
@@ -141,14 +141,14 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp),
-            horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             ComposerChip(DaiyuIcons.Model, state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
                 Modifier.weight(1f).testTag("chat-model"),
                 onLongClick = { actions.onMenuAction(ChatMenuAction.SUB_AGENT) })
-            Row(Modifier.widthIn(max = 140.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
+            Row(Modifier.widthIn(min = 112.dp, max = 144.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
                 .combinedClickable(enabled = state.enabled, role = Role.Button, onClickLabel = "上下文统计", onClick = actions.onContextClick,
                     onLongClick = { actions.onMenuAction(ChatMenuAction.CONTEXT_SCOPE) })
-                .padding(horizontal = 10.dp, vertical = 10.dp),
+                .padding(start = 8.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 val fraction = state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
                 Canvas(Modifier.size(14.dp)) {

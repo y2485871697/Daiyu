@@ -8,11 +8,15 @@ import org.junit.Test
 
 class SettingsPresentationTest {
     @Test
-    fun originalSettingsHaveUniqueIdsAndThirteenGroups() {
+    fun retainedSettingsHaveUniqueIdsAndNineGroups() {
         val entries = SettingsCatalog.entries
-        assertEquals(52, entries.size)
+        assertEquals(41, entries.size)
         assertEquals(entries.size, entries.map { it.id }.toSet().size)
-        assertEquals(13, SettingsCatalog.groups.size)
+        assertEquals(9, SettingsCatalog.groups.size)
+        assertTrue(SettingsCatalog.groups.none { it.id in setOf("system", "vendor", "gemini", "circle") })
+        for (removed in listOf("系统助手", "小布", "Gemini", "一圈即搜", "Hey Google")) {
+            assertTrue(filterSettingsGroups(removed).isEmpty())
+        }
         assertTrue(entries.all { it.title.isNotBlank() && it.icon.name.isNotBlank() })
         assertEquals(SettingsCatalog.groups, filterSettingsGroups("  "))
     }

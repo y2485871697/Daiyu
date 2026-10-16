@@ -28,10 +28,12 @@ class ControllerGenerationSessionTest {
         listOf(GenerationBatchSelection("batch", "image", listOf(GenerationRunConfig.Item("item", "draw")))),
         0, GenerationDownloadHosts(setOf("cdn.example")))
 
-    private fun session(drain: (Long) -> GenerationToolsCloseResult = { GenerationToolsCloseResult.Drained }):
-        ControllerGenerationSession {
+    private fun session(
+        stop: () -> Unit = {},
+        drain: (Long) -> GenerationToolsCloseResult = { GenerationToolsCloseResult.Drained },
+    ): ControllerGenerationSession {
         val p = preparation()
-        return ControllerGenerationSession(p.confirm(p.preview, editor, identity), drain)
+        return ControllerGenerationSession(p.confirm(p.preview, editor, identity), stop, drain)
     }
 
     private fun owner(id: GenerationPreparationIdentity = identity): RunExecutionOwner {
@@ -169,6 +171,197 @@ class ControllerGenerationSessionTest {
         assertFalse(lane.offer(rejected)) // shutdown never falls back to inline execution
         assertEquals(0, rejectedCalls.get())
         rejected.cleanupOnWorker(0)
+    }
+
+    @Test fun existingPositionalAndTrailingDrainConstructorsRemainCompatible() {
+        val calls = AtomicInteger()
+        val drain: (Long) -> GenerationToolsCloseResult = {
+            calls.incrementAndGet(); GenerationToolsCloseResult.Drained
+        }
+        val first = preparation()
+        val positional = ControllerGenerationSession(first.confirm(first.preview, editor, identity), drain)
+        val second = preparation()
+        val trailing = ControllerGenerationSession(second.confirm(second.preview, editor, identity)) {
+            drain(it)
+        }
+        positional.cleanupOnWorker(0); trailing.cleanupOnWorker(0)
+        assertEquals(2, calls.get())
+        assertEquals(GenerationToolsCloseResult.Drained, positional.closeResult)
+        assertEquals(GenerationToolsCloseResult.Drained, trailing.closeResult)
+    }
+
+    @Test fun parentStopAndFinishedStayOnWorkerAndRetirementWaitsForDrain() {
+        val caller = Thread.currentThread()
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val finished = CountDownLatch(1)
+        val events = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val failure = AtomicReference<Throwable?>()
+        lateinit var s: ControllerGenerationSession
+        s = session(stop = {
+            assertNotSame(caller, Thread.currentThread())
+            assertFalse(Thread.holdsLock(s))
+            events.add("stop"); entered.countDown()
+            check(release.await(5, TimeUnit.SECONDS))
+        }, drain = {
+            assertFalse(Thread.holdsLock(s))
+            assertEquals(GenerationToolsCloseResult.Drained, s.token.awaitClose(0))
+            events.add("drain"); GenerationToolsCloseResult.Drained
+        })
+        s.recordPersistence(identity, GenerationPersistenceReceipt.Rejected)
+        s.revokeAdmission()
+        assertTrue(events.isEmpty()) // UI revocation cannot invoke even the parent's stop request.
+        val lane = ControllerGenerationCleanupQueue(timeoutMillis = 0)
+        try {
+            assertTrue(lane.offer(s) {
+                try {
+                    assertNotSame(caller, Thread.currentThread())
+                    assertFalse(Thread.holdsLock(s))
+                    assertTrue(s.canRetire)
+                    events.add("finished")
+                } catch (t: Throwable) { failure.set(t) }
+                finally { finished.countDown() }
+            })
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertEquals(listOf("stop"), events.toList())
+            assertTrue(s.cleanupRequested)
+            assertNull(s.closeResult)
+            assertFalse(s.canRetire)
+            release.countDown()
+            assertTrue(finished.await(5, TimeUnit.SECONDS))
+            assertNull(failure.get())
+            assertEquals(listOf("stop", "drain", "finished"), events.toList())
+        } finally { release.countDown(); lane.close() }
+    }
+
+    @Test fun stopFailureStillClosesTokenButNeverReportsDrainedOrRetriesStop() {
+        val stops = AtomicInteger(); val drains = AtomicInteger()
+        val finished = CountDownLatch(1)
+        val s = session(stop = {
+            stops.incrementAndGet(); throw IllegalStateException("private parent failure")
+        }, drain = { drains.incrementAndGet(); GenerationToolsCloseResult.Drained })
+        s.recordPersistence(identity, GenerationPersistenceReceipt.Rejected)
+        val token = s.token
+        val lane = ControllerGenerationCleanupQueue(timeoutMillis = 0)
+        try {
+            assertTrue(lane.offer(s) { finished.countDown() })
+            assertTrue(finished.await(5, TimeUnit.SECONDS))
+            assertEquals(GenerationToolsCloseResult.Unknown("generation_cleanup_failed"), s.closeResult)
+            assertEquals(GenerationToolsCloseResult.Drained, token.awaitClose(0))
+            assertSame(token, s.token)
+            assertTrue(s.cleanupRequested)
+            assertFalse(s.canRetire)
+            s.cleanupOnWorker(0)
+            assertEquals(1, stops.get())
+            assertEquals(0, drains.get())
+        } finally { lane.close() }
+    }
+
+    @Test fun defaultLaneBoundsTwoWorkersAndEightSlotsWithoutDuplicateOrRejectedNotifications() {
+        val entered = CountDownLatch(2); val release = CountDownLatch(1)
+        val finished = CountDownLatch(10)
+        val stops = AtomicInteger(); val duplicateNotifications = AtomicInteger()
+        val rejectedStops = AtomicInteger(); val rejectedNotifications = AtomicInteger()
+        val active = List(2) { session(stop = {
+            stops.incrementAndGet(); entered.countDown()
+            check(release.await(5, TimeUnit.SECONDS))
+        }) }
+        val waiting = List(8) { session(stop = { stops.incrementAndGet() }) }
+        val rejected = session(stop = { rejectedStops.incrementAndGet() })
+        val lane = ControllerGenerationCleanupQueue(timeoutMillis = 0)
+        try {
+            active.forEach { assertTrue(lane.offer(it) { finished.countDown() }) }
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            waiting.forEach { assertTrue(lane.offer(it) { finished.countDown() }) }
+            // Both an active duplicate and a queued duplicate need no extra worker or slot.
+            assertTrue(lane.offer(active.first()) { duplicateNotifications.incrementAndGet() })
+            assertTrue(lane.offer(waiting.first()) { duplicateNotifications.incrementAndGet() })
+            assertFalse(lane.offer(rejected) { rejectedNotifications.incrementAndGet() })
+            assertEquals(2, stops.get())
+            assertEquals(0, rejectedStops.get())
+            assertTrue(rejected.cleanupRequested)
+            assertNull(rejected.closeResult)
+            assertFalse(rejected.canRetire)
+            release.countDown()
+            assertTrue(finished.await(5, TimeUnit.SECONDS))
+            assertEquals(10, stops.get())
+            assertEquals(0, duplicateNotifications.get())
+            assertEquals(0, rejectedNotifications.get())
+            assertTrue(lane.offer(active.first()) { duplicateNotifications.incrementAndGet() })
+            assertEquals(0, duplicateNotifications.get()) // already terminal: no inline callback
+        } finally { release.countDown(); lane.close() }
+        assertFalse(lane.offer(rejected) { rejectedNotifications.incrementAndGet() })
+        assertEquals(0, rejectedStops.get())
+        assertEquals(0, rejectedNotifications.get())
+    }
+
+    @Test fun notificationFollowsRemovalOutsideLocksAndObserverFailureDoesNotKillWorker() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val firstFinished = CountDownLatch(1); val secondFinished = CountDownLatch(1)
+        val firstThread = AtomicReference<Thread?>(); val secondThread = AtomicReference<Thread?>()
+        val failure = AtomicReference<Throwable?>()
+        val caller = Thread.currentThread()
+        val first = session { entered.countDown(); check(release.await(5, TimeUnit.SECONDS))
+            GenerationToolsCloseResult.Drained }
+        val second = session()
+        val lane = ControllerGenerationCleanupQueue(workers = 1, capacity = 1, timeoutMillis = 0)
+        // Observe the private marker only to distinguish removal-before-notify from notify-before-removal.
+        val field = ControllerGenerationCleanupQueue::class.java.getDeclaredField("queued")
+        field.isAccessible = true
+        val queued = field.get(lane) as Set<*>
+        try {
+            assertTrue(lane.offer(first) {
+                firstThread.set(Thread.currentThread())
+                try {
+                    assertNotSame(caller, Thread.currentThread())
+                    assertFalse(Thread.holdsLock(queued))
+                    assertFalse(Thread.holdsLock(first))
+                    synchronized(queued) { assertFalse(queued.contains(first)) }
+                    assertEquals(GenerationToolsCloseResult.Drained, first.closeResult)
+                } catch (t: Throwable) { failure.set(t) }
+                finally { firstFinished.countDown() }
+                throw AssertionError("observer failure must be isolated")
+            })
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertTrue(lane.offer(second) {
+                secondThread.set(Thread.currentThread()); secondFinished.countDown()
+            })
+            release.countDown()
+            assertTrue(firstFinished.await(5, TimeUnit.SECONDS))
+            assertTrue(secondFinished.await(5, TimeUnit.SECONDS))
+            assertNull(failure.get())
+            assertSame(firstThread.get(), secondThread.get())
+        } finally { release.countDown(); lane.close() }
+    }
+
+    @Test fun finishedNotificationDoesNotRetirePendingOrUnconsumedPersistence() {
+        val missing = session()
+        val unknown = session().also { it.recordPersistence(identity, GenerationPersistenceReceipt.Unknown) }
+        val accepted = session().also {
+            it.bindOwner(owner(), editor, identity, "session")
+            it.recordPersistence(identity, GenerationPersistenceReceipt.Accepted(saved))
+        }
+        val finished = CountDownLatch(3)
+        val failure = AtomicReference<Throwable?>()
+        val lane = ControllerGenerationCleanupQueue(timeoutMillis = 0)
+        try {
+            listOf(missing, unknown, accepted).forEach { s ->
+                assertTrue(lane.offer(s) {
+                    try {
+                        assertEquals(GenerationToolsCloseResult.Drained, s.closeResult)
+                        assertFalse(s.canRetire)
+                    } catch (t: Throwable) { failure.set(t) }
+                    finally { finished.countDown() }
+                })
+            }
+            assertTrue(finished.await(5, TimeUnit.SECONDS))
+            assertNull(failure.get())
+            assertNull(missing.persistenceReceipt)
+            assertSame(GenerationPersistenceReceipt.Unknown, unknown.persistenceReceipt)
+            assertNotNull(accepted.consumeAccepted(editor, identity))
+            assertTrue(accepted.canRetire)
+            assertFalse(missing.canRetire)
+            assertFalse(unknown.canRetire)
+        } finally { lane.close() }
     }
 
     @Test fun acceptedReceiptAndStopRaceDoesNotLosePersistenceTruth() {

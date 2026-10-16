@@ -30,8 +30,17 @@ internal sealed interface GenerationPersistenceReceipt {
  */
 internal class ControllerGenerationSession(
     val token: ConfirmedGenerationPreparation,
+    private val parentStop: () -> Unit,
     private val parentDrain: (timeoutMillis: Long) -> GenerationToolsCloseResult,
 ) {
+    /** Keep both (token, drain) and token + trailing drain lambda source-compatible.
+     * Parents with a Runner must supply parentStop; omission preserves the existing no-op.
+     */
+    constructor(
+        token: ConfirmedGenerationPreparation,
+        parentDrain: (timeoutMillis: Long) -> GenerationToolsCloseResult,
+    ) : this(token, {}, parentDrain)
+
     val identity get() = token.preview.identity
     private var owner: RunExecutionOwner? = null
     private var authorization: TaskAuthorization? = null
@@ -167,7 +176,9 @@ internal class ControllerGenerationSession(
         token.revokeAdmission()
     }
 
-    /** Worker-only, not on the send/HTTP executor. Both drains must succeed before retirement.
+    /** Worker-only, not on the send/HTTP executor. Request stop of the original parent Runner
+     * before token close; neither callback runs under this session's monitor. Even if stop fails,
+     * attempt token close, but never claim Drained. Both drains must succeed before retirement.
      * Unknown is sticky and intentionally non-retriable. ParentDrain must include catalog,
      * runner AND receipt-persistence completion, not merely an HTTP cancellation acknowledgement.
      */
@@ -179,7 +190,8 @@ internal class ControllerGenerationSession(
             cleanupRunning = true
         }
         val result = try {
-            token.close()
+            try { parentStop() }
+            finally { token.close() }
             val own = token.awaitClose(timeoutMillis)
             val parent = parentDrain(timeoutMillis)
             when {
@@ -215,14 +227,24 @@ internal class ControllerGenerationCleanupQueue(
             Thread(task, "generation-cleanup-${ids.incrementAndGet()}").apply { isDaemon = true }
         }, ThreadPoolExecutor.AbortPolicy())
 
-    fun offer(session: ControllerGenerationSession): Boolean {
+    /** Only the first accepted offer owns a completion notification. Duplicate/already-terminal
+     * offers return true without scheduling or notifying; rejected offers return false. The
+     * worker removes its queued marker before notifying, outside all queue/session locks. Parent
+     * observers may recheck retirement or retry other pending slots, but must not block this lane.
+     */
+    fun offer(session: ControllerGenerationSession, onFinished: () -> Unit = {}): Boolean {
         session.revokeAdmission()
         synchronized(queued) {
             if (session.closeResult != null || !queued.add(session)) return true
             try {
                 executor.execute {
                     try { session.cleanupOnWorker(timeoutMillis) }
-                    finally { synchronized(queued) { queued.remove(session) } }
+                    finally {
+                        synchronized(queued) { queued.remove(session) }
+                        // Notification belongs to this worker, never offer's caller. A failing
+                        // parent observer must not kill the worker or strand other cleanup.
+                        try { onFinished() } catch (_: Throwable) { }
+                    }
                 }
             } catch (_: java.util.concurrent.RejectedExecutionException) {
                 queued.remove(session)

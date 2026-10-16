@@ -1,5 +1,7 @@
 package app.daiyu.android.integration.tools
 
+import app.daiyu.android.assistants.AssistantProfile
+import app.daiyu.android.browser.BrowserRunAuthorization
 import app.daiyu.android.browser.bridge.BrowserOutcome
 import app.daiyu.android.browser.host.BrowserToolSession
 import app.daiyu.android.browser.session.BrowserAccess
@@ -25,10 +27,41 @@ internal object RunBrowserTools {
     const val READ_CAPABILITY = "browser.read"
     const val WRITE_CAPABILITY = "browser.write"
 
+    /** Legacy host-reviewed admission. This does NOT acquire explicit-confirmation semantics. */
     fun create(
         session: BrowserToolSession,
         owner: RunExecutionOwner,
         authorization: TaskAuthorization
+    ): List<RegisteredTool> = createTools(session, owner, authorization, null)
+
+    /** The task and tools must travel together: the tools retain the full confirmed snapshot. */
+    class ConfirmedCatalog internal constructor(
+        val taskAuthorization: TaskAuthorization,
+        val tools: List<RegisteredTool>,
+    )
+
+    /** Pure binding only. Call after trusted confirmation with the actual runner/profile/session.
+     * No fallback to legacy create, new session, host, tab or inferred assistant is permitted.
+     */
+    fun createConfirmed(
+        session: BrowserToolSession,
+        owner: RunExecutionOwner,
+        assistant: AssistantProfile,
+        confirmed: BrowserRunAuthorization,
+    ): ConfirmedCatalog {
+        // Profile ID is frozen here; never look up a moving active-assistant selection.
+        val assistantId = assistant.id
+        val task = confirmed.taskAuthorization(owner, assistantId, session)
+        return ConfirmedCatalog(task, createTools(session, owner, task, Confirmation(confirmed, assistantId)))
+    }
+
+    private data class Confirmation(val token: BrowserRunAuthorization, val assistantId: String)
+
+    private fun createTools(
+        session: BrowserToolSession,
+        owner: RunExecutionOwner,
+        authorization: TaskAuthorization,
+        confirmation: Confirmation?,
     ): List<RegisteredTool> {
         require(owner.runId.value == authorization.taskId &&
             session.grant.owner.sessionId == authorization.sessionId) { "tool_run_owner_mismatch" }
@@ -44,6 +77,10 @@ internal object RunBrowserTools {
                 )
 
                 override fun prepare(arguments: ToolArguments): PreparedTool {
+                    // Gate before the existing catalog command preparation. A TaskAuthorization
+                    // alone deliberately cannot carry profile, action subset or revocation.
+                    confirmation?.token?.checkInvocation(owner, confirmation.assistantId, session,
+                        definition.name, arguments.canonicalJson())
                     val command = freeze(arguments.canonicalJson(), write)
                     checkAccess(session, command.action)
                     val effect = if (write) effect(session, command) else null
@@ -58,14 +95,29 @@ internal object RunBrowserTools {
                             !matches(context.invocation.arguments, write, command) -> ExecutionReceipt.NotExecuted("tool_invocation_mismatch")
                             effect != null && effect !in context.authorization.allowedWrites ->
                                 ExecutionReceipt.NotExecuted("task_write_not_authorized")
-                            else -> null
+                            else -> confirmedAdmission(confirmation, context, session)
                         }
                     }) { context ->
                         if (context.cancelled()) ExecutionReceipt.NotExecuted("cancelled_before_execution")
-                        else execute(session, command)
+                        else confirmedAdmission(confirmation, context, session) ?: execute(session, command)
                     }
                 }
             }
+        }
+    }
+
+    private fun confirmedAdmission(
+        confirmation: Confirmation?,
+        context: ToolExecutionContext,
+        session: BrowserToolSession,
+    ): ExecutionReceipt.NotExecuted? {
+        if (confirmation == null) return null // Explicitly legacy; never auto-upgrade.
+        return try {
+            confirmation.token.checkInvocation(context.owner, confirmation.assistantId, session,
+                context.invocation.name, context.invocation.arguments)
+            null
+        } catch (_: IllegalArgumentException) {
+            ExecutionReceipt.NotExecuted("browser_confirmation_not_authorized")
         }
     }
 

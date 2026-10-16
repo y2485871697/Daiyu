@@ -107,19 +107,29 @@ internal class BrowserRunPreparation private constructor(
 }
 
 /**
- * In-memory confirmation only; not saved and not wired to Controller/Catalog by this file.
- * Integration MUST call checkInvocation before catalog prepare AND before confirmed ledger replay.
- * TaskAuthorization alone has no assistant/action-subset field and is not a substitute for that gate.
- * The host remains responsible for active run ownership, revocation, lifetime and cleanup.
+ * In-memory, revocable confirmation; never persisted or inferred from saved preferences.
+ * RunBrowserTools.createConfirmed retains this token through prepare and context admission,
+ * including confirmed ledger replay. TaskAuthorization alone is not a substitute for that gate.
+ * The host must explicitly confirm, retain/revoke the token and own session lifetime/cleanup.
  */
 internal class BrowserRunAuthorization internal constructor(
     val preview: BrowserRunPreview,
     private val existingSession: BrowserToolSession?,
 ) {
     private val effects = Collections.unmodifiableSet(preview.writes.map { it.effect }.toSet())
+    private var revoked = false
+    private var boundOwner: RunExecutionOwner? = null
+    private var boundSession: BrowserToolSession? = existingSession
 
-    fun taskAuthorization(owner: RunExecutionOwner, assistantId: String, session: BrowserToolSession): TaskAuthorization {
+    /** Terminal for this token. Recreating a catalog or TaskAuthorization cannot restore it. */
+    @Synchronized fun revoke() { revoked = true }
+
+    @Synchronized fun taskAuthorization(owner: RunExecutionOwner, assistantId: String, session: BrowserToolSession): TaskAuthorization {
         checkBinding(owner, assistantId, session)
+        // A read-only preview may precede session creation. Bind its first real session and
+        // opaque runner owner here; equal IDs/grants must not authorize a replacement object.
+        boundOwner = owner
+        boundSession = session
         return TaskAuthorization(preview.grant.owner.sessionId, preview.identity.runId.value, effects)
     }
 
@@ -141,13 +151,15 @@ internal class BrowserRunAuthorization internal constructor(
         }
     }
 
-    private fun checkBinding(owner: RunExecutionOwner, assistantId: String, session: BrowserToolSession) {
+    @Synchronized private fun checkBinding(owner: RunExecutionOwner, assistantId: String, session: BrowserToolSession) {
+        require(!revoked) { "browser_authorization_revoked" }
         val identity = preview.identity
         require(owner.conversationId == identity.conversationId && owner.runId == identity.runId &&
-            owner.assistantMessageId == identity.assistantMessageId && assistantId == identity.assistantId) {
+            owner.assistantMessageId == identity.assistantMessageId && assistantId == identity.assistantId &&
+            (boundOwner == null || owner === boundOwner)) {
             "browser_run_identity_mismatch"
         }
-        require(session.grant == preview.grant && (existingSession == null || session === existingSession)) {
+        require(session.grant == preview.grant && (boundSession == null || session === boundSession)) {
             "browser_grant_mismatch"
         }
     }

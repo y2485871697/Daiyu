@@ -4,6 +4,10 @@ import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.model.videos.FrozenMessageVideoPlan
 import app.daiyu.android.model.videos.OpenRouterVideoCapability
+import app.daiyu.android.model.videos.VideoPostApprovalProvider
+import app.daiyu.android.model.videos.VideoPostRequest
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
 import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
@@ -15,12 +19,15 @@ class ResponsesModel internal constructor(
     private val imageInputSupported: Boolean?,
     private val assistantInstructions: String? = null,
     private val videoInputCapability: OpenRouterVideoCapability? = null,
+    private val videoPostApprovalProvider: VideoPostApprovalProvider? = null,
 ) : ModelPort {
     internal constructor(settings: ModelSettings, connect: (URL) -> HttpsURLConnection) : this(settings, connect, null)
     constructor(settings: ModelSettings) : this(settings, { it.openConnection() as HttpsURLConnection }, null)
     internal constructor(snapshot: ProviderSnapshot, assistantInstructions: String? = null,
-                         videoInputCapability: OpenRouterVideoCapability? = null) : this(snapshot.asModelSettings(),
-        { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported, assistantInstructions, videoInputCapability)
+                         videoInputCapability: OpenRouterVideoCapability? = null,
+                         videoPostApprovalProvider: VideoPostApprovalProvider? = null) : this(snapshot.asModelSettings(),
+        { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported, assistantInstructions,
+        videoInputCapability, videoPostApprovalProvider)
     override fun open(history: List<Message>): ModelSession = open(history, settings.enabledTools())
     override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = open(history, tools.map {
         ToolDefinition(it.toolName, it.description, """{"type":"object","properties":{},"required":[],"additionalProperties":false}""")
@@ -31,12 +38,14 @@ class ResponsesModel internal constructor(
         Session(settings, history, connect, definitions.toList(), imageInputSupported, images, assistantInstructions)
 
     /** Explicit OpenRouter extension only. Generic ModelPort/ModelFactory paths remain unchanged.
-     * Pass the same run-local permission used to freeze videos to this model's constructor.
+     * Pass the same run-local capability used to freeze videos to this model's constructor.
+     * A videoPostApprovalProvider must also supply fresh approval for EVERY HTTP POST. This
+     * blocking ModelSession must be driven off the UI thread; its provider may suspend for UI.
      */
     fun open(history: List<Message>, definitions: List<ToolDefinition>, videos: FrozenMessageVideoPlan,
              images: ModelImagePlan? = null): ModelSession =
         Session(settings, history, connect, definitions.toList(), imageInputSupported, images,
-            assistantInstructions, videoInputCapability, videos)
+            assistantInstructions, videoInputCapability, videos, videoPostApprovalProvider)
 
     private class Session(
         private val settings: ModelSettings,
@@ -46,10 +55,16 @@ class ResponsesModel internal constructor(
         capability: Boolean?,
         images: ModelImagePlan?,
         private val assistantInstructions: String?,
-        videoCapability: OpenRouterVideoCapability? = null,
+        private val videoCapability: OpenRouterVideoCapability? = null,
         videos: FrozenMessageVideoPlan? = null,
+        private val videoPostApprovalProvider: VideoPostApprovalProvider? = null,
     ) : ModelSession {
         private val cancelled = AtomicBoolean(false)
+        private val postLock = Any()
+        private val historyIdentity = Any()
+        @Volatile private var approvalWait: Job? = null
+        @Volatile private var pendingVideoPost: VideoPostRequest? = null
+        private var postNumber = 0
         @Volatile private var connection: HttpsURLConnection? = null
         private val historySnapshot = app.daiyu.android.model.images.FrozenMessageImagePlan.snapshot(history)
         private val imagePlan = ImageRequestPreflight.history(settings, ProviderProtocol.RESPONSES, capability, historySnapshot, images)
@@ -60,7 +75,10 @@ class ResponsesModel internal constructor(
         private var started = false
         private var pending = emptySet<String>()
         init { settings.validate() }
-        private fun checkCancelled() { if (cancelled.get()) throw InterruptedException() }
+        private fun checkCancelled() {
+            if (cancelled.get() || Thread.currentThread().isInterrupted) throw InterruptedException()
+        }
+        @Synchronized
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
             checkCancelled()
             check(usable && (!started || pending.isNotEmpty())) { "Responses session cannot be replayed" }
@@ -87,15 +105,66 @@ class ResponsesModel internal constructor(
                 try { sink(event) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
             }
             var ownedConnection: HttpsURLConnection? = null
+            var post: VideoPostRequest? = null
             try {
                 checkCancelled()
+                // The payload and all budgets/allowlists are final before asking the UI. Never
+                // acquire a connection merely to prepare an approval dialog. No default approval.
+                val approval = if (videoPlan != null) {
+                    val provider = requireNotNull(videoPostApprovalProvider) {
+                        "Original video requires fresh approval for each POST"
+                    }
+                    val request = VideoPostRequest(settings, videoPlan, historySnapshot,
+                        historyIdentity, ++postNumber, requestBytes)
+                    post = request
+                    val wait = Job()
+                    synchronized(postLock) {
+                        checkCancelled()
+                        pendingVideoPost = request
+                        approvalWait = wait
+                    }
+                    try {
+                        // ModelSession is deliberately blocking. This child can suspend while the
+                        // parent UI obtains a permit; cancel() also cancels that suspension.
+                        runBlocking(wait) { provider.approve(request) }
+                    } finally {
+                        synchronized(postLock) { if (approvalWait === wait) approvalWait = null }
+                        wait.cancel()
+                    }
+                } else null
+                val pendingPost = post
+                if (pendingPost != null) {
+                    synchronized(postLock) {
+                        checkCancelled()
+                        check(pendingVideoPost === pendingPost) { "Video POST request expired" }
+                    }
+                    // Revalidate after the suspension; the host consume operation must also fence
+                    // its current run/config/history before spending its one-shot permit.
+                    // Neither that external operation nor the connection factory may hold the
+                    // control lock: cancel must return even if either waits on DB/another gate.
+                    videoPlan?.validate(settings, videoCapability, historySnapshot)
+                    videoPlan?.validateRequest(settings, request, input)
+                    checkCancelled()
+                    pendingPost.consume(approval)
+                }
+                checkCancelled()
                 val conn = connect(URL(settings.requestEndpoint()))
-                ownedConnection = conn; connection = conn
+                // Own the result before checking cancellation so a late factory return is always
+                // disconnected by finally, even when it must never be published or write a body.
+                ownedConnection = conn
+                synchronized(postLock) {
+                    checkCancelled()
+                    if (pendingPost != null) {
+                        check(pendingVideoPost === pendingPost) { "Video POST request expired" }
+                    }
+                    connection = conn
+                }
                 checkCancelled()
                 conn.requestMethod = "POST"; conn.doOutput = true; conn.instanceFollowRedirects = false
                 conn.connectTimeout = 20_000; conn.readTimeout = 60_000
                 conn.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
                 conn.setRequestProperty("Content-Type", "application/json"); conn.setRequestProperty("Accept", "text/event-stream")
+                checkCancelled()
                 conn.outputStream.use { it.write(requestBytes) }
                 checkCancelled()
                 val status = conn.responseCode
@@ -139,14 +208,26 @@ class ResponsesModel internal constructor(
                     else -> failure
                 }
             } finally {
-                try { ownedConnection?.disconnect() } catch (_: Exception) {} finally { connection = null }
+                post?.invalidate()
+                synchronized(postLock) {
+                    if (pendingVideoPost === post) pendingVideoPost = null
+                    if (connection === ownedConnection) connection = null
+                }
+                try { ownedConnection?.disconnect() } catch (_: Exception) {}
             }
             checkCancelled()
             usable = true
         }
         override fun cancel() {
             cancelled.set(true)
-            try { connection?.disconnect() } catch (_: Exception) {}
+            val (post, wait, current) = synchronized(postLock) {
+                Triple(pendingVideoPost, approvalWait, connection)
+            }
+            // Revocation, coroutine cancellation handlers and transport cleanup run outside the
+            // control lock too. This signals cancellation; it does not drain an in-flight worker.
+            post?.invalidate()
+            wait?.cancel()
+            try { current?.disconnect() } catch (_: Exception) {}
         }
     }
 }

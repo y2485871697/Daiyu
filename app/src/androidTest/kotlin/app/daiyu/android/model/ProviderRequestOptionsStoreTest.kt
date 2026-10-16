@@ -66,6 +66,8 @@ class ProviderRequestOptionsStoreTest : InstrumentationTestCase() {
         val prefs = context.getSharedPreferences("model-settings", 0)
         val cases = listOf(
             ProviderRequestOptions("""{"input":[]}""") to ProviderProtocol.RESPONSES,
+            ProviderRequestOptions("""{"service_tier":7}""") to ProviderProtocol.RESPONSES,
+            ProviderRequestOptions("""{"service_tier":"priority"}""") to ProviderProtocol.MESSAGES,
             ProviderRequestOptions(speedMode = GptSpeedMode.FAST) to ProviderProtocol.MESSAGES
         )
         for ((options, protocol) in cases) {

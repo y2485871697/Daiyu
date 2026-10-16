@@ -40,6 +40,19 @@ class ContextPolicyTest {
         assertFalse(p.shouldCompress(7199)); assertTrue(p.shouldCompress(7200))
         assertFalse(p.copy(enabled = false).shouldCompress(10000))
     }
+    @Test fun sendBudgetIsIndependentOfCompressionAndKeepsUnknownCapacityUnknown() {
+        val policy = CompressionPolicy(false, 10000, 80, 1000, 2)
+        assertEquals(9000L, policy.sendBudgetTokens)
+        assertTrue(policy.fitsSendBudget(9000))
+        assertFalse(policy.fitsSendBudget(9001))
+        assertFalse(policy.shouldCompress(9001))
+        assertEquals(policy.fitsSendBudget(9001), policy.copy(enabled = true).fitsSendBudget(9001))
+        assertNull(CompressionPolicy().sendBudgetTokens)
+        assertTrue(CompressionPolicy().fitsSendBudget(Long.MAX_VALUE))
+    }
+    @Test(expected = IllegalArgumentException::class) fun negativeSendEstimateIsRejected() {
+        CompressionPolicy().fitsSendBudget(-1)
+    }
     @Test fun usageReceiptsAreDeduplicatedWithoutInventingUnknowns() {
         val a = UsageRecord("q1", "r1", "b", 100, 20, 30, 4)
         val b = UsageRecord("q2", "r2", "b", null, null)

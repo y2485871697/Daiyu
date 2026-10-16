@@ -19,6 +19,7 @@ data class ProviderRequestOptions(
         if (customBody.isNotEmpty()) {
             val body = parseBody()
             require(body.keys().asSequence().none { it in OWNED_FIELDS }) { "自定义请求体不能覆盖会话协议字段" }
+            validateBodyOptions(body, protocol)
         }
         require(protocol == ProviderProtocol.RESPONSES || (speedMode == null && !codex)) {
             "GPT 档位仅用于 Responses"
@@ -31,8 +32,8 @@ data class ProviderRequestOptions(
         validate(protocol)
         val merged = if (customBody.isEmpty()) base else RequestBodyMerge.merge(base, parseBody())
         if (protocol == ProviderProtocol.RESPONSES) GptServiceTier.apply(merged, speedMode, codex)
-        val model = merged.opt("model") as? String
-        require(model != null && model.isNotBlank() && model.length <= 200) { "请求模型无效" }
+        validateBodyOptions(merged, protocol)
+        require(merged.has("model")) { "请求模型无效" }
         require(merged.opt("stream") == true) { "请求必须使用流式响应" }
         when (protocol) {
             ProviderProtocol.RESPONSES -> require(merged.opt("input") is JSONArray || merged.opt("input") is String) { "Responses 输入无效" }
@@ -45,6 +46,33 @@ data class ProviderRequestOptions(
         }
         MessagesRequest.validateObject(merged, MessagesRequest.MAX_JSON_CONTAINER_DEPTH)
         return merged
+    }
+
+    /** Validate explicit options before persistence and again after merging. Never coerce JSON types. */
+    private fun validateBodyOptions(body: JSONObject, protocol: ProviderProtocol) {
+        if (body.has("model")) {
+            val model = body.opt("model") as? String
+            require(model != null && model.isNotBlank() && model.length <= 200) { "请求模型无效" }
+        }
+        if (protocol == ProviderProtocol.MESSAGES && body.has("max_tokens")) {
+            val tokens = body.opt("max_tokens")
+            require(tokens is Int && tokens > 0) { "Messages 输出上限无效" }
+        }
+        if (body.has("service_tier")) {
+            val tier = body.opt("service_tier")
+            when (protocol) {
+                // Gateway tiers (including fast/ultrafast) are deliberately not an OpenAI enum whitelist.
+                // An omitted/nullable Responses tier leaves selection to the server.
+                ProviderProtocol.RESPONSES -> require(tier == JSONObject.NULL || tier is String && tier.isNotBlank()) {
+                    "Responses 服务档位必须为非空字符串或 null"
+                }
+                // Messages has its own capacity policy; GPT speed modes must not be mapped to it.
+                ProviderProtocol.MESSAGES -> require(tier is String && tier in setOf("auto", "standard_only")) {
+                    "Messages 服务档位无效"
+                }
+                ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(protocol.wireName)
+            }
+        }
     }
 
     internal fun encode(): String = JSONObject().put("custom_body", customBody)

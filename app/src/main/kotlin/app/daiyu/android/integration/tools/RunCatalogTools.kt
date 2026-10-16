@@ -16,6 +16,7 @@ internal class RunCatalogTools(
     private val runId: RunId,
     private val deviceResources: RunDeviceResources? = null,
     private val children: RunChildModels? = null,
+    private val backgroundFactory: ((RunExecutionOwner, SessionCapabilities, TaskAuthorization) -> RunChildTasks)? = null,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
     private val authorization = TaskAuthorization(capabilities.sessionId, runId.value)
@@ -23,6 +24,7 @@ internal class RunCatalogTools(
     @Volatile private var skills: SkillRunSession? = null
     @Volatile private var bridge: CatalogModelBridge? = null
 
+    @Volatile private var background: RunChildTasks? = null
     @Volatile private var owner: RunExecutionOwner? = null
     @Synchronized override fun bindOwner(owner: RunExecutionOwner) {
         check(!closed.get()) { "run_closed" }
@@ -31,6 +33,7 @@ internal class RunCatalogTools(
         try {
             deviceResources?.bind(owner, authorization, capabilities)
             children?.bind(owner, capabilities, authorization)
+            if (background == null) background = backgroundFactory?.invoke(owner, capabilities, authorization)
             this.owner = owner
         } catch (failure: Exception) {
             close()
@@ -53,6 +56,7 @@ internal class RunCatalogTools(
             check(!closed.get()) { "run_closed" }
             ScopedSkillTools.create(scope, authorization).forEach { registry.register(it) }
             children?.let { registry.register(it.tool()) }
+            background?.let { registry.register(it.tool()) }
             val result = CatalogModelBridge(registry.snapshot(), capabilities, ledger, conversationId, runId, authorization)
             result.bindOwner(bound)
             check(!closed.get()) { "run_closed" }
@@ -83,8 +87,9 @@ internal class RunCatalogTools(
     }
     // Do not wait for capture or in-flight reads on the UI/control thread.
     override fun close() {
-        closed.set(true); children?.close(); deviceResources?.close(); skills?.close()
+        closed.set(true); background?.close(); children?.close(); deviceResources?.close(); skills?.close()
     }
+    internal fun revokeChildren() { background?.revoke() }
     internal fun closeWhenIdle(onClosed: () -> Unit) {
         close()
         val devices = deviceResources

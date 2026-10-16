@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="business_export_title">匯出對話</string>
+    <string name="business_export_conversation">對話</string>
+    <string name="business_export_scope">匯出此對話、訊息及其引用的附件。</string>
+    <string name="business_export_excluded">不包含其他對話、全域設定、憑據或可續接的執行任務。</string>
+    <string name="business_export_choose_file">選擇匯出檔案</string>
+    <string name="business_export_writing">正在寫入備份…</string>
+    <string name="business_export_waiting">等待檔案選擇返回。</string>
+    <string name="business_export_unavailable">目前操作結束後可匯出。</string>
+    <string name="business_task_records">子任務紀錄</string>
+    <string name="business_task_refresh">重新整理</string>
+    <string name="business_task_scope">僅顯示此對話最近20筆紀錄；查看不會恢復或重試任務。</string>
+    <string name="business_task_load_failed">讀取紀錄失敗，可重新整理後再讀取。</string>
+    <string name="business_task_loading">正在讀取紀錄…</string>
+    <string name="business_task_empty">此對話暫無子任務紀錄。</string>
+    <string name="business_task_queued">排隊中</string>
+    <string name="business_task_running">執行中</string>
+    <string name="business_task_completed">已完成</string>
+    <string name="business_task_not_executed">未執行</string>
+    <string name="business_task_unknown">結果未知</string>
+    <string name="business_task_parent">父執行：%1$s</string>
+    <string name="business_task_prompt">任務</string>
+    <string name="business_task_result">結果</string>
+    <string name="business_task_unknown_note">請求可能已經送出，查看或重新整理不會再次傳送。</string>
+    <string name="business_task_expand">展開</string>
+    <string name="business_task_collapse">收合</string>
+    <string name="business_task_stop">請求停止</string>
+</resources>

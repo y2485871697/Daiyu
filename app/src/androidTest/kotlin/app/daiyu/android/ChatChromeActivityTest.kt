@@ -95,15 +95,16 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             contextLayout.didOverflowWidth)
     }
 
-    fun testTouchDispatchesPickersMenusSendPauseAndLongStop() {
+    fun testTouchDispatchesPickersMenusSupplementContinueAndLongStop() {
         val events = mutableListOf<String>()
         var presses = 0; var releases = 0
-        val state = composer()
+        val state = composer().copy(phase = ComposerPhase.PAUSED, supplementAvailable = true)
         show(state, ChatScreenActions(
             onOpenReasoning = { events.add("reasoning") }, onOpenAssistant = { events.add("assistant") },
             onMore = { events.add("more") }, onMenuAction = { events.add("menu:${it.name}") },
             onModelClick = { events.add("model") }, onContextClick = { events.add("context") },
-            onVoice = { events.add("voice") }, onSend = { events.add("send<$it>") },
+            onVoice = { events.add("voice") }, onSupplement = { events.add("supplement<$it>") },
+            onSend = { error("paused text must not start a new send") },
             onPrimaryTap = { events.add("pause") }, onPrimaryLongPress = { events.add("stop") },
             onControlPress = { presses++ }, onControlRelease = { releases++ },
         ))
@@ -119,9 +120,30 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         node("chat-control").performTouchInput { longClick() }
         ui.runOnIdle {
             assertEquals(listOf("reasoning", "assistant", "menu:NEW_CHAT", "more", "menu:CONTEXT_STATS",
-                "model", "context", "voice", "send<${state.text}>", "pause", "stop"), events.toList())
+                "model", "context", "voice", "supplement<${state.text}>", "pause", "stop"), events.toList())
             assertEquals(3, presses); assertEquals(3, releases)
         }
+    }
+
+    fun testIdleTextDispatchesSendAndNeverSupplement() {
+        val sent = mutableListOf<String>()
+        val state = composer().copy(phase = ComposerPhase.IDLE)
+        show(state, ChatScreenActions(
+            onSend = { sent.add(it) },
+            onSupplement = { error("idle text must not append to a run") },
+        ))
+        node("chat-send").assertIsEnabled().assertContentDescriptionEquals("发送")
+        touch(node("chat-send"))
+        ui.runOnIdle { assertEquals(listOf(state.text), sent) }
+    }
+
+    fun testRunningTextCannotSendOrSupplementEvenWithStaleAvailability() {
+        var callbacks = 0
+        show(composer().copy(supplementAvailable = true), ChatScreenActions(
+            onSend = { callbacks++ }, onSupplement = { callbacks++ },
+        ))
+        node("chat-send").assertIsNotEnabled().performTouchInput { click(center) }
+        ui.runOnIdle { assertEquals(0, callbacks) }
     }
 
     fun testOverflowHasOnlyOriginalEntriesAndNoInventedSectionHeadings() {

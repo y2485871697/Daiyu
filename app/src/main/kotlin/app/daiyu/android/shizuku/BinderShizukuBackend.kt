@@ -17,6 +17,7 @@ internal class BinderShizukuBackend(
     private val release: () -> Unit
 ) : ShizukuBackend {
     private val closed = AtomicBoolean(false)
+    private val closeSignal = ShizukuCloseSignal()
     private val calls = ThreadPoolExecutor(1, 1, 0, TimeUnit.SECONDS, ArrayBlockingQueue<Runnable>(1),
         { task -> Thread(task, "shizuku-rpc").apply { isDaemon = true } })
     private fun available() = !closed.get() && live()
@@ -89,8 +90,45 @@ internal class BinderShizukuBackend(
             ShizukuOutcome.Unknown("cancel_requested_owned_shell_only")
         } catch (_: Exception) { close(); ShizukuOutcome.Unknown("shizuku_cancel_unconfirmed") }
     }
+    override fun closeWithResult(onResult: (ShizukuCloseResult) -> Unit) {
+        closeSignal.observe(onResult)
+        close()
+    }
+
     override fun close() {
-        if (closed.compareAndSet(false, true)) { calls.shutdownNow(); release() }
+        if (!closed.compareAndSet(false, true)) return
+        calls.shutdownNow()
+        Thread({
+            val cleanupCalls = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+                Thread(task, "shizuku-close-rpc").apply { isDaemon = true }
+            }
+            var result: ShizukuCloseResult = ShizukuCloseResult.Unknown("shizuku_cleanup_unconfirmed")
+            try {
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+                while (System.nanoTime() < deadline) {
+                    if (!permission()) break
+                    val remaining = deadline - System.nanoTime()
+                    if (remaining <= 0) break
+                    val response = cleanupCalls.submit<Bundle> {
+                        check(permission()) { "shizuku_permission_revoked" }
+                        remote.closeExecution(identity.serviceGeneration, identity.permissionGeneration)
+                    }.get(minOf(remaining, TimeUnit.SECONDS.toNanos(5)), TimeUnit.NANOSECONDS)
+                    if (response.requireBoolean("drained")) {
+                        val localBudget = deadline - System.nanoTime()
+                        if (localBudget > 0 && calls.awaitTermination(localBudget, TimeUnit.NANOSECONDS))
+                            result = ShizukuCloseResult.Drained
+                        break
+                    }
+                    Thread.sleep(25)
+                }
+            } catch (_: Exception) {
+                result = ShizukuCloseResult.Unknown("shizuku_cleanup_unconfirmed")
+            } finally {
+                cleanupCalls.shutdownNow()
+                try { release() }
+                finally { closeSignal.complete(result) }
+            }
+        }, "shizuku-close").apply { isDaemon = true; start() }
     }
 }
 

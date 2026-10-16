@@ -146,6 +146,12 @@ internal class ShizukuCommandEngine(private val launcher: () -> Process = {
             catch (_: java.util.concurrent.RejectedExecutionException) { runCatching { process.destroyForcibly() } }
         }
     }
+    fun isDrained(): Boolean = synchronized(lock) {
+        closed && jobs.values.all { job -> synchronized(job.lock) {
+            job.runnerDone && job.activeIo == 0 && job.process?.isAlive != true
+        } }
+    }
+
     override fun close() {
         val owned = synchronized(lock) { if (closed) return; closed = true; jobs.values.toList() }
         owned.forEach { stop(it, "backend_closed_unknown") }

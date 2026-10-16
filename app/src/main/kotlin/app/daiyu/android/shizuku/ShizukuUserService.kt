@@ -55,6 +55,11 @@ class ShizukuUserService : IShizukuExecutor.Stub() {
         verify(service, grant)
         return Bundle().apply { putBoolean("requested", engine.cancel(requestId)); putString("reason", "cancel_requested_owned_shell_only") }
     }
+    override fun closeExecution(service: String, grant: String): Bundle {
+        verify(service, grant)
+        engine.close()
+        return Bundle().apply { putBoolean("drained", engine.isDrained()) }
+    }
     override fun destroy() {
         val caller = Binder.getCallingUid()
         synchronized(lock) { check(caller == uid || caller == callerUid) { "foreign_caller" } }

@@ -15,6 +15,7 @@ data class ChatScreenActions(
     val onOpenSidebar: () -> Unit = {},
     val onMore: () -> Unit = {},
     val onSend: (String) -> Unit = {},
+    val onSupplement: (String) -> Unit = {},
     val onTextChange: (String) -> Unit = {},
     val onSelectionChange: (Int, Int) -> Unit = { _, _ -> },
     val onControlPress: () -> Unit = {},

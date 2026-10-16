@@ -53,18 +53,19 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     var attachments by remember { mutableStateOf(false) }
     var voiceModes by remember { mutableStateOf(false) }
     val hasText = state.text.isNotBlank()
-    val primaryEnabled = state.enabled && (hasText || state.phase != ComposerPhase.IDLE)
+    val primaryEnabled = if (hasText) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
     val secondaryColor = if (state.enabled) colors.onSurfaceVariantSummary else colors.disabledOnSurface
     val primaryIcon = when {
         state.phase == ComposerPhase.PAUSED && !hasText -> DaiyuIcons.Resume
-        hasText && state.phase == ComposerPhase.RUNNING -> DaiyuIcons.Steer
+        hasText && state.phase != ComposerPhase.IDLE -> DaiyuIcons.Steer
         hasText -> DaiyuIcons.Send
         state.phase == ComposerPhase.RUNNING -> DaiyuIcons.Pause
         else -> DaiyuIcons.Send
     }
     val primaryLabel = when {
         state.phase == ComposerPhase.PAUSED && !hasText -> "继续"
-        hasText && state.phase == ComposerPhase.RUNNING -> "追加消息"
+        state.supplementPending -> "正在追加"
+        hasText && state.phase != ComposerPhase.IDLE -> "追加消息"
         hasText -> "发送"
         state.phase == ComposerPhase.RUNNING -> "暂停"
         else -> "发送"
@@ -113,7 +114,9 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     onLongClick = actions.onPrimaryLongPress)
                             }
                             ChatIconButton(primaryIcon, primaryLabel, {
-                                if (hasText) actions.onSend(state.text) else actions.onPrimaryTap()
+                                if (!hasText) actions.onPrimaryTap()
+                                else if (state.phase == ComposerPhase.IDLE) actions.onSend(state.text)
+                                else actions.onSupplement(state.text)
                             }, Modifier.size(48.dp).testTag(if (hasText || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
                                 .controlGesture(actions, primaryEnabled).background(
                                 if (!primaryEnabled) colors.disabledPrimaryButton

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="business_export_title">导出会话</string>
+    <string name="business_export_conversation">会话</string>
+    <string name="business_export_scope">导出此会话、消息及其引用的附件。</string>
+    <string name="business_export_excluded">不包含其他会话、全局设置、凭据或可续接的运行任务。</string>
+    <string name="business_export_choose_file">选择导出文件</string>
+    <string name="business_export_writing">正在写入备份…</string>
+    <string name="business_export_waiting">等待文件选择返回。</string>
+    <string name="business_export_unavailable">当前操作结束后可导出。</string>
+    <string name="business_task_records">子任务记录</string>
+    <string name="business_task_refresh">刷新</string>
+    <string name="business_task_scope">仅显示此会话最近20条记录；查看不会恢复或重试任务。</string>
+    <string name="business_task_load_failed">读取记录失败，可刷新后重新读取。</string>
+    <string name="business_task_loading">正在读取记录…</string>
+    <string name="business_task_empty">此会话暂无子任务记录。</string>
+    <string name="business_task_queued">排队中</string>
+    <string name="business_task_running">运行中</string>
+    <string name="business_task_completed">已完成</string>
+    <string name="business_task_not_executed">未执行</string>
+    <string name="business_task_unknown">结果未知</string>
+    <string name="business_task_parent">父运行：%1$s</string>
+    <string name="business_task_prompt">任务</string>
+    <string name="business_task_result">结果</string>
+    <string name="business_task_unknown_note">请求可能已经发出，查看或刷新不会重新发送。</string>
+    <string name="business_task_expand">展开</string>
+    <string name="business_task_collapse">收起</string>
+    <string name="business_task_stop">请求停止</string>
+</resources>

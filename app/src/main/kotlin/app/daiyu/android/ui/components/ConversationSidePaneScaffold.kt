@@ -164,6 +164,7 @@ internal fun ConversationSidePaneScaffold(
     onMoveConversationToFolder: (ConversationSummaryUi) -> Unit = {},
     onConversationTogglePin: (ConversationSummaryUi) -> Unit = {},
     onConversationExport: (ConversationSummaryUi) -> Unit = {},
+    onConversationTasks: ((ConversationSummaryUi) -> Unit)? = null,
     onNewConversation: () -> Unit,
     onOpenManageChats: () -> Unit = {},
     onSelectFolder: (String?) -> Unit = {},
@@ -297,6 +298,7 @@ internal fun ConversationSidePaneScaffold(
                     onNewConversation = onNewConversation,
                     onConversationTogglePin = onConversationTogglePin,
                     onConversationExport = onConversationExport,
+                    onConversationTasks = onConversationTasks,
                     onOpenManageChats = { launchAfterDrawerClosed(onOpenManageChats) },
                     onSelectFolder = onSelectFolder,
                     onCreateFolder = onCreateFolder,
@@ -335,6 +337,7 @@ private fun ConversationPanePanel(
     onMoveConversationToFolder: (ConversationSummaryUi) -> Unit = {},
     onConversationTogglePin: (ConversationSummaryUi) -> Unit = {},
     onConversationExport: (ConversationSummaryUi) -> Unit = {},
+    onConversationTasks: ((ConversationSummaryUi) -> Unit)? = null,
     onNewConversation: () -> Unit,
     onOpenManageChats: () -> Unit = {},
     onSelectFolder: (String?) -> Unit = {},
@@ -437,6 +440,7 @@ private fun ConversationPanePanel(
                                 onMoveToFolder = { onMoveConversationToFolder(conversation) },
                                 onTogglePin = { onConversationTogglePin(conversation) },
                                 onExport = { onConversationExport(conversation) },
+                                onTasks = onConversationTasks?.let { action -> { action(conversation) } },
                             )
                         }
                     }
@@ -862,6 +866,7 @@ private fun ConversationTextRow(
     onMoveToFolder: () -> Unit,
     onTogglePin: () -> Unit,
     onExport: () -> Unit,
+    onTasks: (() -> Unit)?,
 ) {
     var showActionMenu by remember { mutableStateOf(false) }
     val view = LocalView.current
@@ -993,6 +998,14 @@ private fun ConversationTextRow(
                     onExport()
                 },
             )
+            if (onTasks != null) {
+                DropdownMenuItem(
+                    modifier = DrawerMenuItemModifier,
+                    contentPadding = DrawerMenuItemPadding,
+                    text = { Text(stringResource(R.string.business_task_records)) },
+                    onClick = { showActionMenu = false; onTasks() },
+                )
+            }
             DropdownMenuItem(
                 modifier = DrawerMenuItemModifier,
                 contentPadding = DrawerMenuItemPadding,

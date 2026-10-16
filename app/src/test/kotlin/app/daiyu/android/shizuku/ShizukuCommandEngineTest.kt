@@ -145,4 +145,62 @@ class ShizukuCommandEngineTest {
         }
     }
 
+    private fun awaitDrained(engine: ShizukuCommandEngine) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (!engine.isDrained()) {
+            check(System.nanoTime() < deadline) { "engine did not drain" }
+            Thread.sleep(5)
+        }
+    }
+
+    @Test fun idleIsNotClosedAndClosedEmptyEngineIsDrained() {
+        val engine = ShizukuCommandEngine { error("no process expected") }
+        assertFalse(engine.isDrained())
+        engine.close()
+        assertTrue(engine.isDrained())
+    }
+
+    @Test fun closeWaitsForLateLauncherAndOwnedProcessExit() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val child = Child(done = false)
+        val engine = ShizukuCommandEngine { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)); child }
+        try {
+            engine.submit("late-drain", "wait".toByteArray(), 5000)
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            engine.close()
+            assertFalse(engine.isDrained())
+            release.countDown()
+            awaitDrained(engine)
+            assertFalse(child.isAlive)
+            assertEquals(0, child.sent.size())
+        } finally { release.countDown(); engine.close() }
+    }
+
+    @Test fun unknownOutcomeDoesNotMeanBlockedIoHasDrained() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val child = object : Child() {
+            override fun getInputStream() = object : java.io.InputStream() {
+                override fun read(): Int {
+                    entered.countDown()
+                    check(release.await(5, TimeUnit.SECONDS))
+                    return -1
+                }
+                override fun close() {}
+            }
+        }
+        val engine = ShizukuCommandEngine { child }
+        try {
+            engine.submit("blocked-io", "wait".toByteArray(), 5000)
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            engine.cancel("blocked-io")
+            engine.close()
+            assertTrue(engine.page("blocked-io", 0, 16).outcome is ShizukuOutcome.Unknown)
+            assertFalse(engine.isDrained())
+            release.countDown()
+            awaitDrained(engine)
+        } finally { release.countDown(); engine.close() }
+    }
+
 }

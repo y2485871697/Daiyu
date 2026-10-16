@@ -6,5 +6,6 @@ interface IShizukuExecutor {
         String requestId, in byte[] script, long timeoutMillis) = 1;
     Bundle poll(String serviceGeneration, String permissionGeneration, String requestId, int offset, int limit) = 2;
     Bundle cancel(String serviceGeneration, String permissionGeneration, String requestId) = 3;
+    Bundle closeExecution(String serviceGeneration, String permissionGeneration) = 4;
     void destroy() = 16777114;
 }

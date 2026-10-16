@@ -5,6 +5,7 @@ import app.daiyu.android.browser.BrowserRunAuthorization
 import app.daiyu.android.browser.bridge.BrowserOutcome
 import app.daiyu.android.browser.host.BrowserToolSession
 import app.daiyu.android.browser.session.BrowserAccess
+import app.daiyu.android.browser.session.BrowserGrant
 import app.daiyu.android.browser.session.BrowserSessionRegistry
 import app.daiyu.android.domain.runtime.RunExecutionOwner
 import app.daiyu.android.domain.tools.*
@@ -48,10 +49,11 @@ internal object RunBrowserTools {
         owner: RunExecutionOwner,
         assistant: AssistantProfile,
         confirmed: BrowserRunAuthorization,
+        authorization: TaskAuthorization? = null,
     ): ConfirmedCatalog {
         // Profile ID is frozen here; never look up a moving active-assistant selection.
         val assistantId = assistant.id
-        val task = confirmed.taskAuthorization(owner, assistantId, session)
+        val task = confirmed.taskAuthorization(owner, assistantId, session, authorization)
         return ConfirmedCatalog(task, createTools(session, owner, task, Confirmation(confirmed, assistantId)))
     }
 
@@ -124,24 +126,32 @@ internal object RunBrowserTools {
     /** Pure helper for trusted approval code; computes an exact effect, never creates a grant.
      * Include every desired argument, including explicit tab_id. No default approval exists.
      */
-    fun writeEffect(session: BrowserToolSession, arguments: String): WriteEffect {
+    fun writeEffect(session: BrowserToolSession, arguments: String): WriteEffect =
+        writeEffect(session.grant, arguments)
+
+    /** First-run approval is pure data: this overload never constructs or touches a session. */
+    fun writeEffect(grant: BrowserGrant, arguments: String): WriteEffect {
         val command = freeze(arguments, write = true)
-        checkAccess(session, command.action)
-        return effect(session, command)
+        checkAccess(grant, command.action)
+        return effect(grant, command)
     }
 
     private data class Command(val action: String, val canonical: String, val parameters: Map<String, Any?>)
 
-    private fun effect(session: BrowserToolSession, command: Command): WriteEffect {
-        val browserOwner = session.grant.owner
+    private fun effect(session: BrowserToolSession, command: Command): WriteEffect = effect(session.grant, command)
+
+    private fun effect(grant: BrowserGrant, command: Command): WriteEffect {
+        val browserOwner = grant.owner
         // Length prefix avoids ambiguity between the host's session ID and owner kind.
         val target = "${browserOwner.sessionId.length}:${browserOwner.sessionId}:${browserOwner.kind.name}"
         return WriteEffect("browser", command.action, target, command.canonical)
     }
 
-    private fun checkAccess(session: BrowserToolSession, action: String) {
-        require(session.grant.access != BrowserAccess.DISABLED) { "BROWSER_DISABLED" }
-        require(session.grant.access == BrowserAccess.FULL || action in reads || action in tabChanges) { "BROWSER_READ_ONLY" }
+    private fun checkAccess(session: BrowserToolSession, action: String) = checkAccess(session.grant, action)
+
+    private fun checkAccess(grant: BrowserGrant, action: String) {
+        require(grant.access != BrowserAccess.DISABLED) { "BROWSER_DISABLED" }
+        require(grant.access == BrowserAccess.FULL || action in reads || action in tabChanges) { "BROWSER_READ_ONLY" }
     }
 
     private fun matches(json: String, write: Boolean, command: Command): Boolean =

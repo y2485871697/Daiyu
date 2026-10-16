@@ -42,8 +42,8 @@ internal class BrowserRunPreview internal constructor(
 
 /**
  * Pure, single-use preparation. No registry, WebView, tab, host, file or network is created.
- * The host supplies a frozen grant. Until a grant-based production writeEffect overload exists,
- * WRITE preparation needs an ALREADY OWNED session; never manufacture a temporary session.
+ * The host supplies a frozen grant. Even the first WRITE preview uses only that grant and
+ * the production effect algorithm; never manufacture a temporary session for approval.
  *
  * This phase intentionally excludes cookies, downloads/fetch and child browser owners. Read-only
  * tab creation/closure still counts as WRITE and needs exact confirmation, as in the catalog.
@@ -92,10 +92,9 @@ internal class BrowserRunPreparation private constructor(
             val actions = allowedActions.toSet()
             require(actions.isNotEmpty() && actions.all { it in permitted }) { "browser_action_not_available" }
             val arguments = writeArguments.toList()
-            require(arguments.isEmpty() || existingSession != null) { "browser_existing_session_required" }
             // Reuse the exact production schema, access checks and canonical effect; no second encoder.
             val writes = arguments.map { raw ->
-                val effect = RunBrowserTools.writeEffect(checkNotNull(existingSession), raw)
+                val effect = RunBrowserTools.writeEffect(grant, raw)
                 require(effect.operation in actions && effect.operation !in reads) { "browser_write_not_selected" }
                 BrowserConfirmedWrite(raw, effect)
             }
@@ -121,16 +120,30 @@ internal class BrowserRunAuthorization internal constructor(
     private var boundOwner: RunExecutionOwner? = null
     private var boundSession: BrowserToolSession? = existingSession
 
+    private var boundAuthorization: TaskAuthorization? = null
+
     /** Terminal for this token. Recreating a catalog or TaskAuthorization cannot restore it. */
     @Synchronized fun revoke() { revoked = true }
 
-    @Synchronized fun taskAuthorization(owner: RunExecutionOwner, assistantId: String, session: BrowserToolSession): TaskAuthorization {
+    /** The parent may supply its ONE mixed-catalog task, never a browser-only copy of it. */
+    @Synchronized fun taskAuthorization(
+        owner: RunExecutionOwner,
+        assistantId: String,
+        session: BrowserToolSession,
+        authorization: TaskAuthorization? = null,
+    ): TaskAuthorization {
         checkBinding(owner, assistantId, session)
-        // A read-only preview may precede session creation. Bind its first real session and
-        // opaque runner owner here; equal IDs/grants must not authorize a replacement object.
+        val task = authorization ?: boundAuthorization ?:
+            TaskAuthorization(preview.grant.owner.sessionId, preview.identity.runId.value, effects)
+        require(task.sessionId == preview.grant.owner.sessionId && task.taskId == preview.identity.runId.value &&
+            task.allowedWrites.containsAll(effects)) { "browser_task_authorization_mismatch" }
+        require(boundAuthorization == null || task === boundAuthorization) { "browser_task_authorization_mismatch" }
+        // Any preview may precede session creation. Pin actual objects on the first binding;
+        // equal IDs/grants must not authorize replacement owners, sessions or task objects.
         boundOwner = owner
         boundSession = session
-        return TaskAuthorization(preview.grant.owner.sessionId, preview.identity.runId.value, effects)
+        boundAuthorization = task
+        return task
     }
 
     /** Pure admission check; this never executes or dispatches the invocation. */

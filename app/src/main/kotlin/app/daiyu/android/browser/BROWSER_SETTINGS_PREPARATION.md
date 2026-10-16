@@ -32,12 +32,12 @@
 
 - `grant.access` 不得超过偏好上限；DISABLED 不能准备。
 - READ_ONLY 的 new_tab / close_tab 在既有 catalog 中仍是 WRITE，必须给出精确确认参数。没有导航、建标签或补齐默认目标的隐式步骤。
-- 参数验证和 effect 完全复用 `RunBrowserTools.writeEffect(existingSession, raw)`；不复刻 canonical JSON / effect 编码。不造临时 session、registry 或 WebView。
-- 非空 WRITE 列表在当前接口下必须提供宿主**已经拥有**的匹配 session；否则以 `browser_existing_session_required` 拒绝。纯读取准备只需不可变 grant。
+- 参数验证和 effect 完全复用 `RunBrowserTools.writeEffect(grant, raw)`；不复刻 canonical JSON / effect 编码。不造临时 session、registry 或 WebView。
+- READ/WRITE 预览均无需打开 session；已有 session 传入时必须匹配冻结 grant，且后续必须绑定同一个实例。
 - 选择的每一个写动作必须有参数；未选择动作、重复 effect、缺显式写 tab_id、额外参数及生产 schema 拒绝的值都会拒绝。
 - Preview 防御性复制集合、保留显示过的原始字符串与生产 effect。只有同一 preview 实例能被显式 confirm；确认/取消均消费 preparation。
 - 确认结果只在内存中持有，不能作为持久或模型可提供的 bearer proof。参数或身份变化应丢弃旧 preview，重新准备并明确确认。
-- `taskAuthorization(owner, assistantId, session)` 校验四项身份与 grant，且对于写准备要求原有 session 实例；只发出精确 effects。
+- `taskAuthorization(owner, assistantId, session)` 校验四项身份与 grant，且在预览提供了已有 session 时要求原实例；只发出精确 effects。
 - `checkInvocation(...)` 是纯 admission gate，校验相同绑定、动作子集、工具种类与精确 effect。生产 catalog 仍负责完整 READ schema 校验。它不执行调用。
 
 ## 必须保留的集成边界（主代理负责）
@@ -50,16 +50,9 @@
 6. 暂不开放 `get_cookies`、`set_cookies`、`fetch`、offload 或共享路径，也不接私有文件映射；不能因底层有实现就声称本阶段可用。网页 JS/文本不构成这些能力的额外授权。
 7. 真实后端支持、系统权限、接管、generation 校验与资源清理仍是执行端的职责。底层每 owner 最多 3 个标签（0–2）；不承诺无限子标签或本阶段可用的子浏览器。unknown 不自动重试。
 
-## 单列给父代理的必要最小接口建议（本提交未修改）
+## 无 session 的纯预览
 
-当前 `RunBrowserTools.writeEffect` 仅接受 BrowserToolSession，但实际 effect 只依赖 `session.grant.owner`、access 与生产 freeze 结果。为了**在任何浏览器 session 尚未打开前**准备 WRITE，建议另行审查：
-
-- 增加 `writeEffect(grant: BrowserGrant, arguments: String): WriteEffect` 纯 overload；
-- 现有 session overload 只委托 `writeEffect(session.grant, arguments)`；
-- 将 private `effect` / `checkAccess` 的最小依赖改为 grant，继续复用同一 freeze/canonical 逻辑，不改变外部 effect 值；
-- 等 overload 合并后，本准备接口再改为只接收冻结 grant。不得为了绕开这一缺口临时构造 BrowserToolSession（其 init 会调用 registry.open），更不能造临时 WebView。
-
-这项建议与动作子集执行 gate 是两个独立问题；仅新增 overload 不会自动解决执行端 action-subset/assistant 约束。
+`RunBrowserTools.writeEffect(grant, arguments)` 已接入；session overload 只委托纯 grant 入口。prepare 不创建 BrowserToolSession、registry 或 WebView。无论预览是否带既有 session，执行端仍保留 action-subset、assistant、owner 和 task 对象身份约束。
 
 ## 证据与待运行测试
 

@@ -74,8 +74,9 @@ not evidence of an end-to-end Android UI integration.
 At creation, the token validates all frozen identity fields, grant equality and
 session identity. Task binding also pins the opaque runner owner object and the
 actual session object: equal IDs/grants do not authorize a replacement owner or
-session. A read-only preparation may omit the session; its first task binding
-pins the real session. Writes require an already-owned session at preparation.
+session. Read and write preparation may omit the session; the first task binding pins
+the real session. If preparation supplies an existing session, binding must
+retain that exact object. Write effects use the pure frozen-grant overload.
 The assistant profile is trusted creation-time data, not a model argument;
 `ToolExecutionContext` itself has no assistant-profile field.
 

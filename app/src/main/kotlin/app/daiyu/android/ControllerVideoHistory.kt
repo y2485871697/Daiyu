@@ -24,6 +24,7 @@ internal class ControllerVideoHistorySnapshot internal constructor(
     sidecars: List<List<MessageVideoInput>>,
 ) {
     val rows: List<Message> = physicalVideoHistoryCopy(rows)
+    private val sidecars = sidecars.map { inputs -> inputs.map { MessageVideoInput(it.owner, it.references) } }
     private val canonical = this.rows.zip(sidecars).map { (row, inputs) ->
         MessageVideoInputCodec.encode(row, inputs)
     }
@@ -35,6 +36,10 @@ internal class ControllerVideoHistorySnapshot internal constructor(
         require(rows.all { it.conversationId == conversation })
         validateVideoHistory(this.rows, inputs)
     }
+    internal fun appended(user: Message, assistant: Message, inputs: List<MessageVideoInput>) =
+        ControllerVideoHistorySnapshot(conversation, true, rows + listOf(user, assistant),
+            sidecars + listOf(inputs, emptyList()))
+
     internal fun same(other: ControllerVideoHistorySnapshot): Boolean =
         conversation == other.conversation && exists == other.exists && rows == other.rows && canonical == other.canonical
 }
@@ -75,6 +80,7 @@ internal class ControllerVideoHistory(private val database: ConversationDatabase
 
     internal fun capture(db: SQLiteDatabase, conversation: ConversationId): ControllerVideoHistorySnapshot {
         check(db.inTransaction())
+        SQLiteMessageVideoStore.assertNoOrphans(db)
         val exists = db.rawQuery("SELECT 1 FROM conversations WHERE id=?", arrayOf(conversation.value)).use { it.moveToFirst() }
         val ids = db.rawQuery("SELECT id FROM messages WHERE conversation_id=? ORDER BY seq", arrayOf(conversation.value)).use { c ->
             buildList { while (c.moveToNext()) add(c.getString(0)) }
@@ -92,6 +98,13 @@ internal class ControllerVideoHistory(private val database: ConversationDatabase
 
     fun assertCurrent(db: SQLiteDatabase, expected: ControllerVideoHistorySnapshot) {
         check(expected.same(capture(db, expected.conversation))) { "video_history_changed" }
+    }
+
+    fun assertAppended(db: SQLiteDatabase, expected: ControllerVideoHistorySnapshot,
+        user: Message, assistant: Message, inputs: List<MessageVideoInput>) {
+        check(expected.appended(user, assistant, inputs).same(capture(db, expected.conversation))) {
+            "video_history_append_unconfirmed"
+        }
     }
 }
 

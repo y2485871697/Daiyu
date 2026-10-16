@@ -259,6 +259,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         require(user.role=="user" && user.status==RunStatus.COMPLETED && assistant.role=="assistant" && assistant.status==RunStatus.RUNNING)
         var conversation:Conversation?=null
         transaction { db ->
+            val videoHistory = app.daiyu.android.ControllerVideoHistory(this).capture(db, user.conversationId)
             requireAssistant(db, expectedAssistantId)
             if (!newConversation) check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND assistant_id=?",
                 arrayOf(user.conversationId.value, expectedAssistantId)).use { it.moveToFirst() }) { "会话助手绑定已变化；草稿保留" }
@@ -286,6 +287,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 check(storedMessage(db,message.conversationId,message.id.value)==message) {"发送消息内容不匹配"}
             }
             validateRunHistory(db,user.conversationId,user.runId)
+            app.daiyu.android.ControllerVideoHistory(this).assertAppended(db, videoHistory, user, assistant, videoInputs)
             conversation=db.rawQuery("SELECT title,updated,folder,pinned,rowid,length(CAST(draft AS BLOB))=0,assistant_id FROM conversations WHERE id=?",arrayOf(user.conversationId.value)).use {
                 check(it.moveToFirst() && (newConversationRowId==null || it.getLong(4)==newConversationRowId)) {"发送会话身份不匹配"}
                 check(it.getInt(5)==1) {"发送会话草稿未清空"}
@@ -376,6 +378,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         val messageWhere=if(conversationId==null) "" else " WHERE conversation_id=?"
         val args=conversationId?.let {arrayOf(it.value)}
         transaction {db->
+            SQLiteMessageVideoStore.assertNoOrphans(db)
             check(videoAssets != null || !SQLiteMessageVideoStore.hasVideos(db, conversationId?.value)) {
                 "文本备份不能保留原视频，请使用支持视频原件的备份格式"
             }
@@ -505,6 +508,17 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         check(db === writableDatabase && db.inTransaction())
         val (imported, restored, _) = parseBackup(text)
         verifyBackupRows(db, imported, restored)
+    }
+    internal fun verifyImportedVideoWitnesses(db: SQLiteDatabase, text: String) {
+        check(db === writableDatabase && db.inTransaction())
+        SQLiteMessageVideoStore.assertNoOrphans(db)
+        val (_, rows, _) = parseBackup(text)
+        rows.forEach { original ->
+            val current = storedMessage(db, original.conversationId, original.id.value)
+            check(current.runId == original.runId && current.role == original.role) {
+                "video_import_owner_changed"
+            }
+        }
     }
     internal fun completeVideoBackupWitnesses(db: SQLiteDatabase, text: String,
         sidecars: List<app.daiyu.android.backup.BackupVideoSidecar>) {

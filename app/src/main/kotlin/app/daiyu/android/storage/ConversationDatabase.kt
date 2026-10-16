@@ -171,13 +171,20 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             arrayOf(message.id.value, message.conversationId.value, message.runId.value)) == 1) { "运行消息已结束，拒绝迟到检查点" }
         validateRunHistory(db, message.conversationId, message.runId)
     }
-    fun exportBackup():String {
+    fun exportBackup():String = exportBackup(null)
+    fun exportConversationBackup(conversationId:ConversationId):String = exportBackup(conversationId)
+    private fun exportBackup(conversationId:ConversationId?):String {
         var result=""
+        val conversationWhere=if(conversationId==null) "" else " WHERE id=?"
+        val messageWhere=if(conversationId==null) "" else " WHERE conversation_id=?"
+        val args=conversationId?.let {arrayOf(it.value)}
         transaction {db->
-            val conversationCount=db.rawQuery("SELECT count(*) FROM conversations",null).use {it.moveToFirst();it.getLong(0)}
-            val messageCount=db.rawQuery("SELECT count(*) FROM messages",null).use {it.moveToFirst();it.getLong(0)}
+            val conversationCount=db.rawQuery("SELECT count(*) FROM conversations$conversationWhere",args).use {it.moveToFirst();it.getLong(0)}
+            require(conversationId==null || conversationCount==1L) {"会话不存在或已删除"}
+            val messageCount=db.rawQuery("SELECT count(*) FROM messages$messageWhere",args).use {it.moveToFirst();it.getLong(0)}
             require(conversationCount<=1000 && messageCount<=50000) {"文本备份最多1000个会话、50000条消息"}
-            val rawBytes=db.rawQuery("SELECT (SELECT coalesce(sum(length(CAST(id AS BLOB))+length(CAST(title AS BLOB))+length(CAST(draft AS BLOB))+length(CAST(folder AS BLOB))),0) FROM conversations)+(SELECT coalesce(sum(length(CAST(id AS BLOB))+length(CAST(conversation_id AS BLOB))+length(CAST(run_id AS BLOB))+length(CAST(blocks AS BLOB))+length(CAST(protocol AS BLOB))+coalesce(length(CAST(error AS BLOB)),0)+length(CAST(history_segments AS BLOB))),0) FROM messages)+(SELECT length(CAST(draft AS BLOB)) FROM composer WHERE id=1)",null).use {it.moveToFirst();it.getLong(0)}
+            val composerBytes=if(conversationId==null) "(SELECT length(CAST(draft AS BLOB)) FROM composer WHERE id=1)" else "0"
+            val rawBytes=db.rawQuery("SELECT (SELECT coalesce(sum(length(CAST(id AS BLOB))+length(CAST(title AS BLOB))+length(CAST(draft AS BLOB))+length(CAST(folder AS BLOB))),0) FROM conversations$conversationWhere)+(SELECT coalesce(sum(length(CAST(id AS BLOB))+length(CAST(conversation_id AS BLOB))+length(CAST(run_id AS BLOB))+length(CAST(blocks AS BLOB))+length(CAST(protocol AS BLOB))+coalesce(length(CAST(error AS BLOB)),0)+length(CAST(history_segments AS BLOB))),0) FROM messages$messageWhere)+$composerBytes",args?.let {it+it}).use {it.moveToFirst();it.getLong(0)}
             require(rawBytes<=16*1024*1024) {"备份超过16MiB上限"}
             var encodedBytes=0L
             fun reserve(value:JSONObject) {
@@ -185,12 +192,12 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 require(encodedBytes<=16*1024*1024) {"备份超过16MiB上限"}
             }
             val conversations=JSONArray()
-            db.rawQuery("SELECT id,title,draft,updated,folder,pinned FROM conversations ORDER BY id",null).use {c->while(c.moveToNext()) {
+            db.rawQuery("SELECT id,title,draft,updated,folder,pinned FROM conversations$conversationWhere ORDER BY id",args).use {c->while(c.moveToNext()) {
                 val value=JSONObject().put("id",c.getString(0)).put("title",c.getString(1)).put("draft",c.getString(2)).put("updated",c.getLong(3)).put("folder",c.getString(4)).put("pinned",c.getInt(5)!=0)
                 reserve(value);conversations.put(value)
             }}
             val messages=JSONArray()
-            db.rawQuery("SELECT id,conversation_id,run_id,role,blocks,status,error,protocol,history_segments FROM messages ORDER BY seq",null).use {c->while(c.moveToNext()) {
+            db.rawQuery("SELECT id,conversation_id,run_id,role,blocks,status,error,protocol,history_segments FROM messages$messageWhere ORDER BY seq",args).use {c->while(c.moveToNext()) {
                 val blocks=JSONArray(c.getString(4));validateBlocks(blocks)
                 val protocol=JSONArray(c.getString(7))
                 val value=JSONObject().put("id",c.getString(0)).put("conversation_id",c.getString(1)).put("run_id",c.getString(2)).put("role",c.getString(3)).put("blocks",blocks).put("status",c.getString(5)).put("error",c.getString(6) ?: JSONObject.NULL).put("protocol",protocol)
@@ -205,7 +212,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 validateProtocol(protocol, if (JSONArray(rawSegments).length()==0) decode(blocks) else emptyList(), c.getString(3))
                 reserve(value);messages.put(value)
             }}
-            val draft=db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)}
+            val draft=if(conversationId==null) db.rawQuery("SELECT draft FROM composer WHERE id=1",null).use {it.moveToFirst();it.getString(0)} else ""
             reserve(JSONObject().put("draft",draft))
             val payload=JSONObject().put("conversations",conversations).put("messages",messages).put("draft",draft).toString()
             result=JSONObject().put("format","daiyu-neutral-text").put("version",1).put("conversation_count",conversations.length()).put("message_count",messages.length()).put("sha256",backupDigest(payload)).put("payload",payload).toString()

@@ -18,16 +18,22 @@ Inside `onConfirmed(token)`:
 
 ```kotlin
 // Under the existing parent's control lock; verify the same reservation/account/editor first.
-val lifetime = ControllerGenerationSession(token) { timeoutMillis ->
-    // Invoked ONLY on the independent cleanup worker, outside controller locks.
-    // Wait for the existing catalog, Runner AND receipt-persistence drain.
+val lifetime = ControllerGenerationSession(token, parentStop = {
+    // Invoked ONLY on the independent cleanup worker, before token.close().
+    // Target this reservation's ORIGINAL Runner, not whichever run is now current.
+    requestStopOfOriginalParentRun()
+}) { timeoutMillis ->
+    // Wait for the existing catalog, original Runner AND receipt-persistence drain.
+    // This callback runs outside the session/queue locks, not on UI or send/HTTP.
     // Return GenerationToolsCloseResult.Unknown if any drain is unknown.
     drainExistingParentRun(timeoutMillis)
 }
 reservedSlot.generationSession = lifetime // before scheduling the existing send/run path
 ```
 
-The parent-supplied `drainExistingParentRun` is intentionally not implemented here: only the parent owns that Runner/catalog and knows whether its durable receipt transaction has finished. It must not report Drained merely because HTTP was cancelled. Return `true` to the UI handoff only if the parent accepted this exact slot. UI callback acceptance is **not** a persistence receipt and must not clear the editor.
+The parent-supplied stop and `drainExistingParentRun` callbacks are intentionally not implemented here: only the parent owns that original Runner/catalog and knows whether its durable admission transaction and real run exit have finished. Requesting stop (or cancelling HTTP) is **not** proof of exit or admission completion. The drain must await both; it must not report Drained merely because HTTP was cancelled. Stop must target the captured original run, never a replacement/current run. Return `true` to the UI handoff only if the parent accepted this exact slot. UI callback acceptance is **not** a persistence receipt and must not clear the editor.
+
+`parentStop` is optional through the existing two-argument constructor: both `ControllerGenerationSession(token, parentDrain)` and `ControllerGenerationSession(token) { timeout -> ... }` retain their no-op-stop behavior. New parent wiring with a Runner must supply the stop callback. Construction and `revokeAdmission()` never invoke it; only the winning cleanup worker does, once.
 
 ## Exact existing catalog callbacks
 
@@ -98,11 +104,20 @@ synchronized(controllerLock) {
     lifetime.revokeAdmission() // cheap token/leaf admission fences only; no I/O/wait
     // Revoke parent owner before replacing it.
 }
-val queued = cleanupLane.offer(lifetime) // only enqueues; also idempotently revokes
+val queued = cleanupLane.offer(lifetime, onFinished = {
+    // Runs on the cleanup worker AFTER closeResult is published and the queue marker removed.
+    // No session/queue lock is held. Post a short event to the existing parent/UI coordinator;
+    // there, recheck the SAME reserved slot plus canRetire under the parent's control lock.
+    notifyParentToRecheckRetirement(lifetime)
+}) // only enqueues; also idempotently revokes
 // false => full/shutdown: keep reservedSlot + lifetime; retry notification later.
 ```
 
-The cleanup worker calls token `close()`/`awaitClose()` and the supplied parent drain. Close may block on an already admitted publication/transport; it is never called on the UI or send executor. Capacity is bounded even if all workers are stuck. `cleanupRequested` stays true; `closeResult` is published when both phases finish. Unknown is sticky, retains token/leaf/assets and reservation, and is **not** permission to retry paid generation, delete assets or make a replacement reservation. Queue shutdown drains existing queued tasks; it does not forcibly interrupt them. A rejected offer remains parent-owned.
+The cleanup worker first invokes `parentStop`, then attempts token `close()`/`awaitClose()` and the supplied parent drain. Both parent callbacks run outside the session/queue locks. Token `close()` is attempted even if stop throws; a thrown stop produces sticky Unknown (`generation_cleanup_failed`, or `generation_cleanup_interrupted` with interrupt restored), skips the parent drain and never reports Drained. Neither the stop request nor the token's own successful close proves the original parent has exited. Close may block on an already admitted publication/transport; it is never called on the UI or send executor.
+
+`offer(session, onFinished = {})` has an optional worker completion notification. The **first accepted offer** owns that notification: duplicate queued/active offers and already-terminal sessions return `true` without adding work or a second notification. Always attach the parent's callback on its first offer. A full/shutdown rejection returns `false`, invokes neither stop nor notification, and leaves the session pending. Successful cleanup publishes `closeResult`, removes the queued marker, then notifies on that same worker, including on Unknown. A notification exception is isolated and cannot discard the result or kill the worker. Notifications never run inline on the offer caller or under queue/session locks; keep them short, since they occupy a cleanup worker. The parent must also recheck retirement on later admission/receipt-consumption events; an already-terminal offer is not a new completion event.
+
+Capacity is bounded even if all workers are stuck. `cleanupRequested` stays true; `closeResult` is published when the cleanup attempt finishes. Unknown is sticky, retains token/leaf/assets and reservation, and is **not** permission to retry paid generation, delete assets or make a replacement reservation. Queue shutdown drains existing queued tasks; it does not forcibly interrupt them. A rejected offer remains parent-owned.
 
 `canRetire` requires Drained plus a definite Rejected or an Accepted already consumed by its exact editor. Unknown or an unresolved/non-consumed Accepted never retires automatically. It is deliberately conservative; the parent may need a separate explicit saved-history/manual reconciliation path, but cannot reinterpret that as automatic draft consumption.
 
@@ -126,7 +141,7 @@ The caller supplies the actual persisted binding and original `GenerationAttempt
 
 ## Added test sources and verification boundary
 
-- `app/src/test/.../ControllerGenerationSessionTest.kt`: real Runner-issued owner; Accepted-before-bind and stop ordering; wrong revision/account/owner; same mixed task/leaf; zero construction/preparation I/O; default URL deny; sticky parent-drain Unknown; saturated independent bounded queue/no CallerRuns; concurrent stop/Accepted.
+- `app/src/test/.../ControllerGenerationSessionTest.kt`: real Runner-issued owner; Accepted-before-bind and stop ordering; wrong revision/account/owner; same mixed task/leaf; zero construction/preparation I/O; default URL deny; sticky parent-drain Unknown; both legacy constructor forms; parent stop/drain/notification worker ordering, no UI-inline stop and stop-failure retention; default two-worker/eight-slot saturation, active/queued deduplication and no rejection fallback; notification after marker removal/outside locks and observer-exception isolation; unresolved/Unknown/unconsumed Accepted retention; concurrent stop/Accepted.
 - `app/src/androidTest/.../ControllerGenerationResourcesTest.kt`: isolated in-memory SQLite with static PNG; exact persistent account/assistant/run/tool and authoritative history validation; duplicate call denial; real output registration/metadata/original roundtrip; wrong fingerprint/account/tool rejection; no path/receipt in metadata.
 
 Tests are **source additions only**. Compilation, the targeted tests and any device run remain the main agent's responsibility. No paid calls or full Gradle execution are required for these fixtures.

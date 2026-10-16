@@ -22,7 +22,7 @@ class ControllerGenerationSessionTest {
     private val editor = GenerationEditorSnapshot(3, " exact text ", listOf("immutable-photo"))
     private val saved = Conversation(identity.conversationId, "saved", "", 1)
 
-    private fun preparation() = ControllerGenerationPreparation.prepare(identity, editor,
+    private fun preparation(snapshot: GenerationEditorSnapshot = editor) = ControllerGenerationPreparation.prepare(identity, snapshot,
         listOf(GenerationModelProfile("image", "explicit image", GenerationProtocol.OPENAI_IMAGES_JSON,
             "https://api.example/images/generations", "private-key", "explicit-model")),
         listOf(GenerationBatchSelection("batch", "image", listOf(GenerationRunConfig.Item("item", "draw")))),
@@ -53,6 +53,57 @@ class ControllerGenerationSessionTest {
     }
 
     private fun rejects(action: () -> Unit) { assertTrue(runCatching(action).isFailure) }
+
+    @Test fun explicitReceiptAcknowledgementNeverCreatesOwnerAndStillWaitsForDrain() {
+        val s = session()
+        val receipt = GenerationPersistenceReceipt.Accepted(saved)
+        s.recordPersistence(identity, receipt)
+        assertSame(receipt, s.pendingAcceptedReceipt)
+        assertFalse(s.acknowledgeAccepted(identity.copy(accountScope = "other"), receipt))
+        assertFalse(s.acknowledgeAccepted(identity, GenerationPersistenceReceipt.Accepted(saved)))
+        assertTrue(s.acknowledgeAccepted(identity, receipt))
+        assertNull(s.pendingAcceptedReceipt)
+        assertFalse(s.canRetire)
+        assertFalse(s.acknowledgeAccepted(identity, receipt))
+        assertNull(s.consumeAccepted(editor, identity))
+        s.cleanupOnWorker(0)
+        assertTrue(s.canRetire)
+    }
+
+    @Test fun originalDraftAndApprovedFormHaveIndependentRevisionNamespaces() {
+        val approved = GenerationEditorSnapshot(30, editor.text, editor.attachmentIds)
+        val p = preparation(approved)
+        val s = ControllerGenerationSession(p.confirm(p.preview, approved, identity)) {
+            GenerationToolsCloseResult.Drained
+        }
+        s.bindOwner(owner(), approved, identity, "session")
+        val receipt = GenerationPersistenceReceipt.Accepted(saved)
+        s.recordPersistence(identity, receipt)
+        assertNull(s.consumeAcceptedForOriginalEditor(editor,
+            GenerationEditorSnapshot(4, editor.text, editor.attachmentIds), identity))
+        assertNull(s.consumeAcceptedForOriginalEditor(editor,
+            GenerationEditorSnapshot(3, "changed", editor.attachmentIds), identity))
+        assertNull(s.consumeAcceptedForOriginalEditor(editor,
+            GenerationEditorSnapshot(3, editor.text, listOf("different-photo")), identity))
+        assertNull(s.consumeAcceptedForOriginalEditor(editor, editor, identity.copy(runId = RunId("other"))))
+        assertSame(receipt, s.consumeAcceptedForOriginalEditor(editor, editor, identity))
+        assertFalse(s.acknowledgeAccepted(identity, receipt))
+        assertNull(s.consumeAcceptedForOriginalEditor(editor, editor, identity))
+    }
+
+    @Test fun acknowledgementCannotOverrideUnknownOrMissingPersistenceOrDrain() {
+        val receipt = GenerationPersistenceReceipt.Accepted(saved)
+        val missing = session()
+        assertFalse(missing.acknowledgeAccepted(identity, receipt))
+        val unknownPersistence = session()
+        unknownPersistence.recordPersistence(identity, GenerationPersistenceReceipt.Unknown)
+        assertFalse(unknownPersistence.acknowledgeAccepted(identity, receipt))
+        val unknownDrain = session(drain = { GenerationToolsCloseResult.Unknown("fixture") })
+        unknownDrain.recordPersistence(identity, receipt)
+        assertTrue(unknownDrain.acknowledgeAccepted(identity, receipt))
+        unknownDrain.cleanupOnWorker(0)
+        assertFalse(unknownDrain.canRetire)
+    }
 
     @Test fun acceptedBeforeBindingCannotConsumeButExactBindingReleasesItOnce() {
         val s = session()

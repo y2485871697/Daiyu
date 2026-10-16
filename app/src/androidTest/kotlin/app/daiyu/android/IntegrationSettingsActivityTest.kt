@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import android.content.ContextWrapper
+import androidx.test.espresso.Espresso
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -62,6 +63,9 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         return Triple(entered, release, connection)
     }
     private fun fetchReady(): SemanticsNodeInteraction {
+        ui.waitForIdle()
+        Espresso.closeSoftKeyboard()
+        ui.waitForIdle()
         reveal("model-catalog-fetch")
         ui.waitUntil(timeoutMillis = 5_000) {
             ui.onAllNodesWithTag("model-catalog-fetch").fetchSemanticsNodes().singleOrNull()?.config?.let {
@@ -79,8 +83,9 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     fun testChatModelButtonOpensPickerAndSelectionPreservesConfigurationAndDraft() {
         val (_, _, connection) = catalogue()
         val before = fixture.settings.load()
-        val database = fixture.database.exportBackup()
         setDraft("切换模型时保留草稿")
+        assertDraft("切换模型时保留草稿")
+        val database = fixture.database.exportBackup()
         node("chat-model").performClick()
         node("chat-model-picker").assertExists()
         node("page:模型设置").assertDoesNotExist()
@@ -205,7 +210,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         backToChat(activity)
     }
     private fun openSkills() {
-        menu("设置"); reveal("settings-row:Skills", "设置").performClick()
+        openSettings(); reveal("settings-row:Skills", "设置").performClick()
         node("page:技能").assertIsDisplayed()
     }
     private fun skillSwitch(tag: String, on: Boolean): SemanticsNodeInteraction {

@@ -8,6 +8,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
@@ -109,17 +111,33 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         touch(button("新建会话")); touch(button("更多"))
         val menu = node("chat-overflow-menu").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         assertTrue(menu.height <= 336 * activity.resources.displayMetrics.density + 1)
-        touch(ui.onNodeWithText("重命名").performScrollTo())
-        ui.onNodeWithText("重命名").assertDoesNotExist()
+        touch(ui.onNodeWithText("Token 用量").performScrollTo())
+        ui.onNodeWithText("Token 用量").assertDoesNotExist()
         touch(node("chat-model")); touch(node("chat-context")); touch(button("语音输入"))
         node("chat-send").assertContentDescriptionEquals("追加消息")
         touch(node("chat-send")); touch(node("chat-control"))
         node("chat-control").performTouchInput { longClick() }
         ui.runOnIdle {
-            assertEquals(listOf("reasoning", "assistant", "menu:NEW_CHAT", "more", "menu:RENAME",
+            assertEquals(listOf("reasoning", "assistant", "menu:NEW_CHAT", "more", "menu:CONTEXT_STATS",
                 "model", "context", "voice", "send<${state.text}>", "pause", "stop"), events.toList())
             assertEquals(3, presses); assertEquals(3, releases)
         }
+    }
+
+    fun testOverflowHasOnlyOriginalEntriesAndNoInventedSectionHeadings() {
+        show(composer())
+        touch(button("更多"))
+        for (text in listOf("会话", "工具与工作区", "上下文", "会话管理", "重命名", "会话 ID", "导出",
+            "加载更早消息", "定位用户消息", "回到底部", "设置")) {
+            ui.onNodeWithText(text, substring = false, useUnmergedTree = true).assertDoesNotExist()
+        }
+        val expected = listOf("NEW_CHAT", "SEARCH", "INTERACTIVE_MODE", "OPEN_TERMINAL", "OPEN_BROWSER",
+            "OPEN_WORKSPACE", "SUB_AGENT", "OPEN_KIMI", "CONTEXT_STATS", "COMPRESS_CONTEXT", "AUTO_COMPRESS")
+        val actual = ui.onAllNodes(SemanticsMatcher("overflow menu item") {
+            it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("chat-menu:") == true
+        }).fetchSemanticsNodes().map { it.config[SemanticsProperties.TestTag].removePrefix("chat-menu:") }
+        assertEquals(expected, actual)
+        for (action in expected) node("chat-menu:$action").performScrollTo().assertIsDisplayed().assertHeightIsEqualTo(40.dp)
     }
 
     fun testDisabledComposerDoesNotAcquireControlGestureOrDispatchActions() {

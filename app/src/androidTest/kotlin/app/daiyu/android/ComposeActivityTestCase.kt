@@ -48,8 +48,13 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
     protected fun saveModel() { reveal("model-save").performClick() }
     protected fun openModels() {
-        menu("设置")
+        openSettings()
         reveal("settings-row:模型提供商", "设置").performClick()
+    }
+    protected fun openSettings() {
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        ui.onNodeWithContentDescription("设置").performClick()
+        ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodesWithTag("page:设置").fetchSemanticsNodes().isNotEmpty() }
     }
     protected fun menu(label: String) {
         ui.onNodeWithContentDescription("更多").performSemanticsAction(SemanticsActions.OnClick) { it() }

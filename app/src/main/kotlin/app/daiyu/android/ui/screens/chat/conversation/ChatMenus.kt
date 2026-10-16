@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
@@ -42,31 +43,22 @@ private data class MenuEntry(val title: String, val icon: ImageVector, val actio
 internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit,
     kimiRunning: Boolean = false) {
     val groups = listOf(
-        "会话" to listOf(
+        listOf(
             MenuEntry("新建会话", DaiyuIcons.NewChat, ChatMenuAction.NEW_CHAT),
-            MenuEntry("搜索会话", DaiyuIcons.Search, ChatMenuAction.SEARCH),
-            MenuEntry("交互模式", DaiyuIcons.Interactive, ChatMenuAction.INTERACTIVE_MODE),
+            MenuEntry("搜索记录", DaiyuIcons.Search, ChatMenuAction.SEARCH),
         ),
-        "工具与工作区" to listOf(
+        listOf(MenuEntry("交互模式", DaiyuIcons.Interactive, ChatMenuAction.INTERACTIVE_MODE)),
+        listOf(
             MenuEntry("打开终端", DaiyuIcons.Terminal, ChatMenuAction.OPEN_TERMINAL),
             MenuEntry("打开浏览器", DaiyuIcons.Browser, ChatMenuAction.OPEN_BROWSER),
             MenuEntry("浏览工作区文件", DaiyuIcons.Folder, ChatMenuAction.OPEN_WORKSPACE),
-            MenuEntry("子代理协作", DaiyuIcons.SubAgent, ChatMenuAction.SUB_AGENT),
+            MenuEntry("子代理状态", DaiyuIcons.SubAgent, ChatMenuAction.SUB_AGENT),
             MenuEntry(if (kimiRunning) "打开 Kimi Web · 运行中" else "启动 Kimi Web", DaiyuIcons.Model, ChatMenuAction.OPEN_KIMI),
         ),
-        "上下文" to listOf(
+        listOf(
             MenuEntry("Token 用量", DaiyuIcons.Chart, ChatMenuAction.CONTEXT_STATS),
-            MenuEntry("压缩上下文", DaiyuIcons.Compress, ChatMenuAction.COMPRESS_CONTEXT),
+            MenuEntry("压缩会话", DaiyuIcons.Compress, ChatMenuAction.COMPRESS_CONTEXT),
             MenuEntry("自动压缩", DaiyuIcons.Compress, ChatMenuAction.AUTO_COMPRESS),
-        ),
-        "会话管理" to listOf(
-            MenuEntry("重命名", DaiyuIcons.Rename, ChatMenuAction.RENAME),
-            MenuEntry("会话 ID", DaiyuIcons.Id, ChatMenuAction.CONVERSATION_ID),
-            MenuEntry("导出", DaiyuIcons.Export, ChatMenuAction.EXPORT),
-            MenuEntry("加载更早消息", DaiyuIcons.Refresh, ChatMenuAction.LOAD_EARLIER),
-            MenuEntry("定位用户消息", DaiyuIcons.Locate, ChatMenuAction.LOCATE_USER),
-            MenuEntry("回到底部", DaiyuIcons.JumpUp, ChatMenuAction.BOTTOM),
-            MenuEntry("设置", DaiyuIcons.Settings, ChatMenuAction.SETTINGS),
         ),
     )
     val colors = MiuixTheme.colorScheme
@@ -75,22 +67,22 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
         .widthIn(min = 232.dp, max = 280.dp).heightIn(max = maxHeight),
         shape = RoundedCornerShape(16.dp), containerColor = colors.surfaceContainer,
         tonalElevation = 0.dp, shadowElevation = 6.dp, border = BorderStroke(1.dp, colors.outline)) {
-        groups.forEachIndexed { index, (heading, entries) ->
+        groups.forEachIndexed { index, entries ->
             if (index > 0) HorizontalDivider(Modifier.padding(vertical = 4.dp), color = colors.outline)
-            Text(heading, Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                style = MiuixTheme.textStyles.footnote1, color = colors.onSurfaceVariantSummary)
-            entries.forEach { entry -> ChatMenuItem(entry, onDismiss, onAction) }
+            entries.forEach { entry -> ChatMenuItem(entry, onDismiss, onAction, Modifier.height(40.dp)) }
         }
         if (kimiRunning) {
             HorizontalDivider(color = colors.outline)
-            ChatMenuItem(MenuEntry("停止 Kimi Web", DaiyuIcons.Stop, ChatMenuAction.STOP_KIMI), onDismiss, onAction)
+            ChatMenuItem(MenuEntry("停止 Kimi Web", DaiyuIcons.Stop, ChatMenuAction.STOP_KIMI), onDismiss, onAction, Modifier.height(40.dp))
         }
     }
 }
 
 @Composable
-private fun ChatMenuItem(entry: MenuEntry, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit) {
+private fun ChatMenuItem(entry: MenuEntry, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit,
+    modifier: Modifier = Modifier) {
     DropdownMenuItem(
+        modifier = modifier.testTag("chat-menu:${entry.action.name}"),
         text = { Text(entry.title, style = MiuixTheme.textStyles.body1, color = MiuixTheme.colorScheme.onSurface) },
         leadingIcon = { Icon(entry.icon, null, Modifier.size(18.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary) },
         onClick = { onDismiss(); onAction(entry.action) },

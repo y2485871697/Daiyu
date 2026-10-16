@@ -87,6 +87,8 @@ class ChatController internal constructor(private val application:Application,
     private val contextPreparationFactory: (android.content.Context, ContextService) -> ContextPreparationCoordinator =
         ProductionContextPreparation::create,
     private val virtualDisplayFactory: ControllerVirtualDisplayFactory = ControllerVirtualDisplayFactory.REAL) {
+    // Voice credentials remain independent from chat settings.
+    internal val voiceRuntime by lazy { ControllerVoiceRuntime(application) }
     private val contextService by lazy { ContextService(application, database) }
     private val contextPreparation by lazy { contextPreparationFactory(application, contextService) }
 
@@ -102,7 +104,8 @@ class ChatController internal constructor(private val application:Application,
     }
     internal sealed interface TextSendResult {
         val owner: TextSendOwner
-        data class Accepted(override val owner: TextSendOwner, val conversation: Conversation): TextSendResult
+        data class Accepted(override val owner: TextSendOwner, val conversation: Conversation,
+            val assistant: Message? = null): TextSendResult
         data class Rejected(override val owner: TextSendOwner): TextSendResult
         /** Persistence did not return a confirmed receipt; retain the draft and do not auto-retry. */
         data class Unknown(override val owner: TextSendOwner): TextSendResult
@@ -122,6 +125,7 @@ class ChatController internal constructor(private val application:Application,
     // The existing preparation lane is retained until the worker (and device cleanup) exits.
     // Identity, not a Boolean reset, prevents an old completion from clearing a newer owner.
     private class Preparation(val assistantId: String?, var textTicket: TextSendTicket? = null) {
+        var admittedVoiceOwner: Message? = null
         val cancellation = ContextPreparationCancellation()
         var revoked = false
         var committing = false
@@ -964,7 +968,7 @@ class ChatController internal constructor(private val application:Application,
             val saved = try { sendPrepared(token,conversation,text,expectedDraftText=text) }
                 catch (_: Exception) { null }
             val result = when {
-                saved != null -> TextSendResult.Accepted(owner,saved)
+                saved != null -> TextSendResult.Accepted(owner,saved,token.admittedVoiceOwner)
                 token.persistenceUnconfirmed -> TextSendResult.Unknown(owner)
                 else -> TextSendResult.Rejected(owner)
             }
@@ -1903,6 +1907,7 @@ class ChatController internal constructor(private val application:Application,
                 browserPreparation?.isCancelled==true) false else {
                 if(imageAttempt!=null) imageProvider=provider
                 problem=null;active=assistant
+                token.admittedVoiceOwner = assistant // Exact admitted run, not a later current/history guess.
                 runner=owned;runTools=tools;resources=lifetime
                 generation?.let { it.runner=owned; it.catalog=tools }
                 enqueueSlice(lifetime,allowStopped=true) {

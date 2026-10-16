@@ -52,6 +52,7 @@ class VoiceHostTest {
             return true
         }
         override fun close() { closeCount++ }
+        override fun closeStrict() { stops += owner; close() }
         fun emit(phase: SpeechPhase, owner: String = this.owner, requestId: String? = state.value.requestId) {
             mutableState.value = SpeechPlaybackState(owner, requestId, phase)
         }
@@ -90,7 +91,10 @@ class VoiceHostTest {
         f.host.setForeground(true)
         assertTrue(f.host.speak(f.host.owner, "m", "answer"))
         assertEquals(1, f.creations)
-        assertEquals(Triple(f.host.owner, "m", "answer"), f.player.plays.single())
+        val engineRequest = f.player.plays.single()
+        assertNotEquals(f.host.owner, engineRequest.first)
+        assertNotEquals("m", engineRequest.second)
+        assertEquals("answer", engineRequest.third)
         assertEquals(SpeechPhase.INITIALIZING, f.host.state.value.phase)
         assertTrue(voiceHostIsActive(f.host.state.value))
         f.player.emit(SpeechPhase.SPEAKING)
@@ -152,7 +156,7 @@ class VoiceHostTest {
         f.host.speak(f.host.owner, "first", "one")
         f.host.speak(f.host.owner, "second", "two")
         assertFalse(f.host.stop(f.host.owner, "first"))
-        assertTrue(f.player.stops.isEmpty())
+        assertEquals(1, f.player.stops.size) // Replacement already strictly disposed the first player.
         f.player.emit(SpeechPhase.COMPLETED, requestId = "first")
         runCurrent()
         assertEquals("second", f.host.state.value.requestId)
@@ -173,7 +177,7 @@ class VoiceHostTest {
         f.player.failure = null
         f.host.speak(f.host.owner, "m", "answer")
         assertEquals(2, f.player.plays.size)
-        assertEquals(1, f.creations)
+        assertEquals(2, f.creations) // A terminal request cannot retain a ready Android engine.
         f.host.close()
     }
 

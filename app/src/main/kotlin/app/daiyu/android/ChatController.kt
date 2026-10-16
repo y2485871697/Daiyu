@@ -882,7 +882,8 @@ class ChatController internal constructor(private val application:Application,
                 backgroundFactory, authorization=shizukuAuthorization ?: browserBinding?.let {
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value, it.requiredWrites)
                 }, shizuku=shizuku, browser=browserBinding) { grants, authorization ->
-                SkillToolRegistry(application).captureForRun(grants, authorization)
+                SkillToolRegistry(application).captureForRun(grants, authorization,
+                    selection = assistantContext.enabledSkillIds.toSet())
             }
             preparingTools = tools
             val owned = ChatRunner(preparedModel, database, tools,

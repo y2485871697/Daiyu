@@ -60,7 +60,7 @@ Host fixtures use test-only AtomicFile/Instrumentation/Context/preferences subst
 
 ## Trusted read-only run scope increment
 
-`SkillToolRegistry.captureForRun(SessionCapabilities, TaskAuthorization)` is a trusted worker-thread factory. Pass the actual host-issued grant, not IDs parsed from model JSON. It rejects session mismatch, snapshots `skills.read` / `skills.resource`, and preserves builtin precedence and `builtin:` / `user:` IDs. With no read capability or global Skills disabled it returns an empty, unauthorized handle. Capturing may lock/read/recover stores; never call it from `RegisteredTool.prepare`.
+`SkillToolRegistry.captureForRun(SessionCapabilities, TaskAuthorization, selection: Set<String>? = null)` is a trusted worker-thread factory. Pass the actual host-issued grant, not IDs parsed from model JSON. It rejects session mismatch and snapshots `skills.read` / `skills.resource`. Omitting selection preserves legacy builtin precedence and `builtin:` / `user:` IDs; explicit selection uses the narrower rules below. With no read capability or global Skills disabled it returns an empty, unauthorized handle. Capturing may lock/read/recover stores; never call it from `RegisteredTool.prepare`.
 
 Use one `SkillRunSession` per trusted run. `availableTools` contains only `skills_list`, `skills_read`, and optionally `skills_read_resource`; it is a name set, not a central ToolCatalog. The central adapter, prompt index and reads must consume this same handle. Do not route model reads to the legacy live `execute()` fallback, and do not expose install/inspect through this read-only session.
 
@@ -163,3 +163,78 @@ API26 and API37.2; UI smoke for URL input -> inspect -> select (including root) 
 each replacement checkbox -> submit/read-back; cancel before submission and leave while queued;
 Unknown/cleanup messaging; refresh after stale revision; old run instructions/new run metadata
 and old-resource rejection; model catalog still read-only. No test count here implies passage.
+
+## Assistant-selected read-only run scope
+
+`captureForRun(capabilities, authorization, selection: Set<String>? = null)` now accepts a
+host-owned selection. The parent must pass the **already frozen**
+`AssistantRunContext.enabledSkillIds.toSet()`, not reread the current assistant settings or
+accept selection from model JSON. The factory copies that set before capture. No mutable
+selection is retained in `SkillRunSession`.
+
+Normalization deliberately cannot widen a selection:
+
+| Input | Meaning |
+| --- | --- |
+| Omitted or `null` | Backward-compatible enabled catalog, with enabled builtins shadowing same-name user entries. This is not the assistant path. |
+| `emptySet()` | No selected skills. Authorized read tools may remain advertised, but the index is empty and every skill read rejects. Never convert empty to null. |
+| `builtin:name` / `user:name` | Exact, case-sensitive origin and name. No fallback to another origin if missing or disabled. Both same-name origins appear only when both exact IDs were explicitly requested. |
+| Bare `name` (e.g. `self-improving-agent`) | Resolve only if that installed directory name exists in exactly one origin. If both origins contain it, ignore this ambiguous token (fail closed), even when a namesake is disabled or has damaged metadata. An additional explicit ID still selects its exact origin. |
+| Unknown/malformed token | Select nothing for that token; never reinterpret as all skills. No trimming, lowercasing, wildcard matching or prefix repair. Names use `[a-z0-9]+(?:-[a-z0-9]+)*`, length 1..64. |
+
+All selections still require global enablement, individual enablement and `skills.read`.
+`skills_read_resource` additionally requires `skills.resource`; selection is not a grant.
+Selection filters directory names **before** per-skill metadata/body validation and byte
+accounting. Only selected enabled bodies/manifests enter the capture budget. Thus unselected
+corrupt SKILL.md or `.skill.json` cannot break a selected run. A selected damaged skill still
+fails capture; root safety, store locking and transaction recovery failures remain errors
+(not silently ignored). Directory-name inventory also initializes the default user store's
+builtin-name protection, avoiding eager parsing of unselected builtin metadata. Installation
+and settings approval protocols are otherwise unchanged.
+
+The returned single scope supplies catalog/index, SKILL.md and resource reads. Unselected IDs
+are absent even if physically installed. `SkillRunSession` is unchanged: it requires the same
+host authorization **object** (`===`), keeps frozen bodies, and checks the captured revision
+and hash plus current enabled state for non-body resources. Selection changes affect only a
+new capture; neither changing a caller's mutable set nor editing an assistant can widen an
+already returned scope. Capture is not a cross-store transaction: directory inventories and
+per-store snapshots are separately locked. A newly installed skill is not discovered again
+mid-capture to widen an explicit selection.
+
+### Parent Controller integration example (handoff, not edited here)
+
+At the existing `RunCatalogTools` skill-factory callback, capture the assistant selection once
+from the run context and pass it explicitly. Keep the same host `authorization` object:
+
+```kotlin
+val selected = assistantContext.enabledSkillIds.toSet() // empty stays empty
+val tools = RunCatalogTools(
+    registry, capabilities, toolLedger, conversationId, run, devices, children,
+    backgroundFactory, authorization = shizukuAuthorization, shizuku = shizuku
+) { grants, authorization ->
+    SkillToolRegistry(application).captureForRun(
+        grants, authorization, selection = selected
+    )
+}
+```
+
+Use this returned handle throughout the existing dispatcher/prompt path; do not switch back
+to live `execute()` or recapture later. This patch does not edit Controller, MainActivity or
+RunCatalogTools, does not alter global installation management, and adds no shell execution
+or child-agent tools. The main agent must review and apply the parent call-site change.
+
+### Selection verification handoff
+
+`SkillRunSelectionTest` adds isolated fixtures for omitted/null versus explicit empty selection,
+unique bare names, unknown/malformed tokens, exact prefixes, same-name collision (including
+disabled/damaged namesakes), unselected damaged metadata/bodies with default lazy user-store
+construction, selected damage rejection, exclusion before the capture budget, mutable
+selection changes after capture, shared index/body/resource scope, authorization object
+identity, frozen body/live-resource revision semantics and global/individual/read/resource
+permission intersections. Existing `SkillRegistrySnapshotTest`, `SkillRunSessionTest`,
+`SkillManagementTest` and installation tests remain regression targets.
+
+These tests were authored and statically reviewed only. This implementation agent ran no
+shell, build or tests and claims no passing test count. Parent compilation and test execution
+are required; API26/API37.2 instrumentation and real Controller-path acceptance are not
+established by this change.

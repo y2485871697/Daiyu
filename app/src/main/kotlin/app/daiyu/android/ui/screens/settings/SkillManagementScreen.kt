@@ -22,6 +22,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -48,7 +52,9 @@ import app.daiyu.android.skills.SkillManagement
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicReference
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -96,6 +102,26 @@ internal fun SkillManagementScreen(
                         onCheckedChange = controller::setGlobalEnabled,
                     )
                 })
+            }
+        }
+        item(key = "skills_install") {
+            SkillSettingsCard {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("从公开 GitHub 仓库安装", color = colors.onSurface)
+                    OutlinedTextField(
+                        value = controller.url,
+                        onValueChange = { controller.url = it },
+                        enabled = !controller.busy,
+                        label = { Text("https://github.com/owner/repo") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth().testTag("skills-install-url"),
+                    )
+                    Button(onClick = controller::inspect, enabled = !controller.busy && controller.url.isNotBlank(),
+                        modifier = Modifier.testTag("skills-inspect")) { Text("检查仓库") }
+                    if (controller.busy) Text("正在处理，请稍候…", color = colors.onSurfaceVariantSummary)
+                    Text("仅安装静态技能资源，不执行脚本；安装后供新运行使用。", color = colors.onSurfaceVariantSummary)
+                    controller.installMessage?.let { Text(it, color = colors.onSurface) }
+                }
             }
         }
         controller.error?.let { error ->
@@ -172,8 +198,74 @@ internal fun SkillManagementScreen(
         }
     }
 
+    controller.inspection?.let { inspection ->
+        SkillInstallSheet(controller, inspection)
+    }
     details?.let { entry ->
         SkillDetailsSheet(entry = entry, onDismiss = { details = null })
+    }
+}
+
+@Composable
+private fun SkillInstallSheet(controller: SkillManagementPageState, inspection: SkillManagement.Inspection) {
+    val colors = MiuixTheme.colorScheme
+    val preview = controller.preview
+    var approved by remember(preview) { mutableStateOf(emptySet<String>()) }
+    Dialog(onDismissRequest = { if (!controller.installing) controller.cancelInstall() },
+        properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Column(Modifier.padding(16.dp).widthIn(max = 640.dp).fillMaxWidth().heightIn(max = 640.dp)
+            .clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerHigh).padding(16.dp)
+            .semantics { paneTitle = "安装技能" }, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(if (preview == null) "选择技能目录" else "确认精确安装内容", color = colors.onSurface)
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${inspection.owner}/${inspection.repo}\ncommit: ${inspection.commit}", color = colors.onSurface)
+                if (preview == null) {
+                    if (inspection.candidates.isEmpty()) Text("未找到 SKILL.md", color = colors.onSurface)
+                    inspection.candidates.forEach { candidate ->
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Checkbox(checked = candidate.directory in controller.selected,
+                                enabled = !controller.busy,
+                                onCheckedChange = { controller.select(candidate.directory, it) },
+                                modifier = Modifier.testTag("skills-directory:${candidate.directory}"))
+                            Column {
+                                Text("${candidate.name} · ${candidate.directory.ifEmpty { "(根目录)" }}", color = colors.onSurface)
+                                Text(candidate.description, color = colors.onSurfaceVariantSummary)
+                            }
+                        }
+                    }
+                } else {
+                    Text("已通过现有文件/路径/大小静态校验；不代表可执行脚本或平台兼容性认证。", color = colors.onSurfaceVariantSummary)
+                    preview.changes.forEach { change ->
+                        val candidate = change.candidate
+                        Text("${candidate.name}\n目录：${candidate.directory.ifEmpty { "(根目录)" }}\n新版本：${candidate.incomingRevision}", color = colors.onSurface)
+                        change.previousRevision?.let { old ->
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = candidate.name in approved, enabled = !controller.busy,
+                                    onCheckedChange = { checked -> approved = if (checked) approved + candidate.name else approved - candidate.name },
+                                    modifier = Modifier.testTag("skills-replace:${candidate.name}"))
+                                Text("批准替换 user:${candidate.name}\n旧版本：$old", color = colors.onSurface)
+                            }
+                        } ?: Text("新安装（仅创建，不覆盖）", color = colors.onSurfaceVariantSummary)
+                    }
+                    Text("确认仅用于上述 commit、目录和版本，使用一次即失效。安装将启用所选技能，全局开关保持不变。", color = colors.onSurfaceVariantSummary)
+                }
+                controller.error?.let { Text(it, color = colors.error) }
+                if (controller.busy) Text(if (controller.installing) "安装等待或处理中；离页撤销尚未开始的安装，已开始的安装不回滚。" else "正在静态校验…", color = colors.onSurface)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                TextButton(onClick = controller::cancelInstall, enabled = !controller.installing) { Text("取消") }
+                if (preview == null) {
+                    Button(onClick = controller::prepareInstall, enabled = !controller.busy && controller.selected.isNotEmpty(),
+                        modifier = Modifier.testTag("skills-preview")) { Text("预览安装") }
+                } else {
+                    val needed = preview.changes.filter { it.previousRevision != null }.map { it.candidate.name }.toSet()
+                    Button(onClick = { controller.install(preview, preview.replacements) },
+                        enabled = !controller.busy && approved.containsAll(needed),
+                        modifier = Modifier.testTag("skills-confirm-install")) { Text("确认安装") }
+                }
+            }
+        }
     }
 }
 
@@ -278,12 +370,36 @@ private fun SkillSwitch(
     )
 }
 
+/**
+ * One-way page ownership, independent of the worker queue and SkillManagement's I/O lock.
+ * Issuing a ticket is NOT admission. Only the worker's successful CAS admits that ticket;
+ * revoke competes with that same CAS and permanently closes this owner. No I/O runs here.
+ */
+private class SkillInstallPageOwner {
+    class Ticket
+    private val open = Any()
+    private val revoked = Any()
+    private val state = AtomicReference(open)
+
+    val active: Boolean get() = state.get() !== revoked
+    fun ticket(): Ticket? = Ticket().takeIf { state.compareAndSet(open, it) }
+    fun admit(ticket: Ticket): Boolean = state.compareAndSet(ticket, open)
+    fun revoke(): Boolean = state.getAndSet(revoked) !== revoked
+}
+
 /** Only the executor touches SkillManagement; only the main thread updates observable state. */
-private class SkillManagementPageState(managementFactory: () -> SkillManagement) {
-    private val main = Handler(Looper.getMainLooper())
-    private val worker = Executors.newSingleThreadExecutor()
-    private val management by lazy(managementFactory)
-    private var active = true
+internal class SkillManagementPageState(
+    managementFactory: () -> SkillManagement,
+    private val worker: ExecutorService = Executors.newSingleThreadExecutor(),
+    private val postToMain: (() -> Unit) -> Unit = { callback ->
+        Handler(Looper.getMainLooper()).post { callback() }
+        Unit
+    },
+) {
+    private val managementDelegate = lazy(managementFactory)
+    private val management by managementDelegate
+    private val owner = SkillInstallPageOwner()
+    private val active: Boolean get() = owner.active
 
     var state by mutableStateOf<SkillManagement.State?>(null)
         private set
@@ -293,6 +409,101 @@ private class SkillManagementPageState(managementFactory: () -> SkillManagement)
         private set
     var error by mutableStateOf<String?>(null)
         private set
+
+    var url by mutableStateOf("")
+    var inspection by mutableStateOf<SkillManagement.Inspection?>(null)
+        private set
+    var preview by mutableStateOf<SkillManagement.Preview?>(null)
+        private set
+    var selected by mutableStateOf(emptySet<String>())
+        private set
+    var installing by mutableStateOf(false)
+        private set
+    var installMessage by mutableStateOf<String?>(null)
+        private set
+    private var flowGeneration = 0L
+
+    fun inspect() {
+        if (!active || busy) return
+        inspection = null; preview = null; selected = emptySet(); installMessage = null
+        val input = url.trim()
+        flow({ management.inspect(input) }) { inspection = it }
+    }
+
+    fun select(directory: String, checked: Boolean) {
+        if (!active || busy || preview != null) return
+        selected = if (checked) selected + directory else selected - directory
+    }
+
+    fun prepareInstall() {
+        val inspected = inspection ?: return
+        val directories = selected.toSet()
+        flow({ management.preview(inspected, directories) }) { preview = it }
+    }
+
+    fun install(approvedPreview: SkillManagement.Preview, replacements: Map<String, String>) {
+        if (!active || busy || preview !== approvedPreview) return
+        val ticket = owner.ticket() ?: return
+        installing = true
+        flow(ticket = ticket, operation = {
+            val result = management.install(approvedPreview, replacements)
+            result to runCatching { management.snapshot() }
+        }) { (result, refreshed) ->
+            inspection = null; preview = null; selected = emptySet()
+            refreshed.fold(onSuccess = { state = it; confirmed = !it.entriesUnavailable }, onFailure = { confirmed = false })
+            installMessage = when (result) {
+                is SkillManagement.InstallResult.Installed -> if (result.cleanupPending)
+                    "安装已提交，清理待完成；请刷新，不要重复安装。" else "安装成功，新运行可见；当前运行保持原快照。"
+                is SkillManagement.InstallResult.Rejected -> "安装未获确认（${result.code}），请刷新后重新检查和预览。"
+                SkillManagement.InstallResult.Unknown -> "安装结果未知，请刷新核对；不会自动重装。离页不代表回滚。"
+            }
+            if (refreshed.isFailure) error = "列表读取失败，请刷新核对；不要重复提交安装。"
+        }
+    }
+
+    fun cancelInstall() {
+        if (!active || installing) return
+        flowGeneration++
+        busy = false
+        inspection = null; preview = null; selected = emptySet(); error = null
+        worker.execute { runCatching { management.cancelInstall() } }
+    }
+
+    private fun <T> flow(
+        operation: () -> T,
+        ticket: SkillInstallPageOwner.Ticket? = null,
+        accept: (T) -> Unit,
+    ) {
+        if (!active || busy) { installing = false; return }
+        busy = true; error = null
+        val generation = ++flowGeneration
+        val writing = installing
+        worker.execute {
+            // This is the install admission point, not the click or execute() call.
+            // Once admitted, finish outside the gate even if the page is then revoked.
+            if (ticket != null) {
+                if (!owner.admit(ticket)) return@execute
+            } else if (!active) return@execute
+            val result = runCatching(operation)
+            postToMain {
+                if (!active || generation != flowGeneration) return@postToMain
+                busy = false; installing = false
+                result.fold(onSuccess = accept, onFailure = { failure ->
+                    if (writing) {
+                        inspection = null; preview = null; selected = emptySet(); confirmed = false
+                        installMessage = "安装结果未知，请刷新核对；不会自动重装。离页不代表回滚。"
+                    } else {
+                        error = when (failure.message) {
+                            "builtin_conflict" -> "所选技能与内置技能同名，不能覆盖内置技能。"
+                            "duplicate_skill" -> "所选目录包含重名技能，请调整选择。"
+                            "incoming_revision_conflict" -> "下载内容与检查版本不符，请重新检查仓库。"
+                            else -> "检查或预览失败，请刷新后重试（未提交安装）。"
+                        }
+                    }
+                })
+            }
+        }
+    }
 
     fun refresh() = load { management.snapshot() }
 
@@ -310,9 +521,10 @@ private class SkillManagementPageState(managementFactory: () -> SkillManagement)
         if (!active || busy) return
         busy = true
         worker.execute {
+            if (!active) return@execute
             val result = runCatching(operation)
-            main.post {
-                if (!active) return@post
+            postToMain {
+                if (!active) return@postToMain
                 busy = false
                 result.fold(
                     onSuccess = { freshState ->
@@ -331,8 +543,12 @@ private class SkillManagementPageState(managementFactory: () -> SkillManagement)
     }
 
     fun dispose() {
-        active = false
-        // An admitted write may finish; leaving the page is not rollback.
+        // Revoke synchronously without waiting for management's network/storage lock.
+        // Queued tickets now fail admission; an already admitted write may finish.
+        if (!owner.revoke()) return
+        worker.execute {
+            if (managementDelegate.isInitialized()) runCatching { management.cancelInstall() }
+        }
         worker.shutdown()
     }
 }

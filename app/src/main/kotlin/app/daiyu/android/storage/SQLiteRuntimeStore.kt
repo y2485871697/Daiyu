@@ -33,6 +33,10 @@ internal class SQLiteRuntimeStore private constructor(
     private val childStore = SQLiteChildTaskStore(database)
     internal val childTasks: ChildTaskStore = object : ChildTaskStore {
         override fun enqueue(parent: RunExecutionOwner, tasks: List<ChildTaskRecord>) = childAccess { childStore.enqueue(parent, tasks) }
+        override fun get(owner: ChildRunOwner) = childAccess { childStore.get(owner) }
+        override fun commandReceipt(command: ChildTaskCommand) = childAccess { childStore.commandReceipt(command) }
+        override fun enqueueCommand(parent: RunExecutionOwner, command: ChildTaskCommand, successor: ChildTaskRecord) =
+            childAccess { childStore.enqueueCommand(parent, command, successor) }
         override fun started(task: ChildTaskRecord) = childAccess { childStore.started(task) }
         override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) =
             childAccess { childStore.finished(task, status, text, detail) }

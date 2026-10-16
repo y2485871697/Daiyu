@@ -221,7 +221,7 @@ internal class RunCatalogTools(
                 }
                 ScopedSkillTools.create(scope, authorization).forEach { registry.register(it) }
                 children?.let { registry.register(it.tool()) }
-                background?.let { registry.register(it.tool()) }
+                background?.let { registry.register(it.tool()); registry.register(it.commandTool()) }
                 shizuku?.let { registry.register(it.commands.tool()) }
                 terminalLeaf?.registeredTools?.forEach { registry.register(it) }
                 browserTools.forEach { registry.register(it) }

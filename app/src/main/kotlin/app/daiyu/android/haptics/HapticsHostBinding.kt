@@ -107,8 +107,8 @@ class HapticsHostBinding(
         /** On accepted stop/failure/completion, NOT just when the Activity becomes background. */
         fun stop() {
             ended = true // Revoke worker callbacks before waiting for the main looper.
+            session.close() // Also fences already queued engine ticks, even off the main thread.
             val dispose = {
-                session.close()
                 if (current === this) current = null
             }
             if (Looper.myLooper() == Looper.getMainLooper()) dispose() else handler.post { dispose() }

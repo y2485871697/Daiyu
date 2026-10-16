@@ -1,5 +1,7 @@
 # R08 第二阶段：独立 identity / durable receipt 基础（未接线）
 
+> 本文保留第二阶段历史范围。后续 owner 侧 Main/IPC 可信 bootstrap 与 receipt 接线见 [第三阶段](vd-owner-stage3-bootstrap-receipts.md)；中央宿主接线与真机验证仍不能据此视为完成。
+
 ## 范围与证据边界
 
 本阶段只新增：

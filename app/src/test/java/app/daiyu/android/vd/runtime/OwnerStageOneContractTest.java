@@ -26,7 +26,8 @@ public class OwnerStageOneContractTest {
         for (int uid : new int[]{2000, 10000}) {
             ShadowProcess.setUid(uid);
             assertEquals(3, VirtualDisplayOwnerMain.run(new String[]{
-                    "--socket", "host-contract", "--allow-uid", "10000"}));
+                    "--socket", "host-contract", "--allow-uid", "10000",
+                    "--receipt-root", "/private/owner-receipts"}));
         }
     }
 

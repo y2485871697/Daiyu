@@ -1,6 +1,23 @@
-# P24 应用级桌宠宿主接线（父入口待接）
+# P24 应用级桌宠宿主接线
 
-本叶子不修改 `MainActivity`、`ChatController`、`ModelSettings` 公共配置或 manifest，不改变原图/算法。新增的生产组合入口是 `app.daiyu.android.pet.PetApplicationHost`。它真实组合现有 `PetHost` → `PetOverlayHost` 以及 `AndroidPetModelPort`；不是另一个桌宠运行时。
+## 产品入口（本次集成）
+
+`ChatApplication.onCreate` 现在唯一创建并强持有 `pets`，连接 controller 的 `CommittedPetTransitions`。
+`MainActivity` 的 `ApplicationPetMount` 用真实 FrameLayout 包裹 ComposeView，借用 attach lease；
+原生 sibling dispatch 保留透明区域触摸穿透，Activity 重建只释放租约，不 close 应用运行时。
+SettingsHome 的 pet 条目分派到真实 PetSettingsScreen，并提供本进程显式 gate 与独立系统授权入口。
+
+`IndependentModelSettings` 使用独立加密 ModelSettingsStore 命名空间及持久绑定记录；桌宠的 assistantId
+必须存在且匹配绑定 providerId/localModelId，API model/凭据来自该独立记录，不读取主槽兜底。
+配置页保存后写入真实三 ID 到 PetSettings，配置变更撤销旧反应。无需 DB 升版。
+完成流来自 ChatRunner 成功 post-commit 的真实 active before / callback after，标题固定为 database.send
+接受回执的 title；切换选择、重命名、重组、读历史不会构造完成事件。
+
+新增/扩展测试源码：IndependentModelProductionTest、ControllerAssistantBindingTest、ActivityLifecycleTest；
+涵盖真实绑定、精确 ID 拒绝、接受标题、设置入口、Compose 挂载与跨 Activity 同一宿主。
+本集成未构建/执行测试；下方保留叶子 API 和授权契约供审核。
+
+生产组合入口是 `app.daiyu.android.pet.PetApplicationHost`。它真实组合现有 `PetHost` → `PetOverlayHost` 以及 `AndroidPetModelPort`，不是另一个桌宠运行时。以下保留宿主 API/接线契约；当前 MainActivity/ChatController 已按上节接入，未改变原图/算法或 manifest。
 
 ## 1. 可编译公共 API
 

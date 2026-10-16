@@ -78,6 +78,12 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
             f.app.getSharedPreferences("daiyu-assistants",0).edit().clear().commit()
             val keys=java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
             java.util.Collections.list(keys.aliases()).filter { it.startsWith("${f.alias}.") }.forEach(keys::deleteEntry)
+            listOf("pet", "vision").forEach { slot ->
+                val raw = f.app.getSharedPreferences("independent-$slot-model", 0)
+                raw.getString("key-alias", null)?.let { keys.deleteEntry(it) }
+                raw.edit().clear().commit()
+            }
+            f.app.getSharedPreferences("independent-model-bindings", 0).edit().clear().commit()
         } } finally { super.tearDown() }
     }
 
@@ -160,6 +166,112 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         assertNull(f.controller.send(null,"keep"))
         assertEquals("keep",f.database.draft())
         assertTrue(f.database.conversations().isEmpty()); assertEquals(0,opened.get())
+    }
+
+    fun testCommittedPetEventUsesAcceptanceTitleAndActualPersistedTransition() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val f = fresh(factory = { _, _ -> ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
+                sink(ModelEvent.TextFinal("answer", "done"))
+            }
+            override fun cancel() { release.countDown() }
+        } } })
+        val event = AtomicReference<app.daiyu.android.pet.PetAssistantTransition?>()
+        val committed = CountDownLatch(1)
+        val lease = f.controller.petTransitions.subscribe {
+            // This callback is downstream of the real atomic Runner commit, not an observe/diff.
+            assertEquals(it.after, f.database.storedMessage(f.database.readableDatabase,
+                it.after.conversationId, it.after.id.value))
+            event.set(it); committed.countDown()
+        }
+        try {
+            val accepted = checkNotNull(f.controller.send(null, "completion event"))
+            assertTrue(entered.await(10, TimeUnit.SECONDS))
+            f.database.rename(accepted.id, "renamed while running; not the acceptance title")
+            f.controller.assistantStore.save(AssistantProfile("different", "Other selection", ""))
+            f.controller.assistantStore.select("different")
+            release.countDown()
+            assertTrue(committed.await(10, TimeUnit.SECONDS))
+            val actual = checkNotNull(event.get())
+            assertEquals(RunStatus.RUNNING, actual.before.status)
+            assertEquals(RunStatus.COMPLETED, actual.after.status)
+            assertEquals(actual.before.id, actual.after.id)
+            assertEquals(accepted.title, actual.title)
+            await(f) { f.controller.active == null }
+        } finally { release.countDown(); lease.cancel() }
+    }
+
+    fun testEnabledVisionRouteIsIndependentAndDoesNotUpgradeMainImageCapability() {
+        val mainOpens = AtomicInteger()
+        val f = fresh(factory = { provider, _ ->
+            assertEquals("fixture", provider.model)
+            assertNull(provider.imageInputSupported)
+            ModelPort { history ->
+                mainOpens.incrementAndGet()
+                assertTrue(history.all { it.blocks.none { block -> block is MessageBlock.Image } })
+                object : ModelSession {
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        sink(ModelEvent.TextFinal("done", "ordinary text through auxiliary branch"))
+                    }
+                    override fun cancel() {}
+                }
+            }
+        })
+        f.controller.independentModels.save(IndependentModelSettings.Slot.VISION,
+            ModelSettings("https://vision.invalid", "separate-vision-api", "separate-vision-key", false), null, true, true)
+        val main = ProviderSnapshot.capture(f.controller.settings.load())
+        val route = f.controller.captureImageRoute(main)
+        assertNull(main.imageInputSupported)
+        assertEquals("separate-vision-api", route.actual.model)
+        assertEquals(true, route.actual.imageInputSupported)
+        assertNotNull(route.auxiliaryGeneration)
+        assertNotNull(f.controller.send(null, "text needs authorization too"))
+        await(f) { f.controller.active == null }
+        assertEquals(1, mainOpens.get())
+    }
+
+    fun testAuxiliaryConfigurationEditCancelsBlockedOpenButRetainsRunUntilWorkerDrains() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val lateCancels = AtomicInteger(); val nextCalls = AtomicInteger()
+        val f = fresh(factory = { _, _ -> ModelPort {
+            entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
+            object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) { nextCalls.incrementAndGet() }
+                override fun cancel() { lateCancels.incrementAndGet() }
+            }
+        } })
+        val configuration = ModelSettings("https://vision.invalid", "vision-a", "vision-key", false)
+        f.controller.independentModels.save(IndependentModelSettings.Slot.VISION, configuration, null, true, true)
+        try {
+            assertNotNull(f.controller.send(null, "hold open"))
+            assertTrue(entered.await(10, TimeUnit.SECONDS))
+            f.controller.independentModels.save(IndependentModelSettings.Slot.VISION,
+                configuration.copy(model = "vision-b"), null, true, true)
+            assertNotNull(f.controller.active) // cancel is not worker/drain completion.
+            release.countDown()
+            await(f) { f.controller.active == null }
+            assertEquals(0, nextCalls.get())
+            assertTrue(lateCancels.get() >= 1)
+        } finally { release.countDown() }
+    }
+
+    fun testExplicitAuxiliaryUnknownFailsWithoutCallingMainOrFallingBack() {
+        val factories = AtomicInteger()
+        val f = fresh(factory = { _, _ -> factories.incrementAndGet(); port() })
+        f.controller.independentModels.save(IndependentModelSettings.Slot.VISION,
+            ModelSettings("https://auxiliary.invalid", "vision-api", "independent-key", false), null, true, null)
+        f.database.draft("retain unknown capability")
+        assertNull(f.controller.send(null, "retain unknown capability"))
+        assertEquals(0, factories.get())
+        assertEquals("retain unknown capability", f.database.draft())
+        assertTrue(f.controller.problem!!.contains("辅助视觉"))
+        // Explicitly disabled is a separate ordinary text path, not catch-and-fallback.
+        f.controller.independentModels.save(IndependentModelSettings.Slot.VISION,
+            ModelSettings("https://auxiliary.invalid", "vision-api", "independent-key", false), null, false, null)
+        assertNotNull(f.controller.send(null, "retain unknown capability"))
+        await(f) { f.controller.active == null }
+        assertEquals(1, factories.get())
     }
 
     fun testExistingInjectedFactoryStillOwnsPortConstruction() {

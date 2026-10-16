@@ -1,11 +1,32 @@
-# P25 辅助视觉：待接线的生产 host 叶子
+# P25 辅助视觉：生产接线
+
+## 产品入口（本次集成）
+
+SettingsHome 的 vision 条目已分派到 IndependentModelScreen。IndependentModelSettings 提供显式 enabled、
+持久 providerId/localModelId、独立加密凭据和 nullable 图片能力；未知/false 拒绝，不推断、不复制主模型。
+一次 run 冻结真实独立记录；配置编辑在写入前撤权并停止旧辅助 run，编辑中不允许接受新冻结，失败也不复活旧授权。
+
+ChatController.sendPrepared 在显式 enabled 分支用真实辅助 provider 做原图预检，创建 ControllerAuxiliaryVision；
+传给 leaf 的是 preparedContext 原始消息行，而不是 FrozenMessageImagePlan/预展开投影。
+辅助外部不再套 messageImages.wrap；主端仅收到 leaf 的纯文本投影。
+ImageChatHost/ControllerImageAttempt 分别保留主 provider 与实际图片 route，主 provider 不被升级为支持图片。
+
+ControllerVisionAuthorization 在同一 SQLite 事务内读取、验证完整物理行/segments，再逐行精确比较并展开；
+只额外允许本次 preparedContext 的精确纯文本 summary 和本次 assistant 的合法 COMPLETED 模型投影。
+不存在按 summary 前缀或自报 owner 放行。observation/sourceRunId 从已授权物理身份产生，原图读取复用
+messageImageResolver；每次 open（含纯文本和缓存命中）仍重新授权。RunResources 强持有辅助实例直至真实
+terminal worker/drain，stop/close 传递 cancel；WAITING_USER slice 不销毁辅助实例。控制 monitor 不包外部 IO。
+
+测试源码覆盖独立真实配置、unknown fail-closed/disabled 普通路径、原始行/segment 授权及伪造投影拒绝、
+真实设置入口；既有 ControllerAuxiliaryVisionTest 保留协议、缓存、取消/晚 session 的无网络覆盖。
+本集成未构建/执行测试，无 DB 升版和 manifest 修改；以下保留原叶子 API 契约。
 
 ## 范围与入口
 
 新增 `app/src/main/kotlin/app/daiyu/android/ControllerAuxiliaryVision.kt`。
-这是一个 **每个 parent run 一个实例** 的内部 `ModelPort` 装饰器，不是已上线的 UI/Controller 接线。
+这是一个 **每个 parent run 一个实例** 的内部 `ModelPort` 装饰器；当前 UI/Controller 入口如上节所列。
 复用现有 `AuxiliaryModelSelection`、`AuxiliaryVisionBridge`、`AuxiliaryVisionModelAdapter`，不复制协议解析器。
-未修改 ChatController、ControllerImageSending、ImageChatHost、Main、ModelSettings 或 auxiliary 三个实现文件。
+集成只修改父入口/图片路由并新增独立设置，未重写此叶子或 auxiliary 三个实现文件。
 
 父 host 的最窄接入面：
 

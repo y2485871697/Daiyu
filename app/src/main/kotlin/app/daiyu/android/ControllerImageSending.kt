@@ -71,6 +71,8 @@ internal class ControllerImageAttempt(
     val handle: ImageSendHandle,
     private val journal: SharedPreferences,
     val expectedDraftText: String = "",
+    val imageRoute: ProviderSnapshot = provider,
+    val auxiliaryGeneration: Long? = null,
 ) {
     val parts = parts.toList()
     val images = this.parts.filterIsInstance<ImageSendPart.Image>().map { it.attachment }
@@ -126,7 +128,7 @@ internal class ControllerImageAttempt(
     }
 
     fun prepare(store: ImageAttachmentStore, assets: MessageImageAssetStore): Message {
-        val frozen = store.freeze(owner, images, provider.imageInputSupported == true, handle::isCancelled)
+        val frozen = store.freeze(owner, images, imageRoute.imageInputSupported == true, handle::isCancelled)
         val refs = assets.prepare(app.daiyu.android.media.MessageImageOwner(owner.conversationId, userId.value),
             owner, frozen, handle::isCancelled)
         return user(refs.associateBy { it.id })

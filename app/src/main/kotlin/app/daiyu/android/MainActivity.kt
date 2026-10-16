@@ -104,6 +104,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 
 class MainActivity : ComponentActivity() {
     private val controller get() = (application as ChatApplication).controller
+    private val pets get() = (application as ChatApplication).pets
+    private val openPetSettings: () -> Unit = {
+        if (activityUsable()) { dismissSidebar(); retainedPage = "pet-settings" }
+    }
     private val terminalProvider get() = (application as ChatApplication).terminalProvider
     private var linuxSettingsVisit: Any? = null
     private var linuxSettingsPageOwner by mutableStateOf<app.daiyu.android.terminal.LinuxSettingsPageOwner?>(null)
@@ -579,7 +583,9 @@ class MainActivity : ComponentActivity() {
         taskRecordsConversationId = state?.getString("task-records-conversation")
         if (exportConversationId != null) retainedPage = "conversation-export"
         else if (taskRecordsConversationId != null) retainedPage = "child-tasks"
+        if (intent?.action == ChatApplication.OPEN_PET_SETTINGS) retainedPage = "pet-settings"
         setContent {
+            app.daiyu.android.ui.screens.settings.ApplicationPetMount(pets, this@MainActivity, Modifier.fillMaxSize()) {
             AgentAppTheme(appearance, applyInterfaceScale = true, onResolvedDarkModeChange = ::updateSystemBars) {
                 val iconCoordinator = rememberIconAppearanceCoordinator(iconNotifications, ::reportAutomaticIconSync)
                 val focus = LocalFocusManager.current
@@ -592,13 +598,34 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "appearance", "haptics", "offline-speech", "terminal", "browser-settings", "compression-settings", "linux-settings" -> retainedPage = "settings"
+                        "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "compression-settings", "linux-settings", "pet-settings", "vision-settings" -> retainedPage = "settings"
+                        "pet-model-settings" -> retainedPage = "pet-settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
                         else -> returnToChat()
                     }
                 }
                 when (retainedPage) {
+                    "pet-settings" -> Column(Modifier.fillMaxSize()) {
+                        top.yukonga.miuix.kmp.basic.TextButton(text = "返回", onClick = { retainedPage = "settings" })
+                        top.yukonga.miuix.kmp.basic.TextButton(text = "配置独立助手 / 服务商 / 模型", onClick = { retainedPage = "pet-model-settings" })
+                        top.yukonga.miuix.kmp.basic.TextButton(text = "允许本次进程全局悬浮", onClick = { pets.setOverlayAllowed(true) })
+                        top.yukonga.miuix.kmp.basic.TextButton(text = "禁止本次进程全局悬浮", onClick = { pets.setOverlayAllowed(false) })
+                        top.yukonga.miuix.kmp.basic.TextButton(text = "打开系统悬浮窗授权（仍需上方明确允许）", onClick = {
+                            startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                Uri.parse("package:$packageName")))
+                        })
+                        app.daiyu.android.ui.screens.settings.PetSettingsScreen(pets.host, Modifier.weight(1f))
+                    }
+                    "pet-model-settings", "vision-settings" -> key(retainedPage) {
+                        val petModel = retainedPage == "pet-model-settings"
+                        app.daiyu.android.ui.screens.settings.IndependentModelScreen(controller.independentModels,
+                            if (petModel) app.daiyu.android.storage.IndependentModelSettings.Slot.PET
+                            else app.daiyu.android.storage.IndependentModelSettings.Slot.VISION,
+                            assistantProfiles, pets,
+                            onBack = { retainedPage = if (petModel) "pet-settings" else "settings" },
+                            modifier = Modifier.fillMaxSize())
+                    }
                     "manage" -> ManageChatsScreen(
                         conversations = paneState.historyConversations,
                         onBack = { returnToChat() },
@@ -951,6 +978,7 @@ class MainActivity : ComponentActivity() {
                         thinkingPicker = false
                     })
             }
+        }
         }
         controller.observe(listener)
         refresh()
@@ -1910,12 +1938,19 @@ class MainActivity : ComponentActivity() {
         if (retainedPage == "child-tasks") state.putString("task-records-conversation", taskRecordsConversationId)
         super.onSaveInstanceState(state)
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); offerOpenedBackup(intent) }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent); setIntent(intent)
+        if (intent.action == ChatApplication.OPEN_PET_SETTINGS) {
+            dismissSidebar(); retainedPage = "pet-settings"
+        } else offerOpenedBackup(intent)
+    }
     override fun onResume() {
         super.onResume(); voiceForeground = true; speechHost.setForeground(true)
         controller.attachVideoUi(videoUi)
         settleRetainedVideoReceipt()
         controller.recoverVideos { if (activityUsable()) publishChat() }
+        (application as ChatApplication).petSettingsNavigator = openPetSettings
+        pets.refreshOverlayPermission()
         refreshRateWindowResumed = true; applyPreferredRefreshRate()
         window.decorView.post(refreshRateRequest)
     }
@@ -1931,6 +1966,9 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         controller.invalidateVideo(videoUi)
         videoDialog?.dismiss(); videoDialog = null
+        (application as ChatApplication).let { app ->
+            if (app.petSettingsNavigator === openPetSettings) app.petSettingsNavigator = null
+        }
         voiceForeground = false
         stopCascadeVoice()
         invalidateConfiguredVoice()
@@ -2078,6 +2116,8 @@ class MainActivity : ComponentActivity() {
             FeatureRoute.BROWSER_SETTINGS -> openBrowserSettings()
             FeatureRoute.COMPRESSION_SETTINGS -> openCompressionSettings()
             FeatureRoute.GENERATION_SETTINGS -> openGenerationSettings()
+            FeatureRoute.PET_SETTINGS -> retainedPage = "pet-settings"
+            FeatureRoute.AUXILIARY_VISION_SETTINGS -> retainedPage = "vision-settings"
             // Settings entries are navigation, never implicit execution/send/stop operations.
             FeatureRoute.CHAT, FeatureRoute.USER_MESSAGE -> Unit
         }

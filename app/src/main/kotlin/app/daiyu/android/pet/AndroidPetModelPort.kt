@@ -16,7 +16,9 @@ import java.util.concurrent.atomic.AtomicReference
 /** Explicit lookup result: resolver must validate all three saved IDs, never select a main-agent fallback.
  * Credentials stay ephemeral here, never in PetState or PetStore. settings.model is the API model name.
  */
-data class ResolvedPetModel(val selection: PetModelSelection, val settings: ModelSettings)
+data class ResolvedPetModel(val selection: PetModelSelection, val settings: ModelSettings,
+    /** Captures the registry epoch, not just the three stable IDs. Must be worker-safe. */
+    val isCurrent: () -> Boolean = { true })
 fun interface PetModelResolver { fun resolve(selection: PetModelSelection): ResolvedPetModel? }
 
 /** Reuses production Responses/Messages transports, with one isolated prompt, no tools/history,
@@ -36,15 +38,45 @@ class AndroidPetModelPort internal constructor(
     })
     private val executor = Executors.newSingleThreadExecutor { task -> Thread(task, "daiyu-pet-model").apply { isDaemon = true } }
     private val closed = AtomicBoolean(false)
-    private class Job {
+    private val authority = Any()
+    private val generation = java.util.concurrent.atomic.AtomicLong()
+    // Production binds this once, before use, to PetController's serialized effect boundary.
+    // Always acquire owner BEFORE authority; never hold authority while entering the controller.
+    @Volatile private var owner: Any = Any()
+    internal fun bindOwner(monitor: Any) {
+        check(jobs.isEmpty() && generation.get() == 0L && !closed.get())
+        owner = monitor
+    }
+    internal fun invalidateConfiguration() = synchronized(owner) {
+        val retired = synchronized(authority) {
+            generation.incrementAndGet()
+            jobs.entries.filter { it.value.generation != generation.get() }.map { it.key to it.value }
+        }
+        retired.forEach { (id, job) -> job.cancel(); jobs.remove(id, job) }
+    }
+    private class Job(val generation: Long) {
         val cancelled = AtomicBoolean(false)
         val delivered = AtomicBoolean(false)
-        val session = AtomicReference<ModelSession?>()
+        private val session = AtomicReference<ModelSession?>()
         val future = AtomicReference<Future<*>?>()
+        fun publishSession(opened: ModelSession) {
+            session.set(opened)
+            // Cancellation may have observed null while open was still outside our locks.
+            // Either that caller or this late publisher takes the session, never both.
+            if (cancelled.get()) cleanSession()
+        }
+        fun cleanSession() {
+            val retired = session.getAndSet(null) ?: return
+            // A transport may block in cancel. Never run it inline (including under a reentrant
+            // controller owner), on the model worker, or on an executor stopped by close.
+            Thread({ runCatching { retired.cancel() } }, "daiyu-pet-model-cleanup").apply {
+                isDaemon = true
+            }.start()
+        }
         fun cancel() {
             cancelled.set(true)
-            runCatching { session.get()?.cancel() }
             future.get()?.cancel(true)
+            cleanSession()
         }
     }
     private val jobs = ConcurrentHashMap<String, Job>()
@@ -53,11 +85,19 @@ class AndroidPetModelPort internal constructor(
         require(request.selection.configured && request.usageOwner == "pet")
         require(request.maxOutputTokens in 1..120 && request.sessionId == "pet:${request.requestId}")
         val frozenRequest = request.copy(selection = request.selection.copy())
-        val job = Job()
-        fun deliver(result: PetModelResult) {
-            if (job.delivered.compareAndSet(false, true)) runCatching { completion(result) }
+        val job = synchronized(authority) {
+            check(!closed.get()) { "Pet model adapter closed" }
+            Job(generation.get()).also { check(jobs.putIfAbsent(frozenRequest.requestId, it) == null) }
         }
-        check(jobs.putIfAbsent(frozenRequest.requestId, job) == null)
+        fun live(model: ResolvedPetModel?): Boolean = !job.cancelled.get() && !closed.get() &&
+            job.generation == generation.get() && (model?.isCurrent?.invoke() != false)
+        fun deliver(model: ResolvedPetModel?, result: PetModelResult) {
+            synchronized(owner) {
+                // Check INSIDE the effect owner's monitor, including late usage receipts. A check
+                // before waiting for the controller would allow a stale callback to cross revocation.
+                if (live(model) && job.delivered.compareAndSet(false, true)) runCatching { completion(result) }
+            }
+        }
         try {
             // Resolve at acceptance, before queueing: later configuration edits must not retarget this request.
             // Freeze lookup failures too; the worker reports failure without retrying or falling back.
@@ -70,24 +110,30 @@ class AndroidPetModelPort internal constructor(
                     ProviderProtocol.MESSAGES -> ProviderRequestOptions()
                     ProviderProtocol.UNKNOWN -> error("Unsupported pet protocol")
                 }
-                ResolvedPetModel(resolved.selection.copy(), resolved.settings.copy(
+                resolved.copy(selection = resolved.selection.copy(), settings = resolved.settings.copy(
                     batteryEnabled = false, deviceStatusEnabled = false, requestOptions = options))
             } catch (_: Exception) { null }
             val future = executor.submit {
                 try {
-                    if (job.cancelled.get() || closed.get()) return@submit
+                    if (!live(frozenModel)) return@submit
                     val settings = frozenModel?.settings ?: error("Pet selection unavailable")
                     val transport = transportFactory(settings, frozenRequest.maxOutputTokens)
                     val message = Message(MessageId("pet-prompt-${frozenRequest.requestId}"), ConversationId(frozenRequest.sessionId),
                         RunId(frozenRequest.requestId), Message.USER_ROLE,
                         listOf(MessageBlock.Text("pet-input", frozenRequest.prompt)), RunStatus.COMPLETED)
+                    // Recheck after factory/queue delays, serialized with generation revocation.
+                    // External open must stay outside authority/owner: an arbitrary transport can
+                    // block here. This is not a physical-send fence for arbitrary transports.
+                    synchronized(authority) { if (!live(frozenModel)) return@submit }
+                    // Production Responses/Messages open only constructs a logical session; HTTP
+                    // starts in next. Publish even a late return so cancel/close cannot leak it.
                     val session = transport.open(listOf(message), emptyList<ToolDefinition>())
-                    job.session.set(session)
-                    if (job.cancelled.get() || closed.get()) { session.cancel(); return@submit }
+                    job.publishSession(session)
+                    if (!live(frozenModel)) return@submit
                     val texts = linkedMapOf<String, String>()
                     var input: Long? = null; var output: Long? = null
                     session.next(emptyList()) { event ->
-                        if (job.cancelled.get() || closed.get()) throw InterruptedException()
+                        if (!live(frozenModel)) throw InterruptedException()
                         when (event) {
                             is ModelEvent.TextDelta -> texts[event.itemId] = (texts[event.itemId].orEmpty() + event.text).take(8192)
                             is ModelEvent.TextFinal -> texts[event.itemId] = event.text.take(8192)
@@ -99,14 +145,17 @@ class AndroidPetModelPort internal constructor(
                         require(texts.size <= 16 && texts.values.sumOf { it.length } <= 8192) { "Pet response too large" }
                     }
                     // ModelSession.next returns successfully only for a genuine protocol terminal event.
-                    if (!job.cancelled.get() && !closed.get()) {
+                    if (live(frozenModel)) {
                         val text = texts.values.joinToString("")
-                        if (text.isBlank()) deliver(PetModelResult.Failed("桌宠模型未返回文字"))
-                        else deliver(PetModelResult.Completed(text, input, output))
+                        if (text.isBlank()) deliver(frozenModel, PetModelResult.Failed("桌宠模型未返回文字"))
+                        else deliver(frozenModel, PetModelResult.Completed(text, input, output))
                     }
                 } catch (_: Exception) {
-                    if (!job.cancelled.get() && !closed.get()) deliver(PetModelResult.Failed("桌宠独立模型请求失败"))
-                } finally { jobs.remove(frozenRequest.requestId, job) }
+                    deliver(frozenModel, PetModelResult.Failed("桌宠独立模型请求失败"))
+                } finally {
+                    job.cleanSession()
+                    jobs.remove(frozenRequest.requestId, job)
+                }
             }
             job.future.set(future)
             if (job.cancelled.get() || closed.get()) job.cancel()
@@ -114,7 +163,14 @@ class AndroidPetModelPort internal constructor(
         return PetCancel { job.cancel(); jobs.remove(frozenRequest.requestId, job) }
     }
     override fun close() {
-        if (!closed.compareAndSet(false, true)) return
-        jobs.values.forEach { it.cancel() }; jobs.clear(); executor.shutdownNow()
+        synchronized(owner) {
+            val retired = synchronized(authority) {
+                if (!closed.compareAndSet(false, true)) return
+                generation.incrementAndGet()
+                jobs.values.toList().also { jobs.clear() }
+            }
+            retired.forEach { it.cancel() }
+            executor.shutdownNow()
+        }
     }
 }

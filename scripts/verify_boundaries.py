@@ -13,7 +13,7 @@ for folder in ("app/src", "core-domain/src"):
         if path.is_file():
             assert b"io.github.mangi.eta" not in path.read_bytes(), path
 manifest = ET.parse(ROOT / "app/src/main/AndroidManifest.xml").getroot()
-assert {node.attrib["{http://schemas.android.com/apk/res/android}name"] for node in manifest.findall("uses-permission")} == {"android.permission.INTERNET", "android.permission.VIBRATE"}, "Exact integrated feature permission boundary"
+assert {node.attrib["{http://schemas.android.com/apk/res/android}name"] for node in manifest.findall("uses-permission")} == {"android.permission.INTERNET", "android.permission.VIBRATE", "android.permission.RECORD_AUDIO"}, "Exact integrated feature permission boundary"
 assert 'applicationId = "app.daiyu.android"' in (ROOT / "app/build.gradle.kts").read_text(encoding="utf-8")
 assert 'rootProject.name = "代鱼"' in (ROOT / "settings.gradle.kts").read_text(encoding="utf-8")
 print("Module boundary, independent identity and integrated permissions: passed")

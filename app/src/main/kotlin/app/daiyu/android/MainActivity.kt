@@ -34,6 +34,11 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import app.daiyu.android.voice.AndroidSpeechPlayer
+import app.daiyu.android.voice.AudioOwnerGate
+import app.daiyu.android.voice.VoiceOwner
+import app.daiyu.android.voice.ActivityVoiceAudio
+import app.daiyu.android.voice.ComposerDictationHost
+import app.daiyu.android.voice.DictationDraftTarget
 import app.daiyu.android.voice.SpeechError
 import app.daiyu.android.voice.SpeechPhase
 import app.daiyu.android.voice.SpeechPlaybackState
@@ -109,8 +114,35 @@ class MainActivity : ComponentActivity() {
         ConversationSubAgentPreferences(getSharedPreferences("subagent_configuration", MODE_PRIVATE))
     }
     // The host is cheap; its Android player (and system TTS) exist only after an explicit click.
+    // Process-lifetime gate survives recreation, including an unconfirmed Android release.
+    private val audioGate = ActivityVoiceAudio.gate
     private val speechHost by lazy {
-        VoiceHost(lifecycleScope) { AndroidVoiceHostPlayer(AndroidSpeechPlayer(applicationContext)) }
+        VoiceHost(lifecycleScope, audioGate) { AndroidVoiceHostPlayer(AndroidSpeechPlayer(applicationContext)) }
+    }
+    private var voiceForeground = false
+    private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        dictationHost.permissionResult(granted)
+        // A permission sheet may pause/invalidate its editor token. Report only the app-level
+        // permission outcome in that case; never resurrect that token or start a recognizer.
+        if (activityUsable()) toast(if (granted) "麦克风权限已授予，请再次点击语音开始听写"
+            else "麦克风权限被拒绝；草稿未更改")
+    }
+    private val dictationHost by lazy {
+        ComposerDictationHost(applicationContext, audioGate,
+            isEditorCurrent = { target ->
+                activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+                    selectionReady && controller.ready && !controller.dataBusy &&
+                    !imageHost.sending && !shizukuWritesBlocked &&
+                    target.conversationId == selected?.id?.value &&
+                    target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
+            },
+            requestPermission = { microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO) },
+            applyDraft = { _, text ->
+                updateDraft(text)
+                check(draft == text) { "dictation_draft_not_saved" }
+                selectionStart = text.length; selectionEnd = text.length
+                publishChat()
+            })
     }
     private val imageHost by lazy { ImageChatHost.obtain(controller, { if (activityUsable()) publishChat() },
         { if (activityUsable()) toast(it) }, ::settleImageReceipt) }
@@ -132,7 +164,7 @@ class MainActivity : ComponentActivity() {
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
-            if (value != "chat") cancelShizukuEditor()
+            if (value != "chat") { dictationHost.invalidate(); cancelShizukuEditor() }
             speechHost.setVisible(value == "chat" && !sidebarVisible)
             imageHost.setVisible(value == "chat" && !sidebarVisible, selected?.id?.value)
             retainedPageState = value
@@ -148,7 +180,15 @@ class MainActivity : ComponentActivity() {
     private var selectionEnd = 0
     private var selectionReady = false
     private var editorGeneration = 0L
+        set(value) {
+            if (field != value) dictationHost.invalidate()
+            field = value
+        }
     private var draftRevision = 0L
+        set(value) {
+            if (field != value) dictationHost.invalidate()
+            field = value
+        }
     private val supplementDraft = PausedSupplementDraft()
     private val selections get() = controller.selections
     private var shown = mutableListOf<Pair<Long, Message>>()
@@ -441,6 +481,7 @@ class MainActivity : ComponentActivity() {
                                     VoiceExtras(id)
                                 }, imageLoader = imageHost.historyLoader)
                                 if (imagePanelVisible) ImageComposerPanel()
+                                DictationComposerEntry()
                                 ShizukuComposerEntry()
                             }
                         }
@@ -508,6 +549,7 @@ class MainActivity : ComponentActivity() {
         val renderedOwner = controlOwner
         val renderedConversation = chatState.conversationKey
         val renderedEditorGeneration = editorGeneration
+        val renderedDraftRevision = draftRevision
         val renderedSpeechOwner = speechHost.owner
         fun editorMatches() = activityUsable() && selectionReady &&
             selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration
@@ -517,7 +559,13 @@ class MainActivity : ComponentActivity() {
         fun pendingFeature() { Toast.makeText(this, "该功能界面已保留，后端尚未接入", Toast.LENGTH_SHORT).show() }
         return ChatScreenActions(
         onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
-        onVoice = { pendingFeature() }, onContextClick = { pendingFeature() },
+        onVoice = {
+            if (editorMatches() && draftRevision == renderedDraftRevision && voiceForeground &&
+                retainedPage == "chat" && !sidebarVisible &&
+                controller.ready && !controller.dataBusy && !imageHost.sending && !shizukuWritesBlocked) {
+                dictationHost.start(DictationDraftTarget(selected?.id?.value, editorGeneration, draftRevision))
+            }
+        }, onContextClick = { pendingFeature() },
         onRegenerate = { pendingFeature() }, onSpeak = { id ->
             if (activityUsable() && controller.ready && !controller.dataBusy &&
                 selected?.id?.value == renderedConversation) {
@@ -576,6 +624,23 @@ class MainActivity : ComponentActivity() {
             else -> pendingFeature()
         } } },
         )
+    }
+
+    @Composable private fun DictationComposerEntry() {
+        val state by dictationHost.state.collectAsStateWithLifecycle()
+        if (state.status.isNotEmpty()) {
+            top.yukonga.miuix.kmp.basic.Text(text = state.status,
+                modifier = Modifier.testTag("dictation-status").semantics { liveRegion = LiveRegionMode.Polite })
+        }
+        if (state.preview.isNotEmpty()) {
+            top.yukonga.miuix.kmp.basic.Text(text = "识别预览（非最终草稿）：${state.preview}",
+                modifier = Modifier.testTag("dictation-partial"))
+        }
+        if (state.listening) {
+            val target = state.target
+            top.yukonga.miuix.kmp.basic.TextButton(text = "停止听写", modifier = Modifier.testTag("dictation-stop"),
+                onClick = { if (dictationHost.state.value.target == target) dictationHost.invalidate() })
+        }
     }
 
     @Composable private fun ShizukuComposerEntry() {
@@ -854,7 +919,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); offerOpenedBackup(intent) }
     override fun onResume() {
-        super.onResume(); speechHost.setForeground(true)
+        super.onResume(); voiceForeground = true; speechHost.setForeground(true)
         refreshRateWindowResumed = true; applyPreferredRefreshRate()
         window.decorView.post(refreshRateRequest)
     }
@@ -868,6 +933,8 @@ class MainActivity : ComponentActivity() {
         requestedPreferredRefreshRate = rate; attributes.preferredRefreshRate = rate; window.attributes = attributes
     }
     override fun onPause() {
+        voiceForeground = false
+        dictationHost.invalidate()
         cancelShizukuEditor()
         speechHost.setForeground(false)
         refreshRateWindowResumed = false; window.decorView.removeCallbacks(refreshRateRequest)
@@ -881,11 +948,15 @@ class MainActivity : ComponentActivity() {
     }
     override fun onStop() {
         // Idempotent fallback as well as the earlier onPause cancellation.
+        voiceForeground = false
+        dictationHost.invalidate()
         speechHost.setForeground(false)
         super.onStop()
     }
     override fun onDestroy() {
         hapticsHost?.close(); hapticsHost = null
+        voiceForeground = false
+        dictationHost.close()
         interactiveModeObservation?.close()
         interactiveModeObservation = null
         cancelShizukuEditor()
@@ -921,6 +992,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun openSidebar() { guard {
+        dictationHost.invalidate()
         cancelShizukuEditor()
         updatePane(); speechHost.setVisible(false); imageHost.setVisible(false, selected?.id?.value)
         sidebarVisible = true; publishChat()
@@ -1031,6 +1103,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun updateDraft(value: String) {
         if (!activityUsable() || sidebarVisible || controller.dataBusy || !controller.ready || imageHost.sending || shizukuWritesBlocked) return
+        dictationHost.invalidate()
         cancelShizukuEditor()
         guard {
             val id = selected?.id
@@ -1489,6 +1562,8 @@ internal interface VoiceHostPlayer : AutoCloseable {
     fun bindOwner(owner: String)
     fun play(owner: String, requestId: String, text: String): Boolean
     fun stop(owner: String): Boolean
+    /** Must confirm release or throw; close() alone is only lifecycle best effort. */
+    fun closeStrict()
 }
 
 private class AndroidVoiceHostPlayer(private val player: AndroidSpeechPlayer) : VoiceHostPlayer {
@@ -1497,23 +1572,34 @@ private class AndroidVoiceHostPlayer(private val player: AndroidSpeechPlayer) : 
     override fun play(owner: String, requestId: String, text: String) = player.play(owner, requestId, text)
     override fun stop(owner: String) = player.stop(owner)
     override fun close() = player.close()
+    override fun closeStrict() = player.closeStrict()
 }
 
+/** P32-INTEGRATION option 2: retain playback UI, but own every player through a strict gate lease.
+ * Production must inject the same gate as dictation; the default exists for isolated legacy tests.
+ */
 internal class VoiceHost(
     private val scope: CoroutineScope,
+    private val gate: AudioOwnerGate = AudioOwnerGate(),
     private val factory: () -> VoiceHostPlayer,
 ) : AutoCloseable {
-    // Observable so captured action capabilities are refreshed even after pause/resume without data edits.
+    // UI capability is not the engine identity. Each click gets fresh audio and player tokens.
     var owner by mutableStateOf(java.util.UUID.randomUUID().toString())
         private set
+    private class Request(val uiOwner: String, val messageId: String, conversation: String?) {
+        val audioOwner = VoiceOwner(conversation ?: "unsaved-draft", java.util.UUID.randomUUID().toString())
+        val playerOwner = java.util.UUID.randomUUID().toString()
+        val requestId = java.util.UUID.randomUUID().toString()
+        lateinit var lease: AudioOwnerGate.Lease
+        var player: VoiceHostPlayer? = null
+        var observation: Job? = null
+    }
     private var conversation: String? = null
     private var foreground = false
     private var visible = true
     private var closed = false
-    private var player: VoiceHostPlayer? = null
-    private var observation: Job? = null
+    private var active: Request? = null
     private var requestId: String? = null
-    private var acceptingPlayback = false
     private val mutableState = MutableStateFlow(SpeechPlaybackState(owner = owner))
     val state: StateFlow<SpeechPlaybackState> = mutableState.asStateFlow()
 
@@ -1523,88 +1609,115 @@ internal class VoiceHost(
         conversation = conversationId
         renewOwner()
     }
-
     fun syncConversation(conversationId: String?) {
         if (conversation != conversationId) enter(conversationId)
     }
-
     fun setForeground(value: Boolean) {
         if (closed || foreground == value) return
         if (!value) stop(owner)
         foreground = value
-        // Resume does not replay; it only invalidates pre-background click capabilities.
         if (value) renewOwner()
     }
-
     fun setVisible(value: Boolean) {
         if (closed || visible == value) return
         if (!value) stop(owner)
         visible = value
         if (value) renewOwner()
     }
-
     private fun renewOwner() {
         owner = java.util.UUID.randomUUID().toString()
         requestId = null
-        acceptingPlayback = false
-        player?.bindOwner(owner)
         mutableState.value = SpeechPlaybackState(owner = owner)
     }
 
     fun speak(expectedOwner: String?, id: String, text: String): Boolean {
         if (closed || !foreground || !visible || owner != expectedOwner || id.isBlank()) return false
-        requestId = id
-        acceptingPlayback = false
         if (text.isBlank()) {
-            // Empty answer (e.g. tool-only turn) must not initialize system TTS or read tool data.
-            player?.stop(owner)
+            if (!stop(owner)) return false
+            requestId = id
             mutableState.value = SpeechPlaybackState(owner, id, SpeechPhase.ERROR, SpeechError.EMPTY_TEXT)
             return false
         }
-        val target = player ?: try {
-            factory().also { created ->
-                try {
-                    created.bindOwner(owner)
-                } catch (failure: Exception) {
-                    runCatching { created.close() }
-                    throw failure
-                }
-                player = created
-                observation = scope.launch(start = CoroutineStart.UNDISPATCHED) {
-                    created.state.collect { accept(it) }
-                }
+        val request = Request(owner, id, conversation)
+        try {
+            // Previous TTS OR dictation must finish strict teardown before factory/play can run.
+            request.lease = gate.acquire(request.audioOwner, {
+                !closed && foreground && visible && owner == expectedOwner
+            }) { teardown(request, stopped = true) }
+            active = request
+            requestId = id
+            val player = factory()
+            request.player = player // Install before bind: a throwing bind still owns resources.
+            player.bindOwner(request.playerOwner)
+            request.observation = scope.launch(start = CoroutineStart.UNDISPATCHED) {
+                player.state.collect { accept(request, player, it) }
             }
+            val accepted = player.play(request.playerOwner, request.requestId, text)
+            accept(request, player, player.state.value)
+            if (!accepted && active === request) {
+                finish(request, SpeechPlaybackState(owner, id, SpeechPhase.ERROR, SpeechError.PLAYBACK_FAILED))
+            }
+            return accepted
         } catch (_: Exception) {
-            mutableState.value = SpeechPlaybackState(owner, id, SpeechPhase.UNAVAILABLE, SpeechError.ENGINE_UNAVAILABLE)
+            // A failure before acquisition is already recorded by the shared gate. If acquired,
+            // close through releaseAfter, never best-effort close followed by bare release.
+            if (active === request) {
+                try { gate.releaseAfter(request.lease) { teardown(request, stopped = false) } }
+                catch (_: Exception) { /* poisoned gate remains closed to all subsequent owners */ }
+            }
+            if (!closed && owner == request.uiOwner) {
+                mutableState.value = SpeechPlaybackState(owner, id, SpeechPhase.ERROR, SpeechError.STOP_FAILED)
+            }
             return false
         }
-        acceptingPlayback = true
-        val accepted = target.play(owner, id, text)
-        accept(target.state.value)
-        return accepted
     }
 
     fun stop(expectedOwner: String?, expectedRequestId: String? = null): Boolean {
         if (closed || owner != expectedOwner ||
             (expectedRequestId != null && expectedRequestId != requestId)) return false
-        val target = player ?: return true
-        val accepted = target.stop(owner)
-        accept(target.state.value)
-        return accepted
-    }
-
-    private fun accept(value: SpeechPlaybackState) {
-        if (!closed && acceptingPlayback && value.owner == owner && value.requestId == requestId) {
-            mutableState.value = value
+        val request = active ?: return true
+        return try { gate.cancel(request.audioOwner); true } catch (_: Exception) {
+            mutableState.value = SpeechPlaybackState(owner, request.messageId, SpeechPhase.ERROR, SpeechError.STOP_FAILED)
+            false
         }
     }
 
+    private fun teardown(request: Request, stopped: Boolean) {
+        if (active === request) active = null // Fence callbacks before touching Android.
+        request.observation?.cancel(); request.observation = null
+        val player = request.player; request.player = null
+        try {
+            player?.closeStrict()
+        } catch (failure: Exception) {
+            if (!closed && owner == request.uiOwner) {
+                mutableState.value = SpeechPlaybackState(owner, request.messageId, SpeechPhase.ERROR, SpeechError.STOP_FAILED)
+            }
+            throw failure
+        }
+        if (stopped && !closed && owner == request.uiOwner) {
+            mutableState.value = SpeechPlaybackState(owner, request.messageId, SpeechPhase.STOPPED)
+        }
+    }
+    private fun finish(request: Request, state: SpeechPlaybackState) {
+        try {
+            if (gate.releaseAfter(request.lease) { teardown(request, stopped = false) }) mutableState.value = state
+        } catch (_: Exception) {
+            mutableState.value = state.copy(phase = SpeechPhase.ERROR, error = SpeechError.STOP_FAILED)
+        }
+    }
+    private fun accept(request: Request, source: VoiceHostPlayer, value: SpeechPlaybackState) {
+        if (closed || active !== request || request.player !== source || !gate.current(request.lease) ||
+            owner != request.uiOwner || value.owner != request.playerOwner || value.requestId != request.requestId) return
+        val display = value.copy(owner = request.uiOwner, requestId = request.messageId)
+        when (value.phase) {
+            SpeechPhase.COMPLETED, SpeechPhase.ERROR, SpeechPhase.UNAVAILABLE, SpeechPhase.STOPPED, SpeechPhase.CLOSED -> finish(request, display)
+            else -> mutableState.value = display
+        }
+    }
     override fun close() {
         if (closed) return
+        stop(owner)
         closed = true
-        observation?.cancel()
-        player?.close()
-        player = null
         mutableState.value = SpeechPlaybackState(owner = owner, phase = SpeechPhase.CLOSED)
     }
 }

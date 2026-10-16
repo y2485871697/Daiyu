@@ -19,7 +19,8 @@ import java.util.concurrent.atomic.AtomicReference
 @Suppress("DEPRECATION")
 class ControllerChildRetentionTest : InstrumentationTestCase() {
     private class FixtureApplication(base: Context) : Application() { init { attachBaseContext(base) } }
-    private class Fixture(base: Context, val submit: Boolean = true, holdParent: Boolean = false) {
+    private class Fixture(base: Context, val submit: Boolean = true, holdParent: Boolean = false,
+        holdChildCleanup: Boolean = false) {
         val id = UUID.randomUUID().toString()
         val app = FixtureApplication(testContext(base, "controller-retention-$id-"))
         val database = ConversationDatabase(app)
@@ -30,6 +31,11 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
         val childRelease = CountDownLatch(1)
         val childExited = CountDownLatch(1)
         val childTimeouts = AtomicInteger()
+        val childWorker = AtomicReference<Thread>()
+        val childCleanupRelease = CountDownLatch(if (holdChildCleanup) 1 else 0)
+        val childCleanupExited = CountDownLatch(1)
+        val childCleanupTimeouts = AtomicInteger()
+        val childCancels = AtomicInteger()
         val parentEntered = CountDownLatch(1)
         val parentRelease = CountDownLatch(if (holdParent) 1 else 0)
         val childOpens = AtomicInteger()
@@ -52,6 +58,7 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
                         return object : ModelSession {
                             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                                 if (isChild) {
+                                    childWorker.set(Thread.currentThread())
                                     childEntered.countDown()
                                     try {
                                         val released = childRelease.await(30, TimeUnit.SECONDS)
@@ -69,7 +76,16 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
                                     sink(ModelEvent.TextFinal("parent", "parent answer"))
                                 }
                             }
-                            override fun cancel() { if (isChild) childCancelled.countDown() else parentRelease.countDown() }
+                            override fun cancel() {
+                                if (!isChild) { parentRelease.countDown(); return }
+                                childCancels.incrementAndGet()
+                                childCancelled.countDown()
+                                try {
+                                    val released = childCleanupRelease.await(30, TimeUnit.SECONDS)
+                                    if (!released) childCleanupTimeouts.incrementAndGet()
+                                    check(released) { "child cleanup timed out instead of being released" }
+                                } finally { childCleanupExited.countDown() }
+                            }
                         }
                     }
                 }
@@ -84,7 +100,7 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
                 is ConversationSubAgentPreferences.WriteResult.Saved)
         }
         fun dispose() {
-            childRelease.countDown(); parentRelease.countDown(); controller.close()
+            childRelease.countDown(); childCleanupRelease.countDown(); parentRelease.countDown(); controller.close()
             app.getSharedPreferences("model-settings", 0).edit().clear().commit()
             app.getSharedPreferences("conversation-ui", 0).edit().clear().commit()
             app.getSharedPreferences("subagent_configuration", 0).edit().clear().commit()
@@ -106,8 +122,8 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
         try { assertTrue(label, done.await(5, TimeUnit.SECONDS)) }
         finally { main { f.controller.unobserve(listener) } }
     }
-    private fun fresh(submit: Boolean = true, holdParent: Boolean = false): Fixture =
-        Fixture(instrumentation.targetContext, submit, holdParent).also {
+    private fun fresh(submit: Boolean = true, holdParent: Boolean = false, holdChildCleanup: Boolean = false): Fixture =
+        Fixture(instrumentation.targetContext, submit, holdParent, holdChildCleanup).also {
             fixtures.add(it); awaitChange(it, "recovery") { it.controller.ready }; it.prepare()
             main { assertTrue(it.controller.bindChildSavedModel(it.conversation.id, it.profile.id, it.child.modelId, it.provider)) }
         }
@@ -135,10 +151,27 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
         assertTrue("provider must actually exit", f.childExited.await(5, TimeUnit.SECONDS))
         assertEquals("fixture must be released, not time out", 0, f.childTimeouts.get())
     }
+    private fun finishChildWithCleanupBlocked(f: Fixture) {
+        releaseChild(f)
+        assertTrue("transport cleanup must start independently", f.childCancelled.await(5, TimeUnit.SECONDS))
+        // next() returning alone is not worker exit. The batch shuts down this real worker
+        // after recording its result, even while asynchronous transport cleanup is blocked.
+        val worker = checkNotNull(f.childWorker.get())
+        worker.join(5000)
+        assertFalse("child worker must exit before cleanup is released", worker.isAlive)
+        assertFalse("worker exit must not complete blocked cleanup", f.childCleanupExited.await(100, TimeUnit.MILLISECONDS))
+        main { } // Process any release notification already posted by the exited worker.
+        assertEquals(ChildTaskStatus.COMPLETED, f.controller.childTasks(f.conversation.id).single().status)
+        assertEquals(1L, f.childCleanupRelease.count)
+        assertEquals(1L, f.childCleanupExited.count)
+        assertEquals(0, f.childCleanupTimeouts.get())
+        assertEquals(1, f.childCancels.get())
+        assertEquals(1, retained(f)); assertTrue(f.controller.hasLiveChildTasks()); assertLeaseHeld(f)
+    }
     private fun assertLeaseHeld(f: Fixture) {
         val another = ConversationDatabase(f.app)
         try {
-            try { SQLiteRuntimeStore.acquire(another).close(); fail("runtime lease released before actual child exit") }
+            try { SQLiteRuntimeStore.acquire(another).close(); fail("runtime lease released before child worker and transport cleanup drain") }
             catch (_: IllegalStateException) { }
         } finally { another.close() }
     }
@@ -268,6 +301,70 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
         releaseChild(f)
         awaitChange(f, "revoked child exits") { retained(f) == 0 && !f.controller.hasLiveChildTasks() }
         assertEquals(ChildTaskStatus.UNKNOWN, f.controller.childTasks(f.conversation.id).single().status)
+    }
+
+    fun testExitedChildWorkerRetainsHandleUntilTransportCleanupReturns() {
+        val f = fresh(holdChildCleanup = true)
+        send(f); assertTrue(f.childEntered.await(5, TimeUnit.SECONDS))
+        awaitChange(f, "parent complete before child cleanup") { f.controller.active == null }
+        assertParentCompleted(f)
+        try {
+            finishChildWithCleanupBlocked(f)
+        } finally { f.childCleanupRelease.countDown() }
+        assertTrue("transport cleanup must return", f.childCleanupExited.await(5, TimeUnit.SECONDS))
+        awaitChange(f, "cleanup, not worker exit, releases the handle") {
+            retained(f) == 0 && !f.controller.hasLiveChildTasks()
+        }
+        assertEquals(0, f.childCleanupTimeouts.get()); assertEquals(1, f.childCancels.get())
+        val record = f.controller.childTasks(f.conversation.id).single()
+        assertEquals(ChildTaskStatus.COMPLETED, record.status); assertEquals("retained answer", record.text)
+        assertEquals(1, f.childOpens.get())
+    }
+
+    fun testRepeatedCloseSharesBlockedTransportCleanupAndReleasesLeaseOnce() {
+        val f = fresh(holdChildCleanup = true)
+        send(f); assertTrue(f.childEntered.await(5, TimeUnit.SECONDS))
+        awaitChange(f, "parent complete before close") { f.controller.active == null }
+        assertParentCompleted(f)
+        val closeStarted = CountDownLatch(2)
+        val closeDone = CountDownLatch(2)
+        val failure = AtomicReference<Throwable?>()
+        val closers = List(2) {
+            Thread {
+                closeStarted.countDown()
+                try { f.controller.close() } catch (t: Throwable) { failure.compareAndSet(null, t) }
+                finally { closeDone.countDown() }
+            }
+        }
+        try {
+            finishChildWithCleanupBlocked(f)
+            main { f.controller.close() }
+            closers.forEach { it.start() }
+            assertTrue("both repeated closes must start", closeStarted.await(5, TimeUnit.SECONDS))
+            assertFalse("all closes must wait for the same cleanup", closeDone.await(100, TimeUnit.MILLISECONDS))
+            assertEquals("neither close may return early", 2L, closeDone.count)
+            assertEquals(1L, f.childCleanupExited.count); assertEquals(1, f.childCancels.get())
+            assertEquals(1, retained(f)); assertLeaseHeld(f)
+        } finally { f.childCleanupRelease.countDown() }
+        assertTrue("transport cleanup must return", f.childCleanupExited.await(5, TimeUnit.SECONDS))
+        assertTrue("one cleanup release must complete every close", closeDone.await(5, TimeUnit.SECONDS))
+        closers.forEach { it.join(1000) }
+        failure.get()?.let { throw it }
+        assertEquals(0, retained(f)); assertFalse(f.controller.hasLiveChildTasks())
+        assertEquals(0, f.childCleanupTimeouts.get()); assertEquals(1, f.childCancels.get())
+        val reopened = ConversationDatabase(f.app)
+        try {
+            val runtime = SQLiteRuntimeStore.acquire(reopened)
+            try {
+                repeat(3) { f.controller.close() }
+                main { } // Drain the repeated close callbacks before checking the replacement lease.
+                assertLeaseHeld(f)
+                assertEquals(0, retained(f)); assertEquals(1, f.childCancels.get())
+                assertEquals(ChildTaskStatus.COMPLETED,
+                    SQLiteChildTaskStore(reopened).list(f.conversation.id.value, 20).single().status)
+            } finally { runtime.close() }
+        } finally { reopened.close() }
+        assertEquals(1, f.childOpens.get())
     }
 
     fun testCloseKeepsRuntimeLeaseUntilBackgroundProviderExits() {

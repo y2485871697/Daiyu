@@ -139,18 +139,18 @@ class ShizukuAuthorization(context: Context) : AutoCloseable {
 class ShizukuConnection internal constructor(val identity: ShizukuIdentity, private val remote: IShizukuExecutor,
     @Suppress("unused") private val owner: IBinder, private val directory: File,
     private val live: () -> Boolean, private val permission: () -> Boolean, private val release: () -> Unit) : AutoCloseable {
-    private val closed = AtomicBoolean(false)
-    private var scope: String? = null
-    private var backend: ShizukuBackend? = null
-    val isOpen: Boolean get() = !closed.get() && live()
-    @Synchronized fun openBackend(hostScope: String): ShizukuBackend {
+    private val lifecycle = ShizukuConnectionLifecycle(release)
+    val isOpen: Boolean get() = lifecycle.isOpen && live()
+    fun openBackend(hostScope: String): ShizukuBackend {
         check(Looper.myLooper() != Looper.getMainLooper()) { "shizuku_worker_required" }
-        check(isOpen)
-        backend?.let { check(scope == hostScope) { "shizuku_scope_already_bound" }; return it }
-        val journal = OperationJournal(directory, hostScope, binding = JSONObject().put("backend", "shizuku")
-            .put("uid", identity.uid).put("service", identity.serviceGeneration).put("permission", identity.permissionGeneration))
-        check(journal.verifyBinding().getBoolean("ok")) { "shizuku_scope_binding_unavailable" }
-        return BinderShizukuBackend(identity, remote, journal, { isOpen }, permission, ::close).also { backend = it; scope = hostScope }
+        check(isOpen) { "shizuku_scope_revoked" }
+        return lifecycle.open(hostScope) {
+            check(isOpen) { "shizuku_scope_revoked" }
+            val journal = OperationJournal(directory, hostScope, binding = JSONObject().put("backend", "shizuku")
+                .put("uid", identity.uid).put("service", identity.serviceGeneration).put("permission", identity.permissionGeneration))
+            check(journal.verifyBinding().getBoolean("ok")) { "shizuku_scope_binding_unavailable" }
+            BinderShizukuBackend(identity, remote, journal, { isOpen }, permission, ::close)
+        }
     }
-    override fun close() { if (closed.compareAndSet(false, true)) { backend?.close(); release() } }
+    override fun close() { lifecycle.close() }
 }

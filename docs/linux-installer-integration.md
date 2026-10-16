@@ -118,10 +118,14 @@ parent, not from invented installer constants.
   absent or delete it to mimic rollback. Parent must disclose/recover this uncertainty before
   catalog approval. A true flag acknowledges sync calls, not a real power-loss experiment.
 - `inspectPublished(prepared)` reads and verifies only; missing rootfs returns null, malformed
-  marker/shell throws. It does not authorize execution or reconstruct a catalog. If a process
-  dies after rename, recreate the same prepared request from trusted parent-held metadata and
-  inspect explicitly. Keep that metadata/approval in the parent's operation lifecycle; do not
-  auto-import arbitrary marker files or scan directories into the catalog.
+  marker/shell throws. It does not authorize execution or reconstruct a catalog. The production
+  coordinator persists a canonical, non-authorizing request before offering installation and
+  reconstructs that exact request after restart using `recoverRequest`, the pinned catalog and
+  original packaged helper pair. A visible target still requires an explicit original-path
+  `confirmPublishedDurability` call, then a separate registration confirmation; no download or
+  probe is replayed for published files. See `R09-linux-production-install-composition.md` for
+  journal formats, linked registration identity, read-only startup validation and strict
+  UNKNOWN/missing/corrupt metadata behavior. Never import arbitrary markers into the catalog.
 
 ## Extraction security contract
 

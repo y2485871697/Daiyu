@@ -37,7 +37,9 @@ class LinuxSettingsApplication private constructor(
             val admission = LinuxSettingsAdmission(snapshot.map { LinuxGenerationRef(it.environmentId, it.generation) }.toSet())
             // Host metadata is fixed for this entire owner lifetime. New approvals never replace it.
             val owner = TerminalUiOwner(TerminalEnvironmentHost.android(context.applicationContext, snapshot), admission::current)
-            val settings = LinuxSettingsController(LinuxSettingsCatalogAdapter(catalog), admission, startupEntries = snapshot)
+            val access = LinuxSettingsCatalogAdapter(catalog)
+            val installation = app.daiyu.android.terminal.install.LinuxInstallCoordinator.android(context, access)
+            val settings = LinuxSettingsController(access, admission, startupEntries = snapshot, installation = installation)
             return LinuxSettingsApplication(owner, settings, admission)
         }
     }

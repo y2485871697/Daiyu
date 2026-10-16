@@ -121,5 +121,13 @@ fun interface LinuxInstallProbeRunner {
             cancellation: LinuxInstallCancellation): LinuxProbeResult
 }
 
+/** Read-only reconstruction. Neither a receipt nor a persisted consent/capability. */
+internal data class RecoveredLinuxInstall(
+    val prepared: PreparedLinuxInstall,
+    val published: Boolean,
+    val unknown: Boolean,
+    val registration: app.daiyu.android.terminal.FrozenLinuxApproval?,
+)
+
 /** Files only. This receipt is NOT catalog approval, selection, or an execution lease. */
 data class LinuxInstallReceipt(val installation: LinuxInstallation, val directorySyncConfirmed: Boolean)

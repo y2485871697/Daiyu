@@ -1,5 +1,7 @@
 package app.daiyu.android.storage
 
+import app.daiyu.android.model.catalog.*
+import java.io.File
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
@@ -65,6 +67,17 @@ class ModelSettingsStore internal constructor(context:Context,private val keyAli
     constructor(context:Context):this(context,"model-api-key")
     private val preferences=context.getSharedPreferences("model-settings",Context.MODE_PRIVATE)
     private val restoreIdentity = Any()
+    internal val modelCatalog by lazy { FileSavedModelCatalogPersistence(
+        File(context.filesDir, "model-catalog/primary.bin"), CatalogModelParametersCodec) }
+    internal fun modelCatalogSnapshot(): SavedModelCatalogSnapshot<CatalogModelParameters> =
+        modelCatalog.registerFrom {
+            val editing = synchronized(lock) { editingWithoutCredential() }
+            check(!editing.requestOptionsUnavailable) { "请求策略已损坏；请先明确修复再导入模型" }
+            val current = editing.settings
+            check(current.endpoint.isNotBlank() && current.model.isNotBlank()) { "请先保存服务商配置" }
+            check(current.protocol != ProviderProtocol.UNKNOWN) { "请先修复模型协议" }
+            listOf(CatalogModelParameters.fromCurrent(current))
+        }
     internal fun nonSecretConfiguration(): Map<String, Any?> = synchronized(lock) { readNonSecretConfiguration() }
     private fun readNonSecretConfiguration(includeProtocol: Boolean = true): Map<String, Any?> = buildMap {
         listOf("endpoint", "model", "responses-path").forEach { key ->
@@ -103,7 +116,7 @@ class ModelSettingsStore internal constructor(context:Context,private val keyAli
     }
 
     /** Apply only after explicit user approval of this preview. Commit and compensation never touch keys. */
-    fun applyNonSecretRestore(plan: NonSecretRestorePlan, authorized: Boolean): Unit = synchronized(lock) {
+    fun applyNonSecretRestore(plan: NonSecretRestorePlan, authorized: Boolean): Unit = modelCatalog.configurationChange { synchronized(lock) {
         require(authorized) { "恢复配置需要明确授权" }
         require(plan.belongsTo(restoreIdentity)) { "恢复计划不属于当前设置" }
         check(preferences !in failedStores) { "模型设置存储不可用；请重新保存" }
@@ -135,7 +148,7 @@ class ModelSettingsStore internal constructor(context:Context,private val keyAli
             if(!restored) failedStores.add(preferences)
             throw IllegalStateException("配置未恢复；原设置补偿失败时须显式重新保存")
         }
-    }
+    } }
 
     private fun readProtocol(): ProviderProtocol = try {
         if(!preferences.contains("protocol")) ProviderProtocol.RESPONSES
@@ -207,11 +220,11 @@ class ModelSettingsStore internal constructor(context:Context,private val keyAli
         if(loaded.credentialUnavailable) throw CredentialUnavailableException()
         loaded.settings
     }
-    fun selectModel(expected: ModelSettings, model: String): Unit = synchronized(lock) {
+    fun selectModel(expected: ModelSettings, model: String): Unit = modelCatalog.configurationChange { synchronized(lock) {
         check(load() == expected) { "模型配置已变更，请重新打开选择器" }
         if (model != expected.model) save(expected.copy(model = model))
-    }
-    fun save(settings:ModelSettings, protocolChangeAuthorized: Boolean = false, requestOptionsReplacementAuthorized: Boolean = false):Unit=synchronized(lock) {
+    } }
+    fun save(settings:ModelSettings, protocolChangeAuthorized: Boolean = false, requestOptionsReplacementAuthorized: Boolean = false):Unit=modelCatalog.configurationChange { synchronized(lock) {
         settings.validate()
         val previousOptionsValid = try {
             val previousOptions = readRequestOptions()
@@ -276,7 +289,7 @@ class ModelSettingsStore internal constructor(context:Context,private val keyAli
                 if(runCatching {UUID.fromString(suffix).toString()==suffix}.getOrDefault(false)) discardKey(oldAlias)
             }
         }
-    }
+    } }
     companion object {
         private val lock=Any()
         private val failedStores=java.util.Collections.newSetFromMap(java.util.WeakHashMap<SharedPreferences,Boolean>())

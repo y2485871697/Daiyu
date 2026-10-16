@@ -99,10 +99,10 @@ internal fun SettingsRow(
 }
 
 @Composable
-internal fun SettingsSwitchRow(title: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+internal fun SettingsSwitchRow(title: String, checked: Boolean, enabled: Boolean = true, onCheckedChange: (Boolean) -> Unit) {
     val colors = MiuixTheme.colorScheme
     SettingsRow(title = title, tag = "settings-switch:$title", modifier = Modifier.toggleable(
-        value = checked, role = Role.Switch, onValueChange = onCheckedChange
+        value = checked, role = Role.Switch, enabled = enabled, onValueChange = onCheckedChange
     ), trailing = {
         Switch(
             checked = checked,
@@ -120,8 +120,8 @@ internal fun SettingsSwitchRow(title: String, checked: Boolean, onCheckedChange:
 }
 
 @Composable
-internal fun SettingsRadioRow(title: String, selected: Boolean, onClick: () -> Unit) {
-    Box(Modifier.testTag("settings-radio:$title").fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, onClick = onClick)) {
+internal fun SettingsRadioRow(title: String, selected: Boolean, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(Modifier.testTag("settings-radio:$title").fillMaxWidth().selectable(selected = selected, role = Role.RadioButton, enabled = enabled, onClick = onClick)) {
         SettingsRow(title = title, trailing = {
             if (selected) {
                 DaiyuIcon(DaiyuIcons.Check, contentDescription = "已选择",

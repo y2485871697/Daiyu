@@ -42,14 +42,61 @@ Host validation (non-Android) uses:
 cc -std=c11 -Wall -Wextra -Werror -O2 daiyu_pty.c -o /trusted/check-dir/daiyu_pty_host
 ```
 
-The colocated CMake file defines a PIE-capable executable target and 16KiB
-Android linker alignment. The public app build currently does not include it.
-The 1号 build owner must build with NDK API26 for supported ABIs, package as a
-trusted executable in the native-library delivery path, verify actual extraction
-and SELinux execution rules on API26/API37.2, then supply that packaged path to
-`PtySession.open`. Do not execute a downloaded/copy-to-filesDir binary to evade
-Android targetSdk execution restrictions. No host executable is shipped in this
-repository, and host success is not Android ABI or background-lifecycle evidence.
+`app/build.gradle.kts` now links the colocated CMake project with
+`externalNativeBuild`, explicitly selects the `daiyu_pty` executable target, and
+builds/packages `arm64-v8a`, `armeabi-v7a`, `x86_64` and `x86` at NDK API26. The
+NDK executable CRT/PIE entry point is retained: this is **not** a shared library
+with `main` substituted as an entry point and must not be loaded with JNI.
+CMake names the Android output `libdaiyu_pty.so` in AGP's native output directory
+so the native packaging/installer path accepts it as `lib/<abi>/libdaiyu_pty.so`.
+The `-Wl,-z,max-page-size=16384` linker option remains in force. Non-Android CMake
+and `compileHostPty`/`verifyHostPty` continue producing host executables only.
+
+`packaging.jniLibs.useLegacyPackaging = true` is intentional: the merged manifest
+requests native extraction (`extractNativeLibs=true`), and the **package
+installer**, not application code, materializes an executable file under
+`ApplicationInfo.nativeLibraryDir`. APK compression is unrelated to the ELF's
+16KiB segment alignment. Do not remove extraction merely because a JNI library
+can be mmap-loaded directly from an APK. No host executable is shipped in this
+repository, and no download, asset-copy, chmod or filesDir executable fallback
+exists.
+
+`AndroidPtyHost.helper(Context): File` is the shared trusted resolver. It reads
+this app's PackageManager installation record, verifies package/UID, requires
+the expected file beneath the read-only APK installation/native directory, and
+rejects missing ABI payloads, symlink escapes and non-executable or writable
+files before a process or journal is opened. A helper path cannot be supplied to
+`AndroidPtyHost.open`; that worker-only host entrypoint actually calls
+`PtyRunSession.open(owner, helper, argv, environment, cwd, journalDirectory,
+sessionScope, rows, columns)`. Context, owner and frozen launch values must come
+from the trusted host after central authorization, never model JSON. The adapter
+does not manufacture WRITE grants, register tools, change receipts or replay
+UNKNOWN operations. `close()` still only requests shutdown; use
+`awaitTermination()` and retain any selected environment lease until it returns
+true.
+
+### Focused verification (build/integration owner)
+
+No Android build or device execution is implied by host tests. Before delivery,
+perform a minimal Android build with the existing toolchain and inspect:
+
+- APK entries `lib/<abi>/libdaiyu_pty.so` for all four declared ABIs; merged
+  manifest extraction enabled (also verify a delivered split if using bundles).
+- NDK `llvm-readelf -h -l` reports the matching machine, a PIE executable with
+  an interpreter, and LOAD alignment at least `0x4000`; the minimum API is 26.
+- Only `app.daiyu.android.terminal.AndroidPtyHostTest` on API26 and API37.2:
+  installed immutable executable resolution, app-data/missing-ABI preflight
+  refusal without a journal, real PTY launch/dimensions, owner isolation,
+  UNKNOWN delivery receipts and an actual exit wait status. It intentionally
+  uses the installed Android payload, not the host-test helper property.
+
+These checks still require execution by the build/integration owner; neither
+SELinux compatibility on a particular device nor background process survival
+is established merely by the build configuration. The app's normal sandbox and
+Android lifecycle restrictions continue to apply.
+
+References: [AGP external native builds/explicit executable targets](https://developer.android.com/studio/projects/gradle-external-native-builds),
+[AGP native packaging DSL](https://developer.android.com/reference/tools/gradle-api/9.0/com/android/build/api/dsl/JniLibsPackaging).
 
 For intentionally identical repeated input, the trusted host supplies a distinct
 `inputSequence` to `write`; retries retain the original sequence and request ID.

@@ -169,7 +169,7 @@ internal fun DaiyuSettingsScreen(
                 item(key = "settings_tools") {
                     SettingsSectionTitle("工具与数据")
                     SettingsCard {
-                        listOf("skills", "usage", "backup").forEachIndexed { index, id ->
+                        listOf("usage", "backup").forEachIndexed { index, id ->
                             if (index > 0) SettingsDivider()
                             val entry = SettingsCatalog.entry(id)
                             SettingsRow(entry.title, onClick = { open(entry) },

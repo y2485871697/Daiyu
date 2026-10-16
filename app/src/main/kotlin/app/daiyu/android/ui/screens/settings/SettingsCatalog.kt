@@ -37,16 +37,10 @@ internal object SettingsCatalog {
             SettingsEntry("usage", "用量统计", DaiyuIcons.Chart, SettingControl.PAGE, FeatureRoute.USAGE_STATS),
             SettingsEntry("backup", "数据备份", DaiyuIcons.Backup, SettingControl.PAGE, FeatureRoute.BACKUP),
         )),
-        SettingsGroup("tools", "工具", "工具开关、任务偏好与运行环境", listOf(
-            SettingsEntry("tool_list", "工具列表", DaiyuIcons.Tool, SettingControl.PAGE),
-            SettingsEntry("task_surface", "Agent任务偏好", DaiyuIcons.VirtualScreen, SettingControl.PAGE),
-            SettingsEntry("browser_tools", "启用网页浏览工具", DaiyuIcons.Browser, SettingControl.TOGGLE),
-            SettingsEntry("device_tools", "启用设备直达工具", DaiyuIcons.Device, SettingControl.TOGGLE),
-            SettingsEntry("sensitive_read", "允许读取敏感设备信息", DaiyuIcons.Vision, SettingControl.TOGGLE),
-            SettingsEntry("sensitive_action", "允许敏感设备操作", DaiyuIcons.Shield, SettingControl.TOGGLE),
-            SettingsEntry("terminal_tools", "启用终端/文件工具", DaiyuIcons.Terminal, SettingControl.TOGGLE),
-            SettingsEntry("linux", "Linux 工具环境", DaiyuIcons.Terminal, SettingControl.PAGE),
+        SettingsGroup("tools", "工具", "工作区、Linux 与任务执行偏好", listOf(
             SettingsEntry("workspace", "工作区与文件", DaiyuIcons.Folder, SettingControl.PAGE),
+            SettingsEntry("linux", "Linux 工具环境", DaiyuIcons.Terminal, SettingControl.PAGE),
+            SettingsEntry("task_surface", "Agent任务偏好", DaiyuIcons.VirtualScreen, SettingControl.PAGE),
         )),
         SettingsGroup("haptics", "震动", "震动反馈与试听", listOf(
             SettingsEntry("haptics", "震动列表", DaiyuIcons.Vibration, SettingControl.PAGE),

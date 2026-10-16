@@ -33,6 +33,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -93,6 +94,8 @@ internal fun ChatMessageList(
             val layout = listState.layoutInfo
             currentTurns to Triple(layout.totalItemsCount, layout.visibleItemsInfo.lastOrNull()?.size, layout.viewportEndOffset)
         }.collectLatest {
+            // Layout notifications can resume this collector during measurement.
+            withFrameNanos { }
             if (followBottom && !currentDragging && currentTurns.isNotEmpty()) {
                 listState.scrollToItem(currentTurns.lastIndex)
                 val layout = listState.layoutInfo

@@ -83,7 +83,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             }
         } finally {super.tearDown()}
     }
-    private fun await(f:Fixture,description:String,predicate:()->Boolean) {
+    private fun await(f:Fixture,description:String,diagnostic:()->String={""},predicate:()->Boolean) {
         val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(8)
         while(System.nanoTime()<deadline) {
             f.probe.failure.get()?.let {throw it}
@@ -92,7 +92,8 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             if(done) {instrumentation.waitForIdleSync();return}
             Thread.sleep(20)
         }
-        fail(description)
+        var details="";main {details=diagnostic()}
+        fail("$description $details")
     }
     private fun fresh(seed:(Fixture)->Unit={}):Fixture {
         val f=Fixture(instrumentation.targetContext);fixtures.add(f)
@@ -116,8 +117,25 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         setDraft("Ask for a route");node("chat-send").performClick()
         return checkNotNull(f.c.active)
     }
-    private fun checkpoint(f:Fixture,m:Message):RunCheckpoint=f.db.readableDatabase.rawQuery("SELECT payload FROM runtime_checkpoints WHERE message_id=?",arrayOf(m.id.value)).use {
-        check(it.moveToFirst());RunCheckpointCodec.decode(it.getString(0))
+    private fun checkpointOrNull(f:Fixture,m:Message):RunCheckpoint?=f.db.readableDatabase.rawQuery("SELECT payload FROM runtime_checkpoints WHERE message_id=?",arrayOf(m.id.value)).use {
+        if(it.moveToFirst()) RunCheckpointCodec.decode(it.getString(0)) else null
+    }
+    private fun checkpoint(f:Fixture,m:Message):RunCheckpoint=checkNotNull(checkpointOrNull(f,m))
+    private fun waitingDiagnostic(f:Fixture,owner:Message):String {
+        val saved=checkpointOrNull(f,owner)
+        val identity=saved?.let {QuestionIdentity(owner.conversationId.value,owner.runId.value,it.owner,CALL)}
+        val record=identity?.let {id->PrivateQuestionStore(f.app).use {it.get(id.storageKey)}}
+        @Suppress("UNCHECKED_CAST")
+        val shown=MainActivity::class.java.getDeclaredField("shown").apply {isAccessible=true}.get(checkNotNull(activity)) as List<Pair<Long,Message>>
+        val message=shown.singleOrNull {it.second.id==owner.id}?.second
+        val tools=message?.blocks?.filterIsInstance<MessageBlock.Tool>().orEmpty()
+        val projection=tools.singleOrNull()?.let {f.c.questionProjection(checkNotNull(message),it.invocation)}
+        val cards=all().filterIsInstance<QuestionCardView>()
+        return "checkpointPresent=${saved!=null} phase=${saved?.phase} pendingCallMatches=${saved?.pending?.callId==ToolCallId(CALL)} " +
+            "checkpointTools=${saved?.tools?.size} recordPresent=${record!=null} answered=${record?.answer!=null} interrupted=${record?.interrupted} " +
+            "activePresent=${f.c.active!=null} activeMatchesOwner=${f.c.active?.id==owner.id} controllerReady=${f.c.ready} problemPresent=${f.c.problem!=null} " +
+            "ownerTurnPresent=${message!=null} ownerToolCount=${tools.size} projectionPresent=${projection!=null} canAnswer=${projection?.canAnswer} " +
+            "bindingPresent=${projection?.binding!=null} nativeCardCount=${cards.size} shownNativeCardCount=${cards.count {it.isShown}}"
     }
     private fun row(f:Fixture,id:QuestionIdentity):QuestionRecord=PrivateQuestionStore(f.app).use {checkNotNull(it.get(id.storageKey))}
     private fun drainWorker(f:Fixture) {
@@ -127,7 +145,13 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         instrumentation.waitForIdleSync();f.probe.failure.get()?.let {throw it}
     }
     private fun waiting(f:Fixture,owner:Message):QuestionIdentity {
-        await(f,"real public question card") {all().filterIsInstance<QuestionCardView>().singleOrNull()?.isShown==true}
+        await(f,"question checkpoint WAITING_USER",{waitingDiagnostic(f,owner)}) {checkpointOrNull(f,owner)?.phase==ExecutionPhase.WAITING_USER}
+        val pending=checkpoint(f,owner)
+        assertEquals(owner.id,pending.message.id);assertEquals(owner.runId,pending.message.runId)
+        assertEquals(owner.conversationId,pending.message.conversationId)
+        val identity=QuestionIdentity(owner.conversationId.value,owner.runId.value,pending.owner,CALL)
+        await(f,"durable public question record",{waitingDiagnostic(f,owner)}) {PrivateQuestionStore(f.app).use {it.get(identity.storageKey)!=null}}
+        await(f,"real public question card",{waitingDiagnostic(f,owner)}) {all().filterIsInstance<QuestionCardView>().singleOrNull()?.isShown==true}
         val saved=checkpoint(f,owner)
         assertEquals(ExecutionPhase.WAITING_USER,saved.phase);assertEquals(ToolCallId(CALL),saved.pending!!.callId)
         assertEquals(ToolDisposition.IN_FLIGHT,saved.tools.single().disposition)

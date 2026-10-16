@@ -40,6 +40,10 @@ class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
         val owner = MessageVideoOwner(conversation.id.value, user.id.value)
         db.send(user, assistant, videoInputs = listOf(MessageVideoInput(owner, listOf(MessageVideoReference(
             owner, "original", "video/mp4", 3, "a".repeat(64), 1000, 32, 24)))))
+        // Enabled but unusable auxiliary vision is irrelevant to the original-video route.
+        fixture.controller.independentModels.save(app.daiyu.android.storage.IndependentModelSettings.Slot.VISION,
+            app.daiyu.android.storage.ModelSettings("https://vision.invalid", "vision", "test-key", false),
+            null, true, null)
         mainThread { activity.select(conversation) }
         val text = "  ordinary continuation, original whitespace  "
         setDraft(text)

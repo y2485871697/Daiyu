@@ -11,6 +11,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
@@ -180,6 +181,279 @@ class AndroidPetModelPortTest {
             assertEquals(0, callbacks.get()); assertEquals(2, opened.get()); assertEquals(3, lookups.get())
         } finally { release.countDown(); adapter.close() }
     }
+    /** Deliberately ignores cancellation interrupts, like a transport/factory already in native IO. */
+    private fun awaitRelease(latch: CountDownLatch) {
+        while (true) {
+            try { check(latch.await(10, TimeUnit.SECONDS)); return }
+            catch (_: InterruptedException) { /* Cancellation alone is not our authorization fence. */ }
+        }
+    }
+
+    @Test fun ioRevocationWhileFactoryPausedFencesActualOpenAndQueuedWorkNotNewOwner() {
+        val factoryEntered = CountDownLatch(1); val release = CountDownLatch(1)
+        val revoked = CountDownLatch(1); val finished = CountDownLatch(1)
+        val factories = AtomicInteger(); val opens = AtomicInteger(); val staleCallbacks = AtomicInteger()
+        val adapter = AndroidPetModelPort(PetModelResolver { ResolvedPetModel(it, settings()) }) { _, _ ->
+            if (factories.incrementAndGet() == 1) { factoryEntered.countDown(); awaitRelease(release) }
+            ModelPort {
+                opens.incrementAndGet()
+                object : ModelSession {
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        sink(ModelEvent.TextFinal("t", "reply"))
+                    }
+                    override fun cancel() {}
+                }
+            }
+        }
+        val worker = Thread { adapter.invalidateConfiguration(); revoked.countDown() }
+        try {
+            adapter.complete(request("factory-paused")) { staleCallbacks.incrementAndGet() }
+            assertTrue(factoryEntered.await(3, TimeUnit.SECONDS))
+            adapter.complete(request("queued-old")) { staleCallbacks.incrementAndGet() }
+            worker.start()
+            // No executor/main-loop progress is needed for revocation to return.
+            assertTrue(revoked.await(3, TimeUnit.SECONDS))
+            adapter.complete(request("new-owner")) { assertTrue(it is PetModelResult.Completed); finished.countDown() }
+            release.countDown()
+            assertTrue(finished.await(3, TimeUnit.SECONDS)) // Executor barrier: both old jobs are drained.
+            assertEquals(0, staleCallbacks.get())
+            assertEquals(1, opens.get()) // Not even the already-created old transport may open.
+            assertEquals(2, factories.get())
+        } finally { release.countDown(); worker.join(3000); adapter.close() }
+    }
+
+    @Test fun frozenRegistryEpochIsCheckedAtActualOpenWithoutRelyingOnCancellation() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1); val finished = CountDownLatch(1)
+        val epoch = AtomicInteger(); val factories = AtomicInteger(); val opens = AtomicInteger()
+        val callbacks = AtomicInteger()
+        val adapter = AndroidPetModelPort(PetModelResolver {
+            val frozenEpoch = epoch.get()
+            ResolvedPetModel(it, settings(), isCurrent = { epoch.get() == frozenEpoch })
+        }) { _, _ ->
+            if (factories.incrementAndGet() == 1) { entered.countDown(); awaitRelease(release) }
+            ModelPort {
+                opens.incrementAndGet()
+                object : ModelSession {
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        sink(ModelEvent.TextFinal("t", "reply"))
+                    }
+                    override fun cancel() {}
+                }
+            }
+        }
+        try {
+            adapter.complete(request("old-epoch")) { callbacks.incrementAndGet() }
+            assertTrue(entered.await(3, TimeUnit.SECONDS))
+            epoch.incrementAndGet() // Same IDs; no cancel or adapter invalidation to hide a missing epoch check.
+            adapter.complete(request("current-epoch")) { finished.countDown() }
+            release.countDown()
+            assertTrue(finished.await(3, TimeUnit.SECONDS))
+            assertEquals(1, opens.get()); assertEquals(0, callbacks.get())
+        } finally { release.countDown(); adapter.close() }
+    }
+
+    @Test fun completedReceiptWaitingForEffectOwnerRechecksGenerationInsideDeliveryBoundary() {
+        val terminal = CountDownLatch(1); val release = CountDownLatch(1)
+        val checkedAfterTerminal = CountDownLatch(1); val finished = CountDownLatch(1)
+        val terminalReturned = java.util.concurrent.atomic.AtomicBoolean()
+        val callbacks = AtomicInteger(); val sessions = AtomicInteger()
+        val owner = Any()
+        val adapter = AndroidPetModelPort(PetModelResolver {
+            ResolvedPetModel(it, settings(), isCurrent = {
+                if (terminalReturned.get()) checkedAfterTerminal.countDown()
+                true
+            })
+        }) { _, _ ->
+            val first = sessions.incrementAndGet() == 1
+            ModelPort { object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    sink(ModelEvent.TextFinal("t", "reply")); sink(ModelEvent.Usage(91, 13))
+                    if (first) {
+                        terminal.countDown(); awaitRelease(release)
+                        terminalReturned.set(true)
+                    }
+                }
+                override fun cancel() {}
+            } }
+        }
+        adapter.bindOwner(owner)
+        try {
+            adapter.complete(request("old-receipt")) { callbacks.incrementAndGet() }
+            assertTrue(terminal.await(3, TimeUnit.SECONDS))
+            synchronized(owner) {
+                release.countDown()
+                // Worker has parsed a genuine terminal result and passed its pre-delivery check,
+                // but cannot enter the effect owner. Invalidate before allowing it to enter.
+                assertTrue(checkedAfterTerminal.await(3, TimeUnit.SECONDS))
+                adapter.invalidateConfiguration()
+            }
+            adapter.complete(request("barrier")) { finished.countDown() }
+            assertTrue(finished.await(3, TimeUnit.SECONDS))
+            assertEquals(0, callbacks.get()) // Neither reaction nor a late usage receipt crosses.
+        } finally { release.countDown(); adapter.close() }
+    }
+
+    @Test fun invalidationReturnsBeforeBlockedActualOpenAndCancelsLateSessionOnce() {
+        blockedActualOpen { adapter, _ -> adapter.invalidateConfiguration() }
+    }
+
+    @Test fun closeReturnsBeforeBlockedActualOpenAndCancelsLateSessionOnce() {
+        blockedActualOpen { adapter, _ -> adapter.close() }
+    }
+
+    @Test fun epochOnlyChangeDuringBlockedActualOpenCancelsLateSessionWithoutNext() {
+        // Stable IDs and no adapter invalidation/cancel: the frozen registry epoch alone revokes it.
+        blockedActualOpen { _, epoch -> epoch.incrementAndGet() }
+    }
+
+    private fun blockedActualOpen(revoke: (AndroidPetModelPort, AtomicInteger) -> Unit) {
+        val owner = Any(); val epoch = AtomicInteger()
+        val openEntered = CountDownLatch(1); val releaseOpen = CountDownLatch(1)
+        val revoked = CountDownLatch(1); val cleaned = CountDownLatch(1)
+        val nextCalls = AtomicInteger(); val cancelCalls = AtomicInteger(); val callbacks = AtomicInteger()
+        val openHeldOwner = AtomicBoolean(); val cancelHeldOwner = AtomicBoolean()
+        val adapter = AndroidPetModelPort(PetModelResolver {
+            val acceptedEpoch = epoch.get()
+            ResolvedPetModel(it, settings(), isCurrent = { acceptedEpoch == epoch.get() })
+        }) { _, _ ->
+            ModelPort {
+                openHeldOwner.set(Thread.holdsLock(owner))
+                openEntered.countDown()
+                awaitRelease(releaseOpen) // Ignore the private Future's interrupt, including after close.
+                object : ModelSession {
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        nextCalls.incrementAndGet()
+                        sink(ModelEvent.TextFinal("t", "must not run"))
+                    }
+                    override fun cancel() {
+                        cancelHeldOwner.set(Thread.holdsLock(owner))
+                        cancelCalls.incrementAndGet(); cleaned.countDown()
+                    }
+                }
+            }
+        }
+        adapter.bindOwner(owner)
+        val revoker = Thread {
+            // Real controller calls can already own this monitor when invalidating or closing.
+            synchronized(owner) { revoke(adapter, epoch) }
+            revoked.countDown()
+        }.apply { isDaemon = true }
+        var lease: PetCancel? = null
+        try {
+            lease = adapter.complete(request("blocked-open")) { callbacks.incrementAndGet() }
+            assertTrue(openEntered.await(3, TimeUnit.SECONDS))
+            revoker.start()
+            assertTrue("revocation must not wait for external open", revoked.await(3, TimeUnit.SECONDS))
+            assertEquals(1L, releaseOpen.count)
+            assertEquals(0, cancelCalls.get()) // No session exists yet to cancel.
+            releaseOpen.countDown()
+            assertTrue("late session must be reclaimed even after close", cleaned.await(3, TimeUnit.SECONDS))
+            lease.cancel(); lease.cancel(); adapter.close()
+            assertEquals(1, cancelCalls.get())
+            assertEquals(0, nextCalls.get()); assertEquals(0, callbacks.get())
+            assertFalse(openHeldOwner.get()); assertFalse(cancelHeldOwner.get())
+        } finally {
+            releaseOpen.countDown(); lease?.cancel(); adapter.close(); revoker.join(3000)
+        }
+    }
+
+    @Test fun ownerReentrantInvalidationDoesNotRunBlockingCancelInlineOrBlockNewWork() {
+        blockingCancelDoesNotBlockOwnerOrWorker(invalidate = true)
+    }
+
+    @Test fun ownerReentrantLeaseCancelDoesNotRunBlockingCancelInlineOrBlockNewWork() {
+        blockingCancelDoesNotBlockOwnerOrWorker(invalidate = false)
+    }
+
+    private fun blockingCancelDoesNotBlockOwnerOrWorker(invalidate: Boolean) {
+        val owner = Any()
+        val nextEntered = CountDownLatch(1); val releaseNext = CountDownLatch(1)
+        val cancelEntered = CountDownLatch(1); val releaseCancel = CountDownLatch(1)
+        val cancelFinished = CountDownLatch(1); val cancelAcquiredOwner = CountDownLatch(1)
+        val revoked = CountDownLatch(1); val finished = CountDownLatch(1)
+        val sessions = AtomicInteger(); val firstCancels = AtomicInteger(); val callbacks = AtomicInteger()
+        val cancelHeldOwner = AtomicBoolean(); val cleanupDaemon = AtomicBoolean()
+        val adapter = AndroidPetModelPort(PetModelResolver { ResolvedPetModel(it, settings()) }) { _, _ ->
+            val first = sessions.incrementAndGet() == 1
+            ModelPort { object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    if (first) { nextEntered.countDown(); awaitRelease(releaseNext) }
+                    sink(ModelEvent.TextFinal("t", "reply"))
+                }
+                override fun cancel() {
+                    if (first) {
+                        firstCancels.incrementAndGet()
+                        cancelHeldOwner.set(Thread.holdsLock(owner))
+                        cleanupDaemon.set(Thread.currentThread().isDaemon)
+                        cancelEntered.countDown()
+                        synchronized(owner) { cancelAcquiredOwner.countDown() }
+                        awaitRelease(releaseCancel)
+                        cancelFinished.countDown()
+                    }
+                }
+            } }
+        }
+        adapter.bindOwner(owner)
+        var revoker: Thread? = null
+        try {
+            val lease = adapter.complete(request("old")) { callbacks.incrementAndGet() }
+            assertTrue(nextEntered.await(3, TimeUnit.SECONDS))
+            revoker = Thread {
+                synchronized(owner) {
+                    if (invalidate) adapter.invalidateConfiguration() else lease.cancel()
+                }
+                revoked.countDown()
+            }.apply { isDaemon = true; start() }
+            assertTrue("cancel must not wait for transport cleanup", revoked.await(3, TimeUnit.SECONDS))
+            assertTrue(cancelEntered.await(3, TimeUnit.SECONDS))
+            assertTrue("cleanup must not retain the controller owner", cancelAcquiredOwner.await(3, TimeUnit.SECONDS))
+            assertFalse(cancelHeldOwner.get()); assertTrue(cleanupDaemon.get())
+            assertEquals(1L, releaseCancel.count)
+            // Keep the old cancel blocked while the private model worker runs a new generation.
+            adapter.complete(request("new")) { finished.countDown() }
+            releaseNext.countDown()
+            assertTrue("cleanup must not occupy the single model worker", finished.await(3, TimeUnit.SECONDS))
+            assertEquals(0, callbacks.get()); assertEquals(2, sessions.get())
+            lease.cancel(); lease.cancel()
+            adapter.close() // Nor may close wait for the already-running cleanup.
+            assertEquals(1L, releaseCancel.count)
+            assertEquals(1, firstCancels.get())
+            releaseCancel.countDown()
+            assertTrue(cancelFinished.await(3, TimeUnit.SECONDS))
+            assertEquals(1, firstCancels.get())
+        } finally {
+            releaseNext.countDown(); releaseCancel.countDown(); adapter.close(); revoker?.join(3000)
+        }
+    }
+
+    @Test fun successfulAndExceptionalNextBothCleanTheirSessionExactlyOnce() {
+        listOf(false, true).forEach { fail ->
+            val delivered = CountDownLatch(1); val cleaned = CountDownLatch(1)
+            val cancelCalls = AtomicInteger(); val result = AtomicReference<PetModelResult>()
+            val adapter = AndroidPetModelPort(PetModelResolver { ResolvedPetModel(it, settings()) }) { _, _ ->
+                ModelPort { object : ModelSession {
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        if (fail) error("next failed")
+                        sink(ModelEvent.TextFinal("t", "reply"))
+                    }
+                    override fun cancel() {
+                        cancelCalls.incrementAndGet(); cleaned.countDown()
+                        error("cleanup failure must stay isolated")
+                    }
+                } }
+            }
+            try {
+                val lease = adapter.complete(request()) { result.set(it); delivered.countDown() }
+                assertTrue(delivered.await(3, TimeUnit.SECONDS))
+                assertTrue("finally must clean successful and failed sessions", cleaned.await(3, TimeUnit.SECONDS))
+                if (fail) assertTrue(result.get() is PetModelResult.Failed)
+                else assertTrue(result.get() is PetModelResult.Completed)
+                lease.cancel(); lease.cancel(); adapter.close()
+                assertEquals(1, cancelCalls.get())
+            } finally { adapter.close() }
+        }
+    }
+
     @Test fun protocolFailureAndUnexpectedToolsAreNotSuccessfulPetReactions() {
         val failures: List<(ModelEvent) -> Unit> = listOf({}, { throw IllegalStateException("incomplete") })
         failures.forEachIndexed { index, terminal ->

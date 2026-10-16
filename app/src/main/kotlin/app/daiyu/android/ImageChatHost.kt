@@ -254,21 +254,25 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         }
         changed()
         io.launch {
-            val provider = try {
+            val request = try {
                 val saved = controller.settings.load()
-                ProviderSnapshot.capture(saved, saved.protocol, imageInputSupported = if (saved == authorizedSettings) true else null)
+                val main = ProviderSnapshot.capture(saved, saved.protocol,
+                    imageInputSupported = if (saved == authorizedSettings) true else null)
+                main to controller.captureImageRoute(main)
             } catch (_: Exception) { null }
             withContext(Dispatchers.Main) {
-                if (attempt.cancelled || target.abandoned || closed || !visible || !stillCurrent() || provider == null || provider.imageInputSupported != true) {
+                val provider = request?.first
+                val route = request?.second
+                if (attempt.cancelled || target.abandoned || closed || !visible || !stillCurrent() || provider == null || route?.actual?.imageInputSupported != true) {
                     finish(target, attempt, ImageSendResult.Rejected(target.owner, revision,
-                        "请先声明当前精确模型支持图片；草稿保留"))
+                        "实际图片路由未配置或能力未确认；请检查辅助视觉或主模型声明，草稿保留"))
                     return@withContext
                 }
                 val parts = buildList {
                     if (text.isNotEmpty()) add(ImageSendPart.Text(text))
                     submission.attachments.forEach { add(ImageSendPart.Image(it)) }
                 }
-                attempt.handle = controller.sendImages(conversation, target.owner, revision, parts, provider, text) {
+                attempt.handle = controller.sendImages(conversation, target.owner, revision, parts, provider, text, checkNotNull(route)) {
                     finish(target, attempt, it)
                 }
                 if (attempt.handle == null) finish(target, attempt,

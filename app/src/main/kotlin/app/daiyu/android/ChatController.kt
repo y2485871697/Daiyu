@@ -50,6 +50,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 
 class ChatApplication:Application() {
+    companion object { internal const val OPEN_PET_SETTINGS = "app.daiyu.android.OPEN_PET_SETTINGS" }
     private val terminalProviderDelegate = lazy { app.daiyu.android.terminal.TerminalApplicationProvider(this) }
     internal val terminalProvider by terminalProviderDelegate
     internal val terminalOwner get() = checkNotNull(
@@ -57,6 +58,9 @@ class ChatApplication:Application() {
     ) { "terminal_catalog_not_ready" }.terminalOwner
     val shizuku by lazy { app.daiyu.android.shizuku.ShizukuAuthorization(this) }
     lateinit var controller:ChatController
+    lateinit var pets: app.daiyu.android.pet.PetApplicationHost
+        private set
+    internal var petSettingsNavigator: (() -> Unit)? = null
     lateinit var hapticsRuntime: app.daiyu.android.haptics.HapticsRuntime
         private set
     private var touchHaptics: AutoCloseable? = null
@@ -68,11 +72,26 @@ class ChatApplication:Application() {
         hapticsRuntime.installForeground(this)
         touchHaptics = app.daiyu.android.ui.haptics.TouchHaptics.install(hapticsRuntime)
         controller = ChatController(this)
+        pets = app.daiyu.android.pet.PetApplicationHost(this,
+            app.daiyu.android.pet.PetModelResolver { selection ->
+                controller.independentModels.resolvePet(selection, controller.assistantStore)
+            }, onOpenSettings = {
+                val navigate = petSettingsNavigator
+                if (navigate != null) navigate() else startActivity(android.content.Intent(this, MainActivity::class.java)
+                    .setAction(OPEN_PET_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                        android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            })
+        pets.connectAssistantTransitions(controller.petTransitions)
+        controller.independentModels.onChanging = {
+            pets.onModelConfigurationChanged() // Synchronous worker-safe fence; UI sync is posted by the host.
+            controller.independentConfigurationChanging()
+        }
         terminalProvider
     }
     override fun onTerminate() {
         // Android normally kills the process without this callback; useful for hosted runtimes.
         if (terminalProviderDelegate.isInitialized()) terminalProvider.close()
+        pets.close() // Hosted-runtime cleanup; an Activity never closes the application host.
         touchHaptics?.close(); touchHaptics = null
         hapticsRuntime.close()
         super.onTerminate()
@@ -113,6 +132,24 @@ class ChatController internal constructor(private val application:Application,
     constructor(application:Application):this(application,ConversationDatabase(application),ModelSettingsStore(application),application.getSharedPreferences("conversation-ui",0),{ModelFactory.create(it)},
         assistantModel=AssistantModelFactory::create)
     val assistantStore: SqliteAssistantStore by lazy { SqliteAssistantStore(database) }
+    internal val independentModels = IndependentModelSettings(application).also {
+        it.onChanging = { independentConfigurationChanging() }
+    }
+    internal val petTransitions = CommittedPetTransitions()
+    internal data class ImageRoute(val actual: ProviderSnapshot, val auxiliaryGeneration: Long?)
+    /** Worker-only: explicit auxiliary enablement is not main-provider image capability. */
+    internal fun captureImageRoute(main: ProviderSnapshot): ImageRoute {
+        if (!independentModels.visionSelection().enabled) return ImageRoute(main, null)
+        val generation = independentModels.generation()
+        val frozen = independentModels.freeze(IndependentModelSettings.Slot.VISION)
+        independentModels.visionSelection().resolve(listOf(independentModels.visionCandidate(frozen)))
+        check(independentModels.isCurrent(generation))
+        return ImageRoute(frozen.provider, generation)
+    }
+    internal fun independentConfigurationChanging() {
+        val lifetime = synchronized(this) { resources?.takeIf { it.auxiliary != null } }
+        lifetime?.let { stop(it.initial) }
+    }
     internal val interactiveMode = app.daiyu.android.config.InteractiveModePreference(preferences)
     private val executor=Executors.newSingleThreadExecutor()
     private val handler=Handler(Looper.getMainLooper())
@@ -634,7 +671,8 @@ class ChatController internal constructor(private val application:Application,
     private var questionStore:PrivateQuestionStore?=null
     private val closeDone=CountDownLatch(1)
     private var closingStorage=false
-    private class RunResources(val initial:Message,val runner:ChatRunner,val tools:RunCatalogTools) {
+    private class RunResources(val initial:Message,val runner:ChatRunner,val tools:RunCatalogTools,
+        val auxiliary: ControllerAuxiliaryVision? = null) {
         val writer=Executors.newSingleThreadExecutor()
         val waiter=Executors.newSingleThreadExecutor()
         var question:QuestionRunSession?=null
@@ -1510,13 +1548,15 @@ class ChatController internal constructor(private val application:Application,
     /** Queue acceptance, NOT a receipt. complete always carries the exact owner + revision.
      * The host must retain/freeze that editor revision until completion and remove ONLY the
      * Accepted.images after comparing owner/revision. No callback here deletes a draft.
-     * provider must be an explicit host capability snapshot matching the saved configuration.
+     * provider is the frozen MAIN configuration; route is the independent actual image capability.
+     * An explicitly enabled auxiliary route must be captured on a worker, never by upgrading main.
      * expectedDraftText is the exact persisted composer/conversation text at this revision;
      * it is compared atomically before accepting, never inferred from image labels or URIs.
      * Null means busy/closed/invalid input, no task and no callback. Cancellation is via handle.
      */
     internal fun sendImages(conversation:Conversation?, owner:ImageAttachmentOwner, draftRevision:Long,
         parts:List<ImageSendPart>, provider:ProviderSnapshot, expectedDraftText:String,
+        route: ImageRoute = ImageRoute(provider, null),
         complete:(ImageSendResult)->Unit):ImageSendHandle? {
         val snapshot=parts.toList()
         val (token, handle)=synchronized(this) {
@@ -1530,7 +1570,8 @@ class ChatController internal constructor(private val application:Application,
         try { executor.execute {
             var attempt:ControllerImageAttempt?=null
             val result=try {
-                attempt=ControllerImageAttempt(owner,draftRevision,snapshot,provider,handle,imageJournal,expectedDraftText)
+                attempt=ControllerImageAttempt(owner,draftRevision,snapshot,provider,handle,imageJournal,expectedDraftText,
+                    route.actual, route.auxiliaryGeneration)
                 val replay=try {attempt.reserve(database)} catch (_:Exception) {attempt.unknown()}
                 if(replay!=null) replay else {
                     sendPrepared(token,conversation,"",imageAttempt=attempt)
@@ -1687,6 +1728,21 @@ class ChatController internal constructor(private val application:Application,
             token.video?.revoke()
             problem="原视频目录证据、运行批准或原件校验失败；草稿保留，未启动模型请求";notifyChanged();return null
         } else null
+        val auxiliaryEpoch = independentModels.generation()
+        val auxiliaryCurrent = { video != null || independentModels.isCurrent(auxiliaryEpoch) }
+        val auxiliarySelection = if (video != null) app.daiyu.android.model.auxiliary.AuxiliaryModelSelection(false, "", "")
+            else independentModels.visionSelection()
+        val auxiliaryFrozen = try {
+            if (video != null || !auxiliarySelection.enabled) null else independentModels.freeze(IndependentModelSettings.Slot.VISION).also {
+                auxiliarySelection.resolve(listOf(independentModels.visionCandidate(it)))
+            }
+        } catch (_: Exception) {
+            problem="独立辅助视觉配置不可用或图片能力未知；草稿保留，不回退主模型";notifyChanged();return null
+        }
+        if (imageAttempt != null && (imageAttempt.auxiliaryGeneration != auxiliaryEpoch.takeIf { auxiliaryFrozen != null } ||
+                !auxiliaryCurrent())) {
+            problem="图片路由已变化；草稿保留，请重新发送";notifyChanged();return null
+        }
         val preparedContext = try {
             // All sends, including the very first message, share the same frozen policy/budget.
             val coordinator = contextPreparation
@@ -1716,25 +1772,43 @@ class ChatController internal constructor(private val application:Application,
             notifyChanged(); return null
         }
         if(preparationCancelled(token)) return null
+        var auxiliaryPort: ControllerAuxiliaryVision? = null
+        val acceptedTitle = java.util.concurrent.atomic.AtomicReference<String?>()
         val preparedModel=try {
             if (video != null) messageVideos.wrap(provider, video.second, conversationId, assistant.id,
                 checkNotNull(videoPlan), assistantContext.systemPrompt, { video.first.isRevoked() },
                 checkNotNull(video.first.post), onFrozenPlan = video.first::onFrozenPlan) else {
-            // Preflight the complete expanded history BEFORE DB acceptance or any model open.
-            // Later opens re-authorize against persisted rows; candidate authorization ends here.
+            // Capability preflight is against the actual image route, not the text/main provider.
             val imageHistory=(contextService.displayHistory(conversationId) + preparedContext.messages)
                 .distinctBy { it.id }
-            val plan=messageImages.freeze(imageHistory,provider,user) {
-                preparationCancelled(token) || imageAttempt?.handle?.isCancelled()==true || shizukuPreparation?.isCancelled()==true
+            val summaries = preparedContext.messages.filter { row ->
+                preparedContext.archiveId != null && row.id.value == "summary-${preparedContext.archiveId}" &&
+                    row.runId.value == "summary-${preparedContext.archiveId}"
+            }
+            val authorization = if (auxiliaryFrozen == null) null else
+                ControllerVisionAuthorization(database, assistant, summaries) {
+                    auxiliaryCurrent() && !closed
+                }
+            // Authorize raw owners/segments even before LOCAL auxiliary preflight image reads.
+            // The candidate capability is not installed in the post-accept leaf callback.
+            authorization?.preflight(imageHistory, user)
+            val plan=messageImages.freeze(imageHistory,auxiliaryFrozen?.provider ?: provider,user) {
+                preparationCancelled(token) || !auxiliaryCurrent() ||
+                    imageAttempt?.handle?.isCancelled()==true || shizukuPreparation?.isCancelled()==true
             }
             val delegate=assistantModel?.invoke(provider,assistantContext)
-                ?: if(plan.hasImages) imageModel(provider) else model(config)
-            messageImages.wrap(delegate,provider,conversationId)
+                ?: if(plan.hasImages && auxiliaryFrozen == null) imageModel(provider) else model(config)
+            if (auxiliaryFrozen == null) messageImages.wrap(delegate,provider,conversationId)
+            else {
+                ControllerAuxiliaryVision.create(delegate, auxiliarySelection,
+                    listOf(independentModels.visionCandidate(auxiliaryFrozen)), messageImageResolver(conversationId),
+                    checkNotNull(authorization)::authorize).also { auxiliaryPort = it }
+            }
             }
         } catch (_:Exception) {
             problem="图片历史读取、能力检查或模型初始化失败；草稿保留，未启动聊天模型请求";notifyChanged();return null
         }
-        if(preparationCancelled(token)) return null
+        if(preparationCancelled(token)) { auxiliaryPort?.close(); return null }
         var preparingTools: RunCatalogTools? = null
         var preparingDevices: RunDeviceResources? = null
         var preparingChildren: RunChildModels? = null
@@ -1820,11 +1894,18 @@ class ChatController internal constructor(private val application:Application,
                     onReasoning={ event -> publishReasoning(assistant,event) })) {
                 synchronized(this) {
                     if(!closed && active?.id==assistant.id && active?.runId==run && active?.conversationId==conversationId &&
-                        it.id==assistant.id && it.runId==run && it.conversationId==conversationId) {active=it;notifyChanged()}
+                        it.id==assistant.id && it.runId==run && it.conversationId==conversationId) {
+                        val before = checkNotNull(active)
+                        active=it;notifyChanged()
+                        before
+                    } else null
+                }?.let { before ->
+                    acceptedTitle.get()?.let { title -> petTransitions.afterCommit(before, it, title) }
                 }
             }
             owned to tools
         } catch (_: Exception) {
+            auxiliaryPort?.close()
             if(preparingTools!=null) closeUnacceptedTools(preparingTools)
             else {
                 preparingDevices?.close()
@@ -1842,11 +1923,11 @@ class ChatController internal constructor(private val application:Application,
         }
         val mayCommit=synchronized(this) {
             if(preparation !== token || closed || token.revoked || token.committing ||
-                token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true ||
+                !auxiliaryCurrent() || token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true ||
                 browserPreparation?.isCancelled==true || (imageAttempt!=null && !imageAttempt.beginCommit())) false
             else { token.committing=true; true }
         }
-        if (!mayCommit) { closeUnacceptedTools(tools); return null }
+        if (!mayCommit) { auxiliaryPort?.close(); closeUnacceptedTools(tools); return null }
         var databaseSendEntered=false
         val saved=try {
             if (videoAttempt != null) {
@@ -1891,19 +1972,22 @@ class ChatController internal constructor(private val application:Application,
             token.persistenceUnconfirmed=databaseSendEntered || token.videoReceipt?.outcome == VideoDraftOutcome.UNKNOWN
             synchronized(this) { virtualDisplay?.persistenceUnknown = token.persistenceUnconfirmed }
             if(databaseSendEntered) imageAttempt?.unknown() else imageAttempt?.draftChanged()
+            auxiliaryPort?.close()
             closeUnacceptedTools(tools)
             problem=if(!token.persistenceUnconfirmed) "会话、原文或编辑草稿已变化；保留当前草稿，未启动聊天模型请求"
                 else "发送保存结果未确认；保留原文和附件，不自动重发"
             notifyChanged();return null
         }
         // database.send returns only after its real two-row transaction receipt succeeds.
+        acceptedTitle.set(saved.title)
         imageAttempt?.accepted(saved)
         synchronized(this) { virtualDisplay?.accepted = true }
         video?.first?.accepted(user, videoPrepared?.inputs.orEmpty())
         generation?.session?.recordPersistence(generation.identity, GenerationPersistenceReceipt.Accepted(saved))
-        val lifetime=RunResources(assistant,owned,tools)
+        val lifetime=RunResources(assistant,owned,tools,auxiliaryPort)
         val installed=synchronized(this) {
-            if(closed || token.revoked || token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true ||
+            if(closed || token.revoked || !auxiliaryCurrent() ||
+                token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true ||
                 browserPreparation?.isCancelled==true) false else {
                 if(imageAttempt!=null) imageProvider=provider
                 problem=null;active=assistant
@@ -1922,6 +2006,7 @@ class ChatController internal constructor(private val application:Application,
         }
         if(!installed) {
             // close won AFTER acceptance: receipt still wins, but no provider request is opened.
+            auxiliaryPort?.close()
             closeUnacceptedTools(tools)
             try {database.save(assistant.copy(status=RunStatus.INTERRUPTED))} catch (_:Exception) { }
         }
@@ -2010,6 +2095,7 @@ class ChatController internal constructor(private val application:Application,
             fenceRun(lifetime)
         }
         handler.post {
+            lifetime.auxiliary?.cancel()
             lifetime.runner.stop()
             lifetime.tools.revokeChildren()
             lifetime.tools.close()
@@ -2055,6 +2141,8 @@ class ChatController internal constructor(private val application:Application,
             // Closing tools can reach a model/device transport. Fence under the monitor,
             // but invoke close and wait for its drain callback outside the monitor.
             handler.post {
+                // Terminal worker/drain boundary, not the end of a WAITING_USER slice.
+                lifetime.auxiliary?.close()
                 lifetime.tools.closeWithResult { result ->
                     handler.post {synchronized(this) {
                         if(resources===lifetime) {
@@ -2357,6 +2445,7 @@ class ChatController internal constructor(private val application:Application,
                 it.initial.conversationId==owner.conversationId && owner.role==Message.ASSISTANT_ROLE}
                 ?.also {fenceRun(it)}
         } ?: return false
+        lifetime.auxiliary?.cancel()
         lifetime.runner.stop();lifetime.tools.revokeChildren();lifetime.tools.close()
         handler.post {synchronized(this) {cleanupRun(lifetime)}}
         return true
@@ -2369,6 +2458,7 @@ class ChatController internal constructor(private val application:Application,
         synchronized(this) {pendingImage}?.cancel()
         synchronized(this) {pendingShizuku}?.let(::rejectShizuku)
         val lifetime=synchronized(this) {resources?.also {fenceRun(it)}} ?: return
+        lifetime.auxiliary?.cancel()
         lifetime.runner.stop();lifetime.tools.revokeChildren();lifetime.tools.close()
         handler.post {synchronized(this) {cleanupRun(lifetime)}}
     }
@@ -2388,6 +2478,7 @@ class ChatController internal constructor(private val application:Application,
         cancelPreparation()
         synchronized(this) {pendingImage}?.cancel()
         synchronized(this) {pendingShizuku}?.let(::rejectShizuku)
+        lifetime?.auxiliary?.cancel()
         lifetime?.runner?.stop();lifetime?.tools?.close()
         handler.post {synchronized(this) {
             if(lifetime!=null && resources===lifetime) cleanupRun(lifetime) else closeStorageWhenIdle()

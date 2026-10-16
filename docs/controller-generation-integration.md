@@ -58,11 +58,11 @@ worker; video originals are verified but video playback/export is not added by t
 The two existing Main deletion callers both reach `mutateGenerationOwners`:
 
 - conversation deletion supplies its copied set of conversation IDs;
-- delete-all supplies `null` (the whole account publication scope).
+- delete-all supplies `null`; its worker snapshots and seals the existing conversation IDs while `dataBusy` excludes new admissions.
 
-Admission checks and sealing occur under the short controller monitor. The parent records
-permanent conversation/account admission seals and immediately calls the retained Resources'
-`sealConversationPublicationAdmission` / `sealAccountPublicationAdmission`. These APIs only
+Admission checks and conversation sealing use the short controller monitor. The parent records
+permanent admission seals for the selected existing conversation IDs and calls the retained Resources'
+`sealConversationPublicationAdmission`. These APIs only
 modify in-memory admission; they do not run validators, acquire SQLite/file locks, or wait.
 
 The queued worker then calls **every captured `revocation.revokeOnWorker()` before closing the

@@ -115,6 +115,25 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         } } finally { super.tearDown() }
     }
 
+    fun testImageAttemptFreezesWithActualAuxiliaryRouteWithoutClaimingMainSupportsImages() {
+        val f = fixture(); val conversation = f.db.create("default")
+        val owner = ImageAttachmentOwner(conversation.id.value, "independent-route-editor")
+        val attachment = image(f, owner)
+        val main = provider(f, null)
+        val actual = ProviderSnapshot.capture(ModelSettings("https://auxiliary.invalid", "independent-vision", "other-key", false),
+            app.daiyu.android.model.ProviderProtocol.RESPONSES, true)
+        val attempt = ControllerImageAttempt(owner, 1, listOf(ImageSendPart.Image(attachment)), main,
+            ImageSendHandle(owner, 1), f.app.getSharedPreferences("image-send-identities", 0),
+            imageRoute = actual, auxiliaryGeneration = 17)
+        val row = attempt.prepare(f.controller.imageAttachments.store,
+            MessageImageAssetStore(File(f.app.filesDir, "independent-route-assets")))
+        assertNull(attempt.provider.imageInputSupported)
+        assertEquals("independent-vision", attempt.imageRoute.model)
+        assertEquals(1, row.blocks.filterIsInstance<MessageBlock.Image>().size)
+        assertEquals(0, f.probe.opens.get())
+        assertEquals(1, f.controller.imageAttachments.store.list(owner).size)
+    }
+
     fun testAcceptedOrderedBlocksExactReceiptAndHistoryAfterDraftRemoval() {
         val f = fixture(); val conversation = f.db.create("default")
         val owner = ImageAttachmentOwner(conversation.id.value, "editor-one")

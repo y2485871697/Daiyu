@@ -10,7 +10,11 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.pet.*
+import app.daiyu.android.storage.ModelSettings
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 /** No real WindowManager, permission launch, model network or service is used. */
 @Suppress("DEPRECATION")
@@ -303,6 +307,109 @@ class PetApplicationHostTest : InstrumentationTestCase() {
                 assertTrue(f.app.host.snapshot().pet.state.speechVisible)
                 assertEquals(1, f.app.host.snapshot().pet.state.memories.size)
             } finally { f.close() }
+        }
+    }
+
+    private fun awaitIgnoringInterrupt(latch: CountDownLatch) {
+        while (true) {
+            try { check(latch.await(10, TimeUnit.SECONDS)); return }
+            catch (_: InterruptedException) { /* Emulate native IO that cannot be interrupted. */ }
+        }
+    }
+
+    fun testPausedMainIoRevocationFencesOldOpenReceiptAndEffectsWithoutCancellingNewOwner() {
+        val context = context()
+        val oldTerminal = CountDownLatch(1); val releaseOld = CountDownLatch(1)
+        val newEntered = CountDownLatch(1); val releaseNew = CountDownLatch(1)
+        val revoked = CountDownLatch(1); val newVoice = CountDownLatch(1)
+        val opens = AtomicInteger(); val oldQueuedCallbacks = AtomicInteger(); val voices = AtomicInteger()
+        val adapter = AndroidPetModelPort(PetModelResolver {
+            ResolvedPetModel(it, ModelSettings("https://pet.invalid", "pet-api", "test-secret", false))
+        }) { _, _ ->
+            ModelPort {
+                val first = opens.incrementAndGet() == 1
+                object : ModelSession {
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        if (!first) { newEntered.countDown(); awaitIgnoringInterrupt(releaseNew) }
+                        sink(ModelEvent.TextFinal("t", "{\"mood\":\"happy\",\"speech\":\"独立反应\"}"))
+                        sink(ModelEvent.Usage(if (first) 91L else 11L, if (first) 33L else 7L))
+                        // All old text/usage has already been parsed; return a genuine terminal
+                        // AFTER revocation, without another event that could supply the fence.
+                        if (first) { oldTerminal.countDown(); awaitIgnoringInterrupt(releaseOld) }
+                    }
+                    override fun cancel() {} // A late terminal receipt is intentionally still possible.
+                }
+            }
+        }
+        lateinit var app: PetApplicationHost
+        var satietyAfterNewFeed = -1
+        val ioFailure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        val io = Thread {
+            try { app.onModelConfigurationChanged() }
+            catch (failure: Throwable) { ioFailure.set(failure) }
+            finally { revoked.countDown() }
+        }
+        instrumentation.runOnMainSync {
+            app = PetApplicationHost(context, adapter, PetVoicePort { _, _ ->
+                voices.incrementAndGet(); newVoice.countDown(); PetCancel {}
+            }, {}, Windows(), { false })
+            app.updateSettings(PetSettings(enabled = true, audioEnabled = true,
+                model = PetModelSelection("pet-assistant", "pet-provider", "pet-model")))
+            app.host.feed(PetFood.BOWL)
+        }
+        try {
+            assertTrue(oldTerminal.await(3, TimeUnit.SECONDS))
+            val selection = app.host.snapshot().pet.state.settings.model
+            adapter.complete(PetModelRequest("queued-old", selection, PetEvent.FEED, "old", "pet:queued-old")) {
+                oldQueuedCallbacks.incrementAndGet()
+            }
+            instrumentation.runOnMainSync {
+                // Deliberately freeze main while IO revokes. No queued UI runnable may be needed
+                // to fence the old adapter or retire its controller owner.
+                io.start()
+                assertTrue(revoked.await(3, TimeUnit.SECONDS))
+                assertNull(ioFailure.get())
+                val retired = app.host.snapshot().pet.state
+                assertFalse(retired.thinking)
+                assertFalse(retired.speechVisible)
+                assertTrue(retired.memories.isEmpty())
+                assertEquals(PetRequestStatus.CANCELLED, retired.usage.single().status)
+                assertNull(retired.usage.single().inputTokens)
+                assertNull(retired.usage.single().outputTokens)
+                assertEquals(0, voices.get())
+                // New owner starts BEFORE the old revocation's queued UI synchronization runs.
+                app.host.feed(PetFood.BOWL)
+                assertTrue(app.host.snapshot().pet.state.thinking)
+                satietyAfterNewFeed = app.host.snapshot().pet.state.satiety
+            }
+            instrumentation.runOnMainSync {
+                assertTrue(app.host.snapshot().pet.state.thinking) // Old UI work did not cancel new owner.
+                releaseOld.countDown()
+            }
+            assertTrue(newEntered.await(3, TimeUnit.SECONDS)) // Serial executor has drained both old jobs.
+            val afterOldTerminal = app.host.snapshot().pet.state
+            assertTrue(afterOldTerminal.thinking)
+            assertTrue(afterOldTerminal.memories.isEmpty())
+            assertFalse(afterOldTerminal.speechVisible)
+            assertEquals(satietyAfterNewFeed, afterOldTerminal.satiety)
+            assertEquals(0, voices.get()); assertEquals(0, oldQueuedCallbacks.get())
+            assertEquals(2, opens.get()) // Only the old already-open session and the new owner.
+            assertEquals(PetRequestStatus.CANCELLED, afterOldTerminal.usage.first().status)
+            assertNull(afterOldTerminal.usage.first().inputTokens) // No late receipt write either.
+            assertNull(afterOldTerminal.usage.first().outputTokens)
+            releaseNew.countDown()
+            assertTrue(newVoice.await(3, TimeUnit.SECONDS))
+            val completed = app.host.snapshot().pet.state
+            assertEquals(1, completed.memories.size)
+            assertEquals(1, voices.get())
+            assertEquals(PetRequestStatus.COMPLETED, completed.usage.last().status)
+            assertEquals(11L, completed.usage.last().inputTokens)
+            assertNull(completed.usage.first().inputTokens)
+        } finally {
+            releaseOld.countDown(); releaseNew.countDown()
+            io.join(3000)
+            instrumentation.runOnMainSync { app.close() }
+            context.getSharedPreferences("daiyu_pet_v1", 0).edit().clear().commit()
         }
     }
 

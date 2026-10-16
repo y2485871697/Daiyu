@@ -102,6 +102,41 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
         assertEquals(0, provider.opens.get()); assertEquals(0L, controller.dataRevision)
         assertEquals(before, controller.database.exportBackup()); assertEquals(0, modelCalls.get())
     }
+    fun testProductionPetMountLeaseSurvivesActivityRecreationAndRealSettingsRoute() {
+        val current = start()
+        val singleton = application.pets
+        lateinit var previousLayer: android.widget.FrameLayout
+        mainThread {
+            previousLayer = checkNotNull(current.window.decorView.findViewWithTag<android.widget.FrameLayout>("application-pet-layer"))
+            assertEquals(2, previousLayer.childCount) // Compose content + borrowed pet layer.
+            assertFalse(singleton.closed)
+        }
+        openSettings()
+        reveal("settings-row:鲸鱼女仆", "设置").performClick()
+        instrumentation.waitForIdleSync()
+        mainThread { assertNotNull(current.window.decorView.findViewWithTag<android.view.View>("pet-settings-view")) }
+        backToChat(current) // Pet settings BackHandler returns to the actual SettingsHome.
+        reveal("settings-row:辅助视觉模型", "设置").performClick()
+        ui.waitUntil(timeoutMillis = 5_000) {
+            var found = false
+            instrumentation.runOnMainSync {
+                found = current.window.decorView.findViewWithTag<android.view.View>("independent-model-vision") != null
+            }
+            found
+        }
+        activity = recreateActivity(current)
+        mainThread {
+            val replacement = checkNotNull(activity)
+            val newLayer = checkNotNull(replacement.window.decorView.findViewWithTag<android.widget.FrameLayout>("application-pet-layer"))
+            assertSame(singleton, application.pets)
+            assertNotSame(previousLayer, newLayer)
+            assertEquals(1, previousLayer.childCount) // Pet lease detached; runtime not closed.
+            assertEquals(2, newLayer.childCount)
+            assertFalse(singleton.closed)
+        }
+        assertEquals(0, modelCalls.get())
+    }
+
     fun testFailedSelectionPreferenceCommitKeepsInputAndDraftOwner() {
         val current = start(); val a = controller.database.create(); val b = controller.database.create()
         controller.database.draft(b.id, "B protected draft")

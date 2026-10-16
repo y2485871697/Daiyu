@@ -43,14 +43,20 @@ internal class RunCatalogTools(
     private val backgroundFactory: ((RunExecutionOwner, SessionCapabilities, TaskAuthorization) -> RunChildTasks)? = null,
     authorization: TaskAuthorization? = null,
     private val shizuku: CatalogShizukuBinding? = null,
+    terminal: CatalogTerminalBinding? = null,
     // Same-package failure injection; production always invokes the resource's own stop action.
     private val closeResource: (AutoCloseable) -> Unit = { it.close() },
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
-    // Only the legacy, non-Shizuku path may manufacture an EMPTY authorization.
+    // Only the legacy path without an approved external binding may use EMPTY authorization.
     private val authorization = authorization ?: run {
         require(shizuku == null) { "shizuku_task_authorization_required" }
+        require(terminal == null) { "terminal_task_authorization_required" }
         TaskAuthorization(capabilities.sessionId, runId.value)
+    }
+    // No PTY is opened here, during binding, capture, advertising, or preparation.
+    private val terminalLeaf = terminal?.let {
+        TerminalCatalogLeaf(it, capabilities, ledger, this.authorization, conversationId, runId)
     }
     init {
         require(this.authorization.sessionId == capabilities.sessionId && this.authorization.taskId == runId.value) {
@@ -91,6 +97,7 @@ internal class RunCatalogTools(
                 deviceResources?.bind(owner, authorization, capabilities)
                 children?.bind(owner, capabilities, authorization)
                 shizuku?.commands?.bind(owner, capabilities, authorization)
+                terminalLeaf?.bindOwner(owner)
                 val created = if (background == null) backgroundFactory?.let { factory ->
                     createResource { factory(owner, capabilities, authorization) }
                 } else null
@@ -135,6 +142,7 @@ internal class RunCatalogTools(
                 children?.let { registry.register(it.tool()) }
                 background?.let { registry.register(it.tool()) }
                 shizuku?.let { registry.register(it.commands.tool()) }
+                terminalLeaf?.registeredTools?.forEach { registry.register(it) }
                 val result = CatalogModelBridge(registry.snapshot(), capabilities, ledger, conversationId, runId, authorization)
                 result.bindOwner(bound)
                 synchronized(closeLock) {
@@ -188,6 +196,8 @@ internal class RunCatalogTools(
     }
     private fun observeOutcomes(results: List<ToolDispatchResult>) {
         // Includes ledger reservation conflicts and persistence failure AFTER a confirmed adapter reply.
+        // Use the entire central result, never a second leaf dispatcher or adapter-only receipts.
+        terminalLeaf?.observeOutcomes(results)
         results.firstNotNullOfOrNull { it.outcome as? DispatchOutcome.Unknown }?.let {
             shizuku?.session?.markOutcomeUnknown(it.code.ifBlank { "dispatcher_outcome_unknown" })
         }
@@ -197,14 +207,15 @@ internal class RunCatalogTools(
     }
     private fun endDispatch() {
         synchronized(closeLock) { activeDispatches-- }
-        notifyClosed()
+        advanceClose()
     }
     // Fence publication under the same short lock as creation admission. Never wait for a factory,
     // capture, dispatch or drain callback on the UI/control thread.
     override fun close() {
         val resources = synchronized(closeLock) {
             closed.set(true)
-            claimStops(listOfNotNull(shizuku, background, children, deviceResources, skills))
+            // Fence the terminal before stopping other resources; join is observed separately.
+            claimStops(listOfNotNull(terminalLeaf, shizuku, background, children, deviceResources, skills))
         }
         stopClaimed(resources)
     }
@@ -233,7 +244,7 @@ internal class RunCatalogTools(
     }
     internal fun revokeChildren() { background?.revoke() }
 
-    /** Legacy callback means DRAINED only. Shizuku callers must use closeWithResult instead. */
+    /** Legacy callback means DRAINED only. External bindings must use closeWithResult instead. */
     internal fun closeWhenIdle(onClosed: () -> Unit) = closeWithResult {
         if (it == RunCatalogCloseResult.Drained) onClosed()
     }
@@ -248,11 +259,14 @@ internal class RunCatalogTools(
     }
     private fun advanceClose() {
         val begin = synchronized(closeLock) {
-            if (!closed.get() || !observingClose || observationsStarted || activeCreations != 0 || pendingStops != 0) false
+            // The terminal leaf's own dispatcher is not used by this catalog. Its worker join
+            // must therefore start only after OUR final receipt persistence/observation settles.
+            if (!closed.get() || !observingClose || observationsStarted || activeCreations != 0 || pendingStops != 0 ||
+                (terminalLeaf != null && activeDispatches != 0)) false
             else {
                 observationsStarted = true
                 registeringObservations = true
-                remainingObservations = 3
+                remainingObservations = 4
                 true
             }
         }
@@ -274,6 +288,10 @@ internal class RunCatalogTools(
                         is ShizukuCloseResult.Unknown -> RunCatalogCloseResult.Unknown(result.reason)
                     })
                 }
+            }
+            observeResourceClose(terminalLeaf) { done ->
+                if (terminalLeaf == null) done(RunCatalogCloseResult.Drained)
+                else terminalLeaf.observeClose(done)
             }
             synchronized(closeLock) { registeringObservations = false }
         }

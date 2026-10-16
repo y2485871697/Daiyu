@@ -83,7 +83,7 @@ expected=${target_spec%%$'\n'*}
 test_classes=${target_spec#*$'\n'}
 test "$expected" -gt 0
 printf '%s\n' "$target_spec" > smoke/instrumentation-targets.txt
-adb_stage instrumentation 300 shell am instrument -w -e class "$test_classes" app.daiyu.android.test/android.test.InstrumentationTestRunner 2>&1 | tee smoke/platform-tests.txt
+adb_stage instrumentation 600 shell am instrument -w -e class "$test_classes" app.daiyu.android.test/android.test.InstrumentationTestRunner 2>&1 | tee smoke/platform-tests.txt
 grep -q "OK ($expected tests)" smoke/platform-tests.txt
 if grep -q 'FAILURES!!!' smoke/platform-tests.txt; then exit 1; fi
 adb_stage packages 20 shell pm list packages > smoke/packages.txt

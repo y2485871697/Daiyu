@@ -12,6 +12,11 @@ on:
           - smoke
         default: build
         required: true
+      smoke_api:
+        description: 仅启动补检的API（完整构建始终覆盖双API）
+        type: choice
+        options: [all, '26', '37.2']
+        default: all
       check_scope:
         description: 仅检查模式的补检范围
         type: choice
@@ -176,9 +181,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {api: '26', target: google_apis, ram: 4096}
-          - {api: '37.2', target: google_apis_ps16k, ram: 6144}
+        include: ${{ fromJSON(inputs.mode == 'smoke' && inputs.smoke_api == '26' && '[{"api":"26","target":"google_apis","ram":4096}]' || inputs.mode == 'smoke' && inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144}]' || '[{"api":"26","target":"google_apis","ram":4096},{"api":"37.2","target":"google_apis_ps16k","ram":6144}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:

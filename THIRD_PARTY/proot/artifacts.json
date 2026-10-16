@@ -1,0 +1,78 @@
+{
+  "source_baseline": "2a7e7ab92b98da5a3711611017021441e7a8053c",
+  "build_android_api": 34,
+  "artifacts": [
+    {
+      "path": "app/src/main/jniLibs/arm64-v8a/libproot_exec.so",
+      "bytes": 256808,
+      "sha256": "a8ebc8a4b77a634f88dd8e270423fdbc761666eb4e26b391966657550e3d0f5b",
+      "source": "sources/eta/app/src/main/jniLibs/arm64-v8a/libproot_exec.so"
+    },
+    {
+      "path": "app/src/main/jniLibs/arm64-v8a/libproot_loader.so",
+      "bytes": 17800,
+      "sha256": "9a1c8aae223f5e8de76b8d457086530ba2780261d3582cc2e1bbe4ccf19df5c9",
+      "source": "sources/eta/app/src/main/jniLibs/arm64-v8a/libproot_loader.so"
+    },
+    {
+      "path": "app/src/main/jniLibs/x86_64/libproot_exec.so",
+      "bytes": 271472,
+      "sha256": "1d6578c474d98d29cc3cfa25a13828a8a4be8ccdbb65055a120760290a7d628f",
+      "source": "sources/eta/app/src/main/jniLibs/x86_64/libproot_exec.so"
+    },
+    {
+      "path": "app/src/main/jniLibs/x86_64/libproot_loader.so",
+      "bytes": 17944,
+      "sha256": "3a28ac6af36b5fbd8142ba62dd9780bbf308736cef8672518ddca0e685e9999f",
+      "source": "sources/eta/app/src/main/jniLibs/x86_64/libproot_loader.so"
+    },
+    {
+      "path": "app/src/main/assets/native-sources/proot.tgz",
+      "bytes": 322321,
+      "sha256": "a1b070f55ec32b78e5033621476533d7230eb110275fe0cc3ee79c4fb334cfaa",
+      "source": "sources/eta/app/src/main/assets/native-sources/proot.tgz"
+    },
+    {
+      "path": "app/src/main/assets/native-sources/talloc.tgz",
+      "bytes": 684092,
+      "sha256": "dc46c40b9f46bb34dd97fe41f548b0e8b247b77a918576733c528e83abd854dd",
+      "source": "sources/eta/app/src/main/assets/native-sources/talloc.tgz"
+    },
+    {
+      "path": "app/src/main/assets/native-sources/shmem.tgz",
+      "bytes": 8891,
+      "sha256": "1e5ff8459bc0a8c229dd8a94b27d119987e09ef3414331c2b5ebfff20b98e867",
+      "source": "sources/eta/app/src/main/assets/native-sources/shmem.tgz"
+    },
+    {
+      "path": "app/src/main/assets/native-sources/eta-native-build.tgz",
+      "bytes": 8103,
+      "sha256": "58a08bfc96910eac6e62b30bdb0f74ea38148e123b9d80a145d923f01227f9c4",
+      "source": "sources/eta/app/src/main/assets/native-sources/eta-native-build.tgz"
+    },
+    {
+      "path": "app/src/main/assets/licenses/GPL-3.0.txt",
+      "bytes": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "source": "sources/eta/app/src/main/assets/licenses/GPL-3.0.txt"
+    },
+    {
+      "path": "app/src/main/assets/licenses/proot-5.1.107.92.txt",
+      "bytes": 19106,
+      "sha256": "0ffa6454acbe7e410ac6f0007df83b9b3161fe55484c1f4b87487c0f2d228a6d",
+      "source": "sources/eta/app/src/main/assets/licenses/proot-5.1.107.92.txt"
+    },
+    {
+      "path": "app/src/main/assets/licenses/talloc-2.4.3.txt",
+      "bytes": 7651,
+      "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768",
+      "source": "sources/eta/app/src/main/assets/licenses/talloc-2.4.3.txt"
+    },
+    {
+      "path": "app/src/main/assets/licenses/libandroid-shmem-0.7.txt",
+      "bytes": 1529,
+      "sha256": "0dd43abe17196b0224cb0b159819af798cd508a82a21e5870126fff4e899a7eb",
+      "source": "sources/eta/app/src/main/assets/licenses/libandroid-shmem-0.7.txt"
+    }
+  ]
+}

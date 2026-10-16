@@ -69,6 +69,8 @@ import app.daiyu.android.ui.screens.assistants.AssistantPickerDialog
 import app.daiyu.android.ui.screens.chat.ManageChatsScreen
 import app.daiyu.android.ui.screens.chat.conversation.*
 import app.daiyu.android.ui.screens.settings.*
+import app.daiyu.android.ui.screens.search.ConversationSearchScreen
+import app.daiyu.android.ui.screens.search.MessageSearchScreen
 import app.daiyu.android.ui.screens.stats.UsageStatsScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -141,6 +143,12 @@ class MainActivity : ComponentActivity() {
     private var exportConversationId by mutableStateOf<String?>(null)
     private var exportConversationTitle by mutableStateOf("")
     private var taskRecordsConversationId by mutableStateOf<String?>(null)
+    // Frozen entry context. Readers run on IO and must not inspect mutable Compose/host state.
+    private class SearchPage(
+        val route: String, val returnPage: String, val conversationId: String?,
+        val active: Message?, val folderId: String?,
+    )
+    private var searchPage by mutableStateOf<SearchPage?>(null)
     private var configurationRestorePreview by mutableStateOf<ChatController.ConfigurationRestorePreview?>(null)
     private var restorePreviewText by mutableStateOf("")
     private var backupBusy by mutableStateOf(false)
@@ -190,7 +198,11 @@ class MainActivity : ComponentActivity() {
                     if (sidebarVisible || retainedPage != "chat") focus.clearFocus()
                 }
                 BackHandler(enabled = retainedPage != "chat") {
-                    if (retainedPage == "appearance") retainedPage = "settings" else returnToChat()
+                    when (retainedPage) {
+                        "appearance" -> retainedPage = "settings"
+                        "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
+                        else -> returnToChat()
+                    }
                 }
                 when (retainedPage) {
                     "manage" -> ManageChatsScreen(
@@ -203,9 +215,33 @@ class MainActivity : ComponentActivity() {
                             check(controller.active == null) { "请先停止当前运行" }
                             retainedData.deleteAll(); select(null); updatePane()
                         } },
-                        onSearchHistory = { query -> withContext(Dispatchers.IO) { retainedData.search(query) } },
-                        onOpenHistoryHit = { hit -> guard { openHistoryHit(hit) } },
+                        onOpenMessageSearch = { guard { openSearch("message-search") } },
+                        onOpenConversationSearch = { guard { searchConversations() } },
                     )
+                    "conversation-search", "message-search" -> searchPage?.let { page ->
+                        key(page) {
+                            if (page.route == "conversation-search") ConversationSearchScreen(
+                                loadConversations = { retainedData.summaries(page.active) },
+                                folders = paneState.folders, initialFolderId = page.folderId,
+                                onOpenConversation = { id ->
+                                    if (searchPage === page && retainedPage == page.route) guard { openRetainedConversation(id) }
+                                },
+                                onBack = { closeSearch(page) },
+                            ) else MessageSearchScreen(
+                                onSearch = { query -> retainedData.search(query) },
+                                currentConversationId = page.conversationId,
+                                onSearchCurrentConversation = { query, id ->
+                                    check(id == page.conversationId) { "搜索范围已改变" }
+                                    retainedData.searchCurrentConversation(query, id)
+                                },
+                                resultLimit = RetainedConversationData.SEARCH_RESULT_LIMIT,
+                                onOpenHit = { hit ->
+                                    if (searchPage === page && retainedPage == page.route) guard { openHistoryHit(hit) }
+                                },
+                                onBack = { closeSearch(page) },
+                            )
+                        }
+                    }
                     "usage" -> UsageStatsScreen(onBack = { returnToChat() }, load = { retainedData.stats() })
                     "conversation-export" -> exportConversationId?.let { id ->
                         ConversationExportScreen(
@@ -416,7 +452,7 @@ class MainActivity : ComponentActivity() {
             ChatMenuAction.LOAD_EARLIER -> loadEarlier()
             ChatMenuAction.LOCATE_USER -> chooseUserMessage()
             ChatMenuAction.BOTTOM -> jumpToBottom()
-            ChatMenuAction.SEARCH -> searchConversations()
+            ChatMenuAction.SEARCH -> openSearch("message-search")
             ChatMenuAction.SETTINGS -> retainedPage = "settings"
             ChatMenuAction.CONVERSATION_ID -> selected?.let {
                 (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("会话 ID", it.id.value))
@@ -537,7 +573,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun returnToChat() {
         dismissChatModels(); invalidateCatalog(); modelDraft = null; editingSettings = null; modelError = null
-        cancelRestorePreview(); prompt = null; retainedPage = "chat"
+        cancelRestorePreview(); prompt = null; searchPage = null; retainedPage = "chat"
         exportConversationId = null; exportConversationTitle = ""; taskRecordsConversationId = null
         if (activityUsable()) refresh()
     }
@@ -602,8 +638,33 @@ class MainActivity : ComponentActivity() {
                 updatePane(); refresh()
             } })
     }
-    private fun searchConversations() {
-        prompt = InputPrompt("搜索会话", "", "标题、草稿或消息关键词", "搜索", { query -> guard { chooseConversation(query) } })
+    private fun searchConversations() = openSearch("conversation-search")
+
+    private fun openSearch(route: String) {
+        requireActivityUsable()
+        check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
+        require(route == "conversation-search" || route == "message-search")
+        val origin = if (retainedPage == "manage") "manage" else "chat"
+        updatePane()
+        prompt = null
+        searchPage = SearchPage(route, origin, selected?.id?.value, controller.active, paneState.selectedFolderId)
+        // Transition first: dismissSidebar must not briefly make hidden chat speech visible.
+        retainedPage = route
+        dismissSidebar()
+    }
+
+    private fun closeSearch(page: SearchPage) {
+        if (!activityUsable() || searchPage !== page || retainedPage != page.route) return
+        searchPage = null
+        try {
+            if (page.returnPage == "manage") {
+                retainedPage = "manage"
+                updatePane()
+            } else returnToChat()
+        } catch (_: Exception) {
+            // A failed reader must not trap Back or turn a refresh error into an Activity crash.
+            toast("读取失败；原数据保留")
+        }
     }
     private fun browseFolders() {
         val folders = controller.database.conversations().map { it.folder }.distinct().sorted()
@@ -627,10 +688,12 @@ class MainActivity : ComponentActivity() {
     }
     private fun openHistoryHit(hit: MessageSearchHit) {
         val conversation = retainedConversation(hit.conversationId)
-        openRetainedConversation(hit.conversationId)
         val sequence = controller.database.readableDatabase.rawQuery("SELECT seq FROM messages WHERE conversation_id=? AND id=?",
             arrayOf(conversation.id.value, hit.ownerMessageId)).use { cursor -> check(cursor.moveToFirst()) { "命中消息已不存在" }; cursor.getLong(0) }
-        shown = controller.database.messages(conversation.id, sequence + 1, 50).toMutableList()
+        val window = controller.database.messages(conversation.id, sequence + 1, 50).toMutableList()
+        // Resolve the owner/window before leaving search, so a deleted hit keeps its source page.
+        openRetainedConversation(hit.conversationId)
+        shown = window
         publishChat(); requestScroll(hit.ownerMessageId, false)
     }
     private fun toast(text: String) { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }

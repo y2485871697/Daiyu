@@ -32,28 +32,56 @@ internal class RetainedConversationData(private val database: ConversationDataba
         }
     }
 
-    fun search(query: String): List<MessageSearchHit> {
+    companion object {
+        // This reader has no continuation token: never advertise pagination or unlimited results.
+        const val SEARCH_RESULT_LIMIT = 200
+    }
+
+    fun search(query: String): List<MessageSearchHit> = searchHistory(query, null)
+
+    /** Scope the SQLite read BEFORE matching/limiting, not a filter of 200 global hits. */
+    fun searchCurrentConversation(query: String, conversationId: String): List<MessageSearchHit> {
+        require(conversationId.isNotBlank())
+        return searchHistory(query, conversationId)
+    }
+
+    private fun searchHistory(query: String, conversationId: String?): List<MessageSearchHit> {
         val needle = query.trim()
         if (needle.isEmpty()) return emptyList()
         require(needle.length <= 1000)
+        val conversations = database.readableDatabase.rawQuery(
+            "SELECT id,title FROM conversations" + (if (conversationId == null) "" else " WHERE id=?") +
+                " ORDER BY pinned DESC,updated DESC,id ASC",
+            conversationId?.let { arrayOf(it) },
+        ).use { cursor -> buildList {
+            while (cursor.moveToNext()) add(ConversationId(cursor.getString(0)) to cursor.getString(1))
+        } }
+        // A removed scope is a failed read, not an apparently successful search of some other scope.
+        check(conversationId == null || conversations.size == 1) { "会话已不存在" }
         return buildList {
-            for (conversation in database.conversations()) {
-                val stored = context.displayHistory(conversation.id)
+            val seen = hashSetOf<Pair<String, String>>()
+            for ((id, title) in conversations) {
+                // displayHistory binds WHERE conversation_id=? and includes old/segmented history.
+                val stored = context.displayHistory(id)
                 val owners = stored.flatMap { owner -> owner.historySegments.map { it.messageId.value to owner.id.value } }.toMap()
-                val history = MessageHistory.expand(stored)
-                for (message in history) {
-                    val text = message.blocks.joinToString("\n") { block -> when (block) {
-                        is MessageBlock.Text -> block.text
-                        is MessageBlock.Tool -> listOfNotNull(block.invocation.name, block.invocation.arguments, block.result).joinToString(" ")
-                    } }
+                for (message in MessageHistory.expand(stored)) {
+                    // Search explicit text/tool records, not serialized block IDs or protocol
+                    // metadata. No image/attachment tables, asset paths or sidecar files are read.
+                    val text = message.blocks.mapNotNull { block -> when {
+                        block is MessageBlock.Text -> block.text
+                        block is MessageBlock.Tool -> listOfNotNull(block.invocation.name, block.invocation.arguments, block.result).joinToString(" ")
+                        else -> null // Non-text attachment blocks never contribute metadata.
+                    } }.joinToString("\n")
                     val at = text.indexOf(needle, ignoreCase = true)
-                    if (at >= 0) add(MessageSearchHit(conversation.id.value, conversation.title, message.id.value,
-                        text.substring((at - 36).coerceAtLeast(0), (at + needle.length + 80).coerceAtMost(text.length)),
-                        if (message.role == "user") "用户" else "助手", owners[message.id.value] ?: message.id.value))
-                    if (size >= 200) return@buildList
+                    if (at >= 0 && seen.add(id.value to message.id.value)) {
+                        add(MessageSearchHit(id.value, title, message.id.value,
+                            text.substring((at - 36).coerceAtLeast(0), (at + needle.length + 80).coerceAtMost(text.length)),
+                            if (message.role == "user") "用户" else "助手", owners[message.id.value] ?: message.id.value))
+                    }
+                    if (size >= SEARCH_RESULT_LIMIT) return@buildList
                 }
             }
-        }.distinctBy { it.conversationId to it.messageId }
+        }
     }
 
     fun stats(): UsageStatsSnapshot = DatabaseTransactions { database.readableDatabase }.run { db ->

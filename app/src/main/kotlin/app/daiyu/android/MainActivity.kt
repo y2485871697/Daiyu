@@ -598,12 +598,7 @@ class MainActivity : ComponentActivity() {
                                     top.yukonga.miuix.kmp.basic.TextButton(
                                         text = "取消发送准备",
                                         modifier = Modifier.testTag("text-send-cancel"),
-                                        onClick = {
-                                            if (activityUsable() && pendingTextSend === pending) {
-                                                controller.cancelTextSend(pending.ticket)
-                                                publishChat()
-                                            }
-                                        }
+                                        onClick = { cancelPendingTextSend(pending) }
                                     )
                                 }
                                 if (imagePanelVisible) ImageComposerPanel()
@@ -1470,6 +1465,12 @@ class MainActivity : ComponentActivity() {
             toast("本次发送未受理；草稿保留")
         }
         publishChat()
+    }
+    private fun cancelPendingTextSend(pending: PendingTextSend) {
+        if (activityUsable() && pendingTextSend === pending) {
+            controller.cancelTextSend(pending.ticket)
+            publishChat()
+        }
     }
     private fun completeTextSend(pending: PendingTextSend, result: ChatController.TextSendResult) {
         if (pendingTextSend !== pending) return

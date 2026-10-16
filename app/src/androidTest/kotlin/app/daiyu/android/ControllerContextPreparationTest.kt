@@ -22,6 +22,8 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         private val files = File(base.cacheDir,"controller-context-${UUID.randomUUID()}").apply { mkdirs() }
         init { attachBaseContext(base) }
         override fun getFilesDir(): File = files
+        // Production factories normalize to applicationContext; keep their reads isolated too.
+        override fun getApplicationContext(): Context = this
     }
     private data class Fixture(val app: FixtureApplication, val db: ConversationDatabase,
         val controller: ChatController, val alias: String)
@@ -35,6 +37,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
     private fun await(latch: CountDownLatch) = assertTrue("timed out", latch.await(10,TimeUnit.SECONDS))
     private fun fresh(config: CompressionSettings = CompressionSettings(),
         summary: SummaryModelResolver = SummaryModelResolver { error("unexpected summary resolution") },
+        production: Boolean = false,
         factory: (ModelSettings) -> ModelPort): Fixture {
         val id = UUID.randomUUID().toString()
         val app = FixtureApplication(testContext(instrumentation.targetContext,"controller-context-$id-"))
@@ -43,8 +46,9 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         val settings = ModelSettingsStore(app,alias)
         settings.save(ModelSettings("https://example.invalid","context-fixture","synthetic-key",false))
         val controller = ChatController(app,db,settings,app.getSharedPreferences("conversation-ui",0),factory,
-            contextPreparationFactory = { _, service ->
-                ContextPreparationCoordinator(service, {
+            contextPreparationFactory = { context, service ->
+                if (production) ProductionContextPreparation.create(context, service)
+                else ContextPreparationCoordinator(service, {
                     check(Looper.myLooper()!=Looper.getMainLooper())
                     config
                 }, CompressionPolicyResolver { snapshot ->
@@ -79,10 +83,11 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         }
         override fun cancel() {}
     }
-    private fun send(f: Fixture, conversation: Conversation?, text: String): ChatController.TextSendResult {
+    private fun send(f: Fixture, conversation: Conversation?, text: String,
+        ticket: ChatController.TextSendTicket = ChatController.TextSendTicket()): ChatController.TextSendResult {
         val result = AtomicReference<ChatController.TextSendResult>()
         val done = CountDownLatch(1)
-        main { assertTrue(f.controller.sendText(conversation,17,23,text) {
+        main { assertTrue(f.controller.sendText(conversation,17,23,text,ticket=ticket) {
             assertEquals(Looper.getMainLooper(),Looper.myLooper())
             result.set(it);done.countDown()
         }) }
@@ -206,6 +211,145 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         assertTrue(result.get() is ChatController.TextSendResult.Rejected)
         assertEquals(before,service.prepareSend(owner.id));assertEquals(0,mainFactories.get())
         assertEquals("pending",f.db.conversations().single().draft)
+    }
+
+    fun testSummaryRequestFailureDoesNotClaimNoNetworkRequest() {
+        val requests=AtomicInteger();val factories=AtomicInteger()
+        val bound=BoundSummaryModel(binding,SummaryModelTransport { _, _ -> object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                requests.incrementAndGet()
+                throw java.io.IOException("summary transport failed after request started")
+            }
+            override fun cancel() {}
+        } },100000,90000,{SummaryRequestDeadline(60000)})
+        val f=fresh(CompressionSettings(true,10000,1000,10,2,binding),SummaryModelResolver {bound}) {
+            factories.incrementAndGet();ModelPort {error("chat must not open")}
+        }
+        val owner=seed(f);val before=ContextService(f.app,f.db).prepareSend(owner.id)
+        f.db.draft(owner.id,"pending")
+        assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Rejected)
+        assertEquals(1,requests.get());assertEquals(0,factories.get())
+        assertEquals("上下文或摘要准备失败；草稿保留，未启动聊天模型请求",f.controller.problem)
+        assertEquals(before,ContextService(f.app,f.db).prepareSend(owner.id))
+        assertEquals("pending",f.db.conversations().single().draft)
+        assertEquals(12,ContextService(f.app,f.db).displayHistory(owner.id).size)
+    }
+
+    fun testFinalCasAfterSummaryRequestDoesNotClaimNoNetworkRequest() {
+        val requests=AtomicInteger();val opens=AtomicInteger()
+        val bound=BoundSummaryModel(binding,SummaryModelTransport { _, _ -> object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                requests.incrementAndGet();sink(ModelEvent.TextFinal("summary","已确认事实"))
+            }
+            override fun cancel() {}
+        } },100000,90000,{SummaryRequestDeadline(60000)})
+        lateinit var f: Fixture
+        lateinit var owner: Conversation
+        f=fresh(CompressionSettings(true,10000,1000,10,2,binding),SummaryModelResolver {bound}) {
+            // Summary has already run; only the final send CAS loses to a newer draft.
+            f.db.draft(owner.id,"newer draft")
+            ModelPort {opens.incrementAndGet();session()}
+        }
+        owner=seed(f);f.db.draft(owner.id,"pending")
+        assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Rejected)
+        assertEquals(1,requests.get());assertEquals(0,opens.get())
+        // This assertion includes the companion production wording fix integrated by the parent.
+        assertEquals("会话、原文或编辑草稿已变化；保留当前草稿，未启动聊天模型请求",f.controller.problem)
+        assertEquals("newer draft",f.db.conversations().single().draft)
+        assertEquals(12,ContextService(f.app,f.db).displayHistory(owner.id).size)
+    }
+
+    fun testCancelTextSendOnlyMatchingTicketKeepsReservationUntilSummaryWorkerExits() {
+        val entered=CountDownLatch(1);val cancelled=CountDownLatch(1);val release=CountDownLatch(1)
+        val factories=AtomicInteger()
+        val bound=BoundSummaryModel(binding,SummaryModelTransport { _, _ -> object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                entered.countDown();assertTrue(release.await(10,TimeUnit.SECONDS))
+                sink(ModelEvent.TextFinal("summary","must not publish"))
+            }
+            override fun cancel() {cancelled.countDown()}
+        } },100000,90000,{SummaryRequestDeadline(60000)})
+        val f=fresh(CompressionSettings(true,10000,1000,10,2,binding),SummaryModelResolver {bound}) {
+            factories.incrementAndGet();ModelPort {session()}
+        }
+        val owner=seed(f);val service=ContextService(f.app,f.db)
+        val before=service.prepareSend(owner.id)
+        f.db.draft(owner.id,"pending")
+        val ticket=ChatController.TextSendTicket()
+        val result=AtomicReference<ChatController.TextSendResult>();val done=CountDownLatch(1)
+        try {
+            main {assertTrue(f.controller.sendText(owner,1,2,"pending",ticket=ticket) {
+                result.set(it);done.countDown()
+            })}
+            await(entered)
+            main {
+                assertFalse(f.controller.cancelTextSend(ChatController.TextSendTicket()))
+                assertEquals(1L,cancelled.count)
+                assertTrue(f.controller.cancelTextSend(ticket))
+            }
+            await(cancelled)
+            main {
+                val pending=checkNotNull(f.controller.textSendState())
+                assertSame(ticket,pending.ticket);assertNull(pending.result)
+                f.controller.acknowledgeTextSend(ticket)
+                assertSame(pending,f.controller.textSendState())
+                assertFalse(f.controller.sendText(owner,1,3,"duplicate") {fail("not admitted")})
+            }
+            // Legacy worker admission does not consult pendingTextState: this proves the
+            // preparation reservation itself survives cancellation until the old worker exits.
+            assertNull(f.controller.send(owner,"duplicate"))
+            assertEquals(1L,done.count)
+            assertEquals("pending",f.db.conversations().single().draft)
+            assertEquals(before,service.prepareSend(owner.id))
+        } finally {release.countDown()}
+        await(done)
+        assertTrue(result.get() is ChatController.TextSendResult.Rejected)
+        assertEquals(before,service.prepareSend(owner.id));assertEquals(0,factories.get())
+        assertEquals("pending",f.db.conversations().single().draft)
+        assertEquals("上下文准备已取消；草稿保留，未启动聊天模型请求",f.controller.problem)
+    }
+
+    fun testCancelTextSendAfterCommitGateKeepsAcceptedReceipt() {
+        val opens=AtomicInteger();val cancellations=AtomicInteger()
+        val f=fresh {ModelPort {opens.incrementAndGet();session()}}
+        val owner=seed(f,1);f.db.draft(owner.id,"pending")
+        val ticket=ChatController.TextSendTicket()
+        // The real SQLite insert runs after beginCommit but before returning its receipt.
+        f.db.writableDatabase.addCustomFunction("cancel_prepared",0) {
+            main {
+                assertTrue(f.controller.cancelTextSend(ticket));cancellations.incrementAndGet()
+                assertNull(checkNotNull(f.controller.textSendState()).result)
+            }
+        }
+        f.db.writableDatabase.execSQL("CREATE TRIGGER cancel_after_accept AFTER INSERT ON messages " +
+            "WHEN NEW.role='assistant' BEGIN SELECT cancel_prepared(); END")
+        val result=send(f,owner,"pending",ticket)
+        assertTrue(result is ChatController.TextSendResult.Accepted)
+        assertEquals(1,cancellations.get());assertEquals(0,opens.get());assertNull(f.controller.active)
+        assertEquals("",f.db.conversations().single().draft)
+        val rows=ContextService(f.app,f.db).displayHistory(owner.id)
+        assertEquals(4,rows.size)
+        assertEquals(RunStatus.INTERRUPTED,rows.last().status)
+        main {
+            assertSame(result,checkNotNull(f.controller.textSendState()).result)
+            assertFalse(f.controller.cancelTextSend(ticket))
+            assertSame(result,checkNotNull(f.controller.textSendState()).result)
+        }
+    }
+
+    fun testProductionFactoryRejectsMissingSummaryProfileWithoutChatFallback() {
+        val factories=AtomicInteger()
+        val f=fresh(production=true) {factories.incrementAndGet();ModelPort {session()}}
+        // Real persisted v2 settings -> production policy -> independent profile store.
+        // No injected coordinator/resolver in this test; missing credentials prevent transport I/O.
+        ProductionCompressionSettingsStore(f.app).save(
+            ProductionCompressionSettings(true,10000,1000,10,2,binding))
+        val owner=seed(f);f.db.draft(owner.id,"pending")
+        assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Rejected)
+        assertEquals("独立摘要配置不可用（MISSING）；请重新保存，草稿保留，未回退聊天模型",f.controller.problem)
+        assertEquals(0,factories.get());assertNull(f.controller.active)
+        assertEquals("pending",f.db.conversations().single().draft)
+        assertEquals(12,ContextService(f.app,f.db).displayHistory(owner.id).size)
     }
 
     fun testCloseAfterCommitGateReturnsReceiptWithoutStartingRunner() {

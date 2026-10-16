@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="voice_host_stop">停止朗读</string>
+    <string name="voice_host_initializing">正在准备系统朗读…</string>
+    <string name="voice_host_queued">朗读已排队</string>
+    <string name="voice_host_speaking">正在朗读</string>
+    <string name="voice_host_completed">朗读完成</string>
+    <string name="voice_host_stopped">朗读已停止</string>
+    <string name="voice_host_engine_unavailable">系统朗读不可用：未找到可用的语音引擎。</string>
+    <string name="voice_host_initialization_failed">系统语音引擎初始化失败，可再次点击朗读重试。</string>
+    <string name="voice_host_language_unsupported">系统语音引擎不支持当前语言。</string>
+    <string name="voice_host_language_data_missing">系统语音引擎缺少当前语言的数据。</string>
+    <string name="voice_host_offline_voice_unavailable">没有已安装的离线音色；不会改用云端朗读。</string>
+    <string name="voice_host_empty_text">这条消息暂无可朗读的回答正文。</string>
+    <string name="voice_host_text_too_long">回答超出系统单次朗读长度限制，未截断或自动分段播放。</string>
+    <string name="voice_host_playback_failed">系统朗读失败，可再次点击朗读重试。</string>
+    <string name="voice_host_stop_failed">停止朗读失败，已尝试关闭系统语音引擎。</string>
+</resources>

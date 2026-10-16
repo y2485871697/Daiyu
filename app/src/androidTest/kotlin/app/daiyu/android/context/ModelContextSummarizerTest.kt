@@ -18,7 +18,8 @@ class ModelContextSummarizerTest : InstrumentationTestCase() {
 
     private fun adapter(token: ContextPreparationCancellation = ContextPreparationCancellation(), budget: Long = 20000,
         open: (List<Message>) -> ModelSession): ModelContextSummarizer = ModelContextSummarizer(
-        BoundSummaryModel(binding, SummaryModelTransport(open), 30000, budget), token)
+        BoundSummaryModel(binding, SummaryModelTransport { history, _ -> open(history) }, 30000, budget,
+            { SummaryRequestDeadline(60000) }), token)
 
     fun testEvidenceIsTextOnlyAndFinalTextReplacesDeltas() {
         var closed = false

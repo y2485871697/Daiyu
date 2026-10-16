@@ -5,10 +5,26 @@ import app.daiyu.android.domain.context.estimateTokens
 import java.util.UUID
 import java.util.concurrent.CancellationException
 
+/** One monotonic absolute deadline shared by preparation, transport and result acceptance.
+ * Signed subtraction also handles nanoTime wraparound; the duration must fit in a Long. */
+class SummaryRequestDeadline(timeoutMillis: Long, private val nanoTime: () -> Long = System::nanoTime) {
+    private val expiresAtNanos: Long
+    init {
+        require(timeoutMillis in 1..Long.MAX_VALUE / 1_000_000)
+        expiresAtNanos = nanoTime() + timeoutMillis * 1_000_000
+    }
+
+    fun check() { remainingNanos() }
+    fun remainingMillis(): Long = (remainingNanos() - 1) / 1_000_000 + 1
+    private fun remainingNanos(): Long = (expiresAtNanos - nanoTime()).also {
+        if (it <= 0) throw ModelRequestException(ModelFailure.TIMEOUT)
+    }
+}
+
 /** No legacy ModelPort.open(history) fallback: the injected provider adapter must explicitly
  * disable all tool advertisement (including built-ins) and must open lazily without I/O. */
 fun interface SummaryModelTransport {
-    fun openWithoutTools(history: List<Message>): ModelSession
+    fun openWithoutTools(history: List<Message>, deadline: SummaryRequestDeadline): ModelSession
 }
 
 /**
@@ -23,6 +39,8 @@ data class BoundSummaryModel(
     val transport: SummaryModelTransport,
     val contextWindowTokens: Long,
     val inputBudgetTokens: Long,
+    /** Invoked once at summarize entry, never reset by open/next. */
+    val startDeadline: () -> SummaryRequestDeadline,
 ) {
     init { require(contextWindowTokens > 0 && inputBudgetTokens in 1..contextWindowTokens) }
 }
@@ -37,10 +55,14 @@ class ModelContextSummarizer(
     private val cancellation: ContextPreparationCancellation,
 ) : ContextSummarizer {
     override fun summarize(input: CompressionInput): String {
-        cancellation.check()
+        val deadline = bound.startDeadline()
+        fun checkLive() { cancellation.check(); deadline.check() }
+        checkLive()
         require(input.originals.isNotEmpty()) { "摘要原文为空" }
         val originals = freezeContextMessages(input.originals)
+        checkLive()
         val evidence = ArchiveCodec.encode(originals).toString(Charsets.UTF_8)
+        checkLive()
         val first = originals.first()
         require(originals.all { it.conversationId == first.conversationId })
         val requestId = UUID.randomUUID().toString()
@@ -53,16 +75,18 @@ class ModelContextSummarizer(
         }
         val request = listOf(Message(MessageId("summary-input-$requestId"), first.conversationId,
             RunId("summary-request-$requestId"), "user", listOf(MessageBlock.Text("evidence", prompt)), RunStatus.COMPLETED))
-        require(estimateTokens(request) <= bound.inputBudgetTokens) { "摘要模型输入预算不足；保留原文" }
-        cancellation.check()
+        checkLive()
+        val estimatedTokens = estimateTokens(request)
+        checkLive()
+        require(estimatedTokens <= bound.inputBudgetTokens) { "摘要模型输入预算不足；保留原文" }
         // Separate required contract: unlike ModelPort, there is no tools-enabled default.
-        val session = bound.transport.openWithoutTools(request)
+        val session = bound.transport.openWithoutTools(request, deadline)
         val registration = cancellation.register { session.cancel() }
         try {
-            cancellation.check()
+            checkLive()
             val text = linkedMapOf<String, StringBuilder>()
             session.next(emptyList()) { event ->
-                cancellation.check()
+                checkLive()
                 when (event) {
                     is ModelEvent.TextDelta -> text.getOrPut(event.itemId) { StringBuilder() }.append(event.text)
                     is ModelEvent.TextFinal -> text[event.itemId] = StringBuilder(event.text)
@@ -71,13 +95,16 @@ class ModelContextSummarizer(
                     else -> Unit
                 }
             }
-            cancellation.check()
-            return text.values.joinToString("\n").trim().also { require(it.isNotEmpty()) { "摘要模型返回为空" } }
+            checkLive()
+            val summary = text.values.joinToString("\n").trim()
+            checkLive()
+            require(summary.isNotEmpty()) { "摘要模型返回为空" }
+            return summary
         } catch (interrupted: InterruptedException) {
             Thread.currentThread().interrupt()
             throw CancellationException("摘要准备已取消").also { it.initCause(interrupted) }
         } catch (failure: Exception) {
-            cancellation.check() // Prefer cancellation over a transport's disconnect error.
+            checkLive() // Prefer cancellation/expiry over a transport's disconnect error.
             throw failure
         } finally {
             registration.close()

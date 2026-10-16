@@ -8,7 +8,14 @@ import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 /** A host-selected backend for one run. Every shell command requires an exact WRITE grant. */
-internal class RunShizukuCommands(private val backend: ShizukuBackend) : AutoCloseable {
+internal class RunShizukuCommands(
+    private val backend: ShizukuBackend,
+    private val admission: () -> Boolean = { true },
+    private val commandApproved: (WriteEffect) -> Boolean = { true },
+    private val onReceipt: (ExecutionReceipt) -> Unit = {},
+    private val expectedSessionId: String? = null,
+    private val expectedRunId: String? = null
+) : AutoCloseable {
     private val lock = Any()
     private var owner: RunExecutionOwner? = null
     private var authorization: TaskAuthorization? = null
@@ -19,7 +26,9 @@ internal class RunShizukuCommands(private val backend: ShizukuBackend) : AutoClo
     private var observer: ((ShizukuCloseResult) -> Unit)? = null
 
     fun bind(owner: RunExecutionOwner, capabilities: SessionCapabilities, authorization: TaskAuthorization) = synchronized(lock) {
-        check(!closed) { "run_closed" }
+        check(!closed && admission()) { "run_closed" }
+        require((expectedSessionId == null || capabilities.sessionId == expectedSessionId) &&
+            (expectedRunId == null || owner.runId.value == expectedRunId)) { "shizuku_approval_run_mismatch" }
         require(owner.runId.value == authorization.taskId && capabilities.sessionId == authorization.sessionId) {
             "tool_run_owner_mismatch"
         }
@@ -44,17 +53,20 @@ internal class RunShizukuCommands(private val backend: ShizukuBackend) : AutoClo
             val timeout = if (arguments.contains("timeout_ms")) arguments.integer("timeout_ms") else 30_000L
             require(script.isNotBlank() && '\u0000' !in script)
             val effect = writeEffect(backend.identity.uid, script, timeout)
-            return PreparedTool.contextual(effect) { execute(it, script, timeout, effect) }
+            return PreparedTool.contextual(effect) {
+                execute(it, script, timeout, effect).also { receipt -> runCatching { onReceipt(receipt) } }
+            }
         }
     }
 
     private fun execute(context: ToolExecutionContext, script: String, timeout: Long, effect: WriteEffect): ExecutionReceipt {
         val bound = synchronized(lock) {
-            if (closed) return ExecutionReceipt.NotExecuted("run_closed")
+            if (closed || !admission()) return ExecutionReceipt.NotExecuted("run_closed")
             val current = owner ?: return ExecutionReceipt.NotExecuted("shizuku_run_not_bound")
             if (context.owner !== current) return ExecutionReceipt.NotExecuted("tool_run_owner_mismatch")
             if (context.authorization !== authorization) return ExecutionReceipt.NotExecuted("tool_run_authorization_mismatch")
             if (CAPABILITY !in checkNotNull(capabilities).enabled) return ExecutionReceipt.NotExecuted("capability_disabled")
+            if (!commandApproved(effect)) return ExecutionReceipt.NotExecuted("shizuku_command_not_approved")
             if (effect !in context.authorization.allowedWrites) return ExecutionReceipt.NotExecuted("task_write_not_authorized")
             if (context.invocation.name != TOOL_NAME) return ExecutionReceipt.NotExecuted("tool_invocation_mismatch")
             val actual = try { SCHEMA.parse(context.invocation.arguments) } catch (_: RuntimeException) {
@@ -128,7 +140,8 @@ internal class RunShizukuCommands(private val backend: ShizukuBackend) : AutoClo
         }
     }
 
-    private fun stopped(context: ToolExecutionContext): Boolean = synchronized(lock) { closed } || context.cancelled()
+    private fun stopped(context: ToolExecutionContext): Boolean =
+        synchronized(lock) { closed || !admission() } || context.cancelled()
 
     override fun close() {
         val begin = synchronized(lock) { if (closed) false else { closed = true; true } }

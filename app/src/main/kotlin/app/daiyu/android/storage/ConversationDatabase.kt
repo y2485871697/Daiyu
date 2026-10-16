@@ -11,7 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 7), ConversationStore {
+class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 8), ConversationStore {
     internal val runtimeLockFile = java.io.File(context.getDatabasePath("conversations.db").canonicalPath + ".runtime-owner")
     /** A message row keeps the v4 columns as the legacy projection.  This column is an
      * append-only, lossless history of the provider attempts.  Empty means an old row and
@@ -29,13 +29,14 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         createComposer(db)
         ContextStorage.installSchema(db)
         SQLiteRuntimeStore.installSchema(db)
+        SQLiteChildTaskStore.installSchema(db)
     }
     private fun createComposer(db:SQLiteDatabase) {
         db.execSQL("CREATE TABLE composer(id INTEGER PRIMARY KEY CHECK(id=1),draft TEXT NOT NULL)")
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..6 && newVersion==7) {"不支持此数据库版本，保留原数据"}
+        check(oldVersion in 1..7 && newVersion==8) {"不支持此数据库版本，保留原数据"}
         if(oldVersion==1) createComposer(db)
         if(oldVersion<=2) {
             db.execSQL("ALTER TABLE conversations ADD COLUMN folder TEXT NOT NULL DEFAULT ''")
@@ -44,6 +45,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         if(oldVersion<=4) db.execSQL("ALTER TABLE messages ADD COLUMN history_segments TEXT NOT NULL DEFAULT '[]'")
         ContextStorage.installSchema(db)
         SQLiteRuntimeStore.installSchema(db)
+        SQLiteChildTaskStore.installSchema(db)
         createUiFolders(db)
     }
     private fun createUiFolders(db: SQLiteDatabase) {

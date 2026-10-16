@@ -19,8 +19,9 @@ class ChildModelDefinition(val poolKey: String, val parallelLimit: Int, val crea
     init { require(poolKey.isNotBlank()); require(parallelLimit >= 0) }
 }
 
-/** Synchronous parent tool, internally parallel. Only the parent's existing receipt is durable. */
-class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val timeoutMillis: Long = 120_000) : AutoCloseable {
+/** Synchronous parent tool, internally parallel, with optional durable per-child observation. */
+class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val timeoutMillis: Long = 120_000,
+    private val store: ChildTaskStore? = null) : AutoCloseable {
     private val models = models.toMap()
     private val limits = this.models.values.groupBy { it.poolKey }.mapValues { (_, entries) ->
         require(entries.map { it.parallelLimit }.distinct().size == 1) { "child_pool_limit_conflict" }
@@ -76,12 +77,23 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
             return if (started.get()) ExecutionReceipt.Unknown(code) else ExecutionReceipt.NotExecuted(code)
         }
         try {
+            val records = snapshot.mapIndexed { index, task ->
+                ChildTaskRecord(ChildRunOwner(parent.conversationId.value, parent.runId.value, group, current,
+                    UUID.randomUUID().toString(), UUID.randomUUID().toString()), parent.assistantMessageId.value,
+                    parent.ownerId, index, task.profileId, task.prompt)
+            }
+            store?.enqueue(parent, records)
             snapshot.forEachIndexed { index, task ->
                 val admitted = synchronized(gate) { if (closed) false else { outstanding++; true } }
-                if (!admitted) return uncertain("child_batch_cancelled")
+                if (!admitted) {
+                    records.drop(index).forEach { runCatching { store?.finished(it, ChildTaskStatus.NOT_EXECUTED, detail = "child_not_submitted") } }
+                    return uncertain("child_batch_cancelled")
+                }
                 try {
                     workers.execute {
                         var completion: Completion? = null
+                        val record = records[index]
+                        var requestStarted = false
                         val definition = models.getValue(task.profileId)
                         val pool = limits.getValue(definition.poolKey)
                         var acquired = false
@@ -89,8 +101,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                             while (!acquired && !cancelled() && System.nanoTime() < deadline)
                                 acquired = pool.tryAcquire(25, TimeUnit.MILLISECONDS)
                             if (acquired && !cancelled() && System.nanoTime() < deadline) {
-                                val child = ChildRunOwner(parent.conversationId.value, parent.runId.value, group, current,
-                                    UUID.randomUUID().toString(), UUID.randomUUID().toString())
+                                val child = record.owner
                                 val scope = ChildRunScope.capture(child, parentSession, parentAuthorization, emptySet())
                                 val initial = Message(MessageId(child.assistantMessageId), parent.conversationId, RunId(child.childRunId),
                                     Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
@@ -109,9 +120,11 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                         check(definitions.isEmpty())
                                         check(!cancelled() && System.nanoTime() < deadline)
                                         val port = definition.create()
+                                        store?.started(record)
                                         val revoked = context.cancelled()
                                         synchronized(gate) {
                                             check(!closed && generation == current && !revoked && System.nanoTime() < deadline)
+                                            requestStarted = true
                                             started.set(true)
                                         }
                                         val transport = port.open(history, definitions)
@@ -162,13 +175,24 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                         } catch (_: Exception) { /* A sent request is uncertain; never reopen it. */ }
                         finally {
                             if (acquired) pool.release()
-                            synchronized(gate) { outstanding-- }
-                            if (completion == null) failures.set(true) else completions.offer(completion)
-                            notifyIfIdle()
+                            try {
+                                val result = completion
+                                if (result != null) store?.finished(record, ChildTaskStatus.COMPLETED, result.text)
+                                else store?.finished(record,
+                                    if (requestStarted) ChildTaskStatus.UNKNOWN else ChildTaskStatus.NOT_EXECUTED,
+                                    detail = if (requestStarted) "child_result_unconfirmed" else "child_not_sent")
+                            } catch (_: Exception) {
+                                completion = null
+                            } finally {
+                                synchronized(gate) { outstanding-- }
+                                if (completion == null) failures.set(true) else completions.offer(completion)
+                                notifyIfIdle()
+                            }
                         }
                     }
                 } catch (_: Exception) {
                     synchronized(gate) { outstanding-- }
+                    records.drop(index).forEach { runCatching { store?.finished(it, ChildTaskStatus.NOT_EXECUTED, detail = "child_not_submitted") } }
                     return uncertain("child_submission_unconfirmed")
                 }
             }

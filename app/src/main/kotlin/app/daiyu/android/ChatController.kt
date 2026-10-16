@@ -46,7 +46,24 @@ import java.util.concurrent.Executors
 class ChatApplication:Application() {
     val shizuku by lazy { app.daiyu.android.shizuku.ShizukuAuthorization(this) }
     lateinit var controller:ChatController
-    override fun onCreate() {super.onCreate();controller=ChatController(this)}
+    lateinit var hapticsRuntime: app.daiyu.android.haptics.HapticsRuntime
+        private set
+    private var touchHaptics: AutoCloseable? = null
+    override fun onCreate() {
+        super.onCreate()
+        // One store/runtime for the entire process, shared by UI, streams and settings.
+        hapticsRuntime = app.daiyu.android.haptics.HapticsRuntime(
+            app.daiyu.android.haptics.LocalHapticSettingsStore(this))
+        hapticsRuntime.installForeground(this)
+        touchHaptics = app.daiyu.android.ui.haptics.TouchHaptics.install(hapticsRuntime)
+        controller = ChatController(this)
+    }
+    override fun onTerminate() {
+        // Android normally kills the process without this callback; useful for hosted runtimes.
+        touchHaptics?.close(); touchHaptics = null
+        hapticsRuntime.close()
+        super.onTerminate()
+    }
 }
 class ChatController internal constructor(private val application:Application,
     val database:ConversationDatabase, val settings:ModelSettingsStore, val preferences:SharedPreferences,
@@ -63,6 +80,8 @@ class ChatController internal constructor(private val application:Application,
     // Entry points and callback commits share this controller's monitor. Runner control and
     // shutdown waits stay outside it, so a worker can always finish its last publication.
     private val listeners=mutableMapOf<()->Unit,Any>()
+    private val reasoningListeners=mutableMapOf<(Message, ModelEvent)->Unit,Any>()
+    private val runRevocationListeners=mutableSetOf<(Message)->Unit>()
     private var closed=false
     private var preparing=false
     private var preparingGlobalAssistantId:String?=null
@@ -335,6 +354,55 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     private fun notifyChanged() {handler.post {dispatchChanged()} }
+
+    /** Real accepted runner events only; no persistence, snapshot replay or model interception.
+     * Capture registrations at emission, not delivery: a replacement Activity cannot receive an
+     * old owner's queued event. Identity and registration are both checked again on the main thread.
+     */
+    @Synchronized internal fun observeReasoning(listener:(Message, ModelEvent)->Unit):AutoCloseable {
+        val registration=Any()
+        if(!closed) reasoningListeners[listener]=registration
+        return AutoCloseable { synchronized(this) {
+            if(reasoningListeners[listener]===registration) reasoningListeners.remove(listener)
+        } }
+    }
+    /** Synchronous capability revocation, not a queued UI/status notification. Callbacks must be
+     * thread-safe and must not wait for the main thread or for runner shutdown. */
+    @Synchronized internal fun observeRunRevocation(listener:(Message)->Unit):AutoCloseable {
+        if(!closed) runRevocationListeners.add(listener)
+        return AutoCloseable { synchronized(this) {runRevocationListeners.remove(listener)} }
+    }
+    @Synchronized internal fun isRunUnfenced(owner:Message):Boolean = !closed &&
+        owner.role==Message.ASSISTANT_ROLE && resources?.let {
+            !it.fenced && it.initial.id==owner.id && it.initial.runId==owner.runId &&
+                it.initial.conversationId==owner.conversationId
+        }==true && active?.id==owner.id && active?.runId==owner.runId &&
+            active?.conversationId==owner.conversationId
+
+    // All callers hold the controller monitor. Revoke before any potentially slow runner control.
+    private fun fenceRun(lifetime:RunResources) {
+        if(lifetime.fenced) return
+        lifetime.fenced=true
+        runRevocationListeners.toList().forEach { listener ->
+            try {listener(lifetime.initial)} catch (_:Exception) { /* Optional feedback only. */ }
+        }
+    }
+    private fun publishReasoning(owner:Message,event:ModelEvent) {
+        synchronized(this) {
+            if(!isRunUnfenced(owner)) return
+            val targets=reasoningListeners.toList()
+            handler.post {
+                targets.forEach { (listener,registration) ->
+                    val current=synchronized(this) {
+                        reasoningListeners[listener]===registration && isRunUnfenced(owner)
+                    }
+                    if(current) try { listener(owner,event) } catch (_:Exception) {
+                        // Optional feedback must never fail a run or suppress another observer.
+                    }
+                }
+            }
+        }
+    }
     fun send(conversation:Conversation?,text:String):Conversation? {
         synchronized(this) {
             if(!idleAvailable() || text.isBlank()) return null
@@ -568,7 +636,8 @@ class ChatController internal constructor(private val application:Application,
             }
             preparingTools = tools
             val owned = ChatRunner(preparedModel, database, tools,
-                RunnerOptions(runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools)) {
+                RunnerOptions(runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools,
+                    onReasoning={ event -> publishReasoning(assistant,event) })) {
                 synchronized(this) {
                     if(!closed && active?.id==assistant.id && active?.runId==run && active?.conversationId==conversationId &&
                         it.id==assistant.id && it.runId==run && it.conversationId==conversationId) {active=it;notifyChanged()}
@@ -664,7 +733,7 @@ class ChatController internal constructor(private val application:Application,
                             lifetime.waiting=false
                             lifetime.result=(active ?: lifetime.initial).copy(error="保存失败，运行已停止；原检查点保留，重新打开后仅恢复历史")
                             problem=lifetime.result?.error
-                            lifetime.fenced=true
+                            fenceRun(lifetime)
                             handler.post {lifetime.runner.stop()}
                         }
                     })
@@ -718,7 +787,7 @@ class ChatController internal constructor(private val application:Application,
         notifyChanged()
     }
     private fun stopRun(lifetime:RunResources) {
-        lifetime.fenced=true
+        fenceRun(lifetime)
         handler.post {
             lifetime.runner.stop()
             lifetime.tools.revokeChildren()
@@ -729,7 +798,7 @@ class ChatController internal constructor(private val application:Application,
     private fun cleanupRun(lifetime:RunResources) {
         pruneBackgroundRuns()
         if(resources!==lifetime) return
-        lifetime.fenced=true
+        fenceRun(lifetime)
         if(!lifetime.cleanupConfirmed && !lifetime.cleaning) {
             val question=lifetime.question
             if(question==null) lifetime.cleanupConfirmed=true
@@ -982,7 +1051,7 @@ class ChatController internal constructor(private val application:Application,
         val lifetime=synchronized(this) {
             resources?.takeIf {!closed && it.initial.id==owner.id && it.initial.runId==owner.runId &&
                 it.initial.conversationId==owner.conversationId && owner.role==Message.ASSISTANT_ROLE}
-                ?.also {it.fenced=true}
+                ?.also {fenceRun(it)}
         } ?: return false
         lifetime.runner.stop();lifetime.tools.revokeChildren();lifetime.tools.close()
         handler.post {synchronized(this) {cleanupRun(lifetime)}}
@@ -990,7 +1059,7 @@ class ChatController internal constructor(private val application:Application,
     }
     fun stop() {
         synchronized(this) {pendingShizuku}?.let(::rejectShizuku)
-        val lifetime=synchronized(this) {resources?.also {it.fenced=true}} ?: return
+        val lifetime=synchronized(this) {resources?.also {fenceRun(it)}} ?: return
         lifetime.runner.stop();lifetime.tools.revokeChildren();lifetime.tools.close()
         handler.post {synchronized(this) {cleanupRun(lifetime)}}
     }
@@ -999,9 +1068,9 @@ class ChatController internal constructor(private val application:Application,
             if(!closed) {
                 closed=true;ready=false;dataBusy=false;active=null
                 pendingImage?.cancel();imageProvider=null
-                configurationRestorePreview=null;dataNotice=null;listeners.clear();childBindings.clear()
+                configurationRestorePreview=null;dataNotice=null;listeners.clear();reasoningListeners.clear();childBindings.clear()
             }
-            resources?.also {it.fenced=true}
+            resources?.also {fenceRun(it)}.also {runRevocationListeners.clear()}
         }
         synchronized(this) {pendingShizuku}?.let(::rejectShizuku)
         lifetime?.runner?.stop();lifetime?.tools?.close()

@@ -147,7 +147,7 @@ class MainActivity : ComponentActivity() {
             isEditorCurrent = { target ->
                 activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
                     selectionReady && controller.ready && !controller.dataBusy &&
-                    !imageHost.sending && !shizukuWritesBlocked &&
+                    !imageHost.sending && !shizukuWritesBlocked && terminalEditor == null &&
                     target.conversationId == selected?.id?.value &&
                     target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
             },
@@ -178,7 +178,7 @@ class MainActivity : ComponentActivity() {
     private var sidebarVisible: Boolean
         get() = sidebarVisibleState
         set(value) {
-            if (value && !sidebarVisibleState) cancelGenerationOutputs()
+            if (value && !sidebarVisibleState) { cancelGenerationOutputs(); cancelTerminalEditor() }
             sidebarVisibleState = value
         }
     private var retainedPageState by mutableStateOf("chat")
@@ -233,6 +233,15 @@ class MainActivity : ComponentActivity() {
         val ticket: ChatController.TextSendTicket = ChatController.TextSendTicket(),
         val editorOwner: ChatController.TextSendOwner = owner)
     private var pendingTextSend by mutableStateOf<PendingTextSend?>(null)
+    private class TerminalEditor(val conversation: Conversation?, val draft: TerminalDraftSnapshot) {
+        var command by mutableStateOf("")
+        var linux by mutableStateOf<app.daiyu.android.terminal.LinuxGenerationRef?>(null)
+        var preparing by mutableStateOf(false)
+        var choosing by mutableStateOf(false)
+        var confirmed by mutableStateOf(false)
+        var preparation by mutableStateOf<ControllerTerminalPreparation?>(null)
+    }
+    private var terminalEditor by mutableStateOf<TerminalEditor?>(null)
     private var browserApproval by mutableStateOf<ControllerBrowserPreparation?>(null)
     private var browserPreparing by mutableStateOf(false)
     private var browserRequest: Any? = null
@@ -721,7 +730,7 @@ class MainActivity : ComponentActivity() {
         return ChatScreenActions(
         onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
         onVoice = {
-            if (editorMatches() && draftRevision == renderedDraftRevision && voiceForeground &&
+            if (editorMatches() && terminalEditor == null && draftRevision == renderedDraftRevision && voiceForeground &&
                 retainedPage == "chat" && !sidebarVisible &&
                 controller.ready && !controller.dataBusy && !imageHost.sending && !shizukuWritesBlocked) {
                 dictationHost.start(DictationDraftTarget(selected?.id?.value, editorGeneration, draftRevision))
@@ -742,7 +751,7 @@ class MainActivity : ComponentActivity() {
         onSelectionChange = { start, end ->
             if (editorMatches()) { selectionStart = start; selectionEnd = end; publishChat() }
         },
-        onSend = { text -> if (editorMatches() && text == draft && pendingTextSend == null && !shizukuWritesBlocked) guard {
+        onSend = { text -> if (editorMatches() && terminalEditor == null && text == draft && pendingTextSend == null && !shizukuWritesBlocked) guard {
             cancelShizukuEditor()
             cancelBrowserEditor()
             if (imageHost.hasAttachments) sendImageDraft(text) else if (!imageHost.busy) sendDraft(text)
@@ -813,7 +822,7 @@ class MainActivity : ComponentActivity() {
         val revision = draftRevision
         val available = activityUsable() && retainedPage == "chat" && !sidebarVisible && selectionReady &&
             controller.ready && !controller.dataBusy && controller.active == null &&
-            !imageHost.busy && !shizukuWritesBlocked && !hasImages && draft.isNotBlank()
+            !imageHost.busy && !shizukuWritesBlocked && !hasImages && draft.isNotBlank() && terminalEditor == null
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
             Row(Modifier.fillMaxWidth()) {
                 top.yukonga.miuix.kmp.basic.TextButton(
@@ -844,6 +853,7 @@ class MainActivity : ComponentActivity() {
             top.yukonga.miuix.kmp.basic.TextButton(text = "读取本会话生成资产",
                 modifier = Modifier.testTag("generation-output-entry").heightIn(min = 48.dp),
                 onClick = ::openGenerationOutputs)
+            TerminalComposerEntry()
             GenerationSurfaces()
             browserApproval?.let { pending ->
                 val observedState by produceState(pending.state, pending) {
@@ -885,6 +895,157 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun terminalDraft() = TerminalDraftSnapshot(
+        TerminalDraftOwner(selected?.id, editorGeneration, draftRevision), draft)
+
+    private fun terminalEditorCurrent(editor: TerminalEditor): Boolean = activityUsable() &&
+        terminalEditor === editor && retainedPage == "chat" && !sidebarVisible && selectionReady &&
+        terminalDraft() == editor.draft && !imageHost.hasAttachments && pendingTextSend == null &&
+        shizukuEditor == null && browserApproval == null && generationApproval == null
+
+    private fun terminalInputEditable(editor: TerminalEditor) = terminalEditorCurrent(editor) &&
+        !editor.preparing && !editor.choosing && editor.preparation == null
+
+    private fun cancelTerminalEditor() {
+        val editor = terminalEditor
+        terminalEditor = null
+        editor?.preparation?.let(controller::rejectTerminal)
+        // A late prepare completion still belongs to this editor and rejects itself in finally.
+    }
+
+    @Composable private fun TerminalComposerEntry() {
+        val appState by terminalProvider.state.collectAsStateWithLifecycle()
+        val application = (appState as? app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application
+        val canEnter = activityUsable() && retainedPage == "chat" && !sidebarVisible && selectionReady &&
+            controller.ready && !controller.dataBusy && controller.active == null && !imageHost.busy &&
+            !imageHost.hasAttachments && !shizukuWritesBlocked && pendingTextSend == null &&
+            controller.textSendState() == null && draft.isNotBlank() && terminalEditor == null &&
+            shizukuEditor == null && browserApproval == null && !browserPreparing && generationApproval == null
+        val renderedDraft = terminalDraft()
+        top.yukonga.miuix.kmp.basic.TextButton(text = "终端精确命令审批",
+            enabled = canEnter, modifier = Modifier.testTag("terminal-chat-entry"), onClick = {
+                if (canEnter && activityUsable() && retainedPage == "chat" && !sidebarVisible &&
+                    renderedDraft == terminalDraft() && terminalEditor == null && !imageHost.hasAttachments &&
+                    pendingTextSend == null && shizukuEditor == null && browserApproval == null && generationApproval == null) {
+                    cancelBrowserEditor(); cancelShizukuEditor(); dictationHost.invalidate()
+                    terminalEditor = TerminalEditor(selected, terminalDraft())
+                }
+            })
+        val editor = terminalEditor ?: return
+        key(editor) {
+            Column(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState())
+                .testTag("terminal-chat-editor")) {
+                androidx.compose.material3.Text("聊天草稿不是 shell。仅发送下面独立输入区的 UTF-8 字节；不补回车。需要执行时请在输入中明确换行。准备和确认都不发送、不启动。")
+                androidx.compose.material3.OutlinedTextField(value = editor.command,
+                    onValueChange = { if (terminalInputEditable(editor)) editor.command = it },
+                    enabled = terminalInputEditable(editor),
+                    label = { androidx.compose.material3.Text("精确终端命令（包含所需换行）") },
+                    modifier = Modifier.fillMaxWidth().testTag("terminal-exact-command"))
+                val canChoose = terminalInputEditable(editor)
+                androidx.compose.material3.TextButton(enabled = canChoose, onClick = {
+                    if (terminalInputEditable(editor)) editor.linux = null
+                }, modifier = Modifier.testTag("terminal-chat-android")) {
+                    androidx.compose.material3.Text(if (editor.linux == null) "已选 Android（应用 UID）" else "选择 Android（应用 UID）")
+                }
+                if (application != null) {
+                    val host = application.terminalOwner.host
+                    val status by host.state.collectAsStateWithLifecycle()
+                    LaunchedEffect(application) { host.refreshLinux() }
+                    status.linux.choices.forEach { choice ->
+                        androidx.compose.material3.TextButton(enabled = canChoose, onClick = {
+                            if (terminalInputEditable(editor)) {
+                                // Explicit selection only; prepare itself never changes environment.
+                                editor.choosing = true
+                                host.selectLinux(choice.reference).whenComplete { result, failure ->
+                                    runOnUiThread {
+                                        if (terminalEditor === editor) {
+                                            editor.choosing = false
+                                            if (failure == null && result?.ok == true) editor.linux = choice.reference
+                                            else toast("Linux 选择未确认；未准备或启动终端")
+                                        }
+                                    }
+                                }
+                            }
+                        }) { androidx.compose.material3.Text(
+                            "${if (editor.linux == choice.reference) "已选" else "选择"}可信 Linux：${choice.label}") }
+                    }
+                    if (status.linux.choices.isEmpty()) androidx.compose.material3.Text("无已安装可信 Linux；不会自动下载或安装。")
+                }
+                val pending = editor.preparation
+                if (pending == null) {
+                    androidx.compose.material3.Button(enabled = terminalInputEditable(editor) && editor.command.isNotEmpty(),
+                        modifier = Modifier.testTag("terminal-prepare"), onClick = { prepareTerminal(editor) }) {
+                        androidx.compose.material3.Text(if (editor.preparing) "准备中（不启动）" else "准备终端审批（不启动）")
+                    }
+                } else {
+                    val state = if (editor.confirmed) ControllerTerminalPreparation.State.CONFIRMED else pending.state
+                    app.daiyu.android.ui.TerminalApprovalHost(
+                        draft = terminalDraft(), assistant = pending.assistant, provider = pending.provider,
+                        preparation = pending, state = state, onPrepare = { false },
+                        onConfirm = { preparation, displayed, current ->
+                            if (!terminalEditorCurrent(editor) || editor.preparation !== preparation) false
+                            else {
+                                val configuration = runCatching { controller.terminalConfiguration(editor.conversation) }.getOrNull()
+                                val confirmed = configuration != null && controller.confirmTerminal(preparation, displayed,
+                                    current, configuration.first, configuration.second)
+                                if (confirmed) { editor.confirmed = true; publishChat() } else cancelTerminalEditor()
+                                confirmed
+                            }
+                        }, onCancel = { if (terminalEditor === editor && editor.preparation === it) cancelTerminalEditor() }, problem = controller.problem)
+                    if (state == ControllerTerminalPreparation.State.CONFIRMED) {
+                        androidx.compose.material3.Text("已确认；尚未发送或执行。仅授权 2 个步骤及 2 个有界读页。")
+                        androidx.compose.material3.Button(modifier = Modifier.testTag("terminal-send-approved"),
+                            onClick = { sendTerminal(editor, pending) }) {
+                            androidx.compose.material3.Text("发送已批准任务")
+                        }
+                    }
+                }
+                androidx.compose.material3.TextButton(onClick = { if (terminalEditor === editor) cancelTerminalEditor() },
+                    modifier = Modifier.testTag("terminal-chat-cancel")) { androidx.compose.material3.Text("取消终端审批") }
+            }
+        }
+    }
+
+    private fun prepareTerminal(editor: TerminalEditor) {
+        if (!terminalInputEditable(editor)) return
+        val command = editor.command
+        val linux = editor.linux
+        editor.preparing = true
+        lifecycleScope.launch {
+            var prepared: ControllerTerminalPreparation? = null
+            var retained = false
+            try {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                    prepared = controller.prepareTerminalSend(editor.conversation, editor.draft, command, linux)
+                }
+                if (terminalEditorCurrent(editor) && editor.command == command && editor.linux == linux) {
+                    editor.preparation = prepared
+                    retained = prepared != null
+                    if (!retained) toast(controller.problem ?: "终端准备未受理；草稿保留")
+                }
+            } finally {
+                if (!retained) prepared?.let(controller::rejectTerminal)
+                editor.preparing = false
+            }
+        }
+    }
+
+    private fun sendTerminal(editor: TerminalEditor, pending: ControllerTerminalPreparation) {
+        if (!terminalEditorCurrent(editor) || editor.preparation !== pending) return
+        val configuration = runCatching { controller.terminalConfiguration(editor.conversation) }.getOrNull()
+            ?: return cancelTerminalEditor()
+        val current = terminalDraft()
+        val submitted = PendingTextSend(ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision), draft)
+        pendingTextSend = submitted
+        val queued = controller.sendTerminal(pending, pending.preview, current, configuration.first,
+            configuration.second, submitted.ticket) { result ->
+            if (terminalEditor === editor) terminalEditor = null
+            completeTextSend(submitted, result)
+        }
+        if (!queued) { pendingTextSend = null; cancelTerminalEditor(); toast("终端发送未受理；草稿保留，不自动重发") }
+        publishChat()
     }
 
     private fun cancelGenerationEditor() {
@@ -1039,6 +1200,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun cancelBrowserEditor() {
+        cancelTerminalEditor()
         cancelGenerationEditor()
         cancelGenerationOutputs()
         browserRequest = null
@@ -1750,6 +1912,14 @@ class MainActivity : ComponentActivity() {
         }
         if (!controller.ready || controller.problem?.startsWith("会话恢复失败") == true) { publishChat(); return }
         guard {
+            terminalEditor?.let { editor ->
+                val pending = editor.preparation
+                if (pendingTextSend == null && pending != null &&
+                    (controller.terminalPreparation() !== pending || pending.isCancelled ||
+                        terminalDraft() != pending.draft || runCatching {
+                        controller.terminalConfiguration(editor.conversation)
+                    }.getOrNull() != (pending.assistant to pending.provider))) cancelTerminalEditor()
+            }
             if (!selectionReady) {
                 val id = controller.preferences.getString("selected", null)
                 select(controller.database.conversations().firstOrNull { it.id.value == id }); return@guard

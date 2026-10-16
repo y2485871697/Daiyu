@@ -83,7 +83,7 @@ class TerminalApprovalHostTest : WiredActivityTestCase() {
         ui.waitForIdle()
         assertEquals(1, confirmations.get())
         assertEquals(ControllerTerminalPreparation.State.CONFIRMED, p.state)
-        ui.onNodeWithTag("terminal-confirm").assertIsNotEnabled()
+        ui.onNodeWithTag("terminal-confirm").assertDoesNotExist()
         p.cancel()
         // Instrumentation worker, not the application's main thread; no process was constructed.
         assertTrue(p.awaitCleanupOnWorker(100))

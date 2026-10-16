@@ -76,6 +76,7 @@ import app.daiyu.android.storage.EditingSettings
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.ui.FeatureRoute
 import app.daiyu.android.ui.RetainedConversationData
+import app.daiyu.android.ui.BrowserApprovalHost
 import app.daiyu.android.ui.ShizukuApprovalHost
 import app.daiyu.android.ui.screens.shizuku.ShizukuScreen
 import androidx.compose.foundation.rememberScrollState
@@ -187,7 +188,7 @@ class MainActivity : ComponentActivity() {
                 browserSettingsPageOwner?.revoke()
                 browserSettingsPageOwner = null
             }
-            if (value != "chat") { dictationHost.invalidate(); cancelShizukuEditor() }
+            if (value != "chat") { dictationHost.invalidate(); cancelShizukuEditor(); cancelBrowserEditor() }
             speechHost.setVisible(value == "chat" && !sidebarVisible)
             imageHost.setVisible(value == "chat" && !sidebarVisible, selected?.id?.value)
             retainedPageState = value
@@ -216,6 +217,9 @@ class MainActivity : ComponentActivity() {
         val ticket: ChatController.TextSendTicket = ChatController.TextSendTicket(),
         val editorOwner: ChatController.TextSendOwner = owner)
     private var pendingTextSend by mutableStateOf<PendingTextSend?>(null)
+    private var browserApproval by mutableStateOf<ControllerBrowserPreparation?>(null)
+    private var browserPreparing by mutableStateOf(false)
+    private var browserRequest: Any? = null
     private val supplementDraft = PausedSupplementDraft()
     private val selections get() = controller.selections
     private var shown = mutableListOf<Pair<Long, Message>>()
@@ -679,6 +683,7 @@ class MainActivity : ComponentActivity() {
         },
         onSend = { text -> if (editorMatches() && text == draft && pendingTextSend == null && !shizukuWritesBlocked) guard {
             cancelShizukuEditor()
+            cancelBrowserEditor()
             if (imageHost.hasAttachments) sendImageDraft(text) else if (!imageHost.busy) sendDraft(text)
         } },
         onSupplement = { text -> if (editorMatches() && text == draft && !imageHost.sending && !shizukuWritesBlocked) guard {
@@ -764,6 +769,40 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.weight(1f).testTag("shizuku-settings-entry").heightIn(min = 48.dp),
                     onClick = { if (activityUsable()) retainedPage = "shizuku-settings" })
             }
+            top.yukonga.miuix.kmp.basic.TextButton(
+                text = if (browserPreparing) "正在准备浏览器审批" else "浏览器操作审批",
+                enabled = available && !browserPreparing && browserApproval == null && pendingTextSend == null,
+                modifier = Modifier.testTag("browser-approval-entry").heightIn(min = 48.dp),
+                onClick = ::openBrowserApproval)
+            browserApproval?.let { pending ->
+                val observedState by produceState(pending.state, pending) {
+                    while (true) {
+                        value = pending.state
+                        kotlinx.coroutines.delay(100)
+                    }
+                }
+                BrowserApprovalHost(
+                    draft = BrowserDraftSnapshot(BrowserDraftOwner(selected?.id, editorGeneration, draftRevision), draft),
+                    assistant = pending.assistant, settings = pending.settings,
+                    preparation = pending, state = observedState,
+                    onPrepare = { _, _ -> false },
+                    onConfirm = { confirmed, displayed, current ->
+                        if (!activityUsable() || browserApproval !== confirmed || current != confirmed.draft ||
+                            imageHost.hasAttachments || pendingTextSend != null || !confirmed.confirm(displayed, current)) false
+                        else {
+                            val owner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+                            val submitted = PendingTextSend(owner, draft)
+                            pendingTextSend = submitted
+                            val queued = controller.sendBrowser(confirmed, current, submitted.ticket) { result ->
+                                if (browserApproval === confirmed) browserApproval = null
+                                completeTextSend(submitted, result)
+                            }
+                            if (!queued) { pendingTextSend = null; controller.rejectBrowser(confirmed) }
+                            queued
+                        }
+                    }, onCancel = { if (browserApproval === it) cancelBrowserEditor() },
+                    problem = controller.problem)
+            }
             val editor = shizukuEditor
             if (editor != null && !hasImages) key(editor) {
                 Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())
@@ -775,6 +814,54 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun cancelBrowserEditor() {
+        browserRequest = null
+        browserPreparing = false
+        val pending = browserApproval
+        browserApproval = null
+        pending?.let(controller::rejectBrowser)
+    }
+
+    private fun openBrowserApproval() {
+        if (!activityUsable() || pendingTextSend != null || imageHost.hasAttachments || draft.isBlank()) return
+        val snapshot = BrowserDraftSnapshot(BrowserDraftOwner(selected?.id, editorGeneration, draftRevision), draft)
+        val conversation = selected
+        prompt = InputPrompt("本次浏览器写操作", "",
+            "每行一个完整 JSON 操作；仅批准这些精确参数。留空只开放读取，不自动建标签、跳转或下载。",
+            "预览审批", { raw ->
+                val current = BrowserDraftSnapshot(BrowserDraftOwner(selected?.id, editorGeneration, draftRevision), draft)
+                if (current != snapshot || !activityUsable() || imageHost.hasAttachments || pendingTextSend != null) return@InputPrompt
+                val writes = raw.lineSequence().map { it.trim() }.filter { it.isNotEmpty() }.toList()
+                if (snapshot.owner.conversationId == null) controller.database.draft(snapshot.text)
+                else controller.database.draft(checkNotNull(snapshot.owner.conversationId), snapshot.text)
+                cancelShizukuEditor()
+                cancelBrowserEditor()
+                val request = Any()
+                browserRequest = request
+                browserPreparing = true
+                lifecycleScope.launch {
+                    var prepared: ControllerBrowserPreparation? = null
+                    var retained = false
+                    try {
+                        withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                            prepared = controller.prepareBrowserSend(conversation, snapshot, writes)
+                        }
+                        val matches = activityUsable() && browserRequest === request && retainedPage == "chat" &&
+                            !sidebarVisible && snapshot == BrowserDraftSnapshot(
+                                BrowserDraftOwner(selected?.id, editorGeneration, draftRevision), draft)
+                        if (matches) {
+                            browserApproval = prepared
+                            retained = prepared != null
+                            if (prepared == null) toast(controller.problem ?: "浏览器准备未受理；草稿保留")
+                        }
+                    } finally {
+                        if (!retained) prepared?.let(controller::rejectBrowser)
+                        if (browserRequest === request) { browserPreparing = false; browserRequest = null }
+                    }
+                }
+            })
     }
 
     private fun trackShizukuPreparation() {
@@ -862,6 +949,7 @@ class MainActivity : ComponentActivity() {
         if (!selectionReady || sidebarVisible || retainedPage != "chat" || controller.active != null || imageHost.busy) return
         if (shizukuWritesBlocked) return
         cancelShizukuEditor()
+        cancelBrowserEditor()
         imageHost.requestSelection(imageHost.session.attachments.state.value.draft, ::launchImagePicker)
     }
     private fun declareImageSupport() {
@@ -1034,6 +1122,7 @@ class MainActivity : ComponentActivity() {
         voiceForeground = false
         dictationHost.invalidate()
         cancelShizukuEditor()
+        cancelBrowserEditor()
         speechHost.setForeground(false)
         refreshRateWindowResumed = false; window.decorView.removeCallbacks(refreshRateRequest)
         val previous = previousPreferredRefreshRate
@@ -1066,6 +1155,7 @@ class MainActivity : ComponentActivity() {
         interactiveModeObservation?.close()
         interactiveModeObservation = null
         cancelShizukuEditor()
+        cancelBrowserEditor()
         imageHost.close()
         speechHost.close()
         activityCallbacksAllowed = false; refreshRateWindowResumed = false
@@ -1162,6 +1252,7 @@ class MainActivity : ComponentActivity() {
     private fun openSidebar() { guard {
         dictationHost.invalidate()
         cancelShizukuEditor()
+        cancelBrowserEditor()
         updatePane(); speechHost.setVisible(false); imageHost.setVisible(false, selected?.id?.value)
         sidebarVisible = true; publishChat()
     } }
@@ -1273,6 +1364,7 @@ class MainActivity : ComponentActivity() {
         if (!activityUsable() || sidebarVisible || controller.dataBusy || !controller.ready || controller.textSendState() != null || pendingTextSend != null || imageHost.sending || shizukuWritesBlocked) return
         dictationHost.invalidate()
         cancelShizukuEditor()
+        cancelBrowserEditor()
         guard {
             val id = selected?.id
             if (id == null) controller.database.draft(value) else controller.database.draft(id, value)
@@ -1286,6 +1378,7 @@ class MainActivity : ComponentActivity() {
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
         val shizukuOwned = shizukuEditor != null || shizukuWritesBlocked
         cancelShizukuEditor()
+        cancelBrowserEditor()
         val list = controller.database.conversations()
         var targetDraft = if (conversation == null) controller.database.draft() else list.first { it.id == conversation.id }.draft
         if (selectionReady) {
@@ -1421,6 +1514,7 @@ class MainActivity : ComponentActivity() {
             if (dataRevision != controller.dataRevision) {
                 dataRevision = controller.dataRevision
                 cancelShizukuEditor()
+                cancelBrowserEditor()
                 imageHost.configurationChanged()
                 imageHost.enter(selected?.id?.value)
                 val latest = selected?.id?.let { id -> controller.database.conversations().firstOrNull { it.id == id } }

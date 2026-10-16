@@ -85,7 +85,8 @@ class ChatController internal constructor(private val application:Application,
     private val assistantModel: ((ProviderSnapshot, AssistantRunContext)->ModelPort)? = null,
     val assistantAssets: AssistantAssets = FileAssistantAssets(application),
     private val contextPreparationFactory: (android.content.Context, ContextService) -> ContextPreparationCoordinator =
-        ProductionContextPreparation::create) {
+        ProductionContextPreparation::create,
+    private val virtualDisplayFactory: ControllerVirtualDisplayFactory = ControllerVirtualDisplayFactory.REAL) {
     private val contextService by lazy { ContextService(application, database) }
     private val contextPreparation by lazy { contextPreparationFactory(application, contextService) }
 
@@ -148,10 +149,14 @@ class ChatController internal constructor(private val application:Application,
     }
     // Fence under the short monitor; transport cancellation callbacks must run OUTSIDE it.
     private fun cancelPreparation() {
-        val token = synchronized(this) { preparation?.also { it.revoked = true } }
+        val token = synchronized(this) {
+            virtualDisplayEntry?.let { it.revoked = true; it.session?.close() }
+            preparation?.also { it.revoked = true }
+        }
         token?.cancellation?.cancel()
         token?.browser?.cancel()
-        if (token != null && (token.browser != null || token.terminal != null) && !token.submitted) finishPreparation(token)
+        if (token != null && !token.submitted && (token.browser != null || token.terminal != null ||
+            synchronized(this) { virtualDisplayEntry?.submitted == false })) finishPreparation(token)
     }
     internal fun bindConversationAssistant(owner: ConversationId, expected: String?, replacement: String): Boolean {
         val token = synchronized(this) {
@@ -554,10 +559,25 @@ class ChatController internal constructor(private val application:Application,
         }
         tools.closeWithResult { result -> handler.post {synchronized(this) {
             observation.observe(result)
-            if(observation.drained) unacceptedTools.remove(tools)
-            else problem="运行准备清理结果 UNKNOWN；原资源保留，不自动重连或重发"
+            if(observation.drained) {
+                unacceptedTools.remove(tools)
+                clearCleanupProblem(tools)
+                virtualDisplayEntry?.takeIf { it.catalog === tools && !it.persistenceUnknown }?.let {
+                    virtualDisplayEntry = null
+                }
+            }
+            else reportCleanupProblem(tools, "运行准备清理结果 UNKNOWN；原资源保留，不自动重连或重发")
             if(closed) closeStorageWhenIdle() else notifyChanged()
         }}}
+        if (synchronized(this) { virtualDisplayEntry?.catalog === tools }) executor.execute {
+            val result = tools.observeVirtualDisplayCloseOnWorker(parentDrained = true)
+            if (result is RunCatalogCloseResult.Unknown) handler.post { synchronized(this) {
+                if (unacceptedTools.containsKey(tools)) {
+                    reportCleanupProblem(tools, "副屏清理结果 UNKNOWN；保留原身份、会话和 lease，不自动重试")
+                    notifyChanged()
+                }
+            } }
+        }
     }
     internal data class QuestionProjection(val identity:QuestionIdentity,val record:QuestionRecord,
         val binding:QuestionCardBinding?,val canAnswer:Boolean)
@@ -688,11 +708,24 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
-        resources==null && generationEntry==null && generationReaders==0 && pendingShizuku==null && unacceptedTools.isEmpty() &&
+        resources==null && generationEntry==null && virtualDisplayEntry==null && generationReaders==0 && pendingShizuku==null && unacceptedTools.isEmpty() &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
     internal val selections=mutableMapOf<ConversationId?,Pair<Int,Int>>()
     @Volatile var active:Message?=null;private set
-    @Volatile var problem:String?=null;private set
+    private var problemRevision = 0L
+    @Volatile var problem:String?=null
+        private set(value) { synchronized(this) { field = value; problemRevision++ } }
+    // Each cleanup chain owns only its last publication, never a later unrelated error (even
+    // one with identical text). All accesses to this map are under the Controller monitor.
+    private val cleanupProblemRevisions = mutableMapOf<RunCatalogTools, Long>()
+    private fun reportCleanupProblem(tools: RunCatalogTools, text: String) {
+        problem = text
+        cleanupProblemRevisions[tools] = problemRevision
+    }
+    private fun clearCleanupProblem(tools: RunCatalogTools) {
+        val revision = cleanupProblemRevisions.remove(tools) ?: return
+        if (problemRevision == revision) problem = null
+    }
     @Volatile private var runner:ChatRunner?=null
     @Volatile private var runTools:RunCatalogTools?=null
     @Volatile var dataBusy=false;private set
@@ -774,6 +807,8 @@ class ChatController internal constructor(private val application:Application,
     private fun fenceRun(lifetime:RunResources) {
         if(lifetime.fenced) return
         lifetime.fenced=true
+        virtualDisplayEntry?.takeIf { it.assistantId == lifetime.initial.id && it.runId == lifetime.initial.runId &&
+            it.conversationId == lifetime.initial.conversationId }?.let { it.revoked = true; it.session?.close() }
         generationEntry?.takeIf { it.runner === lifetime.runner }?.session?.revokeAdmission()
         runRevocationListeners.toList().forEach { listener ->
             try {listener(lifetime.initial)} catch (_:Exception) { /* Optional feedback only. */ }
@@ -846,6 +881,8 @@ class ChatController internal constructor(private val application:Application,
     }
     /** Cancellation is scoped to the original editor submission, never a later preparation. */
     internal fun cancelTextSend(ticket: TextSendTicket): Boolean {
+        synchronized(this) { virtualDisplayEntry?.takeIf { it.textTicket === ticket } }
+            ?.let { return cancelVirtualDisplay(it) }
         val token = synchronized(this) {
             preparation?.takeIf { it.textTicket === ticket }?.also { it.revoked = true }
         } ?: return false
@@ -994,9 +1031,161 @@ class ChatController internal constructor(private val application:Application,
         synchronized(this) {
             if (preparation !== token) return
             preparation = null
+            virtualDisplayEntry?.takeIf { !it.accepted && !token.persistenceUnconfirmed && !it.factoryEntered && it.catalog == null }
+                ?.let { virtualDisplayEntry = null }
             pendingImage = null
             if (closed) closeStorageWhenIdle() else notifyChanged()
         }
+    }
+
+    private var virtualDisplayEntry: ControllerVirtualDisplayEntry? = null
+    @Synchronized internal fun virtualDisplayEntry(): ControllerVirtualDisplayEntry? = virtualDisplayEntry
+    @Synchronized internal fun virtualDisplayApproval(entry: ControllerVirtualDisplayEntry) =
+        if (virtualDisplayEntry === entry && !entry.revoked) entry.session?.pendingApproval() else null
+
+    /** Explicit text-only mode. Preparation is in-memory; durable lease reservation occurs only
+     * after database acceptance when the ONE Runner binds its opaque owner to the catalog. */
+    @Synchronized internal fun prepareVirtualDisplaySend(conversation: Conversation?, editor: TextSendOwner,
+        text: String, writes: List<R08VirtualDisplayWrite>, reads: List<R08VirtualDisplayRead>): ControllerVirtualDisplayEntry? {
+        if (!idleAvailable() || pendingTextState != null) return null
+        return runCatching { ControllerVirtualDisplayEntry(conversation, editor, text, writes, reads) }
+            .getOrNull()?.also { virtualDisplayEntry = it; reservePreparation(); notifyChanged() }
+    }
+
+    /** Identity fence is synchronous, including while a factory or DB receipt is in flight.
+     * Session.close is revocation only; runner/transport work is posted outside this monitor. */
+    internal fun cancelVirtualDisplay(entry: ControllerVirtualDisplayEntry): Boolean {
+        val (lifetime, token, submitted) = synchronized(this) {
+            if (virtualDisplayEntry !== entry) return false
+            entry.revoked = true
+            entry.session?.close()
+            val pending = preparation?.also { it.revoked = true }
+            val running = resources?.takeIf { it.initial.id == entry.assistantId && it.initial.runId == entry.runId &&
+                it.initial.conversationId == entry.conversationId }?.also { fenceRun(it) }
+            Triple(running, pending, entry.submitted)
+        }
+        token?.cancellation?.cancel() // can invoke transports; never under the Controller monitor
+        if (lifetime != null) stopRun(lifetime)
+        else if (!submitted && token != null) finishPreparation(token)
+        return true // acknowledgement of this identity, not proof of drain or DB rejection
+    }
+
+    /** Explicit physical observation, never cancellation-as-exit or an automatic release write.
+     * A pending/UNKNOWN result retains the entry and all handles; the user may observe again. */
+    internal fun observeVirtualDisplayClose(entry: ControllerVirtualDisplayEntry): Boolean {
+        val tools = synchronized(this) {
+            if (virtualDisplayEntry !== entry || !entry.revoked) return false
+            val catalog = entry.catalog ?: return false
+            val lifetime = resources
+            if (lifetime != null) {
+                if (lifetime.tools !== catalog || lifetime.busy || lifetime.waiting ||
+                    lifetime.result == null || !lifetime.devicesClosing) return false
+            } else if (preparation != null || catalog !in unacceptedTools) return false
+            catalog
+        }
+        executor.execute {
+            val result = tools.observeVirtualDisplayCloseOnWorker(parentDrained = true)
+            if (result is RunCatalogCloseResult.Unknown) handler.post { synchronized(this) {
+                if (virtualDisplayEntry === entry) {
+                    reportCleanupProblem(tools, "副屏清理结果 UNKNOWN；保留原身份、会话和 lease，不自动重连或重发")
+                    notifyChanged()
+                }
+            } }
+        }
+        return true
+    }
+
+    internal fun answerVirtualDisplay(entry: ControllerVirtualDisplayEntry,
+        request: app.daiyu.android.vdapproval.VirtualDisplayApprovalRequest, approved: Boolean): Boolean {
+        val answered = synchronized(this) {
+            if (closed || virtualDisplayEntry !== entry || entry.revoked) return false
+            entry.session?.answerFromUi(request, approved) == true
+        }
+        if (answered && !approved) cancelVirtualDisplay(entry)
+        if (answered) notifyChanged()
+        return answered
+    }
+
+    internal fun sendVirtualDisplay(entry: ControllerVirtualDisplayEntry, ticket: TextSendTicket,
+        complete: (TextSendResult) -> Unit): Boolean {
+        val token = synchronized(this) {
+            val current = preparation ?: return false
+            if (closed || virtualDisplayEntry !== entry || entry.revoked || entry.submitted ||
+                current.revoked || pendingTextState != null) return false
+            entry.submitted = true
+            entry.textTicket = ticket
+            current.submitted = true
+            current.textTicket = ticket
+            pendingTextState = TextSendState(ticket, entry.editor, entry.text)
+            current
+        }
+        try { executor.execute {
+            val saved = try { sendPrepared(token, entry.conversation, entry.text,
+                expectedDraftText = entry.text, virtualDisplay = entry) } catch (_: Exception) { null }
+            val result = when {
+                saved != null -> TextSendResult.Accepted(entry.editor, saved)
+                token.persistenceUnconfirmed -> TextSendResult.Unknown(entry.editor)
+                else -> TextSendResult.Rejected(entry.editor)
+            }
+            synchronized(this) {
+                if (pendingTextState?.ticket === ticket) pendingTextState = pendingTextState?.copy(result = result)
+            }
+            finishPreparation(token)
+            handler.post { try { complete(result) } catch (_: Exception) {} }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { if (pendingTextState?.ticket === ticket) pendingTextState = null }
+            cancelVirtualDisplay(entry); finishPreparation(token); return false
+        }
+        return true
+    }
+
+    /** Adapter to THIS controller's accepted run, actual authorization and central batch feedback.
+     * It owns neither a second catalog nor a second dispatcher/ledger. */
+    private fun bindVirtualDisplay(entry: ControllerVirtualDisplayEntry,
+        realOwner: app.daiyu.android.domain.runtime.RunExecutionOwner,
+        caps: SessionCapabilities): ControllerVirtualDisplaySession {
+        synchronized(this) {
+            check(virtualDisplayEntry === entry && entry.accepted && !entry.factoryEntered)
+            check(realOwner.conversationId == entry.conversationId && realOwner.runId == entry.runId &&
+                realOwner.assistantMessageId == entry.assistantId)
+            entry.factoryEntered = true
+            entry.owner = realOwner; entry.capabilities = caps
+        }
+        val parent = object : ControllerVirtualDisplayRuntime.Parent {
+            override fun showApproval(request: app.daiyu.android.vdapproval.VirtualDisplayApprovalRequest) {
+                val current = synchronized(this@ChatController) {
+                    virtualDisplayEntry === entry && !closed && !entry.revoked && entry.owner === realOwner &&
+                        resources?.let { !it.fenced && realOwner.owns(it.initial) } == true
+                }
+                if (!current) { synchronized(this@ChatController) { entry.session?.close() }; return }
+                notifyChanged() // asynchronous UI publication, never wait for Main
+            }
+            override fun combinedAuthorization(owner: app.daiyu.android.domain.runtime.RunExecutionOwner,
+                capabilities: SessionCapabilities, approvedEffects: Set<app.daiyu.android.domain.tools.WriteEffect>) =
+                synchronized(this@ChatController) {
+                    check(virtualDisplayEntry === entry && !closed && !entry.revoked &&
+                        entry.owner === owner && entry.capabilities === capabilities)
+                    check(entry.authorization == null)
+                    app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, owner.runId.value,
+                        approvedEffects).also { entry.authorization = it }
+                }
+            override fun stopAcceptedRun(owner: app.daiyu.android.domain.runtime.RunExecutionOwner) {
+                if (synchronized(this@ChatController) { entry.owner === owner }) cancelVirtualDisplay(entry)
+            }
+            override fun beginBatch(leaf: R08VirtualDisplayCatalogLeaf, originalWholeBatch: List<ToolInvocation>):
+                ControllerVirtualDisplaySession.BatchCompletion {
+                val ticket = leaf.beginBatch(originalWholeBatch)
+                return ControllerVirtualDisplaySession.BatchCompletion { results -> leaf.finishBatch(ticket, results) }
+            }
+        }
+        return virtualDisplayFactory.create(application, realOwner, caps, entry.writes, entry.reads, parent,
+            ControllerVirtualDisplayRuntime.Retention { session ->
+                synchronized(this) {
+                    check(virtualDisplayEntry === entry && entry.session == null && entry.owner === realOwner)
+                    entry.session = session // retain even a late factory; never resurrect admission
+                    if (closed || entry.revoked) session.close()
+                }
+            })
     }
 
     @Synchronized internal fun browserPreparation(): ControllerBrowserPreparation? = preparation?.browser
@@ -1259,14 +1448,17 @@ class ChatController internal constructor(private val application:Application,
         browserBinding:CatalogBrowserBinding?=null,
         generation:GenerationEntry?=null,
         terminalPreparation:ControllerTerminalPreparation?=null,
-        terminalRun:TerminalConfirmedRun?=null):Conversation? {
+        terminalRun:TerminalConfirmedRun?=null,
+        virtualDisplay:ControllerVirtualDisplayEntry?=null):Conversation? {
         require((terminalPreparation == null) == (terminalRun == null))
         require(terminalRun == null || (imageAttempt == null && shizukuPreparation == null &&
-            browserPreparation == null && generation == null && !withChildren &&
+            browserPreparation == null && generation == null && virtualDisplay == null && !withChildren &&
             terminalRun.preview === terminalPreparation?.preview &&
             terminalRun.authorization === terminalRun.binding.authorization))
         if (terminalPreparation != null && runCatching { terminalConfiguration(conversation) }.getOrNull() !=
             (terminalPreparation.assistant to terminalPreparation.provider)) return null
+        require(virtualDisplay == null || (generation == null && shizukuPreparation == null &&
+            browserBinding == null && imageAttempt == null && terminalRun == null && !withChildren))
         require(shizukuPreparation==null || (imageAttempt==null && shizukuAuthorization!=null))
         require(generation == null || (shizukuPreparation == null && browserBinding == null && imageAttempt == null))
         if(preparationCancelled(token)) return null
@@ -1316,13 +1508,13 @@ class ChatController internal constructor(private val application:Application,
             if(imageAttempt!=null) require(selected?.asModelSettings()==config) {"stale_image_provider"}
             selected?.takeIf {it.asModelSettings()==config} ?: ProviderSnapshot.capture(config)
         } catch (_:Exception) {problem="图片模型配置已变化；草稿保留，未发起网络请求";notifyChanged();return null}
-        val conversationId=terminalRun?.preview?.identity?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
+        val conversationId=virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
-        val run=terminalRun?.preview?.identity?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
+        val run=virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
         val user=try {imageAttempt?.prepare(imageAttachments.store,messageImageAssets) ?:
             Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
         } catch (_:Exception) {problem="图片冻结失败或模型不支持；草稿保留，未发起网络请求";notifyChanged();return null}
-        val assistant=Message(terminalRun?.preview?.identity?.assistantMessageId ?: generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
+        val assistant=Message(virtualDisplay?.assistantId ?: terminalRun?.preview?.identity?.assistantMessageId ?: generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
         val physicalVideoHistory = try {
             ControllerVideoHistory(database).capture(conversationId).also {
                 check(it.inputs.isEmpty()) { "original_video_authorization_required" }
@@ -1378,14 +1570,15 @@ class ChatController internal constructor(private val application:Application,
             preparingDevices = devices
             val registry = AndroidToolRegistry.create(devices, contextTools, enableUserBarrier=interactiveSnapshot.enabled)
             val capabilities = SessionCapabilities(terminalRun?.preview?.identity?.sessionId ?: run.value,
-                AndroidToolRegistry.capabilitiesFor(config.enabledTools()) + contextTools.map { it.definition.capability } +
+                (if (virtualDisplay == null) AndroidToolRegistry.capabilitiesFor(config.enabledTools()) else emptySet()) + contextTools.map { it.definition.capability } +
                     setOf(SkillRunSession.READ, SkillRunSession.RESOURCE) +
                     (if (interactiveSnapshot.enabled) setOf(AndroidToolRegistry.ASK_USER_CAPABILITY) else emptySet()) +
                     (if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY,RunChildTasks.CAPABILITY)) +
                     (if (shizukuPreparation == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)) +
                     (if (browserBinding == null) emptySet() else setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY)) +
                     (if (generation == null) emptySet() else setOf(RunGenerationTools.CAPABILITY)) +
-                    (if (terminalRun == null) emptySet() else setOf(RunTerminalTools.CAPABILITY)))
+                    (if (terminalRun == null) emptySet() else setOf(RunTerminalTools.CAPABILITY)) +
+                    (if (virtualDisplay == null) emptySet() else setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY)))
             val backgroundFactory: ((app.daiyu.android.domain.runtime.RunExecutionOwner, SessionCapabilities,
                 app.daiyu.android.domain.tools.TaskAuthorization) -> RunChildTasks)? =
                 if(childModels.isEmpty()) null else { owner, grants, authorization ->
@@ -1417,6 +1610,9 @@ class ChatController internal constructor(private val application:Application,
                             capabilities.sessionId).also { notifyChanged() }
                     }
                 },
+                virtualDisplaySessionFactory = if (virtualDisplay == null) null else { realOwner, grants ->
+                    bindVirtualDisplay(virtualDisplay, realOwner, grants)
+                },
                 generationFactory = if (generation == null) null else { realOwner, grants, task ->
                     val retained = synchronized(this) {
                         check(generationEntry === generation && !closed)
@@ -1433,6 +1629,7 @@ class ChatController internal constructor(private val application:Application,
             }
             preparingTools = tools
             if (terminalRun != null) token.terminalCatalog = tools
+            synchronized(this) { virtualDisplay?.catalog = tools }
             generation?.catalog = tools
             val owned = ChatRunner(preparedModel, database, tools,
                 RunnerOptions(runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools,
@@ -1496,6 +1693,7 @@ class ChatController internal constructor(private val application:Application,
                 ?: throw IllegalStateException("browser_acceptance_unconfirmed")
         } catch (_:Exception) {
             token.persistenceUnconfirmed=databaseSendEntered
+            synchronized(this) { virtualDisplay?.persistenceUnknown = databaseSendEntered }
             if(databaseSendEntered) imageAttempt?.unknown() else imageAttempt?.draftChanged()
             closeUnacceptedTools(tools)
             problem=if(!databaseSendEntered) "会话、原文或编辑草稿已变化；保留当前草稿，未启动聊天模型请求"
@@ -1504,6 +1702,7 @@ class ChatController internal constructor(private val application:Application,
         }
         // database.send returns only after its real two-row transaction receipt succeeds.
         imageAttempt?.accepted(saved)
+        synchronized(this) { virtualDisplay?.accepted = true }
         generation?.session?.recordPersistence(generation.identity, GenerationPersistenceReceipt.Accepted(saved))
         val lifetime=RunResources(assistant,owned,tools)
         val installed=synchronized(this) {
@@ -1608,7 +1807,10 @@ class ChatController internal constructor(private val application:Application,
         notifyChanged()
     }
     private fun stopRun(lifetime:RunResources) {
-        fenceRun(lifetime)
+        synchronized(this) {
+            if (resources !== lifetime) return
+            fenceRun(lifetime)
+        }
         handler.post {
             lifetime.runner.stop()
             lifetime.tools.revokeChildren()
@@ -1661,7 +1863,7 @@ class ChatController internal constructor(private val application:Application,
                             lifetime.deviceCleanup.observe(result)
                             if(lifetime.deviceCleanup.drained) cleanupRun(lifetime)
                             else {
-                                problem="运行清理结果 UNKNOWN；原资源保留，不自动重连或重发，请核实设备状态"
+                                reportCleanupProblem(lifetime.tools, "运行清理结果 UNKNOWN；原资源保留，不自动重连或重发，请核实设备状态")
                                 if(!closed) active=(active ?: lifetime.initial).copy(
                                     status=RunStatus.INTERRUPTED,error=problem)
                                 notifyChanged()
@@ -1669,11 +1871,17 @@ class ChatController internal constructor(private val application:Application,
                         }
                     }}
                 }
+                synchronized(this) { virtualDisplayEntry?.takeIf { it.catalog === lifetime.tools } }
+                    ?.let(::observeVirtualDisplayClose)
             }
         }
         if(!lifetime.deviceCleanup.drained) return
         lifetime.writer.shutdown();lifetime.waiter.shutdown()
         resources=null;runner=null;runTools=null
+        clearCleanupProblem(lifetime.tools)
+        virtualDisplayEntry?.takeIf { it.catalog === lifetime.tools }?.let {
+            virtualDisplayEntry = null
+        }
         generationEntry?.takeIf { it.runner === lifetime.runner }?.let {
             // Slice completion + receipt persistence + catalog physical drain, not HTTP cancel.
             it.runnerDone.countDown()
@@ -1693,7 +1901,7 @@ class ChatController internal constructor(private val application:Application,
     }==true
     private fun closeStorageWhenIdle() {
         pruneBackgroundRuns()
-        if(resources!=null || preparing || generationEntry!=null || generationReaders!=0 ||
+        if(resources!=null || preparing || generationEntry!=null || virtualDisplayEntry!=null || generationReaders!=0 ||
             unacceptedTools.isNotEmpty() || imageReaders!=0 || closingStorage) return
         if(!childrenClosed) {
             if(!childrenClosing) {

@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import android.content.ContextWrapper
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
@@ -60,7 +61,18 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             })
         return Triple(entered, release, connection)
     }
-    private fun fetch() { reveal("model-catalog-fetch").performClick() }
+    private fun fetchReady(): SemanticsNodeInteraction {
+        reveal("model-catalog-fetch")
+        ui.waitUntil(timeoutMillis = 5_000) {
+            ui.onAllNodesWithTag("model-catalog-fetch").fetchSemanticsNodes().singleOrNull()?.config?.let {
+                it.getOrNull(SemanticsProperties.Disabled) == null
+            } == true
+        }
+        return node("model-catalog-fetch").assertIsEnabled()
+    }
+    private fun fetch() {
+        fetchReady().performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+    }
     private fun finished(connection: AtomicReference<CatalogConnection>) {
         awaitControl("catalog finished") { connection.get()?.disconnected == true }; ui.waitForIdle()
     }
@@ -77,13 +89,19 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     }
     fun testCatalogChangedAndRestoredDraftRevokesLateResponseAndCanRetry() {
         val (entered, release, connection) = catalogue(held = true)
-        openModels(); fetch(); assertTrue(entered.await(5, TimeUnit.SECONDS))
-        val old = fixture.settings.load().model
-        try { editModel("模型名", "changed"); editModel("模型名", old) } finally { release.countDown() }
-        finished(connection); node("settings-row:second").assertDoesNotExist()
-        fetch(); finished(connection); reveal("settings-row:second").assertExists()
+        val before = fixture.settings.load(); val old = before.model
+        openModels(); modelField("模型名").assertEditableText(old)
+        fetch(); assertTrue(entered.await(5, TimeUnit.SECONDS))
+        try {
+            editModel("模型名", "changed"); modelField("模型名").assertEditableText("changed")
+            editModel("模型名", old); modelField("模型名").assertEditableText(old)
+        } finally { release.countDown() }
+        finished(connection); fetchReady(); node("settings-row:second").assertDoesNotExist()
+        val (retryEntered, _, retryConnection) = catalogue()
+        fetch(); assertTrue(retryEntered.await(5, TimeUnit.SECONDS))
+        finished(retryConnection); fetchReady(); reveal("settings-row:second").assertExists()
         backToChat(activity); node("settings-row:second").assertDoesNotExist()
-        assertEquals(old, fixture.settings.load().model)
+        assertEquals(old, fixture.settings.load().model); assertEquals(before, fixture.settings.load())
     }
     fun testCatalogSaveFailureAndDismissRevokePendingResponse() {
         for (save in listOf(true, false)) {

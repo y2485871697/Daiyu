@@ -24,6 +24,7 @@ internal data class UsageStatsSnapshot(
     val conversationsPerDay: Map<LocalDate, Int> = emptyMap(),
     val launchCount: Int = 0,
     val modelUsage: ModelUsageSnapshot = ModelUsageSnapshot(),
+    val recordedUsage: RecordedUsageStats? = null,
 ) {
     val totalConversations: Int get() = currentConversations
     val totalMessages: Int get() = currentMessages

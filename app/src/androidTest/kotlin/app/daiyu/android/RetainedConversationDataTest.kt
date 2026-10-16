@@ -64,8 +64,43 @@ class RetainedConversationDataTest : android.test.AndroidTestCase() {
         assertEquals(1, snapshot.currentConversations); assertEquals(122, snapshot.currentMessages)
         assertFalse(snapshot.heatmapAvailable); assertFalse(snapshot.tokenAccountingAvailable); assertFalse(snapshot.lifetimeAccountingAvailable)
         assertTrue(snapshot.modelUsage.providers.isEmpty())
+        val recorded = snapshot.recordedUsage!!
+        assertTrue(recorded.scanComplete); assertEquals(61, recorded.messagesWithoutCheckpoint)
+        assertEquals(0L, recorded.summary.requestSnapshotCount); assertNull(recorded.summary.input.reportedTokens)
         val summary = data.summaries(null).single()
         assertFalse(summary.isActiveRun); assertFalse(summary.hasCompletionMarker)
+    }
+    fun testStatsConsumesCommittedRunnerUsageReplacementReopenAndDeletion() {
+        val conversation = database.create(); val run = RunId("usage-run")
+        val user = Message(MessageId("usage-user"), conversation.id, run, "user", emptyList(), RunStatus.COMPLETED)
+        val assistant = user.copy(id = MessageId("usage-answer"), role = "assistant", status = RunStatus.RUNNING)
+        app.daiyu.android.storage.SQLiteRuntimeStore.acquire(database).use { runtime ->
+            runtime.recoverPending()
+            database.send(user, assistant)
+            var rounds = 0
+            val runner = ChatRunner(ModelPort { object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    if (++rounds == 1) {
+                        sink(ModelEvent.Usage(10, 20, 5)); sink(ModelEvent.Usage(null, 0, 0))
+                        sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("usage-tool"), "get_battery_status", "{}")))
+                    } else sink(ModelEvent.Usage(7, 9, 2))
+                }
+                override fun cancel() {}
+            } }, database, BatteryTool { "ok" }, app.daiyu.android.domain.runtime.RunnerOptions(runtimeStore = runtime)) {}
+            assertEquals(RunStatus.COMPLETED, runner.run(assistant, listOf(user)).status)
+        }
+        val snapshot = data.stats(); val summary = snapshot.recordedUsage!!.summary
+        assertEquals(2L, summary.requestSnapshotCount)
+        assertEquals(7L, summary.input.reportedTokens); assertEquals(1L, summary.input.unknownRequestCount)
+        assertEquals(9L, summary.output.reportedTokens); assertEquals(2L, summary.cached.reportedTokens)
+        assertFalse(snapshot.tokenAccountingAvailable); assertFalse(snapshot.lifetimeAccountingAvailable)
+        assertTrue(snapshot.modelUsage.providers.isEmpty())
+        database.close(); database = ConversationDatabase(scoped)
+        data = RetainedConversationData(database, ContextService(scoped, database))
+        assertEquals(snapshot.recordedUsage, data.stats().recordedUsage)
+        data.deleteAll(); val empty = data.stats().recordedUsage!!
+        assertEquals(0L, empty.summary.requestSnapshotCount); assertNull(empty.summary.output.reportedTokens)
+        assertTrue(empty.scanComplete)
     }
     fun testDeleteAllRollsBackEarlierDeletesWhenLaterDeleteFails() {
         val first = database.create(); val second = database.create()

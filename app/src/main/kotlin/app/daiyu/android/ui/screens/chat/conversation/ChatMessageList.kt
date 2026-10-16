@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.MarkdownText
 import app.daiyu.android.domain.RunStatus
@@ -150,10 +151,11 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions) {
         Box {
             Text(turn.text, Modifier.widthIn(max = 320.dp)
                 .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomEnd = 6.dp, bottomStart = 20.dp))
-                .background(MiuixTheme.colorScheme.primary)
+                .background(MiuixTheme.colorScheme.surfaceContainerHigh)
                 .combinedClickable(onClick = {}, onLongClick = { showMenu = true })
                 .padding(horizontal = 16.dp, vertical = 12.dp),
-                color = MiuixTheme.colorScheme.onPrimary, style = MiuixTheme.textStyles.body1)
+                color = MiuixTheme.colorScheme.onSurface,
+                style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp, lineHeight = 23.sp))
             UserTurnMenu(showMenu, { showMenu = false }, turn.id, actions)
         }
         MessageTimestamp(turn.timestamp, Modifier.padding(top = 6.dp, end = 4.dp))
@@ -167,7 +169,8 @@ internal fun AssistantTurn(turn: ChatTurnUi.Assistant, actions: ChatScreenAction
         if (turn.finalText.isNotBlank()) {
             val answer = remember(turn.finalText) { MarkdownText.render(turn.finalText).toString() }
             SelectionContainer {
-                Text(answer, color = MiuixTheme.colorScheme.onSurface, style = MiuixTheme.textStyles.body1)
+                Text(answer, color = MiuixTheme.colorScheme.onSurface,
+                    style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp, lineHeight = 23.sp))
             }
         } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {
             Text("正在思考…", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, style = MiuixTheme.textStyles.body2)

@@ -35,7 +35,7 @@ internal fun SubAgentPresetActionsSheet(preset: SubAgentPreset, onDismiss: () ->
             .semantics { contentDescription = "子代理组操作面板" }) {
             Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 20.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.38f)) {
+                Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                     Icon(Icons.Rounded.AccountTree, null, Modifier.padding(14.dp).size(28.dp), tint = MaterialTheme.colorScheme.primary)
                 }
                 Text(preset.name, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)

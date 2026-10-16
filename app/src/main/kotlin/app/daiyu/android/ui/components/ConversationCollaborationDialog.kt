@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
@@ -115,7 +116,8 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
             Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
                 Surface(Modifier.widthIn(max = 480.dp).fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp)
                     .heightIn(max = maximumHeight).testTag("subagent-collaboration-card"), shape = RoundedCornerShape(28.dp),
-                    color = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+                    color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 0.dp,
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) {
                     Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)) {
                         Text("本会话协作", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 16.dp))
                         Column(Modifier.fillMaxWidth().weight(1f, fill = false).testTag("subagent-collaboration-body")

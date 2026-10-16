@@ -7,11 +7,9 @@ internal const val SubAgentGptSpeedAnimationDurationMillis = 450
 private const val SubAgentGptSpeedRotationDegreesPerCycle = 360f
 private const val SubAgentGptSpeedScaleStart = 1f
 private const val SubAgentGptSpeedScalePeak = 1.12f
-private val SubAgentGptSpeedFastColor = Color(0xFFF2A7BD)
-private val SubAgentGptSpeedUltraFastColor = Color(0xFF800020)
-internal fun subAgentGptSpeedChipColor(mode: GptSpeedMode, normalColor: Color): Color = when (mode) {
-    GptSpeedMode.FAST -> SubAgentGptSpeedFastColor
-    GptSpeedMode.ULTRA_FAST -> SubAgentGptSpeedUltraFastColor
+internal fun subAgentGptSpeedChipColor(mode: GptSpeedMode, normalColor: Color, fastColor: Color, ultraFastColor: Color): Color = when (mode) {
+    GptSpeedMode.FAST -> fastColor
+    GptSpeedMode.ULTRA_FAST -> ultraFastColor
     else -> normalColor
 }
 internal fun subAgentGptSpeedRotationDegrees(progress: Float): Float = SubAgentGptSpeedRotationDegreesPerCycle * progress.coerceIn(0f, 1f)

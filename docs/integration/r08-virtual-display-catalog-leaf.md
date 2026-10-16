@@ -125,18 +125,50 @@ tool ledger. If production does not have this implementation yet, do not publish
 
 ## Final-result feedback, lifecycle and retention
 
-Immediately after the parent's actual dispatcher finishes its durable outcome processing, and
-before any next dispatch or lifecycle observation, call:
+Register the **original whole batch before any dispatcher/ledger access**, not after an adapter
+runs. The former post-hoc `observeOutcomes(batch, results)` API has been removed: it could not see
+ledger UNKNOWN short-circuits when feedback was completely omitted. The required pairing is:
 
 ```kotlin
-leaf.observeOutcomes(originalWholeBatch, finalCentralResults)
+val originalWholeBatch = invocations.toList()
+val ticket = leaf.beginBatch(originalWholeBatch) // Pure memory; before central dispatch.
+// On the parent's existing worker / receipt path, not under a UI/controller lifecycle lock:
+val finalCentralResults = existingDispatcher.dispatchOwned(authorization, originalWholeBatch, owner)
+leaf.finishBatch(ticket, finalCentralResults)
 ```
 
-Forward results from both `execute` and `start`/receipt paths, including replay, partial failures,
-and `receipt_persistence_failed`. Missing R08 outcomes or any central R08 UNKNOWN taint the leaf.
-This is not optional: adapter success precedes final ledger persistence. The leaf counts locally
-executed calls awaiting this callback; `heldState().pendingFinalOutcomes > 0` prevents a drained
-observation. The parent must additionally drain its own dispatch/creation/feedback barriers.
+The names above illustrate ordering, not new parent wiring. `RunCatalogTools` / `ChatController`
+are unchanged in this leaf-only fix; the parent must install this pairing on its actual paths.
+For both `execute` and `start`/receipt paths, hold the same ticket through any suspended receipt
+completion. Forward only the **final durable central results**, including replay, partial failures,
+and `receipt_persistence_failed`. Do not manufacture success, empty results or NotExecuted in a
+`finally` block if dispatch throws. No feedback on an exception deliberately leaves the ticket
+pending; this is safe retention, not a recoverable automatic release protocol.
+
+`beginBatch` snapshots the complete batch and immediately counts every R08 invocation, even if
+central admission/ledger handling never enters the leaf. Concurrent outstanding batches cannot
+reuse an R08 call ID. `finishBatch` accepts only the original identity ticket, once, with the exact
+whole-batch call-ID sequence and multiplicity (including other leaves' results). A legitimate
+original duplicate-ID batch rejection is still accepted; a fabricated duplicate, partial, extra,
+reordered or wrong-ID result list is not. Invalid, foreign, concurrent duplicate or already-consumed
+tickets throw and latch UNKNOWN without releasing another batch. An adapter invocation with no
+matching registered ticket fails closed before owner I/O, retains local pending accounting, and
+cannot be repaired by retroactively registering that ID.
+
+The parent remains the trusted source of final outcomes: `ToolDispatchResult` has no cryptographic
+provenance. Identity/coverage validation prevents forged tickets or substituted batches, not a
+malicious caller fabricating matching result payloads. Only R08 evidence is sent to the journal.
+Journal I/O occurs **outside** the state/lifecycle lock, while the ticket and local execute counts
+remain held. A journal exception retains the ticket and latches UNKNOWN. Any central R08 UNKNOWN
+also latches UNKNOWN, even if the complete callback then releases its accounting. Missing results
+latch UNKNOWN and leave the original ticket pending; entirely missing callbacks leave it pending
+without needing to observe an UNKNOWN result. Neither case can be reported as Drained.
+
+`heldState().pendingFinalOutcomes` counts registered R08 calls (not double-counting their local
+executions), plus any unregistered local executions. Local execute accounting is retained until
+valid final feedback; returning an adapter result does not release it. The parent must additionally
+drain its own dispatch/creation/feedback barriers. A physical host drain cannot override these
+pending tickets or uncertainty; observation rechecks the in-memory gate after host I/O as well.
 
 `heldState()` is a nonblocking in-memory parent status snapshot. It contains revocation, active
 execution count, pending final outcomes, start-attempted, initialization and uncertainty. The leaf
@@ -171,7 +203,13 @@ Sources cover setup/prepare/batch rejection without I/O, read-before-init refusa
 from init, copied authorization/capability rejection, extra model owner-field rejection, exact
 write effects, canonical parameters, stable actual-call IDs, central replay, lookup-only evidence,
 negative/receipt-only/disconnected responses, journal failure, central persistence failure, retained
-UNKNOWN, and nonblocking close during an in-flight request without cleanup.
+UNKNOWN, and nonblocking close during an in-flight request without cleanup. Additional ticket
+regressions cover central ledger UNKNOWN short-circuit with entirely omitted feedback, local
+execute without feedback, unregistered execute, incomplete/duplicate/reordered/extra/wrong-ID
+results, original-batch snapshot ownership, foreign/forged/consumed tickets, complete normal
+batches (including legitimate duplicate-ID rejection), final-journal failure and concurrent close
+while final-journal I/O is held. These are source-level regressions for the pending-accounting gap;
+no test execution or integration of the parent dispatcher is claimed.
 
 These are authored test cases, **not passing test results**. The parent must compile/run them and
 inspect any failures. Device/root/SELinux/owner lifecycle behavior is not tested here; it inherits

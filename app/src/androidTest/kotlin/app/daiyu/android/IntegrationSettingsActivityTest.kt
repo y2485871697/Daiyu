@@ -1,10 +1,9 @@
 package app.daiyu.android
 
-import android.app.AlertDialog
 import android.content.ContextWrapper
-import android.view.View
-import android.view.ViewGroup
-import android.widget.Button
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.*
 import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.model.ProviderRequestOptions
@@ -125,43 +124,49 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         modelField("自定义请求体").assertEditableText(expected.customBody); reveal("settings-radio:快速").assertIsSelected()
         backToChat(activity)
     }
-    // SkillManagementDialog has not changed in this migration: assert its actual native controls.
-    private fun views(view: View): List<View> = listOf(view) + if (view is ViewGroup) (0 until view.childCount).flatMap { views(view.getChildAt(it)) } else emptyList()
-    private fun skillDialog(): AlertDialog {
-        val host = MainActivity::class.java.getDeclaredField("skillManagementDialog").apply { isAccessible = true }.get(activity)
-        return host.javaClass.getDeclaredField("window").apply { isAccessible = true }.get(host) as AlertDialog
+    private fun openSkills() {
+        menu("设置"); reveal("settings-row:技能管理", "设置").performClick()
+        node("page:技能").assertIsDisplayed()
     }
-    private fun openSkills() { menu("设置"); reveal("settings-row:技能管理", "设置").performClick() }
+    private fun skillSwitch(tag: String, on: Boolean): SemanticsNodeInteraction {
+        ui.waitUntil(timeoutMillis = 5_000) {
+            ui.onAllNodesWithTag(tag).fetchSemanticsNodes().singleOrNull()?.config?.let { config ->
+                config.getOrNull(SemanticsProperties.Disabled) == null &&
+                    config.getOrNull(SemanticsProperties.ToggleableState) == (if (on) ToggleableState.On else ToggleableState.Off)
+            } == true
+        }
+        return node(tag).assertIsEnabled().also { if (on) it.assertIsOn() else it.assertIsOff() }
+    }
     fun testSkillsEntryPersistsIndividualAndGlobalSwitchesAndClosesWithActivity() {
         val name = "integration-demo"
         SkillStore(fixture.application).install(listOf(SkillBundle(mapOf("SKILL.md" to "---\nname: $name\ndescription: UI fixture\n---\nFixture instructions".toByteArray()))))
+        val id = "user:$name"
         openSkills()
-        awaitControl("skill loaded") { views(skillDialog().window!!.decorView).filterIsInstance<Button>().any { it.text.toString() == "关闭 $name" } }
-        mainThread { views(skillDialog().window!!.decorView).filterIsInstance<Button>().single { it.text.toString() == "关闭 $name" }.performClick() }
-        awaitControl("individual switch") { views(skillDialog().window!!.decorView).filterIsInstance<Button>().any { it.text.toString() == "开启 $name" } }
+        skillSwitch("skills-global", on = true)
+        reveal("skill-row:$id", "技能").assertIsDisplayed()
+        skillSwitch("skill-switch:$id", on = true).performClick()
+        skillSwitch("skill-switch:$id", on = false)
         assertFalse(SkillStore(fixture.application).list().single().enabled)
-        mainThread { views(skillDialog().window!!.decorView).filterIsInstance<Button>().single { it.text.toString() == "技能总开关：已开启（点击关闭）" }.performClick() }
-        awaitControl("global switch") { views(skillDialog().window!!.decorView).filterIsInstance<Button>().any { it.text.toString() == "技能总开关：已关闭（点击开启）" } }
+        reveal("skills-global", "技能")
+        skillSwitch("skills-global", on = true).performClick()
+        skillSwitch("skills-global", on = false)
         assertFalse(SkillToolRegistry(fixture.application).enabled)
-        lateinit var old: AlertDialog
-        mainThread { old = skillDialog() }; activity = recreateActivity(activity); assertFalse(old.isShowing)
+        activity = recreateActivity(activity)
+        node("page:技能").assertDoesNotExist(); node("skills-global").assertDoesNotExist()
+        node("chat-draft").assertExists()
         openSkills()
-        awaitControl("reopened switches") {
-            val labels = views(skillDialog().window!!.decorView).filterIsInstance<Button>().map { it.text.toString() }
-            "开启 $name" in labels && "技能总开关：已关闭（点击开启）" in labels
-        }
+        skillSwitch("skills-global", on = false)
+        reveal("skill-row:$id", "技能").assertIsDisplayed()
+        skillSwitch("skill-switch:$id", on = false)
         assertTrue(SkillToolRegistry(fixture.application).snapshot().skills.isEmpty())
     }
     fun testDamagedSkillListStillAllowsGlobalOffAndDefaultNextCaptureDoesNotReadIt() {
         val blocked = File(directory, "agent-builtin-skills-v1/installed")
         check(blocked.parentFile!!.mkdirs()); blocked.writeText("not a directory"); openSkills()
-        awaitControl("global available") { views(skillDialog().window!!.decorView).filterIsInstance<Button>().any { it.text.toString() == "技能总开关：已开启（点击关闭）" } }
-        mainThread {
-            val nodes = views(skillDialog().window!!.decorView)
-            assertTrue(nodes.filterIsInstance<android.widget.TextView>().any { it.text.toString().startsWith("技能列表暂不可用") })
-            nodes.filterIsInstance<Button>().single { it.text.toString() == "技能总开关：已开启（点击关闭）" }.performClick()
-        }
-        awaitControl("off despite directory") { views(skillDialog().window!!.decorView).filterIsInstance<Button>().any { it.text.toString() == "技能总开关：已关闭（点击开启）" } }
+        skillSwitch("skills-global", on = true)
+        ui.onNodeWithText("技能列表暂不可用", substring = true).assertExists()
+        node("skills-global").performClick()
+        skillSwitch("skills-global", on = false)
         val reopened = SkillToolRegistry(fixture.application); assertFalse(reopened.enabled)
         val owner = app.daiyu.android.domain.tools.TaskAuthorization("disabled-skill-test", "next")
         val scope = reopened.captureForRun(app.daiyu.android.domain.tools.SessionCapabilities(owner.sessionId, setOf(app.daiyu.android.skills.SkillRunSession.READ)), owner)

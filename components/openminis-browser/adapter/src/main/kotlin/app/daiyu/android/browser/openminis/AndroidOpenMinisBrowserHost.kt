@@ -65,6 +65,8 @@ class AndroidOpenMinisBrowserHost(
     override fun rebind(allocation: BrowserTabLease, lease: BrowserTabLease) = delegate.rebind(allocation, lease)
     fun retryCleanup(lease: BrowserTabLease) = delegate.retryCleanup(lease)
     fun cleanupFailure(lease: BrowserTabLease): Exception? = delegate.cleanupFailure(lease)
+    fun closeWithResult() = delegate.closeWithResult()
+    fun closeStatus() = delegate.closeStatus()
     /** Trusted UI-side cookie composition lookup; delegate fences the complete execution lease. */
     fun currentUrl(lease: BrowserTabLease): String? {
         check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
@@ -85,7 +87,7 @@ class AndroidOpenMinisBrowserHost(
 }
 
 private class AndroidBlankResource(
-    context: Context,
+    private val context: Context,
     private val sessions: BrowserSessionRegistry,
     private val ui: UiDispatcher,
     private var lease: BrowserTabLease,
@@ -111,7 +113,8 @@ private class AndroidBlankResource(
         sessions.publish(lease) { action() }
     }
 
-    init {
+    override fun initialize() {
+        // This phase runs only after LeaseBrowserHost owns the destroyable allocation.
         // Offscreen resource has no Activity/window layout pass. Give the real WebView a bounded
         // mobile viewport so JS metrics and upstream bitmap capture have non-zero dimensions.
         val density = context.resources.displayMetrics.density

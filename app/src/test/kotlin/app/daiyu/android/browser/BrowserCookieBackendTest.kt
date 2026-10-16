@@ -258,4 +258,83 @@ class BrowserCookieBackendTest {
         }
     }
 
+    @Test fun closeReceiptWaitsForQueuedStartEvenWhenResultIsAlreadyCancelled() {
+        Fixture().use { f ->
+            val result = f.call()
+            result.cancel(false)
+            f.backend.closeWithResult()
+            // Run deletion before the posted start: its Future is done, its frame is not.
+            f.io.drain()
+            assertFalse(f.backend.closeStatus().drained)
+            assertEquals(0L, f.countFiles())
+            f.pump()
+            assertTrue(f.backend.closeStatus().successful)
+            assertTrue(f.store.reads.isEmpty())
+        }
+    }
+
+    @Test fun closeReceiptWaitsForPrivateFileDeletionAndForNativeCookieCallback() {
+        Fixture().use { f ->
+            val offload = f.call()
+            f.pump()
+            assertNotNull(offload.join().filePath)
+            assertEquals(1L, f.countFiles())
+            assertFalse(f.backend.closeWithResult().drained)
+            assertEquals(1L, f.countFiles())
+            f.io.drain()
+            assertTrue(f.backend.closeStatus().successful)
+            assertEquals(0L, f.countFiles())
+        }
+        Fixture().use { f ->
+            val pending = f.call("set_cookies", mapOf("cookies" to """[{"name":"sid","value":"secret"}]"""))
+            f.ui.drain()
+            f.backend.closeWithResult(); f.io.drain()
+            assertTrue(pending.isDone)
+            assertFalse(f.backend.closeStatus().drained)
+            f.store.reply(true); f.pump()
+            assertTrue(f.backend.closeStatus().successful)
+            assertEquals(1, f.store.writes.size) // no replay after cancellation
+        }
+    }
+
+    @Test fun closeFromInsideWriterCannotDrainBeforeWriterAndItsLatePublishReturn() {
+        Fixture().use { f ->
+            var inspected = false
+            f.duringMapping = {
+                inspected = true
+                assertEquals(1L, f.countFiles())
+                assertFalse(f.backend.closeWithResult().drained)
+            }
+            val result = f.call()
+            f.pump()
+            assertTrue(inspected)
+            failed(result)
+            assertEquals(0L, f.countFiles())
+            assertTrue(f.backend.closeStatus().successful)
+        }
+    }
+
+    @Test fun failedDeletionRetainsReceiptUntilExplicitCleanupRetryWithoutCookieReplay() {
+        Fixture().use { f ->
+            val result = f.call()
+            f.pump()
+            val file = java.nio.file.Paths.get(result.join().filePath!!)
+            Files.delete(file)
+            Files.createDirectory(file)
+            val obstruction = Files.write(file.resolve("obstruction"), byteArrayOf(1))
+            try {
+                f.backend.closeWithResult(); f.io.drain()
+                val failed = f.backend.closeStatus()
+                assertFalse(failed.drained)
+                assertEquals(setOf("COOKIE_FILE_DELETE"), failed.failures)
+                Files.delete(obstruction); Files.delete(file)
+                f.backend.closeWithResult(); f.io.drain()
+                assertTrue(f.backend.closeStatus().drained)
+                assertFalse(f.backend.closeStatus().successful) // failure evidence is retained
+                assertEquals(1, f.store.reads.size)
+            } finally {
+                Files.deleteIfExists(obstruction); Files.deleteIfExists(file)
+            }
+        }
+    }
 }

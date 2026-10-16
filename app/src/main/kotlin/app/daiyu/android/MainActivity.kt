@@ -135,6 +135,8 @@ class MainActivity : ComponentActivity() {
         }
     private var paneState by mutableStateOf(ConversationPaneUiState(emptyList(), null, ""))
     private var chatState by mutableStateOf(ChatScreenState("代鱼"))
+    private var interactiveModeEnabled by mutableStateOf(false)
+    private var interactiveModeObservation: AutoCloseable? = null
     private var selected: Conversation? = null
     private var draft by mutableStateOf("")
     private var selectionStart = 0
@@ -218,6 +220,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        interactiveModeObservation = controller.interactiveMode.observe { interactiveModeEnabled = it }
         appearance = loadAppearance()
         activityCallbacksAllowed = true
         pendingBackupRequest = state?.getInt("pending-backup-request", 0)?.takeIf { it != 0 }
@@ -400,7 +403,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
                             Column(Modifier.fillMaxSize().imePadding()) {
-                                DaiyuChatScreen(chatState, chatActions(), modifier = Modifier.weight(1f), turnExtras = { id ->
+                                DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled), chatActions(), modifier = Modifier.weight(1f), turnExtras = { id ->
                                     QuestionExtras(id)
                                     VoiceExtras(id)
                                 }, imageLoader = imageHost.historyLoader)
@@ -465,6 +468,7 @@ class MainActivity : ComponentActivity() {
         }
         fun pendingFeature() { Toast.makeText(this, "该功能界面已保留，后端尚未接入", Toast.LENGTH_SHORT).show() }
         return ChatScreenActions(
+        onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
         onVoice = { pendingFeature() }, onContextClick = { pendingFeature() },
         onRegenerate = { pendingFeature() }, onSpeak = { id ->
             if (activityUsable() && controller.ready && !controller.dataBusy &&
@@ -833,6 +837,8 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        interactiveModeObservation?.close()
+        interactiveModeObservation = null
         cancelShizukuEditor()
         imageHost.close()
         speechHost.close()

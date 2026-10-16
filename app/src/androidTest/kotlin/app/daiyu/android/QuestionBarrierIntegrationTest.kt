@@ -90,9 +90,10 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         }
         fail("$description ${diagnostic()}")
     }
-    private fun fresh(seed:(Fixture)->Unit={}):Fixture {
+    private fun fresh(interactiveEnabled:Boolean=false,seed:(Fixture)->Unit={}):Fixture {
         val f=Fixture(instrumentation.targetContext);fixtures.add(f)
         f.settings.save(ModelSettings("https://example.invalid","question-fixture","synthetic-question-key",false))
+        if (interactiveEnabled) check(f.app.getSharedPreferences("conversation-ui",0).edit().putBoolean("interactive_mode",true).commit())
         seed(f)
         f.c=ChatController(f.app,f.db,f.settings,f.app.getSharedPreferences("conversation-ui",0),{f.probe})
         await(f,"recovery ready") {f.c.ready};assertNull(f.c.problem);return f
@@ -181,7 +182,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         } finally {instrumentation.removeMonitor(monitor)}
     }
     fun testPublicQuestionReleasesWorkerAndDurableAnswerContinuesExactlyOnce() {
-        val f=fresh();launch(f);val owner=send(f);val id=waiting(f,owner)
+        val f=fresh(interactiveEnabled=true);launch(f);val owner=send(f);val id=waiting(f,owner)
         node("question-option:0").performClick().assertIsSelected()
         val originalCardId=node("question-card").fetchSemanticsNode().id
         main {MainActivity::class.java.getDeclaredMethod("refresh").apply {isAccessible=true}.invoke(checkNotNull(activity))}
@@ -189,6 +190,8 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         assertEquals("same question refresh retains the Compose card",originalCardId,node("question-card").fetchSemanticsNode().id)
         node("question-option:0").assertIsSelected()
         recreate();waiting(f,owner)
+        main { f.c.interactiveMode.setEnabled(false) }
+        assertFalse(f.c.interactiveMode.snapshot().enabled)
         val durable=AtomicInteger()
         f.probe.beforeContinuation={outputs ->
             assertEquals(QuestionAnswer.Selected("two"),row(f,id).answer)
@@ -207,7 +210,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         val saved=checkpoint(f,owner);assertEquals(ExecutionPhase.TERMINAL,saved.phase);assertNull(saved.pending);assertEquals(RunStatus.COMPLETED,saved.message.status)
     }
     fun testStopFencesPendingCardAndNeverContinuesModel() {
-        val f=fresh();launch(f);val owner=send(f);val id=waiting(f,owner)
+        val f=fresh(interactiveEnabled=true);launch(f);val owner=send(f);val id=waiting(f,owner)
         node("question-option:1").performClick().assertIsSelected()
         val old=submitAction()
         main {assertTrue(f.c.stop(owner));old();old()}
@@ -217,7 +220,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         val saved=checkpoint(f,owner);assertEquals(RunStatus.STOPPED,saved.message.status);assertNull(saved.pending)
     }
     fun testStopAfterAnswerQueuedBeforeResumeDrainsOriginalContinuation() {
-        val f=fresh();launch(f);val owner=send(f);val id=waiting(f,owner)
+        val f=fresh(interactiveEnabled=true);launch(f);val owner=send(f);val id=waiting(f,owner)
         val worker=ChatController::class.java.getDeclaredField("executor").apply {isAccessible=true}.get(f.c) as Executor
         val entered=CountDownLatch(1);val release=CountDownLatch(1)
         worker.execute {entered.countDown();check(release.await(10,TimeUnit.SECONDS))}
@@ -238,7 +241,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         assertEquals(QuestionAnswer.Selected("two"),row(f,id).answer)
     }
     fun testFailedStopRetainsResourcesAndExplicitRetryCompletesCleanup() {
-        val f=fresh();launch(f);val owner=send(f);val id=waiting(f,owner)
+        val f=fresh(interactiveEnabled=true);launch(f);val owner=send(f);val id=waiting(f,owner)
         PrivateQuestionStore(f.app).use {store ->
             store.writableDatabase.execSQL("CREATE TRIGGER reject_question_stop BEFORE UPDATE OF interrupted ON questions WHEN NEW.interrupted=1 BEGIN SELECT RAISE(ABORT,'injected'); END")
             try {
@@ -256,7 +259,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         assertEquals(1,f.probe.nexts.get());assertEquals(1,f.probe.opens.get())
     }
     fun testCloseFromMainDrainsPendingBeforeReleasingStore() {
-        val f=fresh();launch(f);val owner=send(f);val id=waiting(f,owner)
+        val f=fresh(interactiveEnabled=true);launch(f);val owner=send(f);val id=waiting(f,owner)
         main {f.c.close();assertFalse(f.c.ready);assertNull(f.c.active)}
         f.c.close()
         val saved=checkpoint(f,owner)

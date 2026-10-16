@@ -33,7 +33,8 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun ChatTopBar(title: String, balanceText: String?, actions: ChatScreenActions, modifier: Modifier = Modifier, assistantLabel: String = "助手") {
+internal fun ChatTopBar(title: String, balanceText: String?, actions: ChatScreenActions, modifier: Modifier = Modifier, assistantLabel: String = "助手",
+    interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true) {
     var expanded by remember { mutableStateOf(false) }
     Row(modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         ChatIconButton(DaiyuIcons.Menu, "打开侧边栏", actions.onOpenSidebar)
@@ -51,6 +52,8 @@ internal fun ChatTopBar(title: String, balanceText: String?, actions: ChatScreen
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary, style = MiuixTheme.textStyles.footnote1,
                 maxLines = 1)
         }
+        InteractiveModeToggle(enabled = interactiveModeChangeEnabled, checked = interactiveModeEnabled,
+            onCheckedChange = actions.onInteractiveModeChange)
         ChatIconButton(DaiyuIcons.NewChat, "新建会话", { actions.onMenuAction(ChatMenuAction.NEW_CHAT) }, tint = daiyuIconColor(DaiyuIcons.NewChat))
         Box {
             ChatIconButton(DaiyuIcons.More, "更多", { actions.onMore(); expanded = true })

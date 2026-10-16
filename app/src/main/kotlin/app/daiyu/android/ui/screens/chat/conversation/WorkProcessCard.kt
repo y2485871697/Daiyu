@@ -2,7 +2,6 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -30,6 +29,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.icons.DaiyuIcons
+import app.daiyu.android.ui.icons.daiyuIconColor
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -38,8 +38,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, onRetryStep: (String) -> Unit,
     var expanded by rememberSaveable { mutableStateOf(false) }
     val colors = MiuixTheme.colorScheme
     val stepCount = work.segments.sumOf { it.steps.size }
-    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainer)
-        .border(1.dp, colors.outline, RoundedCornerShape(16.dp))) {
+    Column(modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(colors.surfaceVariant)) {
         Row(Modifier.fillMaxWidth().clickable(role = Role.Button) { expanded = !expanded }
             .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -71,7 +70,7 @@ internal fun WorkStepRow(step: WorkStepUi, onRetry: (String) -> Unit) {
     val colors = MiuixTheme.colorScheme
     val tint = when (step.state) {
         WorkStepState.FAILED -> colors.error
-        WorkStepState.OK -> colors.primary
+        WorkStepState.OK -> daiyuIconColor(DaiyuIcons.Chart)
         WorkStepState.PENDING -> colors.onSurfaceVariantSummary
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -88,7 +87,7 @@ internal fun WorkStepRow(step: WorkStepUi, onRetry: (String) -> Unit) {
             Box(Modifier.padding(top = 4.dp).width(1.dp).heightIn(min = 24.dp).background(colors.onSurfaceVariantSummary.copy(alpha = 0.2f)))
         }
         Column(Modifier.weight(1f)) {
-            Text(step.name, color = tint, style = MiuixTheme.textStyles.body2)
+            Text(step.name, color = colors.onSurface, style = MiuixTheme.textStyles.body2)
             if (step.detail.isNotBlank()) Text(step.detail, color = colors.onSurfaceVariantSummary,
                 style = MiuixTheme.textStyles.footnote1, maxLines = 8, overflow = TextOverflow.Ellipsis)
         }

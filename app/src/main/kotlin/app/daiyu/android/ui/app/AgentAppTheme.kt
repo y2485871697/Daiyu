@@ -2,6 +2,9 @@ package app.daiyu.android.ui.app
 
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.dp
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -158,6 +161,13 @@ fun AgentAppTheme(
             // Retained Material components and Markdown share the native Miuix palette.
             MaterialTheme(
                 colorScheme = materialColors,
+                shapes = Shapes(
+                    extraSmall = RoundedCornerShape(4.dp),
+                    small = RoundedCornerShape(8.dp),
+                    medium = RoundedCornerShape(12.dp),
+                    large = RoundedCornerShape(16.dp),
+                    extraLarge = RoundedCornerShape(20.dp),
+                ),
             ) {
                 content()
             }

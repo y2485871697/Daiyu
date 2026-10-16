@@ -150,12 +150,12 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions) {
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
         Box {
             Text(turn.text, Modifier.widthIn(max = 320.dp)
-                .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp, bottomEnd = 6.dp, bottomStart = 20.dp))
-                .background(MiuixTheme.colorScheme.surfaceContainerHigh)
+                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 6.dp, bottomStart = 16.dp))
+                .background(MiuixTheme.colorScheme.primaryContainer)
                 .combinedClickable(onClick = {}, onLongClick = { showMenu = true })
                 .padding(horizontal = 16.dp, vertical = 12.dp),
                 color = MiuixTheme.colorScheme.onSurface,
-                style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp, lineHeight = 23.sp))
+                style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 25.sp))
             UserTurnMenu(showMenu, { showMenu = false }, turn.id, actions)
         }
         MessageTimestamp(turn.timestamp, Modifier.padding(top = 6.dp, end = 4.dp))
@@ -170,7 +170,7 @@ internal fun AssistantTurn(turn: ChatTurnUi.Assistant, actions: ChatScreenAction
             val answer = remember(turn.finalText) { MarkdownText.render(turn.finalText).toString() }
             SelectionContainer {
                 Text(answer, color = MiuixTheme.colorScheme.onSurface,
-                    style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp, lineHeight = 23.sp))
+                    style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 25.sp))
             }
         } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {
             Text("正在思考…", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, style = MiuixTheme.textStyles.body2)

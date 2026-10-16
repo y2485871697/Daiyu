@@ -1,6 +1,5 @@
 package app.daiyu.android.ui.components
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -21,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.delegation.ConversationSubAgentPreferences
 import app.daiyu.android.delegation.SubAgentPreset
 import app.daiyu.android.ui.haptics.TouchHaptics
+import app.daiyu.android.ui.icons.daiyuIconColor
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.collect
 
@@ -76,16 +76,15 @@ internal fun SubAgentPresetDirectoryStatus(directory: SubAgentPresetDirectory) {
 internal fun SubAgentPresetCard(preset: SubAgentPreset, enabled: Boolean, actionLabel: String,
     onClick: () -> Unit, selected: Boolean = false, trailing: @Composable (() -> Unit)? = null) {
     val view = LocalView.current
-    Surface(shape = RoundedCornerShape(24.dp),
+    Surface(shape = RoundedCornerShape(16.dp),
         color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
-        border = BorderStroke(1.dp, if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.outline),
         contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f).heightIn(min = 96.dp).semantics { contentDescription = actionLabel }
                 .clickable(enabled = enabled, role = Role.Button, interactionSource = remember { MutableInteractionSource() }, indication = null) {
                     TouchHaptics.click(view); onClick()
                 }.padding(20.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                Icon(Icons.Rounded.AccountTree, null, tint = MaterialTheme.colorScheme.primary)
+                Icon(Icons.Rounded.AccountTree, null, tint = daiyuIconColor(Icons.Rounded.AccountTree))
                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(preset.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                     Text("${preset.config.profiles.size} 个子代理 · ${if (preset.config.enabled) "自动委派已开启" else "自动委派已关闭"}", style = MaterialTheme.typography.bodySmall)

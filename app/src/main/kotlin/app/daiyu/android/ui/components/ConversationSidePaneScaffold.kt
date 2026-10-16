@@ -100,6 +100,7 @@ import app.daiyu.android.ui.model.ConversationFolderUi
 import app.daiyu.android.ui.model.searchResults
 import app.daiyu.android.ui.model.ConversationPaneUiState
 import app.daiyu.android.ui.haptics.TouchHaptics
+import app.daiyu.android.ui.icons.daiyuIconColor
 import app.daiyu.android.ui.model.ConversationSummaryUi
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
@@ -120,14 +121,14 @@ private val DrawerMenuItemPadding = PaddingValues(horizontal = 12.dp)
 private object DrawerMetrics {
     val PaneMaxWidth = 320.dp
     val PaneWidthFraction = 0.78f
-    val DrawerCornerRadius = 28.dp
+    val DrawerCornerRadius = 20.dp
     const val OpenDurationMs = 220
     const val CloseDurationMs = 200
     val PaneHorizontalPadding = 16.dp
     val TopInset = 8.dp
     val AfterSearch = 12.dp
     val SearchIconSize = 18.dp
-    val SearchCornerRadius = 14.dp
+    val SearchCornerRadius = 12.dp
     val SearchVerticalPadding = 10.dp
     val ChipGap = 8.dp
     val AfterChips = 10.dp
@@ -139,7 +140,7 @@ private object DrawerMetrics {
     val SectionBottomPadding = 6.dp
     val RowMinHeight = 44.dp
     val RowGap = 2.dp
-    val RowCornerRadius = 18.dp
+    val RowCornerRadius = 12.dp
     val RowHorizontalPadding = 14.dp
     val RowVerticalPadding = 10.dp
     val ActiveDotSize = 6.dp
@@ -499,8 +500,7 @@ private fun PaneSearchRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
-            .background(MiuixTheme.colorScheme.surfaceContainer)
-            .border(1.dp, MiuixTheme.colorScheme.outline, RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
+            .background(MiuixTheme.colorScheme.surfaceVariant)
             .clickable(
                 enabled = searchFocusEnabled && !searchActive,
                 interactionSource = remember { MutableInteractionSource() },
@@ -577,8 +577,7 @@ private fun DrawerActionRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
-            .background(MiuixTheme.colorScheme.surfaceContainer)
-            .border(1.dp, MiuixTheme.colorScheme.outline, RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
+            .background(MiuixTheme.colorScheme.surfaceVariant)
             .pointerInput(onClick) {
                 detectTapGestures(onTap = {
                     TouchHaptics.click(view)
@@ -593,7 +592,7 @@ private fun DrawerActionRow(
             imageVector = icon,
             contentDescription = null,
             modifier = Modifier.size(18.dp),
-            tint = MiuixTheme.colorScheme.onSurface,
+            tint = daiyuIconColor(icon),
         )
         Text(
             text = label,
@@ -839,7 +838,7 @@ private fun ConversationSectionHeader(
 ) {
     Text(
         text = group.localizedLabel(),
-        color = MiuixTheme.colorScheme.primary,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
         style = MiuixTheme.textStyles.footnote1,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier
@@ -1136,7 +1135,7 @@ private fun DrawerCircleButton(
     Box(
         modifier = Modifier
             .clip(CircleShape)
-            .background(MiuixTheme.colorScheme.primaryContainer)
+            .background(MiuixTheme.colorScheme.surfaceVariant)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1151,7 +1150,7 @@ private fun DrawerCircleButton(
             imageVector = icon,
             contentDescription = label,
             modifier = Modifier.size(DrawerMetrics.ActionIconSize),
-            tint = MiuixTheme.colorScheme.onPrimaryContainer,
+            tint = daiyuIconColor(icon),
         )
     }
 }

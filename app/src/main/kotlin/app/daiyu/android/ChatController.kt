@@ -48,8 +48,11 @@ import java.util.UUID
 import java.util.concurrent.Executors
 
 class ChatApplication:Application() {
-    private val terminalOwnerDelegate = lazy { app.daiyu.android.terminal.TerminalUiOwner.android(this) }
-    internal val terminalOwner by terminalOwnerDelegate
+    private val terminalProviderDelegate = lazy { app.daiyu.android.terminal.TerminalApplicationProvider(this) }
+    internal val terminalProvider by terminalProviderDelegate
+    internal val terminalOwner get() = checkNotNull(
+        (terminalProvider.state.value as? app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application
+    ) { "terminal_catalog_not_ready" }.terminalOwner
     val shizuku by lazy { app.daiyu.android.shizuku.ShizukuAuthorization(this) }
     lateinit var controller:ChatController
     lateinit var hapticsRuntime: app.daiyu.android.haptics.HapticsRuntime
@@ -63,10 +66,11 @@ class ChatApplication:Application() {
         hapticsRuntime.installForeground(this)
         touchHaptics = app.daiyu.android.ui.haptics.TouchHaptics.install(hapticsRuntime)
         controller = ChatController(this)
+        terminalProvider
     }
     override fun onTerminate() {
         // Android normally kills the process without this callback; useful for hosted runtimes.
-        if (terminalOwnerDelegate.isInitialized()) terminalOwner.close()
+        if (terminalProviderDelegate.isInitialized()) terminalProvider.close()
         touchHaptics?.close(); touchHaptics = null
         hapticsRuntime.close()
         super.onTerminate()

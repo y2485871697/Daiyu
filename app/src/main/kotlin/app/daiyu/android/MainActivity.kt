@@ -42,6 +42,7 @@ import app.daiyu.android.voice.DictationDraftTarget
 import app.daiyu.android.voice.SpeechError
 import app.daiyu.android.voice.SpeechPhase
 import app.daiyu.android.voice.SpeechPlaybackState
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -100,7 +101,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : ComponentActivity() {
     private val controller get() = (application as ChatApplication).controller
-    private val terminalOwner get() = (application as ChatApplication).terminalOwner
+    private val terminalProvider get() = (application as ChatApplication).terminalProvider
+    private var linuxSettingsVisit: Any? = null
+    private var linuxSettingsPageOwner by mutableStateOf<app.daiyu.android.terminal.LinuxSettingsPageOwner?>(null)
     private var terminalPageOwner: Any? = null
     private val browserSettings by lazy { app.daiyu.android.browser.BrowserSettingsStore(applicationContext) }
     private var compressionSettingsPageOwner: app.daiyu.android.context.CompressionSettingsEditor? = null
@@ -175,6 +178,11 @@ class MainActivity : ComponentActivity() {
                 compressionSettingsPageOwner = null
             }
             if (value != "terminal") terminalPageOwner = null
+            if (value != "linux-settings") {
+                linuxSettingsVisit = null
+                linuxSettingsPageOwner?.close()
+                linuxSettingsPageOwner = null
+            }
             if (value != "browser-settings") {
                 browserSettingsPageOwner?.revoke()
                 browserSettingsPageOwner = null
@@ -324,7 +332,7 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "appearance", "haptics", "terminal", "browser-settings", "compression-settings" -> retainedPage = "settings"
+                        "appearance", "haptics", "terminal", "browser-settings", "compression-settings", "linux-settings" -> retainedPage = "settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
                         else -> returnToChat()
@@ -390,17 +398,40 @@ class MainActivity : ComponentActivity() {
                         onReady = { _, commands -> commands.close() }, // No run is owned by this permission page.
                     )
                     "terminal" -> terminalPageOwner?.let { page ->
-                        val owner = terminalOwner
-                        val caller by owner.caller.collectAsStateWithLifecycle()
-                        app.daiyu.android.ui.screens.terminal.TerminalScreen(
-                            host = owner.host, caller = caller,
-                            onOpenAndroid = { openTerminalAndroid(page) },
-                            onOpenLinux = { reference -> openTerminalLinux(page, reference) },
-                            onBack = {
-                                if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
+                        val state by terminalProvider.state.collectAsStateWithLifecycle()
+                        val ready = state as? app.daiyu.android.terminal.TerminalApplicationState.Ready
+                        if (ready == null) TerminalLoadingPage(state, onBack = {
+                            if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
+                                retainedPage = "settings"
+                        }) else {
+                            val owner = ready.application.terminalOwner
+                            val caller by owner.caller.collectAsStateWithLifecycle()
+                            app.daiyu.android.ui.screens.terminal.TerminalScreen(
+                                host = owner.host, caller = caller,
+                                isCurrent = { activityUsable() && retainedPage == "terminal" && terminalPageOwner === page },
+                                onOpenAndroid = { openTerminalAndroid(page) },
+                                onOpenLinux = { reference -> openTerminalLinux(page, reference) },
+                                onBack = {
+                                    if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
+                                        retainedPage = "settings"
+                                },
+                            )
+                        }
+                    }
+                    "linux-settings" -> {
+                        val state by terminalProvider.state.collectAsStateWithLifecycle()
+                        val ready = state as? app.daiyu.android.terminal.TerminalApplicationState.Ready
+                        val page = linuxSettingsPageOwner
+                        val visit = linuxSettingsVisit
+                        if (ready == null || page == null) TerminalLoadingPage(state, onBack = {
+                            if (activityUsable() && retainedPage == "linux-settings" && linuxSettingsVisit === visit)
+                                retainedPage = "settings"
+                        }) else {
+                            LinuxSettingsScreen(ready.application.settings, page, onBack = {
+                                if (activityUsable() && retainedPage == "linux-settings" && linuxSettingsPageOwner === page)
                                     retainedPage = "settings"
-                            },
-                        )
+                            })
+                        }
                     }
                     "compression-settings" -> compressionSettingsPageOwner?.let { page -> key(page) {
                         CompressionSettingsScreen(page, onBack = {
@@ -1022,6 +1053,9 @@ class MainActivity : ComponentActivity() {
     }
     override fun onDestroy() {
         pendingTextSend?.let { controller.cancelTextSend(it.ticket) }
+        linuxSettingsVisit = null
+        linuxSettingsPageOwner?.close()
+        linuxSettingsPageOwner = null
         compressionSettingsPageOwner?.revoke()
         compressionSettingsPageOwner = null
         browserSettingsPageOwner?.revoke()
@@ -1060,13 +1094,46 @@ class MainActivity : ComponentActivity() {
         browserSettingsPageOwner = app.daiyu.android.browser.BrowserSettingsSaveOwner()
         retainedPage = "browser-settings"
     }
+    @Composable private fun TerminalLoadingPage(
+        state: app.daiyu.android.terminal.TerminalApplicationState,
+        onBack: () -> Unit,
+    ) {
+        app.daiyu.android.ui.components.MiuixScaffoldPage(title = "终端", onBack = onBack) {
+            item {
+                app.daiyu.android.ui.screens.settings.SettingsNote(
+                    if (state == app.daiyu.android.terminal.TerminalApplicationState.Unavailable)
+                        "本地 Linux 配置验证失败；未创建替代终端，请核实配置后重新启动应用。"
+                    else "正在工作线程验证本地 Linux 配置…",
+                    error = state == app.daiyu.android.terminal.TerminalApplicationState.Unavailable)
+            }
+        }
+    }
+    private fun openLinuxSettings() {
+        requireActivityUsable()
+        linuxSettingsPageOwner?.close()
+        val visit = Any()
+        linuxSettingsVisit = visit
+        linuxSettingsPageOwner = null
+        retainedPage = "linux-settings"
+        lifecycleScope.launch {
+            val state = terminalProvider.state.first {
+                it != app.daiyu.android.terminal.TerminalApplicationState.Loading
+            }
+            if (activityUsable() && retainedPage == "linux-settings" && linuxSettingsVisit === visit &&
+                state is app.daiyu.android.terminal.TerminalApplicationState.Ready) {
+                linuxSettingsPageOwner = state.application.settings.enterPage()
+            }
+        }
+    }
     private fun openTerminalAndroid(page: Any) {
         if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
-            terminalOwner.openAndroid(selected?.id)
+            (terminalProvider.state.value as? app.daiyu.android.terminal.TerminalApplicationState.Ready)
+                ?.application?.terminalOwner?.openAndroid(selected?.id)
     }
     private fun openTerminalLinux(page: Any, reference: app.daiyu.android.terminal.LinuxGenerationRef) {
         if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
-            terminalOwner.openLinux(reference, selected?.id)
+            (terminalProvider.state.value as? app.daiyu.android.terminal.TerminalApplicationState.Ready)
+                ?.application?.openLinux(reference, selected?.id)
     }
     private fun openTerminal() {
         requireActivityUsable()
@@ -1085,6 +1152,7 @@ class MainActivity : ComponentActivity() {
             FeatureRoute.FOLDERS -> browseFolders()
             FeatureRoute.SKILLS -> openSkillManagement()
             FeatureRoute.TERMINAL -> openTerminal()
+            FeatureRoute.LINUX_SETTINGS -> openLinuxSettings()
             FeatureRoute.BROWSER_SETTINGS -> openBrowserSettings()
             FeatureRoute.COMPRESSION_SETTINGS -> openCompressionSettings()
             // Settings entries are navigation, never implicit execution/send/stop operations.

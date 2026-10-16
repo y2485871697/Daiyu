@@ -60,13 +60,20 @@ target_spec=$(python3 - <<'PYCOUNT'
 from pathlib import Path
 import re
 classes = {}
-for path in sorted(Path("app/src/androidTest").rglob("*.kt")):
+for path in sorted(Path("app/src/androidTest").rglob("*")):
+    if path.suffix not in {".kt", ".java"} or not path.is_file():
+        continue
     source = path.read_text()
-    count = len(re.findall(r"^\s*fun test\w+\(", source, re.M))
+    if path.suffix == ".kt":
+        count = len(re.findall(r"^\s*fun test\w+\(", source, re.M))
+        packages = re.findall(r"^package\s+([\w.]+)\s*$", source, re.M)
+        names = re.findall(r"^class\s+(\w+Test)\s*:", source, re.M)
+    else:
+        count = len(re.findall(r"^\s*public\s+void\s+test\w+\s*\(\s*\)", source, re.M))
+        packages = re.findall(r"^package\s+([\w.]+)\s*;\s*$", source, re.M)
+        names = re.findall(r"^public\s+class\s+(\w+Test)\s+extends\b", source, re.M)
     if not count:
         continue
-    packages = re.findall(r"^package\s+([\w.]+)\s*$", source, re.M)
-    names = re.findall(r"^class\s+(\w+Test)\s*:", source, re.M)
     if len(packages) != 1 or len(names) != 1:
         raise ValueError(f"Ambiguous instrumentation test declaration: {path}")
     name = packages[0] + "." + names[0]

@@ -9,6 +9,17 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
+import app.daiyu.android.ui.screens.chat.attachments.ImageAttachments
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.ui.Modifier
@@ -43,6 +54,8 @@ import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.delegation.ConversationSubAgentPreferences
 import app.daiyu.android.delegation.ReasoningEffort
 import app.daiyu.android.domain.*
+import app.daiyu.android.domain.appearance.IconNotificationPort
+import app.daiyu.android.domain.appearance.IconSyncResult
 import app.daiyu.android.domain.runtime.ExecutionPhase
 import app.daiyu.android.domain.runtime.SupplementAdmission
 import app.daiyu.android.ui.actions.ConversationExportSelection
@@ -55,6 +68,10 @@ import app.daiyu.android.storage.EditingSettings
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.ui.FeatureRoute
 import app.daiyu.android.ui.RetainedConversationData
+import app.daiyu.android.ui.ShizukuApprovalHost
+import app.daiyu.android.ui.screens.shizuku.ShizukuScreen
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import app.daiyu.android.ui.SubAgentSettingsScreen
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.app.DaiyuPalette
@@ -91,12 +108,29 @@ class MainActivity : ComponentActivity() {
     private val speechHost by lazy {
         VoiceHost(lifecycleScope) { AndroidVoiceHostPlayer(AndroidSpeechPlayer(applicationContext)) }
     }
+    private val imageHost by lazy { ImageChatHost.obtain(controller, { if (activityUsable()) publishChat() },
+        { if (activityUsable()) toast(it) }, ::settleImageReceipt) }
+    private var imagePanelVisible by mutableStateOf(false)
+    // A mount is an editor capability, never saved across Activity recreation or A -> A entry.
+    private class ShizukuEditor(val conversation: Conversation?, val generation: Long,
+        val revision: Long, val text: String) {
+        var preview: ControllerShizukuPreparation? = null
+    }
+    private var shizukuEditor by mutableStateOf<ShizukuEditor?>(null)
+    private var shizukuInFlight by mutableStateOf<ControllerShizukuPreparation?>(null)
+    private val shizukuWritesBlocked: Boolean get() = shizukuInFlight != null ||
+        controller.shizukuPreparation()?.isSubmitted() == true
+    private val imagePicker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+        imageHost.picked(uris)
+    }
     private var sidebarVisible by mutableStateOf(false)
     private var retainedPageState by mutableStateOf("chat")
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
+            if (value != "chat") cancelShizukuEditor()
             speechHost.setVisible(value == "chat" && !sidebarVisible)
+            imageHost.setVisible(value == "chat" && !sidebarVisible, selected?.id?.value)
             retainedPageState = value
         }
     private var paneState by mutableStateOf(ConversationPaneUiState(emptyList(), null, ""))
@@ -116,6 +150,7 @@ class MainActivity : ComponentActivity() {
     private var questionRows by mutableStateOf<Map<String, QuestionRowUi>>(emptyMap())
     private var dataRevision = -1L
     private var scrollSerial = 0L
+    private var historyRequestSerial = 0L
     private var controlOwner: Message? = null
     private var controlTouchOwner: Message? = null
     private var controlTouchActive = false
@@ -170,6 +205,13 @@ class MainActivity : ComponentActivity() {
     private var collaborationVisible by mutableStateOf(false)
     private var thinkingPicker by mutableStateOf(false)
     private var appearance by mutableStateOf(AppearanceSettings())
+    // There are no application-owned notifications to refresh in the current host.
+    private val iconNotifications = IconNotificationPort { }
+
+    private fun reportAutomaticIconSync(result: Result<IconSyncResult>) {
+        val failure = app.daiyu.android.appearance.iconSyncFailureMessage(result)
+        if (failure != null && activityUsable()) toast("图标同步未完成：$failure")
+    }
 
     private fun activityUsable() = activityCallbacksAllowed && !isFinishing && !isDestroyed
     private fun requireActivityUsable() { check(activityUsable()) { "页面已关闭；未执行操作" } }
@@ -189,6 +231,7 @@ class MainActivity : ComponentActivity() {
         else if (taskRecordsConversationId != null) retainedPage = "child-tasks"
         setContent {
             AgentAppTheme(appearance, applyInterfaceScale = true, onResolvedDarkModeChange = ::updateSystemBars) {
+                val iconCoordinator = rememberIconAppearanceCoordinator(iconNotifications, ::reportAutomaticIconSync)
                 val focus = LocalFocusManager.current
                 val chatPageState = rememberSaveableStateHolder()
                 val assistantProfiles by assistantStore.assistants.collectAsState()
@@ -200,6 +243,7 @@ class MainActivity : ComponentActivity() {
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
                         "appearance" -> retainedPage = "settings"
+                        "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
                         else -> returnToChat()
                     }
@@ -258,6 +302,11 @@ class MainActivity : ComponentActivity() {
                             onStop = { record -> controller.stopChildTask(record) },
                             onBack = { returnToChat() })
                     }
+                    "shizuku-settings" -> ShizukuScreen(
+                        authorization = (application as ChatApplication).shizuku, session = null,
+                        onBack = { returnToChat() },
+                        onReady = { _, commands -> commands.close() }, // No run is owned by this permission page.
+                    )
                     "skills" -> SkillManagementScreen(
                         managementFactory = { controller.skillManagement() },
                         onBack = { returnToChat() },
@@ -295,6 +344,11 @@ class MainActivity : ComponentActivity() {
                         state = appearance,
                         onChange = { saveAppearance(it) },
                         onBack = { retainedPage = "settings" },
+                        onOpenIcon = { if (activityUsable() && retainedPage == "appearance") retainedPage = "app-icon" },
+                    )
+                    "app-icon" -> IconAppearanceScreen(
+                        coordinator = iconCoordinator,
+                        onBack = { if (activityUsable() && retainedPage == "app-icon") retainedPage = "appearance" },
                     )
                     "subagents" -> SubAgentSettingsScreen(onBack = { returnToChat() },
                         repositoryFactory = { subAgentRepository }, isCurrentRoute = retainedPage == "subagents")
@@ -345,10 +399,14 @@ class MainActivity : ComponentActivity() {
                         onOpenPermissions = { dismissSidebar(); retainedPage = "settings" },
                     ) {
                         chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
-                            DaiyuChatScreen(chatState, chatActions(), turnExtras = { id ->
-                                QuestionExtras(id)
-                                VoiceExtras(id)
-                            })
+                            Column(Modifier.fillMaxSize().imePadding()) {
+                                DaiyuChatScreen(chatState, chatActions(), modifier = Modifier.weight(1f), turnExtras = { id ->
+                                    QuestionExtras(id)
+                                    VoiceExtras(id)
+                                }, imageLoader = imageHost.historyLoader)
+                                if (imagePanelVisible) ImageComposerPanel()
+                                ShizukuComposerEntry()
+                            }
                         }
                     }
                 }
@@ -423,8 +481,11 @@ class MainActivity : ComponentActivity() {
         onSelectionChange = { start, end ->
             if (editorMatches()) { selectionStart = start; selectionEnd = end; publishChat() }
         },
-        onSend = { text -> if (editorMatches() && text == draft) guard { sendDraft(text) } },
-        onSupplement = { text -> if (editorMatches() && text == draft) guard {
+        onSend = { text -> if (editorMatches() && text == draft && !shizukuWritesBlocked) guard {
+            cancelShizukuEditor()
+            if (imageHost.hasAttachments) sendImageDraft(text) else if (!imageHost.busy) sendDraft(text)
+        } },
+        onSupplement = { text -> if (editorMatches() && text == draft && !imageHost.sending && !shizukuWritesBlocked) guard {
             gestureOwner()?.let { submitPausedText(it, text) }
         } },
         onPrimaryTap = { guard {
@@ -444,6 +505,9 @@ class MainActivity : ComponentActivity() {
         onModelClick = { guard { openChatModels() } }, onReasoningClick = { thinkingPicker = true },
         onAssistantClick = { assistantPicker = true }, onCopy = { id -> copyMessage(id) },
         onMenuAction = { action -> guard { when (action) {
+            ChatMenuAction.ATTACH_IMAGE -> {
+                if (editorMatches()) { imagePanelVisible = true; pickImages() }
+            }
             ChatMenuAction.NEW_CHAT -> select(null)
             ChatMenuAction.RENAME -> selected?.let { conversation ->
                 editConversation(conversation.id.value, false)
@@ -460,6 +524,209 @@ class MainActivity : ComponentActivity() {
             else -> pendingFeature()
         } } },
         )
+    }
+
+    @Composable private fun ShizukuComposerEntry() {
+        val images by imageHost.session.attachments.state.collectAsStateWithLifecycle()
+        val hasImages = images.items.isNotEmpty()
+        val generation = editorGeneration
+        val revision = draftRevision
+        val available = activityUsable() && retainedPage == "chat" && !sidebarVisible && selectionReady &&
+            controller.ready && !controller.dataBusy && controller.active == null &&
+            !imageHost.busy && !shizukuWritesBlocked && !hasImages && draft.isNotBlank()
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+            Row(Modifier.fillMaxWidth()) {
+                top.yukonga.miuix.kmp.basic.TextButton(
+                    text = if (hasImages) "Shizuku 仅限无附件文本" else "Shizuku 文本审批",
+                    enabled = available && shizukuEditor == null,
+                    modifier = Modifier.weight(1f).testTag("shizuku-text-entry").heightIn(min = 48.dp),
+                    onClick = {
+                        if (available && generation == editorGeneration && revision == draftRevision &&
+                            !imageHost.hasAttachments && controller.shizukuPreparation() == null) {
+                            shizukuEditor = ShizukuEditor(selected, generation, revision, draft)
+                        }
+                    })
+                top.yukonga.miuix.kmp.basic.TextButton(text = "Shizuku 权限设置",
+                    modifier = Modifier.weight(1f).testTag("shizuku-settings-entry").heightIn(min = 48.dp),
+                    onClick = { if (activityUsable()) retainedPage = "shizuku-settings" })
+            }
+            val editor = shizukuEditor
+            if (editor != null && !hasImages) key(editor) {
+                Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())
+                    .testTag("shizuku-text-panel")) {
+                    ShizukuApprovalHost(controller, editor.conversation, editor.text,
+                        onAccepted = { preview, saved -> acceptShizuku(editor, preview, saved) })
+                    top.yukonga.miuix.kmp.basic.TextButton(text = "取消文本审批",
+                        modifier = Modifier.testTag("shizuku-text-cancel"), onClick = ::cancelShizukuEditor)
+                }
+            }
+        }
+    }
+
+    private fun trackShizukuPreparation() {
+        val pending = controller.shizukuPreparation()
+        shizukuEditor?.let { editor ->
+            if (pending != null && pending.conversation?.id == editor.conversation?.id && pending.text == editor.text) {
+                editor.preview = pending
+            }
+        }
+        if (pending?.isSubmitted() == true) shizukuInFlight = pending
+        val settling = shizukuInFlight
+        if (settling != null && pending !== settling) {
+            // Controller posts its receipt immediately after the change notification. Keep all
+            // editors frozen through that receipt, including a different selected conversation.
+            window.decorView.post {
+                if (shizukuInFlight === settling && controller.shizukuPreparation() !== settling) {
+                    // A cancelled prepare may have won the DB gate before this Activity (or
+                    // its replacement) left. No writes were admitted while the gate was held:
+                    // settle from the authoritative current-owner draft before enabling edits.
+                    if (activityUsable() && selectionReady) {
+                        val persisted = runCatching {
+                            selected?.id?.let { id -> controller.database.conversations().first { it.id == id }.draft }
+                                ?: controller.database.draft()
+                        }.getOrNull() ?: return@post
+                        if (draft != persisted) {
+                            draft = persisted; editorGeneration++; draftRevision++
+                            selectionStart = draft.length; selectionEnd = draft.length
+                        }
+                    }
+                    shizukuInFlight = null
+                    if (activityUsable()) refresh()
+                }
+            }
+        }
+    }
+
+    private fun cancelShizukuEditor() {
+        trackShizukuPreparation()
+        val editor = shizukuEditor
+        shizukuEditor = null
+        controller.shizukuPreparation()?.takeIf {
+            editor != null && it.conversation?.id == editor.conversation?.id && it.text == editor.text
+        }?.let(controller::rejectShizuku) // Includes submitted prepare/connect; never stops another run.
+    }
+
+    private fun acceptShizuku(editor: ShizukuEditor, preview: ControllerShizukuPreparation, saved: Conversation) {
+        if (!activityUsable() || retainedPage != "chat" || sidebarVisible || shizukuEditor !== editor ||
+            editor.preview !== preview || !preview.isSubmitted() || editorGeneration != editor.generation || draftRevision != editor.revision || draft != editor.text ||
+            selected?.id != editor.conversation?.id || preview.conversation?.id != editor.conversation?.id ||
+            preview.text != editor.text || saved.id != preview.conversationId || imageHost.hasAttachments) return
+        shizukuEditor = null
+        selected = saved; editorGeneration++; draftRevision++
+        draft = ""; selectionStart = 0; selectionEnd = 0
+        // Controller already atomically consumed exactly the submitted DB draft. Never write it again.
+        controller.preferences.edit().putString("selected", saved.id.value).apply()
+        publishChat(); loadAcceptedHistory(saved)
+    }
+
+    @Composable private fun ImageComposerPanel() {
+        val session = imageHost.session
+        val images by session.attachments.state.collectAsStateWithLifecycle()
+        val ownerGeneration = editorGeneration
+        val enabled = activityUsable() && retainedPage == "chat" && !sidebarVisible && selectionReady &&
+            controller.ready && !controller.dataBusy && controller.active == null && !imageHost.busy
+        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp)) {
+            ImageAttachments(images, imageHost.actions(::launchImagePicker), imageHost.draftLoader, enabled = enabled)
+            Row(Modifier.fillMaxWidth()) {
+                top.yukonga.miuix.kmp.basic.TextButton(text = imageHost.authorizationLabel,
+                    enabled = enabled, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("image-host-authorize"),
+                    onClick = { if (imageHost.session === session && editorGeneration == ownerGeneration) declareImageSupport() })
+                top.yukonga.miuix.kmp.basic.TextButton(text = "发送图片", enabled = enabled && images.canSubmit,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("image-host-send"), onClick = {
+                        if (imageHost.session === session && editorGeneration == ownerGeneration) guard { sendImageDraft(draft) }
+                    })
+                top.yukonga.miuix.kmp.basic.TextButton(text = "收起", modifier = Modifier.heightIn(min = 48.dp),
+                    onClick = { imagePanelVisible = false })
+            }
+            if (imageHost.fenced) top.yukonga.miuix.kmp.basic.Text(
+                "发送结果待核实；图片和文字已保留，请勿重发", modifier = Modifier.testTag("image-host-unknown"))
+        }
+    }
+
+    private fun launchImagePicker() { imagePicker.launch("image/*") }
+    private fun pickImages() {
+        if (!selectionReady || sidebarVisible || retainedPage != "chat" || controller.active != null || imageHost.busy) return
+        if (shizukuWritesBlocked) return
+        cancelShizukuEditor()
+        imageHost.requestSelection(imageHost.session.attachments.state.value.draft, ::launchImagePicker)
+    }
+    private fun declareImageSupport() {
+        val generation = editorGeneration
+        imageHost.readSettings { saved ->
+            if (!activityUsable() || retainedPage != "chat" || generation != editorGeneration) return@readSettings
+            if (saved == null) { toast("请先配置模型提供商"); return@readSettings }
+            prompt = ConfirmPrompt("声明图片能力", "仅当你已确认当前提供商的精确模型“${saved.model}”支持图片输入时继续。" +
+                "此声明不通过模型名称推测能力，配置变更后失效。", "确认支持", action = {
+                if (activityUsable() && retainedPage == "chat" && generation == editorGeneration) {
+                    imageHost.authorize(saved) { ok -> toast(if (ok) "已授权当前模型的图片输入及图片历史续发" else "授权未生效；请检查配置后重试") }
+                }
+            })
+        }
+    }
+
+    private fun sendImageDraft(text: String) {
+        if (!selectionReady || retainedPage != "chat" || sidebarVisible || controller.active != null || text != draft) return
+        val generation = editorGeneration
+        val revision = draftRevision
+        val owner = imageHost.session
+        val conversation = selected
+        imageHost.send(conversation, revision, text, stillCurrent = {
+            activityUsable() && imageHost.session === owner && editorGeneration == generation &&
+                draftRevision == revision && selected?.id == conversation?.id && draft == text
+        })
+    }
+
+    private fun settleImageReceipt(receipt: ImageSendResult.Accepted, text: String) {
+        // No text writes were admitted while any image receipt was outstanding. Reconcile the
+        // current view even after A -> B -> A or recreation; never navigate a different owner.
+        if (!activityUsable() || !selectionReady || imageHost.session.owner != receipt.owner ||
+            imageHost.session.attachments.state.value.draft.revision != receipt.revision ||
+            (selected != null && selected?.id != receipt.conversation.id) || draft != text) return
+        selected = receipt.conversation; editorGeneration++; draftRevision++
+        draft = ""; selectionStart = 0; selectionEnd = 0
+        controller.preferences.edit().putString("selected", receipt.conversation.id.value).apply()
+        publishChat()
+        loadAcceptedHistory(receipt.conversation)
+    }
+
+    private fun loadAcceptedHistory(conversation: Conversation) {
+        val generation = editorGeneration
+        val request = ++historyRequestSerial
+        val content = chatState.contentRevision
+        val first = shown.firstOrNull()?.first
+        lifecycleScope.launch {
+            val rows = withContext(Dispatchers.IO) {
+                try { readAcceptedWindow(conversation.id, first) } catch (_: Exception) { null }
+            }
+            applyAcceptedHistory(conversation, generation, request, content, rows)
+        }
+    }
+
+    private fun readAcceptedWindow(id: ConversationId, first: Long?): List<Pair<Long, Message>> {
+        if (first == null) return controller.database.messages(id)
+        val rows = mutableListOf<Pair<Long, Message>>()
+        var cursor = Long.MAX_VALUE
+        while (true) {
+            val page = controller.database.messages(id, cursor, 200)
+            if (page.isEmpty()) break
+            rows.addAll(0, page)
+            cursor = page.first().first
+            if (cursor <= first) break
+        }
+        return rows.filter { it.first >= first }
+    }
+
+    private fun applyAcceptedHistory(conversation: Conversation, generation: Long, request: Long,
+        content: Long, rows: List<Pair<Long, Message>>?) {
+        if (!activityUsable() || selected?.id != conversation.id || editorGeneration != generation ||
+            request != historyRequestSerial) return
+        // Any intervening stream/final refresh, earlier-window expansion or scroll publication
+        // invalidates this snapshot. Never replace a newer loaded range with an older IO result.
+        if (chatState.contentRevision != content) { loadAcceptedHistory(conversation); return }
+        if (rows == null) { toast("消息已保存；历史加载失败"); return }
+        val active = controller.active?.takeIf { it.conversationId == conversation.id }
+        shown = rows.map { if (active != null && it.second.id == active.id) it.first to active else it }.toMutableList()
+        publishChat(); jumpToBottom()
     }
 
     @Composable private fun PromptSurface() {
@@ -549,6 +816,7 @@ class MainActivity : ComponentActivity() {
         requestedPreferredRefreshRate = rate; attributes.preferredRefreshRate = rate; window.attributes = attributes
     }
     override fun onPause() {
+        cancelShizukuEditor()
         speechHost.setForeground(false)
         refreshRateWindowResumed = false; window.decorView.removeCallbacks(refreshRateRequest)
         val previous = previousPreferredRefreshRate
@@ -565,6 +833,8 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        cancelShizukuEditor()
+        imageHost.close()
         speechHost.close()
         activityCallbacksAllowed = false; refreshRateWindowResumed = false
         window.decorView.removeCallbacks(refreshRateRequest); invalidateCatalog(); dismissChatModels()
@@ -596,10 +866,13 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun openSidebar() { guard {
-        updatePane(); speechHost.setVisible(false); sidebarVisible = true; publishChat()
+        cancelShizukuEditor()
+        updatePane(); speechHost.setVisible(false); imageHost.setVisible(false, selected?.id?.value)
+        sidebarVisible = true; publishChat()
     } }
     private fun dismissSidebar() {
         sidebarVisible = false; speechHost.setVisible(retainedPage == "chat")
+        imageHost.setVisible(retainedPage == "chat", selected?.id?.value)
         if (activityUsable()) refresh()
     }
     private fun updatePane() {
@@ -702,7 +975,8 @@ class MainActivity : ComponentActivity() {
         catch (_: Exception) { toast("操作或保存失败；原数据保留") }
     }
     private fun updateDraft(value: String) {
-        if (!activityUsable() || sidebarVisible || controller.dataBusy || !controller.ready) return
+        if (!activityUsable() || sidebarVisible || controller.dataBusy || !controller.ready || imageHost.sending || shizukuWritesBlocked) return
+        cancelShizukuEditor()
         guard {
             val id = selected?.id
             if (id == null) controller.database.draft(value) else controller.database.draft(id, value)
@@ -713,14 +987,20 @@ class MainActivity : ComponentActivity() {
     internal fun select(conversation: Conversation?) {
         requireActivityUsable()
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
+        val shizukuOwned = shizukuEditor != null || shizukuWritesBlocked
+        cancelShizukuEditor()
         val list = controller.database.conversations()
         var targetDraft = if (conversation == null) controller.database.draft() else list.first { it.id == conversation.id }.draft
         if (selectionReady) {
             val id = selected?.id
-            if (id == null) controller.database.draft(draft) else if (list.any { it.id == id }) controller.database.draft(id, draft)
+            // A submitted image revision is already persisted and frozen. Its DB acceptance
+            // may precede the UI receipt; writing it again here could resurrect sent text.
+            if (!imageHost.sending && !shizukuOwned) {
+                if (id == null) controller.database.draft(draft) else if (list.any { it.id == id }) controller.database.draft(id, draft)
+            }
             selections[id] = selectionStart to selectionEnd
         }
-        if (selectionReady && selected?.id == conversation?.id) targetDraft = draft
+        if (selectionReady && selected?.id == conversation?.id && !imageHost.sending && !shizukuOwned) targetDraft = draft
         // Commit the owner before allowing any text callbacks to write to it.
         check(controller.preferences.edit().apply {
             if (conversation == null) remove("selected") else putString("selected", conversation.id.value)
@@ -728,11 +1008,16 @@ class MainActivity : ComponentActivity() {
         editorGeneration++
         // Even A -> A re-entry gets a new capability; old click lambdas cannot act on it.
         speechHost.enter(conversation?.id?.value)
+        imageHost.enter(conversation?.id?.value)
+        draftRevision = maxOf(draftRevision + 1, imageHost.session.attachments.state.value.draft.revision)
+        imagePanelVisible = false
         selected = conversation; selectionReady = true; draft = targetDraft
         val range = selections[conversation?.id]
         selectionStart = (range?.first ?: draft.length).coerceIn(0, draft.length)
         selectionEnd = (range?.second ?: draft.length).coerceIn(0, draft.length)
         shown = if (conversation == null) mutableListOf() else controller.database.messages(conversation.id).toMutableList()
+        imagePanelVisible = imageHost.hasAttachments || imageHost.fenced ||
+            MessageHistory.expand(shown.map { it.second }).any { row -> row.blocks.any { it is MessageBlock.Image } }
         collaborationOwner = null; collaborationVisible = false; publishChat(); jumpToBottom(); refresh()
     }
     private fun sendDraft(text: String) {
@@ -776,6 +1061,7 @@ class MainActivity : ComponentActivity() {
         (if (controlTouchActive) controlTouchOwner else controlOwner)?.takeIf { it.conversationId == selected?.id }
     private fun refresh() {
         if (!activityUsable()) return
+        trackShizukuPreparation()
         backupBusy = controller.dataBusy
         chatModelPicker = chatModelPicker?.copy(enabled = controller.active == null && !controller.dataBusy && controller.ready)
         controlOwner = controller.active?.takeIf { it.conversationId == selected?.id && it.status == RunStatus.RUNNING }
@@ -791,6 +1077,9 @@ class MainActivity : ComponentActivity() {
             }
             if (dataRevision != controller.dataRevision) {
                 dataRevision = controller.dataRevision
+                cancelShizukuEditor()
+                imageHost.configurationChanged()
+                imageHost.enter(selected?.id?.value)
                 val latest = selected?.id?.let { id -> controller.database.conversations().firstOrNull { it.id == id } }
                 if (selected != null && latest == null) { select(null); return@guard }
                 editorGeneration++
@@ -833,6 +1122,7 @@ class MainActivity : ComponentActivity() {
     private fun publishChat() {
         // Also catches new-chat -> persisted conversation after sending, without auto-playing.
         speechHost.syncConversation(selected?.id?.value)
+        imageHost.syncConversation(selected?.id?.value)
         questionRows = shown.mapNotNull { (_, message) ->
             val projections = message.blocks.filterIsInstance<MessageBlock.Tool>()
                 .mapNotNull { controller.questionProjection(message, it.invocation) }
@@ -846,11 +1136,12 @@ class MainActivity : ComponentActivity() {
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
             contentRevision = chatState.contentRevision + 1,
             turns = ChatTurnMapper.map(shown.map { it.second }), canJumpToPreviousUser = shown.any { it.second.role == "user" },
-            balanceText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中"; else -> null },
+            balanceText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中";
+                imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,
                 phase = phase, controlOwnerKey = controlOwner?.id?.value, modelLabel = savedModelLabel(),
                 reasoningLabel = reasoningPreference.get(selected?.id?.value).displayName,
-                assistantLabel = assistantStore.read(assistantStore.selectedId.value)?.name ?: "助手", enabled = allowed,
+                assistantLabel = assistantStore.read(assistantStore.selectedId.value)?.name ?: "助手", enabled = allowed && !imageHost.sending && !shizukuWritesBlocked,
                 supplementAvailable = state?.phase == ExecutionPhase.PAUSED && supplementDraft.pending == null,
                 supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&
                     supplementDraft.pending != null))
@@ -878,10 +1169,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun copyMessage(id: String) {
         val message = shown.firstOrNull { it.second.id.value == id }?.second ?: return
-        val text = message.blocks.joinToString("\n") { block -> when (block) {
-            is MessageBlock.Text -> block.text
-            is MessageBlock.Tool -> "${block.invocation.name}: ${block.result ?: "未完成"}"
-        } }
+        val text = copyableImageHostText(message) ?: return
         (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("代鱼消息", text))
     }
 
@@ -930,6 +1218,7 @@ class MainActivity : ComponentActivity() {
             check(retainedPage == "chat" && controller.ready && controller.active == null && !controller.dataBusy)
             require(picker.models.any { it.id == id })
             controller.settings.selectModel(saved, id)
+            imageHost.configurationChanged()
             dismissChatModels(); refresh()
         } catch (_: Exception) {
             chatModelPicker = picker.copy(message = "切换未保存，请关闭后重新选择")
@@ -966,6 +1255,7 @@ class MainActivity : ComponentActivity() {
             require(!editing.requestOptionsUnavailable || value.requestOptionsReplacementAuthorized)
             controller.settings.save(value.toSettings(editing.settings), protocolChangeAuthorized = value.protocolChangeAuthorized,
                 requestOptionsReplacementAuthorized = value.requestOptionsReplacementAuthorized)
+            imageHost.configurationChanged()
             returnToChat(); toast("模型设置已保存")
         } catch (_: Exception) { modelError = "设置未保存" }
     }
@@ -1257,6 +1547,16 @@ internal class VoiceHost(
         player = null
         mutableState.value = SpeechPlaybackState(owner = owner, phase = SpeechPhase.CLOSED)
     }
+}
+
+/** Image references are not text: no private path, hash, ID or metadata enters the clipboard. */
+internal fun copyableImageHostText(message: Message): String? {
+    if (message.blocks.none { it is MessageBlock.Tool || it is MessageBlock.Text && it.text.isNotBlank() }) return null
+    return message.blocks.joinToString("\n") { block -> when (block) {
+        is MessageBlock.Text -> block.text
+        is MessageBlock.Tool -> "${block.invocation.name}: ${block.result ?: "未完成"}"
+        is MessageBlock.Image -> "[图片]"
+    } }
 }
 
 /** Only the current assistant's visible answer; never flatten work-process/tool payloads. */

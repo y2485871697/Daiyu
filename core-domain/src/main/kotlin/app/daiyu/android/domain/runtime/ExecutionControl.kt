@@ -124,7 +124,10 @@ class RunnerOptions(
     val onUsage: (ModelEvent.Usage) -> Unit = {},
     val batchExecutor: BatchToolExecutor? = null,
     val maxRounds: Int = 12,
-    val receiptBatchExecutor: ReceiptBatchToolExecutor? = null
+    val receiptBatchExecutor: ReceiptBatchToolExecutor? = null,
+    /** Only accepted ReasoningDelta/ReasoningFinal events, after repetition checks.
+     * Runs outside the control lock; observer exceptions do not fail the run. */
+    val onReasoning: (ModelEvent) -> Unit = {}
 ) {
     init {
         require(maxRounds in 1..100)

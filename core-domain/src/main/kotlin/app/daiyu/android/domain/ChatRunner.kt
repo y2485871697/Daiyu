@@ -488,8 +488,14 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             usage = nextUsage
                             try { options.onUsage(event) } catch (_: Exception) { /* Observer failure cannot invalidate committed usage. */ }
                         }
-                        is ModelEvent.ReasoningDelta -> { checkText(event.itemId, event.text, final = false, reasoning = true) }
-                        is ModelEvent.ReasoningFinal -> { checkText(event.itemId, event.text, final = true, reasoning = true) }
+                        is ModelEvent.ReasoningDelta -> {
+                            checkText(event.itemId, event.text, final = false, reasoning = true)
+                            try { options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
+                        }
+                        is ModelEvent.ReasoningFinal -> {
+                            checkText(event.itemId, event.text, final = true, reasoning = true)
+                            try { options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
+                        }
                         is ModelEvent.ProtocolOutput -> {
                             segmentHistory.replaceSessionProtocol(current, event.items)
                             apply(current.copy(protocolItems = event.items))

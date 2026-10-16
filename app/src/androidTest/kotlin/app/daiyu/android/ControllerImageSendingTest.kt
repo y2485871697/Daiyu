@@ -143,7 +143,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
             fail("preview must not read across its authorized conversation")
         } catch (_: IllegalArgumentException) { }
         receipt.images.forEach { f.controller.imageAttachments.store.remove(receipt.owner, it) }
-        main { assertNotNull(f.controller.send(conversation, "follow up")) }
+        assertNotNull(f.controller.send(conversation, "follow up"))
         await(f) { f.controller.active == null }
         assertEquals(2, f.probe.opens.get())
         assertTrue(f.probe.histories.last().any { row -> row.id == receipt.userId && row.blocks.any { it is MessageBlock.Image } })
@@ -248,13 +248,11 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         await(f) { f.controller.active == null }
         f.settings.save(f.settings.load().copy(model = "another-exact-model"))
         f.db.draft(conversation.id, "keep this text")
-        main { assertNull(f.controller.send(conversation, "keep this text")) }
+        assertNull(f.controller.send(conversation, "keep this text"))
         assertEquals(1, f.probe.opens.get()); assertEquals(2, f.db.messages(conversation.id).size)
         assertEquals("keep this text", f.db.conversations().single().draft)
-        main {
-            assertTrue(f.controller.authorizeImageProvider(provider(f)))
-            assertNotNull(f.controller.send(conversation, "keep this text"))
-        }
+        main { assertTrue(f.controller.authorizeImageProvider(provider(f))) }
+        assertNotNull(f.controller.send(conversation, "keep this text"))
         await(f) { f.controller.active == null }
         assertEquals(2, f.probe.opens.get())
     }

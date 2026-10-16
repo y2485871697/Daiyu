@@ -232,7 +232,9 @@ class ControllerBackupTest:InstrumentationTestCase() {
             // ProjectionContext rejects getAll and every credential getString: the gate must run first.
             try {f.app.settings.load();fail("old key must not bind to new endpoint")} catch(_:CredentialUnavailableException) {}
             assertEquals("",f.app.settings.loadForEditing().settings.apiKey)
-            assertNull(f.controller.send(null,"must not use the previous key"))
+        }
+        assertNull(f.controller.send(null,"must not use the previous key"))
+        main {
             assertTrue(f.controller.problem?.contains("未发起网络请求")==true)
             restoreRejected {f.controller.restoreImportedConfiguration(preview,true)}
         }

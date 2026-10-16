@@ -85,8 +85,8 @@ class ControllerUsageAttributionTest : InstrumentationTestCase() {
     private fun send(f: Fixture) {
         controlMain {
             assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider))
-            assertNotNull(f.controller.sendWithChildren(f.conversation, "parent task"))
         }
+        assertNotNull(f.controller.sendWithChildren(f.conversation, "parent task"))
         awaitControl("child and parent complete") { f.controller.active == null }
     }
     fun testControllerCollectsOwnAndChildRequestsAndReadDoesNotReopenModels() {

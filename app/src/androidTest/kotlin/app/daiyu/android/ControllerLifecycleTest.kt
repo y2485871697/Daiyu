@@ -101,10 +101,10 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
             rejects {f.controller.previewImportedConfiguration()}
             checks++
         }
-        main {assertNotNull(f.controller.send(c,"first"))}
+        assertNotNull(f.controller.send(c,"first"))
         assertEquals(1,checks);assertTrue(s.entered.await(5,TimeUnit.SECONDS))
         assertEquals(2,f.db.messages(c.id).size);assertEquals("",f.db.conversations().single().draft)
-        main {assertNull(f.controller.send(c,"duplicate after receipt"))}
+        assertNull(f.controller.send(c,"duplicate after receipt"))
         assertEquals(1,f.calls.get());s.release.countDown();awaitState(f) {f.controller.active==null}
         assertEquals(2,f.db.messages(c.id).size)
     }
@@ -125,9 +125,9 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         try {
             assertTrue(reading.await(5,TimeUnit.SECONDS));second.start()
             assertTrue(secondStarted.await(5,TimeUnit.SECONDS))
-            // Observe the queued call, not the VM's transient monitor-state projection.
-            assertFalse("second send returned before the first preparation was released",
-                secondFinished.await(200,TimeUnit.MILLISECONDS))
+            // Reservation is a short gate, never a monitor held over settings/model I/O.
+            assertTrue("second send must reject while the first preparation is still blocked",
+                secondFinished.await(5,TimeUnit.SECONDS))
             release.countDown();first.join(5000);second.join(5000)
             assertFalse(first.isAlive);assertFalse(second.isAlive);failure.get()?.let {throw it}
             assertNotNull(firstResult.get());assertNull(secondResult.get())
@@ -145,8 +145,8 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         }}
         try {
             assertTrue(entered.await(5,TimeUnit.SECONDS))
+            assertNull(f.controller.send(c,"unsent"))
             main {
-                assertNull(f.controller.send(c,"unsent"))
                 rejects {f.controller.dataTask {"must not run"}}
                 rejects {f.controller.previewImportedConfiguration()}
             }
@@ -156,27 +156,27 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         assertTrue(f.controller.dataNotice?.startsWith("导入失败")==true)
         assertEquals(0L,f.controller.dataRevision);assertEquals(0,threads.get());assertEquals(0,f.calls.get())
         main {f.controller.unobserve(listener)}
-        val s=session(f);main {assertNotNull(f.controller.send(c,"unsent"))}
+        val s=session(f);assertNotNull(f.controller.send(c,"unsent"))
         assertTrue(s.entered.await(5,TimeUnit.SECONDS));s.release.countDown();awaitState(f) {f.controller.active==null}
     }
     fun testCredentialHistoryAndTransactionFailuresPreserveDraftWithoutModelOpen() {
         val f=fresh();val c=f.db.create("default");f.db.draft(c.id,"keep draft");f.db.draft("keep composer")
         f.app.getSharedPreferences("model-settings",0).edit().putBoolean("credential-rebind-required",true).commit()
-        main {assertNull(f.controller.send(c,"keep draft"))}
+        assertNull(f.controller.send(c,"keep draft"))
         assertTrue(f.controller.problem?.contains("未发起网络请求")==true)
         f.settings.save(ModelSettings("https://example.invalid","fixture-model","fixture-key",false))
         // A real transaction failure must roll back clearing the conversation draft.
         f.db.writableDatabase.execSQL("CREATE TRIGGER reject_send BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT,'fixture'); END")
-        main {assertNull(f.controller.send(c,"keep draft"));assertNull(f.controller.send(null,"keep composer"))}
+        assertNull(f.controller.send(c,"keep draft"));assertNull(f.controller.send(null,"keep composer"))
         assertEquals("keep draft",f.db.conversations().single().draft);assertEquals("keep composer",f.db.draft())
         assertEquals(1,f.db.conversations().size);assertTrue(f.db.messages(c.id).isEmpty());assertNull(f.controller.active)
         f.db.writableDatabase.execSQL("DROP TRIGGER reject_send")
         // Corrupt a historical row only after accepting and finishing a normal run.
-        val s=session(f);main {assertNotNull(f.controller.send(c,"accepted"))}
+        val s=session(f);assertNotNull(f.controller.send(c,"accepted"))
         assertTrue(s.entered.await(5,TimeUnit.SECONDS));s.release.countDown();awaitState(f) {f.controller.active==null}
         f.db.draft(c.id,"history read failure");f.db.writableDatabase.execSQL("UPDATE messages SET blocks='not-json'")
-        main {assertNull(f.controller.send(c,"history read failure"))}
-        assertTrue(f.controller.problem?.startsWith("读取历史失败")==true)
+        assertNull(f.controller.send(c,"history read failure"))
+        assertTrue(f.controller.problem?.startsWith("上下文准备失败")==true)
         assertEquals("history read failure",f.db.conversations().single().draft);assertEquals(1,f.calls.get())
     }
     fun testStartupGateWaitsForRealRecoveryAndNeverReplaysInterruptedRun() {
@@ -192,8 +192,8 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         try {
             assertFalse(f.controller.ready)
             f.app.settingsRead={fail("startup gate must precede settings read")}
+            assertNull(f.controller.send(null,"pending draft"))
             main {
-                assertNull(f.controller.send(null,"pending draft"))
                 rejects {f.controller.dataTask {"unexpected"}}
                 rejects {f.controller.previewImportedConfiguration()}
             }
@@ -218,15 +218,16 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         } finally {f.db.writableDatabase.endTransaction();closer.join(5000)}
         assertFalse(closer.isAlive);failure.get()?.let {throw it}
         instrumentation.waitForIdleSync();assertFalse(f.controller.ready);assertNull(f.controller.active)
-        main {assertNull(f.controller.send(null,"pending close"));rejects {f.controller.dataTask {"unexpected"}}}
+        assertNull(f.controller.send(null,"pending close"))
+        main {rejects {f.controller.dataTask {"unexpected"}}}
         assertEquals(0,f.calls.get())
     }
     fun testRecoveryFailureRejectsAllIdleOperationsWithoutReadingSettings() {
         val f=fresh {db->db.draft("preserved");db.writableDatabase.execSQL("DROP TABLE messages")}
         assertTrue(f.controller.problem?.startsWith("会话恢复失败")==true)
         f.app.settingsRead={fail("recovery gate must precede credential read")}
+        assertNull(f.controller.send(null,"preserved"))
         main {
-            assertNull(f.controller.send(null,"preserved"))
             rejects {f.controller.dataTask {"unexpected"}}
             rejects {f.controller.previewImportedConfiguration()}
         }
@@ -253,12 +254,12 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
             // Main looper cannot consume the completion before this close drains the worker.
             f.controller.close()
             assertFalse(f.controller.ready);assertFalse(f.controller.dataBusy);assertNull(f.controller.active)
-            assertNull(f.controller.send(null,"closed draft"))
             rejects {f.controller.dataTask {"unexpected"}}
             rejects {f.controller.previewImportedConfiguration()}
             f.controller.close()
         }
         instrumentation.waitForIdleSync()
+        assertNull(f.controller.send(null,"closed draft"))
         assertEquals(0,notices.get());assertNull(f.controller.dataNotice);assertEquals(0L,f.controller.dataRevision)
         assertEquals(0,f.calls.get())
         val reopened=ConversationDatabase(f.app)
@@ -267,12 +268,12 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
     }
     fun testOldSessionCallbacksCannotPolluteNextConversationOrClosedController() {
         val f=fresh();val a=f.db.create("default");val b=f.db.create("default");f.db.draft(b.id,"B draft")
-        val old=session(f);main {assertNotNull(f.controller.send(a,"A"))}
+        val old=session(f);assertNotNull(f.controller.send(a,"A"))
         assertTrue(old.entered.await(5,TimeUnit.SECONDS))
-        main {assertNull(f.controller.send(b,"B draft"));f.controller.stop()}
+        assertNull(f.controller.send(b,"B draft"));main {f.controller.stop()}
         awaitState(f) {f.controller.active==null}
         assertEquals("B draft",f.db.conversations().first {it.id==b.id}.draft)
-        val next=session(f);main {assertNotNull(f.controller.send(b,"B draft"))}
+        val next=session(f);assertNotNull(f.controller.send(b,"B draft"))
         assertTrue(next.entered.await(5,TimeUnit.SECONDS));val active=f.controller.active
         old.sink.get()!!.invoke(ModelEvent.TextDelta("late","must not appear"))
         assertEquals(active,f.controller.active);assertEquals(2,f.db.messages(b.id).size)
@@ -291,13 +292,14 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         f.app.getSharedPreferences("conversation-ui",0),{error("replacement must not replay")})
     fun testSecondControllerRejectsWithoutInterruptingActiveOwner() {
         val f=fresh();val session=session(f)
-        main {assertNotNull(f.controller.send(null,"active"))}
+        assertNotNull(f.controller.send(null,"active"))
         assertTrue(session.entered.await(5,TimeUnit.SECONDS));val active=f.controller.active!!
         val before=f.db.messages(active.conversationId)
         val blocked=another(f)
         try {
             awaitController(blocked);assertTrue(blocked.problem!!.startsWith("会话恢复失败"))
-            main {assertNull(blocked.send(null,"must not send"));rejects {blocked.dataTask {"no"}}}
+            assertNull(blocked.send(null,"must not send"))
+            main {rejects {blocked.dataTask {"no"}}}
             assertEquals(before,f.db.messages(active.conversationId));assertEquals(1,f.calls.get())
             blocked.close()
             assertEquals(before,f.db.messages(active.conversationId))
@@ -307,13 +309,14 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
     }
     fun testUncertainTerminalRemainsRunningUntilNewLeaseAndBlocksNewWork() {
         val f=fresh();val session=session(f)
-        main {assertNotNull(f.controller.send(null,"accepted"))}
+        assertNotNull(f.controller.send(null,"accepted"))
         assertTrue(session.entered.await(5,TimeUnit.SECONDS));val active=f.controller.active!!
         f.db.writableDatabase.execSQL("CREATE TRIGGER reject_terminal BEFORE UPDATE ON runtime_checkpoints WHEN NEW.phase='TERMINAL' BEGIN SELECT RAISE(ABORT,'injected'); END")
         session.release.countDown();awaitState(f) {f.controller.active?.error?.startsWith("保存失败")==true}
         val persisted=f.db.messages(active.conversationId).last().second
         assertEquals(RunStatus.RUNNING,persisted.status);assertEquals("answer",(persisted.blocks.single() as MessageBlock.Text).text)
-        main {assertNull(f.controller.send(null,"must not send"));rejects {f.controller.dataTask {"no"}}}
+        assertNull(f.controller.send(null,"must not send"))
+        main {rejects {f.controller.dataTask {"no"}}}
         assertEquals(1,f.calls.get())
         f.db.writableDatabase.execSQL("DROP TRIGGER reject_terminal")
         f.controller.close()

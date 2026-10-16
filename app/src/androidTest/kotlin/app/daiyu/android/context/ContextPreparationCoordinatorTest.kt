@@ -179,6 +179,53 @@ class ContextPreparationCoordinatorTest : InstrumentationTestCase() {
         assertEquals(3, coordinator.prepare(frozen).messages.size)
     }
 
+    fun testNewOwnerBudgetsPendingWithoutTryingToSummarizeMissingHistory() {
+        val owner = ConversationId("not-created-yet")
+        val model = bound().copy(transport = SummaryModelTransport { _, _ -> error("no evidence to summarize") })
+        val coordinator = coordinator({ settings() }, SummaryModelResolver { model })
+        val input = pending(owner).copy(blocks = listOf(MessageBlock.Text("input", "x".repeat(2000))))
+        val result = coordinator.prepare(coordinator.freeze(owner, listOf(input)))
+        assertEquals(listOf(input), result.messages)
+        assertNull(result.archiveId)
+        val huge = input.copy(blocks = listOf(MessageBlock.Text("input", "x".repeat(10000))))
+        try { coordinator.prepare(coordinator.freeze(owner, listOf(huge))); fail("budget required") }
+        catch (_: ContextCapacityExceededException) { }
+        assertTrue(db.conversations().isEmpty())
+    }
+
+    fun testFinalRevisionUsesAllOriginalsEvenBehindArchiveAndOutsideUiPage() {
+        val owner = seed(32)
+        val original = service.displayHistory(owner)
+        service.compress(owner, CompressionPolicy(keepTurns = 2), ContextSummarizer { "历史摘要" })
+        val coordinator = coordinator({ CompressionSettings() })
+        val prepared = coordinator.prepare(coordinator.freeze(owner, listOf(pending(owner))))
+        assertNotNull(prepared.archiveId)
+        assertEquals(ContextRevision.digest(original), prepared.expectedHistoryRevision)
+        DatabaseTransactions { db.writableDatabase }.run { transaction ->
+            assertTrue(service.matchesHistoryRevision(transaction, owner, prepared.expectedHistoryRevision))
+        }
+        val firstReply = original.first { it.role == "assistant" }
+        db.save(firstReply.copy(error = "corrected old evidence"))
+        DatabaseTransactions { db.writableDatabase }.run { transaction ->
+            assertFalse(service.matchesHistoryRevision(transaction, owner, prepared.expectedHistoryRevision))
+        }
+        assertEquals(64, service.displayHistory(owner).size)
+    }
+
+    fun testFinalRevisionRequiresTheOwnersOpenTransaction() {
+        val owner = seed(1)
+        val revision = ContextRevision.digest(service.displayHistory(owner))
+        try { service.matchesHistoryRevision(db.writableDatabase, owner, revision); fail("transaction required") }
+        catch (_: IllegalStateException) { }
+        val other = ConversationDatabase(context)
+        try {
+            DatabaseTransactions { other.writableDatabase }.run { transaction ->
+                try { service.matchesHistoryRevision(transaction, owner, revision); fail("same connection required") }
+                catch (_: IllegalStateException) { }
+            }
+        } finally { other.close() }
+    }
+
     fun testPreCancelledPreparationDoesNotResolveOrPublish() {
         val owner = seed(); val token = ContextPreparationCancellation().apply { cancel() }
         val coordinator = coordinator({ error("must not load") }, SummaryModelResolver { error("must not resolve") })

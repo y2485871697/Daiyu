@@ -26,6 +26,19 @@ class ImageSendHandleTest {
         assertFalse(handle.beginCommit())
     }
 
+    @Test fun cancellationReachesSummaryTransportOutsideTheHandleMonitor() {
+        val observed = CountDownLatch(1)
+        lateinit var handle: ImageSendHandle
+        handle = ImageSendHandle(ImageAttachmentOwner("conversation", "draft"), 42) {
+            val worker = Thread { handle.isCancelled(); observed.countDown() }
+            worker.start()
+            assertTrue(observed.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            worker.join()
+        }
+        assertTrue(handle.cancel())
+        assertFalse(handle.beginCommit())
+    }
+
     @Test fun racingCancelAndCommitHaveExactlyOneWinner() {
         repeat(100) {
             val handle = handle()

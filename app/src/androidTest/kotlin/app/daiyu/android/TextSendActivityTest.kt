@@ -1,0 +1,275 @@
+package app.daiyu.android
+
+import android.os.Looper
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.*
+import app.daiyu.android.domain.MessageBlock
+import app.daiyu.android.domain.RunStatus
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
+
+/** Real MainActivity -> sendText -> preparation -> SQLite receipt -> Activity callback.
+ * Only model initialization is gated; neither sendText nor its result is replaced by a fake.
+ */
+class TextSendActivityTest : WiredActivityTestCase() {
+    private val preparing = CountDownLatch(1)
+    private val releasePreparation = CountDownLatch(1)
+    private val preparationCalls = AtomicInteger()
+    private val preparationOnMain = AtomicBoolean()
+    private val rejectPreparation = AtomicBoolean()
+
+    internal override fun createFixture() = RunControlFixture(instrumentation.targetContext) {
+        preparationCalls.incrementAndGet()
+        preparationOnMain.set(Looper.myLooper() == Looper.getMainLooper())
+        preparing.countDown()
+        check(releasePreparation.await(30, TimeUnit.SECONDS)) { "test preparation gate timed out" }
+        check(!rejectPreparation.get()) { "test model initialization rejected" }
+    }
+
+    override fun tearDown() {
+        releasePreparation.countDown()
+        super.tearDown()
+    }
+
+    private fun awaitPreparing() {
+        assertTrue("send must reach the worker preparation gate", preparing.await(5, TimeUnit.SECONDS))
+        assertFalse("model preparation must not run on main", preparationOnMain.get())
+        node("chat-draft").assertIsNotEnabled()
+        node("chat-send").assertIsNotEnabled()
+        assertEquals(0, fixture.opens.get())
+        assertEquals(1, preparationCalls.get())
+    }
+
+    private fun assertUserText(conversation: app.daiyu.android.domain.ConversationId, text: String) {
+        val rows = fixture.database.messages(conversation)
+        assertEquals("one durable user/assistant pair", 2, rows.size)
+        val user = rows.single { it.second.role == "user" }.second
+        assertEquals(RunStatus.COMPLETED, user.status)
+        assertEquals(listOf(MessageBlock.Text("user", text)), user.blocks)
+        assertEquals(user.runId, rows.single { it.second.role == "assistant" }.second.runId)
+    }
+
+    private fun finish(session: RunControlFixture.Session) {
+        session.release.countDown()
+        awaitControl("accepted run completed") { fixture.controller.active == null }
+        assertEquals(1, fixture.opens.get())
+        assertEquals(1, preparationCalls.get())
+    }
+
+    fun testAcceptedReceiptClearsOnlyExactDraftAndRevokesOldEditor() {
+        val text = "  第一行\n第二行末尾  "
+        val session = fixture.session(holdSeconds = 120)
+        setDraft(text); setSelection(2, 5)
+        val oldEditor = retainedControls(activity)
+        node("chat-send").performClick()
+        awaitPreparing()
+        assertDraft(text)
+        assertEquals(text, fixture.database.draft())
+        assertTrue("preparation is not a database receipt", fixture.database.conversations().isEmpty())
+
+        releasePreparation.countDown()
+        awaitTextSendResult(activity)
+        assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+        assertDraft(""); assertSelection(0, 0)
+        node("chat-draft").assertIsEnabled()
+        val owner = checkNotNull(fixture.controller.active)
+        assertUserText(owner.conversationId, text)
+        assertEquals("", fixture.database.draft())
+        assertEquals("", fixture.database.conversations().single().draft)
+        assertEquals(owner.conversationId.value, fixture.controller.preferences.getString("selected", null))
+        finish(session)
+
+        // Same bytes do not authorize a pre-acceptance editor in the new generation.
+        setDraft(text); setSelection(1, 3)
+        mainThread {
+            oldEditor.onTextChange("stale edit")
+            oldEditor.onSelectionChange(0, 0)
+            oldEditor.onSend(text)
+        }
+        awaitTextSendResult(activity)
+        assertDraft(text); assertSelection(1, 3)
+        assertEquals(text, fixture.database.conversations().single().draft)
+        assertUserText(owner.conversationId, text)
+        assertEquals(1, fixture.opens.get()); assertEquals(1, preparationCalls.get())
+    }
+
+    fun testRejectedCallbackRetainsExactDraftAndSelection() {
+        rejectPreparation.set(true)
+        val text = "  拒绝后保留\n尾部  "
+        setDraft(text); setSelection(2, 6)
+        node("chat-send").performClick()
+        awaitPreparing()
+        assertEquals(text, fixture.database.draft())
+        releasePreparation.countDown()
+        awaitTextSendResult(activity)
+
+        node("chat-draft").assertIsEnabled()
+        node("chat-send").assertIsEnabled()
+        assertDraft(text); assertSelection(2, 6)
+        assertEquals(text, fixture.database.draft())
+        assertTrue(fixture.database.conversations().isEmpty())
+        assertNull(fixture.controller.active)
+        assertNotNull("the real preparation rejection is reported", fixture.controller.problem)
+        assertEquals(0, fixture.opens.get()); assertEquals(1, preparationCalls.get())
+    }
+
+    fun testDoubleClickAndPendingRetainedControlsCannotResendOrReplaceDraft() {
+        val text = "  只发送一次\n  "
+        val other = fixture.database.create()
+        val session = fixture.session(holdSeconds = 120)
+        setDraft(text); setSelection(1, 3)
+        val controls = retainedControls(activity)
+        // Two invocations of the attached UI action in one main turn, before recomposition.
+        node("chat-send").performSemanticsAction(SemanticsActions.OnClick) { click ->
+            assertTrue(click()); assertTrue(click())
+        }
+        awaitPreparing()
+        mainThread {
+            controls.onSend(text)
+            controls.onTextChange("must not replace the pending revision")
+            try {
+                activity.select(other)
+                fail("selection must not replace a pending send owner")
+            } catch (_: IllegalStateException) { }
+        }
+        assertDraft(text); assertSelection(1, 3)
+        assertEquals(text, fixture.database.draft())
+        assertTrue(fixture.database.messages(other.id).isEmpty())
+        assertNull(fixture.controller.preferences.getString("selected", null))
+
+        releasePreparation.countDown()
+        awaitTextSendResult(activity)
+        assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+        assertDraft(""); assertSelection(0, 0)
+        val owner = checkNotNull(fixture.controller.active)
+        assertUserText(owner.conversationId, text)
+        finish(session)
+        // Duplicate retained delivery after completion must not create a second turn either.
+        mainThread { controls.onSend(text) }
+        awaitTextSendResult(activity)
+        assertUserText(owner.conversationId, text)
+        assertTrue(fixture.database.messages(other.id).isEmpty())
+        assertEquals(2, fixture.database.conversations().size)
+        assertEquals(1, fixture.opens.get()); assertEquals(1, preparationCalls.get())
+    }
+
+    fun testRotationKeepsPendingEditorFrozenUntilLateRejectionIsConsumed() {
+        val source = fixture.database.create()
+        val target = fixture.database.create()
+        val text = "  原会话发送\n  "
+        val nextDraft = "  新 owner 草稿\n保留  "
+        mainThread { activity.select(source) }
+        setDraft(text); setSelection(1, 3)
+        val oldEditor = retainedControls(activity)
+        node("chat-send").performClick()
+        awaitPreparing()
+        val oldActivity = activity
+        activity = recreateActivity(oldActivity)
+        // f63a5f9: replacement adopts the same retained ticket, not a fresh editable draft.
+        node("chat-draft").assertIsNotEnabled()
+        node("chat-send").assertIsNotEnabled()
+        mainThread {
+            oldEditor.onTextChange("destroyed editor"); oldEditor.onSend(text)
+            try {
+                activity.select(target)
+                fail("the replacement must retain the pending owner until its result")
+            } catch (_: IllegalStateException) { }
+        }
+        assertDraft(text); assertSelection(1, 3)
+        assertEquals(text, fixture.database.conversations().single { it.id == source.id }.draft)
+
+        releasePreparation.countDown()
+        awaitTextSendResult(activity) // The replacement, not the destroyed callback, consumes it.
+        assertDraft(text); assertSelection(1, 3)
+        node("chat-draft").assertIsEnabled()
+        assertTrue(fixture.database.messages(source.id).isEmpty())
+        mainThread { assertNull("the UI acknowledged the retained result", fixture.controller.textSendState()) }
+        assertNull(fixture.controller.active)
+        assertEquals(0, fixture.opens.get()); assertEquals(1, preparationCalls.get())
+
+        mainThread { activity.select(target) }
+        setDraft(nextDraft); setSelection(2, 5)
+        mainThread { oldEditor.onTextChange(text); oldEditor.onSend(text) }
+        awaitTextSendResult(activity)
+        assertDraft(nextDraft); assertSelection(2, 5)
+        assertEquals(target.id.value, fixture.controller.preferences.getString("selected", null))
+        assertEquals(nextDraft, fixture.database.conversations().single { it.id == target.id }.draft)
+        assertTrue(fixture.database.messages(target.id).isEmpty())
+        assertEquals(text, fixture.database.conversations().single { it.id == source.id }.draft)
+        assertEquals(2, fixture.database.conversations().size)
+    }
+
+    fun testReplacementFreezesRetainedPendingUntilLateAcceptedResult() = restoreAcceptedReceipt(beforeCompletion = true)
+
+    fun testRetainedAcceptedReceiptDoesNotResurrectDraftOnRecreation() = restoreAcceptedReceipt(beforeCompletion = false)
+
+    private fun restoreAcceptedReceipt(beforeCompletion: Boolean) {
+        val source = fixture.database.create()
+        val text = "  已提交的精确草稿\n  "
+        mainThread { activity.select(source) }
+        setDraft(text); setSelection(1, 4)
+        val oldEditor = retainedControls(activity)
+        val oldActivity = activity
+        var generation = 0L
+        var revision = 0L
+        mainThread {
+            generation = MainActivity::class.java.getDeclaredField("editorGeneration").apply { isAccessible = true }.getLong(oldActivity)
+            revision = MainActivity::class.java.getDeclaredField("draftRevision").apply { isAccessible = true }.getLong(oldActivity)
+            oldActivity.finish()
+        }
+        ui.waitUntil(5_000) { oldActivity.isDestroyed }
+
+        // Seed a REAL retained ticket while there is no Activity. Reattach either side of
+        // the DB receipt to cover pending takeover AND the post-commit/pre-UI boundary.
+        val ticket = ChatController.TextSendTicket()
+        val result = AtomicReference<ChatController.TextSendResult>()
+        val completed = CountDownLatch(1)
+        val session = fixture.session(holdSeconds = 120)
+        mainThread {
+            assertTrue(fixture.controller.sendText(source, generation, revision, text, ticket = ticket) {
+                result.set(it); completed.countDown()
+            })
+        }
+        assertTrue(preparing.await(5, TimeUnit.SECONDS))
+        assertFalse(preparationOnMain.get())
+        if (beforeCompletion) {
+            activity = startMain()
+            node("chat-draft").assertIsNotEnabled()
+            node("chat-send").assertIsNotEnabled()
+            assertDraft(text)
+            assertEquals(text, fixture.database.conversations().single().draft)
+            mainThread { assertSame(ticket, checkNotNull(fixture.controller.textSendState()).ticket) }
+        }
+        releasePreparation.countDown()
+        assertTrue(completed.await(5, TimeUnit.SECONDS))
+        assertTrue(result.get() is ChatController.TextSendResult.Accepted)
+        assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+        assertUserText(source.id, text)
+        assertEquals("", fixture.database.conversations().single().draft)
+        if (!beforeCompletion) {
+            mainThread { assertSame(ticket, checkNotNull(fixture.controller.textSendState()).ticket) }
+            activity = startMain()
+        }
+        awaitTextSendResult(activity)
+        assertDraft(""); assertSelection(0, 0)
+        node("chat-draft").assertIsEnabled()
+        mainThread { assertNull(fixture.controller.textSendState()) }
+        assertEquals("", fixture.database.conversations().single().draft)
+        activity = recreateActivity(activity)
+        assertDraft(""); assertSelection(0, 0)
+        assertEquals("", fixture.database.conversations().single().draft)
+        assertUserText(source.id, text)
+        finish(session)
+
+        val newer = "  不应被旧结果清除\n  "
+        setDraft(newer); setSelection(1, 4)
+        mainThread { oldEditor.onTextChange(text); oldEditor.onSend(text) }
+        awaitTextSendResult(activity)
+        assertDraft(newer); assertSelection(1, 4)
+        assertEquals(newer, fixture.database.conversations().single().draft)
+        assertEquals(1, fixture.opens.get()); assertEquals(1, preparationCalls.get())
+    }
+}

@@ -88,13 +88,13 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         f.database.draft(unbound.id,"old draft")
         f.controller.assistantStore.save(AssistantProfile("other","其他",""))
         f.controller.assistantStore.select("other")
-        main { assertNull(f.controller.send(unbound,"old draft")) }
+        assertNull(f.controller.send(unbound,"old draft"))
         assertTrue(f.controller.problem!!.contains("未绑定"))
         assertEquals("old draft",f.database.conversations().single().draft)
         val deleted=f.database.create("default")
         f.database.draft(deleted.id,"deleted draft")
         f.controller.assistantStore.delete("default")
-        main { assertNull(f.controller.send(deleted,"deleted draft")) }
+        assertNull(f.controller.send(deleted,"deleted draft"))
         assertTrue(f.controller.problem!!.contains("已删除"))
         assertEquals("deleted draft",f.database.conversations().single { it.id==deleted.id }.draft)
         assertEquals("default",f.database.assistantId(deleted.id))
@@ -107,11 +107,11 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         val stale=f.database.create("default")
         f.controller.assistantStore.save(AssistantProfile("other","其他","",memoryEnabled=false))
         f.controller.assistantStore.select("other")
-        main { assertNotNull(f.controller.send(stale,"first")) }
+        assertNotNull(f.controller.send(stale,"first"))
         await(f) { f.controller.active==null }
         assertEquals(listOf("default"),captured)
         main { assertTrue(f.controller.bindConversationAssistant(stale.id,"default","other")) }
-        main { assertNotNull(f.controller.send(stale,"second")) }
+        assertNotNull(f.controller.send(stale,"second"))
         await(f) { f.controller.active==null }
         assertEquals(listOf("default","other"),captured)
         assertEquals(1,f.memory.reads.get()) // Disabled memory never performs the read.
@@ -157,7 +157,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         })
         f.controller.assistantStore.save(AssistantProfile("other","other",""))
         f.database.draft("keep")
-        main { assertNull(f.controller.send(null,"keep")) }
+        assertNull(f.controller.send(null,"keep"))
         assertEquals("keep",f.database.draft())
         assertTrue(f.database.conversations().isEmpty()); assertEquals(0,opened.get())
     }
@@ -165,7 +165,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
     fun testExistingInjectedFactoryStillOwnsPortConstruction() {
         val called=AtomicInteger()
         val f=fresh(legacy={ called.incrementAndGet(); port() },factory=null)
-        main { assertNotNull(f.controller.send(null,"legacy injected port")) }
+        assertNotNull(f.controller.send(null,"legacy injected port"))
         await(f) { f.controller.active==null }
         assertEquals(1,called.get())
     }

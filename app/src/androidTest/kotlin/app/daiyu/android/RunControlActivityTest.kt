@@ -9,6 +9,8 @@ import java.util.concurrent.TimeUnit
 class RunControlActivityTest : WiredActivityTestCase() {
     private fun send(): Message {
         setDraft("initial user"); node("chat-send").performClick()
+        awaitTextSendResult(activity)
+        assertDraft("")
         return checkNotNull(fixture.controller.active)
     }
     fun testShortClickPausesRecreationRetainsDraftAndContinueCompletesSameOwner() {
@@ -63,7 +65,7 @@ class RunControlActivityTest : WiredActivityTestCase() {
         target.performTouchInput { down(center) }
         first.release.countDown(); awaitControl("old owner completed") { fixture.controller.active == null }
         val second = fixture.session(); val conversation = fixture.database.conversations().single()
-        mainThread { assertNotNull(fixture.controller.send(conversation, "next user")) }
+        assertNotNull(fixture.controller.send(conversation, "next user"))
         val next = checkNotNull(fixture.controller.active); assertTrue(second.entered.await(5, TimeUnit.SECONDS))
         ui.waitForIdle()
         mainThread { oldLong() }

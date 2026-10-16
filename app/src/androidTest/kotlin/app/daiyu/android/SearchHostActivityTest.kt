@@ -159,6 +159,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         val session = fixture.session(holdSeconds = 120)
         setDraft("运行中的提问")
         node("chat-send").performClick()
+        awaitTextSendResult(activity)
         assertTrue(session.entered.await(5, TimeUnit.SECONDS))
         val owner = checkNotNull(fixture.controller.active)
         setDraft("保留追加草稿")

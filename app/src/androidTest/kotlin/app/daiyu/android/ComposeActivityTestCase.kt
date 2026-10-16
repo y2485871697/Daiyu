@@ -66,6 +66,21 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         ui.onNodeWithContentDescription("更多").performSemanticsAction(SemanticsActions.OnClick) { it() }
         ui.onNodeWithText(label).performScrollTo().performClick()
     }
+    // sendText posts its receipt separately from runner/model events. Waiting for active or
+    // Session.entered alone does not guarantee Activity consumption + acknowledgement.
+    // Null also covers synchronous queue rejection (which intentionally has no callback).
+    // Requires the retained result API introduced in f63a5f9.
+    protected fun awaitTextSendResult(activity: MainActivity) {
+        val controller = (instrumentation.targetContext.applicationContext as ChatApplication).controller
+        ui.waitUntil(timeoutMillis = 5_000) {
+            var complete = false
+            instrumentation.runOnMainSync {
+                complete = invokeHost(activity, "getPendingTextSend") == null && controller.textSendState() == null
+            }
+            complete
+        }
+        ui.waitForIdle()
+    }
     protected fun setDraft(text: String) { node("chat-draft").performTextReplacement(text) }
     protected fun assertDraft(text: String) { node("chat-draft").assertEditableText(text).assertTextEquals(text) }
     protected fun setSelection(start: Int, end: Int) {
@@ -133,9 +148,10 @@ abstract class WiredActivityTestCase : ComposeActivityTestCase() {
     internal lateinit var fixture: RunControlFixture
     private lateinit var original: ChatController
     protected lateinit var activity: MainActivity
+    internal open fun createFixture() = RunControlFixture(instrumentation.targetContext)
     override fun setUp() {
         super.setUp()
-        fixture = RunControlFixture(instrumentation.targetContext)
+        fixture = createFixture()
         awaitControl("controller ready") { fixture.controller.ready }
         mainThread {
             val app = instrumentation.targetContext.applicationContext as ChatApplication

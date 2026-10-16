@@ -74,6 +74,7 @@ class ActivityTest : WiredActivityTestCase() {
         fixture.application.getSharedPreferences("model-settings", 0).edit().remove("iv").commit()
         val text = "  保留草稿\n精确尾空格  "
         setDraft(text); node("chat-send").performClick()
+        awaitTextSendResult(activity)
         assertDraft(text); assertTrue(fixture.database.conversations().isEmpty()); assertEquals(0, fixture.opens.get())
         openModels()
         modelField("Base URL").assertEditableText(config.endpoint)
@@ -91,6 +92,7 @@ class ActivityTest : WiredActivityTestCase() {
         preferences.edit().remove("iv").commit()
         val unattached = " 未创建\n草稿  "
         setDraft(unattached); setSelection(2, 4); node("chat-send").performClick()
+        awaitTextSendResult(activity)
         assertDraft(unattached); assertSelection(2, 4); assertTrue(fixture.database.conversations().isEmpty())
         val a = fixture.database.create(); val b = fixture.database.create()
         mainThread { activity.select(a) }; setDraft("A草稿"); setSelection(1, 2)
@@ -114,6 +116,7 @@ class ActivityTest : WiredActivityTestCase() {
         val session = fixture.session("A回复", holdSeconds = 120)
         val beforeSendEditor = retainedControls(activity)
         node("chat-send").performClick(); assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+        awaitTextSendResult(activity)
         mainThread { beforeSendEditor.onTextChange("stale sent text"); beforeSendEditor.onSelectionChange(1, 1) }
         node("chat-draft").assertEditableText(""); assertSelection(0, 0)
         setDraft("A下一条")
@@ -121,6 +124,7 @@ class ActivityTest : WiredActivityTestCase() {
         setDraft(" B新稿\n "); setSelection(1, 2)
         node("chat-control").assertDoesNotExist()
         node("chat-send").performClick() // Existing send rejects another active owner; no new run.
+        awaitTextSendResult(activity)
         assertDraft(" B新稿\n "); assertEquals(1, fixture.opens.get())
         session.release.countDown(); awaitControl("A completed") { fixture.controller.active == null }
         ui.waitForIdle(); assertDraft(" B新稿\n "); assertSelection(1, 2)
@@ -160,8 +164,8 @@ class ActivityTest : WiredActivityTestCase() {
                 entered.countDown(); check(release.await(10, TimeUnit.SECONDS)); fixture.database.importBackup(backup); "完成"
             }) }
             assertTrue(entered.await(5, TimeUnit.SECONDS)); node("chat-draft").assertIsNotEnabled()
+            assertNull(fixture.controller.send(null, "busy attempt"))
             mainThread {
-                assertNull(fixture.controller.send(null, "busy attempt"))
                 try { activity.select(null); fail("busy selection must reject") } catch (_: IllegalStateException) {}
             }
             activity = recreateActivity(activity); node("chat-draft").assertIsNotEnabled()

@@ -7,6 +7,10 @@ import app.daiyu.android.assistants.*
 import app.daiyu.android.model.AssistantModelFactory
 import app.daiyu.android.backup.NeutralBackupService
 import app.daiyu.android.context.ContextService
+import app.daiyu.android.context.ContextPreparationCoordinator
+import app.daiyu.android.context.ContextPreparationCancellation
+import app.daiyu.android.context.DatabaseTransactions
+import app.daiyu.android.context.ProductionContextPreparation
 import app.daiyu.android.context.ContextRegistry
 import app.daiyu.android.context.ContextRegistryScope
 import app.daiyu.android.integration.tools.*
@@ -73,7 +77,29 @@ class ChatController internal constructor(private val application:Application,
     private val model:(ModelSettings)->ModelPort,
     private val imageModel: (ProviderSnapshot)->ModelPort = { ModelFactory.create(it) },
     private val assistantModel: ((ProviderSnapshot, AssistantRunContext)->ModelPort)? = null,
-    val assistantAssets: AssistantAssets = FileAssistantAssets(application)) {
+    val assistantAssets: AssistantAssets = FileAssistantAssets(application),
+    private val contextPreparationFactory: (android.content.Context, ContextService) -> ContextPreparationCoordinator =
+        ProductionContextPreparation::create) {
+    private val contextService by lazy { ContextService(application, database) }
+    private val contextPreparation by lazy { contextPreparationFactory(application, contextService) }
+
+    internal class TextSendTicket
+    internal data class TextSendOwner(val conversationId: ConversationId?, val editorGeneration: Long,
+        val draftRevision: Long)
+    internal data class TextSendState(val ticket: TextSendTicket, val owner: TextSendOwner,
+        val text: String, val result: TextSendResult? = null)
+    private var pendingTextState: TextSendState? = null
+    @Synchronized internal fun textSendState(): TextSendState? = pendingTextState
+    @Synchronized internal fun acknowledgeTextSend(ticket: TextSendTicket) {
+        if (pendingTextState?.ticket === ticket && pendingTextState?.result != null) pendingTextState = null
+    }
+    internal sealed interface TextSendResult {
+        val owner: TextSendOwner
+        data class Accepted(override val owner: TextSendOwner, val conversation: Conversation): TextSendResult
+        data class Rejected(override val owner: TextSendOwner): TextSendResult
+        /** Persistence did not return a confirmed receipt; retain the draft and do not auto-retry. */
+        data class Unknown(override val owner: TextSendOwner): TextSendResult
+    }
     constructor(application:Application):this(application,ConversationDatabase(application),ModelSettingsStore(application),application.getSharedPreferences("conversation-ui",0),{ModelFactory.create(it)},
         assistantModel=AssistantModelFactory::create)
     val assistantStore: SqliteAssistantStore by lazy { SqliteAssistantStore(database) }
@@ -86,15 +112,32 @@ class ChatController internal constructor(private val application:Application,
     private val reasoningListeners=mutableMapOf<(Message, ModelEvent)->Unit,Any>()
     private val runRevocationListeners=mutableSetOf<(Message)->Unit>()
     private var closed=false
-    private var preparing=false
-    private var preparingGlobalAssistantId:String?=null
-    // Call only after the idle gate; this reads the already initialized in-memory selection.
-    private fun reservePreparation() {
-        preparingGlobalAssistantId=assistantStore.selectedId.value
-        preparing=true
+    // The existing preparation lane is retained until the worker (and device cleanup) exits.
+    // Identity, not a Boolean reset, prevents an old completion from clearing a newer owner.
+    private class Preparation(val assistantId: String?, val textTicket: TextSendTicket? = null) {
+        val cancellation = ContextPreparationCancellation()
+        var revoked = false
+        var committing = false
+        var persistenceUnconfirmed = false
+    }
+    private var preparation: Preparation? = null
+    private val preparing: Boolean get() = preparation != null
+    // Call only after the idle gate; selection is already initialized in memory.
+    private fun reservePreparation(textTicket: TextSendTicket? = null): Preparation =
+        Preparation(assistantStore.selectedId.value, textTicket).also {
+        check(preparation == null)
+        preparation = it
+    }
+    private fun preparationCancelled(token: Preparation): Boolean = synchronized(this) {
+        closed || preparation !== token || token.revoked || token.cancellation.isCancelled
+    }
+    // Fence under the short monitor; transport cancellation callbacks must run OUTSIDE it.
+    private fun cancelPreparation() {
+        val token = synchronized(this) { preparation?.also { it.revoked = true } }
+        token?.cancellation?.cancel()
     }
     internal fun bindConversationAssistant(owner: ConversationId, expected: String?, replacement: String): Boolean {
-        synchronized(this) {
+        val token = synchronized(this) {
             if(!idleAvailable() || hasLiveChildTasks(owner)) return false
             reservePreparation()
         }
@@ -104,10 +147,11 @@ class ChatController internal constructor(private val application:Application,
                 notifyChanged()
             }
         } catch (_:Exception) {problem="助手绑定失败；原绑定和草稿保留";notifyChanged();false}
-        finally {finishPreparation()}
+        finally {finishPreparation(token)}
     }
     private var pendingImage:ImageSendHandle?=null
     private var pendingShizuku:ControllerShizukuPreparation?=null
+    private var pendingShizukuToken:Preparation?=null
     @Synchronized internal fun shizukuPreparation():ControllerShizukuPreparation? = pendingShizuku
     private val shizukuAccess by lazy { checkNotNull((application as? ChatApplication)?.shizuku) {
         "shizuku_application_host_required"
@@ -279,13 +323,14 @@ class ChatController internal constructor(private val application:Application,
         }}
     }
     internal fun sendWithChildren(conversation: Conversation, text: String): Conversation? {
-        synchronized(this) {
+        if(rejectSynchronousMainSend()) return null
+        val token = synchronized(this) {
             if (!idleAvailable() || text.isBlank()) return null
             reservePreparation()
         }
         return try {
-            sendPrepared(conversation, text, withChildren=true)
-        } finally { finishPreparation() }
+            sendPrepared(token, conversation, text, withChildren=true)
+        } finally {finishPreparation(token)}
     }
     @Synchronized internal fun childTasks(conversationId: ConversationId, limit: Int = 20): List<ChildTaskRecord> {
         check(!closed && ready && !recoveryFailed) { "child_tasks_unavailable" }
@@ -407,12 +452,61 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     fun send(conversation:Conversation?,text:String):Conversation? {
-        synchronized(this) {
+        if(rejectSynchronousMainSend()) return null
+        val token = synchronized(this) {
             if(!idleAvailable() || text.isBlank()) return null
-            // Reserve before I/O, but never keep the monitor across I/O or model factories.
+            // Legacy synchronous API; UI hosts should use sendText instead.
             reservePreparation()
         }
-        return try {sendPrepared(conversation,text)} finally {finishPreparation()}
+        return try {sendPrepared(token,conversation,text)} finally {finishPreparation(token)}
+    }
+    // Keep source compatibility for worker callers, never turn a legacy UI call into a
+    // blocking wait on summary/network I/O. Main must migrate to the owner-aware sendText API.
+    private fun rejectSynchronousMainSend(): Boolean {
+        if(Looper.myLooper()!=Looper.getMainLooper()) return false
+        synchronized(this) {
+            if(!idleAvailable()) return true
+            problem="同步发送不能在主线程准备上下文；请使用异步发送入口，草稿保留"
+        }
+        notifyChanged()
+        return true
+    }
+    /** Queue admission only. Completion is delivered on main, even if close wins after commit.
+     * Compare ALL owner fields before touching the editor. No callback clears a draft itself.
+     * The host must persist text before admission and freeze that revision until completion. */
+    internal fun sendText(conversation: Conversation?, editorGeneration: Long, draftRevision: Long,
+        text: String, ticket: TextSendTicket = TextSendTicket(), complete: (TextSendResult) -> Unit): Boolean {
+        val owner = TextSendOwner(conversation?.id, editorGeneration, draftRevision)
+        val token = synchronized(this) {
+            if(pendingTextState != null || !idleAvailable() || text.isBlank() || editorGeneration < 0 || draftRevision < 0) return false
+            reservePreparation(ticket).also { pendingTextState = TextSendState(ticket, owner, text) }
+        }
+        try { executor.execute {
+            val saved = try { sendPrepared(token,conversation,text,expectedDraftText=text) }
+                catch (_: Exception) { null }
+            val result = when {
+                saved != null -> TextSendResult.Accepted(owner,saved)
+                token.persistenceUnconfirmed -> TextSendResult.Unknown(owner)
+                else -> TextSendResult.Rejected(owner)
+            }
+            synchronized(this) {
+                if (pendingTextState?.ticket === ticket) pendingTextState = pendingTextState?.copy(result = result)
+            }
+            finishPreparation(token)
+            handler.post { try { complete(result) } catch (_: Exception) {} }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { if (pendingTextState?.ticket === ticket) pendingTextState = null }
+            finishPreparation(token); return false
+        }
+        return true
+    }
+    /** Cancellation is scoped to the original editor submission, never a later preparation. */
+    internal fun cancelTextSend(ticket: TextSendTicket): Boolean {
+        val token = synchronized(this) {
+            preparation?.takeIf { it.textTicket === ticket }?.also { it.revoked = true }
+        } ?: return false
+        token.cancellation.cancel()
+        return true
     }
     /** Optional entry point. Ordinary send()/sendImages() never grant Shizuku access.
      * Reservation performs no I/O and blocks other sends until rejected or submitted.
@@ -425,15 +519,18 @@ class ChatController internal constructor(private val application:Application,
         val timeout=ControllerShizukuPreparation.parseTimeout(timeoutInput) ?: return null
         val preview=runCatching {ControllerShizukuPreparation(conversation,text,uid,command,timeout)}.getOrNull()
             ?: return null
-        reservePreparation();pendingShizuku=preview;notifyChanged()
+        pendingShizukuToken=reservePreparation();pendingShizuku=preview;notifyChanged()
         return preview
     }
     internal fun rejectShizuku(preview:ControllerShizukuPreparation) {
-        val draft=synchronized(this) {
+        val (draft, token)=synchronized(this) {
             if(pendingShizuku!==preview) return
-            (!preview.isSubmitted()).also { if(it) preview.cancel() }
+            val token=checkNotNull(pendingShizukuToken)
+            token.revoked=true
+            (!preview.isSubmitted()) to token
         }
-        if(!draft) preview.cancel()
+        token.cancellation.cancel()
+        preview.cancel()
         // A submitted worker, possibly in connect(), retains ownership until its own cleanup.
         if(draft) finishShizukuPreparation(preview,installed=false)
     }
@@ -443,13 +540,14 @@ class ChatController internal constructor(private val application:Application,
      */
     internal fun confirmShizukuSend(preview:ControllerShizukuPreparation,
         complete:(Conversation?)->Unit):Boolean {
-        val authorization=synchronized(this) {
-            if(closed || pendingShizuku!==preview || preview.isSubmitted() || preview.isCancelled()) return false
-            preview.approve().also {notifyChanged()}
+        val (token, authorization)=synchronized(this) {
+            if(closed || pendingShizuku!==preview || pendingShizukuToken?.revoked!=false ||
+                preview.isSubmitted() || preview.isCancelled()) return false
+            checkNotNull(pendingShizukuToken) to preview.approve().also {notifyChanged()}
         }
         try {executor.execute {
             val saved=try {
-                if(preview.isCancelled()) null else sendPrepared(preview.conversation,preview.messageText,
+                if(preview.isCancelled()) null else sendPrepared(token,preview.conversation,preview.messageText,
                     shizukuPreparation=preview,shizukuAuthorization=authorization)
             } catch (_:Exception) {
                 synchronized(this) {problem="Shizuku 运行准备失败；未自动重发";notifyChanged()}
@@ -457,9 +555,7 @@ class ChatController internal constructor(private val application:Application,
             }
             val installed=synchronized(this) {resources?.initial?.runId==preview.runId}
             finishShizukuPreparation(preview,installed)
-            handler.post {
-                if(synchronized(this) {!closed}) try {complete(saved)} catch (_:Exception) {}
-            }
+            handler.post { try {complete(saved)} catch (_:Exception) {} }
         }} catch (_:java.util.concurrent.RejectedExecutionException) {
             preview.cancel();finishShizukuPreparation(preview,installed=false);return false
         }
@@ -468,8 +564,10 @@ class ChatController internal constructor(private val application:Application,
     private fun finishShizukuPreparation(preview:ControllerShizukuPreparation,installed:Boolean) {
         fun release() = synchronized(this) {
             if(pendingShizuku===preview) {
+                val token=checkNotNull(pendingShizukuToken)
                 pendingShizuku=null
-                finishPreparation()
+                pendingShizukuToken=null
+                finishPreparation(token)
             }
         }
         if(installed) release() else preview.closeWithResult { result ->
@@ -485,9 +583,9 @@ class ChatController internal constructor(private val application:Application,
             }
         }
     }
-    private fun finishPreparation() = synchronized(this) {
-        preparing=false
-        preparingGlobalAssistantId=null
+    private fun finishPreparation(token: Preparation) = synchronized(this) {
+        if(preparation !== token) return@synchronized
+        preparation=null
         pendingImage=null
         if(closed) closeStorageWhenIdle() else notifyChanged()
     }
@@ -502,12 +600,14 @@ class ChatController internal constructor(private val application:Application,
     internal fun sendImages(conversation:Conversation?, owner:ImageAttachmentOwner, draftRevision:Long,
         parts:List<ImageSendPart>, provider:ProviderSnapshot, expectedDraftText:String,
         complete:(ImageSendResult)->Unit):ImageSendHandle? {
-        val handle=ImageSendHandle(owner,draftRevision)
         val snapshot=parts.toList()
-        synchronized(this) {
+        val (token, handle)=synchronized(this) {
             if(!idleAvailable() || draftRevision<0 || snapshot.none {it is ImageSendPart.Image} ||
                 conversation!=null && conversation.id.value!=owner.conversationId) return null
-            reservePreparation();pendingImage=handle
+            val token=reservePreparation()
+            val handle=ImageSendHandle(owner,draftRevision) { token.cancellation.cancel() }
+            pendingImage=handle
+            token to handle
         }
         try { executor.execute {
             var attempt:ControllerImageAttempt?=null
@@ -515,28 +615,38 @@ class ChatController internal constructor(private val application:Application,
                 attempt=ControllerImageAttempt(owner,draftRevision,snapshot,provider,handle,imageJournal,expectedDraftText)
                 val replay=try {attempt.reserve(database)} catch (_:Exception) {attempt.unknown()}
                 if(replay!=null) replay else {
-                    sendPrepared(conversation,"",imageAttempt=attempt)
+                    sendPrepared(token,conversation,"",imageAttempt=attempt)
                     attempt.result ?: attempt.rejected("发送准备被拒绝；草稿保留，未发起请求")
                 }
             } catch (_:Exception) {
                 attempt?.result ?: attempt?.rejected("图片发送失败；草稿保留，未自动重发")
                     ?: ImageSendResult.Rejected(owner,draftRevision,"图片身份或存储无效；草稿保留")
             }
-            finishPreparation()
+            finishPreparation(token)
             // A receipt belongs to the submitted revision, not whichever editor is visible now.
             handler.post {try {complete(result)} catch (_:Exception) {}}
         } } catch (_:java.util.concurrent.RejectedExecutionException) {
-            finishPreparation();return null
+            finishPreparation(token);return null
         }
         return handle
     }
-    private fun sendPrepared(conversation:Conversation?,text:String,
+    private fun sendPrepared(token:Preparation, conversation:Conversation?,text:String,
         withChildren:Boolean = false, imageAttempt:ControllerImageAttempt?=null,
         shizukuPreparation:ControllerShizukuPreparation?=null,
-        shizukuAuthorization:app.daiyu.android.domain.tools.TaskAuthorization?=null):Conversation? {
+        shizukuAuthorization:app.daiyu.android.domain.tools.TaskAuthorization?=null,
+        expectedDraftText:String?=null):Conversation? {
         require(shizukuPreparation==null || (imageAttempt==null && shizukuAuthorization!=null))
+        if(preparationCancelled(token)) return null
+        // Freeze the persisted draft before any model/history preparation. Legacy send callers
+        // may send text different from their persisted draft; CAS still protects that exact draft.
+        val frozenDraft = try {
+            expectedDraftText ?: imageAttempt?.expectedDraftText ?: shizukuPreparation?.text ?:
+                if(conversation==null) database.draft() else database.readableDatabase.rawQuery(
+                    "SELECT draft FROM conversations WHERE id=?", arrayOf(conversation.id.value)
+                ).use { check(it.moveToFirst()); it.getString(0) }
+        } catch (_:Exception) { return null }
         val assistantContext = try {
-            val binding=if(conversation==null) synchronized(this) {preparingGlobalAssistantId}
+            val binding=if(conversation==null) token.assistantId
                 else database.assistantId(conversation.id)
             if(binding==null) throw MissingAssistantBindingException()
             // Freeze the profile before any memory/history I/O. capture consumes this exact
@@ -580,19 +690,21 @@ class ChatController internal constructor(private val application:Application,
             Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
         } catch (_:Exception) {problem="图片冻结失败或模型不支持；草稿保留，未发起网络请求";notifyChanged();return null}
         val assistant=Message(imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
-        val contextService = ContextService(application, database)
         val preparedContext = try {
-            if (conversation == null) null else contextService.prepareSend(conversationId,
-                pendingMessages=listOf(user), cancelled={ imageAttempt?.handle?.isCancelled()==true || shizukuPreparation?.isCancelled()==true })
+            // All sends, including the very first message, share the same frozen policy/budget.
+            val coordinator = contextPreparation
+            coordinator.prepare(coordinator.freeze(conversationId,listOf(user),token.cancellation))
         } catch (_: Exception) {
-            problem="读取历史失败；草稿保留，未发起网络请求";notifyChanged();return null
+            problem="上下文准备失败、超出预算或已取消；草稿保留，未发起网络请求";notifyChanged();return null
         }
-        val prior = preparedContext?.messages.orEmpty()
+        if(preparationCancelled(token)) return null
         val preparedModel=try {
             // Preflight the complete expanded history BEFORE DB acceptance or any model open.
             // Later opens re-authorize against persisted rows; candidate authorization ends here.
-            val plan=messageImages.freeze(prior+user,provider,user) {
-                imageAttempt?.handle?.isCancelled()==true || shizukuPreparation?.isCancelled()==true || synchronized(this) {closed}
+            val imageHistory=(contextService.displayHistory(conversationId) + preparedContext.messages)
+                .distinctBy { it.id }
+            val plan=messageImages.freeze(imageHistory,provider,user) {
+                preparationCancelled(token) || imageAttempt?.handle?.isCancelled()==true || shizukuPreparation?.isCancelled()==true
             }
             val delegate=assistantModel?.invoke(provider,assistantContext)
                 ?: if(plan.hasImages) imageModel(provider) else model(config)
@@ -600,13 +712,14 @@ class ChatController internal constructor(private val application:Application,
         } catch (_:Exception) {
             problem="图片历史读取、能力检查或模型初始化失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
+        if(preparationCancelled(token)) return null
         var preparingTools: RunCatalogTools? = null
         var preparingDevices: RunDeviceResources? = null
         var preparingChildren: RunChildModels? = null
         val prepared = try {
             val contextTools = ScopedContextTools.create(
                 ContextRegistry(contextService), ContextRegistryScope(conversationId),
-                run, preparedContext?.archiveId)
+                run, preparedContext.archiveId)
             val children = if (childModels.isEmpty()) null else RunChildModels(
                 ChildModelBatch(childModels, store = checkNotNull(runtimeStore).childTasks,
                     usageRecorder = checkNotNull(runtimeStore).childUsage), childModels.keys)
@@ -656,40 +769,39 @@ class ChatController internal constructor(private val application:Application,
             problem="运行准备失败；草稿保留，未发起网络请求";notifyChanged();return null
         }
         val (owned, tools) = prepared
+        // Only the in-memory admission gate is under the controller monitor. In particular,
+        // beginCommit must never encompass SQLite or provider/model I/O.
         val mayCommit=synchronized(this) {
-            !closed && shizukuPreparation?.isCancelled()!=true &&
-                (imageAttempt==null || imageAttempt.beginCommit())
+            if(preparation !== token || closed || token.revoked || token.committing ||
+                token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true ||
+                (imageAttempt!=null && !imageAttempt.beginCommit())) false
+            else { token.committing=true; true }
         }
         if (!mayCommit) { closeUnacceptedTools(tools); return null }
+        var databaseSendEntered=false
         val saved=try {
-            if(shizukuPreparation!=null) app.daiyu.android.context.DatabaseTransactions { database.writableDatabase }.run { db ->
-                // Approval/connect is asynchronous: never erase a newer persisted editor draft.
+            DatabaseTransactions { database.writableDatabase }.run { db ->
+                val ownerExists=db.rawQuery("SELECT 1 FROM conversations WHERE id=?",
+                    arrayOf(conversationId.value)).use {it.moveToFirst()}
+                check(ownerExists == (conversation != null)) { "send_owner_changed" }
                 val sameDraft=if(conversation==null) db.rawQuery(
-                    "SELECT 1 FROM composer WHERE id=1 AND draft=?", arrayOf(shizukuPreparation.text)
+                    "SELECT 1 FROM composer WHERE id=1 AND draft=?", arrayOf(frozenDraft)
                 ).use {it.moveToFirst()} else db.rawQuery(
                     "SELECT 1 FROM conversations WHERE id=? AND draft=?",
-                    arrayOf(conversationId.value,shizukuPreparation.text)
+                    arrayOf(conversationId.value,frozenDraft)
                 ).use {it.moveToFirst()}
-                if(!sameDraft) throw ControllerShizukuDraftChangedException()
+                check(sameDraft) { "send_draft_changed" }
+                check(contextService.matchesHistoryRevision(db,conversationId,preparedContext.expectedHistoryRevision)) {
+                    "send_history_changed"
+                }
+                databaseSendEntered=true
                 database.send(user,assistant,conversation==null,assistantContext.assistantId)
             }
-            else if(imageAttempt==null) database.send(user,assistant,conversation==null,assistantContext.assistantId)
-            else app.daiyu.android.context.DatabaseTransactions { database.writableDatabase }.run { db ->
-                // The text CAS and both message rows share one outer SQLite transaction.
-                // Do not clear a newer persisted editor draft while images are being frozen.
-                val sameDraft=if(conversation==null) db.rawQuery(
-                    "SELECT 1 FROM composer WHERE id=1 AND draft=?", arrayOf(imageAttempt.expectedDraftText)
-                ).use {it.moveToFirst()} else db.rawQuery(
-                    "SELECT 1 FROM conversations WHERE id=? AND draft=?",
-                    arrayOf(conversationId.value,imageAttempt.expectedDraftText)
-                ).use {it.moveToFirst()}
-                if(!sameDraft) throw ImageDraftChangedException()
-                database.send(user,assistant,conversation==null,assistantContext.assistantId)
-            }
-        } catch (failure:Exception) {
-            val draftChanged=failure is ImageDraftChangedException || failure is ControllerShizukuDraftChangedException
-            if(draftChanged) imageAttempt?.draftChanged() else imageAttempt?.unknown()
-            closeUnacceptedTools(tools);problem=if(draftChanged) "编辑草稿已变化；保留当前草稿，未发起请求"
+        } catch (_:Exception) {
+            token.persistenceUnconfirmed=databaseSendEntered
+            if(databaseSendEntered) imageAttempt?.unknown() else imageAttempt?.draftChanged()
+            closeUnacceptedTools(tools)
+            problem=if(!databaseSendEntered) "会话、原文或编辑草稿已变化；保留当前草稿，未发起请求"
                 else "发送保存结果未确认；保留草稿和图片，不自动重发"
             notifyChanged();return null
         }
@@ -697,11 +809,17 @@ class ChatController internal constructor(private val application:Application,
         imageAttempt?.accepted(saved)
         val lifetime=RunResources(assistant,owned,tools)
         val installed=synchronized(this) {
-            if(closed || shizukuPreparation?.isCancelled()==true) false else {
+            if(closed || token.revoked || token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true) false else {
                 if(imageAttempt!=null) imageProvider=provider
                 problem=null;active=assistant
                 runner=owned;runTools=tools;resources=lifetime
-                enqueueSlice(lifetime,allowStopped=true) {owned.startSlice(assistant,prior+user)}
+                enqueueSlice(lifetime,allowStopped=true) {
+                    if(synchronized(this) {closed || token.revoked || lifetime.fenced}) {
+                        val interrupted=assistant.copy(status=RunStatus.INTERRUPTED)
+                        database.save(interrupted)
+                        RunSlice.Completed(interrupted)
+                    } else owned.startSlice(assistant,preparedContext.messages)
+                }
                 notifyChanged();true
             }
         }
@@ -1082,6 +1200,8 @@ class ChatController internal constructor(private val application:Application,
         return true
     }
     fun stop() {
+        cancelPreparation()
+        synchronized(this) {pendingImage}?.cancel()
         synchronized(this) {pendingShizuku}?.let(::rejectShizuku)
         val lifetime=synchronized(this) {resources?.also {fenceRun(it)}} ?: return
         lifetime.runner.stop();lifetime.tools.revokeChildren();lifetime.tools.close()
@@ -1091,11 +1211,14 @@ class ChatController internal constructor(private val application:Application,
         val lifetime=synchronized(this) {
             if(!closed) {
                 closed=true;ready=false;dataBusy=false;active=null
-                pendingImage?.cancel();imageProvider=null
+                preparation?.revoked=true
+                imageProvider=null
                 configurationRestorePreview=null;dataNotice=null;listeners.clear();reasoningListeners.clear();childBindings.clear()
             }
             resources?.also {fenceRun(it)}.also {runRevocationListeners.clear()}
         }
+        cancelPreparation()
+        synchronized(this) {pendingImage}?.cancel()
         synchronized(this) {pendingShizuku}?.let(::rejectShizuku)
         lifetime?.runner?.stop();lifetime?.tools?.close()
         handler.post {synchronized(this) {

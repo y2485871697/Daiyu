@@ -41,9 +41,11 @@ class PetHost internal constructor(
     @Volatile private var overlayState = PetOverlayState.DISABLED
     @Volatile private var overlayError: String? = null
     private var foreground = false
+    private var activated = false
     private var mount: FrameLayout? = null
     private var container: FrameLayout? = null
     private var lifecycle: Lifecycle? = null
+    private var closeOnOwnerDestroy = true
     private val listeners = linkedSetOf<(PetHostSnapshot) -> Unit>()
     private val appOps = app.getSystemService(Context.APP_OPS_SERVICE) as AppOpsManager
     private val permissionListener = AppOpsManager.OnOpChangedListener { op, packageName ->
@@ -66,7 +68,7 @@ class PetHost internal constructor(
         when (event) {
             Lifecycle.Event.ON_START -> { foreground = true; refreshOverlayPermission() }
             Lifecycle.Event.ON_STOP -> { foreground = false; sync() }
-            Lifecycle.Event.ON_DESTROY -> close()
+            Lifecycle.Event.ON_DESTROY -> if (closeOnOwnerDestroy) close() else detach()
             else -> Unit
         }
     }
@@ -83,19 +85,32 @@ class PetHost internal constructor(
     /** Mount a transparent, touch-through in-app layer above the content. Global mode still uses WM.
      * ON_STOP hides in-app art; global art stays until disabled/revoked/ON_DESTROY/close.
      */
-    fun attach(container: FrameLayout, owner: LifecycleOwner) {
+    fun attach(container: FrameLayout, owner: LifecycleOwner) = attach(container, owner, true)
+
+    /** Application holder owns lifetime; the Activity owns only this detachable in-app layer. */
+    internal fun attach(container: FrameLayout, owner: LifecycleOwner, closeOnOwnerDestroy: Boolean) {
         mainThread(); check(!closed); check(mount == null) { "PetHost already attached" }
         check(owner.lifecycle.currentState != Lifecycle.State.DESTROYED)
+        this.closeOnOwnerDestroy = closeOnOwnerDestroy
         this.container = container
         mount = FrameLayout(container.context).also { layer ->
             layer.addView(PetViewFactory.createPet(container.context, controller, resources, false, onOpenSettings),
                 FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT))
             container.addView(layer, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
         }
+        activated = true
         lifecycle = owner.lifecycle
         foreground = owner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
         owner.lifecycle.addObserver(ownerObserver)
         sync()
+    }
+    /** Release Activity references without ending the application-owned runtime/global window. */
+    internal fun detach() {
+        mainThread()
+        lifecycle?.removeObserver(ownerObserver); lifecycle = null
+        foreground = false
+        mount?.let { container?.removeView(it) }; mount = null; container = null
+        closeOnOwnerDestroy = true
     }
     fun createSettingsView(context: Context): View {
         mainThread(); check(!closed)
@@ -143,8 +158,9 @@ class PetHost internal constructor(
     private fun sync() {
         mainThread(); if (closed) return
         val current = controller.snapshot()
-        // Until attach, even persisted enabled/global settings cannot create an unowned window.
-        if (mount != null) overlay.sync(current)
+        // Until first attach, persisted settings cannot create an unowned window. After an
+        // application-owned detach, still process permission revocation and global disable.
+        if (activated) overlay.sync(current)
         updateInAppVisibility(current)
         val next = snapshot()
         listeners.toList().forEach { runCatching { it(next) } }

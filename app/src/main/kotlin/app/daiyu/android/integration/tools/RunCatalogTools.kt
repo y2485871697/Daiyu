@@ -48,25 +48,36 @@ internal class RunCatalogTools(
     private val observeBrowserClose: (CatalogBrowserBinding, (RunCatalogCloseResult) -> Unit) -> Unit = ::observeBrowserDrain,
     // Same-package failure injection; production always invokes the resource's own stop action.
     private val closeResource: (AutoCloseable) -> Unit = { it.close() },
+    // Host factories run only after Runner supplies its actual opaque execution owner.
+    private val authorizationFactory: ((RunExecutionOwner) -> TaskAuthorization)? = null,
+    private val generationFactory: ((RunExecutionOwner, SessionCapabilities, TaskAuthorization) -> RunGenerationTools)? = null,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
-    // Only the legacy path without an approved external binding may use EMPTY authorization.
-    private val authorization = authorization ?: run {
+    // No temporary owner or authorization for generation. Legacy read-only callers retain
+    // their empty authorization; a host factory never falls back to one if binding fails.
+    private val initialAuthorization: TaskAuthorization? = authorization ?: if (authorizationFactory != null) {
+        terminal?.authorization // A pre-approved PTY already pins this exact object.
+    } else run {
         require(shizuku == null) { "shizuku_task_authorization_required" }
         require(terminal == null) { "terminal_task_authorization_required" }
         require(browser == null) { "browser_task_authorization_required" }
+        require(generationFactory == null) { "generation_task_authorization_required" }
         TaskAuthorization(capabilities.sessionId, runId.value)
     }
+    @Volatile private var boundAuthorization: TaskAuthorization? = null
     // No PTY is opened here, during binding, capture, advertising, or preparation.
     private val terminalLeaf = terminal?.let {
-        TerminalCatalogLeaf(it, capabilities, ledger, this.authorization, conversationId, runId)
+        TerminalCatalogLeaf(it, capabilities, ledger, checkNotNull(initialAuthorization), conversationId, runId)
     }
     init {
-        require(this.authorization.sessionId == capabilities.sessionId && this.authorization.taskId == runId.value) {
-            "tool_run_owner_mismatch"
-        }
+        initialAuthorization?.let(::validateAuthorization)
         require(shizuku == null || (shizuku.session.sessionId == capabilities.sessionId && shizuku.session.runId == runId.value)) {
             "shizuku_approval_run_mismatch"
+        }
+    }
+    private fun validateAuthorization(authorization: TaskAuthorization) {
+        require(authorization.sessionId == capabilities.sessionId && authorization.taskId == runId.value) {
+            "tool_run_owner_mismatch"
         }
     }
     private val closed = AtomicBoolean(false)
@@ -89,40 +100,66 @@ internal class RunCatalogTools(
     private val setupLock = Any()
 
     @Volatile private var background: RunChildTasks? = null
+    @Volatile private var generation: GenerationCatalogLeaf? = null
     private var browserTools: List<RegisteredTool> = emptyList()
     @Volatile private var owner: RunExecutionOwner? = null
+    private var binding = false
+
     override fun bindOwner(owner: RunExecutionOwner) {
-        var creating = false
+        synchronized(closeLock) {
+            require(owner.conversationId == conversationId && owner.runId == runId) { "tool_run_owner_mismatch" }
+            check(!closed.get()) { "run_closed" }
+            this.owner?.let {
+                check(it === owner) { "tool_owner_already_bound" }
+                return // The factories and leaf registration belong to exactly one binding.
+            }
+            check(!binding) { "tool_owner_binding_in_progress" }
+            binding = true
+            activeCreations++
+        }
+        var createdBackground: RunChildTasks? = null
+        var createdGeneration: GenerationCatalogLeaf? = null
         try {
-            synchronized(setupLock) {
-                require(owner.conversationId == conversationId && owner.runId == runId) { "tool_run_owner_mismatch" }
-                check(this.owner == null || this.owner === owner) { "tool_owner_already_bound" }
-                beginCreation(); creating = true
-                deviceResources?.bind(owner, authorization, capabilities)
-                children?.bind(owner, capabilities, authorization)
-                shizuku?.commands?.bind(owner, capabilities, authorization)
-                terminalLeaf?.bindOwner(owner)
-                browser?.let { browserTools = it.bindOwner(owner, authorization).tools }
-                val created = if (background == null) backgroundFactory?.let { factory ->
-                    createResource { factory(owner, capabilities, authorization) }
-                } else null
-                val publish = synchronized(closeLock) {
-                    if (closed.get()) false else {
-                        if (created != null) background = created
-                        this.owner = owner
-                        true
-                    }
-                }
-                if (!publish) {
-                    // Keep the creation counted until its late result has actually been sealed.
-                    stopResources(listOfNotNull(created))
-                    error("run_closed")
+            // No catalog lifecycle/setup lock is held across host code or external open.
+            val authorization = authorizationFactory?.invoke(owner) ?: checkNotNull(initialAuthorization)
+            validateAuthorization(authorization)
+            require(initialAuthorization == null || authorization === initialAuthorization) { "tool_run_authorization_mismatch" }
+            check(!closed.get()) { "run_closed" }
+            deviceResources?.bind(owner, authorization, capabilities)
+            children?.bind(owner, capabilities, authorization)
+            shizuku?.commands?.bind(owner, capabilities, authorization)
+            terminalLeaf?.bindOwner(owner)
+            val boundBrowserTools = browser?.bindOwner(owner, authorization)?.tools ?: emptyList()
+            createdBackground = backgroundFactory?.let { factory ->
+                createResource { factory(owner, capabilities, authorization) }
+            }
+            check(!closed.get()) { "run_closed" }
+            createdGeneration = generationFactory?.let { factory ->
+                createResource { GenerationCatalogLeaf(factory(owner, capabilities, authorization)) }
+            }
+            val publish = synchronized(closeLock) {
+                // Retain late resources even after close so their physical drain is observed.
+                background = createdBackground
+                generation = createdGeneration
+                if (closed.get()) false else {
+                    browserTools = boundBrowserTools
+                    boundAuthorization = authorization
+                    this.owner = owner // Publish only the complete binding.
+                    true
                 }
             }
+            check(publish) { "run_closed" }
         } catch (failure: Exception) {
-            if (creating) close()
+            synchronized(closeLock) {
+                background = createdBackground
+                generation = createdGeneration
+            }
+            close()
             throw failure
-        } finally { if (creating) endCreation() }
+        } finally {
+            synchronized(closeLock) { binding = false }
+            endCreation()
+        }
     }
 
     override val definitions: List<app.daiyu.android.domain.ToolDefinition> get() = initialized().definitions
@@ -134,6 +171,7 @@ internal class RunCatalogTools(
                 check(!closed.get()) { "run_closed" }
                 bridge?.let { return@synchronized it }
                 val bound = checkNotNull(owner) { "tool_owner_not_bound" }
+                val authorization = checkNotNull(boundAuthorization) { "tool_owner_not_bound" }
                 beginCreation(); creating = true
                 val scope = createResource { capture(capabilities, authorization) }
                 val publish = synchronized(closeLock) {
@@ -149,6 +187,7 @@ internal class RunCatalogTools(
                 shizuku?.let { registry.register(it.commands.tool()) }
                 terminalLeaf?.registeredTools?.forEach { registry.register(it) }
                 browserTools.forEach { registry.register(it) }
+                generation?.registeredTools?.forEach { registry.register(it) }
                 val result = CatalogModelBridge(registry.snapshot(), capabilities, ledger, conversationId, runId, authorization)
                 result.bindOwner(bound)
                 synchronized(closeLock) {
@@ -220,8 +259,9 @@ internal class RunCatalogTools(
     override fun close() {
         val resources = synchronized(closeLock) {
             closed.set(true)
+            generation?.revokeAdmission()
             // Fence the terminal before stopping other resources; join is observed separately.
-            claimStops(listOfNotNull(browser, terminalLeaf, shizuku, background, children, deviceResources, skills))
+            claimStops(listOfNotNull(browser, generation, terminalLeaf, shizuku, background, children, deviceResources, skills))
         }
         browser?.revoke()
         stopClaimed(resources)
@@ -269,11 +309,11 @@ internal class RunCatalogTools(
             // The terminal leaf's own dispatcher is not used by this catalog. Its worker join
             // must therefore start only after OUR final receipt persistence/observation settles.
             if (!closed.get() || !observingClose || observationsStarted || activeCreations != 0 || pendingStops != 0 ||
-                ((terminalLeaf != null || browser != null) && activeDispatches != 0)) false
+                ((terminalLeaf != null || browser != null || generation != null) && activeDispatches != 0)) false
             else {
                 observationsStarted = true
                 registeringObservations = true
-                remainingObservations = 5
+                remainingObservations = 6
                 true
             }
         }
@@ -303,6 +343,10 @@ internal class RunCatalogTools(
             observeResourceClose(browser) { done ->
                 if (browser == null) done(RunCatalogCloseResult.Drained)
                 else observeBrowserClose(browser, done)
+            }
+            observeResourceClose(generation) { done ->
+                if (generation == null) done(RunCatalogCloseResult.Drained)
+                else generation!!.observeClose(done)
             }
             synchronized(closeLock) { registeringObservations = false }
         }

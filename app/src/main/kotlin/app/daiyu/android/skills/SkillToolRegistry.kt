@@ -13,7 +13,7 @@ class SkillToolRegistry(
     private val builtin: SkillStore = SkillStore(File(context.filesDir, "agent-builtin-skills-v1")),
     user: SkillStore? = null
 ) {
-    private val userStore by lazy { user ?: SkillStore(File(context.filesDir, "runtime-skills-v1"), builtin.list().map { it.name }.toSet()) }
+    private val userStore by lazy { user ?: SkillStore(File(context.filesDir, "runtime-skills-v1"), builtin.installedNamesForRun()) }
     private val preferences = context.getSharedPreferences("runtime-skills-v1-settings", Context.MODE_PRIVATE)
     var enabled: Boolean
         get() = preferences.getBoolean("enabled", true)
@@ -48,30 +48,64 @@ class SkillToolRegistry(
         }
         return SkillSnapshot(Collections.unmodifiableList(ArrayList(skills)))
     }
-    /** Trusted worker entry; never accept these capabilities or authorization from tool JSON. */
+    /**
+     * Trusted worker entry; never accept capabilities, authorization or selection from tool JSON.
+     * null/omitted selection preserves the legacy enabled catalog (builtin precedence).
+     * An explicit empty set selects nothing. Exact builtin:name/user:name never fall back;
+     * a bare name selects only a unique installed origin, even if its namesake is disabled.
+     * Unknown, malformed or ambiguous tokens select nothing, never the full catalog.
+     * Selection is copied and resolved before reading bodies or charging capture bytes.
+     */
     fun captureForRun(
         capabilities: app.daiyu.android.domain.tools.SessionCapabilities,
-        authorization: app.daiyu.android.domain.tools.TaskAuthorization
+        authorization: app.daiyu.android.domain.tools.TaskAuthorization,
+        selection: Set<String>? = null
     ): SkillRunSession {
         require(capabilities.sessionId == authorization.sessionId) { "session_mismatch" }
+        val selected = selection?.toSet()
         val permissions = capabilities.enabled.intersect(SkillRunSession.READ_CAPABILITIES)
         if (!enabled || SkillRunSession.READ !in permissions) {
             return SkillRunSession.create(authorization, emptySet(), emptyList())
         }
-        val app = builtin.captureForRun(SkillRunSession.MAX_CAPTURE_BYTES)
+        val resolved = selected?.let(::resolveRunSelection)
+        val app = builtin.captureForRun(SkillRunSession.MAX_CAPTURE_BYTES, resolved?.first)
         val used = app.lastOrNull()?.capturedBytes ?: 0
         require(used <= SkillRunSession.MAX_CAPTURE_BYTES) { "snapshot_too_large" }
-        val remaining = SkillRunSession.MAX_CAPTURE_BYTES - used
-        val users = if (remaining == 0) {
-            require(userStore.list().none { it.enabled }) { "snapshot_too_large" }
-            emptyList()
-        } else {
-            userStore.captureForRun(remaining)
-        }
-        val names = app.map { it.name }.toSet()
+        // Omitted selection alone keeps legacy builtin precedence. Explicit IDs are exact,
+        // so selecting user:shared must not silently substitute or include builtin:shared.
+        val usersSelected = resolved?.second ?: (userStore.installedNamesForRun() - app.map { it.name }.toSet())
+        val users = if (usersSelected.isEmpty()) emptyList() else
+            userStore.captureForRun(SkillRunSession.MAX_CAPTURE_BYTES - used, usersSelected)
         val entries = app.map { SkillRunSession.Entry("builtin:${it.name}", it, builtin) } +
-            users.filter { it.name !in names }.map { SkillRunSession.Entry("user:${it.name}", it, userStore) }
+            users.map { SkillRunSession.Entry("user:${it.name}", it, userStore) }
         return SkillRunSession.create(authorization, permissions, entries)
+    }
+
+    private fun resolveRunSelection(selection: Set<String>): Pair<Set<String>, Set<String>> {
+        val app = mutableSetOf<String>()
+        val users = mutableSetOf<String>()
+        val bare = mutableSetOf<String>()
+        val namePattern = Regex("[a-z0-9]+(?:-[a-z0-9]+)*")
+        for (token in selection) {
+            val name = token.substringAfter(':')
+            if (name.length !in 1..64 || !name.matches(namePattern)) continue
+            when {
+                token.startsWith("builtin:") -> app.add(name)
+                token.startsWith("user:") -> users.add(name)
+                ':' !in token -> bare.add(name)
+            }
+        }
+        if (bare.isNotEmpty()) {
+            // Directory names, not enabled metadata, determine ambiguity. Disabling or
+            // damaging one namesake must never make a bare token authorize the other.
+            val appNames = builtin.installedNamesForRun()
+            val userNames = userStore.installedNamesForRun()
+            for (name in bare) {
+                if (name in appNames && name !in userNames) app.add(name)
+                if (name in userNames && name !in appNames) users.add(name)
+            }
+        }
+        return app to users
     }
     internal fun managementState(): SkillManagement.State {
         val global = enabled

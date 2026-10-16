@@ -48,28 +48,37 @@ class SkillStore(private val root: File, builtinNames: Set<String> = emptySet())
             EnabledSkill(it.name, it.description, it.revision, SkillFiles.text(bytes))
         }))
     }
-    internal fun captureForRun(maxBytes: Int): List<CapturedSkill> = access {
-        require(maxBytes in 1..SkillRunSession.MAX_CAPTURE_BYTES) { "invalid_limit" }
-        var total = 0L
-        val captured = listLocked().filter { it.enabled }.map { info ->
-            val directory = File(installed, info.name)
-            val metadata = JSONObject(SkillFiles.text(SkillFiles.readAtomic(SkillFiles.path(directory, ".skill.json"), MAX_FILE_BYTES)))
-            val files = metadata.getJSONObject("files")
-            require(files.length() in 1..MAX_FILES) { "invalid_skill_store" }
-            val hashes = files.keys().asSequence().associateWith { path ->
-                require(path.split('/').none { it.startsWith('.') }) { "unsafe_path" }
-                SkillFiles.path(directory, path)
-                files.getString(path).also { require(it.matches(Regex("[a-f0-9]{64}"))) { "invalid_skill_store" } }
+    /** Names only: resolving run selection must not parse an unselected skill's metadata/body. */
+    internal fun installedNamesForRun(): Set<String> = access {
+        installed.listFiles().orEmpty().filter { it.isDirectory }.map { it.name }.toSet()
+    }
+    internal fun captureForRun(maxBytes: Int, selectedNames: Set<String>? = null): List<CapturedSkill> {
+        // A previous store may exhaust the budget; only an empty/disabled selection can fit zero.
+        require(maxBytes in 0..SkillRunSession.MAX_CAPTURE_BYTES) { "invalid_limit" }
+        val selected = selectedNames?.toSet()
+        if (selected != null && selected.isEmpty()) return emptyList()
+        return access {
+            var total = 0L
+            val captured = listLocked(selected).filter { it.enabled }.map { info ->
+                val directory = File(installed, info.name)
+                val metadata = JSONObject(SkillFiles.text(SkillFiles.readAtomic(SkillFiles.path(directory, ".skill.json"), MAX_FILE_BYTES)))
+                val files = metadata.getJSONObject("files")
+                require(files.length() in 1..MAX_FILES) { "invalid_skill_store" }
+                val hashes = files.keys().asSequence().associateWith { path ->
+                    require(path.split('/').none { it.startsWith('.') }) { "unsafe_path" }
+                    SkillFiles.path(directory, path)
+                    files.getString(path).also { require(it.matches(Regex("[a-f0-9]{64}"))) { "invalid_skill_store" } }
+                }
+                val bytes = SkillFiles.read(SkillFiles.path(directory, "SKILL.md"), MAX_FILE_BYTES)
+                require(SkillFiles.hash(bytes) == hashes["SKILL.md"]) { "resource_changed" }
+                total += bytes.size + info.description.toByteArray(Charsets.UTF_8).size +
+                    hashes.entries.sumOf { it.key.toByteArray(Charsets.UTF_8).size.toLong() + it.value.length } + info.name.length + info.revision.length
+                require(total <= maxBytes) { "snapshot_too_large" }
+                CapturedSkill(info.name, info.description, info.revision, SkillFiles.text(bytes),
+                    Collections.unmodifiableMap(hashes), total.toInt())
             }
-            val bytes = SkillFiles.read(SkillFiles.path(directory, "SKILL.md"), MAX_FILE_BYTES)
-            require(SkillFiles.hash(bytes) == hashes["SKILL.md"]) { "resource_changed" }
-            total += bytes.size + info.description.toByteArray(Charsets.UTF_8).size +
-                hashes.entries.sumOf { it.key.toByteArray(Charsets.UTF_8).size.toLong() + it.value.length } + info.name.length + info.revision.length
-            require(total <= maxBytes) { "snapshot_too_large" }
-            CapturedSkill(info.name, info.description, info.revision, SkillFiles.text(bytes),
-                Collections.unmodifiableMap(hashes), total.toInt())
+            Collections.unmodifiableList(captured)
         }
-        Collections.unmodifiableList(captured)
     }
     internal fun readCapturedResource(name: String, path: String, revision: String, hash: String, maxBytes: Int): String {
         val text = readResource(name, path, revision, maxBytes)
@@ -213,9 +222,10 @@ class SkillStore(private val root: File, builtinNames: Set<String> = emptySet())
         require(bytes.size.toLong() + 1 <= MAX_FILE_BYTES) { "metadata_too_large" }
         return bytes
     }
-    private fun listLocked(): List<InstalledSkill> = installed.listFiles().orEmpty().filter { it.isDirectory }.map {
-        infoLocked(it.name) ?: error("invalid_skill_store")
-    }.sortedBy { it.name }.also { require(it.size <= MAX_SKILLS) { "too_many_skills" } }
+    private fun listLocked(selectedNames: Set<String>? = null): List<InstalledSkill> = installed.listFiles().orEmpty()
+        .filter { it.isDirectory && (selectedNames == null || it.name in selectedNames) }.map {
+            infoLocked(it.name) ?: error("invalid_skill_store")
+        }.sortedBy { it.name }.also { require(it.size <= MAX_SKILLS) { "too_many_skills" } }
     private fun infoLocked(name: String): InstalledSkill? {
         require(name.matches(Regex("[a-z0-9]+(?:-[a-z0-9]+)*")) && name.length <= 64) { "invalid_name" }
         val directory = SkillFiles.path(installed, name)

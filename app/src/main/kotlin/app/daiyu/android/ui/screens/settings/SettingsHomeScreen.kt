@@ -1,178 +1,190 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import app.daiyu.android.ui.FeatureCatalog
-import app.daiyu.android.ui.FeatureEntry
-import app.daiyu.android.ui.FeatureGroup
+import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.FeatureRoute
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
+import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/** Stable permission IDs: accessibility, root, notification_access, usage_access. */
-internal data class PermissionStateUi(
-    val id: String,
-    val statusText: String = "未检查",
-    val granted: Boolean = false,
-)
-
-private val permissionTitles = linkedMapOf(
-    "accessibility" to "无障碍",
-    "root" to "Root",
-    "notification_access" to "通知访问",
-    "usage_access" to "使用情况访问",
-)
-
-/** Explicit mapping: adding a catalog entry must also choose its settings icon. */
-internal val settingsEntryIcons = mapOf(
-    "P01" to DaiyuIcons.Assistant,
-    "P07" to DaiyuIcons.Menu,
-    "P22" to DaiyuIcons.Folder,
-    "P27" to DaiyuIcons.Search,
-    "P28" to DaiyuIcons.Search,
-    "P28.folders" to DaiyuIcons.Folder,
-    "R03" to DaiyuIcons.Model,
-    "P02" to DaiyuIcons.Lightning,
-    "P03" to DaiyuIcons.Gateway,
-    "P04" to DaiyuIcons.Context,
-    "P05" to DaiyuIcons.Balance,
-    "P06" to DaiyuIcons.Provider,
-    "P08" to DaiyuIcons.Title,
-    "P25" to DaiyuIcons.Vision,
-    "P26" to DaiyuIcons.Reconnect,
-    "P11" to DaiyuIcons.Send,
-    "P12" to DaiyuIcons.Pause,
-    "P13" to DaiyuIcons.Stop,
-    "P14" to DaiyuIcons.Steer,
-    "P17" to DaiyuIcons.Image,
-    "P18" to DaiyuIcons.Video,
-    "P19" to DaiyuIcons.Paint,
-    "P20" to DaiyuIcons.Movie,
-    "P09" to DaiyuIcons.Compress,
-    "P10" to DaiyuIcons.Context,
-    "P21" to DaiyuIcons.Chart,
-    "P39" to DaiyuIcons.Shield,
-    "P42" to DaiyuIcons.Compress,
-    "P43" to DaiyuIcons.Info,
-    "P15" to DaiyuIcons.SubAgent,
-    "P16" to DaiyuIcons.SubAgent,
-    "P23" to DaiyuIcons.Interactive,
-    "P32" to DaiyuIcons.Voice,
-    "P32.dictation" to DaiyuIcons.Voice,
-    "P38" to DaiyuIcons.Voice,
-    "P38.files" to DaiyuIcons.File,
-    "P33" to DaiyuIcons.Skills,
-    "P34" to DaiyuIcons.Browser,
-    "R06" to DaiyuIcons.Device,
-    "R07" to DaiyuIcons.Accessibility,
-    "R08" to DaiyuIcons.VirtualScreen,
-    "R09" to DaiyuIcons.Terminal,
-    "R12" to DaiyuIcons.Backup,
-    "P24" to DaiyuIcons.Pet,
-    "P29" to DaiyuIcons.AppIcon,
-    "P30" to DaiyuIcons.Palette,
-    "P31" to DaiyuIcons.Vibration,
-    "P35" to DaiyuIcons.Timestamp,
-    "P36" to DaiyuIcons.Refresh,
-    "P37" to DaiyuIcons.Tool,
-    "P40" to DaiyuIcons.Refresh,
-    "P41" to DaiyuIcons.Locate,
-)
-
-internal fun filterSettingsGroups(query: String, groups: List<FeatureGroup> = FeatureCatalog.groups): List<FeatureGroup> {
-    val term = query.trim()
-    if (term.isEmpty()) return groups
-    return groups.mapNotNull { group ->
-        val entries = group.entries.filter { it.title.contains(term, ignoreCase = true) }
-        group.copy(entries = entries).takeIf { entries.isNotEmpty() }
+@Composable
+internal fun SettingsIcon(icon: androidx.compose.ui.graphics.vector.ImageVector, emphasized: Boolean = false) {
+    val colors = MiuixTheme.colorScheme
+    Box(Modifier.size(38.dp).background(
+        if (emphasized) colors.primaryContainer else colors.surfaceVariant,
+        RoundedCornerShape(12.dp)), contentAlignment = Alignment.Center) {
+        DaiyuIcon(icon, contentDescription = null,
+            tint = if (emphasized) colors.primary else colors.onSurfaceSecondary, size = 20.dp)
     }
+}
+
+@Composable
+private fun SettingsSearch(query: String, onQueryChange: (String) -> Unit) {
+    val colors = MiuixTheme.colorScheme
+    Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth()
+        .background(colors.surfaceContainerHigh, RoundedCornerShape(18.dp))
+        .padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        DaiyuIcon(DaiyuIcons.Search, null, tint = colors.onSurfaceVariantSummary, size = 20.dp)
+        BasicTextField(value = query, onValueChange = onQueryChange, singleLine = true,
+            textStyle = MiuixTheme.textStyles.body1.copy(color = colors.onSurface, fontSize = 15.sp),
+            cursorBrush = SolidColor(colors.primary),
+            modifier = Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 16.dp)
+                .testTag("settings-search").semantics { contentDescription = "搜索设置" },
+            decorationBox = { editor ->
+                Box {
+                    if (query.isEmpty()) Text("搜索设置", color = colors.onSurfaceVariantSummary,
+                        style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp))
+                    editor()
+                }
+            })
+        if (query.isNotEmpty()) IconButton(onClick = { onQueryChange("") },
+            modifier = Modifier.size(48.dp).testTag("settings-search-clear")) {
+            DaiyuIcon(DaiyuIcons.Close, "清除搜索", tint = colors.onSurfaceVariantSummary, size = 18.dp)
+        }
+    }
+}
+
+@Composable
+private fun OriginalSettingsRow(entry: SettingsEntry, onClick: () -> Unit) {
+    SettingsRow(entry.title, onClick = onClick, leading = { SettingsIcon(entry.icon) })
 }
 
 @Composable
 internal fun DaiyuSettingsScreen(
     onBack: () -> Unit,
-    onOpenEntry: (FeatureEntry) -> Unit,
     onRoute: (FeatureRoute) -> Unit,
     modifier: Modifier = Modifier,
-    permissionStates: List<PermissionStateUi> = emptyList(),
-    onPermissionClick: (String) -> Unit = {},
     onOpenSubAgents: (() -> Unit)? = null,
     onOpenAssistants: (() -> Unit)? = null,
+    onOpenAppearance: (() -> Unit)? = null,
 ) {
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
+    var section by rememberSaveable { mutableStateOf<String?>(null) }
+    var relayExpanded by rememberSaveable { mutableStateOf(false) }
     val groups = remember(query) { filterSettingsGroups(query) }
-    val permissions = permissionStates.associateBy { it.id }
-    MiuixScaffoldPage(title = "设置", onBack = onBack, modifier = modifier) {
-        item(key = "settings_search") {
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                DaiyuIcon(DaiyuIcons.Search, contentDescription = null,
-                    modifier = Modifier.padding(horizontal = 12.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
-                TextField(
-                    value = query,
-                    onValueChange = { query = it },
-                    label = "搜索设置",
-                    useLabelAsPlaceholder = true,
-                    singleLine = true,
-                    modifier = Modifier.testTag("settings-search").weight(1f),
-                )
+    val listState = rememberLazyListState()
+    LaunchedEffect(section, query) { listState.scrollToItem(0) }
+    val focus = LocalFocusManager.current
+    val selectedGroup = SettingsCatalog.groups.find { it.id == section }
+    val pageTitle = selectedGroup?.title ?: "设置"
+    val back: () -> Unit = { if (section != null) section = null else onBack() }
+    BackHandler(enabled = section != null) { section = null }
+    val open: (SettingsEntry) -> Unit = { entry ->
+        focus.clearFocus()
+        when (entry.id) {
+            "assistants" -> onOpenAssistants?.invoke()
+            "subagents" -> onOpenSubAgents?.invoke()
+            "appearance" -> onOpenAppearance?.invoke()
+            "relay" -> {
+                if (section != "about") { section = "about"; relayExpanded = true }
+                else relayExpanded = !relayExpanded
             }
+            else -> entry.route?.let(onRoute)
         }
-        item(key = "settings_permissions") {
-            SettingsSectionTitle("能力与权限")
-            SettingsCard {
-                permissionTitles.forEach { (id, title) ->
-                    val state = permissions[id] ?: PermissionStateUi(id)
-                    val icon = when (id) {
-                        "accessibility" -> DaiyuIcons.Accessibility
-                        "root" -> DaiyuIcons.Shield
-                        "notification_access" -> DaiyuIcons.Bell
-                        else -> DaiyuIcons.Chart
-                    }
-                    SettingsRow(title = title, onClick = { onPermissionClick(id) }, leading = {
-                        DaiyuIcon(icon, contentDescription = null, tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
-                    }, trailing = {
-                        Text(state.statusText, style = MiuixTheme.textStyles.body2,
-                            color = if (state.granted) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                        DaiyuIcon(DaiyuIcons.ChevronRight, contentDescription = null,
-                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 20.dp)
-                    })
+    }
+    MiuixScaffoldPage(title = pageTitle, onBack = back, modifier = modifier, listState = listState) {
+        if (selectedGroup != null) {
+            item(key = "category_intro") { SettingsNote(selectedGroup.summary) }
+            item(key = "category_entries") {
+                SettingsCard {
+                    selectedGroup.entries.filter { relayExpanded || it.id !in setOf("relay_st", "relay_moyu") }
+                        .forEachIndexed { index, entry ->
+                            if (index > 0) SettingsDivider()
+                            OriginalSettingsRow(entry) { open(entry) }
+                        }
                 }
             }
-        }
-        if (groups.isEmpty()) {
-            item(key = "settings_empty") { SettingsNote("没有匹配的设置") }
-        }
-        groups.forEach { group ->
-            item(key = "settings_group_${group.id}") {
-                SettingsSectionTitle(group.title)
-                SettingsCard {
+        } else {
+            item(key = "settings_search") { SettingsSearch(query) { query = it } }
+            if (query.isNotBlank()) {
+                item(key = "search_heading") { SettingsSectionTitle("搜索结果 · ${groups.sumOf { it.entries.size }}") }
+                if (groups.isEmpty()) item(key = "settings_empty") {
+                    Column(Modifier.fillMaxWidth().padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SettingsIcon(DaiyuIcons.Search)
+                        Text("没有匹配的设置", color = MiuixTheme.colorScheme.onSurface,
+                            style = MiuixTheme.textStyles.body1.copy(fontWeight = FontWeight.Medium))
+                        Text("试试“模型”“语音”或“备份”", color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            style = MiuixTheme.textStyles.body2)
+                    }
+                }
+                groups.forEach { group ->
+                    item(key = "search_group_${group.id}") { SettingsSectionTitle(group.title) }
                     group.entries.forEach { entry ->
-                        SettingsRow(title = entry.title, onClick = {
-                            val route = entry.route
-                            when {
-                                entry.id == "P01" && onOpenAssistants != null -> onOpenAssistants()
-                                (entry.id == "P15" || entry.id == "P16") && onOpenSubAgents != null -> onOpenSubAgents()
-                                route != null -> onRoute(route)
-                                else -> onOpenEntry(entry)
+                        item(key = "search_entry_${entry.id}") {
+                            SettingsCard(Modifier.padding(bottom = 6.dp)) {
+                                OriginalSettingsRow(entry) { open(entry) }
                             }
-                        }, leading = {
-                            DaiyuIcon(settingsEntryIcons.getValue(entry.id), contentDescription = null,
-                                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
-                        })
+                        }
+                    }
+                }
+            } else {
+                item(key = "settings_common") {
+                    SettingsSectionTitle("常用设置")
+                    SettingsCard {
+                        listOf("providers", "appearance", "assistants", "subagents").forEachIndexed { index, id ->
+                            if (index > 0) SettingsDivider()
+                            val entry = SettingsCatalog.entry(id)
+                            SettingsRow(entry.title, onClick = { open(entry) },
+                                summary = when (id) {
+                                    "providers" -> "服务地址、模型与请求参数"
+                                    "appearance" -> "主题、界面缩放与显示"
+                                    "assistants" -> "身份、记忆与专属技能"
+                                    else -> "模型、预设与协作配置"
+                                }, leading = { SettingsIcon(entry.icon, emphasized = true) })
+                        }
+                    }
+                }
+                item(key = "settings_tools") {
+                    SettingsSectionTitle("工具与数据")
+                    SettingsCard {
+                        listOf("skills", "usage", "backup").forEachIndexed { index, id ->
+                            if (index > 0) SettingsDivider()
+                            val entry = SettingsCatalog.entry(id)
+                            SettingsRow(entry.title, onClick = { open(entry) },
+                                leading = { SettingsIcon(entry.icon) })
+                        }
+                    }
+                }
+                item(key = "settings_categories_heading") { SettingsSectionTitle("全部设置") }
+                item(key = "settings_categories") {
+                    SettingsCard {
+                        SettingsCatalog.groups.forEachIndexed { index, group ->
+                            if (index > 0) SettingsDivider()
+                            SettingsRow(group.title, summary = group.summary,
+                                onClick = { section = group.id }, leading = { SettingsIcon(group.entries.first().icon) })
+                        }
                     }
                 }
             }

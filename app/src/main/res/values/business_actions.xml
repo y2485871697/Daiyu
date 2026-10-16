@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="business_export_title">Export conversation</string>
+    <string name="business_export_conversation">Conversation</string>
+    <string name="business_export_scope">Export this conversation, messages and referenced attachments.</string>
+    <string name="business_export_excluded">Does not include other conversations, global settings, credentials or resumable tasks.</string>
+    <string name="business_export_choose_file">Choose export file</string>
+    <string name="business_export_writing">Writing the backup…</string>
+    <string name="business_export_waiting">Waiting for the file picker.</string>
+    <string name="business_export_unavailable">Export is available after the current operation finishes.</string>
+    <string name="business_task_records">Child task records</string>
+    <string name="business_task_refresh">Refresh</string>
+    <string name="business_task_scope">The latest 20 records for this conversation. Viewing does not resume or retry tasks.</string>
+    <string name="business_task_load_failed">Could not load records. You can refresh to try reading them again.</string>
+    <string name="business_task_loading">Loading records…</string>
+    <string name="business_task_empty">No child task records in this conversation.</string>
+    <string name="business_task_queued">Queued</string>
+    <string name="business_task_running">Running</string>
+    <string name="business_task_completed">Completed</string>
+    <string name="business_task_not_executed">Not executed</string>
+    <string name="business_task_unknown">Outcome unknown</string>
+    <string name="business_task_parent">Parent run: %1$s</string>
+    <string name="business_task_prompt">Task</string>
+    <string name="business_task_result">Result</string>
+    <string name="business_task_unknown_note">The request may have been sent. Viewing or refreshing will not resend it.</string>
+    <string name="business_task_expand">Expand</string>
+    <string name="business_task_collapse">Collapse</string>
+    <string name="business_task_stop">Request stop</string>
+</resources>

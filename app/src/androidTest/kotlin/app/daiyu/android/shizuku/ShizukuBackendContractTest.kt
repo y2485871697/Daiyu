@@ -8,6 +8,7 @@ import android.test.InstrumentationTestCase
 import app.daiyu.android.terminal.OperationJournal
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -21,10 +22,12 @@ class ShizukuBackendContractTest : InstrumentationTestCase() {
         assertFalse(type.declaredMethods.any { it.name == "connect" && it.parameterTypes.isEmpty() })
         assertFalse(type.declaredMethods.any { it.name == "connect\$default" })
     }
-    private class Endpoint : IShizukuExecutor.Stub() {
+    private open class Endpoint : IShizukuExecutor.Stub() {
         val executions = AtomicInteger()
         var malformed = false
         var crash = false
+        var malformedClose = false
+        val closeCalls = AtomicInteger()
         override fun attach(owner: IBinder, grant: String) = Bundle()
         override fun execute(service: String, grant: String, uid: Int, id: String, script: ByteArray, timeout: Long): Bundle {
             executions.incrementAndGet()
@@ -37,6 +40,10 @@ class ShizukuBackendContractTest : InstrumentationTestCase() {
             putInt("retained_bytes", offset); putBoolean("truncated", false); putBoolean("output_complete", true)
         }
         override fun cancel(service: String, grant: String, id: String) = Bundle().apply { putBoolean("requested", true) }
+        override fun closeExecution(service: String, grant: String) = Bundle().apply {
+            closeCalls.incrementAndGet()
+            if (!malformedClose) putBoolean("drained", true)
+        }
         override fun destroy() {}
     }
     private fun fixture(permission: () -> Boolean = { true }, test: (BinderShizukuBackend, Endpoint) -> Unit) {
@@ -103,4 +110,90 @@ class ShizukuBackendContractTest : InstrumentationTestCase() {
         try { service.attach(Binder(), "grant"); fail("app UID accepted as Shizuku") }
         catch (_: IllegalStateException) {} finally { service.destroy() }
     }
+    fun testRemoteDrainReceiptIsRequiredBeforeCleanupSuccess() = fixture { backend, remote ->
+        val done = CountDownLatch(1)
+        var result: ShizukuCloseResult? = null
+        backend.closeWithResult { result = it; done.countDown() }
+        assertTrue(done.await(5, TimeUnit.SECONDS))
+        assertEquals(ShizukuCloseResult.Drained, result)
+        assertEquals(1, remote.closeCalls.get())
+        assertTrue(backend.execute(ShizukuCommand("after-close", "x")) is ShizukuDispatch.NotExecuted)
+    }
+
+    fun testMalformedCleanupReceiptStaysUnknown() = fixture { backend, remote ->
+        remote.malformedClose = true
+        val done = CountDownLatch(1)
+        var result: ShizukuCloseResult? = null
+        backend.closeWithResult { result = it; done.countDown() }
+        assertTrue(done.await(5, TimeUnit.SECONDS))
+        assertTrue(result is ShizukuCloseResult.Unknown)
+        assertEquals(1, remote.closeCalls.get())
+    }
+
+    fun testRevokedPermissionDoesNotIssueCleanupRpcOrClaimDrain() = fixture({ false }) { backend, remote ->
+        val done = CountDownLatch(1)
+        var result: ShizukuCloseResult? = null
+        backend.closeWithResult { result = it; done.countDown() }
+        assertTrue(done.await(5, TimeUnit.SECONDS))
+        assertTrue(result is ShizukuCloseResult.Unknown)
+        assertEquals(0, remote.closeCalls.get())
+    }
+
+    fun testRemoteDrainDoesNotIgnoreLocalRpcStillInFlight() {
+        val executing = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val requestedClose = CountDownLatch(1)
+        val closed = CountDownLatch(1)
+        val directory = File(instrumentation.targetContext.cacheDir, "shizuku-close-${UUID.randomUUID()}")
+        val endpoint = object : Endpoint() {
+            override fun execute(service: String, grant: String, uid: Int, id: String, script: ByteArray, timeout: Long): Bundle {
+                executing.countDown()
+                while (release.count != 0L) {
+                    try { release.await(5, TimeUnit.SECONDS) } catch (_: InterruptedException) { /* Binder may ignore interruption. */ }
+                }
+                return super.execute(service, grant, uid, id, script, timeout)
+            }
+            override fun closeExecution(service: String, grant: String): Bundle {
+                requestedClose.countDown()
+                return super.closeExecution(service, grant)
+            }
+        }
+        val backend = BinderShizukuBackend(ShizukuIdentity(2000, "service", "grant"), endpoint,
+            OperationJournal(directory, "scope"), { true }, { true }, {})
+        var result: ShizukuCloseResult? = null
+        val caller = Thread { backend.execute(ShizukuCommand("held", "x")) }.apply { isDaemon = true }
+        try {
+            caller.start()
+            assertTrue(executing.await(5, TimeUnit.SECONDS))
+            backend.closeWithResult { result = it; closed.countDown() }
+            assertTrue(requestedClose.await(5, TimeUnit.SECONDS))
+            assertEquals(1L, closed.count)
+            release.countDown()
+            assertTrue(closed.await(5, TimeUnit.SECONDS))
+            assertEquals(ShizukuCloseResult.Drained, result)
+            caller.join(5000)
+            assertFalse(caller.isAlive)
+        } finally { release.countDown(); backend.close(); caller.join(5000); directory.deleteRecursively() }
+    }
+
+    fun testRealAndroidShellCleanupDrainsOwnedProcessAndIo() {
+        val engine = ShizukuCommandEngine()
+        try {
+            engine.submit("closing-shell", "printf ready; exec /system/bin/sleep 20".toByteArray(), 30000)
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (engine.page("closing-shell", 0, 16).bytes.isEmpty()) {
+                check(System.nanoTime() < deadline)
+                Thread.sleep(5)
+            }
+            engine.close()
+            val closeDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (!engine.isDrained()) {
+                check(System.nanoTime() < closeDeadline)
+                Thread.sleep(5)
+            }
+            assertTrue(engine.isDrained())
+            assertTrue(engine.page("closing-shell", 0, 16).outcome is ShizukuOutcome.Unknown)
+        } finally { engine.close() }
+    }
+
 }

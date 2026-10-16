@@ -2,6 +2,7 @@ package app.daiyu.android.shizuku
 
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Owns publication and close requests, not physical remote-cleanup confirmation. */
 internal class ShizukuConnectionLifecycle(private val release: () -> Unit) : AutoCloseable {
@@ -11,6 +12,8 @@ internal class ShizukuConnectionLifecycle(private val release: () -> Unit) : Aut
     private class Opening(val scope: String) : State { val done = CountDownLatch(1) }
     private class Open(val scope: String, val backend: ShizukuBackend) : State
     private val state = AtomicReference<State>(Empty)
+    private val released = AtomicBoolean(false)
+    private fun releaseOnce() { if (released.compareAndSet(false, true)) release() }
     val isOpen: Boolean get() = state.get() !== Closed
 
     fun open(scope: String, create: () -> ShizukuBackend): ShizukuBackend {
@@ -48,6 +51,9 @@ internal class ShizukuConnectionLifecycle(private val release: () -> Unit) : Aut
         val previous = state.getAndSet(Closed)
         if (previous === Closed) return
         if (previous is Opening) previous.done.countDown()
-        try { if (previous is Open) previous.backend.close() } finally { release() }
+        if (previous is Open) {
+            try { previous.backend.closeWithResult { releaseOnce() } }
+            catch (failure: Exception) { releaseOnce(); throw failure }
+        } else releaseOnce()
     }
 }

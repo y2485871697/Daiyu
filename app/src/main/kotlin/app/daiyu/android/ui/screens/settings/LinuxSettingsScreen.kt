@@ -31,7 +31,7 @@ import app.daiyu.android.ui.components.MiuixScaffoldPage
 /**
  * Parent allocates exactly one controller.enterPage() handle per route visit, outside composition.
  * Invalidate it at navigation commit, even if an outgoing transition keeps this page composed.
- * This page only edits the local approval catalog: no installation, selection or terminal launch.
+ * Installation and registration have separate explicit confirmations. No selection or terminal launch.
  */
 @Composable
 internal fun LinuxSettingsScreen(
@@ -41,24 +41,37 @@ internal fun LinuxSettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     val state by page.state.collectAsState()
+    val installState = controller.installation?.state?.collectAsState()?.value
     var draft by remember(page) { mutableStateOf(LinuxSettingsDraft()) }
     var removing by remember(page) { mutableStateOf<LinuxInstallation?>(null) }
+    var removalError by remember(page) { mutableStateOf<String?>(null) }
+    val remove: (LinuxGenerationRef) -> Boolean = { reference ->
+        page.remove(reference).also { accepted ->
+            removalError = if (accepted) null else "撤销请求未受理；尚未确认阻止新启动。请等待当前操作完成或重新进入页面后重试。"
+        }
+    }
     DisposableEffect(page) { onDispose { page.close() } }
     val leave: () -> Unit = { if (page.revoke()) onBack() }
     BackHandler(onBack = leave)
     val enabled = !state.busy && !state.revoked
     val hasPending = state.pendingApproval != null || state.pendingRemoval != null
-    val editEnabled = enabled && !hasPending
+    val editEnabled = enabled && !hasPending && controller.installation?.blocksManual != true
     val edit: (LinuxSettingsDraft) -> Unit = { next ->
         if (page.discardPreview()) draft = next
     }
 
     MiuixScaffoldPage(title = "Linux 本地配置", onBack = leave, modifier = modifier) {
+        installState?.let { installation ->
+            item(key = "linux_install") {
+                LinuxInstallPanel(installation, page, enabled && !hasPending && state.preview == null)
+            }
+        }
         item(key = "linux_scope") {
-            SettingsNote("仅登记已经安装的本地文件，不下载、不安装、不执行。批准表示你接受这些路径、期望摘要和共享映射，不表示来自可信发行方。请从独立可信渠道取得期望摘要；本页不会扫描文件生成摘要或证明 rootfs 来源。")
+            SettingsNote("下方手工配置仅登记已有本地文件。上方安装只使用固定目录条目及随 APK 安装的 helper，不接受任意 URL。下载安装并不等于批准注册。手工批准表示接受路径、期望摘要和共享映射，不表示来源认证；请从独立可信渠道取得期望摘要。")
             SettingsNote("新增批准仅在下次应用进程启动生效。撤销立即阻止该配置的新启动，但不终止已有会话、不释放其资源租约、不清理 UNKNOWN、不删除安装文件。")
             if (state.busy) SettingsNote("正在工作线程读取、冻结或验证配置…")
             state.notice?.let { SettingsNote(it, error = state.error) }
+            removalError?.let { SettingsNote(it, error = true) }
         }
         item(key = "linux_form") {
             SettingsSectionTitle("完整本地配置（共享目录默认空）")
@@ -114,7 +127,7 @@ internal fun LinuxSettingsScreen(
                 SettingsSectionTitle("待确认持久化的撤销")
                 SettingsNote("环境 ID：${reference.environmentId}；代次：${reference.generation}。即使活动列表中已无此项，也未确认撤销已持久化；本进程拒绝新启动不会回退。", error = true)
                 TextButton(enabled = enabled, modifier = Modifier.testTag("linux-retry-revoke"),
-                    onClick = { page.remove(reference) }) { Text("重试确认同一代次的撤销") }
+                    onClick = { remove(reference) }) { Text("重试确认同一代次的撤销") }
             }
         }
         item(key = "linux_catalog_header") {
@@ -141,13 +154,72 @@ internal fun LinuxSettingsScreen(
             Column(Modifier.verticalScroll(rememberScrollState())) {
                 Text("会立即阻止新启动，并保存撤销记录。不会杀死现有进程、释放 UNKNOWN 租约、删除文件或切换其他发行版。")
                 LinuxSettingsConfiguration(entry)
+                removalError?.let { Text(it) }
             }
         }, confirmButton = {
             TextButton(enabled = enabled && !hasPending, onClick = {
-                page.remove(LinuxGenerationRef(entry.environmentId, entry.generation))
-                removing = null
+                if (remove(LinuxGenerationRef(entry.environmentId, entry.generation))) removing = null
             }) { Text("确认撤销此代次") }
         }, dismissButton = { TextButton(onClick = { removing = null }) { Text("取消") } })
+    }
+}
+
+@Composable
+private fun LinuxInstallPanel(
+    state: app.daiyu.android.terminal.install.LinuxInstallState,
+    page: LinuxSettingsPageOwner,
+    enabled: Boolean,
+) {
+    SettingsSectionTitle("固定发行版安装（不自动注册）")
+    SettingsNote("本批预编译 PRoot 仅支持 Android API 34+ 的 arm64 / x86_64 实际 64 位进程。API 26–33 明确不可用；不是已验证的运行支持。无运行时 helper 下载、不跟随 HTTP 重定向、不隐式挂载共享目录。下载后的 rootfs 会执行一次隔离 PTY 的 id -u 探测。")
+    state.notice?.let { SettingsNote(it, error = state.unknown || state.registrationPending || state.recoveryBlocked) }
+    state.unavailableReason?.let { SettingsNote("安装不可用 (Unavailable)：$it", error = true) }
+    val idle = enabled && !state.busy && !state.unknown && !state.recoveryBlocked && state.unavailableReason == null
+    if (state.recoveryBlocked) {
+        SettingsNote("原请求恢复未通过验证，禁止生成新 UUID 绕过。不会自动下载、重放探针、清理 UNKNOWN 锁或更换原 helper。", error = true)
+        TextButton(enabled = enabled && !state.busy && state.unavailableReason == null,
+            onClick = { page.recoverInstall() }) { Text("仅重新读取并验证原安装请求（无授权）") }
+    }
+    if (!state.recoveryBlocked && (state.prepared == null || state.registered)) {
+        Column(Modifier.padding(horizontal = 16.dp)) {
+            listOf("alpine" to "primary", "alpine" to "aliyun", "debian" to "primary", "debian" to "gh-proxy").forEach { (distribution, mirror) ->
+                TextButton(enabled = idle, onClick = { page.prepareInstall(distribution, mirror) }) {
+                    Text("预览 $distribution / $mirror（不下载）")
+                }
+            }
+            Text("GitHub 等来源若返回重定向将失败关闭；可显式选择其他固定镜像，不自动切换。")
+        }
+    }
+    state.prepared?.let { prepared ->
+        SettingsNote("条目：${prepared.artifact.id}\n版本：${prepared.artifact.version}\nABI：${prepared.artifact.abi}\n归档：${prepared.artifact.archive}\n大小：${prepared.artifact.compressedBytes} bytes\n归档 SHA-256：${prepared.artifact.sha256}\n镜像：${prepared.mirror.id}\nURL：${prepared.mirror.uri}")
+        LinuxSettingsConfiguration(prepared.installation)
+        if (state.receipt == null && !state.registered) {
+            TextButton(enabled = idle, modifier = Modifier.testTag("linux-install-confirm"),
+                onClick = { page.install(prepared) }) { Text("确认以上条目：下载、安装并探测（不批准注册）") }
+            TextButton(enabled = idle, onClick = { page.discardInstall() }) { Text("放弃此下载预览") }
+        }
+        if (state.receipt?.directorySyncConfirmed == false) {
+            TextButton(enabled = idle, modifier = Modifier.testTag("linux-install-durability"),
+                onClick = { page.confirmPublishedDurability(prepared) }) { Text("显式重试：确认同一发布的持久化") }
+        }
+    }
+    if (state.busy) {
+        TextButton(enabled = true, modifier = Modifier.testTag("linux-install-cancel"),
+            onClick = { page.cancelInstall() }) { Text("取消请求（阻止排队注册；已开始写入仍等待回执）") }
+    }
+    if (state.receipt?.directorySyncConfirmed == true && state.registration == null && !state.registered) {
+        TextButton(enabled = idle, onClick = { page.prepareInstalledRegistration() }) {
+            Text("重试准备注册冻结预览（不批准）")
+        }
+    }
+    state.registration?.takeIf { !state.registered && state.receipt?.directorySyncConfirmed == true }?.let { approval ->
+        SettingsSectionTitle("独立的完整注册批准")
+        SettingsNote("下载安装授权不包含注册授权。以下为固定的注册对象，可能使用独立的目录代次；重试时绝不重新生成。批准只供下次进程启动，不热换当前终端。")
+        LinuxSettingsConfiguration(approval.installation)
+        TextButton(enabled = idle, modifier = Modifier.testTag("linux-install-register"),
+            onClick = { page.approveInstalled(approval) }) {
+            Text(if (state.registrationPending) "重试批准原冻结配置并确认持久化" else "另行明确批准以上完整配置并注册")
+        }
     }
 }
 

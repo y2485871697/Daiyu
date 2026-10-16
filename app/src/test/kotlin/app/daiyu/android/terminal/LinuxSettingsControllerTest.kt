@@ -19,6 +19,11 @@ class LinuxSettingsControllerTest : TestCase() {
     private fun ref(value: LinuxInstallation) = LinuxGenerationRef(value.environmentId, value.generation)
 
     private class Catalog : LinuxSettingsCatalogAccess {
+        override suspend fun registrationRecorded(approval: FrozenLinuxApproval) = false
+        override suspend fun approveInstallation(approval: FrozenLinuxApproval, admit: () -> Boolean): List<LinuxInstallation> {
+            check(admit()) { "linux_catalog_admission_revoked" }
+            return approve(approval)
+        }
         var entries = emptyList<LinuxInstallation>()
         var reads = 0
         var freezes = 0

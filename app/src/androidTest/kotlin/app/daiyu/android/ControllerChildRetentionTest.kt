@@ -179,6 +179,28 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
         try { fixtures.forEach { it.dispose() } } finally { super.tearDown() }
     }
 
+    fun testControllerPauseAndResumeKeepTheOriginalLiveChildAndRejectWrongOwner() {
+        val f = fresh()
+        send(f)
+        assertTrue(f.childEntered.await(5, TimeUnit.SECONDS))
+        awaitChange(f, "parent completed") { f.controller.active == null }
+        val record = f.controller.childTasks(f.conversation.id).single()
+        val wrong = record.copy(owner = record.owner.copy(conversationId = "different"))
+        assertEquals(app.daiyu.android.domain.delegation.ChildTaskControlReceipt.STALE, f.controller.resumeChildTask(wrong))
+        assertEquals(app.daiyu.android.domain.delegation.ChildTaskControlReceipt.PENDING, f.controller.pauseChildTask(record))
+        assertEquals(app.daiyu.android.domain.delegation.ChildTaskPauseState.PENDING,
+            f.controller.liveChildTasks(f.conversation.id).single().pauseState)
+        assertTrue(f.controller.liveChildTasks(ConversationId("different")).isEmpty())
+        assertEquals(app.daiyu.android.domain.delegation.ChildTaskControlReceipt.RESUMED, f.controller.resumeChildTask(record))
+        assertEquals(app.daiyu.android.domain.delegation.ChildTaskPauseState.ACTIVE,
+            f.controller.liveChildTasks(f.conversation.id).single().pauseState)
+        assertEquals(1, f.childOpens.get())
+        assertEquals(ChildTaskStop.REQUESTED, f.controller.stopChildTask(record))
+        assertEquals(app.daiyu.android.domain.delegation.ChildTaskControlReceipt.STALE, f.controller.resumeChildTask(record))
+        releaseChild(f)
+        awaitChange(f, "stopped child drained") { !f.controller.hasLiveChildTasks() }
+    }
+
     fun testUnusedChildBindingsAreReleasedAcrossNormalParents() {
         val f = fresh(submit = false)
         repeat(4) {

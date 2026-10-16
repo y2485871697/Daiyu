@@ -418,6 +418,9 @@ class MainActivity : ComponentActivity() {
                     }
                     "child-tasks" -> taskRecordsConversationId?.let { id ->
                         ChildTaskRecordsScreen(id, load = { target -> controller.childTasks(ConversationId(target)) },
+                            loadLive = { target -> controller.liveChildTasks(ConversationId(target)) },
+                            onPause = { record -> controller.pauseChildTask(record) },
+                            onResume = { record -> controller.resumeChildTask(record) },
                             onStop = { record -> controller.stopChildTask(record) },
                             onBack = { returnToChat() })
                     }

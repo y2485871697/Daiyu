@@ -223,7 +223,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         val receipt = synchronized(gate) {
             val task = tasks[owner.childRunId]?.takeIf { it.binding === binding && it.initial.owner == owner }
                 ?: return ChildTaskControlReceipt.STALE
-            if (closed || task.stopRequested || task.record.status !in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING))
+            if (closed || task.stopRequested || task.journalUnconfirmed || task.record.status !in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING))
                 return ChildTaskControlReceipt.STALE
             if (resume) task.pause.resume() else task.pause.pause()
         }

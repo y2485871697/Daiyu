@@ -629,6 +629,25 @@ class ChatController internal constructor(private val application:Application,
         }
         return tasks?.stop(record.owner) ?: app.daiyu.android.domain.delegation.ChildTaskStop.NOT_FOUND
     }
+    internal fun liveChildTasks(conversationId: ConversationId): List<app.daiyu.android.domain.delegation.RetainedChildTask> {
+        val retained = synchronized(this) {
+            check(!closed && ready && !recoveryFailed) { "child_tasks_unavailable" }
+            backgroundRuns.values.toList()
+        }
+        return retained.flatMap { it.snapshots() }.filter { it.record.owner.conversationId == conversationId.value }
+    }
+    internal fun pauseChildTask(record: ChildTaskRecord): app.daiyu.android.domain.delegation.ChildTaskControlReceipt {
+        val retained = synchronized(this) {
+            if (closed || !ready || recoveryFailed) null else backgroundRuns[RunId(record.owner.parentRunId)]
+        }
+        return retained?.pause(record.owner) ?: app.daiyu.android.domain.delegation.ChildTaskControlReceipt.STALE
+    }
+    internal fun resumeChildTask(record: ChildTaskRecord): app.daiyu.android.domain.delegation.ChildTaskControlReceipt {
+        val retained = synchronized(this) {
+            if (closed || !ready || recoveryFailed) null else backgroundRuns[RunId(record.owner.parentRunId)]
+        }
+        return retained?.resume(record.owner) ?: app.daiyu.android.domain.delegation.ChildTaskControlReceipt.STALE
+    }
     // Only the supervisor knows when admission is sealed and every actual transport has exited.
     // Terminal history, cancellation requests, and an empty snapshot are not release boundaries.
     private fun pruneBackgroundRuns() {

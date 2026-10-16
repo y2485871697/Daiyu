@@ -53,6 +53,8 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
     /** Safe host-map eviction boundary; neither a stop request nor a terminal journal row is enough. */
     fun isReleased(): Boolean = supervisor.isReleased(binding)
     fun stop(owner: app.daiyu.android.domain.delegation.ChildRunOwner) = supervisor.stop(binding, owner)
+    fun pause(owner: app.daiyu.android.domain.delegation.ChildRunOwner) = supervisor.pause(binding, owner)
+    fun resume(owner: app.daiyu.android.domain.delegation.ChildRunOwner) = supervisor.resume(binding, owner)
     fun revoke() = supervisor.revoke(binding)
     override fun close() = supervisor.finishParent(binding)
 

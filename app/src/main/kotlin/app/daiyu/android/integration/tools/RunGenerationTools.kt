@@ -80,6 +80,9 @@ internal class RunGenerationTools(
     private val attemptStoreFactory: (GenerationAttemptBinding) -> GenerationAttemptStore = {
         SQLiteGenerationAttemptStore(database, it)
     },
+    // Production parent supplies Resources::createFence so readers share the owner gate.
+    private val fenceFactory: (GenerationAssetOwner, (GenerationAssetOwner) -> Boolean) -> GenerationAssetFence =
+        { assetOwner, validator -> GenerationAssetFence(assetOwner, validator) },
 ) : AutoCloseable {
     init {
         require(accountScope.isNotBlank() && accountScope.length <= 200)
@@ -142,7 +145,8 @@ internal class RunGenerationTools(
             context.owner.assistantMessageId.value, context.owner.runId.value,
             context.invocation.id.value, context.invocation.name)
         val assetOwner = GenerationAssetOwner(accountScope, binding)
-        val fence = GenerationAssetFence(assetOwner, validateOwner)
+        val fence = fenceFactory(assetOwner, validateOwner)
+        require(fence.owner.fields() == assetOwner.fields()) { "generation_fence_owner_mismatch" }
         synchronized(lock) {
             if (closed) return ExecutionReceipt.NotExecuted("generation_closed")
             fences.add(fence)
@@ -221,12 +225,13 @@ internal class RunGenerationTools(
     /** Private host state: may contain signed provider URLs in Submission. Never log/export raw. */
     fun outcomes(): List<GenerationRunOutcome> = synchronized(lock) { outcomes.values.toList() }
 
-    /** Synchronous admission barrier only: no fence, validator, transport, SQL or wait.
-     * Safe inside the parent's short control-lock section; already admitted workers may still run.
+    /** Synchronous local admission seal: no validator, transport, SQL or publication wait.
+     * Never revokes the persisted owner's shared gate or accepted history readers.
      * Parent MUST then schedule close() on its cleanup worker and observe awaitClose().
      */
     fun revokeAdmission() {
-        synchronized(lock) { closed = true }
+        val captured = synchronized(lock) { closed = true; fences.toList() }
+        captured.forEach { it.revokeAdmission() }
     }
 
     /** Seal admission, revoke EVERY publication fence, THEN abort transport; no external call under lock.
@@ -234,6 +239,7 @@ internal class RunGenerationTools(
      * Admission sealing is NOT cleanup: a preceding revokeAdmission() must not skip this work.
      */
     override fun close() {
+        revokeAdmission()
         val captured = synchronized(lock) {
             closed = true
             if (closeStarted) return

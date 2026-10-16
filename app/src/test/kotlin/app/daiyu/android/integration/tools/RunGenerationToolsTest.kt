@@ -56,6 +56,8 @@ class RunGenerationToolsTest {
         val accountScope: String = "account",
         ledger: ToolLedger = ToolLedger(InMemoryToolLedgerStore()),
         validate: (GenerationAssetOwner) -> Boolean = { true },
+        fenceFactory: (GenerationAssetOwner, (GenerationAssetOwner) -> Boolean) -> GenerationAssetFence =
+            { assetOwner, validator -> GenerationAssetFence(assetOwner, validator) },
     ) : AutoCloseable {
         val attempts = Attempts()
         val root = Files.createTempDirectory("generation-adapter").toFile()
@@ -74,7 +76,7 @@ class RunGenerationToolsTest {
             { it.accountScope == accountScope && it.binding.conversationId == token.conversationId.value &&
                 it.binding.runId == token.runId.value && it.binding.assistantMessageId == token.assistantMessageId.value && validate(it) },
             GenerationRunApproval { reviews++; review(it) }, GenerationDownloadAuthorization { _, _ -> false },
-            http, { attempts })
+            http, { attempts }, fenceFactory)
         val dispatcher = ToolDispatcher(ToolRegistry().apply { leaf.registeredTools.forEach { register(it) } }.snapshot(),
             SessionCapabilities("session", setOf(RunGenerationTools.CAPABILITY)), ledger)
         fun dispatch(id: String = "original-call", otherOwner: RunExecutionOwner = token): DispatchOutcome =
@@ -150,6 +152,24 @@ class RunGenerationToolsTest {
         Fixture(config(), allowed = false).use {
             assertTrue(it.dispatch() is DispatchOutcome.NotExecuted)
             assertEquals(0, it.reviews); assertTrue(it.attempts.rows.isEmpty())
+        }
+    }
+
+    @Test fun parentFactorySuppliesWriterFenceAndLeafCloseDoesNotRevokeSharedOwner() {
+        val gate = GenerationAssetPublicationGate()
+        var captured: GenerationAssetFence? = null
+        Fixture(config(invalidLast = true), fenceFactory = { assetOwner, validator ->
+            GenerationAssetFence(assetOwner, gate, validator).also { captured = it }
+        }).use { fixture ->
+            assertTrue(fixture.dispatch() is DispatchOutcome.NotExecuted)
+            val writer = checkNotNull(captured)
+            assertSame(gate, writer.publicationGate)
+            val history = GenerationAssetFence(writer.owner, gate) { true }
+            fixture.leaf.revokeAdmission()
+            fixture.leaf.close()
+            try { writer.admit { fail("closed writer admitted") }; fail("writer was not revoked") }
+            catch (failure: GenerationAssetException) { assertEquals(GenerationAssetFailure.CANCELLED, failure.failure) }
+            assertTrue(history.admit { true })
         }
     }
 

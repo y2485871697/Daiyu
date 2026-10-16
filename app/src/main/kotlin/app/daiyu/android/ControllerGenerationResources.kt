@@ -6,6 +6,7 @@ import app.daiyu.android.integration.tools.GenerationDownloadAuthorization
 import app.daiyu.android.integration.tools.RunGenerationTools
 import app.daiyu.android.media.GenerationAssetFence
 import app.daiyu.android.media.GenerationAssetOwner
+import app.daiyu.android.media.GenerationAssetPublicationGate
 import app.daiyu.android.media.MessageGenerationAssets
 import app.daiyu.android.model.generation.GenerationAttempt
 import app.daiyu.android.model.generation.GenerationKind
@@ -19,6 +20,9 @@ import java.io.FileInputStream
 /** The database provider must capture the account's actual application DB, NOT resolve whichever
  * account is active later. The existing schema has no per-message account column: a shared
  * multi-account DB is unsupported. No database is opened, migrated or closed by this helper.
+ * Retain ONE instance in the actual account/DB owner across sessions and history readers; creating
+ * per-reader/per-session instances would split the owner publication barrier. Ordinary Stop must
+ * retain it. Destructive owner changes require seal*PublicationAdmission -> worker revoke -> DB.
  */
 internal class ControllerGenerationResources(
     val accountScope: String,
@@ -28,6 +32,63 @@ internal class ControllerGenerationResources(
 ) {
     init { require(accountScope.isNotBlank() && accountScope.length <= 200) }
     private val retainedAssets = mutableMapOf<GenerationAssetFence, MessageGenerationAssets>()
+    // Only this short in-memory lock participates in seal. Never hold it during DB/FS/validators.
+    private val ownerGateLock = Any()
+    private data class RunKey(val conversationId: String, val runId: String)
+    private val ownerGates = mutableMapOf<RunKey, GenerationAssetPublicationGate>()
+    private val sealedRuns = mutableSetOf<RunKey>()
+    private val sealedConversations = mutableSetOf<String>()
+    private var accountSealed = false
+
+    private fun ownerGate(owner: GenerationAssetOwner): GenerationAssetPublicationGate {
+        require(owner.accountScope == accountScope) { "generation_account_mismatch" }
+        val key = RunKey(owner.binding.conversationId, owner.binding.runId)
+        return synchronized(ownerGateLock) {
+            ownerGates.getOrPut(key) {
+                GenerationAssetPublicationGate().also {
+                    if (accountSealed || key in sealedRuns || key.conversationId in sealedConversations)
+                        it.sealAdmission()
+                }
+            }
+        }
+    }
+
+    /** Pure construction. Each caller owns a LOCAL fence; stable account/conversation/run scope
+     * supplies the shared gate. Do not replace this Resources object for each reader or session.
+     * The validator supplied by the token adds execution cancellation only for that writer.
+     */
+    fun createFence(owner: GenerationAssetOwner,
+        validator: (GenerationAssetOwner) -> Boolean = ::validateOwner): GenerationAssetFence =
+        GenerationAssetFence(owner, ownerGate(owner), validator)
+
+    /** Pure in-memory seal, safe under a short parent control lock. Permanently covers both
+     * existing and FUTURE fences in this scope. This is NOT yet permission to mutate/delete DB.
+     */
+    fun sealRunPublicationAdmission(conversationId: String, runId: String): ControllerGenerationPublicationRevocation =
+        sealPublication(conversationId, runId)
+
+    fun sealConversationPublicationAdmission(conversationId: String): ControllerGenerationPublicationRevocation =
+        sealPublication(conversationId, null)
+
+    fun sealAccountPublicationAdmission(): ControllerGenerationPublicationRevocation = sealPublication(null, null)
+
+    private fun sealPublication(conversationId: String?, runId: String?): ControllerGenerationPublicationRevocation {
+        require(conversationId == null || conversationId.isNotBlank())
+        require(runId == null || runId.isNotBlank())
+        return synchronized(ownerGateLock) {
+            when {
+                conversationId == null -> accountSealed = true
+                runId == null -> sealedConversations.add(conversationId)
+                else -> sealedRuns.add(RunKey(conversationId, runId))
+            }
+            val gates = ownerGates.filterKeys {
+                (conversationId == null || it.conversationId == conversationId) &&
+                    (runId == null || it.runId == runId)
+            }.values.toList()
+            gates.forEach { it.sealAdmission() }
+            ControllerGenerationPublicationRevocation(gates)
+        }
+    }
 
     /** Worker-only. Use the exact same provider for the existing SQLite attempt/output stores. */
     fun database(): SQLiteDatabase {
@@ -39,7 +100,7 @@ internal class ControllerGenerationResources(
 
     /** Lazy factory used by token.openLeaf; strongly retained even after an ambiguous attempt. */
     @Synchronized fun assets(fence: GenerationAssetFence): MessageGenerationAssets {
-        require(fence.owner.accountScope == accountScope) { "generation_account_mismatch" }
+        require(fence.publicationGate === ownerGate(fence.owner)) { "generation_unshared_publication_gate" }
         return retainedAssets.getOrPut(fence) { MessageGenerationAssets(privateMediaRoot, fence) }
     }
 
@@ -82,13 +143,13 @@ internal class ControllerGenerationResources(
         true
     }.getOrDefault(false)
 
-    /** Read back the real side table + original, never a guessed asset path or Tool.result URL.
-     * The reader is app-private and must be closed on a worker (fence revocation may block).
+    /** Worker-only readback; never a guessed path or Tool.result URL. Reader close only seals
+     * its own fence, not this owner's gate and not any writer/other reader.
      */
     fun openOutputs(owner: GenerationAssetOwner): ControllerGenerationOutputReader {
-        check(validateOwner(owner)) { "generation_output_not_authorized" }
-        val fence = GenerationAssetFence(owner, ::validateOwner)
-        return ControllerGenerationOutputReader(::database, owner, assets(fence), fence, ::validateOwner)
+        val fence = createFence(owner)
+        fence.admit { Unit }
+        return ControllerGenerationOutputReader(::database, owner, assets(fence), fence)
     }
 
     companion object {
@@ -101,6 +162,16 @@ internal class ControllerGenerationResources(
         val DENY_DOWNLOADS = GenerationDownloadAuthorization { _, _ -> false }
         const val DOWNLOAD_STATUS = "URL 下载（含视频内容 URL）未启用：尚无经过审计的连接级安全适配器。"
     }
+}
+
+/** A captured, already-sealed owner scope. Await on a worker BEFORE the destructive DB
+ * transaction/account change, never inside a DB transaction or under UI/controller locks.
+ * Return is a barrier for all pre-seal validators/publications, not a transport drain.
+ */
+internal class ControllerGenerationPublicationRevocation internal constructor(
+    private val gates: List<GenerationAssetPublicationGate>,
+) {
+    fun revokeOnWorker() { gates.forEach { it.revokeOnWorker() } }
 }
 
 /** UI-safe projection: no provider URL, credential, local path, raw outcome or reusable receipt. */
@@ -116,17 +187,16 @@ internal data class ControllerGenerationOutputMetadata(
 
 internal class ControllerGenerationOutputReader internal constructor(
     database: () -> SQLiteDatabase,
-    private val owner: GenerationAssetOwner,
+    owner: GenerationAssetOwner,
     assets: MessageGenerationAssets,
     private val fence: GenerationAssetFence,
-    private val validateOwner: (GenerationAssetOwner) -> Boolean,
 ) : AutoCloseable {
     private val store = SQLiteGenerationOutputStore(database, owner, assets)
     @Volatile private var closed = false
 
     /** Worker-only; null is an authorized attempt without a registered output at this index. */
     fun metadata(attempt: GenerationAttempt, outputIndex: Int): ControllerGenerationOutputMetadata? = guarded {
-        store.find(attempt, outputIndex)?.let {
+        fence.admit { store.find(attempt, outputIndex) }?.let {
             ControllerGenerationOutputMetadata(it.outputIndex, it.kind, it.mimeType, it.bytes,
                 it.width, it.height, it.durationMs)
         }
@@ -141,12 +211,16 @@ internal class ControllerGenerationOutputReader internal constructor(
     }
 
     private fun <T> guarded(action: () -> T): T = try {
-        check(!closed && validateOwner(owner))
+        check(!closed)
+        fence.admit { Unit }
+        // Do not hold the gate across open(): assets take file-lock -> gate. SQL metadata-only
+        // reads above can use gate -> DB; acquiring file locks under the gate would invert it.
         action()
     } catch (_: Exception) {
         // Do not export DB/FS exception causes, paths, receipts or provider payloads.
         throw IllegalStateException("generation_output_unavailable")
     }
 
-    override fun close() { closed = true; fence.revoke() }
+    /** Nonblocking reader-local seal; already-returned descriptors remain caller-owned. */
+    override fun close() { closed = true; fence.revokeAdmission() }
 }

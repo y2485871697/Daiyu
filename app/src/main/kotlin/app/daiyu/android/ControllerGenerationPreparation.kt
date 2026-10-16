@@ -213,6 +213,8 @@ internal class ConfirmedGenerationPreparation internal constructor(val preview: 
         networkPolicy: GenerationDownloadAuthorization,
         isCurrentOwner: () -> Boolean,
         http: GenerationHttp = UrlConnectionGenerationHttp(),
+        fenceFactory: (GenerationAssetOwner, (GenerationAssetOwner) -> Boolean) -> GenerationAssetFence =
+            { assetOwner, validator -> GenerationAssetFence(assetOwner, validator) },
     ): RunGenerationTools {
         check(leaf == null && !revoked) { "generation_leaf_already_opened_or_revoked" }
         val approval = approval(owner, authorization, isCurrentOwner)
@@ -223,7 +225,7 @@ internal class ConfirmedGenerationPreparation internal constructor(val preview: 
                     runCatching { isCurrentOwner() && validateOwner(assetOwner) }.getOrDefault(false) &&
                     synchronized(this) { !revoked }
             },
-            approval, download, http).also { leaf = it }
+            approval, download, http, fenceFactory = fenceFactory).also { leaf = it }
     }
 
     @Synchronized private fun pinTask(owner: RunExecutionOwner, authorization: TaskAuthorization) {

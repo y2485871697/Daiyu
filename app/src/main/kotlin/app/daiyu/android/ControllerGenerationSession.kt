@@ -136,7 +136,8 @@ internal class ControllerGenerationSession(
         check(resources == null) { "generation_resources_already_bound" }
         resources = retainedResources
         return token.openLeaf(realOwner, task, retainedResources::database,
-            retainedResources::assets, retainedResources::validateOwner, networkPolicy, isCurrentOwner)
+            retainedResources::assets, retainedResources::validateOwner, networkPolicy, isCurrentOwner,
+            fenceFactory = retainedResources::createFence)
             .also { leaf = it }
     }
 

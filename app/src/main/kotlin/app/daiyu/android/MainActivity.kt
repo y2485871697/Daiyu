@@ -186,9 +186,10 @@ class MainActivity : ComponentActivity() {
                     )
                     "appearance" -> AppearanceSettingsScreen(
                         state = AppearanceSettingsUi(SettingsThemeMode.valueOf(appearance.themeMode.name),
-                            appearance.interfaceScale, appearance.messageTimestampsEnabled),
+                            appearance.interfaceScale, appearance.messageTimestampsEnabled, appearance.monetEnabled),
                         onThemeModeChange = { saveAppearance(appearance.copy(themeMode = AppearanceThemeMode.valueOf(it.name))) },
                         onInterfaceScaleChange = { saveAppearance(appearance.copy(interfaceScale = it)) },
+                        onWallpaperColorsChange = { saveAppearance(appearance.copy(monetEnabled = it)) },
                         onMessageTimestampsChange = { saveAppearance(appearance.copy(messageTimestampsEnabled = it)) },
                         onOpenAppIcon = {}, onOpenIconAppearance = {}, onOpenPet = {}, onOpenVibration = {},
                         onOpenRefreshRate = {}, onBack = { returnToChat() },
@@ -785,12 +786,14 @@ class MainActivity : ComponentActivity() {
     private fun loadAppearance(): AppearanceSettings {
         val preferences = getSharedPreferences("appearance-settings", MODE_PRIVATE)
         return AppearanceSettings(themeMode = AppearanceThemeMode.fromPersistedValue(preferences.getString("theme", null)),
-            interfaceScale = preferences.getFloat("scale", 1f), messageTimestampsEnabled = preferences.getBoolean("timestamps", false)).normalized()
+            interfaceScale = preferences.getFloat("scale", 1f), messageTimestampsEnabled = preferences.getBoolean("timestamps", false),
+            monetEnabled = preferences.getBoolean("monet", false)).normalized()
     }
     private fun saveAppearance(value: AppearanceSettings) { guard {
         val normalized = value.normalized()
         check(getSharedPreferences("appearance-settings", MODE_PRIVATE).edit().putString("theme", normalized.themeMode.persistedValue)
-            .putFloat("scale", normalized.interfaceScale).putBoolean("timestamps", normalized.messageTimestampsEnabled).commit())
+            .putFloat("scale", normalized.interfaceScale).putBoolean("timestamps", normalized.messageTimestampsEnabled)
+            .putBoolean("monet", normalized.monetEnabled).commit())
         appearance = normalized
     } }
 }

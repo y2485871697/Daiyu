@@ -176,11 +176,14 @@ internal class ControllerMessageVideos(
      * and frozen assistant instructions. No caller-supplied generic ModelPort can drop videos.
      * postApproval is run-local and mandatory for videos: each actual freeze is registered before
      * modelFactory receives that SAME per-POST provider. The preflight plan is only a DB witness.
+     * onFrozenPlan publishes the DB-checked actual-open witness to the parent. Tool POSTs retain
+     * that input even while the active SQLite assistant advances; never derive it from a request.
      */
     fun wrap(provider: ProviderSnapshot, capability: OpenRouterVideoCapability?, conversation: ConversationId,
         activeAssistant: MessageId, baseline: ControllerVideoModelPlan,
         assistantInstructions: String?, runtimeCancelled: () -> Boolean,
         postApproval: ControllerVideoPostApproval? = null,
+        onFrozenPlan: (ControllerVideoModelPlan) -> Unit = {},
         modelFactory: (ProviderSnapshot, String?, OpenRouterVideoCapability?, VideoPostApprovalProvider?) -> ResponsesModel = { p, i, c, a ->
             ResponsesModel(p, i, c, a)
         }): ModelPort = object : ModelPort {
@@ -218,6 +221,7 @@ internal class ControllerMessageVideos(
             if (runtimeCancelled()) throw InterruptedException("video_model_cancelled")
             // Register THIS actual freeze, not the pre-accept baseline. Every Runner open and
             // overload comes through here; a same-valued new plan still has a new identity.
+            onFrozenPlan(plan) // Parent witness for this open, including tool continuation POSTs.
             val approval = if (plan.videos != null) requireNotNull(postApproval) {
                 "video_post_approval_required"
             }.also { it.registerFrozenPlan(plan) } else null

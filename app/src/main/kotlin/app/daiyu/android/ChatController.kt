@@ -135,6 +135,11 @@ class ChatController internal constructor(private val application:Application,
         var browserContext: AssistantRunContext? = null
         var submitted = false
         var cleanupDeadline = 0L
+        @Volatile var videoRequired = false
+        var videoEditor: ControllerVideoEditor? = null
+        var videoRouteEpoch = 0L
+        var videoReceipt: VideoDraftReceipt? = null
+        var video: ControllerVideoSession? = null
     }
     private var preparation: Preparation? = null
     private val preparing: Boolean get() = preparation != null
@@ -142,6 +147,7 @@ class ChatController internal constructor(private val application:Application,
     private fun reservePreparation(textTicket: TextSendTicket? = null): Preparation =
         Preparation(assistantStore.selectedId.value, textTicket).also {
         check(preparation == null)
+        it.videoRouteEpoch = videoRouteEpoch.get()
         preparation = it
     }
     private fun preparationCancelled(token: Preparation): Boolean = synchronized(this) {
@@ -151,7 +157,7 @@ class ChatController internal constructor(private val application:Application,
     private fun cancelPreparation() {
         val token = synchronized(this) {
             virtualDisplayEntry?.let { it.revoked = true; it.session?.close() }
-            preparation?.also { it.revoked = true }
+            preparation?.also { it.revoked = true; it.video?.revoke() }
         }
         token?.cancellation?.cancel()
         token?.browser?.cancel()
@@ -184,6 +190,96 @@ class ChatController internal constructor(private val application:Application,
             app.daiyu.android.media.AndroidImageInspector())) }
     internal val videoAttachments by lazy {
         app.daiyu.android.media.video.AndroidVideoAttachments(application)
+    }
+    // One retained draft writer survives Activity recreation; message assets use the existing store.
+    internal val videoHost by lazy { VideoChatHost(application.getSharedPreferences("video-drafts", 0), videoAttachments) }
+    private val videoJournal by lazy { ControllerVideoJournal(application.getSharedPreferences("video-send-identities", 0)) }
+    private val messageVideos by lazy { ControllerMessageVideos(database, videoAttachments.store, messageImages) }
+    @Volatile private var videoSession: ControllerVideoSession? = null
+    @Volatile private var videoUi: ControllerVideoUi? = null
+    internal data class VideoSendState(val request: VideoDraftRequest, val editor: ControllerVideoEditor,
+        val receipt: VideoDraftReceipt? = null, val conversation: Conversation? = null)
+    @Volatile private var pendingVideoState: VideoSendState? = null
+    internal fun videoSendState(): VideoSendState? = pendingVideoState
+    @Synchronized internal fun acknowledgeVideoSend(request: VideoDraftRequest) {
+        if (pendingVideoState?.request === request && pendingVideoState?.receipt != null) pendingVideoState = null
+    }
+    private val videoConfigurationEpoch = java.util.concurrent.atomic.AtomicLong()
+    private val videoRouteEpoch = java.util.concurrent.atomic.AtomicLong()
+    private val videoRunEpoch = java.util.concurrent.atomic.AtomicLong()
+    internal fun attachVideoUi(ui: ControllerVideoUi) { invalidateVideo(); videoUi = ui }
+    internal fun detachVideoUi(ui: ControllerVideoUi) {
+        if (videoUi === ui) { invalidateVideo(); videoUi = null }
+    }
+    internal fun ownsVideoUi(ui: ControllerVideoUi): Boolean = videoUi === ui
+    internal fun invalidateVideo(expectedUi: ControllerVideoUi? = null) {
+        if (expectedUi != null && videoUi !== expectedUi) return
+        val (token, lifetime) = synchronized(this) {
+            videoSession?.revoke() // Close POST permits before publishing a changed route authority.
+            videoRouteEpoch.incrementAndGet()
+            val token = preparation?.takeIf { it.videoRequired }?.also { it.revoked = true }
+            token to resources?.takeIf { it.initial.runId == videoSession?.assistant?.runId }
+        }
+        token?.cancellation?.cancel()
+        // Do not clear the owner: preparation / RunResources retain it until actual worker drain.
+        lifetime?.let(::stopRun)
+    }
+    private fun invalidateVideoConfiguration() {
+        invalidateVideo()
+        videoConfigurationEpoch.incrementAndGet()
+    }
+    private var videoReaders = 0
+    internal fun recoverVideos(complete: () -> Unit = {}) {
+        val pending = videoHost.pendingRecovery()
+        if (pending.isEmpty()) { complete(); return }
+        synchronized(this) { if (closed) return; videoReaders++ }
+        try { executor.execute {
+            val receipts = pending.map { videoJournal.recover(it, database) }
+            handler.post {
+                try { receipts.forEach(videoHost::settle); complete() }
+                finally { synchronized(this) { videoReaders--; if (closed) closeStorageWhenIdle() } }
+            }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { videoReaders--; if (closed) closeStorageWhenIdle() }
+        }
+    }
+    internal fun sendVideos(conversation: Conversation?, request: VideoDraftRequest,
+        editor: ControllerVideoEditor, complete: (VideoDraftReceipt, Conversation?) -> Unit): Boolean {
+        val ui = videoUi ?: return false
+        if (Looper.myLooper() != Looper.getMainLooper() || ui.editor() != editor || !editor.visible ||
+            editor.conversation != request.conversation || editor.text != request.text ||
+            conversation?.id?.value != request.conversation) return false
+        val token = synchronized(this) {
+            if (!idleAvailable() || pendingVideoState != null) return false
+            reservePreparation().also {
+                it.videoRequired = true; it.videoEditor = editor
+                pendingVideoState = VideoSendState(request, editor)
+            }
+        }
+        try { executor.execute {
+            var attempt: ControllerVideoAttempt? = null
+            val result = try {
+                val original = ControllerVideoAttempt(request, videoJournal).also { attempt = it }
+                val replay = original.reserve(database) // ORIGINAL identity, before any DB write.
+                if (replay != null) replay else {
+                    sendPrepared(token, conversation, request.text, expectedDraftText = request.text, videoAttempt = original)
+                    token.videoReceipt ?: original.reject()
+                }
+            } catch (_: Exception) {
+                token.videoReceipt ?: attempt?.reject() ?: VideoDraftReceipt(request.conversation, request.owner, request.revision,
+                    request.videos, VideoDraftOutcome.UNKNOWN)
+            }
+            synchronized(this) {
+                if (pendingVideoState?.request === request) pendingVideoState = pendingVideoState?.copy(
+                    receipt = result, conversation = attempt?.acceptedConversation)
+            }
+            finishPreparation(token)
+            handler.post { try { complete(result, attempt?.acceptedConversation) } catch (_: Exception) { } }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { if (pendingVideoState?.request === request) pendingVideoState = null }
+            finishPreparation(token); return false
+        }
+        return true
     }
     private val messageImageAssets by lazy { MessageImageAssetStore(File(application.filesDir,"media-message-images")) }
     private val messageImages by lazy { ControllerMessageImages(database,messageImageAssets) }
@@ -809,6 +905,7 @@ class ChatController internal constructor(private val application:Application,
         lifetime.fenced=true
         virtualDisplayEntry?.takeIf { it.assistantId == lifetime.initial.id && it.runId == lifetime.initial.runId &&
             it.conversationId == lifetime.initial.conversationId }?.let { it.revoked = true; it.session?.close() }
+        videoSession?.takeIf { it.assistant.runId == lifetime.initial.runId }?.revoke()
         generationEntry?.takeIf { it.runner === lifetime.runner }?.session?.revokeAdmission()
         runRevocationListeners.toList().forEach { listener ->
             try {listener(lifetime.initial)} catch (_:Exception) { /* Optional feedback only. */ }
@@ -858,7 +955,10 @@ class ChatController internal constructor(private val application:Application,
         val owner = TextSendOwner(conversation?.id, editorGeneration, draftRevision)
         val token = synchronized(this) {
             if(pendingTextState != null || !idleAvailable() || text.isBlank() || editorGeneration < 0 || draftRevision < 0) return false
-            reservePreparation(ticket).also { pendingTextState = TextSendState(ticket, owner, text) }
+            reservePreparation(ticket).also {
+                pendingTextState = TextSendState(ticket, owner, text)
+                it.videoEditor = ControllerVideoEditor(conversation?.id?.value, editorGeneration, draftRevision, text, true)
+            }
         }
         try { executor.execute {
             val saved = try { sendPrepared(token,conversation,text,expectedDraftText=text) }
@@ -884,7 +984,7 @@ class ChatController internal constructor(private val application:Application,
         synchronized(this) { virtualDisplayEntry?.takeIf { it.textTicket === ticket } }
             ?.let { return cancelVirtualDisplay(it) }
         val token = synchronized(this) {
-            preparation?.takeIf { it.textTicket === ticket }?.also { it.revoked = true }
+            preparation?.takeIf { it.textTicket === ticket }?.also { it.revoked = true; it.video?.revoke() }
         } ?: return false
         token.cancellation.cancel()
         token.browser?.cancel()
@@ -966,6 +1066,11 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     private fun finishPreparation(token: Preparation) {
+        val installed = synchronized(this) { resources?.initial?.runId == token.video?.assistant?.runId && token.video != null }
+        if (!installed) {
+            token.video?.revoke()
+            if (videoSession === token.video) videoSession = null
+        }
         val terminal = token.terminal
         if (token.terminalCatalog == null && ((terminal != null && terminal.state != ControllerTerminalPreparation.State.DRAINED) ||
                 (terminal == null && token.terminalLaunch is TerminalPtyLaunch.Linux))) {
@@ -1449,16 +1554,20 @@ class ChatController internal constructor(private val application:Application,
         generation:GenerationEntry?=null,
         terminalPreparation:ControllerTerminalPreparation?=null,
         terminalRun:TerminalConfirmedRun?=null,
-        virtualDisplay:ControllerVirtualDisplayEntry?=null):Conversation? {
+        virtualDisplay:ControllerVirtualDisplayEntry?=null,
+        videoAttempt:ControllerVideoAttempt?=null):Conversation? {
         require((terminalPreparation == null) == (terminalRun == null))
         require(terminalRun == null || (imageAttempt == null && shizukuPreparation == null &&
-            browserPreparation == null && generation == null && virtualDisplay == null && !withChildren &&
+            browserPreparation == null && generation == null && virtualDisplay == null && videoAttempt == null && !withChildren &&
             terminalRun.preview === terminalPreparation?.preview &&
             terminalRun.authorization === terminalRun.binding.authorization))
         if (terminalPreparation != null && runCatching { terminalConfiguration(conversation) }.getOrNull() !=
             (terminalPreparation.assistant to terminalPreparation.provider)) return null
         require(virtualDisplay == null || (generation == null && shizukuPreparation == null &&
-            browserBinding == null && imageAttempt == null && terminalRun == null && !withChildren))
+            browserBinding == null && imageAttempt == null && terminalRun == null && videoAttempt == null && !withChildren))
+        require(videoAttempt == null || (generation == null && shizukuPreparation == null && shizukuAuthorization == null &&
+            browserPreparation == null && browserBinding == null && imageAttempt == null &&
+            terminalRun == null && virtualDisplay == null && !withChildren))
         require(shizukuPreparation==null || (imageAttempt==null && shizukuAuthorization!=null))
         require(generation == null || (shizukuPreparation == null && browserBinding == null && imageAttempt == null))
         if(preparationCancelled(token)) return null
@@ -1508,25 +1617,88 @@ class ChatController internal constructor(private val application:Application,
             if(imageAttempt!=null) require(selected?.asModelSettings()==config) {"stale_image_provider"}
             selected?.takeIf {it.asModelSettings()==config} ?: ProviderSnapshot.capture(config)
         } catch (_:Exception) {problem="图片模型配置已变化；草稿保留，未发起网络请求";notifyChanged();return null}
-        val conversationId=virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
+        val conversationId=virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
-        val run=virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
-        val user=try {imageAttempt?.prepare(imageAttachments.store,messageImageAssets) ?:
-            Message(MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
+        val run=virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
+        var user=try {imageAttempt?.prepare(imageAttachments.store,messageImageAssets) ?:
+            Message(videoAttempt?.userId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
         } catch (_:Exception) {problem="图片冻结失败或模型不支持；草稿保留，未发起网络请求";notifyChanged();return null}
-        val assistant=Message(virtualDisplay?.assistantId ?: terminalRun?.preview?.identity?.assistantMessageId ?: generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
-        val physicalVideoHistory = try {
-            ControllerVideoHistory(database).capture(conversationId).also {
-                check(it.inputs.isEmpty()) { "original_video_authorization_required" }
-            }
-        } catch (_: Exception) {
-            problem="原视频历史未获得匹配模型的上传授权，或视频来源无法确认；草稿保留，未启动模型请求"
+        val assistant=Message(virtualDisplay?.assistantId ?: terminalRun?.preview?.identity?.assistantMessageId ?: videoAttempt?.assistantId ?: generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
+        val physicalVideoHistory = try { ControllerVideoHistory(database).capture(conversationId) }
+        catch (_: Exception) {
+            problem="原视频来源无法确认；草稿保留，未启动模型请求";notifyChanged();return null
+        }
+        if (physicalVideoHistory.inputs.isNotEmpty() && (withChildren || imageAttempt != null ||
+                generation != null || terminalRun != null || virtualDisplay != null ||
+                shizukuPreparation != null || shizukuAuthorization != null ||
+                browserPreparation != null || browserBinding != null)) {
+            problem="当前专用批准不能与原视频历史混合发送；保留草稿，请使用原视频文本发送入口"
             notifyChanged(); return null
         }
+        var videoPrepared: PreparedControllerVideoSend? = null
+        var videoPlan: ControllerVideoModelPlan? = null
+        val video = if (videoAttempt != null || physicalVideoHistory.inputs.isNotEmpty()) try {
+            token.videoRequired = true
+            check(token.videoRouteEpoch == videoRouteEpoch.get() && !preparationCancelled(token))
+            val epoch = videoConfigurationEpoch.get()
+            val proof = ModelCatalogService(settings).fetchSavedVideoEvidence(provider, epoch,
+                videoConfigurationEpoch::get) { preparationCancelled(token) || token.videoRouteEpoch != videoRouteEpoch.get() }
+            val ready = CountDownLatch(1)
+            var created: ControllerVideoSession? = null
+            handler.post {
+                try {
+                    val ui = checkNotNull(videoUi)
+                    val editor = checkNotNull(token.videoEditor) { "video_requires_editor_owner" }
+                    check(!preparationCancelled(token) && ui.editor() == editor)
+                    val frozen = if (videoAttempt != null)
+                        app.daiyu.android.model.videos.FrozenVideoApprovalRequest.forDraft(videoAttempt.request,
+                            run.value, run.value, provider, epoch, MessageHistory.expand(physicalVideoHistory.rows), physicalVideoHistory.inputs)
+                    else app.daiyu.android.model.videos.FrozenVideoApprovalRequest.forText(conversationId.value,
+                        run.value, run.value, editor.revision, text, provider, epoch,
+                        MessageHistory.expand(physicalVideoHistory.rows), physicalVideoHistory.inputs)
+                    created = ControllerVideoSession(handler, database, provider, epoch, videoRunEpoch.incrementAndGet(), videoConfigurationEpoch::get,
+                        settings::load, ui, editor, physicalVideoHistory, assistant, frozen,
+                        isParentCurrent = { synchronized(this) {
+                            !closed && token.videoRouteEpoch == videoRouteEpoch.get() && videoSession === token.video &&
+                                (preparation === token && !token.revoked || resources?.let {
+                                    it.initial.runId == run && !it.fenced
+                                } == true)
+                        } }, currentAssistant = { synchronized(this) { active } }, cancelTransport = {
+                            token.cancellation.cancel()
+                            val owned = synchronized(this) { resources?.takeIf { it.initial.runId == run } }
+                            owned?.let(::stopRun)
+                        }).also { token.video = it; videoSession = it }
+                } catch (_: Exception) { } finally { ready.countDown() }
+            }
+            while (!ready.await(50, TimeUnit.MILLISECONDS)) check(!preparationCancelled(token))
+            val session = checkNotNull(created)
+            val capability = session.authorize(proof)
+            videoPrepared = videoAttempt?.prepare(videoAttachments.store, provider, capability) { session.isRevoked() }
+            videoPrepared?.let { user = it.user }
+            videoPlan = if (videoPrepared != null) messageVideos.preflight(physicalVideoHistory, provider,
+                capability, videoPrepared) { session.isRevoked() }
+            else messageVideos.preflightText(physicalVideoHistory, provider, capability, user) { session.isRevoked() }
+            session to capability
+        } catch (_: Exception) {
+            token.video?.revoke()
+            problem="原视频目录证据、运行批准或原件校验失败；草稿保留，未启动模型请求";notifyChanged();return null
+        } else null
         val preparedContext = try {
             // All sends, including the very first message, share the same frozen policy/budget.
             val coordinator = contextPreparation
-            coordinator.prepare(coordinator.freeze(conversationId,listOf(user),token.cancellation))
+            val frozen = coordinator.freeze(conversationId,listOf(user),token.cancellation)
+            if (video == null) coordinator.prepare(frozen) else {
+                // A video run must not silently replace physical/retained history with a text summary.
+                // Keep the same policy/budget and acceptance revision, but send every physical row.
+                val estimate = app.daiyu.android.domain.context.estimateTokens(physicalVideoHistory.rows + user)
+                val budget = frozen.policy.sendBudgetTokens
+                if (budget != null && !frozen.policy.fitsSendBudget(estimate))
+                    throw app.daiyu.android.context.ContextCapacityExceededException(estimate, budget)
+                app.daiyu.android.context.PreparedSendContext(frozen,
+                    app.daiyu.android.context.PreparedContext(physicalVideoHistory.rows,
+                        app.daiyu.android.domain.context.estimateTokens(physicalVideoHistory.rows), null),
+                    app.daiyu.android.domain.context.ContextRevision.digest(contextService.displayHistory(conversationId)))
+            }
         } catch (failure: Exception) {
             problem = when (failure) {
                 is java.util.concurrent.CancellationException ->
@@ -1541,6 +1713,9 @@ class ChatController internal constructor(private val application:Application,
         }
         if(preparationCancelled(token)) return null
         val preparedModel=try {
+            if (video != null) messageVideos.wrap(provider, video.second, conversationId, assistant.id,
+                checkNotNull(videoPlan), assistantContext.systemPrompt, { video.first.isRevoked() },
+                checkNotNull(video.first.post), onFrozenPlan = video.first::onFrozenPlan) else {
             // Preflight the complete expanded history BEFORE DB acceptance or any model open.
             // Later opens re-authorize against persisted rows; candidate authorization ends here.
             val imageHistory=(contextService.displayHistory(conversationId) + preparedContext.messages)
@@ -1551,6 +1726,7 @@ class ChatController internal constructor(private val application:Application,
             val delegate=assistantModel?.invoke(provider,assistantContext)
                 ?: if(plan.hasImages) imageModel(provider) else model(config)
             messageImages.wrap(delegate,provider,conversationId)
+            }
         } catch (_:Exception) {
             problem="图片历史读取、能力检查或模型初始化失败；草稿保留，未启动聊天模型请求";notifyChanged();return null
         }
@@ -1596,7 +1772,11 @@ class ChatController internal constructor(private val application:Application,
                 backgroundFactory, authorization=terminalRun?.authorization ?: shizukuAuthorization ?: browserBinding?.let {
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value, it.requiredWrites)
                 }, shizuku=shizuku, browser=browserBinding, terminal=terminalRun?.binding,
-                authorizationFactory = if (generation == null) null else { realOwner ->
+                authorizationFactory = if (video != null) { realOwner ->
+                    video.first.bindOwner(realOwner)
+                    app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value,
+                        browserBinding?.requiredWrites.orEmpty())
+                } else if (generation == null) null else { realOwner ->
                     synchronized(this) {
                         check(generationEntry === generation)
                         val session = checkNotNull(generation.session)
@@ -1665,6 +1845,17 @@ class ChatController internal constructor(private val application:Application,
         if (!mayCommit) { closeUnacceptedTools(tools); return null }
         var databaseSendEntered=false
         val saved=try {
+            if (videoAttempt != null) {
+                val receipt = videoAttempt.commit(database, physicalVideoHistory, checkNotNull(videoPrepared),
+                    checkNotNull(videoPlan), assistantContext.assistantId, frozenDraft,
+                    cancelled = { preparationCancelled(token) || video?.first?.isRevoked() == true },
+                    beforeSend = { db ->
+                        check(contextService.matchesHistoryRevision(db, conversationId, preparedContext.expectedHistoryRevision))
+                    })
+                token.videoReceipt = receipt
+                check(receipt.outcome == VideoDraftOutcome.ACCEPTED) { "video_acceptance_unconfirmed" }
+                checkNotNull(videoAttempt.acceptedConversation)
+            } else {
             val commit: () -> Conversation? = {
                 try { DatabaseTransactions { database.writableDatabase }.run { db ->
                 val ownerExists=db.rawQuery("SELECT 1 FROM conversations WHERE id=?",
@@ -1691,18 +1882,20 @@ class ChatController internal constructor(private val application:Application,
             if (browserPreparation == null) checkNotNull(commit())
             else browserPreparation.accept(checkNotNull(browserBinding), commit)?.conversation
                 ?: throw IllegalStateException("browser_acceptance_unconfirmed")
+            }
         } catch (_:Exception) {
-            token.persistenceUnconfirmed=databaseSendEntered
-            synchronized(this) { virtualDisplay?.persistenceUnknown = databaseSendEntered }
+            token.persistenceUnconfirmed=databaseSendEntered || token.videoReceipt?.outcome == VideoDraftOutcome.UNKNOWN
+            synchronized(this) { virtualDisplay?.persistenceUnknown = token.persistenceUnconfirmed }
             if(databaseSendEntered) imageAttempt?.unknown() else imageAttempt?.draftChanged()
             closeUnacceptedTools(tools)
-            problem=if(!databaseSendEntered) "会话、原文或编辑草稿已变化；保留当前草稿，未启动聊天模型请求"
-                else "发送保存结果未确认；保留草稿和图片，不自动重发"
+            problem=if(!token.persistenceUnconfirmed) "会话、原文或编辑草稿已变化；保留当前草稿，未启动聊天模型请求"
+                else "发送保存结果未确认；保留原文和附件，不自动重发"
             notifyChanged();return null
         }
         // database.send returns only after its real two-row transaction receipt succeeds.
         imageAttempt?.accepted(saved)
         synchronized(this) { virtualDisplay?.accepted = true }
+        video?.first?.accepted(user, videoPrepared?.inputs.orEmpty())
         generation?.session?.recordPersistence(generation.identity, GenerationPersistenceReceipt.Accepted(saved))
         val lifetime=RunResources(assistant,owned,tools)
         val installed=synchronized(this) {
@@ -1877,6 +2070,7 @@ class ChatController internal constructor(private val application:Application,
         }
         if(!lifetime.deviceCleanup.drained) return
         lifetime.writer.shutdown();lifetime.waiter.shutdown()
+        if (videoSession?.assistant?.runId == lifetime.initial.runId) videoSession = null
         resources=null;runner=null;runTools=null
         clearCleanupProblem(lifetime.tools)
         virtualDisplayEntry?.takeIf { it.catalog === lifetime.tools }?.let {
@@ -1902,7 +2096,7 @@ class ChatController internal constructor(private val application:Application,
     private fun closeStorageWhenIdle() {
         pruneBackgroundRuns()
         if(resources!=null || preparing || generationEntry!=null || virtualDisplayEntry!=null || generationReaders!=0 ||
-            unacceptedTools.isNotEmpty() || imageReaders!=0 || closingStorage) return
+            unacceptedTools.isNotEmpty() || imageReaders!=0 || videoReaders!=0 || closingStorage) return
         if(!childrenClosed) {
             if(!childrenClosing) {
                 childrenClosing=true
@@ -1961,6 +2155,8 @@ class ChatController internal constructor(private val application:Application,
     /** Single-use manual confirmation. Recheck runtime gates AND both snapshots at the actual commit. */
     @Synchronized internal fun restoreImportedConfiguration(preview:ConfigurationRestorePreview,authorized:Boolean,
         completed:(Boolean)->Unit = {}) {
+        videoSession?.revoke()
+        videoConfigurationEpoch.incrementAndGet()
         val current=configurationRestorePreview
         configurationRestorePreview=null
         checkConfigurationRestoreAvailable()
@@ -1974,6 +2170,7 @@ class ChatController internal constructor(private val application:Application,
     internal fun saveModelSettings(value:ModelSettings,protocolChangeAuthorized:Boolean,
         requestOptionsReplacementAuthorized:Boolean,completed:(Boolean)->Unit) {
         check(Looper.myLooper()==Looper.getMainLooper())
+        invalidateVideoConfiguration()
         dataTask(failureNotice="模型设置未保存",completed=completed,work={
             settings.save(value,protocolChangeAuthorized,requestOptionsReplacementAuthorized)
             "模型设置已保存"
@@ -1981,6 +2178,7 @@ class ChatController internal constructor(private val application:Application,
     }
     internal fun selectConfiguredModel(expected:ModelSettings,model:String,completed:(Boolean)->Unit) {
         check(Looper.myLooper()==Looper.getMainLooper())
+        invalidateVideoConfiguration()
         dataTask(failureNotice="模型切换未保存",completed=completed,work={
             settings.selectModel(expected,model)
             "模型已切换"

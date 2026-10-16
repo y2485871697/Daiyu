@@ -106,7 +106,7 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
     fun testVersionSevenUpgradeKeepsHistoryAndCreatesTaskSchema() {
         val db = fresh(); val owner = parent(db); val before = db.messages(owner.conversationId)
         db.writableDatabase.execSQL("DROP TABLE child_tasks"); app.daiyu.android.removeAssistantSchemaForLegacyFixture(db.writableDatabase); db.writableDatabase.version = 7; db.close()
-        assertEquals(12, db.readableDatabase.version); assertEquals(before, db.messages(owner.conversationId))
+        assertEquals(13, db.readableDatabase.version); assertEquals(before, db.messages(owner.conversationId))
         assertTrue(SQLiteChildTaskStore(db).list(owner.conversationId.value, 20).isEmpty())
         val runtime = lease(db); val newOwner = parent(db); val rows = tasks(newOwner, 1)
         runtime.childTasks.enqueue(newOwner, rows)

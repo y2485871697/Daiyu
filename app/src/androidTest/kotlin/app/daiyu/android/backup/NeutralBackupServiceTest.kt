@@ -143,7 +143,7 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
         db.close()
         val reopened = ConversationDatabase(context)
         try {
-            assertEquals(12, reopened.readableDatabase.version)
+            assertEquals(13, reopened.readableDatabase.version)
             val restored = NeutralBackupService(context, reopened)
             assertEquals(old, restored.importedConfiguration().toString()); assertEquals(before, restored.exportPackage())
             assertEquals(2, reopened.readableDatabase.rawQuery("SELECT count(*) FROM neutral_config", null).use { it.moveToFirst(); it.getInt(0) })

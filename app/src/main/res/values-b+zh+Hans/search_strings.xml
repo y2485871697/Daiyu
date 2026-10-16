@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="search_conversations_title">搜索会话</string>
+    <string name="search_messages_title">搜索聊天记录</string>
+    <string name="search_conversations_hint">标题或预览关键词</string>
+    <string name="search_messages_hint">消息正文或工具记录关键词</string>
+    <string name="search_clear">清空关键词</string>
+    <string name="search_refresh">刷新</string>
+    <string name="search_retry">重试</string>
+    <string name="search_cancel">取消</string>
+    <string name="search_cancelled">已取消搜索，可重试读取。</string>
+    <string name="search_loading">正在读取…</string>
+    <string name="search_read_error">搜索结果读取失败，原记录未更改。</string>
+    <string name="search_all_folders">全部文件夹</string>
+    <string name="search_uncategorized">未分类</string>
+    <string name="search_selected_scope">已选：%1$s</string>
+    <string name="search_no_conversations">此文件夹暂无会话。</string>
+    <string name="search_no_results">没有匹配的结果。</string>
+    <string name="search_all_records">全部记录</string>
+    <string name="search_all_records_selected">已选：全部记录</string>
+    <string name="search_current">当前会话</string>
+    <string name="search_current_selected">已选：当前会话</string>
+    <string name="search_current_unavailable">当前数据源暂不支持限定当前会话搜索。</string>
+    <string name="search_enter_query">输入关键词搜索消息正文与工具记录。</string>
+    <string name="search_message_count">已返回 %1$d 条消息命中</string>
+    <string name="search_limited_results">当前数据源最多返回 %1$d 条且不支持分页，结果可能不完整。</string>
+</resources>

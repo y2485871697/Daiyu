@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shizuku_title">Shizuku 命令授权</string>
+    <string name="shizuku_refresh">刷新状态</string>
+    <string name="shizuku_request_permission">请求 Shizuku 授权</string>
+    <string name="shizuku_unavailable">Shizuku 服务不可用，请先在 Shizuku 中启动服务。</string>
+    <string name="shizuku_unsupported">当前服务版本或身份不受支持（需要版本 13 及以上）。</string>
+    <string name="shizuku_permission_required">尚未获得 Shizuku 授权。系统授权不等于批准执行命令。</string>
+    <string name="shizuku_authorized">已观测服务身份：UID %1$d。尚不代表命令已获批准。</string>
+    <string name="shizuku_closed">Shizuku 管理器已关闭。</string>
+    <string name="shizuku_no_run">请先由当前会话创建待批准的运行；此页不会给未来运行授予全局执行权限。</string>
+    <string name="shizuku_run_scope">仅限会话 %1$s\n运行 %2$s</string>
+    <string name="shizuku_shell">选择 ADB shell（UID 2000）</string>
+    <string name="shizuku_root">选择 root（UID 0）</string>
+    <string name="shizuku_selected">本次选择：UID %1$d</string>
+    <string name="shizuku_identity_required">必须明确选择身份，不会自动切换 root、shell 或 Linux。</string>
+    <string name="shizuku_script">精确命令（按原文批准）</string>
+    <string name="shizuku_timeout">超时（毫秒，1–120000）</string>
+    <string name="shizuku_scope_warning">批准只绑定以上命令、超时、身份与当前运行。修改任何一项后必须重新批准。命令可能改变设备，停止不等于撤销副作用。</string>
+    <string name="shizuku_approve">批准以上命令，仅限本次运行</string>
+    <string name="shizuku_open">连接所选身份并交给本次运行</string>
+    <string name="shizuku_revoke">撤销本次批准并停止</string>
+    <string name="shizuku_draft">未批准：不会执行。</string>
+    <string name="shizuku_approved">已批准精确命令，尚未连接或执行。</string>
+    <string name="shizuku_opening">正在连接所选身份，尚未确认可执行。</string>
+    <string name="shizuku_ready">已交给本次运行，仍受逐次授权与撤销检查约束。</string>
+    <string name="shizuku_revoked">已撤销：禁止新派发。已派发命令的副作用可能仍存在。</string>
+    <string name="shizuku_run_closed">本次运行已封口，不会重新连接或重试。</string>
+    <string name="shizuku_observed">实际连接身份：%1$s（UID %2$d）</string>
+    <string name="shizuku_failed">操作未完成。请刷新查看状态；不会自动重试、切换身份或执行命令。</string>
+    <string name="shizuku_invalid_approval">无法批准：请选择身份，输入非空合法命令及有效超时。</string>
+    <string name="shizuku_not_executed">命令未执行：%1$s</string>
+    <string name="shizuku_unknown">结果未知：%1$s。禁止自动重放；请人工确认设备实际状态。</string>
+    <string name="shizuku_confirmed">命令已返回确认结果。非零退出码按错误保留，不自动重试。</string>
+    <string name="shizuku_cleanup_pending">已请求关闭，仍等待所属执行资源的收尾回执。</string>
+    <string name="shizuku_cleanup_drained">所属 shell、执行线程与本地 RPC 已排空；不保证脱离的后代进程已停止，也不表示副作用回滚。</string>
+    <string name="shizuku_cleanup_unknown">关闭未确认：%1$s。不能视为已释放资源。</string>
+</resources>

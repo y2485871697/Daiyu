@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="search_conversations_title">Search conversations</string>
+    <string name="search_messages_title">Search message history</string>
+    <string name="search_conversations_hint">Title or preview</string>
+    <string name="search_messages_hint">Message or tool record</string>
+    <string name="search_clear">Clear query</string>
+    <string name="search_refresh">Refresh</string>
+    <string name="search_retry">Retry</string>
+    <string name="search_cancel">Cancel</string>
+    <string name="search_cancelled">Search cancelled. Retry to read again.</string>
+    <string name="search_loading">Reading…</string>
+    <string name="search_read_error">Could not read search results. Your records have not been changed.</string>
+    <string name="search_all_folders">All folders</string>
+    <string name="search_uncategorized">Uncategorized</string>
+    <string name="search_selected_scope">Selected: %1$s</string>
+    <string name="search_no_conversations">No conversations in this folder.</string>
+    <string name="search_no_results">No matching results.</string>
+    <string name="search_all_records">All records</string>
+    <string name="search_all_records_selected">Selected: all records</string>
+    <string name="search_current">Current conversation</string>
+    <string name="search_current_selected">Selected: current conversation</string>
+    <string name="search_current_unavailable">Current-conversation search is unavailable from this data source.</string>
+    <string name="search_enter_query">Enter a keyword to search message text and tool records.</string>
+    <string name="search_message_count">%1$d message results returned</string>
+    <string name="search_limited_results">This source returns up to %1$d results without paging. Results may be incomplete.</string>
+</resources>

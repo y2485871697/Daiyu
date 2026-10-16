@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="search_conversations_title">搜尋對話</string>
+    <string name="search_messages_title">搜尋聊天記錄</string>
+    <string name="search_conversations_hint">標題或預覽關鍵字</string>
+    <string name="search_messages_hint">訊息正文或工具記錄關鍵字</string>
+    <string name="search_clear">清空關鍵字</string>
+    <string name="search_refresh">重新整理</string>
+    <string name="search_retry">重試</string>
+    <string name="search_cancel">取消</string>
+    <string name="search_cancelled">已取消搜尋，可重試讀取。</string>
+    <string name="search_loading">正在讀取…</string>
+    <string name="search_read_error">搜尋結果讀取失敗，原記錄未變更。</string>
+    <string name="search_all_folders">全部資料夾</string>
+    <string name="search_uncategorized">未分類</string>
+    <string name="search_selected_scope">已選：%1$s</string>
+    <string name="search_no_conversations">此資料夾暫無對話。</string>
+    <string name="search_no_results">沒有符合的結果。</string>
+    <string name="search_all_records">全部記錄</string>
+    <string name="search_all_records_selected">已選：全部記錄</string>
+    <string name="search_current">目前對話</string>
+    <string name="search_current_selected">已選：目前對話</string>
+    <string name="search_current_unavailable">目前資料來源暫不支援限定目前對話搜尋。</string>
+    <string name="search_enter_query">輸入關鍵字搜尋訊息正文與工具記錄。</string>
+    <string name="search_message_count">已傳回 %1$d 條訊息命中</string>
+    <string name="search_limited_results">目前資料來源最多傳回 %1$d 條且不支援分頁，結果可能不完整。</string>
+</resources>

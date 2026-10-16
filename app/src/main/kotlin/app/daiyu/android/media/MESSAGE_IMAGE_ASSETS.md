@@ -70,11 +70,12 @@ metadata/data symlinks, traversal IDs and replaced root symlinks are rejected on
 
 ## Validation status
 
-New JVM tests cover handoff/reopen, idempotence, ordering/limits, exact deletion, cancellation,
+New JVM test source covers handoff/reopen, idempotence, ordering/limits, exact deletion, cancellation,
 publication failure, explicit unknown-DB reconciliation, deletion tombstones, corruption and path
-boundaries. Android JPEG testing now uses a platform-written EXIF fixture, checks both filename and
-InputStream orientation readers, retains rotation/original-byte assertions, and extends those
-assertions through message handoff + draft/provider deletion. The previously hand-injected minimal
-APP1 failed in the supplied API26 report before production import; the precise platform parser
-internal cause is not established here. No build or test was run by this implementation agent;
-parent must execute the final targeted JVM/API26/API37 regression and DB integration matrix.
+boundaries; these tests still await final execution. This integration explicitly excludes the
+platform-written EXIF fixture replacement and the proposed InputStream-reader and message-handoff
+preview test extensions. AndroidImageAttachmentsTest.kt retains the existing fixed APP1 fixture and
+its original assertions. The supplied API26 failure (expected orientation 6, actual 0) remains
+unresolved; the precise platform parser internal cause is not established here. No build or test
+was run for this documentation correction. JVM tests, Android API26/API37 regression and the DB
+integration matrix all await final execution; no Android fixture fix or extended coverage is claimed.

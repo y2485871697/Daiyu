@@ -53,7 +53,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
     protected fun openSettings() {
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
-        ui.onNodeWithContentDescription("设置").performClick()
+        ui.onNodeWithContentDescription(instrumentation.targetContext.getString(R.string.route_settings)).performClick()
         ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodesWithTag("page:设置").fetchSemanticsNodes().isNotEmpty() }
     }
     protected fun menu(label: String) {

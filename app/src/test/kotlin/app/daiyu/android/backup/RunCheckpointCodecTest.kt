@@ -179,4 +179,18 @@ class RunCheckpointCodecTest {
         assertTrue(growth in 1 until RunCheckpointCodec.RECOVERY_RESERVE)
     }
 
+
+    @Test fun duplicateSupplementIdsRejectOnEncodeAndDecode() {
+        val value=checkpoint();val extra=value.supplements.single()
+        reject {RunCheckpointCodec.encode(value.copy(supplements=listOf(extra,extra)))}
+        val raw=JSONObject(RunCheckpointCodec.encode(value));val rows=raw.getJSONArray("supplements")
+        rows.put(rows.getJSONObject(0));reject {RunCheckpointCodec.decode(raw.toString())}
+    }
+    @Test fun supplementToolBlocksRejectOnEncodeAndDecode() {
+        val value=checkpoint();val invalid=value.supplements.single().copy(blocks=listOf(MessageBlock.Tool(call,"done")))
+        reject {RunCheckpointCodec.encode(value.copy(supplements=listOf(invalid)))}
+        val raw=JSONObject(RunCheckpointCodec.encode(value))
+        raw.getJSONArray("supplements").getJSONObject(0).put("blocks",raw.getJSONArray("message").getJSONObject(0).getJSONArray("blocks"))
+        reject {RunCheckpointCodec.decode(raw.toString())}
+    }
 }

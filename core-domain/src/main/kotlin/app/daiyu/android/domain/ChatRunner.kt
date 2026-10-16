@@ -41,6 +41,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     @Volatile private var requestOpening = false
     private val supplements = mutableListOf<Message>()
     private val supplementIds = mutableSetOf<MessageId>()
+    private val sourceMessageIds = mutableSetOf<MessageId>()
+    private data class PendingSupplement(val message: Message, val complete: (SupplementAdmission) -> Unit)
+    private val pendingSupplements = java.util.ArrayDeque<PendingSupplement>()
     @Volatile private var execution = ExecutionState()
     @Volatile private var session: ModelSession? = null
     @Volatile private var identity: Message? = null
@@ -101,6 +104,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             check(!started) { "Runner只能启动一次" }
             started = true
             identity = initial
+            sourceMessageIds.addAll((history + initial).flatMap { listOf(it.id) + it.historySegments.map { segment -> segment.messageId } })
         }
         val body: suspend () -> Message = { runBody(initial, history, allowBarrier) }
         body.startCoroutine(object : Continuation<Message> {
@@ -171,6 +175,38 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         captured.second?.let { LockSupport.unpark(it) }
         cancelSession(captured.first)
         return true
+    }
+    /** Proposes a text supplement at a confirmed PAUSED boundary. True only means queued;
+     * the callback confirms durable admission. Does not resume or consume a draft. */
+    fun admitSupplement(message: Message, complete: (SupplementAdmission) -> Unit): Boolean {
+        val frozen = message.copy(blocks = message.blocks.toList(), protocolItems = message.protocolItems.toList(),
+            historySegments = message.historySegments.toList())
+        val pending = PendingSupplement(frozen, complete)
+        val accepted = synchronized(terminalLock) {
+            val owner = identity
+            if (owner == null || terminal || terminalReserved || stopped.get() || !pauseRequested ||
+                execution.phase != ExecutionPhase.PAUSED || options.runtimeStore !is AtomicSupplementRuntimeStore ||
+                !options.runtimeStore.durable || frozen.role != Message.USER_ROLE || frozen.status != RunStatus.COMPLETED ||
+                frozen.conversationId != owner.conversationId || frozen.runId != owner.runId || frozen.id == owner.id ||
+                frozen.error != null || frozen.historySegments.isNotEmpty() || frozen.protocolItems.isNotEmpty() ||
+                frozen.blocks.isEmpty() || frozen.blocks.any { it !is MessageBlock.Text } ||
+                frozen.blocks.filterIsInstance<MessageBlock.Text>().all { it.text.isBlank() } ||
+                frozen.id in supplementIds || frozen.id in sourceMessageIds) false
+            else {
+                supplementIds.add(frozen.id)
+                pendingSupplements.addLast(pending)
+                true
+            }
+        }
+        if (!accepted) {
+            completeAdmission(pending, SupplementAdmission.Rejected(message.id))
+            return false
+        }
+        synchronized(terminalLock) { boundaryWaiter }?.let { LockSupport.unpark(it) }
+        return true
+    }
+    private fun completeAdmission(pending: PendingSupplement, result: SupplementAdmission) {
+        try { pending.complete(result) } catch (_: Exception) { /* Observers cannot undo a committed admission. */ }
     }
     /** Public recovery entry point; never opens a model or executes a tool. */
     fun recover(checkpoint: RunCheckpoint): Message {
@@ -270,19 +306,37 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         val unknownOperations = mutableSetOf<Pair<String, String>>()
         fun awaitPause() {
             while (true) {
+                var pending: PendingSupplement? = null
                 val needsCheckpoint = synchronized(terminalLock) {
-                    if (!pauseRequested || stopped.get() || terminalReserved) {
-                        boundaryWaiter = null
-                        return
+                    if (stopped.get() || terminalReserved) { boundaryWaiter = null; return }
+                    pending = pendingSupplements.pollFirst()
+                    if (pending != null) false
+                    else {
+                        if (!pauseRequested) { boundaryWaiter = null; return }
+                        boundaryWaiter = Thread.currentThread()
+                        val changed = execution.phase != ExecutionPhase.PAUSED
+                        setPhase(ExecutionPhase.PAUSED)
+                        changed
                     }
-                    boundaryWaiter = Thread.currentThread()
-                    val changed = execution.phase != ExecutionPhase.PAUSED
-                    setPhase(ExecutionPhase.PAUSED)
-                    changed
+                }
+                val admission = pending
+                if (admission != null) {
+                    val expected = snapshot().copy(supplements = synchronized(terminalLock) { supplements.toList() } + admission.message)
+                    try {
+                        (options.runtimeStore as AtomicSupplementRuntimeStore).commitSupplement(expected, admission.message)
+                    } catch (failure: Exception) {
+                        completeAdmission(admission, SupplementAdmission.Unconfirmed(admission.message.id))
+                        throw PersistenceException(failure)
+                    }
+                    revision = expected.revision
+                    synchronized(terminalLock) {
+                        supplements.add(admission.message)
+                        execution = execution.copy(queuedSupplements = supplements.size)
+                    }
+                    completeAdmission(admission, SupplementAdmission.Accepted(admission.message.id))
+                    continue
                 }
                 if (needsCheckpoint) checkpoint()
-                // Do not wait while owning the control lock. unpark is intentionally used by
-                // stop/resume, including the race where the wake-up precedes park().
                 LockSupport.park()
             }
         }
@@ -805,6 +859,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 captured
             }
             cancelSession(toCancel)
+            val rejected = synchronized(terminalLock) {
+                pendingSupplements.toList().also { pendingSupplements.clear() }
+            }
+            rejected.forEach { completeAdmission(it, SupplementAdmission.Rejected(it.message.id)) }
         }
     }
 }

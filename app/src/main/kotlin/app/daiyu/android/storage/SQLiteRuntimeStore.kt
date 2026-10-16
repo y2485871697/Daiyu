@@ -16,7 +16,7 @@ import java.util.UUID
 internal class SQLiteRuntimeStore private constructor(
     private val database: ConversationDatabase, private val path: String,
     private val file: RandomAccessFile, private val lock: FileLock
-) : AtomicRuntimeStore, AutoCloseable {
+) : AtomicSupplementRuntimeStore, AutoCloseable {
     private val processOwner = UUID.randomUUID().toString()
     private val transactions = DatabaseTransactions { database.writableDatabase }
     private var recovered = false
@@ -34,7 +34,14 @@ internal class SQLiteRuntimeStore private constructor(
         }
         recovered = true
     }
-    @Synchronized override fun commitCheckpoint(checkpoint: RunCheckpoint) {
+    @Synchronized override fun commitCheckpoint(checkpoint: RunCheckpoint) = commit(checkpoint, null)
+    @Synchronized override fun commitSupplement(checkpoint: RunCheckpoint, supplement: Message) {
+        require(checkpoint.phase == ExecutionPhase.PAUSED)
+        require(checkpoint.supplements.count { it.id == supplement.id } == 1 &&
+            checkpoint.supplements.single { it.id == supplement.id } == supplement)
+        commit(checkpoint, supplement)
+    }
+    private fun commit(checkpoint: RunCheckpoint, supplement: Message?) {
         available(); check(recovered)
         val encoded = RunCheckpointCodec.encode(checkpoint)
         transactions.run { db ->
@@ -49,6 +56,7 @@ internal class SQLiteRuntimeStore private constructor(
             if (prior == null) check(checkpoint.revision == 1L) { "首个检查点版本必须为1" }
             val persisted = database.runtimeMessage(db, m)
             check(persisted.status == RunStatus.RUNNING) { "消息已终结，不允许接管运行" }
+            if (supplement != null) database.insertRuntimeSupplement(db, m, supplement)
             val values = values(checkpoint, encoded)
             if (prior == null) db.insertOrThrow("runtime_checkpoints", null, values)
             else check(db.update("runtime_checkpoints", values,

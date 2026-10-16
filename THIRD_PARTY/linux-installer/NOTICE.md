@@ -56,7 +56,7 @@ Alpine 3.24.1 rootfs entries use the supplied Alpine release URLs; Debian 13 ent
 Archive SHA-256/size values identify the fixed inputs but do not override licenses of packages
 inside them. No rootfs is vendored by this change and no automatic download occurs.
 
-PRoot, loaders and any native helpers are not bundled or fetched here. Their binary hashes,
-source/patch/build provenance and separate licenses remain required from the trusted parent;
-none were invented from the rootfs metadata. See the existing
-[native-runtime inventory](../task19/native-runtime.md) for its separately scoped audit.
+The original installer-only change did not bundle native helpers. The subsequent R09
+runtime packaging adds the exact supplied PRoot/loader pairs, corresponding source and
+licenses; see [the bundled runtime notice](../proot/NOTICE.md) and its artifact hashes.
+These hashes were not derived from rootfs metadata. The [earlier native-runtime inventory](../task19/native-runtime.md) remains a historical audit, not the current packaging state.

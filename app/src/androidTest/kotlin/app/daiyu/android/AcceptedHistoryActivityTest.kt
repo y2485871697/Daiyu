@@ -17,7 +17,7 @@ class AcceptedHistoryActivityTest : WiredActivityTestCase() {
     private fun contentRevision() = ((field("chatState\$delegate") as State<*>).value as ChatScreenState).contentRevision
 
     fun testLateAcceptedHistoryCannotOverwriteExpandedWindowOrNewFinalText() {
-        val conversation = fixture.database.create()
+        val conversation = fixture.database.create("default")
         repeat(70) { index ->
             val run = RunId("late-history-$index")
             fixture.database.send(

@@ -26,7 +26,7 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
         finally { super.tearDown() }
     }
     private fun parent(): RunExecutionOwner {
-        val conversation = database.create(); val run = RunId(UUID.randomUUID().toString())
+        val conversation = database.create("default"); val run = RunId(UUID.randomUUID().toString())
         val user = Message(MessageId(UUID.randomUUID().toString()), conversation.id, run, "user", emptyList(), RunStatus.COMPLETED)
         val assistant = user.copy(id = MessageId(UUID.randomUUID().toString()), role = "assistant", status = RunStatus.RUNNING)
         database.send(user, assistant)
@@ -144,9 +144,10 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
     fun testVersionEightUpgradeKeepsTaskRowsAndReportsOldUsageAsMissing() {
         val owner = parent(); task(owner)
         runtime.close(); database.writableDatabase.execSQL("DROP TABLE child_request_usage")
+        app.daiyu.android.removeAssistantSchemaForLegacyFixture(database.writableDatabase)
         database.writableDatabase.version = 8; database.close()
         runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
-        assertEquals(9, database.readableDatabase.version)
+        assertEquals(10, database.readableDatabase.version)
         assertEquals(1, read().childCoverage.tasksWithoutReportedUsage)
         assertNull(read().summary.child.input.reportedTokens)
     }

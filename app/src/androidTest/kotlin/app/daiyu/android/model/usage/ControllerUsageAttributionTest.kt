@@ -61,7 +61,7 @@ class ControllerUsageAttributionTest : InstrumentationTestCase() {
             })
         }
         fun prepare() {
-            conversation = database.create(); database.draft(conversation.id, "preserve draft")
+            conversation = database.create("default"); database.draft(conversation.id, "preserve draft")
             val owner = SubAgentConfigKey.Conversation(conversation.id.value)
             preferences.createConversation(owner)
             check(preferences.update(owner) { it.copy(enabled = true, profiles = listOf(profile)) } is ConversationSubAgentPreferences.WriteResult.Saved)

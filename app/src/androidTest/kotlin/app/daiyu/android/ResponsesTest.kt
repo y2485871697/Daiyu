@@ -87,7 +87,7 @@ class ResponsesTest:InstrumentationTestCase() {
         val context=testContext(instrumentation.targetContext);context.deleteDatabase("conversations.db")
         var db=app.daiyu.android.storage.ConversationDatabase(context)
         try {
-            val c=db.create();val initial=initial().copy(conversationId=c.id)
+            val c=db.create("default");val initial=initial().copy(conversationId=c.id)
             val user=initial.copy(id=MessageId("u-device"),role="user",status=RunStatus.COMPLETED,blocks=listOf(MessageBlock.Text("u","设备状态")))
             db.send(user,initial)
             val model=ResponsesModel(config) {connections[opened++]}

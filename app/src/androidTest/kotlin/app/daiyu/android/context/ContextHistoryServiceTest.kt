@@ -44,7 +44,7 @@ class ContextHistoryServiceTest : InstrumentationTestCase() {
         })
     }
     private fun seed(): List<Message> {
-        val id = db.create().id
+        val id = db.create("default").id
         fun row(key: String, role: String, run: String, value: String = key) = Message(
             MessageId("${id.value}-$key"), id, RunId("${id.value}-$run"), role, text(value), RunStatus.COMPLETED)
         val user = row("u1", "user", "r1", "question".repeat(100))

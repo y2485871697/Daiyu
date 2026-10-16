@@ -134,7 +134,7 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
     }
 
     fun testAcceptedDbFixtureClearsOnlyMatchingEditorAndLoadsThatConversation() {
-        val conversation = fixture.database.create()
+        val conversation = fixture.database.create("default")
         mainThread { activity.select(conversation) }
         val p = preview()
         val owner = checkNotNull(editor())

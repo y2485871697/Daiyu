@@ -122,7 +122,7 @@ class NeutralImageBackupTest : InstrumentationTestCase() {
 
     fun testRealOriginalsFromRowsSegmentOnlyAndArchiveOnlyAreCarriedAndDeduplicated() {
         val from = fresh(); val assets = SourceAssets(File(from.context.filesDir, "test-message-assets"))
-        val conversation = from.db.create().id
+        val conversation = from.db.create("default").id
         val ordinary = image(assets, conversation, "visible")
         val supplement = image(assets, conversation, "segment-only")
         val segments = listOf(
@@ -156,7 +156,7 @@ class NeutralImageBackupTest : InstrumentationTestCase() {
 
     fun testMissingCorruptAndForgedImagePackagesRejectBeforeAnyPublicationOrSqlMutation() {
         val from = fresh(); val assets = SourceAssets(File(from.context.filesDir, "test-message-assets"))
-        val conversation = from.db.create().id; send(from, conversation, "visible", image(assets, conversation, "visible"))
+        val conversation = from.db.create("default").id; send(from, conversation, "visible", image(assets, conversation, "visible"))
         val text = NeutralBackupService(from.context, from.db, assets).exportPackage()
         val invalid = listOf(
             mutate(text) { it.remove("message_images") },
@@ -184,9 +184,9 @@ class NeutralImageBackupTest : InstrumentationTestCase() {
 
     fun testScopedExportNeverReadsOtherConversationsButMissingAndCorruptSelectedOriginalFail() {
         val from = fresh(); val assets = SourceAssets(File(from.context.filesDir, "test-message-assets"))
-        val selected = from.db.create().id; val selectedImage = image(assets, selected, "selected")
+        val selected = from.db.create("default").id; val selectedImage = image(assets, selected, "selected")
         send(from, selected, "selected", selectedImage)
-        val other = from.db.create().id; val otherImage = image(assets, other, "other")
+        val other = from.db.create("default").id; val otherImage = image(assets, other, "other")
         send(from, other, "other", otherImage)
         assets.removeOriginal(MessageImageReferenceCodec.toAsset(otherImage.reference))
         val exporter = NeutralBackupService(from.context, from.db, assets)
@@ -200,7 +200,7 @@ class NeutralImageBackupTest : InstrumentationTestCase() {
 
     fun testConfigurationConflictAndAssetCollisionCannotOverwriteExistingState() {
         val from = fresh(); val assets = SourceAssets(File(from.context.filesDir, "test-message-assets"))
-        val conversation = from.db.create().id; val block = image(assets, conversation, "visible")
+        val conversation = from.db.create("default").id; val block = image(assets, conversation, "visible")
         send(from, conversation, "visible", block)
         val exporter = NeutralBackupService(from.context, from.db, assets)
         exporter.setNonSecretConfiguration(mapOf("model" to "incoming")); val text = exporter.exportPackage()
@@ -219,7 +219,7 @@ class NeutralImageBackupTest : InstrumentationTestCase() {
 
     fun testArchiveClaimsCannotAuthorizeReadingAnotherConversationDuringScopedExport() {
         val from = fresh(); val source = SourceAssets(File(from.context.filesDir, "test-message-assets"))
-        val selected = from.db.create().id; val foreign = from.db.create().id
+        val selected = from.db.create("default").id; val foreign = from.db.create("default").id
         send(from, selected, "selected", MessageBlock.Text("t", "selected text"))
         val block = image(source, foreign, "foreign-image")
         archive(from, Message(MessageId("foreign-image"), foreign, RunId("old"), "user", listOf(block), RunStatus.COMPLETED))
@@ -230,7 +230,7 @@ class NeutralImageBackupTest : InstrumentationTestCase() {
 
     fun testArchiveOnlyImageCannotBypassManifestRequirement() {
         val from = fresh(); val assets = SourceAssets(File(from.context.filesDir, "test-message-assets"))
-        val conversation = from.db.create().id
+        val conversation = from.db.create("default").id
         send(from, conversation, "text", MessageBlock.Text("t", "current text"))
         val archived = image(assets, conversation, "old-image")
         archive(from, Message(MessageId("old-image"), conversation, RunId("old"), "user", listOf(archived), RunStatus.COMPLETED))
@@ -247,7 +247,7 @@ class NeutralImageBackupTest : InstrumentationTestCase() {
 
     fun testLaterOwnerCollisionRollsBackDbWithoutDeletingPreviouslyPublishedOrExistingAssets() {
         val from = fresh(); val source = SourceAssets(File(from.context.filesDir, "test-message-assets"))
-        val conversation = from.db.create().id
+        val conversation = from.db.create("default").id
         val first = image(source, conversation, "a-new"); val last = image(source, conversation, "z-existing")
         send(from, conversation, "a-new", first); send(from, conversation, "z-existing", last)
         val text = NeutralBackupService(from.context, from.db, source).exportPackage()
@@ -264,7 +264,7 @@ class NeutralImageBackupTest : InstrumentationTestCase() {
     }
 
     fun testUnconnectedImageCapabilityFailsExplicitlyAndLegacyTextPackagesRemainCompatible() {
-        val from = fresh(); val conversation = from.db.create().id
+        val from = fresh(); val conversation = from.db.create("default").id
         send(from, conversation, "text", MessageBlock.Text("t", "legacy"))
         val plain = NeutralBackupService(from.context, from.db); val text = plain.exportPackage()
         assertFalse(payload(text).has("message_images"))

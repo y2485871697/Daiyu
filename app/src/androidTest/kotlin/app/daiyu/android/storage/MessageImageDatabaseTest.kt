@@ -62,7 +62,7 @@ class MessageImageDatabaseTest : android.test.AndroidTestCase() {
     }
 
     fun testOrdinaryImageTextAndToolRoundTripReopenAndSearch() {
-        val id = database.create().id
+        val id = database.create("default").id
         val (plain, assistant) = pair(id)
         val reference = image(plain)
         val user = plain.copy(blocks = plain.blocks + reference)
@@ -72,7 +72,7 @@ class MessageImageDatabaseTest : android.test.AndroidTestCase() {
             MessageBlock.Tool(ToolInvocation(ToolCallId("call"), "lookup", "tool argument needle"), "tool result needle")))
         database.save(completed)
         reopen()
-        assertEquals(9, database.readableDatabase.version)
+        assertEquals(10, database.readableDatabase.version)
         assertEquals(listOf(user, completed), database.messages(id).map { it.second })
         for (query in listOf("visible search phrase", "tool argument needle", "tool result needle")) {
             assertEquals(listOf(id), database.conversations(query).map { it.id })
@@ -93,7 +93,7 @@ class MessageImageDatabaseTest : android.test.AndroidTestCase() {
     }
 
     fun testInvalidOwnersDuplicatesAndLimitsRollBackWholeSend() {
-        val retained = database.create().id
+        val retained = database.create("default").id
         database.draft(retained, "retained draft")
         database.draft("retained composer")
         val before = database.exportBackup()
@@ -120,7 +120,7 @@ class MessageImageDatabaseTest : android.test.AndroidTestCase() {
     }
 
     fun testMaximumImageCountAndAggregateBytesAreAcceptedAsMetadata() {
-        val id = database.create().id
+        val id = database.create("default").id
         val (plain, assistant) = pair(id)
         val user = plain.copy(blocks = List(MessageImageReference.MAX_IMAGES) { image(plain, 8 * 1024 * 1024) })
         database.send(user, assistant)
@@ -129,7 +129,7 @@ class MessageImageDatabaseTest : android.test.AndroidTestCase() {
     }
 
     fun testHistoryImageUsesSegmentMessageAndEnclosingConversationOwner() {
-        val id = database.create().id
+        val id = database.create("default").id
         val (plain, assistant) = pair(id)
         database.send(plain, assistant)
         val supplementId = MessageId("segment-${UUID.randomUUID()}")
@@ -161,13 +161,13 @@ class MessageImageDatabaseTest : android.test.AndroidTestCase() {
     }
 
     fun testInvalidImageImportRejectsBeforeAnyRowsOrDraftAreChanged() {
-        val source = database.create().id
+        val source = database.create("default").id
         val (plain, assistant) = pair(source)
         database.send(plain.copy(blocks = listOf(image(plain))), assistant)
         database.save(assistant.copy(status = RunStatus.COMPLETED))
         val backup = database.exportBackup()
         reset()
-        val retained = database.create().id
+        val retained = database.create("default").id
         database.draft(retained, "retained conversation draft")
         database.draft("retained composer")
         val before = database.exportBackup()

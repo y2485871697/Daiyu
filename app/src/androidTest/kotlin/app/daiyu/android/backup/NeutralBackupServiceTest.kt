@@ -26,7 +26,7 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
         databases.forEach { (c, db) -> db.close(); c.deleteDatabase("conversations.db"); c.filesDir.deleteRecursively() }; super.tearDown()
     }
     private fun seed(db: ConversationDatabase, turns: Int): ConversationId {
-        val owner = db.create().id
+        val owner = db.create("default").id
         repeat(turns) { n -> val r = RunId("r-$n-${owner.value}")
             val u = Message(MessageId("u-$n-${owner.value}"), owner, r, "user", listOf(MessageBlock.Text("t", "question $n ".repeat(200))), RunStatus.COMPLETED)
             val a = Message(MessageId("a-$n-${owner.value}"), owner, r, "assistant", listOf(MessageBlock.Text("t", "answer $n ".repeat(200))), RunStatus.RUNNING)
@@ -87,7 +87,7 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
     }
     fun testConfigurationCaptureReplacesSnapshotAndClearsRemovedPreferences() {
         val (context, db, backup) = fresh()
-        assertEquals(9, db.writableDatabase.version)
+        assertEquals(10, db.writableDatabase.version)
         val preferences = context.getSharedPreferences("model-settings", Context.MODE_PRIVATE)
         val full = linkedMapOf<String, Any>("endpoint" to "https://example.org", "model" to "model",
             "responses-path" to "/v1/responses", "battery" to true, "device-status" to false)
@@ -126,7 +126,7 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
     }
     fun testSecondConfigurationInsertFailureRollsBackSnapshotAfterReopen() {
         val (context, db, backup) = fresh(); seed(db, 1)
-        assertEquals(9, db.writableDatabase.version)
+        assertEquals(10, db.writableDatabase.version)
         backup.setNonSecretConfiguration(mapOf("model" to "existing", "battery" to false))
         val old = backup.importedConfiguration().toString(); val before = backup.exportPackage()
         db.writableDatabase.execSQL("""CREATE TRIGGER fail_second_configuration_insert BEFORE INSERT ON neutral_config
@@ -143,7 +143,7 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
         db.close()
         val reopened = ConversationDatabase(context)
         try {
-            assertEquals(9, reopened.readableDatabase.version)
+            assertEquals(10, reopened.readableDatabase.version)
             val restored = NeutralBackupService(context, reopened)
             assertEquals(old, restored.importedConfiguration().toString()); assertEquals(before, restored.exportPackage())
             assertEquals(2, reopened.readableDatabase.rawQuery("SELECT count(*) FROM neutral_config", null).use { it.moveToFirst(); it.getInt(0) })

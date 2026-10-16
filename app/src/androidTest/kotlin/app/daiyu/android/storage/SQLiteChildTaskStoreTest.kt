@@ -23,7 +23,7 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
     }
     private fun lease(db: ConversationDatabase) = SQLiteRuntimeStore.acquire(db).also { leases.add(it); it.recoverPending() }
     private fun parent(db: ConversationDatabase): RunExecutionOwner {
-        val conversation = db.create(); val run = RunId(UUID.randomUUID().toString())
+        val conversation = db.create("default"); val run = RunId(UUID.randomUUID().toString())
         val user = Message(MessageId(UUID.randomUUID().toString()), conversation.id, run, "user",
             listOf(MessageBlock.Text("u", "question")), RunStatus.COMPLETED)
         val assistant = user.copy(id = MessageId(UUID.randomUUID().toString()), role = "assistant", blocks = emptyList(), status = RunStatus.RUNNING)
@@ -105,8 +105,8 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
 
     fun testVersionSevenUpgradeKeepsHistoryAndCreatesTaskSchema() {
         val db = fresh(); val owner = parent(db); val before = db.messages(owner.conversationId)
-        db.writableDatabase.execSQL("DROP TABLE child_tasks"); db.writableDatabase.version = 7; db.close()
-        assertEquals(9, db.readableDatabase.version); assertEquals(before, db.messages(owner.conversationId))
+        db.writableDatabase.execSQL("DROP TABLE child_tasks"); app.daiyu.android.removeAssistantSchemaForLegacyFixture(db.writableDatabase); db.writableDatabase.version = 7; db.close()
+        assertEquals(10, db.readableDatabase.version); assertEquals(before, db.messages(owner.conversationId))
         assertTrue(SQLiteChildTaskStore(db).list(owner.conversationId.value, 20).isEmpty())
         val runtime = lease(db); val newOwner = parent(db); val rows = tasks(newOwner, 1)
         runtime.childTasks.enqueue(newOwner, rows)

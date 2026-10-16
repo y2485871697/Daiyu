@@ -34,7 +34,7 @@ class ConversationSchema4Test : InstrumentationTestCase() {
     private fun count(db: ConversationDatabase, table: String): Int =
         db.readableDatabase.rawQuery("SELECT count(*) FROM $table", null).use { it.moveToFirst(); it.getInt(0) }
     private fun assertSchema(db: ConversationDatabase) {
-        assertEquals(9, db.readableDatabase.version)
+        assertEquals(10, db.readableDatabase.version)
         db.readableDatabase.rawQuery("SELECT history_segments FROM messages LIMIT 0",null).use { assertEquals(1,it.columnCount) }
         for (table in listOf("context_archives", "context_branches", "context_usage", "neutral_assets", "neutral_config", "neutral_imports")) {
             db.readableDatabase.rawQuery("SELECT * FROM $table LIMIT 0", null).use { assertTrue(it.columnCount > 0) }
@@ -84,7 +84,7 @@ class ConversationSchema4Test : InstrumentationTestCase() {
     }
     fun testDeleteClearsOwnedReferencesButKeepsMaterializedBranchAndSharedBlob() {
         val context = fresh(); val db = open(context)
-        val parent = db.create().id; val other = db.create().id
+        val parent = db.create("default").id; val other = db.create("default").id
         val message = turn(db, parent); turn(db, other)
         val backup = NeutralBackupService(context, db)
         backup.attach("parent-asset", message.id.value, "application/octet-stream", byteArrayOf(1, 2, 3))
@@ -108,7 +108,7 @@ class ConversationSchema4Test : InstrumentationTestCase() {
     }
     fun testDeleteFailureRollsBackReferencesAndMessagesAfterReopen() {
         val context = fresh(); var db = open(context)
-        val owner = db.create().id; val message = turn(db, owner)
+        val owner = db.create("default").id; val message = turn(db, owner)
         val backup = NeutralBackupService(context, db)
         backup.attach("asset", message.id.value, "application/octet-stream", byteArrayOf(5))
         ContextService(context, db).recordUsage(UsageRecord("usage", message.runId.value, owner.value, 1L, 2L, null, null))

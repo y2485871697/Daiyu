@@ -92,7 +92,7 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
             })
         }
         fun prepare() {
-            conversation = database.create()
+            conversation = database.create("default")
             val owner = SubAgentConfigKey.Conversation(conversation.id.value)
             val preferences = ConversationSubAgentPreferences(app.getSharedPreferences("subagent_configuration", 0))
             preferences.createConversation(owner)

@@ -162,9 +162,9 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             m.blocks.none { it is MessageBlock.Tool && it.result == null }
         }) { "不能截断未完成工具批次" }
         val copy = ConversationId(UUID.randomUUID().toString())
-        val values = db.rawQuery("SELECT title,folder FROM conversations WHERE id=?", arrayOf(id.value)).use { c ->
+        val values = db.rawQuery("SELECT title,folder,assistant_id FROM conversations WHERE id=?", arrayOf(id.value)).use { c ->
             require(c.moveToFirst()); ContentValues().apply { put("id", copy.value); put("title", c.getString(0) + " · 分支")
-                put("folder", c.getString(1)); put("pinned", 0); put("draft", ""); put("updated", System.currentTimeMillis()) }
+                put("folder", c.getString(1)); put("assistant_id", c.getString(2)); put("pinned", 0); put("draft", ""); put("updated", System.currentTimeMillis()) }
         }
         db.insertOrThrow("conversations", null, values)
         val runs = mutableMapOf<RunId, RunId>()

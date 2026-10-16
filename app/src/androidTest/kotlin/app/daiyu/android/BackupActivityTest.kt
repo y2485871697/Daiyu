@@ -109,7 +109,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
         awaitState {controller.ready}
         assertNull(controller.problem)
         // Small real backup with historical messages/tool result; importing must not replay them.
-        val conversation=database.create()
+        val conversation=database.create("default")
         val run=RunId("historical-run")
         val user=Message(MessageId("historical-user"),conversation.id,run,"user",listOf(MessageBlock.Text("u","question")),RunStatus.COMPLETED)
         val assistant=Message(MessageId("historical-assistant"),conversation.id,run,"assistant",

@@ -272,7 +272,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         val f=fresh {f ->
             val runtime=SQLiteRuntimeStore.acquire(f.db)
             try {
-                runtime.recoverPending();val conversation=f.db.create();val run=RunId("lost-run")
+                runtime.recoverPending();val conversation=f.db.create("default");val run=RunId("lost-run")
                 val user=Message(MessageId("lost-user"),conversation.id,run,"user",listOf(MessageBlock.Text("user","old question")),RunStatus.COMPLETED)
                 val assistant=Message(MessageId("lost-assistant"),conversation.id,run,"assistant",emptyList(),RunStatus.RUNNING)
                 f.db.send(user,assistant)

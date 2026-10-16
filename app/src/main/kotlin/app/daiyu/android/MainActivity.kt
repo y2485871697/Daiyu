@@ -34,6 +34,7 @@ import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.components.*
 import app.daiyu.android.ui.components.subagent.SubAgentThinkingEffortPickerDialog
 import app.daiyu.android.ui.model.ConversationPaneUiState
+import app.daiyu.android.ui.model.ConversationReasoningPreference
 import app.daiyu.android.ui.model.ConversationSummaryUi
 import app.daiyu.android.ui.model.MessageSearchHit
 import app.daiyu.android.ui.screens.assistants.AssistantEditScreen
@@ -51,6 +52,9 @@ class MainActivity : ComponentActivity() {
     private val retainedData by lazy { RetainedConversationData(controller.database, ContextService(this, controller.database)) }
     private val assistantStore by lazy { SharedPreferencesAssistantStore(applicationContext) }
     private val assistantAssets by lazy { FileAssistantAssets(applicationContext) }
+    private val reasoningPreference by lazy {
+        ConversationReasoningPreference(getSharedPreferences("conversation-ui", MODE_PRIVATE))
+    }
     private val subAgentRepository by lazy {
         ConversationSubAgentPreferences(getSharedPreferences("subagent_configuration", MODE_PRIVATE))
     }
@@ -249,9 +253,16 @@ class MainActivity : ComponentActivity() {
                     onDismiss = { collaborationVisible = false; collaborationOwner = null }, taskRunning = controller.active != null || backupBusy,
                     ownerMatches = { activityUsable() && selected?.id?.value == owner && retainedPage == "chat" && !controller.dataBusy },
                     repositoryFactory = { subAgentRepository })
-                // No runtime reasoning-capability contract exists yet. Do not write arbitrary request JSON.
-                SubAgentThinkingEffortPickerDialog(show = thinkingPicker, effort = ReasoningEffort.DEFAULT,
-                    options = listOf(ReasoningEffort.DEFAULT), onDismiss = { thinkingPicker = false }, onEffortChange = {})
+                // UI preference only: no runtime reasoning-capability contract exists yet.
+                val thinkingOwner = chatState.conversationKey
+                SubAgentThinkingEffortPickerDialog(show = thinkingPicker, effort = reasoningPreference.get(thinkingOwner),
+                    options = ReasoningEffort.entries, onDismiss = { thinkingPicker = false }, onEffortChange = { effort ->
+                        if (activityUsable() && selected?.id?.value == thinkingOwner) {
+                            reasoningPreference.set(thinkingOwner, effort)
+                            publishChat()
+                        }
+                        thinkingPicker = false
+                    })
             }
         }
         controller.observe(listener)
@@ -596,6 +607,7 @@ class MainActivity : ComponentActivity() {
             balanceText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,
                 phase = phase, controlOwnerKey = controlOwner?.id?.value, modelLabel = savedModelLabel(),
+                reasoningLabel = reasoningPreference.get(selected?.id?.value).displayName,
                 assistantLabel = assistantStore.read(assistantStore.selectedId.value)?.name ?: "助手", enabled = allowed))
     }
     private fun requestScroll(id: String? = null, follow: Boolean = true) {

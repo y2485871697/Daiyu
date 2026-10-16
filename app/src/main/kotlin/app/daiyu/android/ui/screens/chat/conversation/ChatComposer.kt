@@ -6,6 +6,8 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.background
@@ -124,7 +126,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(top = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             ComposerChip(DaiyuIcons.Model, state.modelLabel, state.enabled, actions.onModelClick, Modifier.testTag("chat-model"))
-            ComposerChip(DaiyuIcons.Reasoning, state.reasoningLabel, state.enabled, actions.onOpenReasoning)
+            ComposerChip(DaiyuIcons.Reasoning, state.reasoningLabel, state.enabled, actions.onOpenReasoning,
+                Modifier.semantics { contentDescription = "推理强度，当前为 ${state.reasoningLabel}" })
             ComposerChip(DaiyuIcons.Assistant, state.assistantLabel, state.enabled, actions.onOpenAssistant)
             Row(Modifier.clip(RoundedCornerShape(50)).background(colors.surfaceContainerHigh)
                 .clickable(enabled = state.enabled, onClick = actions.onContextClick).padding(horizontal = 10.dp, vertical = 8.dp),

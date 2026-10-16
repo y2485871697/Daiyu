@@ -157,6 +157,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                     if (fraction != null) drawArc(if (state.enabled) colors.primary else colors.disabledOnSurface, -90f, fraction * 360f, false, style = stroke)
                 }
                 Text(if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}",
+                    modifier = Modifier.weight(1f),
                     style = MiuixTheme.textStyles.footnote1, color = secondaryColor,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }

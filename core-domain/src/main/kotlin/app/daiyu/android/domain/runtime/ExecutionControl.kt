@@ -62,6 +62,19 @@ interface AtomicRuntimeStore : RuntimeStore {
     fun readCommittedCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint? = null
 }
 
+/** Local durable admission only; never a provider receipt or a promise of execution. */
+sealed interface SupplementAdmission {
+    val messageId: MessageId
+    data class Accepted(override val messageId: MessageId) : SupplementAdmission
+    data class Rejected(override val messageId: MessageId) : SupplementAdmission
+    data class Unconfirmed(override val messageId: MessageId) : SupplementAdmission
+}
+
+/** Atomically commits the queued supplement, its user row and the assistant checkpoint. */
+interface AtomicSupplementRuntimeStore : AtomicRuntimeStore {
+    fun commitSupplement(checkpoint: RunCheckpoint, supplement: Message)
+}
+
 /** Batch boundary integration for ToolDispatcher. Implementations validate the ENTIRE batch before
  * any execution and own durable dedup/equivalent unknown protection and question barriers.
  * Return one output per call in input order; throw on uncertain outcomes, never fallback/replay. */

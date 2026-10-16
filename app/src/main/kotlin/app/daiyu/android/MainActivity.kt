@@ -63,8 +63,12 @@ class MainActivity : ComponentActivity() {
     private var selectionStart = 0
     private var selectionEnd = 0
     private var selectionReady = false
+    private var editorGeneration = 0L
     private val selections get() = controller.selections
     private var shown = mutableListOf<Pair<Long, Message>>()
+    private data class QuestionRowUi(val message: Message,
+        val projections: List<ChatController.QuestionProjection>, val retryCleanup: Boolean)
+    private var questionRows by mutableStateOf<Map<String, QuestionRowUi>>(emptyMap())
     private var dataRevision = -1L
     private var scrollSerial = 0L
     private var controlOwner: Message? = null
@@ -231,7 +235,7 @@ class MainActivity : ComponentActivity() {
                         onOpenPermissions = { dismissSidebar(); retainedPage = "settings" },
                     ) {
                         chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
-                            DaiyuChatScreen(chatState, chatActions(), turnExtras = { id -> QuestionExtras(id, chatState.contentRevision) })
+                            DaiyuChatScreen(chatState, chatActions(), turnExtras = { id -> QuestionExtras(id) })
                         }
                     }
                 }
@@ -258,12 +262,18 @@ class MainActivity : ComponentActivity() {
 
     private fun chatActions(): ChatScreenActions {
         val renderedOwner = controlOwner
+        val renderedConversation = chatState.conversationKey
+        val renderedEditorGeneration = editorGeneration
+        fun editorMatches() = activityUsable() && selectionReady &&
+            selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration
         fun gestureOwner() = currentControlOwner()?.takeIf {
             renderedOwner != null && it.id == renderedOwner.id && it.runId == renderedOwner.runId && it.conversationId == renderedOwner.conversationId
         }
         return ChatScreenActions(
-        onOpenSidebar = { openSidebar() }, onTextChange = { updateDraft(it) },
-        onSelectionChange = { start, end -> selectionStart = start; selectionEnd = end; publishChat() },
+        onOpenSidebar = { openSidebar() }, onTextChange = { if (editorMatches()) updateDraft(it) },
+        onSelectionChange = { start, end ->
+            if (editorMatches()) { selectionStart = start; selectionEnd = end; publishChat() }
+        },
         onSend = { text -> guard { sendDraft(text) } },
         onPrimaryTap = { guard {
             gestureOwner()?.let { owner -> controller.runState(owner)?.let { state ->
@@ -320,12 +330,10 @@ class MainActivity : ComponentActivity() {
         if (activityUsable() && retainedPage == "settings") guard { openSettingsRoute(route) }
     }
 
-    @Suppress("UNUSED_PARAMETER")
-    @Composable private fun QuestionExtras(id: String, revision: Long) {
-        val message = shown.firstOrNull { it.second.id.value == id }?.second ?: return
-        message.blocks.filterIsInstance<MessageBlock.Tool>().forEach { tool ->
-            val question = controller.questionProjection(message, tool.invocation)
-            if (question != null) key(question.identity) {
+    @Composable private fun QuestionExtras(id: String) {
+        val row = questionRows[id] ?: return
+        row.projections.forEach { question ->
+            key(question.identity) {
                 // The existing question binding owns durable replies and stop races; keep its adapter.
                 AndroidView(factory = { app.daiyu.android.question.QuestionCardView(it) }, update = { view ->
                     val binding = question.binding
@@ -336,8 +344,8 @@ class MainActivity : ComponentActivity() {
                 })
             }
         }
-        if (controller.canRetryQuestionCleanup(message)) {
-            top.yukonga.miuix.kmp.basic.TextButton(text = "重试停止清理", onClick = { guard { controller.stop(message) } })
+        if (row.retryCleanup) {
+            top.yukonga.miuix.kmp.basic.TextButton(text = "重试停止清理", onClick = { guard { controller.stop(row.message) } })
         }
     }
 
@@ -496,6 +504,7 @@ class MainActivity : ComponentActivity() {
         check(controller.preferences.edit().apply {
             if (conversation == null) remove("selected") else putString("selected", conversation.id.value)
         }.commit())
+        editorGeneration++
         selected = conversation; selectionReady = true; draft = targetDraft
         val range = selections[conversation?.id]
         selectionStart = (range?.first ?: draft.length).coerceIn(0, draft.length)
@@ -505,6 +514,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun sendDraft(text: String) {
         val saved = controller.send(selected, text) ?: return
+        editorGeneration++
         selected = saved; selectionReady = true
         val savedSelection = controller.preferences.edit().putString("selected", saved.id.value).commit()
         draft = ""; selectionStart = 0; selectionEnd = 0
@@ -532,6 +542,7 @@ class MainActivity : ComponentActivity() {
                 dataRevision = controller.dataRevision
                 val latest = selected?.id?.let { id -> controller.database.conversations().firstOrNull { it.id == id } }
                 if (selected != null && latest == null) { select(null); return@guard }
+                editorGeneration++
                 selected = latest
                 draft = latest?.draft ?: controller.database.draft()
                 selectionStart = selectionStart.coerceIn(0, draft.length); selectionEnd = selectionEnd.coerceIn(0, draft.length)
@@ -569,6 +580,13 @@ class MainActivity : ComponentActivity() {
         return result
     }
     private fun publishChat() {
+        questionRows = shown.mapNotNull { (_, message) ->
+            val projections = message.blocks.filterIsInstance<MessageBlock.Tool>()
+                .mapNotNull { controller.questionProjection(message, it.invocation) }
+            val retryCleanup = controller.canRetryQuestionCleanup(message)
+            if (projections.isEmpty() && !retryCleanup) null
+            else message.id.value to QuestionRowUi(message, projections, retryCleanup)
+        }.toMap()
         val state = controlOwner?.let { controller.runState(it) }
         val phase = composerPhaseForRun(state?.pauseRequested)
         val allowed = !sidebarVisible && controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true

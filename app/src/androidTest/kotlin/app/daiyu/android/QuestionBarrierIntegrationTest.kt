@@ -169,6 +169,19 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
     }
     fun testPublicQuestionReleasesWorkerAndDurableAnswerContinuesExactlyOnce() {
         val f=fresh();launch(f);val owner=send(f);val id=waiting(f,owner)
+        lateinit var originalCard:QuestionCardView
+        var selectedOptionId=0
+        main {
+            originalCard=card()
+            val choices=views(originalCard).filterIsInstance<RadioGroup>().single()
+            selectedOptionId=choices.getChildAt(0).id;choices.check(selectedOptionId)
+            MainActivity::class.java.getDeclaredMethod("refresh").apply {isAccessible=true}.invoke(checkNotNull(activity))
+        }
+        ui.waitForIdle()
+        main {
+            assertSame("same question refresh retains the native card",originalCard,card())
+            assertEquals(selectedOptionId,views(card()).filterIsInstance<RadioGroup>().single().checkedRadioButtonId)
+        }
         recreate();waiting(f,owner)
         val durable=AtomicInteger()
         f.probe.beforeContinuation={outputs ->

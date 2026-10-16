@@ -51,6 +51,7 @@ internal class RunCatalogTools(
     // Host factories run only after Runner supplies its actual opaque execution owner.
     private val authorizationFactory: ((RunExecutionOwner) -> TaskAuthorization)? = null,
     private val generationFactory: ((RunExecutionOwner, SessionCapabilities, TaskAuthorization) -> RunGenerationTools)? = null,
+    private val virtualDisplayFactory: ((RunExecutionOwner, SessionCapabilities, TaskAuthorization) -> R08VirtualDisplayCatalogLeaf)? = null,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
     // No temporary owner or authorization for generation. Legacy read-only callers retain
@@ -62,6 +63,7 @@ internal class RunCatalogTools(
         require(terminal == null) { "terminal_task_authorization_required" }
         require(browser == null) { "browser_task_authorization_required" }
         require(generationFactory == null) { "generation_task_authorization_required" }
+        require(virtualDisplayFactory == null) { "virtual_display_task_authorization_required" }
         TaskAuthorization(capabilities.sessionId, runId.value)
     }
     @Volatile private var boundAuthorization: TaskAuthorization? = null
@@ -101,6 +103,7 @@ internal class RunCatalogTools(
 
     @Volatile private var background: RunChildTasks? = null
     @Volatile private var generation: GenerationCatalogLeaf? = null
+    @Volatile private var virtualDisplay: R08VirtualDisplayCatalogLeaf? = null
     private var browserTools: List<RegisteredTool> = emptyList()
     @Volatile private var owner: RunExecutionOwner? = null
     private var binding = false
@@ -119,9 +122,11 @@ internal class RunCatalogTools(
         }
         var createdBackground: RunChildTasks? = null
         var createdGeneration: GenerationCatalogLeaf? = null
+        var createdVirtualDisplay: R08VirtualDisplayCatalogLeaf? = null
         try {
             // No catalog lifecycle/setup lock is held across host code or external open.
-            val authorization = authorizationFactory?.invoke(owner) ?: checkNotNull(initialAuthorization)
+            val authorization = if (authorizationFactory != null) authorizationFactory.invoke(owner)
+                else checkNotNull(initialAuthorization)
             validateAuthorization(authorization)
             require(initialAuthorization == null || authorization === initialAuthorization) { "tool_run_authorization_mismatch" }
             check(!closed.get()) { "run_closed" }
@@ -137,10 +142,17 @@ internal class RunCatalogTools(
             createdGeneration = generationFactory?.let { factory ->
                 createResource { GenerationCatalogLeaf(factory(owner, capabilities, authorization)) }
             }
+            check(!closed.get()) { "run_closed" }
+            createdVirtualDisplay = virtualDisplayFactory?.let { factory ->
+                createResource { factory(owner, capabilities, authorization) }
+            }
+            // Retain the returned handle even if bind throws or close wins the race.
+            createdVirtualDisplay?.bind(owner, capabilities, authorization)
             val publish = synchronized(closeLock) {
                 // Retain late resources even after close so their physical drain is observed.
                 background = createdBackground
                 generation = createdGeneration
+                virtualDisplay = createdVirtualDisplay
                 if (closed.get()) false else {
                     browserTools = boundBrowserTools
                     boundAuthorization = authorization
@@ -153,6 +165,7 @@ internal class RunCatalogTools(
             synchronized(closeLock) {
                 background = createdBackground
                 generation = createdGeneration
+                virtualDisplay = createdVirtualDisplay
             }
             close()
             throw failure
@@ -188,6 +201,7 @@ internal class RunCatalogTools(
                 terminalLeaf?.registeredTools?.forEach { registry.register(it) }
                 browserTools.forEach { registry.register(it) }
                 generation?.registeredTools?.forEach { registry.register(it) }
+                virtualDisplay?.registeredTools?.forEach { registry.register(it) }
                 val result = CatalogModelBridge(registry.snapshot(), capabilities, ledger, conversationId, runId, authorization)
                 result.bindOwner(bound)
                 synchronized(closeLock) {
@@ -224,20 +238,60 @@ internal class RunCatalogTools(
     }
     override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): List<ToolDispatchResult> {
         validateOwner(message)
-        if (!beginDispatch()) return invocations.map { ToolDispatchResult(it.id, DispatchOutcome.NotExecuted("run_closed")) }
+        val batch = CatalogBatch(invocations.toList())
+        // A closed catalog cannot open a leaf ticket: leaf revocation is already final.
+        if (!beginDispatch()) return batch.invocations.map { ToolDispatchResult(it.id, DispatchOutcome.NotExecuted("run_closed")) }
         try {
-            return checkNotNull(bridge) { "catalog_not_prepared" }.execute(message, invocations) { closed.get() || cancelled() }
-                .also(::observeOutcomes)
+            batch.begin()
+            return checkNotNull(bridge) { "catalog_not_prepared" }.execute(message, batch.invocations) { closed.get() || cancelled() }
+                .also(batch::finish)
+        } catch (failure: Throwable) {
+            batch.unconfirmed()
+            throw failure
         } finally { endDispatch() }
     }
     override fun start(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): ReceiptBatchStart {
         validateOwner(message)
+        val batch = CatalogBatch(invocations.toList())
         if (!beginDispatch()) return ReceiptBatchStart.Completed(
-            invocations.map { ToolDispatchResult(it.id, DispatchOutcome.NotExecuted("run_closed")) })
+            batch.invocations.map { ToolDispatchResult(it.id, DispatchOutcome.NotExecuted("run_closed")) })
         try {
-            return checkNotNull(bridge) { "catalog_not_prepared" }.start(message, invocations) { closed.get() || cancelled() }
-                .also { if (it is ReceiptBatchStart.Completed) observeOutcomes(it.receipts) }
+            batch.begin()
+            return checkNotNull(bridge) { "catalog_not_prepared" }.start(message, batch.invocations) { closed.get() || cancelled() }
+                .also { result ->
+                    when (result) {
+                        is ReceiptBatchStart.Completed -> batch.finish(result.receipts)
+                        // The central dispatcher only suspends a singleton USER_BARRIER.
+                        // Any R08 + barrier batch is rejected whole before execution.
+                        // An unexpected suspension must leave its ticket pending/Unknown,
+                        // never masquerade as a final result or an empty successful batch.
+                        is ReceiptBatchStart.Suspended -> check(!batch.hasTicket) { "virtual_display_unexpected_suspension" }
+                    }
+                }
+        } catch (failure: Throwable) {
+            batch.unconfirmed()
+            throw failure
         } finally { endDispatch() }
+    }
+
+    /** A relevant batch holds the immutable ORIGINAL WHOLE batch, not a filtered R08 subset.
+     * Pure ask_user can suspend/resume independently: it owns no virtual-display operations.
+     * All leaf/journal calls run outside closeLock. Missing/throwing feedback is never success. */
+    private inner class CatalogBatch(val invocations: List<ToolInvocation>) {
+        private val leaf = virtualDisplay?.takeIf {
+            invocations.any { it.name == R08VirtualDisplayCatalogLeaf.WRITE_TOOL || it.name == R08VirtualDisplayCatalogLeaf.READ_TOOL }
+        }
+        private var ticket: R08VirtualDisplayCatalogLeaf.BatchTicket? = null
+        val hasTicket: Boolean get() = ticket != null
+        fun begin() { ticket = leaf?.beginBatch(invocations) }
+        fun finish(results: List<ToolDispatchResult>) {
+            observeOutcomes(results)
+            ticket?.let { checkNotNull(leaf).finishBatch(it, results) }
+        }
+        fun unconfirmed() {
+            if (leaf != null) synchronized(closeLock) { recordCloseFailure("virtual_display_batch_unconfirmed") }
+            // Do not invent results or finish a ticket when no final central result exists.
+        }
     }
     private fun observeOutcomes(results: List<ToolDispatchResult>) {
         // Includes ledger reservation conflicts and persistence failure AFTER a confirmed adapter reply.
@@ -261,7 +315,8 @@ internal class RunCatalogTools(
             closed.set(true)
             generation?.revokeAdmission()
             // Fence the terminal before stopping other resources; join is observed separately.
-            claimStops(listOfNotNull(browser, generation, terminalLeaf, shizuku, background, children, deviceResources, skills))
+            // R08 close is revocation only. Never synthesize a release/shutdown operation.
+            claimStops(listOfNotNull(browser, generation, virtualDisplay, terminalLeaf, shizuku, background, children, deviceResources, skills))
         }
         browser?.revoke()
         stopClaimed(resources)
@@ -309,11 +364,11 @@ internal class RunCatalogTools(
             // The terminal leaf's own dispatcher is not used by this catalog. Its worker join
             // must therefore start only after OUR final receipt persistence/observation settles.
             if (!closed.get() || !observingClose || observationsStarted || activeCreations != 0 || pendingStops != 0 ||
-                ((terminalLeaf != null || browser != null || generation != null) && activeDispatches != 0)) false
+                ((terminalLeaf != null || browser != null || generation != null || virtualDisplay != null) && activeDispatches != 0)) false
             else {
                 observationsStarted = true
                 registeringObservations = true
-                remainingObservations = 6
+                remainingObservations = 7
                 true
             }
         }
@@ -347,6 +402,16 @@ internal class RunCatalogTools(
             observeResourceClose(generation) { done ->
                 if (generation == null) done(RunCatalogCloseResult.Drained)
                 else generation!!.observeClose(done)
+            }
+            observeResourceClose(virtualDisplay) { done ->
+                val leaf = virtualDisplay
+                if (leaf == null) done(RunCatalogCloseResult.Drained)
+                else leaf.observeClose { result ->
+                    done(when (result) {
+                        R08VirtualDisplayCloseResult.Drained -> RunCatalogCloseResult.Drained
+                        is R08VirtualDisplayCloseResult.Unknown -> RunCatalogCloseResult.Unknown(result.code)
+                    })
+                }
             }
             synchronized(closeLock) { registeringObservations = false }
         }

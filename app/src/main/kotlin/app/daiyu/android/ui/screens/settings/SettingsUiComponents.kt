@@ -47,9 +47,9 @@ internal fun SettingsSectionTitle(title: String) {
 }
 
 @Composable
-internal fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
+internal fun SettingsCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
     Column(
-        modifier = Modifier.padding(horizontal = 12.dp).fillMaxWidth()
+        modifier = modifier.padding(horizontal = 12.dp).fillMaxWidth()
             .clip(RoundedCornerShape(16.dp))
             .background(MiuixTheme.colorScheme.surfaceContainerHigh),
         content = content,

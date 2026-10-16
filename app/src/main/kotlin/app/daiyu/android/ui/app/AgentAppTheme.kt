@@ -36,9 +36,9 @@ fun AgentAppTheme(
         AppearanceThemeMode.DARK -> true
     }
     val colorSchemeMode = when (appearance.themeMode) {
-        AppearanceThemeMode.LIGHT -> ColorSchemeMode.MonetLight
-        AppearanceThemeMode.DARK -> ColorSchemeMode.MonetDark
-        AppearanceThemeMode.SYSTEM -> ColorSchemeMode.MonetSystem
+        AppearanceThemeMode.LIGHT -> if (appearance.monetEnabled) ColorSchemeMode.MonetLight else ColorSchemeMode.Light
+        AppearanceThemeMode.DARK -> if (appearance.monetEnabled) ColorSchemeMode.MonetDark else ColorSchemeMode.Dark
+        AppearanceThemeMode.SYSTEM -> if (appearance.monetEnabled) ColorSchemeMode.MonetSystem else ColorSchemeMode.System
     }
     val keyColor = if (appearance.accentColor == AppearanceAccentColor.SYSTEM) {
         platformDynamicColors(isDark).primary
@@ -53,6 +53,8 @@ fun AgentAppTheme(
     ) {
         ThemeController(
             colorSchemeMode = colorSchemeMode,
+            lightColors = DaiyuPalette.light,
+            darkColors = DaiyuPalette.dark,
             keyColor = keyColor,
             colorSpec = ThemeColorSpec.Spec2025,
             paletteStyle = appearance.paletteStyle.toMiuixPaletteStyle(),

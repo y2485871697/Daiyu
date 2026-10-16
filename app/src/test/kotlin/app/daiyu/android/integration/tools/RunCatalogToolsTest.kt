@@ -117,8 +117,13 @@ class RunCatalogToolsTest {
         }
         val worker=Thread {try {tools.definitions;failure.set(AssertionError("revoked capture published"))} catch (_:IllegalStateException) {} catch(t:Throwable){failure.set(t)}}
         worker.start();assertTrue(entered.await(5,TimeUnit.SECONDS))
-        try {tools.close()} finally {release.countDown()}
+        val result = AtomicReference<RunCatalogCloseResult?>()
+        try {
+            tools.closeWithResult { result.set(it) }
+            assertNull(result.get()) // Capture is still in flight: not drained yet.
+        } finally {release.countDown()}
         worker.join(5000);assertFalse(worker.isAlive);failure.get()?.let {throw it}
+        assertEquals(RunCatalogCloseResult.Drained, result.get())
         denied {snapshot.read(auth,"user:demo",revision)}
     }
     @Test fun failedCaptureCannotRecaptureAndWrongRunCannotDispatch() {

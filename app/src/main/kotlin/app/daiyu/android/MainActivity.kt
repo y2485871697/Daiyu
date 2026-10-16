@@ -103,6 +103,7 @@ class MainActivity : ComponentActivity() {
     private val terminalOwner get() = (application as ChatApplication).terminalOwner
     private var terminalPageOwner: Any? = null
     private val browserSettings by lazy { app.daiyu.android.browser.BrowserSettingsStore(applicationContext) }
+    private var compressionSettingsPageOwner: app.daiyu.android.context.CompressionSettingsEditor? = null
     private var browserSettingsPageOwner: app.daiyu.android.browser.BrowserSettingsSaveOwner? = null
     private var hapticsHost: app.daiyu.android.haptics.HapticsActivityHost? = null
     private fun syncHaptics() {
@@ -169,6 +170,10 @@ class MainActivity : ComponentActivity() {
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
+            if (value != "compression-settings") {
+                compressionSettingsPageOwner?.revoke()
+                compressionSettingsPageOwner = null
+            }
             if (value != "terminal") terminalPageOwner = null
             if (value != "browser-settings") {
                 browserSettingsPageOwner?.revoke()
@@ -315,7 +320,7 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "appearance", "haptics", "terminal", "browser-settings" -> retainedPage = "settings"
+                        "appearance", "haptics", "terminal", "browser-settings", "compression-settings" -> retainedPage = "settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
                         else -> returnToChat()
@@ -393,6 +398,14 @@ class MainActivity : ComponentActivity() {
                             },
                         )
                     }
+                    "compression-settings" -> compressionSettingsPageOwner?.let { page -> key(page) {
+                        CompressionSettingsScreen(page, onBack = {
+                            if (activityUsable() && compressionSettingsPageOwner === page && retainedPage == "compression-settings")
+                                retainedPage = "settings"
+                        }, ownerCurrent = {
+                            activityUsable() && compressionSettingsPageOwner === page && retainedPage == "compression-settings"
+                        })
+                    } }
                     "browser-settings" -> browserSettingsPageOwner?.let { page -> key(page) {
                         BrowserSettingsScreen(browserSettings,
                             onBack = {
@@ -1004,6 +1017,8 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        compressionSettingsPageOwner?.revoke()
+        compressionSettingsPageOwner = null
         browserSettingsPageOwner?.revoke()
         browserSettingsPageOwner = null
         hapticsHost?.close(); hapticsHost = null
@@ -1027,6 +1042,12 @@ class MainActivity : ComponentActivity() {
     }
     private fun openSkillManagement() {
         retainedPage = "skills"
+    }
+    private fun openCompressionSettings() {
+        requireActivityUsable()
+        compressionSettingsPageOwner?.revoke()
+        compressionSettingsPageOwner = app.daiyu.android.context.CompressionSettingsEditor(applicationContext)
+        retainedPage = "compression-settings"
     }
     private fun openBrowserSettings() {
         requireActivityUsable()
@@ -1060,6 +1081,7 @@ class MainActivity : ComponentActivity() {
             FeatureRoute.SKILLS -> openSkillManagement()
             FeatureRoute.TERMINAL -> openTerminal()
             FeatureRoute.BROWSER_SETTINGS -> openBrowserSettings()
+            FeatureRoute.COMPRESSION_SETTINGS -> openCompressionSettings()
             // Settings entries are navigation, never implicit execution/send/stop operations.
             FeatureRoute.CHAT, FeatureRoute.USER_MESSAGE -> Unit
         }

@@ -23,11 +23,14 @@ data class CompressionSettings(
     val triggerPercent: Int = 80,
     val keepRecentMessages: Int = 4,
     val summaryModel: SummaryModelBinding? = null,
+    /** Only explicit v2 production configuration supplies turns; never derived from v1 messages. */
+    val keepTurns: Int? = null,
 ) {
     init {
         require(contextWindowTokens == null || contextWindowTokens > 0)
         require(reserveTokens >= 0 && triggerPercent in 10..95)
         require(keepRecentMessages in 0..100)
+        require(keepTurns == null || keepTurns in 1..100)
     }
     val automaticWithKnownWindow: Boolean get() = automatic && contextWindowTokens != null
 
@@ -56,6 +59,7 @@ class CompressionSettingsStore(private val preferences: SharedPreferences) {
     }
 
     fun save(settings: CompressionSettings) = synchronized(lock) {
+        require(settings.keepTurns == null) { "轮数配置请使用 ProductionCompressionSettingsStore" }
         val raw = encode(settings)
         fenced[preferences] = true
         check(preferences.edit().putString(KEY, raw).commit()) { "压缩设置未持久化" }

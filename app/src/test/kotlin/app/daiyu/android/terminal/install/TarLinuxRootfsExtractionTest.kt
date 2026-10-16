@@ -1,0 +1,269 @@
+package app.daiyu.android.terminal.install
+
+import junit.framework.TestCase
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
+import org.tukaani.xz.LZMA2Options
+import org.tukaani.xz.XZOutputStream
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.IOException
+import java.net.URI
+import java.nio.file.Files
+import java.nio.file.LinkOption.NOFOLLOW_LINKS
+import java.nio.file.attribute.PosixFilePermission
+import java.util.concurrent.CancellationException
+import java.util.zip.CRC32
+import java.util.zip.GZIPOutputStream
+
+/** Real tiny tar/gzip/xz fixtures, no downloads or guest/host process execution. */
+class TarLinuxRootfsExtractionTest : TestCase() {
+    private data class Item(val name: String, val content: String = "", val type: Char = '0',
+                            val target: String = "", val mode: Int = 493)
+
+    private fun tar(vararg items: Item): ByteArray {
+        val bytes = ByteArrayOutputStream()
+        TarArchiveOutputStream(bytes).use { out ->
+            out.setLongFileMode(TarArchiveOutputStream.LONGFILE_POSIX)
+            for (item in items) {
+                val entry = TarArchiveEntry(item.name, item.type.code.toByte(), true)
+                entry.mode = item.mode
+                entry.linkName = item.target
+                val payload = item.content.toByteArray()
+                entry.size = if (item.type == '0') payload.size.toLong() else 0L
+                out.putArchiveEntry(entry)
+                if (item.type == '0') out.write(payload)
+                out.closeArchiveEntry()
+            }
+            out.finish()
+        }
+        return bytes.toByteArray()
+    }
+
+    private fun compressed(tar: ByteArray, format: RootfsArchive): ByteArray {
+        val bytes = ByteArrayOutputStream()
+        when (format) {
+            RootfsArchive.TAR_GZIP -> GZIPOutputStream(bytes).use { it.write(tar) }
+            RootfsArchive.TAR_XZ -> XZOutputStream(bytes, LZMA2Options(0)).use { it.write(tar) }
+        }
+        return bytes.toByteArray()
+    }
+
+    private class Fixture(val root: File) {
+        val stage = File(root, "stage").apply { mkdir() }
+        val archive = File(root, "archive")
+        fun extract(payload: ByteArray, format: RootfsArchive = RootfsArchive.TAR_GZIP,
+                    strip: Int = 0, extractor: TarLinuxRootfsExtraction = TarLinuxRootfsExtraction(),
+                    token: LinuxInstallCancellation = LinuxInstallCancellation()) {
+            archive.writeBytes(payload)
+            val artifact = LinuxRootfsArtifact("test", "alpine", "test", "arm64-v8a", format,
+                payload.size.toLong(), "0".repeat(64),
+                listOf(RootfsMirror("test", URI("https://example.invalid/test"))), strip)
+            // Hash verification belongs to the installer; this exercises extraction directly.
+            extractor.extract(artifact, archive, stage, token)
+        }
+    }
+
+    private fun fixture(block: (Fixture) -> Unit) {
+        val root = Files.createTempDirectory("tar-rootfs-test-").toFile()
+        try { block(Fixture(root)) } finally { root.deleteRecursively() }
+    }
+
+    private fun rejected(block: () -> Unit) {
+        try { block(); fail("expected rejection") } catch (_: IllegalArgumentException) {
+        } catch (_: IllegalStateException) { } catch (_: IOException) { }
+    }
+
+    fun testBothCompressionFormatsExtractFilesModesAndDeferredLinks() {
+        for (format in RootfsArchive.entries) fixture { f ->
+            f.extract(compressed(tar(
+                Item("./", type = '5'),
+                Item("./bin/", type = '5'),
+                Item("bin/sh", type = '2', target = "/usr/bin/tool"),
+                Item("chain-a", type = '1', target = "chain-b"),
+                Item("chain-b", type = '1', target = "usr/bin/tool"),
+                Item("usr/bin/tool", "inert executable", mode = 493),
+                Item("etc/config", "plain text", mode = 420)
+            ), format), format)
+            assertEquals("inert executable", File(f.stage, "bin/sh").readText())
+            assertFalse(Files.readSymbolicLink(File(f.stage, "bin/sh").toPath()).isAbsolute)
+            assertTrue(Files.isSameFile(File(f.stage, "chain-a").toPath(), File(f.stage, "usr/bin/tool").toPath()))
+            assertTrue(Files.getPosixFilePermissions(File(f.stage, "usr/bin/tool").toPath())
+                .contains(PosixFilePermission.OWNER_EXECUTE))
+            assertFalse(Files.getPosixFilePermissions(File(f.stage, "etc/config").toPath())
+                .contains(PosixFilePermission.OWNER_EXECUTE))
+        }
+    }
+
+    fun testContainedDanglingAndCurrentDirectorySymlinksStayRelative() = fixture { f ->
+        f.extract(compressed(tar(
+            Item("root-link", type = '2', target = "/"),
+            Item("dangling", type = '2', target = "/proc/not-mounted"),
+            Item("dir/relative", type = '2', target = "../missing")
+        ), RootfsArchive.TAR_GZIP))
+        try {
+            assertEquals(".", Files.readSymbolicLink(File(f.stage, "root-link").toPath()).toString())
+            assertEquals("proc/not-mounted", Files.readSymbolicLink(File(f.stage, "dangling").toPath()).toString())
+            assertEquals("../missing", Files.readSymbolicLink(File(f.stage, "dir/relative").toPath()).toString())
+        } finally {
+            // Do not let recursive fixture cleanup traverse this intentional directory cycle.
+            Files.delete(File(f.stage, "root-link").toPath())
+        }
+    }
+
+    fun testStripOneAlsoStripsHardlinkTargetsButNotGuestAbsoluteSymlinkTargets() = fixture { f ->
+        f.extract(compressed(tar(
+            Item("root/", type = '5'), Item("root/usr/bin/tool", "fixture"),
+            Item("root/hard", type = '1', target = "root/usr/bin/tool"),
+            Item("root/bin", type = '2', target = "/usr/bin")
+        ), RootfsArchive.TAR_XZ), RootfsArchive.TAR_XZ, strip = 1)
+        assertFalse(File(f.stage, "root").exists())
+        assertEquals("fixture", File(f.stage, "bin/tool").readText())
+        assertTrue(Files.isSameFile(File(f.stage, "hard").toPath(), File(f.stage, "usr/bin/tool").toPath()))
+    }
+
+    fun testRejectsUnsafeNamesAndNormalizedDuplicates() {
+        val unsafe = listOf("../outside", "a/../outside", "/absolute", "C:/absolute", "a\\b",
+            ".daiyu-rootfs-install", ".daiyu-rootfs-install/child", "x/".repeat(129) + "file")
+        for (name in unsafe) fixture { f ->
+            rejected { f.extract(compressed(tar(Item(name, "bad")), RootfsArchive.TAR_GZIP)) }
+            assertFalse(File(f.root, "outside").exists())
+        }
+        fixture { f ->
+            rejected { f.extract(compressed(tar(Item("a//b", "one"), Item("./a/b", "two")), RootfsArchive.TAR_GZIP)) }
+        }
+        fixture { f ->
+            rejected { f.extract(compressed(tar(Item("one/a", "one"), Item("two/a", "two")), RootfsArchive.TAR_GZIP), strip = 1) }
+        }
+    }
+
+    fun testRejectsEmbeddedNulInTarNameRatherThanSilentlyTruncatingIt() = fixture { f ->
+        val bytes = tar(Item("ok", "data"))
+        bytes[2] = 0
+        bytes[3] = 'x'.code.toByte()
+        fixHeaderChecksum(bytes)
+        rejected { f.extract(compressed(bytes, RootfsArchive.TAR_GZIP)) }
+        assertFalse(File(f.stage, "ok").exists())
+    }
+
+    fun testRejectsEmptyOrNonemptyStagingSymlinkAndPopulatedStaging() {
+        fixture { f ->
+            val keep = File(f.stage, "keep").apply { writeText("untouched") }
+            rejected { f.extract(compressed(tar(Item("file", "data")), RootfsArchive.TAR_GZIP)) }
+            assertEquals("untouched", keep.readText())
+        }
+        fixture { f ->
+            f.stage.delete()
+            Files.createSymbolicLink(f.stage.toPath(), f.root.toPath())
+            try {
+                rejected { f.extract(compressed(tar(Item("file", "data")), RootfsArchive.TAR_GZIP)) }
+                assertFalse(File(f.root, "file").exists())
+            } finally { Files.delete(f.stage.toPath()) }
+        }
+        fixture { f ->
+            f.stage.delete()
+            rejected { f.extract(compressed(tar(Item("file", "data")), RootfsArchive.TAR_GZIP)) }
+        }
+    }
+
+    fun testRejectsLinkAncestorsInEitherOrderAndEscapingTargets() {
+        val cases = listOf(
+            arrayOf(Item("a", type = '2', target = "inside"), Item("a/file", "bad")),
+            arrayOf(Item("a/file", "bad"), Item("a", type = '2', target = "inside")),
+            arrayOf(Item("escape", type = '2', target = "../outside")),
+            arrayOf(Item("escape", type = '2', target = "/../../outside")),
+            arrayOf(Item("hard", type = '1', target = "../outside")),
+            arrayOf(Item("hard", type = '1', target = "/outside")),
+            arrayOf(Item("dir/", type = '5'), Item("hard", type = '1', target = "dir")),
+            arrayOf(Item("real", "data"), Item("sym", type = '2', target = "real"), Item("hard", type = '1', target = "sym")),
+            arrayOf(Item("a", type = '1', target = "b"), Item("b", type = '1', target = "a")),
+            arrayOf(Item("a", type = '1', target = "missing"))
+        )
+        for (items in cases) fixture { f ->
+            rejected { f.extract(compressed(tar(*items), RootfsArchive.TAR_GZIP)) }
+            assertFalse(File(f.root, "outside").exists())
+        }
+    }
+
+    fun testNeverCreatesDeviceOrFifo() {
+        for (type in listOf('3', '4', '6', '7', 'A')) fixture { f ->
+            rejected { f.extract(compressed(tar(Item("special", type = type)), RootfsArchive.TAR_GZIP)) }
+            assertFalse(Files.exists(File(f.stage, "special").toPath(), NOFOLLOW_LINKS))
+        }
+    }
+
+    fun testStripsPrivilegedModeBitsAndRetainsOrdinaryExecutableBits() = fixture { f ->
+        f.extract(compressed(tar(Item("tool", "inert", mode = 4095)), RootfsArchive.TAR_GZIP))
+        val mode = (Files.getAttribute(File(f.stage, "tool").toPath(), "unix:mode") as Int) and 4095
+        assertEquals(511, mode)
+    }
+
+    fun testByteEntryAndMetadataQuotasAndTruncation() {
+        fixture { f ->
+            rejected { f.extract(compressed(tar(Item("big", "x".repeat(8192))), RootfsArchive.TAR_GZIP),
+                extractor = TarLinuxRootfsExtraction(maxExpandedBytes = 1024)) }
+        }
+        fixture { f ->
+            rejected { f.extract(compressed(tar(Item("one"), Item("two")), RootfsArchive.TAR_GZIP),
+                extractor = TarLinuxRootfsExtraction(maxEntries = 1)) }
+        }
+        // A GNU metadata header is counted even though Commons hides it from nextTarEntry.
+        fixture { f ->
+            val bytes = tar(Item("file"))
+            bytes[156] = 'L'.code.toByte()
+            putOctal(bytes, 124, 12, 2L * 1024 * 1024)
+            fixHeaderChecksum(bytes)
+            rejected { f.extract(compressed(bytes, RootfsArchive.TAR_GZIP)) }
+        }
+        for (format in RootfsArchive.entries) {
+            fixture { f ->
+                val bytes = compressed(tar(Item("file", "data")), format)
+                rejected { f.extract(bytes.copyOf(bytes.size - 6), format) }
+            }
+            fixture { f ->
+                val bytes = tar(Item("file", "data"))
+                rejected { f.extract(compressed(bytes.copyOf(514), format), format) }
+            }
+            fixture { f ->
+                rejected { f.extract(compressed(tar(Item("file", "data")).copyOf(1024), format), format) }
+            }
+        }
+    }
+
+    fun testXzDecoderRejectsDictionaryAbove128MiBWithoutAllocatingIt() = fixture { f ->
+        val bytes = compressed(tar(Item("file", "data")), RootfsArchive.TAR_XZ)
+        val headerSize = (bytes[12].toInt() + 1) * 4
+        assertEquals(0x21, bytes[14].toInt() and 255) // LZMA2 filter
+        assertEquals(1, bytes[15].toInt())
+        bytes[16] = 0x22 // LZMA2 dictionary property: 512 MiB
+        val crc = CRC32().apply { update(bytes, 12, headerSize - 4) }.value
+        for (i in 0..3) bytes[12 + headerSize - 4 + i] = (crc ushr (8 * i)).toByte()
+        try {
+            f.extract(bytes, RootfsArchive.TAR_XZ)
+            fail("expected XZ memory limit")
+        } catch (_: org.tukaani.xz.MemoryLimitException) { }
+    }
+
+    fun testExplicitPreCancellationMakesNoStagingChanges() = fixture { f ->
+        val token = LinuxInstallCancellation().apply { cancel() }
+        try {
+            f.extract(compressed(tar(Item("file", "data")), RootfsArchive.TAR_GZIP), token = token)
+            fail("expected cancellation")
+        } catch (_: CancellationException) { }
+        assertEquals(0, f.stage.list()!!.size)
+    }
+
+    private fun fixHeaderChecksum(bytes: ByteArray) {
+        for (i in 148..155) bytes[i] = 32
+        val sum = (0 until 512).sumOf { bytes[it].toInt() and 255 }
+        val value = sum.toString(8).padStart(6, '0').toByteArray()
+        value.copyInto(bytes, 148)
+        bytes[154] = 0
+        bytes[155] = 32
+    }
+
+    private fun putOctal(bytes: ByteArray, offset: Int, length: Int, value: Long) {
+        value.toString(8).padStart(length - 1, '0').toByteArray().copyInto(bytes, offset)
+        bytes[offset + length - 1] = 0
+    }
+}

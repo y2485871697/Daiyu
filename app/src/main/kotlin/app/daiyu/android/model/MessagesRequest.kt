@@ -159,7 +159,7 @@ internal object MessagesRequest {
             require(message.protocolItems.isEmpty() || message.blocks.none { it is MessageBlock.Image }) {
                 "Images cannot also replay protocolItems"
             }
-            // No system channel exists in ModelPort. Never silently discard privileged input.
+            // System instructions have a separate request channel, never a history role.
             require(message.role == "user" || message.role == "assistant") {
                 "Messages supports only user and assistant history; system messages are unsupported"
             }
@@ -302,6 +302,23 @@ internal object MessagesRequest {
         ToolDefinition(it.toolName, it.description,
             JSONObject().put("type", "object").put("properties", JSONObject()).put("required", JSONArray())
                 .put("additionalProperties", false).toString())
+    }
+
+    /** Preserve a caller's string or structured system blocks before the frozen assistant input. */
+    fun withAssistantInstructions(body: JSONObject, instructions: String?): JSONObject {
+        if (instructions == null) return body
+        when (val existing = body.opt("system")) {
+            null -> body.put("system", instructions)
+            is String -> body.put("system", if (existing.isEmpty()) instructions else "$existing\n\n$instructions")
+            is JSONArray -> {
+                val combined = JSONArray()
+                for (i in 0 until existing.length()) combined.put(existing.get(i))
+                combined.put(JSONObject().put("type", "text").put("text", instructions))
+                body.put("system", combined)
+            }
+            else -> throw IllegalArgumentException("Messages system must be a string or an array")
+        }
+        return validateObject(body, MAX_JSON_CONTAINER_DEPTH)
     }
 
     fun body(model: String, messages: JSONArray, tools: List<ToolDefinition>, maxTokens: Int): JSONObject {

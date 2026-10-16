@@ -14,22 +14,23 @@ class MessagesModel internal constructor(
     private val maxTokens: Int,
     private val connect: (URL) -> HttpsURLConnection,
     private val imageInputSupported: Boolean?,
+    private val assistantInstructions: String? = null,
 ) : ModelPort {
     internal constructor(settings: ModelSettings, maxTokens: Int, connect: (URL) -> HttpsURLConnection) :
         this(settings, maxTokens, connect, null)
     constructor(settings: ModelSettings, maxTokens: Int = 4096) :
         this(settings, maxTokens, { it.openConnection() as HttpsURLConnection })
     internal constructor(settings: ModelSettings, connect: (URL) -> HttpsURLConnection) : this(settings, 4096, connect)
-    internal constructor(snapshot: ProviderSnapshot) : this(snapshot.asModelSettings(), 4096,
-        { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported)
+    internal constructor(snapshot: ProviderSnapshot, assistantInstructions: String? = null) : this(snapshot.asModelSettings(), 4096,
+        { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported, assistantInstructions)
 
     override fun open(history: List<Message>): ModelSession = open(history, settings.enabledTools())
     override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession =
         open(history, MessagesRequest.definitions(tools))
     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession =
-        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, null)
+        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, null, assistantInstructions)
     override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
-        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, images)
+        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, images, assistantInstructions)
 
     private class Session(
         private val settings: ModelSettings,
@@ -39,6 +40,7 @@ class MessagesModel internal constructor(
         private val connect: (URL) -> HttpsURLConnection,
         capability: Boolean?,
         images: ModelImagePlan?,
+        private val assistantInstructions: String?,
     ) : ModelSession {
         private val endpoint = MessagesRequest.endpoint(settings)
         private val historySnapshot = app.daiyu.android.model.images.FrozenMessageImagePlan.snapshot(history)
@@ -69,7 +71,10 @@ class MessagesModel internal constructor(
                 val item = MessagesRequest.message("user", content)
                 messages.put(item); ownItems.add(item.toString())
             }
-            val request = settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens), ProviderProtocol.MESSAGES)
+            val request = MessagesRequest.withAssistantInstructions(
+                settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens), ProviderProtocol.MESSAGES),
+                assistantInstructions,
+            )
             val requestBytes = ImageRequestPreflight.bytes(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null
             val deliver: (ModelEvent) -> Unit = { event ->

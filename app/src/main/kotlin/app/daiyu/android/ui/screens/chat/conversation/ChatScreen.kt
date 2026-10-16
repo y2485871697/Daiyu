@@ -40,6 +40,7 @@ data class ChatScreenActions(
     val onJumpPreviousUser: () -> Unit = {},
     val onRetryStep: (String) -> Unit = {},
     val onMenuAction: (ChatMenuAction) -> Unit = {},
+    val onInteractiveModeChange: (Boolean) -> Unit = {},
 )
 
 @Composable
@@ -54,7 +55,9 @@ internal fun DaiyuChatScreen(
         modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
             .statusBarsPadding().navigationBarsPadding().imePadding(),
     ) {
-        ChatTopBar(state.title, state.balanceText, actions, assistantLabel = state.composer.assistantLabel)
+        ChatTopBar(state.title, state.balanceText, actions, assistantLabel = state.composer.assistantLabel,
+            interactiveModeEnabled = state.interactiveModeEnabled,
+            interactiveModeChangeEnabled = state.interactiveModeChangeEnabled)
         androidx.compose.runtime.key(state.conversationKey) {
             ChatMessageList(state.turns, state.canJumpToPreviousUser, actions, Modifier.weight(1f), state.scrollRequest, turnExtras, imageLoader)
         }

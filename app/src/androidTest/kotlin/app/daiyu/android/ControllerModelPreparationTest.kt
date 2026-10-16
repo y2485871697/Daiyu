@@ -36,14 +36,16 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             instrumentation.waitForIdleSync()
         } finally { main { f.controller.unobserve(listener) } }
     }
-    private fun fresh(factory: (ModelSettings) -> ModelPort): Fixture {
+    private fun fresh(interactiveEnabled: Boolean? = true, factory: (ModelSettings) -> ModelPort): Fixture {
         val id = UUID.randomUUID().toString()
         val app = FixtureApplication(testContext(instrumentation.targetContext, "controller-model-$id-"))
         val db = ConversationDatabase(app)
         val alias = "app.daiyu.android.test.model.$id"
         val settings = ModelSettingsStore(app, alias)
         settings.save(ModelSettings("https://example.invalid", "fixture-model", "fixture-key", true))
-        val controller = ChatController(app, db, settings, app.getSharedPreferences("conversation-ui", 0), factory)
+        val preferences = app.getSharedPreferences("conversation-ui", 0)
+        if (interactiveEnabled != null) check(preferences.edit().putBoolean("interactive_mode", interactiveEnabled).commit())
+        val controller = ChatController(app, db, settings, preferences, factory)
         val f = Fixture(app, db, settings, alias, controller)
         fixtures.add(f)
         awaitState(f) { controller.ready }
@@ -213,6 +215,46 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
     private fun ledger(f:Fixture)=app.daiyu.android.integration.tools.SQLiteToolLedgerStore(f.db).use {store ->
         store.transaction {it.toList()}
     }
+    fun testInteractiveModeMissingPreferenceDoesNotAdvertiseOrExecuteQuestion() {
+        val probe = CatalogProbe()
+        val f = fresh(interactiveEnabled = null) { probe }
+        val c = f.db.create()
+        probe.batches = listOf(listOf(call("ungranted-question", "ask_user", org.json.JSONObject())))
+        finish(f, c)
+        assertFalse(f.controller.preferences.contains("interactive_mode"))
+        assertTrue(probe.definitions.none { it.name == "ask_user" })
+        assertFalse(org.json.JSONObject(probe.returned.single().single().output).getBoolean("ok"))
+        assertTrue(ledger(f).isEmpty())
+    }
+
+    fun testInteractiveModeEnablingDuringPreparationOnlyAffectsNextRun() {
+        val probe = CatalogProbe()
+        lateinit var f: Fixture
+        f = fresh(interactiveEnabled = false) {
+            check(f.controller.preferences.edit().putBoolean("interactive_mode", true).commit())
+            probe
+        }
+        val c = f.db.create()
+        finish(f, c)
+        assertTrue(probe.definitions.none { it.name == "ask_user" })
+        finish(f, c)
+        assertEquals(1, probe.definitions.count { it.name == "ask_user" })
+    }
+
+    fun testInteractiveModeDisablingDuringPreparationKeepsCurrentGrantOnly() {
+        val probe = CatalogProbe()
+        lateinit var f: Fixture
+        f = fresh {
+            check(f.controller.preferences.edit().putBoolean("interactive_mode", false).commit())
+            probe
+        }
+        val c = f.db.create()
+        finish(f, c)
+        assertEquals(1, probe.definitions.count { it.name == "ask_user" })
+        finish(f, c)
+        assertTrue(probe.definitions.none { it.name == "ask_user" })
+    }
+
     fun testCatalogDefinitionsUseFrozenSettingsAndHostLocators() {
         val probe=CatalogProbe();lateinit var f:Fixture
         f=fresh {config ->

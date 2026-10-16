@@ -207,6 +207,10 @@ class ModelSettingsStore internal constructor(context:Context,private val keyAli
         if(loaded.credentialUnavailable) throw CredentialUnavailableException()
         loaded.settings
     }
+    fun selectModel(expected: ModelSettings, model: String): Unit = synchronized(lock) {
+        check(load() == expected) { "模型配置已变更，请重新打开选择器" }
+        if (model != expected.model) save(expected.copy(model = model))
+    }
     fun save(settings:ModelSettings, protocolChangeAuthorized: Boolean = false, requestOptionsReplacementAuthorized: Boolean = false):Unit=synchronized(lock) {
         settings.validate()
         val previousOptionsValid = try {

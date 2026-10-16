@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -67,12 +70,14 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
         ),
     )
     val colors = MiuixTheme.colorScheme
-    DropdownMenu(expanded, onDismiss, modifier = Modifier.widthIn(min = 232.dp, max = 296.dp),
+    val maxHeight = minOf(336.dp, (LocalConfiguration.current.screenHeightDp * 0.55f).dp)
+    DropdownMenu(expanded, onDismiss, modifier = Modifier.testTag("chat-overflow-menu")
+        .widthIn(min = 232.dp, max = 280.dp).heightIn(max = maxHeight),
         shape = RoundedCornerShape(16.dp), containerColor = colors.surfaceContainer,
         tonalElevation = 0.dp, shadowElevation = 6.dp, border = BorderStroke(1.dp, colors.outline)) {
         groups.forEachIndexed { index, (heading, entries) ->
             if (index > 0) HorizontalDivider(Modifier.padding(vertical = 4.dp), color = colors.outline)
-            Text(heading, Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            Text(heading, Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
                 style = MiuixTheme.textStyles.footnote1, color = colors.onSurfaceVariantSummary)
             entries.forEach { entry -> ChatMenuItem(entry, onDismiss, onAction) }
         }

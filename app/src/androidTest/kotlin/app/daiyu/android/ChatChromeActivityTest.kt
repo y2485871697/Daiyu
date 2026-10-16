@@ -67,7 +67,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             button("选择助手，当前为 代码助手"), button("语音输入"), node("chat-control"), node("chat-send"))
         val bounds = controls.mapIndexed { index, target ->
             target.assertIsDisplayed().assertHasClickAction()
-                .assertWidthIsEqualTo(if (index == 3) 48.dp else 40.dp)
+                .assertWidthIsEqualTo(if (index == 3 || index == 5) 48.dp else 40.dp)
             target.fetchSemanticsNode().boundsInRoot.also {
                 assertTrue(it.width > 0 && it.height > 0)
                 assertTrue(it.left >= host.left - 1 && it.right <= host.right + 1)
@@ -107,6 +107,8 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         ))
         touch(node("chat-reasoning")); touch(node("chat-assistant"))
         touch(button("新建会话")); touch(button("更多"))
+        val menu = node("chat-overflow-menu").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertTrue(menu.height <= 336 * activity.resources.displayMetrics.density + 1)
         touch(ui.onNodeWithText("重命名").performScrollTo())
         ui.onNodeWithText("重命名").assertDoesNotExist()
         touch(node("chat-model")); touch(node("chat-context")); touch(button("语音输入"))

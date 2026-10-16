@@ -23,8 +23,8 @@ import android.os.Process;
  *
  * <p>The main looper prepared by {@link Looper#prepareMainLooper()} cannot be quit, so
  * {@link Looper#loop()} never returns. The process is ended only from the IPC stop callback, and
- * only after the owner reports the display released; a session that still has tasks is never
- * exited.
+ * only after the owner reports the display released, or authenticated explicit shutdown of a
+ * never-initialized process closes the receipt store. A session that still has tasks is never exited.
  *
  * <pre>
  * app_process /system/bin app.daiyu.android.vd.runtime.VirtualDisplayOwnerMain \
@@ -35,7 +35,6 @@ import android.os.Process;
 public final class VirtualDisplayOwnerMain {
     private static final String READY_PREFIX = "VD_OWNER_READY";
     private static final String ERROR_PREFIX = "VD_OWNER_ERROR";
-    private static final String STOPPED_PREFIX = "VD_OWNER_STOPPED";
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -90,16 +89,18 @@ public final class VirtualDisplayOwnerMain {
             server = new OwnerIpcServer(parsed.socket, parsed.allowUid, token, handler, coordinator,
                     new Runnable() {
                         @Override public void run() {
-                            // Verified release AND durable operation/generation finals precede
-                            // this callback, even if the response delivery was lost.
+                            // Either verified release + durable finals, or explicit never-initialized
+                            // shutdown + closed store precedes this, even if delivery was lost.
                             if (!coordinator.shouldStop()) return;
+                            final String marker;
                             try {
                                 coordinator.closeAfterStop();
+                                marker = coordinator.stoppedMarker();
                             } catch (IOException ex) {
                                 print(ERROR_PREFIX + " code=RECEIPT_CLOSE_UNCONFIRMED");
                                 return; // never advertise successful lifecycle completion
                             }
-                            print(STOPPED_PREFIX + " released=true receiptsFinal=true");
+                            print(marker);
                             System.exit(0);
                         }
                     });
@@ -120,7 +121,7 @@ public final class VirtualDisplayOwnerMain {
         server.start();
 
         // The main looper prepared above cannot be quit, so this never returns. The session ends
-        // from the stop callback, which calls System.exit(0) once the release has been verified.
+        // from the stop callback, after verified release or never-initialized store closure.
         Looper.loop();
         // Not reached: the stop callback exits the process.
         return 0;

@@ -52,15 +52,29 @@ class VirtualDisplayOwnerClient internal constructor(
 ) {
     private var disconnected = false
     private var initializeSent = false
+    private var initializationEverSent = false
+    private var shutdownSent = false
     private val sentIds = mutableSetOf<String>()
 
     init { safeInput { require(ID.matches(generation)) } }
 
     @Synchronized fun initialize(): OwnerReply {
         checkWorker()
-        if (initializeSent) throw OwnerClientException()
+        if (initializeSent || shutdownSent) throw OwnerClientException()
         initializeSent = true
+        initializationEverSent = true
         return request("initialize", null, null, false)
+    }
+
+    /**
+     * Explicit host-only process shutdown, never release/receipt cleanup. One attempt for this
+     * READY identity, also across reconnect. An ambiguous result must only be observed, not retried.
+     */
+    @Synchronized fun shutdownUninitialized(): OwnerReply {
+        checkWorker()
+        if (initializationEverSent || shutdownSent) throw OwnerClientException()
+        shutdownSent = true
+        return request("shutdown_uninitialized", null, null, false)
     }
 
     /** This method sends ONLY receipt, even before initialize; it cannot create a display. */
@@ -78,6 +92,7 @@ class VirtualDisplayOwnerClient internal constructor(
 
     @Synchronized fun execute(operationId: String, operation: String, parameters: JSONObject): OwnerReply {
         checkWorker()
+        if (shutdownSent) throw OwnerClientException()
         val args = arguments(operationId, operation, parameters)
         // Even an uncertain send consumes the local permit. Same-ID inspection is lookup only.
         if (!sentIds.add(operationId)) throw OwnerClientException()
@@ -92,7 +107,8 @@ class VirtualDisplayOwnerClient internal constructor(
     private fun request(operation: String, id: String?, parameters: JSONObject?, lookup: Boolean): OwnerReply {
         if (disconnected) return OwnerReply(OwnerReply.Outcome.UNKNOWN)
         val wireOp = if (lookup) "receipt" else operation
-        val envelope = JSONObject().put("v", 2).put("op", wireOp).put("generation", generation)
+        val envelope = JSONObject().put("v", 2).put("op", wireOp)
+        if (wireOp != "shutdown_uninitialized") envelope.put("generation", generation)
         if (lookup || operation == "initialize") envelope.put("binding", binding.json())
         if (id != null) {
             envelope.put("operationId", id).put("parameters", parameters)
@@ -116,6 +132,15 @@ class VirtualDisplayOwnerClient internal constructor(
             OwnerReply(OwnerReply.Outcome.UNKNOWN)
         } finally {
             envelope.remove("token")
+        }
+    }
+
+    /** Keep process shutdown admission across connections, without changing business replay rules. */
+    @Synchronized internal fun reconnectTransport(next: OwnerTransport): VirtualDisplayOwnerClient {
+        disconnectTransport()
+        return VirtualDisplayOwnerClient(generation, binding, credential, next).also {
+            it.initializationEverSent = initializationEverSent
+            it.shutdownSent = shutdownSent
         }
     }
 

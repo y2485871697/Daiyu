@@ -33,8 +33,8 @@ class RunControlActivityTest : WiredActivityTestCase() {
     fun testOtherConversationCannotControlOwnerAndLongClickStopsWithoutPause() {
         val session = fixture.session(); val owner = send(); assertTrue(session.entered.await(5, TimeUnit.SECONDS))
         val ownedConversation = fixture.database.conversations().single(); val other = fixture.database.create()
-        val staleTap = retainedClick("chat-control")
-        val staleLong = checkNotNull(node("chat-control").fetchSemanticsNode().config[SemanticsActions.OnLongClick].action)
+        val staleTap = retainedClick(activity, "chat-control")
+        val staleLong = retainedControls(activity).onPrimaryLongPress
         mainThread { activity.select(other) }; setDraft("other draft"); node("chat-control").assertDoesNotExist()
         mainThread { staleTap(); staleLong() }
         assertFalse(fixture.controller.runState(owner)!!.pauseRequested); assertEquals(1L, session.cancelled.count)
@@ -49,7 +49,7 @@ class RunControlActivityTest : WiredActivityTestCase() {
     fun testGestureOwnerCannotRetargetNextRunBeforeRelease() {
         val first = fixture.session(); val old = send(); assertTrue(first.entered.await(5, TimeUnit.SECONDS))
         val target = node("chat-control")
-        val oldLong = checkNotNull(target.fetchSemanticsNode().config[SemanticsActions.OnLongClick].action)
+        val oldLong = retainedControls(activity).onPrimaryLongPress
         target.performTouchInput { down(center) }
         first.release.countDown(); awaitControl("old owner completed") { fixture.controller.active == null }
         val second = fixture.session(); val conversation = fixture.database.conversations().single()

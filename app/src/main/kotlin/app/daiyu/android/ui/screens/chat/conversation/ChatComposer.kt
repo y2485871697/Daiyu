@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
@@ -89,23 +90,25 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically) {
                         ChatIconButton(DaiyuIcons.Attach, "附件", { actions.onAttach(); attachments = true }, enabled = state.enabled)
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (hasText && state.phase != ComposerPhase.IDLE) {
-                            ChatIconButton(if (state.phase == ComposerPhase.PAUSED) DaiyuIcons.Resume else DaiyuIcons.Pause,
-                                if (state.phase == ComposerPhase.PAUSED) "继续" else "暂停", actions.onPrimaryTap,
-                                Modifier.testTag("chat-control").controlGesture(actions), enabled = state.enabled,
-                                onLongClick = actions.onPrimaryLongPress)
-                        }
-                        ChatIconButton(primaryIcon, primaryLabel, {
-                            if (hasText) actions.onSend(state.text) else actions.onPrimaryTap()
-                        }, Modifier.testTag(if (hasText || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
-                            .controlGesture(actions).background(
-                            if (state.phase == ComposerPhase.PAUSED || (!hasText && state.phase == ComposerPhase.RUNNING)) colors.onSurface else colors.primary,
-                            CircleShape,
-                        ),
-                            enabled = state.enabled && (hasText || state.phase != ComposerPhase.IDLE),
-                            tint = if (state.phase == ComposerPhase.PAUSED || (!hasText && state.phase == ComposerPhase.RUNNING)) colors.surface else colors.onPrimary,
-                            onLongClick = if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
+                        key(state.controlOwnerKey) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (hasText && state.phase != ComposerPhase.IDLE) {
+                                ChatIconButton(if (state.phase == ComposerPhase.PAUSED) DaiyuIcons.Resume else DaiyuIcons.Pause,
+                                    if (state.phase == ComposerPhase.PAUSED) "继续" else "暂停", actions.onPrimaryTap,
+                                    Modifier.testTag("chat-control").controlGesture(actions), enabled = state.enabled,
+                                    onLongClick = actions.onPrimaryLongPress)
+                            }
+                            ChatIconButton(primaryIcon, primaryLabel, {
+                                if (hasText) actions.onSend(state.text) else actions.onPrimaryTap()
+                            }, Modifier.testTag(if (hasText || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
+                                .controlGesture(actions).background(
+                                if (state.phase == ComposerPhase.PAUSED || (!hasText && state.phase == ComposerPhase.RUNNING)) colors.onSurface else colors.primary,
+                                CircleShape,
+                            ),
+                                enabled = state.enabled && (hasText || state.phase != ComposerPhase.IDLE),
+                                tint = if (state.phase == ComposerPhase.PAUSED || (!hasText && state.phase == ComposerPhase.RUNNING)) colors.surface else colors.onPrimary,
+                                onLongClick = if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
+                            }
                         }
                     }
                     SpeechMorphButton(

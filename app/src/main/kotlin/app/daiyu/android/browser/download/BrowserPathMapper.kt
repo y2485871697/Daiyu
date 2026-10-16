@@ -3,6 +3,7 @@ package app.daiyu.android.browser.download
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
+import java.nio.file.attribute.BasicFileAttributes
 
 /** Roots come from an explicit host grant. No implicit /sdcard or guest filesystem access. */
 class BrowserPathMapper(privateRoot: Path, mounts: Map<String, Path> = emptyMap()) {
@@ -24,12 +25,12 @@ class BrowserPathMapper(privateRoot: Path, mounts: Map<String, Path> = emptyMap(
     fun recheckPrivate(path: Path): Path {
         val normalized = path.toAbsolutePath().normalize()
         require(normalized.startsWith(privateRoot) && normalized != privateRoot) { "BROWSER_PATH_OUTSIDE_ROOT" }
-        return resolve(privateRoot, privateRoot.relativize(normalized).toString())
+        return resolve(privateRoot, privateRoot.relativize(normalized).joinToString("/") { it.toString() })
     }
 
     private fun resolve(root: Path, relative: String): Path {
         require(relative.isNotBlank() && !relative.contains('\\') && !relative.contains('\u0000')) { "BROWSER_PATH_INVALID" }
-        require(Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS) && root.toRealPath() == root) { "BROWSER_ROOT_CHANGED" }
+        require(canonicalRoot(root, "BROWSER_ROOT_CHANGED") == root) { "BROWSER_ROOT_CHANGED" }
         require(!java.nio.file.Paths.get(relative).isAbsolute) { "BROWSER_PATH_ABSOLUTE" }
         val parts = relative.split('/')
         require(parts.none { it.isEmpty() || it == "." || it == ".." }) { "BROWSER_PATH_TRAVERSAL" }
@@ -45,12 +46,20 @@ class BrowserPathMapper(privateRoot: Path, mounts: Map<String, Path> = emptyMap(
         }
         return candidate
     }
+    private fun canonicalRoot(path: Path, error: String): Path {
+        for (component in generateSequence(path) { it.parent }.toList().asReversed()) {
+            val attributes = Files.readAttributes(component, BasicFileAttributes::class.java, LinkOption.NOFOLLOW_LINKS)
+            require(attributes.isDirectory && !attributes.isSymbolicLink && !attributes.isOther) { error }
+        }
+        val canonical = path.toRealPath()
+        require(path.toRealPath(LinkOption.NOFOLLOW_LINKS) == canonical) { error }
+        return canonical
+    }
     private fun checkedRoot(path: Path): Path {
         val normalized = path.toAbsolutePath().normalize()
         require(Files.isDirectory(normalized, LinkOption.NOFOLLOW_LINKS) && !Files.isSymbolicLink(normalized)) {
             "BROWSER_ROOT_MISSING"
         }
-        require(normalized.toRealPath() == normalized) { "BROWSER_ROOT_SYMLINK" }
-        return normalized
+        return canonicalRoot(normalized, "BROWSER_ROOT_SYMLINK")
     }
 }

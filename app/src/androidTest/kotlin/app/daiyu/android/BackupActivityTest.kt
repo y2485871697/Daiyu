@@ -367,7 +367,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
         main {assertNull(restoreDialog())};assertEquals(1,provider.opens.get());assertEquals(0,modelCalls.get())
         // Real settings dialog must not prefill the old credential; only an explicit new key save clears the gate.
         click("模型设置")
-        modelField("API Key").assertTextEquals("");editModel("API Key","synthetic-new-key");saveModel()
+        modelField("API Key").assertEditableText("");editModel("API Key","synthetic-new-key");saveModel()
         instrumentation.waitForIdleSync()
         assertFalse(modelPreferences().getBoolean("credential-rebind-required",false))
         assertEquals("synthetic-new-key",controller.settings.load().apiKey)

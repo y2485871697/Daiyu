@@ -68,7 +68,8 @@ class SQLiteRuntimeStoreDatabaseTest:InstrumentationTestCase() {
         val db=fresh();val runtime=lease(db);val first=seed(db);val call=ToolInvocation(ToolCallId("call"),"read","{}")
         runtime.commitCheckpoint(first)
         val active=first.copy(message=first.message.copy(blocks=listOf(MessageBlock.Text("t","accepted"),MessageBlock.Tool(call))),
-            phase=ExecutionPhase.TOOL_EXECUTING,tools=listOf(ToolRecord(call,ToolDisposition.IN_FLIGHT)),requestUnconfirmed=true,revision=2)
+            phase=ExecutionPhase.TOOL_EXECUTING,tools=listOf(ToolRecord(call,ToolDisposition.IN_FLIGHT)),requestUnconfirmed=true,revision=2,
+            request=RequestCheckpoint("request", "attempt", first.owner, RequestOperation.NEXT))
         runtime.commitCheckpoint(active)
         release(db,runtime)
         val next=SQLiteRuntimeStore.acquire(db).also {stores+=it}
@@ -76,6 +77,7 @@ class SQLiteRuntimeStoreDatabaseTest:InstrumentationTestCase() {
         assertEquals(RunStatus.INTERRUPTED,result.message.status);assertEquals(active.message.blocks,result.message.blocks)
         assertEquals(ToolDisposition.UNKNOWN,result.tools.single().disposition);assertTrue(result.requestUnconfirmed)
         assertEquals(3L,result.revision);assertTrue(result.owner!=active.owner)
+        assertEquals(active.request,result.request);assertEquals(active.owner,result.request!!.owner)
         assertEquals(result,next.reconcileCheckpoint(first))
         next.recoverPending();rejects {next.commitCheckpoint(active.copy(revision=3))}
         rejects {runtime.commitCheckpoint(active.copy(revision=3))}

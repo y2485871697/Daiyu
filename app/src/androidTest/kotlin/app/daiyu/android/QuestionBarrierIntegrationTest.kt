@@ -87,6 +87,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(8)
         while(System.nanoTime()<deadline) {
             f.probe.failure.get()?.let {throw it}
+            ui.waitForIdle()
             var done=false;main {done=predicate()}
             if(done) {instrumentation.waitForIdleSync();return}
             Thread.sleep(20)
@@ -139,7 +140,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         try {
             main {old.recreate()}
             activity=instrumentation.waitForMonitorWithTimeout(monitor,5000) as? MainActivity
-            assertNotNull(activity);instrumentation.waitForIdleSync()
+            assertNotNull(activity);ui.waitForIdle();instrumentation.waitForIdleSync()
         } finally {instrumentation.removeMonitor(monitor)}
     }
     fun testPublicQuestionReleasesWorkerAndDurableAnswerContinuesExactlyOnce() {
@@ -206,7 +207,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
                 main {assertNull(f.c.send(null,"must remain fenced"))}
             } finally {store.writableDatabase.execSQL("DROP TRIGGER reject_question_stop")}
         }
-        main {all().filterIsInstance<Button>().single {it.text.toString()=="重试停止清理"}.performClick()}
+        ui.onNodeWithText("重试停止清理").performClick()
         await(f,"retry reaches durable stop") {f.c.active==null};drainWorker(f)
         assertNull(f.c.problem);assertTrue(row(f,id).interrupted)
         assertEquals(RunStatus.STOPPED,checkpoint(f,owner).message.status)

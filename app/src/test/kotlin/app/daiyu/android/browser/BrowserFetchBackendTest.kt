@@ -349,4 +349,62 @@ class BrowserFetchBackendTest {
             }
         }
     }
+    @Test fun closeReceiptTracksRawWorkerAndNativeCleanupAfterCancelledFutureAndCallerExit() {
+        Fixture().use { f ->
+            val entered = CountDownLatch(1)
+            val rawExit = CountDownLatch(1)
+            val cleanupEntered = CountDownLatch(1)
+            val cleanupExit = CountDownLatch(1)
+            fun ignoreInterrupts(latch: CountDownLatch) {
+                while (true) {
+                    try { latch.await(); return } catch (_: InterruptedException) { }
+                }
+            }
+            val downloader = BrowserHttpDownloader(f.sessions, f.coordinator, connectionFactory = {
+                object : Connection(it) {
+                    override fun connect() { entered.countDown(); ignoreInterrupts(rawExit) }
+                    override fun disconnect() { cleanupEntered.countDown(); ignoreInterrupts(cleanupExit) }
+                }
+            })
+            BrowserFetchBackend(f.sessions, downloader).use { backend ->
+                try {
+                    val future = backend.execute(f.command(), f.lease)
+                    assertTrue(entered.await(2, TimeUnit.SECONDS))
+                    future.cancel(true)
+                    assertTrue(future.isDone)
+                    val closing = call { backend.closeWithResult() }.get(1, TimeUnit.SECONDS)
+                    assertFalse(closing.drained)
+                    assertTrue(cleanupEntered.await(2, TimeUnit.SECONDS))
+                    eventually { "FETCH_CALLER_OR_FILES" !in backend.closeStatus().pending }
+                    assertEquals(setOf("HTTP_RAW_IO_OR_CLEANUP"), backend.closeStatus().pending)
+                    rawExit.countDown()
+                    assertFalse(backend.closeStatus().drained) // native disconnect still blocked
+                    cleanupExit.countDown()
+                    eventually { backend.closeStatus().drained }
+                    assertTrue(backend.closeStatus().successful)
+                    assertTrue(empty(f))
+                } finally { rawExit.countDown(); cleanupExit.countDown() }
+            }
+        }
+    }
+
+    @Test fun nativeCleanupFailureSurvivesDrainAndRepeatedCloseWithoutReplay() {
+        Fixture().use { f ->
+            val destroys = AtomicInteger()
+            val downloader = BrowserHttpDownloader(f.sessions, f.coordinator, connectionFactory = {
+                object : Connection(it) {
+                    override fun disconnect() { destroys.incrementAndGet(); error("private-url-must-not-leak") }
+                }
+            })
+            BrowserFetchBackend(f.sessions, downloader).use { backend ->
+                assertNotNull(await(backend.execute(f.command(), f.lease)).filePath)
+                backend.closeWithResult()
+                eventually { backend.closeStatus().drained }
+                assertFalse(backend.closeStatus().successful)
+                assertEquals(setOf("HTTP_NATIVE_CLEANUP"), backend.closeStatus().failures)
+                backend.closeWithResult()
+                assertEquals(1, destroys.get())
+            }
+        }
+    }
 }

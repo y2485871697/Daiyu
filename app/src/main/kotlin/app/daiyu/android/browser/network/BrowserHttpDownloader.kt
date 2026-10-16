@@ -61,6 +61,15 @@ class BrowserHttpDownloader(
     private val lock = Any()
     private val operations = mutableSetOf<Operation>()
     private var closed = false
+    private val closeFailures = mutableSetOf<String>()
+
+    fun closeWithResult(): BrowserCloseResult { close(); return closeStatus() }
+    fun closeStatus(): BrowserCloseResult = synchronized(lock) {
+        BrowserCloseResult(closed,
+            if (operations.isEmpty()) emptySet() else setOf("HTTP_RAW_IO_OR_CLEANUP"),
+            closeFailures.toSet())
+    }
+    private fun cleanupFailed(code: String) { synchronized(lock) { closeFailures.add(code) } }
 
     init {
         require(connectTimeoutMillis in 1..60_000 && readTimeoutMillis in 1..60_000)
@@ -193,10 +202,15 @@ class BrowserHttpDownloader(
                     // A receipt can exist if invalidation won just after coordinator publication.
                     // It belongs to this operation, never to a newer lease's download.
                     try { receipt?.let { Files.deleteIfExists(it.path) } }
-                    finally { ticket?.let { downloads.cancel(it) } }
+                    catch (failure: Exception) { cleanupFailed("HTTP_FILE_DELETE"); throw failure }
+                    finally {
+                        try { ticket?.let { downloads.cancel(it) } }
+                        catch (failure: Exception) { cleanupFailed("HTTP_TICKET_CLEANUP"); throw failure }
+                    }
                 }
             } finally {
                 try { registration?.close() }
+                catch (failure: Exception) { cleanupFailed("HTTP_SUBSCRIPTION_CLEANUP"); throw failure }
                 finally {
                     // This caller returning is NOT evidence that the raw socket or its cleanup
                     // calls returned. Their separately held references retain the admission slot.
@@ -219,7 +233,9 @@ class BrowserHttpDownloader(
             shutdownIfDrained()
             operations.toList()
         }
-        selected.forEach { it.cancel() }
+        selected.forEach {
+            try { it.cancel() } catch (_: Exception) { cleanupFailed("HTTP_CLEANUP_QUEUE") }
+        }
     }
 
     private inner class Operation(val lease: BrowserTabLease, totalTimeoutMillis: Int) {
@@ -311,10 +327,11 @@ class BrowserHttpDownloader(
             retain()
             try {
                 cleanupExecutor.execute {
-                    try { action() } catch (_: Exception) { /* no secrets/logs; best effort */ }
+                    try { action() } catch (_: Exception) { cleanupFailed("HTTP_NATIVE_CLEANUP") }
                     finally { release() }
                 }
             } catch (e: RuntimeException) {
+                cleanupFailed("HTTP_CLEANUP_QUEUE")
                 release()
                 throw e
             }

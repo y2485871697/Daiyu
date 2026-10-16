@@ -420,4 +420,104 @@ class LeaseBrowserHostTest {
         assertEquals("destroy failed", host.cleanupFailure(lease)?.message)
     }
 
+    @Test fun admittedCloseCannotReportDrainedBeforeIdleSlotRetirement() {
+        val f = Fixture()
+        f.create()
+        // Reproduce exactly the interleaving after close seals admission but before retire runs.
+        LeaseBrowserHost::class.java.getDeclaredField("closed").apply {
+            isAccessible = true
+            setBoolean(f.host, true)
+        }
+        try {
+            val between = f.host.closeStatus()
+            assertTrue(between.closeRequested)
+            assertTrue("WEBVIEW_CLEANUP" in between.pending)
+            assertFalse(between.drained)
+            assertFalse(between.successful)
+            assertEquals(0, f.resources.single().destroyed)
+        } finally {
+            f.host.closeWithResult()
+            f.ui.drain()
+        }
+        assertTrue(f.host.closeStatus().successful)
+        assertEquals(1, f.resources.single().destroyed)
+    }
+
+    @Test fun closeReceiptDoesNotConfuseSettledCommandWithExecutedCleanup() {
+        val f = Fixture()
+        val lease = f.create()
+        val pending = f.start(lease)
+        f.ui.next()
+        val closing = f.host.closeWithResult()
+        assertTrue(pending.isDone)
+        assertFalse(closing.drained)
+        assertTrue("WEBVIEW_CLEANUP" in closing.pending)
+        assertEquals(0, f.resources.single().destroyed)
+        f.ui.drain()
+        assertTrue(f.host.closeStatus().successful)
+        f.host.closeWithResult()
+        f.ui.drain()
+        assertEquals(1, f.resources.single().destroyed)
+        try { f.ui.now { f.host.create(lease) }; fail("closed host cannot allocate") }
+        catch (_: IllegalStateException) { }
+    }
+
+    @Test fun factoryFrameRemainsPendingEvenAfterEarlyCreatedFutureAndCleanupSettle() {
+        val ui = Ui()
+        val sessions = BrowserSessionRegistry()
+        val owner = BrowserOwner("factory-receipt", BrowserOwnerKind.MAIN)
+        sessions.open(BrowserGrant(owner, BrowserAccess.FULL))
+        lateinit var host: LeaseBrowserHost
+        val resource = Resource()
+        host = LeaseBrowserHost(sessions, ui, Dispatchers.Unconfined, { _, _, _ ->
+            val during = host.closeWithResult()
+            assertTrue("WEBVIEW_CREATION" in during.pending)
+            assertFalse(during.drained)
+            resource
+        })
+        try { ui.now { host.create(sessions.newTab(owner)) }; fail("closed during factory") }
+        catch (_: java.util.concurrent.CompletionException) { }
+        assertEquals(1, resource.destroyed)
+        assertFalse(host.closeStatus().drained) // queued subscription cleanup has not run
+        ui.drain()
+        assertTrue(host.closeStatus().successful)
+    }
+
+    @Test fun partialInitializationIsDestroyedAndFailureCannotBeReplayedByCloseReceipt() {
+        val ui = Ui()
+        val sessions = BrowserSessionRegistry()
+        val owner = BrowserOwner("partial-receipt", BrowserOwnerKind.MAIN)
+        sessions.open(BrowserGrant(owner, BrowserAccess.FULL))
+        var destroys = 0
+        val host = LeaseBrowserHost(sessions, ui, Dispatchers.Unconfined, { _, _, _ ->
+            object : BlankBrowserResource {
+                override fun initialize() { error("layout failed after native allocation") }
+                override suspend fun execute(input: BrowserActionInput) = BrowserActionResult("unused")
+                override fun destroy() { destroys++; error("native destroy failed") }
+            }
+        })
+        try { ui.now { host.create(sessions.newTab(owner)) }; fail("initialization") }
+        catch (_: java.util.concurrent.CompletionException) { }
+        host.closeWithResult()
+        ui.drain()
+        val result = host.closeStatus()
+        assertTrue(result.drained)
+        assertFalse(result.successful)
+        assertEquals(setOf("WEBVIEW_DESTROY"), result.failures)
+        host.closeWithResult(); ui.drain()
+        assertEquals(1, destroys)
+    }
+
+    @Test fun rejectedCloseQueueRemainsPendingUntilExplicitRetryAndNeverReplaysDestroy() {
+        val f = Fixture()
+        f.create()
+        f.ui.rejectPosts = true
+        val blocked = f.host.closeWithResult()
+        assertFalse(blocked.drained)
+        assertTrue("WEBVIEW_CLEANUP_QUEUE" in blocked.failures)
+        f.ui.rejectPosts = false
+        f.host.closeWithResult(); f.ui.drain()
+        assertTrue(f.host.closeStatus().successful)
+        assertEquals(1, f.resources.single().destroyed)
+    }
 }

@@ -22,7 +22,7 @@ class BrowserOutputTest {
         }
     }
     private fun jpeg(name: String = "screenshot_123.jpg"): File {
-        val directory = File(temporary.root, "browser_screenshots").also { it.mkdirs() }
+        val directory = File(temporary.root.canonicalFile, "browser_screenshots").also { it.mkdirs() }
         return File(directory, name).also { it.writeBytes(byteArrayOf(0xff.toByte(), 0xd8.toByte(), 0xff.toByte(), 0xd9.toByte())) }
     }
 

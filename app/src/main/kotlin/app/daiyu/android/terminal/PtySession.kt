@@ -141,7 +141,10 @@ class PtySession internal constructor(private val process: Process, private val 
         internal fun openBound(helper: File, argv: List<String>, environment: Map<String, String>, cwd: File,
                  journalDirectory: File, sessionScope: String, rows: Int, columns: Int, binding: JSONObject?,
                  startProcess: (ProcessBuilder) -> Process = { it.start() },
-                 createSession: (Process, OperationJournal) -> PtySession = ::PtySession): PtySession {
+                 createSession: (Process, OperationJournal) -> PtySession = ::PtySession,
+                 createJournal: (File, String, JSONObject?) -> OperationJournal = { directory, scope, metadata ->
+                     OperationJournal(directory, scope, binding = metadata)
+                 }): PtySession {
             val frozenArgv = argv.toList()
             val frozenEnvironment = environment.toMap()
             require(helper.isAbsolute && helper.isFile && helper.canExecute()) { "pty_native_unavailable" }
@@ -150,7 +153,7 @@ class PtySession internal constructor(private val process: Process, private val 
             require(cwd.isAbsolute && cwd.isDirectory && rows in 1..1000 && columns in 1..1000)
             require(frozenEnvironment.size <= 128 && frozenEnvironment.all { (key, value) ->
                 key.matches(Regex("[A-Za-z_][A-Za-z0-9_]{0,127}")) && value.length <= 8192 && '\u0000' !in value })
-            val journal = OperationJournal(journalDirectory, sessionScope, binding = binding)
+            val journal = createJournal(journalDirectory, sessionScope, binding)
             var created: PtySession? = null
             var cleanup: PtyStartupCleanup? = null
             var startupCause: Exception? = null

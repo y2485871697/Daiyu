@@ -93,18 +93,28 @@ class ActivityTest : WiredActivityTestCase() {
         assertDraft(unattached); assertSelection(2, 4); assertTrue(fixture.database.conversations().isEmpty())
         val a = fixture.database.create(); val b = fixture.database.create()
         mainThread { activity.select(a) }; setDraft("A草稿"); setSelection(1, 2)
+        val firstAEditor = retainedControls(activity)
         mainThread { activity.select(b) }; setDraft(" B草稿\n "); setSelection(0, 1)
+        val oldBEditor = retainedControls(activity)
         menu("新建会话"); ui.waitForIdle()
+        mainThread { oldBEditor.onTextChange("stale B"); oldBEditor.onSelectionChange(0, 0) }
         mainThread {
             assertNull("new-chat menu must select the unattached slot", fixture.controller.preferences.getString("selected", null))
             assertEquals("unattached slot survives the menu action", unattached, fixture.database.draft())
             assertEquals("previous slot survives the menu action", " B草稿\n ", fixture.database.conversations().single { it.id == b.id }.draft)
         }
         assertDraft(unattached); assertSelection(2, 4)
-        mainThread { activity.select(a) }; assertDraft("A草稿"); assertSelection(1, 2)
+        mainThread {
+            activity.select(a)
+            firstAEditor.onTextChange("stale A after round trip"); firstAEditor.onSelectionChange(0, 0)
+        }
+        assertDraft("A草稿"); assertSelection(1, 2)
         fixture.settings.save(original)
-        val session = fixture.session("A回复")
+        val session = fixture.session("A回复", holdSeconds = 120)
+        val beforeSendEditor = retainedControls(activity)
         node("chat-send").performClick(); assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+        mainThread { beforeSendEditor.onTextChange("stale sent text"); beforeSendEditor.onSelectionChange(1, 1) }
+        node("chat-draft").assertEditableText(""); assertSelection(0, 0)
         setDraft("A下一条")
         mainThread { activity.select(b) }; assertDraft(" B草稿\n ")
         setDraft(" B新稿\n "); setSelection(1, 2)

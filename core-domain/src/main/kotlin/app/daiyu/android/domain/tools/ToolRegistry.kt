@@ -66,10 +66,13 @@ class PreparedTool private constructor(
     val writeEffect: WriteEffect?,
     val execute: () -> ExecutionReceipt,
     private val contextualExecution: ((ToolExecutionContext) -> ExecutionReceipt)?,
-    internal val isUserBarrier: Boolean = false
+    internal val isUserBarrier: Boolean = false,
+    private val contextAdmission: ((ToolExecutionContext) -> ExecutionReceipt.NotExecuted?)? = null
 ) {
     constructor(writeEffect: WriteEffect? = null, execute: () -> ExecutionReceipt) : this(writeEffect, execute, null)
     internal val requiresContext: Boolean get() = contextualExecution != null
+    internal fun admit(context: ToolExecutionContext?): ExecutionReceipt.NotExecuted? =
+        contextAdmission?.invoke(checkNotNull(context) { "tool_execution_context_required" })
     internal fun execute(context: ToolExecutionContext?): ExecutionReceipt =
         contextualExecution?.invoke(checkNotNull(context) { "tool_execution_context_required" }) ?: execute()
 
@@ -77,9 +80,21 @@ class PreparedTool private constructor(
         fun userBarrier(): PreparedTool =
             PreparedTool(null, { error("user_barrier_requires_start") }, null, isUserBarrier = true)
 
-        /** Context becomes available only after whole-batch validation and ledger reservation. */
+        /** Execution receives context only after whole-batch validation and ledger reservation. */
         fun contextual(writeEffect: WriteEffect? = null, execute: (ToolExecutionContext) -> ExecutionReceipt): PreparedTool =
             PreparedTool(writeEffect, { error("tool_execution_context_required") }, execute)
+
+        /** Optional pure context admission, checked for the whole batch before reservation/replay.
+         * Return null to admit, or a rejection guaranteed to have attempted no side effects.
+         * Like prepare, admit MUST NOT perform I/O, execute the tool or mutate external state.
+         * Exceptions fail closed; execution still runs only for a new ledger reservation.
+         */
+        fun contextual(
+            writeEffect: WriteEffect? = null,
+            admit: (ToolExecutionContext) -> ExecutionReceipt.NotExecuted?,
+            execute: (ToolExecutionContext) -> ExecutionReceipt
+        ): PreparedTool = PreparedTool(writeEffect, { error("tool_execution_context_required") }, execute,
+            contextAdmission = admit)
     }
 }
 

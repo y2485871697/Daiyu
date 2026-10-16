@@ -52,6 +52,9 @@ internal interface LinuxSettingsCatalogAccess {
     fun freeze(configuration: LinuxInstallation): FrozenLinuxApproval
     suspend fun load(): List<LinuxInstallation>
     suspend fun approve(approval: FrozenLinuxApproval): List<LinuxInstallation>
+    // Implementations must invoke admit once at their actual IO gate, not before dispatching.
+    suspend fun approveInstallation(approval: FrozenLinuxApproval, admit: () -> Boolean): List<LinuxInstallation>
+    suspend fun registrationRecorded(approval: FrozenLinuxApproval): Boolean
     suspend fun remove(reference: LinuxGenerationRef): List<LinuxInstallation>
 }
 
@@ -59,6 +62,9 @@ internal class LinuxSettingsCatalogAdapter(private val catalog: TrustedLinuxCata
     override fun freeze(configuration: LinuxInstallation) = catalog.freezeForApproval(configuration)
     override suspend fun load() = catalog.load()
     override suspend fun approve(approval: FrozenLinuxApproval) = catalog.approve(approval)
+    override suspend fun approveInstallation(approval: FrozenLinuxApproval, admit: () -> Boolean) =
+        catalog.approveInstallation(approval, admit)
+    override suspend fun registrationRecorded(approval: FrozenLinuxApproval) = catalog.registrationRecorded(approval)
     override suspend fun remove(reference: LinuxGenerationRef) = catalog.remove(reference)
 }
 
@@ -72,6 +78,7 @@ class LinuxSettingsController internal constructor(
     private val admission: LinuxSettingsAdmission,
     private val worker: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     startupEntries: List<LinuxInstallation> = emptyList(),
+    val installation: app.daiyu.android.terminal.install.LinuxInstallCoordinator? = null,
 ) : AutoCloseable {
     // For a failed later refresh, keep known startup refs visible so a broken file can be revoked.
     // These rows are explicitly unconfirmed, never a replacement for the admission gate.
@@ -121,10 +128,21 @@ class LinuxSettingsController internal constructor(
     }
 
     private fun revokeLocked(page: LinuxSettingsPageOwner) {
+        if (current === page) installation?.cancel()
         page.mutable.value = page.mutable.value.copy(revoked = true, busy = false, preview = null)
     }
 
     private fun active(page: LinuxSettingsPageOwner) = !closed && current === page && !page.mutable.value.revoked
+
+    internal fun installAction(page: LinuxSettingsPageOwner,
+        action: (app.daiyu.android.terminal.install.LinuxInstallCoordinator) -> Boolean): Boolean = synchronized(lock) {
+        if (!active(page) || page.mutable.value.busy || pending != null || page.mutable.value.preview != null) false
+        else installation?.let(action) ?: false
+    }
+
+    internal fun cancelInstall(page: LinuxSettingsPageOwner): Boolean = synchronized(lock) {
+        if (!active(page)) false else { installation?.cancel(); true }
+    }
 
     internal fun discardPreview(page: LinuxSettingsPageOwner): Boolean = synchronized(lock) {
         if (!active(page) || page.mutable.value.busy || pending != null) return@synchronized false
@@ -136,7 +154,7 @@ class LinuxSettingsController internal constructor(
         // Capture before enqueue; a caller's mutable list must not change the displayed approval.
         val captured = draft.snapshot()
         return submit(page, failure = "预览失败：请检查完整绝对路径、标识、64 位小写期望摘要和共享映射。",
-            clearPreview = true, eligible = { pending == null }) {
+            clearPreview = true, eligible = { pending == null && installation?.blocksManual != true }) {
             val frozen = catalog.freeze(captured.installation())
             return@submit { state -> state.copy(preview = frozen, notice = "仅生成冻结预览，尚未批准；文件验证在批准时执行。") }
         }
@@ -152,7 +170,7 @@ class LinuxSettingsController internal constructor(
         val mutation = PendingOperation.Approval(approval)
         return submit(page, failure = mutation.failure, mutation = mutation,
             invalidateListOnFailure = true, eligible = {
-                it.preview === approval && (pending == null ||
+                installation?.blocksManual != true && it.preview === approval && (pending == null ||
                     (pending as? PendingOperation.Approval)?.approval === approval)
             }) {
             val entries = catalog.approve(approval)
@@ -168,6 +186,8 @@ class LinuxSettingsController internal constructor(
         }
         return submit(page, failure = mutation.failure, mutation = mutation,
             invalidateListOnFailure = true, eligible = { state ->
+                // Revocation of a known reference is independent of installation recovery.
+                // In particular, UNKNOWN must not prevent synchronous admission denial.
                 if (pending == null) state.entries.any { ref(it) == reference }
                 else (pending as? PendingOperation.Removal)?.reference == reference
             }, beforeEnqueue = { admission.deny(reference) }) {
@@ -223,6 +243,7 @@ class LinuxSettingsController internal constructor(
             current?.let(::revokeLocked)
             current = null
         }
+        installation?.close()
         worker.cancel()
     }
 
@@ -241,6 +262,16 @@ class LinuxSettingsPageOwner internal constructor(
     fun discardPreview() = controller.discardPreview(this)
     fun approve(approval: FrozenLinuxApproval) = controller.approve(this, approval)
     fun remove(reference: LinuxGenerationRef) = controller.remove(this, reference)
+    fun prepareInstall(distribution: String, mirrorId: String) = controller.installAction(this) { it.prepare(distribution, mirrorId) }
+    fun discardInstall() = controller.installAction(this) { it.discard() }
+    fun recoverInstall() = controller.installAction(this) { it.recover() }
+    fun install(prepared: app.daiyu.android.terminal.install.PreparedLinuxInstall) =
+        controller.installAction(this) { it.downloadAndInstall(prepared) }
+    fun confirmPublishedDurability(prepared: app.daiyu.android.terminal.install.PreparedLinuxInstall) =
+        controller.installAction(this) { it.confirmPublishedDurability(prepared) }
+    fun prepareInstalledRegistration() = controller.installAction(this) { it.prepareRegistration() }
+    fun approveInstalled(approval: FrozenLinuxApproval) = controller.installAction(this) { it.approveRegistration(approval) }
+    fun cancelInstall() = controller.cancelInstall(this)
     /** Returns true only once, when this was still the active page; useful for back callbacks. */
     fun revoke(): Boolean = controller.revoke(this)
     override fun close() { revoke() }

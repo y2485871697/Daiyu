@@ -20,8 +20,9 @@ import java.nio.file.attribute.PosixFilePermissions
 import java.security.MessageDigest
 
 /**
- * Files-only install transaction. Parent must explicitly confirm a PreparedLinuxInstall, provide
- * its own runner, and wire operation cancellation. Production uses bounded tar extraction.
+ * Files-only install transaction. Caller explicitly confirms a PreparedLinuxInstall and wires
+ * operation cancellation. The app factory supplies the real bounded Android PTY probe runner
+ * and bounded tar extraction; injected runners remain a host-test/audited integration seam.
  * No catalog writes, selection, chroot, profiles, shell fallback or implicit network requests.
  */
 class RootlessLinuxInstaller internal constructor(
@@ -37,9 +38,13 @@ class RootlessLinuxInstaller internal constructor(
         // Both directories have the same parent/filesystem; never fall back to copying.
         Files.move(from.toPath(), to.toPath())
         Unit
-    }
+    },
+    private val fileForce: (FileChannel) -> Unit = { it.force(true) },
 ) {
     private val owner = Any()
+    // Strong references to unknown PTY resources; their writer locks/staging remain on disk.
+    // Neither Activity/page disposal nor a new install request is evidence of termination.
+    private val unknownProbes = java.util.concurrent.CopyOnWriteArrayList<LinuxInstallProbeUnknown>()
 
     /** Pure preparation; caller chooses the generation BEFORE obtaining consent. */
     fun prepare(artifact: LinuxRootfsArtifact, mirrorId: String,
@@ -61,6 +66,199 @@ class RootlessLinuxInstaller internal constructor(
         return PreparedLinuxInstall(owner, artifact, mirror, installation)
     }
 
+    /**
+     * Persist only the request description. No consent, process status or durability receipt is
+     * serialized. The production coordinator calls this before it can offer installation.
+     */
+    internal fun rememberRequest(prepared: PreparedLinuxInstall) {
+        check(prepared.owner === owner) { "linux_install_wrong_owner" }
+        secureDirectory(prepared.targetRootfs.parentFile!!)
+        val bytes = requestBytes(prepared)
+        val journal = File(privateRoot, REQUEST)
+        securePath(journal)
+        if (exists(journal) && readBounded(journal).contentEquals(bytes)) {
+            directorySync(privateRoot)
+            return
+        }
+        publishRequest(bytes)
+    }
+
+    /** Preserve the exact catalog generation BEFORE its first possible catalog write. */
+    internal fun rememberRegistration(prepared: PreparedLinuxInstall,
+                                      approval: app.daiyu.android.terminal.FrozenLinuxApproval) {
+        check(prepared.owner === owner) { "linux_install_wrong_owner" }
+        check(approval.installation == prepared.installation.copy(generation = approval.installation.generation))
+        checkGeneration(approval.installation.generation)
+        val journal = readBounded(File(privateRoot, REQUEST))
+        val linked = linkedRequestBytes(prepared, approval.installation.generation)
+        check(journal.contentEquals(requestBytes(prepared)) || journal.contentEquals(linked))
+        val file = File(prepared.targetRootfs.parentFile!!, REGISTRATION)
+        securePath(file)
+        val bytes = registrationBytes(prepared, approval.installation.generation)
+        if (exists(file)) {
+            check(readBounded(file).contentEquals(bytes)) { "linux_install_registration_mismatch" }
+            // Visible identical bytes may be from a failed force, not a durability receipt.
+            FileChannel.open(file.toPath(), WRITE).use(fileForce)
+        } else writeForced(file, bytes)
+        directorySync(file.parentFile!!)
+        // Link the registration identity into the durable request before catalog IO. Recovery
+        // must reject a missing registration description rather than generate a replacement UUID.
+        if (!journal.contentEquals(linked)) publishRequest(linked) else directorySync(privateRoot)
+    }
+
+    /** Retire only a catalog-recorded request. Never delete files, locks or UNKNOWN residue. */
+    internal fun completeRegistration(prepared: PreparedLinuxInstall,
+                                      approval: app.daiyu.android.terminal.FrozenLinuxApproval) {
+        check(prepared.owner === owner) { "linux_install_wrong_owner" }
+        check(approval.installation == prepared.installation.copy(generation = approval.installation.generation))
+        val journal = readBounded(File(privateRoot, REQUEST))
+        if (journal.contentEquals(EMPTY_REQUEST)) {
+            directorySync(privateRoot)
+            return
+        }
+        check(journal.contentEquals(linkedRequestBytes(prepared, approval.installation.generation)))
+        val parent = prepared.targetRootfs.parentFile!!
+        securePath(parent)
+        check(parent.list()?.all { it == "rootfs" || it == REGISTRATION } == true) {
+            "linux_install_completion_unknown"
+        }
+        check(inspectPublished(prepared) != null) { "linux_install_completion_missing" }
+        check(readBounded(File(parent, REGISTRATION)).contentEquals(
+            registrationBytes(prepared, approval.installation.generation)))
+        publishRequest(EMPTY_REQUEST)
+    }
+
+    /** Explicit discard is permitted only for an untouched, non-published request. */
+    internal fun discardRequest(prepared: PreparedLinuxInstall) {
+        check(prepared.owner === owner) { "linux_install_wrong_owner" }
+        val parent = prepared.targetRootfs.parentFile!!
+        securePath(parent)
+        check(readBounded(File(privateRoot, REQUEST)).contentEquals(requestBytes(prepared)))
+        check(!exists(prepared.targetRootfs) && parent.list()?.isEmpty() == true) {
+            "linux_install_discard_not_safe"
+        }
+        // A durable empty description distinguishes intentional discard from a missing journal.
+        // Do not delete rootfs, staging, writer locks or even old generation directories.
+        publishRequest(EMPTY_REQUEST)
+    }
+
+    /**
+     * Read-only restart recovery. The pinned catalog and original packaged helper pair must still
+     * match byte-for-byte. A visible marker is NOT a publication receipt; a lock/residue is UNKNOWN,
+     * never evidence of a dead process. No mkdir/fsync/probe/download/catalog mutation here.
+     */
+    internal fun recoverRequest(packaged: PackagedProotHelpers,
+                                artifacts: List<LinuxRootfsArtifact> = LinuxRootfsCatalog.artifacts): RecoveredLinuxInstall? {
+        securePath(privateRoot)
+        val journal = File(privateRoot, REQUEST)
+        securePath(journal)
+        check(!exists(File(privateRoot, "$REQUEST.tmp"))) { "linux_install_request_incomplete" }
+        if (!exists(journal)) {
+            check(!exists(privateRoot) || (privateRoot.isDirectory && privateRoot.list()?.isEmpty() == true)) {
+                "linux_install_request_missing"
+            }
+            return null
+        }
+        val bytes = readBounded(journal)
+        if (bytes.contentEquals(EMPTY_REQUEST)) return null
+        val text = bytes.toString(Charsets.UTF_8)
+        check(text.startsWith("daiyu-install-request-v1\ndaiyu-rootfs-marker-v1\n")) { "linux_install_request_format" }
+        val fields = text.lines().drop(2).dropLast(1).associate { line ->
+            val separator = line.indexOf('=')
+            check(separator > 0) { "linux_install_request_format" }
+            line.substring(0, separator) to line.substring(separator + 1)
+        }
+        fun field(name: String) = checkNotNull(fields[name]) { "linux_install_request_field" }
+        val artifact = artifacts.singleOrNull { it.id == field("entry") && it.abi == packaged.abi }
+            ?: error("linux_install_request_catalog_changed")
+        val installation = LinuxInstallation(artifact.distribution, field("environment"), field("generation"),
+            File(field("rootfs")), File(field("proot")), field("proot_sha256"),
+            File(field("loader")), field("loader_sha256"), "/", emptyMap())
+        check(installation.proot == packaged.proot && installation.prootSha256 == packaged.prootSha256 &&
+            installation.loader == packaged.loader && installation.loaderSha256 == packaged.loaderSha256) {
+            "linux_install_original_helpers_unavailable"
+        }
+        val prepared = prepare(artifact, field("mirror"), installation)
+        // Exact canonical comparison rejects changed hashes/URLs, duplicate/unknown fields,
+        // truncation, non-UTF8, alternative paths and noncanonical values without trusting them.
+        val linkedGeneration = fields["registration_generation"]
+        linkedGeneration?.let(::checkGeneration)
+        val expected = if (linkedGeneration == null) requestBytes(prepared)
+            else linkedRequestBytes(prepared, linkedGeneration)
+        check(expected.contentEquals(bytes)) { "linux_install_request_mismatch" }
+        securePath(prepared.targetRootfs.parentFile!!)
+        validateHelpers(installation, LinuxInstallCancellation())
+        val registrationFile = File(prepared.targetRootfs.parentFile!!, REGISTRATION)
+        securePath(registrationFile)
+        check(linkedGeneration == null || exists(registrationFile)) { "linux_install_registration_missing" }
+        val registration = if (!exists(registrationFile)) null else {
+            val saved = readBounded(registrationFile)
+            val generation = saved.toString(Charsets.UTF_8).lines().getOrNull(2)
+                ?.removePrefix("generation=") ?: error("linux_install_registration_format")
+            checkGeneration(generation)
+            check(linkedGeneration == null || linkedGeneration == generation) { "linux_install_registration_mismatch" }
+            check(saved.contentEquals(registrationBytes(prepared, generation))) { "linux_install_registration_mismatch" }
+            app.daiyu.android.terminal.FrozenLinuxApproval(installation.copy(generation = generation))
+        }
+        val published = inspectPublished(prepared) != null
+        check(registration == null || published) { "linux_install_registered_target_missing" }
+        val names = checkNotNull(prepared.targetRootfs.parentFile!!.list()) { "linux_install_parent_unreadable" }
+        val unknown = names.any { it != "rootfs" && it != REGISTRATION }
+        return RecoveredLinuxInstall(prepared, published, unknown, registration)
+    }
+
+    private fun checkGeneration(generation: String) {
+        check(Regex("[A-Za-z0-9_-]{1,128}").matches(generation)) { "linux_install_registration_generation" }
+    }
+
+    private fun requestBytes(prepared: PreparedLinuxInstall) =
+        "daiyu-install-request-v1\n".toByteArray(Charsets.UTF_8) + markerBytes(prepared)
+
+    private fun linkedRequestBytes(prepared: PreparedLinuxInstall, generation: String) =
+        requestBytes(prepared) + "registration_generation=$generation\n".toByteArray(Charsets.UTF_8)
+
+    private fun registrationBytes(prepared: PreparedLinuxInstall, generation: String) =
+        ("daiyu-install-registration-description-v1\nrequest_sha256=" +
+            MessageDigest.getInstance("SHA-256").digest(requestBytes(prepared)).joinToString("") { "%02x".format(it) } +
+            "\ngeneration=$generation\n").toByteArray(Charsets.UTF_8)
+
+    private fun readBounded(file: File): ByteArray {
+        securePath(file)
+        check(Files.isRegularFile(file.toPath(), NOFOLLOW_LINKS) && file.length() in 1L..20000L) {
+            "linux_install_journal_unavailable"
+        }
+        return file.inputStream().use { input ->
+            val result = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(4096)
+            while (true) {
+                val n = input.read(buffer)
+                if (n < 0) break
+                check(result.size() + n <= 20000) { "linux_install_journal_limit" }
+                result.write(buffer, 0, n)
+            }
+            result.toByteArray()
+        }
+    }
+
+    private fun writeForced(file: File, bytes: ByteArray) {
+        securePath(file)
+        FileChannel.open(file.toPath(), CREATE_NEW, WRITE).use { channel ->
+            val buffer = ByteBuffer.wrap(bytes)
+            while (buffer.hasRemaining()) channel.write(buffer)
+            fileForce(channel)
+        }
+    }
+
+    private fun publishRequest(bytes: ByteArray) {
+        val journal = File(privateRoot, REQUEST)
+        val temporary = File(privateRoot, "$REQUEST.tmp")
+        securePath(journal)
+        writeForced(temporary, bytes)
+        Files.move(temporary.toPath(), journal.toPath(), java.nio.file.StandardCopyOption.ATOMIC_MOVE,
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        directorySync(privateRoot)
+    }
+
     /** Call ONLY after the user explicitly accepts this exact entry/mirror/generation/target. */
     fun approveDownloadAndInstall(prepared: PreparedLinuxInstall): DownloadInstallApproval {
         check(prepared.owner === owner) { "linux_install_wrong_owner" }
@@ -79,6 +277,7 @@ class RootlessLinuxInstaller internal constructor(
         val parent = prepared.targetRootfs.parentFile!!
         var lockOwned = false
         var publicationAttempted = false
+        var cleanupSafe = true
         var staging: File? = null
         var archive: File? = null
         val lock = File(parent, ".install-lock")
@@ -123,15 +322,44 @@ class RootlessLinuxInstaller internal constructor(
             check(inspectPublished(prepared) != null) { "linux_install_published_marker_invalid" }
             return LinuxInstallReceipt(prepared.installation, directorySyncConfirmed = true)
         } catch (failure: Exception) {
+            if (failure is LinuxInstallProbeUnknown) {
+                cleanupSafe = false
+                unknownProbes.add(failure)
+            }
             if (publicationAttempted && runCatching { inspectPublished(prepared) }.getOrNull() != null) {
                 return LinuxInstallReceipt(prepared.installation, directorySyncConfirmed = false)
             }
             throw failure
         } finally {
             // Never delete a published target, pre-existing rootfs, or another owner's staging.
-            staging?.let { runCatching { deleteTreeWithoutFollowingLinks(it.toPath()) } }
-            archive?.let { runCatching { Files.deleteIfExists(it.toPath()) } }
-            if (lockOwned) runCatching { Files.deleteIfExists(lock.toPath()); directorySync(parent) }
+            if (cleanupSafe) {
+                staging?.let { runCatching { deleteTreeWithoutFollowingLinks(it.toPath()) } }
+                archive?.let { runCatching { Files.deleteIfExists(it.toPath()) } }
+                if (lockOwned) runCatching { Files.deleteIfExists(lock.toPath()); directorySync(parent) }
+            }
+        }
+    }
+
+    /**
+     * Explicit retry after a visible rename without its durability receipt. Same prepared request,
+     * exact marker, helper validation and exclusive writer lock are required; no probe/network or
+     * catalog approval is implied. Inspection alone must never be treated as this receipt.
+     */
+    fun confirmPublishedDurability(prepared: PreparedLinuxInstall): LinuxInstallReceipt {
+        check(prepared.owner === owner) { "linux_install_wrong_owner" }
+        val parent = prepared.targetRootfs.parentFile!!
+        secureDirectory(parent)
+        val lock = File(parent, ".install-lock")
+        Files.createDirectory(lock.toPath(), PRIVATE_DIRECTORY)
+        try {
+            check(inspectPublished(prepared) != null) { "linux_install_not_published" }
+            validateHelpers(prepared.installation, LinuxInstallCancellation())
+            syncTree(prepared.targetRootfs, LinuxInstallCancellation())
+            directorySync(parent)
+            check(inspectPublished(prepared) != null) { "linux_install_published_marker_invalid" }
+            return LinuxInstallReceipt(prepared.installation, directorySyncConfirmed = true)
+        } finally {
+            runCatching { Files.deleteIfExists(lock.toPath()); directorySync(parent) }
         }
     }
 
@@ -310,6 +538,9 @@ class RootlessLinuxInstaller internal constructor(
 
     companion object {
         private const val MARKER = ".daiyu-rootfs-install"
+        private const val REQUEST = ".install-request"
+        private const val REGISTRATION = ".registration-request"
+        private val EMPTY_REQUEST = "daiyu-install-empty-v1\n".toByteArray(Charsets.UTF_8)
         private val PRIVATE_DIRECTORY = PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------"))
 
         /** Production extraction is bounded and always staged under Context.filesDir. */

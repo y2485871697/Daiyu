@@ -23,7 +23,8 @@ class FrozenLinuxApproval internal constructor(configuration: LinuxInstallation)
  */
 class TrustedLinuxCatalog internal constructor(
     private val directory: File,
-    private val directorySync: (File) -> Unit
+    private val directorySync: (File) -> Unit,
+    private val beforeApprovalGate: () -> Unit = {},
 ) {
     constructor(directory: File) : this(directory, TerminalDurability::syncDirectory)
 
@@ -59,14 +60,28 @@ class TrustedLinuxCatalog internal constructor(
     }
 
     /** Invoke only after the user/parent explicitly confirms this frozen object's FULL contents. */
-    suspend fun approve(approval: FrozenLinuxApproval): List<LinuxInstallation> = withContext(Dispatchers.IO) {
+    suspend fun approve(
+        approval: FrozenLinuxApproval,
+        admit: () -> Boolean = { true },
+    ): List<LinuxInstallation> = approveRecord(approval, admit, acceptRecorded = false)
+
+    /** Retry an installed request without resurrecting a concurrently revoked generation. */
+    internal suspend fun approveInstallation(approval: FrozenLinuxApproval, admit: () -> Boolean): List<LinuxInstallation> =
+        approveRecord(approval, admit, acceptRecorded = true)
+
+    private suspend fun approveRecord(approval: FrozenLinuxApproval, admit: () -> Boolean,
+                                      acceptRecorded: Boolean): List<LinuxInstallation> = withContext(Dispatchers.IO) {
+        beforeApprovalGate() // Test seam; no catalog IO has occurred yet.
         synchronized(gate) {
+            // Exactly once, after dispatcher/gate waits and before the first catalog IO.
+            // The caller atomically decides against cancellation; never holds its lock for IO.
+            check(admit()) { "linux_catalog_admission_revoked" }
             val records = read()
             val value = approval.installation
             checkMetadata(value)
             val previous = records.singleOrNull { ref(it.installation) == ref(value) }
             if (previous != null) {
-                check(previous.active && previous.installation == value) { "linux_catalog_generation_conflict" }
+                check((previous.active || acceptRecorded) && previous.installation == value) { "linux_catalog_generation_conflict" }
             }
             val next = if (previous == null) records + Record(value, true) else records
             // Do not publish a partially usable list, nor replace a failed old approval.
@@ -90,6 +105,19 @@ class TrustedLinuxCatalog internal constructor(
             // left, but a visible tombstone alone does not confirm the prior rename.
             if (next != records) publish(next) else directorySync(directory)
             activeList(next)
+        }
+    }
+
+    /** A matching tombstone is also a completed registration, never permission to resurrect it. */
+    internal suspend fun registrationRecorded(approval: FrozenLinuxApproval): Boolean = withContext(Dispatchers.IO) {
+        synchronized(gate) {
+            val previous = read().singleOrNull { ref(it.installation) == ref(approval.installation) }
+            if (previous == null) false else {
+                check(previous.installation == approval.installation) { "linux_catalog_generation_conflict" }
+                // Confirm even a visible record left by a failed directory sync before retiring.
+                directorySync(directory)
+                true
+            }
         }
     }
 

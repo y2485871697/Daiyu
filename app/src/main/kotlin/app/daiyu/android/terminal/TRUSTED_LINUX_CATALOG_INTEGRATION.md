@@ -19,6 +19,10 @@
 
 相同冻结批准对象重试且已有完整相同的活动记录是幂等校验、不重写 catalog，但成功返回前仍必须同步 catalog 目录；重复撤销也遵循此规则，即使撤销后已无活动项。目录同步失败继续抛错，不能仅凭读取到目标记录就确认持久化成功。另一次 freeze（即使配置字段相同）也是新 generation。任何相同 ref 不同字段都拒绝，已撤销 generation 不可重新激活。旧批准配置永久保留，仅 active 标志能被撤销；变更 cwd/mount/path/digest/label 必须新批准、新 generation，不能修改旧记录。上限 256 条**含墓碑**、1 MiB；达到上限报错，不自动压缩历史或复用身份。
 
+安装协调器使用专属 `approveInstallation(approval, admit)`：切换到 IO、实际取得本 catalog 根 gate 之后，首次 catalog IO 之前恰好调用一次 admit。该回调与取消在协调器短锁上原子决定，文件 IO 不在协调器锁内；接受之后不得取消拥有持久化回执的 coroutine。普通 `approve` 也支持相同的可选 admit 围栏，但仍拒绝已撤销代次。专属安装重试遇到完全相同的既有墓碑时只确认持久化并返回剩余活动列表，绝不将 active 恢复为 true。
+
+只读安装描述恢复之后，可用 `registrationRecorded` 严格匹配既有配置（活动记录或墓碑均可），同步 catalog 目录成功才确认其持久化。协调器随后仅退役安装请求，不新增授权、不删除安装文件、不清理 UNKNOWN。描述、文件内容或未同步的可见记录本身不是成功回执。
+
 ## catalog 与 selection 严格分离
 
 权威文件只有 `<catalog>/trusted-linux-catalog.json`。自身格式版本 1，包含完整 installation 和 active 标志。严格检查 canonical 序列化、重复 ref、未知字段和类型，因此它是本模块拥有的内部文件，不支持手工编辑/通用 JSON 导入。某条记录的授权只能由明确批准流程建立。
@@ -53,5 +57,7 @@ val terminalOwner = TerminalUiOwner.android(context, trusted)
 新增 `app/src/test/kotlin/app/daiyu/android/terminal/TrustedLinuxCatalogTest.kt`，使用临时目录和从不执行的文本 fixture，覆盖：明确批准前零授权/零发布、残留 selection 与 scratch 不自授权、冻结 mounts/不可变返回值、损坏/未知字段/重复 ref、已知摘要不符、配置变更新 generation、相同 ref 不可偷换/撤销不可复活、路径/URI/挂载注入、rename 前写入失败保持旧批准并重试、catalog 符号链接拒绝。现有 LinuxEnvironmentStoreTest 提供 validator、lease、文件替换与绑定等额外契约证据。
 
 新增故障注入回归 `testSameApprovalRetryMustSyncDirectoryAfterPostRenameFailure` 与 `testLastActiveRemovalRetryMustSyncDirectoryAfterPostRenameFailure`：只在目标单条活动记录/墓碑已经通过真实 rename 可见、临时文件已消失后注入目录 fsync 异常，首次调用和同一 catalog 对象的第一次幂等重试均必须抛出该异常；再一次同对象重试必须调用真实目录 fsync 并成功后才返回。断言覆盖同步尝试/成功次数、快照字节不变、generation 不变、最后一个活动项撤销后仍保留墓碑且不可复活，并明确读取可见快照不能替代重试确认。
+
+新增 `testInstalledRequestCanRetireAgainstRecordedTombstoneButNeverReactivateIt` 与 `testRevokedAdmissionRunsOnceBeforeEvenReadingMalformedCatalog`，覆盖安装专属重试保持墓碑字节不变、相同 ref 不同配置仍拒绝，以及拒绝准入时首次 catalog read 也不发生。生产 gate 排队取消及注册重启退役的组合用例位于 Linux 安装专属测试类。
 
 **实现代理未运行构建或测试**（仅可编辑工作树，无 shell）。如需验证，由主代理在 Linux 构建环境仅定向运行 `:app:testDebugUnitTest --tests app.daiyu.android.terminal.TrustedLinuxCatalogTest`；本次不构建 APK、不运行全量测试、不推送。未新增或执行真机 rootfs 安装/启动、下载、ABI、SELinux 或断电恢复验证；故障注入不等于真实断电恢复或真实发行版验证。

@@ -64,6 +64,35 @@ class TrustedLinuxCatalogTest : TestCase() {
         fail("must not acknowledge the visible snapshot before directory fsync succeeds")
     }
 
+    fun testInstalledRequestCanRetireAgainstRecordedTombstoneButNeverReactivateIt() = fixture { root, spec, catalog ->
+        val approval = catalog.freezeForApproval(spec)
+        catalog.approve(approval)
+        catalog.remove(reference(approval.installation))
+        val tombstone = manifest(root).readBytes()
+        var admissions = 0
+        assertTrue(catalog.approveInstallation(approval) { admissions++; true }.isEmpty())
+        assertEquals(1, admissions)
+        assertTrue(tombstone.contentEquals(manifest(root).readBytes()))
+        assertTrue(catalog.registrationRecorded(approval))
+        rejected { catalog.approve(approval) }
+        rejected { catalog.approveInstallation(FrozenLinuxApproval(
+            approval.installation.copy(guestWorkingDirectory = "/changed"))) { true } }
+        assertTrue(tombstone.contentEquals(manifest(root).readBytes()))
+    }
+
+    fun testRevokedAdmissionRunsOnceBeforeEvenReadingMalformedCatalog() = fixture { root, spec, catalog ->
+        File(root, "catalog").mkdirs()
+        manifest(root).writeText("malformed catalog")
+        var admissions = 0
+        val failure = runCatching {
+            catalog.approve(catalog.freezeForApproval(spec)) { admissions++; false }
+        }.exceptionOrNull()
+        assertEquals("linux_catalog_admission_revoked", failure?.message)
+        assertEquals(1, admissions)
+        assertEquals("malformed catalog", manifest(root).readText())
+        assertFalse(File(root, "catalog/validation-only").exists())
+    }
+
     fun testOnlyExplicitFrozenApprovalCreatesAuthorityAndDoesNotSelect() = fixture { root, spec, catalog ->
         assertEquals(emptyList<LinuxInstallation>(), catalog.load())
         val approval = catalog.freezeForApproval(spec)

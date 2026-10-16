@@ -576,6 +576,18 @@ class MainActivity : ComponentActivity() {
                                     QuestionExtras(id)
                                     VoiceExtras(id)
                                 }, imageLoader = imageHost.historyLoader)
+                                pendingTextSend?.let { pending ->
+                                    top.yukonga.miuix.kmp.basic.TextButton(
+                                        text = "取消发送准备",
+                                        modifier = Modifier.testTag("text-send-cancel"),
+                                        onClick = {
+                                            if (activityUsable() && pendingTextSend === pending) {
+                                                controller.cancelTextSend(pending.ticket)
+                                                publishChat()
+                                            }
+                                        }
+                                    )
+                                }
                                 if (imagePanelVisible) ImageComposerPanel()
                                 DictationComposerEntry()
                                 ShizukuComposerEntry()

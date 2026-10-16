@@ -24,6 +24,9 @@ import java.net.URL
 import java.nio.file.Files
 import java.security.cert.Certificate
 import java.util.UUID
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import javax.net.ssl.HttpsURLConnection
 
 /** Real SQLite/sidecar and private files; synthetic inspector/transport only. No service/network.
@@ -383,15 +386,57 @@ class ControllerVideoSendingTest {
         assertEquals(VideoDraftOutcome.ACCEPTED,
             attempt.commit(db, snapshot, prepared, plan, "default", request.text, { false }).outcome)
         val connection = Connection()
-        val port = adapter.wrap(supported, cap, conversation.id, prepared.assistant.id, plan, "image + video instructions", { false }) { _, instructions, grant ->
-            ResponsesModel(settings, { connection }, true, instructions, grant)
+        val ui = PostUi(plan.history, plan.inputs)
+        val port = adapter.wrap(supported, cap, conversation.id, prepared.assistant.id, plan,
+            "image + video instructions", { false }, ui.approval) { _, instructions, grant, approval ->
+            ResponsesModel(settings, { connection }, true, instructions, grant, approval)
         }
-        port.open(plan.history).next(emptyList()) {}
+        ui.send(port.open(plan.history))
         val body = JSONObject(connection.sent.toString("UTF-8"))
         assertEquals("image + video instructions", body.getString("instructions"))
         assertTrue(body.toString().contains("data:image/png;base64,"))
         assertTrue(body.toString().contains("data:video/mp4;base64,"))
         assertTrue(connection.sent.size() > 0)
+    }
+
+    /** Synthetic UI driver for these existing payload tests, not a production auto-approval. */
+    private inner class PostUi(private val rows: List<Message>, private val inputs: List<MessageVideoInput>) {
+        private val main = Thread.currentThread()
+        private val queue = LinkedBlockingQueue<() -> Unit>()
+        private val identity = Any()
+        private var decision: ((Boolean) -> Unit)? = null
+        private var cancelled = false
+        private fun authority() = ControllerVideoPostAuthority(identity, 1, 1, settings, rows, inputs)
+        val approval = ControllerVideoPostApproval(object : ControllerVideoPostApprovalHost {
+            override fun postToMain(action: () -> Unit) { queue.put(action) }
+            override fun snapshotOnMain(): ControllerVideoPostAuthority? {
+                assertSame(main, Thread.currentThread())
+                return if (cancelled) null else authority()
+            }
+            override fun showOnMain(prompt: ControllerVideoPostPrompt, decision: (Boolean) -> Unit) {
+                assertSame(main, Thread.currentThread())
+                assertEquals(inputs.sumOf { it.references.size }, prompt.references.size)
+                this@PostUi.decision = decision
+            }
+            override fun cancelRun() { cancelled = true }
+        }, authority())
+
+        fun send(session: ModelSession) {
+            decision = null
+            val failure = AtomicReference<Throwable?>()
+            val worker = Thread {
+                try { session.next(emptyList()) {} } catch (caught: Throwable) { failure.set(caught) }
+            }.apply { start() }
+            try {
+                checkNotNull(queue.poll(3, TimeUnit.SECONDS))()
+                checkNotNull(decision)(true) // Explicit test click for THIS displayed POST.
+                worker.join(3000)
+                assertFalse(worker.isAlive)
+                failure.get()?.let { throw AssertionError("video POST failed", it) }
+            } finally {
+                session.cancel(); worker.interrupt(); worker.join(3000)
+            }
+        }
     }
 
     private class Connection : HttpsURLConnection(URL(OpenRouterVideoCapability.ENDPOINT)) {
@@ -423,17 +468,24 @@ class ControllerVideoSendingTest {
         val cap = permission
         var runtimeCancelled = false
         val connections = mutableListOf<Connection>()
-        val port = adapter.wrap(provider, cap, follow.conversationId, active.id, baseline, "preserved assistant instructions", { runtimeCancelled }) { _, instructions, grant ->
+        val ui = PostUi(rows, baseline.inputs)
+        val port = adapter.wrap(provider, cap, follow.conversationId, active.id, baseline,
+            "preserved assistant instructions", { runtimeCancelled }, ui.approval) { _, instructions, grant, approval ->
             assertSame(cap, grant)
             val connection = Connection().also { connections.add(it) }
-            ResponsesModel(settings, { connection }, null, instructions, grant)
+            ResponsesModel(settings, { connection }, null, instructions, grant, approval)
         }
         val definitions = listOf(ToolDefinition("fixture_tool", "fixture", "{\"type\":\"object\",\"properties\":{}}"))
         val imagePlan = ControllerMessageImages(db, MessageImageAssetStore(File(root, "other-images"))).freeze(rows, provider)
-        val sessions = listOf(port.open(rows), port.open(rows, setOf(ReadOnlyTool.BATTERY)),
-            port.open(rows, definitions), port.open(rows, definitions, imagePlan))
-        assertTrue(connections.all { it.sent.size() == 0 }) // open is not a POST
-        sessions.forEach { it.next(emptyList()) {} }
+        // A later actual freeze retires earlier plan identities, so open/approve each session
+        // in order instead of pre-opening four stale sessions and then trying to send them.
+        val opens = listOf<() -> ModelSession>({ port.open(rows) }, { port.open(rows, setOf(ReadOnlyTool.BATTERY)) },
+            { port.open(rows, definitions) }, { port.open(rows, definitions, imagePlan) })
+        opens.forEach { open ->
+            val session = open()
+            assertEquals(0, connections.last().sent.size()) // open is not a POST
+            ui.send(session)
+        }
         assertEquals(4, connections.size)
         connections.forEach { connection ->
             val body = JSONObject(connection.sent.toString("UTF-8"))
@@ -449,7 +501,7 @@ class ControllerVideoSendingTest {
         runtimeCancelled = true
         rejected { port.open(rows) }
         assertEquals(4, connections.size)
-        val noGrant = adapter.wrap(provider, null, follow.conversationId, active.id, baseline, null, { false }) { _, _, _ -> error("no transport") }
+        val noGrant = adapter.wrap(provider, null, follow.conversationId, active.id, baseline, null, { false }) { _, _, _, _ -> error("no transport") }
         rejected { noGrant.open(rows) }
         runtimeCancelled = false
         db.writableDatabase.delete("message_video_inputs", "message_id=?", arrayOf(ready.attempt.userId.value))

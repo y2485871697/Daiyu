@@ -174,12 +174,15 @@ internal class ControllerMessageVideos(
      * projection is tolerated. All other physical history and every video user must be present.
      * modelFactory is a test seam; production constructs ResponsesModel with the SAME permission
      * and frozen assistant instructions. No caller-supplied generic ModelPort can drop videos.
+     * postApproval is run-local and mandatory for videos: each actual freeze is registered before
+     * modelFactory receives that SAME per-POST provider. The preflight plan is only a DB witness.
      */
     fun wrap(provider: ProviderSnapshot, capability: OpenRouterVideoCapability?, conversation: ConversationId,
         activeAssistant: MessageId, baseline: ControllerVideoModelPlan,
         assistantInstructions: String?, runtimeCancelled: () -> Boolean,
-        modelFactory: (ProviderSnapshot, String?, OpenRouterVideoCapability?) -> ResponsesModel = { p, i, c ->
-            ResponsesModel(p, i, c)
+        postApproval: ControllerVideoPostApproval? = null,
+        modelFactory: (ProviderSnapshot, String?, OpenRouterVideoCapability?, VideoPostApprovalProvider?) -> ResponsesModel = { p, i, c, a ->
+            ResponsesModel(p, i, c, a)
         }): ModelPort = object : ModelPort {
         private fun openPlan(source: List<Message>, definitions: List<ToolDefinition>, supplied: ModelImagePlan? = null): ModelSession {
             val snapshot = history.capture(conversation)
@@ -213,7 +216,12 @@ internal class ControllerMessageVideos(
             }
             history.assertUnchanged(snapshot)
             if (runtimeCancelled()) throw InterruptedException("video_model_cancelled")
-            val delegate = modelFactory(provider, assistantInstructions, capability)
+            // Register THIS actual freeze, not the pre-accept baseline. Every Runner open and
+            // overload comes through here; a same-valued new plan still has a new identity.
+            val approval = if (plan.videos != null) requireNotNull(postApproval) {
+                "video_post_approval_required"
+            }.also { it.registerFrozenPlan(plan) } else null
+            val delegate = modelFactory(provider, assistantInstructions, capability, approval)
             val session = if (plan.videos != null) delegate.open(plan.history, definitions, plan.videos, plan.images)
                 else delegate.open(plan.history, definitions, plan.images)
             return object : ModelSession {

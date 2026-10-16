@@ -51,6 +51,13 @@ class MessageGenerationAssetsTest {
     private fun originals() = root.walkTopDown().filter { it.name == "original" }.toList()
     private fun await(latch: CountDownLatch) { check(latch.await(5, TimeUnit.SECONDS)) }
     private fun join(thread: Thread) { thread.join(5000); assertFalse("worker did not exit", thread.isAlive) }
+    private fun awaitBlockedOnFence(thread: Thread) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (thread.state != Thread.State.BLOCKED && thread.isAlive && System.nanoTime() < deadline) {
+            Thread.yield()
+        }
+        assertEquals(Thread.State.BLOCKED, thread.state)
+    }
 
     @Test fun incrementalIndicesAndReopenPreserveExactOriginalsAndReceipt() {
         val first = store().commit(identity, 3, GenerationKind.IMAGE, image, info)
@@ -130,6 +137,48 @@ class MessageGenerationAssetsTest {
         val denied = store(GenerationAssetFence(owner) { false })
         expect(GenerationAssetFailure.OWNER_REJECTED) { denied.pending(receipt) }
         assertEquals(receipt, store(GenerationAssetFence(owner) { true }).pending(identity, 0)!!.receipt)
+    }
+
+    @Test fun registrationAdmissionRejectsRevocationAndForeignOwnerWithoutRunningSql() {
+        val assets = store()
+        var sqlCalls = 0
+        val sameOwner = owner("account", "assistant")
+        assertEquals("committed", assets.admitRegistration(sameOwner) { sqlCalls++; "committed" })
+        expect(GenerationAssetFailure.OWNER_REJECTED) {
+            assets.admitRegistration(owner("other-account", "assistant")) { sqlCalls++ }
+        }
+        fence.revoke()
+        expect(GenerationAssetFailure.CANCELLED) { assets.admitRegistration(owner) { sqlCalls++ } }
+        assertEquals(1, sqlCalls)
+        assertTrue(originals().isEmpty()) // Admission itself performs no file verification/publication.
+    }
+
+    @Test fun registrationAdmissionKeepsSameGateUntilCallbackCompletes() {
+        val assets = store()
+        val inSql = CountDownLatch(1); val releaseSql = CountDownLatch(1)
+        val revoking = CountDownLatch(1); val revoked = CountDownLatch(1)
+        val result = AtomicReference<String>()
+        val failure = AtomicReference<Throwable>()
+        val register = Thread {
+            try {
+                result.set(assets.admitRegistration(owner) {
+                    inSql.countDown(); check(releaseSql.await(15, TimeUnit.SECONDS)); "committed"
+                })
+            } catch (error: Throwable) { failure.set(error) }
+        }
+        val revoke = Thread { revoking.countDown(); fence.revoke(); revoked.countDown() }
+        register.start()
+        try {
+            await(inSql); revoke.start(); await(revoking)
+            awaitBlockedOnFence(revoke)
+            assertEquals(1L, revoked.count)
+        } finally {
+            releaseSql.countDown(); join(register); join(revoke)
+        }
+        failure.get()?.let { throw it }
+        assertEquals("committed", result.get())
+        assertEquals(0L, revoked.count)
+        expect(GenerationAssetFailure.CANCELLED) { assets.admitRegistration(owner) { fail("revoked") } }
     }
 
     @Test fun cancellationDuringInspectionPreventsPublicationButPreservesSiblings() {

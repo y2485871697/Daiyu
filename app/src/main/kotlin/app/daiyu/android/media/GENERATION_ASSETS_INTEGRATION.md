@@ -58,6 +58,13 @@ Public methods:
   For video this is the original video, never a thumbnail. No path/URI is exported.
 * `GenerationAssetFence.revoke()`: sticky cancellation/owner-invalidation fence.
 
+Internal output-store integration: `admitRegistration(expectedOwner) { SQL }`
+revalidates the same owner through the existing fence and holds its gate until the
+SQL callback has committed or failed. It does not read files. Verify via `pending`
+first, release file locks, then acquire this gate **before** starting SQL; never
+enter from a DB transaction or call asset/file APIs inside the callback. The
+expected owner's scalar fields must match even when recovery finds no slot.
+
 `PendingGenerationAsset` carries `receipt`, `owner`, `identity`, `outputIndex`,
 `kind`, `mimeType`, `bytes: Long`, `sha256`, `width`, `height`, `durationMs` (0 for
 images). Its name is intentional: it always means **awaiting parent registration**,
@@ -113,11 +120,18 @@ io.cancellation.cancel()       // then abort the HTTP side
 Do not rely only on `GenerationCancellation.isCancellationRequested`, a callback
 check, interrupt or a transport exception to revoke asset admission. They are not
 atomic publication fences. Do not hold a DB transaction while acquiring a fence
-or calling this adapter. Lock order is namespace/file lock -> fence -> validator
-DB reads; the validator must not call back into the adapter. Revocation does not
-recall an original descriptor already handed to the caller: close it at parent
-operation end. A fresh fence after restart requires fresh owner validation, not
-blindly reviving an old cancelled run.
+or calling this adapter. File operations order namespace/file lock -> fence ->
+validator DB reads. Final output registration releases file locks and orders
+fence -> validator DB reads -> SQL transaction/commit, holding the gate throughout
+SQL. The validator must not call back into the adapter. Same-fence revocation wins
+before registration, or waits for an admitted registration to commit/fail; there
+is no post-commit cancellation that invalidates the successful receipt.
+Revocation does not recall an original descriptor already handed to the caller:
+close it at parent operation end. A fresh fence after restart requires fresh owner
+validation AND current cancellation/account policy, not blindly reviving an old
+cancelled run. In-process recovery must never replace a revoked fence. Sharing the
+same live-owner fence across leaves and revocation is a necessary parent lifecycle
+integration task; this asset/output-store patch alone does not supply that wiring.
 
 Only this invocation's *never-published* known staging files may be cleaned on a
 pre-rename failure. After a rename is attempted there is NO cleanup, even if the
@@ -151,8 +165,10 @@ After each output success (or recovery), the parent must:
 
 1. Obtain/verify the descriptor with `assets.pending(receipt)` outside the DB
    transaction. Retain the original known output index and failed sibling results.
-2. In ONE transaction on the SAME application/account DB as the persisted
-   assistant invocation and generation attempts, revalidate actual owner/run/call,
+2. Reacquire the same fence via `admitRegistration` and, inside that admission,
+   open ONE transaction on the SAME application/account DB as the persisted
+   assistant invocation and generation attempts. Hold the gate through commit.
+   Revalidate actual owner/run/call,
    account, execution/registration policy and original attempt identity/fingerprint.
    Add a parent-coordinated generation asset/reference schema with a unique key
    `(accountScope, operationId, itemId, outputIndex)` (or equivalent account DB
@@ -170,6 +186,15 @@ After each output success (or recovery), the parent must:
    existence is evidence of chat acceptance; never delete the file to "roll back"
    an unknown DB result. No sibling result may disappear when registering another.
 
+The output-store leaf implements file verification + fenced side-table registration
+as described in `docs/generation-output-store-integration.md`; it does not update
+Tool.result/message projection atomically. Its `recoverPublished(originalAttempt,
+index)` reopens only the original fixed slot and uses the same registration path.
+An absent slot returns explicit `GenerationOutputRecovery.Missing` after owner and
+original-attempt authorization; corruption/denial is an error, never Missing.
+No scan, new identity/fingerprint/protocol, POST, download, or file deletion is a
+recovery strategy. Missing is not permission to regenerate a paid output.
+
 Existing migrations, backup/restore/export, retention and account deletion need
 an explicit parent decision for the new private namespace and reference schema.
 No automatic registration or global manifest changes are supplied by this leaf.
@@ -181,8 +206,9 @@ No automatic registration or global manifest changes are supplied by this leaf.
   stable receipts, same-slot content conflict, ownership/account/item isolation,
   false metadata, owner rejection, cancellation before/after admission, independent
   helper races, original/record/size/digest/symlink tampering, unknown staging/DB
-  outcomes, failed siblings and existing download authorization denial. Fakes are
-  explicitly NON-media and not evidence of real codec acceptance.
+  outcomes, failed siblings and existing download authorization denial. Registration
+  admission tests check scalar owner matching, sticky revocation and monitor-held
+  callback ordering. Fakes are explicitly NON-media, not real codec evidence.
 * `src/androidTest/.../media/MessageGenerationAssetsDeviceTest.kt`: static PNG real
   decoding/original reopen plus MIME spoofing and malformed/header-only/video-PNG
   rejection using production inspectors. No encoding or real generation/network.

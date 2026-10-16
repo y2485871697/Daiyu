@@ -2,9 +2,11 @@
 
 ## 本次边界（尚未接入运行路径）
 
-新增 `storage/SQLiteGenerationOutputStore.kt` 与隔离 SQLite instrumentation 测试。
-**没有修改** `ConversationDatabase`、Controller、Main、`SQLiteGenerationAttemptStore`、
-`MessageGenerationAssets`、MessageBlock 或既有生成/attempt 算法。没有网络、资产 GC、
+`storage/SQLiteGenerationOutputStore.kt` 与隔离 SQLite instrumentation 测试提供输出注册；
+恢复/原子准入实现涉及该 store、`media/MessageGenerationAssets.kt` 及专属测试/文档。
+本次 review 修正仅修改 output store、对应 androidTest 及本文档，不修改资产模块或共享 gate 接线。
+**没有修改** `ConversationDatabase`、Controller、Main、Session、Resources、
+`SQLiteGenerationAttemptStore`、MessageBlock 或既有生成/attempt 算法。没有网络、资产 GC、
 自动 retry POST、清空 attempt、UI 或后台任务。新增类不会自行打开数据库或安装 schema。
 以下父模块工作全部是 **TODO**，不能把本叶模块称为已完成端到端 P19/P20 集成。
 
@@ -42,7 +44,10 @@ outputs.open(attempt, outputIndex)?.use { original -> /* 私有读取，禁止�
 1. 拒绝嵌套事务、只读/非磁盘 DB、低于 FULL 的 synchronous、off/memory journal。
 2. **事务外**调用真实 `assets.pending`，读取并验证原始文件。传入的 pending 不被当作证据；
    重验后逐字段核对 owner、identity、index、receipt、kind、MIME、bytes、SHA-256、宽高、时长。
-3. 开启 **唯一一个顶层事务**。查询真实 conversation 与 assistant message，核对 run、role、
+3. 文件锁及先前的 fence 准入释放后，通过窄接口 `assets.admitRegistration(owner) { SQL }`
+   **重新取得同一个 owner fence** 并执行现有 `validateOwner`，随后开启 **唯一一个顶层事务**。
+   gate 持有到 `endTransaction()` 提交成功或失败返回，固定顺序为 **gate → DB**。
+   查询真实 conversation 与 assistant message，核对 run、role、
    唯一 tool call 的 ID/name；history 非空时完全不用 legacy tool 投影。查询同库
    `generation_attempts` 核对 identity 对应的全部 owner 字段、fingerprint、protocol。
 4. 使用 `(operation_id,item_id,output_index)` 主键插入 `generation_outputs`；另有 receipt 唯一约束、
@@ -64,9 +69,13 @@ outputs.open(attempt, outputIndex)?.use { original -> /* 私有读取，禁止�
 图片 duration=0、视频 duration>0 的既有契约；实际媒体解码与资源限制仍由资产 API 负责。
 这些读取防线同样用于 find/open、既存行幂等比较与 INSERT 后回读；坏行不会被自动修复覆盖。
 
-事务中没有资产 IO、文件锁、asset fence 或网络；也不会更新 attempt outcome。
-状态 COMPLETED 的真实 owner 仍可恢复已生成输出，不以“重新 reserve/重新 POST”代替恢复。
-父 fence 决定当前 owner/cancellation 是否可用；本模块不会强行放行 fence。
+事务中没有资产 IO、文件锁或网络；也不会更新 attempt outcome。注册在事务**之前**取得
+asset fence，并持有到提交完成；绝不在 DB 事务内反向取得 gate。`validateOwner` 仍由父实现，
+在 gate 内、事务外执行，之后还由 SQL 在事务内复核真实 owner/attempt。
+同一 fence 的 revoke 先赢则最后注册拒绝（包括幂等注册），register 先赢则已提交回执仍有效；
+不在 commit 之后追加 cancellation 检查、撤销回执或删除已发布文件。元数据回执不是未来读取许可。
+状态 COMPLETED 的真实 owner 仅在父当前策略仍允许时可恢复已生成输出，不以“重新 reserve/重新
+POST”代替恢复。父 fence 决定当前 owner/cancellation 是否可用；本模块不会强行放行 fence。
 异常在本边界统一为无 cause 的 `IllegalStateException("generation_output_store_unavailable")`，
 调用方不能把异常转换成重试 POST 的许可。
 
@@ -80,6 +89,39 @@ accountScope 是稳定的私有本地账户/DB 标识，不是 URL、凭据或�
 与 attempt store 一样，这个实现假设 **一个应用 DB 就是一个账户范围**；output 表额外存的
 accountScope 不能弥补 attempt 表没有 account 列的事实。共享多账户 DB 需要父模块先升级
 真实 owner/attempt schema 和授权；仅换 constructor 参数不能获得多账户隔离。
+
+## 无网络精确恢复与父共享 fence 前提
+
+```kotlin
+// originalAttempt 必须是已持久化的原始 identity + fingerprint + protocol。
+when (val result = outputs.recoverPublished(originalAttempt, originalOutputIndex)) {
+    is GenerationOutputRecovery.Registered -> useRegisteredReference(result.reference)
+    GenerationOutputRecovery.Missing -> keepOriginalAttemptWithoutResending()
+}
+```
+
+`recoverPublished` 只调用现有 `assets.pending(originalAttempt.identity, originalOutputIndex)`，
+按原 owner/operation/item/index 的固定 slot 重读 record 并核验完整原始字节、摘要、真实媒体元数据。
+找到了就走两种 `register` 共用的 `registerVerified`，包括相同的最终 gate 准入、SQL 授权、
+不可变行对比和提交回读；不依赖调用方还保留 receipt。不扫描目录寻找替代输出、不访问网络、
+不 POST、不下载、不改 operation/item/fingerprint/protocol、不创建 attempt、不删除已发布文件。
+
+`GenerationOutputRecovery.Missing` **仅表示该固定 slot 未发布且同 index 没有已注册 row**，
+不是故障的统称，更不是再次计费许可。即使没有 slot，也要在同 fence、同一个顶层 SQL 事务内
+核对原 attempt 的数据库授权，并通过既有 `(operation_id,item_id,output_index)` 精确查询确认
+没有 row。该查询复用完整字段读取、storage class/数值范围和引用校验；若已有 row，无论它是
+合法引用还是坏数据，整个 published slot 缺失都是损坏/冲突，必须抛出既有脱敏异常。
+已有目录但 record/original 缺损、原始字节冲突、fingerprint/protocol 改变或 owner 拒绝也全部
+抛出异常；不会静默归类 Missing，不会用新字节覆盖旧行。Missing 是一次固定 slot 的缺失观察，
+不承诺阻止并发发布；重试只允许同原始参数再次进行本地恢复。已有 DB 引用也不能代替缺失
+文件生成注册成功结果。
+
+**必要前提，属于独立的父 owner 生命周期任务：** 同一 live owner 的所有 leaf、输出 store、
+取消/删除/切账户路径必须复用**同一 GenerationAssetFence 实例**。仅重建相同字段的新 fence
+没有共同 gate，不能提供撤权与注册的全局排序。本补丁没有修改 Resources/Session/Controller，
+不声称已完成此父接线。父必须先在事务外 revoke、再变更/删除 owner；不得持 DB 事务等待 gate。
+进程重启后的新 fence 只可在重新验证持久 owner **以及当前取消/账户策略**后创建；同进程中
+不得为已撤销 owner 换 fence 复活权限。文件锁不是跨进程 owner lease，多进程策略仍由父负责。
 
 ## 父数据库 TODO：新建与 10 → 新版本迁移
 
@@ -116,7 +158,8 @@ SQLiteGenerationOutputStore.installSchema(db)
    本次隔离测试只手动建最小真实 owner 表并安装叶表，**不是这些父迁移测试**。
 
 不从旧 Tool.result 推测注册凭证、不扫描任意文件制造 attempt、不为旧消息生成新的 call/run。
-如果资产已发布但 output row 尚未提交，可以用相同 account/binding/attempt/receipt 重验并注册。
+如果资产已发布但 output row 尚未提交，可以用相同 account/binding/原始 attempt/index 调用
+`recoverPublished`（无需保留 receipt），或用原 receipt 重验并注册。
 失败可能留下未引用的 published 文件；保留它用于恢复，不删除、不重新计费生成。
 
 ## 父删除/账户生命周期 TODO
@@ -174,7 +217,20 @@ IGNORE/ABORT/变更 trigger、deferred-FK commit 失败以及失败后保留文�
 等坏行，并验证 find/open/两种 register 均拒绝且不覆盖坏行、不删除文件或 attempt；另用旧版
 宽松 REAL index 表验证 `0.0` 不能靠查询参数伪装为合法 INTEGER index。AFTER INSERT trigger
 分别在 CHECK 开启与绕过时注入超 Int/REAL 元数据，检查拒绝及整笔回滚，并保留正常恢复路径。
-测试 fence callback 仅用于断言不在 SQL 事务内调用，不是生产 owner validator。
+新增恢复/排序回归源：真实 SQLite + Android PNG decoder 验证发布后 SQL 失败、helper 重开、
+只按原 slot 恢复（不注册兄弟 index）、幂等恢复、无文件 Missing、破损/缺原始文件、已注册同 slot
+不同有效字节冲突；保持 identity/fingerprint/protocol 与 attempt tombstone 不变。通过真实解码
+完成时注入撤权，覆盖两种 register 和 recovery 的最终准入；线程/latch 覆盖 revoke 先赢以及
+已撤销 fence 不因重建 assets 获得权限。真实 SQLite INSERT trigger 调用阻塞函数，在事务内
+暂停注册、并发 revoke，验证 gate 保持至 SQL 完成且成功回执之后仍能查到。
+该单条并发测试使用公开 API 30+ `setCustomScalarFunction(String, UnaryOperator<String>)`，
+trigger 传一个字符串参数，回调在 latch 放行后返回该参数。沿用项目 JUnit3 runner，以方法入口的
+`Build.VERSION.SDK_INT` guard 在 API 26–29 跳过这一条；未提高测试类或构建的最低 SDK，其他
+测试仍可在 API 26 执行。没有隐藏 API 或反射，也没有用 mock 替换真实 SQLite 交错。
+本次补充已注册后整个 slot 丢失、整个 slot 丢失并且 row 数值/owner 损坏的回归；通过移走测试
+slot 模拟缺失，验证不是 Missing、坏 row 不变、兄弟 slot 可恢复及未注册 index 仍返回 Missing，
+同时保留原始文件、record 和 attempt tombstone。
+测试 fence callback 用于断言不在 SQL 事务内调用，不是生产 owner validator。
 
 本任务只做源代码静态检查；**未构建、未执行 JVM/instrumentation 测试、未运行真实设备、未推送**。
 未运行范围包括本测试类及新增回归、全量测试、父数据库迁移/端到端集成；未构建 APK。

@@ -5,12 +5,18 @@ import android.database.Cursor
 import android.database.sqlite.SQLiteConstraintException
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import android.os.Build
 import android.test.InstrumentationTestCase
 import app.daiyu.android.domain.MessageBlock
 import app.daiyu.android.domain.MessageHistorySegment
 import app.daiyu.android.domain.MessageId
 import app.daiyu.android.domain.ToolCallId
 import app.daiyu.android.domain.ToolInvocation
+import app.daiyu.android.media.AndroidImageInspector
+import app.daiyu.android.media.ImageAttachmentLimits
+import app.daiyu.android.media.ImageInspector
+import app.daiyu.android.media.video.AndroidVideoInspector
+import app.daiyu.android.media.video.VideoAttachmentLimits
 import app.daiyu.android.media.GenerationAssetFence
 import app.daiyu.android.media.GenerationAssetOwner
 import app.daiyu.android.media.MessageGenerationAssets
@@ -69,6 +75,15 @@ class SQLiteGenerationOutputStoreTest : InstrumentationTestCase() {
             val receipt = media.commit(attempt.identity, index, GenerationKind.IMAGE, png, info)
             return media.pending(receipt)
         }
+        // Simulate loss of the entire fixed slot without deleting its bytes or any sibling.
+        fun displacePublishedSlot(pending: PendingGenerationAsset): File {
+            val slotName = pending.receipt.assetId.removePrefix("genasset-v1-").substringBeforeLast('-')
+            val slot = File(File(File(root, "media"), "generation-v1"), slotName)
+            check(slot.isDirectory)
+            return File(root, "displaced-${pending.outputIndex}").also {
+                check(slot.renameTo(it)); check(!slot.exists())
+            }
+        }
         fun reserve() = SQLiteGenerationAttemptStore({ db }, binding).reserve(attempt)
         fun count(table: String) = db.rawQuery("SELECT count(*) FROM $table", null).use {
             check(it.moveToFirst()); it.getInt(0)
@@ -107,6 +122,14 @@ class SQLiteGenerationOutputStoreTest : InstrumentationTestCase() {
             return
         }
         fail("Expected fail-closed output rejection")
+    }
+
+    private fun awaitBlockedOnFence(thread: Thread) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (thread.state != Thread.State.BLOCKED && thread.isAlive && System.nanoTime() < deadline) {
+            Thread.yield()
+        }
+        assertEquals("revoker must block on the registration monitor", Thread.State.BLOCKED, thread.state)
     }
 
     override fun tearDown() {
@@ -376,6 +399,7 @@ class SQLiteGenerationOutputStoreTest : InstrumentationTestCase() {
         val receipt = alternate.commit(f.attempt.identity, 0, GenerationKind.IMAGE, alternateBytes, info)
         assertFalse(receipt == original.receipt)
         rejects { f.store(media = alternate).register(f.attempt, receipt) }
+        rejects { f.store(media = alternate).recoverPublished(f.attempt, 0) }
         assertEquals(registered, f.store().find(f.attempt, 0))
         assertEquals(receipt, alternate.pending(receipt).receipt)
         assertEquals(1, f.count("generation_outputs"))
@@ -418,6 +442,241 @@ class SQLiteGenerationOutputStoreTest : InstrumentationTestCase() {
         assertEquals(0, f.count("generation_outputs")); assertEquals(1, f.count("generation_attempts"))
         assertEquals(pending, f.assets().pending(pending.receipt)) // Files were NOT cleaned up on DB failure.
         assertEquals(pending.receipt, store.register(f.attempt, pending).receipt)
+    }
+
+    fun testPublishedSlotRecoversWithoutRetainedReceiptAfterSqlFailureAndReopen() {
+        val f = fixture(withHistory = true); f.reserve()
+        val first = f.publish(0); val later = f.publish(3)
+        val originalAttempt = f.attempt
+        val store = f.store()
+        // Published originals outlive an interrupted/failed registration, without any retry POST.
+        f.db.execSQL("CREATE TRIGGER fail_recovery BEFORE INSERT ON generation_outputs " +
+            "BEGIN SELECT RAISE(ABORT,'fixture'); END")
+        rejects { store.recoverPublished(originalAttempt, 3) }
+        f.db.execSQL("DROP TRIGGER fail_recovery")
+        assertEquals(0, f.count("generation_outputs"))
+        assertEquals(2, File(f.root, "media").walkTopDown().count { it.name == "original" })
+        f.helper.close()
+        val reopened = f.store(helper(File(f.root, "owner.sqlite")))
+        f.change("status", "COMPLETED")
+        // Recovery is invoked with only the original attempt + exact index, not a cached receipt.
+        val recovered = reopened.recoverPublished(originalAttempt, 3) as GenerationOutputRecovery.Registered
+        assertEquals(later.receipt, recovered.reference.receipt)
+        assertEquals(originalAttempt.identity, recovered.reference.identity)
+        assertEquals(originalAttempt.fingerprint, recovered.reference.fingerprint)
+        assertEquals(originalAttempt.protocol, recovered.reference.protocol)
+        assertEquals(recovered, reopened.recoverPublished(originalAttempt, 3))
+        assertEquals(GenerationOutputRecovery.Missing, reopened.recoverPublished(originalAttempt, 1))
+        assertNull(reopened.find(originalAttempt, 0)) // Never scans or registers a sibling slot.
+        val recoveredFirst = reopened.recoverPublished(originalAttempt, 0) as GenerationOutputRecovery.Registered
+        assertEquals(first.receipt, recoveredFirst.reference.receipt)
+        assertTrue(png.contentEquals(reopened.open(originalAttempt, 3)!!.use { it.readBytes() }))
+        assertEquals(2, f.count("generation_outputs")); assertEquals(1, f.count("generation_attempts"))
+    }
+
+    fun testRecoveryMissingIsExplicitButDeniedOrChangedAttemptsAreNotMissing() {
+        val f = fixture(); val store = f.store()
+        rejects { store.recoverPublished(f.attempt, 0) } // No persisted tombstone/permission.
+        f.reserve()
+        assertEquals(GenerationOutputRecovery.Missing, store.recoverPublished(f.attempt, 0))
+        rejects { store.recoverPublished(f.attempt.copy(fingerprint = "b".repeat(64)), 0) }
+        rejects { store.recoverPublished(f.attempt.copy(protocol = GenerationProtocol.OPENAI_VIDEO_MULTIPART), 0) }
+        rejects { store.recoverPublished(f.attempt.copy(identity = f.binding.identity("other-item")), 0) }
+        rejects { store.recoverPublished(f.attempt.copy(identity = GenerationIdentity("other-operation", "item1")), 0) }
+        rejects { store.recoverPublished(f.attempt, -1) }; rejects { store.recoverPublished(f.attempt, 32) }
+        val foreignOwner = GenerationAssetOwner("other-account", f.binding)
+        rejects { f.store(media = f.assets(foreignOwner)).recoverPublished(f.attempt, 0) }
+        f.db.beginTransaction()
+        try {
+            f.admissions.set(0)
+            rejects { store.recoverPublished(f.attempt, 0) }
+            assertEquals(0, f.admissions.get())
+        } finally { f.db.endTransaction() }
+        f.change("role", "user")
+        rejects { store.recoverPublished(f.attempt, 0) }
+        assertEquals(0, f.count("generation_outputs")); assertEquals(1, f.count("generation_attempts"))
+    }
+
+    fun testRegisteredOutputWithEntirePublishedSlotMissingFailsClosed() {
+        val f = fixture(); f.reserve(); val pending = f.publish(); val sibling = f.publish(3)
+        val store = f.store()
+        val registered = store.register(f.attempt, pending)
+        val siblingReference = store.register(f.attempt, sibling)
+        val displaced = f.displacePublishedSlot(pending)
+        val record = File(displaced, "record-v1").readBytes()
+        assertNull(f.assets().pending(f.attempt.identity, 0)) // Exercise the actual null-pending path.
+        val reopened = f.store(helper(File(f.root, "owner.sqlite")))
+        rejects { reopened.recoverPublished(f.attempt, 0) }
+        assertEquals(registered, reopened.find(f.attempt, 0)) // No row deletion or repair.
+        assertEquals(GenerationOutputRecovery.Missing, reopened.recoverPublished(f.attempt, 1))
+        assertEquals(GenerationOutputRecovery.Registered(siblingReference), reopened.recoverPublished(f.attempt, 3))
+        assertEquals(sibling, f.assets().pending(sibling.receipt))
+        assertTrue(png.contentEquals(File(displaced, "original").readBytes()))
+        assertTrue(record.contentEquals(File(displaced, "record-v1").readBytes()))
+        assertEquals(2, f.count("generation_outputs")); assertEquals(1, f.count("generation_attempts"))
+    }
+
+    fun testEntirePublishedSlotMissingWithCorruptRowIsNeverMissingOrRepaired() {
+        val f = fixture(); f.reserve(); val pending = f.publish(); val sibling = f.publish(3)
+        val store = f.store()
+        val registered = store.register(f.attempt, pending)
+        val siblingReference = store.register(f.attempt, sibling)
+        val displaced = f.displacePublishedSlot(pending)
+        val record = File(displaced, "record-v1").readBytes()
+        assertNull(f.assets().pending(f.attempt.identity, 0))
+        val where = "operation_id=? AND item_id=? AND output_index=?"
+        val key = arrayOf(f.attempt.identity.operationId, f.attempt.identity.itemId, "0")
+        // Cover both strict cursor numeric validation and valid SQL values with invalid ownership/media semantics.
+        val corruptions = listOf("width" to "4294967297", "width" to "1.5",
+            "duration_ms" to "1", "account_scope" to "'foreign'")
+        corruptions.forEach { (column, literal) ->
+            val original = f.db.rawQuery("SELECT $column FROM generation_outputs WHERE $where", key).use {
+                check(it.moveToFirst()); it.getString(0)
+            }
+            try {
+                f.db.execSQL("PRAGMA ignore_check_constraints=ON")
+                try { f.db.execSQL("UPDATE generation_outputs SET $column=$literal WHERE $where", key) }
+                finally { f.db.execSQL("PRAGMA ignore_check_constraints=OFF") }
+                val query = "SELECT typeof($column),quote($column) FROM generation_outputs WHERE $where"
+                val corrupt = f.db.rawQuery(query, key).use {
+                    check(it.moveToFirst()); it.getString(0) to it.getString(1)
+                }
+                rejects { store.recoverPublished(f.attempt, 0) }
+                f.db.rawQuery(query, key).use {
+                    check(it.moveToFirst()); assertEquals(corrupt, it.getString(0) to it.getString(1))
+                }
+                assertEquals(GenerationOutputRecovery.Missing, store.recoverPublished(f.attempt, 1))
+                assertEquals(siblingReference, store.find(f.attempt, 3))
+                assertEquals(sibling, f.assets().pending(sibling.receipt))
+                assertEquals(2, f.count("generation_outputs")); assertEquals(1, f.count("generation_attempts"))
+            } finally {
+                f.db.execSQL("UPDATE generation_outputs SET $column=? WHERE $where", arrayOf(original, *key))
+            }
+        }
+        assertEquals(registered, store.find(f.attempt, 0))
+        assertTrue(png.contentEquals(File(displaced, "original").readBytes()))
+        assertTrue(record.contentEquals(File(displaced, "record-v1").readBytes()))
+    }
+
+    fun testCorruptOriginalIsNotMissingAndRecoveryNeverOverwritesIt() {
+        val f = fixture(); f.reserve(); f.publish()
+        val original = File(f.root, "media").walkTopDown().single { it.name == "original" }
+        val changed = png.copyOf().apply { this[lastIndex] = (this[lastIndex].toInt() xor 1).toByte() }
+        original.writeBytes(changed) // Same byte count, different digest.
+        rejects { f.store().recoverPublished(f.attempt, 0) }
+        assertTrue(changed.contentEquals(original.readBytes()))
+        assertEquals(0, f.count("generation_outputs"))
+        // Missing a file inside an existing publication is corruption, not an absent slot.
+        assertTrue(original.delete())
+        rejects { f.store().recoverPublished(f.attempt, 0) }
+        assertTrue(original.parentFile.isDirectory)
+        assertEquals(1, f.count("generation_attempts"))
+        assertTrue(File(original.parentFile, "record-v1").isFile)
+    }
+
+    fun testRevokeAfterOriginalVerificationStillRejectsFinalSqlAdmission() {
+        // Each API starts from its own genuinely live owner, not an already revoked fixture.
+        for (mode in 0..2) {
+            val f = fixture(); f.reserve(); val pending = f.publish()
+            val fence = GenerationAssetFence(f.owner) { check(!f.db.inTransaction()); true }
+            val realInspector = AndroidImageInspector()
+            // Deterministically inject revocation at the end of the real decoder's verification.
+            // Monitors are reentrant: pending can finish, but SQL must acquire fresh admission.
+            val media = MessageGenerationAssets(File(f.root, "media"), fence,
+                ImageInspector { bytes ->
+                    check(!f.db.inTransaction())
+                    realInspector.inspect(bytes).also { fence.revoke() }
+                },
+                AndroidVideoInspector(), ImageAttachmentLimits(), VideoAttachmentLimits())
+            val store = f.store(media = media)
+            rejects {
+                when (mode) {
+                    0 -> store.register(f.attempt, pending.receipt)
+                    1 -> store.register(f.attempt, pending)
+                    else -> store.recoverPublished(f.attempt, 0)
+                }
+            }
+            assertEquals(0, f.count("generation_outputs"))
+            assertTrue(png.contentEquals(File(f.root, "media").walkTopDown()
+                .single { it.name == "original" }.readBytes())) // Retained; no new fence to read it.
+        }
+    }
+
+    fun testConcurrentRevokeWinsAndSameFenceCannotRecoverOrRegisterAgain() {
+        val f = fixture(); f.reserve(); val pending = f.publish()
+        val fence = GenerationAssetFence(f.owner) { check(!f.db.inTransaction()); true }
+        val media = MessageGenerationAssets(File(f.root, "media"), fence)
+        val store = f.store(media = media)
+        val revoked = CountDownLatch(1); val done = CountDownLatch(1)
+        val failure = AtomicReference<Throwable>()
+        val register = Thread {
+            try {
+                check(revoked.await(5, TimeUnit.SECONDS))
+                rejects { store.register(f.attempt, pending) }
+                rejects { store.register(f.attempt, pending.receipt) }
+                rejects { store.recoverPublished(f.attempt, 0) }
+                rejects { store.recoverPublished(f.attempt, 1) } // Not even a false Missing success.
+                // A new assets object around the SAME revoked fence grants no new permission.
+                rejects { f.store(media = MessageGenerationAssets(File(f.root, "media"), fence))
+                    .recoverPublished(f.attempt, 0) }
+            } catch (error: Throwable) { failure.set(error) } finally { done.countDown() }
+        }
+        val revoke = Thread { fence.revoke(); revoked.countDown() }
+        register.start(); revoke.start()
+        assertTrue(done.await(10, TimeUnit.SECONDS))
+        register.join(5000); revoke.join(5000)
+        failure.get()?.let { throw it }
+        assertFalse(register.isAlive); assertFalse(revoke.isAlive)
+        assertEquals(0, f.count("generation_outputs")); assertEquals(1, f.count("generation_attempts"))
+        assertTrue(png.contentEquals(File(f.root, "media").walkTopDown()
+            .single { it.name == "original" }.readBytes())) // Fixture inspection, not revived admission.
+    }
+
+    fun testRegistrationHoldsFenceThroughRealSqlAndReceiptSurvivesLaterRevoke() {
+        // The project's JUnit3 runner does not apply AndroidX SDK filtering annotations.
+        // Only this public scalar-function hook needs API 30; other tests still run on API 26.
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val f = fixture(); f.reserve(); val pending = f.publish()
+        val fence = GenerationAssetFence(f.owner) { check(!f.db.inTransaction()); true }
+        val store = f.store(media = MessageGenerationAssets(File(f.root, "media"), fence))
+        val inSql = CountDownLatch(1); val releaseSql = CountDownLatch(1)
+        val revoking = CountDownLatch(1); val revoked = CountDownLatch(1)
+        val result = AtomicReference<GenerationOutputReference>()
+        val failure = AtomicReference<Throwable>()
+        // This hook runs inside an actual SQLite INSERT, after file verification, before COMMIT.
+        f.db.setCustomScalarFunction("hold_output_insert") { argument ->
+            check(f.db.inTransaction())
+            inSql.countDown(); check(releaseSql.await(15, TimeUnit.SECONDS))
+            argument
+        }
+        f.db.execSQL("CREATE TRIGGER hold_output AFTER INSERT ON generation_outputs " +
+            "BEGIN SELECT hold_output_insert('hold'); END")
+        val register = Thread {
+            try { result.set(store.register(f.attempt, pending.receipt)) }
+            catch (error: Throwable) { failure.set(error) }
+        }
+        val revoke = Thread { revoking.countDown(); fence.revoke(); revoked.countDown() }
+        register.start()
+        try {
+            assertTrue(inSql.await(5, TimeUnit.SECONDS))
+            revoke.start()
+            assertTrue(revoking.await(5, TimeUnit.SECONDS))
+            awaitBlockedOnFence(revoke)
+            assertEquals("revoke must wait for the SQL registration gate", 1L, revoked.count)
+        } finally {
+            releaseSql.countDown()
+            register.join(5000); revoke.join(5000)
+            f.db.execSQL("DROP TRIGGER hold_output")
+        }
+        assertFalse(register.isAlive); assertFalse(revoke.isAlive)
+        failure.get()?.let { throw it }
+        assertEquals(0L, revoked.count)
+        assertNotNull(result.get())
+        // No post-COMMIT cancellation check may turn this admitted receipt into a failure.
+        assertEquals(pending.receipt, result.get().receipt)
+        assertEquals(result.get(), store.find(f.attempt, 0)) // Durable metadata remains valid.
+        rejects { store.register(f.attempt, pending) }; rejects { store.recoverPublished(f.attempt, 0) }
+        assertEquals(1, f.count("generation_outputs")); assertEquals(1, f.count("generation_attempts"))
     }
 
     fun testIndependentHelpersRaceToOneIdempotentRow() {

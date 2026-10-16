@@ -13,9 +13,16 @@ data class ChildTaskRecord(
     val prompt: String,
     val status: ChildTaskStatus = ChildTaskStatus.QUEUED,
     val text: String = "",
-    val detail: String? = null
+    val detail: String? = null,
+    /** Command CAS revision; execution status is compared separately. */
+    val revision: Long = 0,
+    val sourceTaskId: String? = null,
+    val commandKind: ChildTaskCommandKind? = null
 ) {
     init {
+        require(revision >= 0)
+        require((sourceTaskId == null) == (commandKind == null))
+        require(sourceTaskId == null || (sourceTaskId.isNotBlank() && sourceTaskId.length <= 200))
         require(parentMessageId.isNotBlank() && parentMessageId.length <= 200)
         require(parentOwnerId.isNotBlank() && parentOwnerId.length <= 200)
         require(index in 0..7 && profileId.isNotBlank() && profileId.length <= 200)
@@ -29,6 +36,13 @@ data class ChildTaskRecord(
 /** Durable observation, not permission to resume or replay a model request. */
 interface ChildTaskStore {
     fun enqueue(parent: RunExecutionOwner, tasks: List<ChildTaskRecord>)
+    /** Null only when no durable tombstone exists. Unsupported stores fail closed. */
+    fun commandReceipt(command: ChildTaskCommand): ChildTaskCommandReceipt? =
+        ChildTaskCommandReceipt.Rejected("child_commands_unsupported")
+    fun get(owner: ChildRunOwner): ChildTaskRecord? = null
+    /** Atomically CAS source revision, insert successor and write the call tombstone. */
+    fun enqueueCommand(parent: RunExecutionOwner, command: ChildTaskCommand, successor: ChildTaskRecord): ChildTaskCommandReceipt =
+        ChildTaskCommandReceipt.Rejected("child_commands_unsupported")
     fun started(task: ChildTaskRecord)
     fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String = "", detail: String? = null)
     fun list(conversationId: String, limit: Int = 20): List<ChildTaskRecord>

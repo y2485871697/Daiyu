@@ -681,6 +681,7 @@ class MainActivity : ComponentActivity() {
                             loadLive = { target -> controller.liveChildTasks(ConversationId(target)) },
                             onPause = { record -> controller.pauseChildTask(record) },
                             onResume = { record -> controller.resumeChildTask(record) },
+                            onCommand = { command -> controller.directChildTask(command) },
                             onStop = { record -> controller.stopChildTask(record) },
                             onBack = { returnToChat() })
                     }

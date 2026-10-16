@@ -16,6 +16,8 @@ import app.daiyu.android.context.ContextRegistryScope
 import app.daiyu.android.integration.tools.*
 import app.daiyu.android.delegation.*
 import app.daiyu.android.domain.delegation.ChildTaskRecord
+import app.daiyu.android.domain.delegation.ChildTaskCommand
+import app.daiyu.android.domain.delegation.ChildTaskCommandReceipt
 import app.daiyu.android.domain.delegation.ChildModelBatch
 import app.daiyu.android.domain.delegation.ChildModelDefinition
 import app.daiyu.android.domain.tools.SessionCapabilities
@@ -666,6 +668,7 @@ class ChatController internal constructor(private val application:Application,
     private var runtimeStore:SQLiteRuntimeStore?=null
     private var childSupervisor:app.daiyu.android.domain.delegation.RetainedChildTasks?=null
     private val backgroundRuns=linkedMapOf<RunId,RunChildTasks>()
+    private var childCommandReaders=0
     private var childrenClosing=false
     private var childrenClosed=false
     private var questionStore:PrivateQuestionStore?=null
@@ -811,6 +814,72 @@ class ChatController internal constructor(private val application:Application,
         }
         return retained?.resume(record.owner) ?: app.daiyu.android.domain.delegation.ChildTaskControlReceipt.STALE
     }
+    /** Worker-only records action. Historical work gets a new real Runner owner, never a reopened binding. */
+    internal fun directChildTask(command: ChildTaskCommand): ChildTaskCommandReceipt {
+        check(Looper.myLooper() != Looper.getMainLooper()) { "child_command_requires_worker" }
+        synchronized(this) {
+            if (closed || !ready || recoveryFailed) return ChildTaskCommandReceipt.Rejected("child_tasks_unavailable")
+            childCommandReaders++
+        }
+        try { return directChildTaskPinned(command) }
+        finally { synchronized(this) {
+            childCommandReaders--
+            if (closed) closeStorageWhenIdle()
+        } }
+    }
+    private fun directChildTaskPinned(command: ChildTaskCommand): ChildTaskCommandReceipt {
+        val runtime = synchronized(this) { checkNotNull(runtimeStore) }
+        runtime.childTasks.commandReceipt(command)?.let { return it }
+        val liveParent = synchronized(this) {
+            backgroundRuns[RunId(command.source.owner.parentRunId)]?.takeIf { active?.runId?.value == command.source.owner.parentRunId }
+        }
+        val invocation = ToolInvocation(ToolCallId(command.callId), "direct_child_task", "{}")
+        if (synchronized(this) { closed }) return ChildTaskCommandReceipt.Rejected("child_tasks_unavailable")
+        if (liveParent != null) {
+            if (liveParent.snapshots().none { it.record.owner == command.source.owner })
+                return ChildTaskCommandReceipt.Rejected("child_source_not_controlled")
+            return liveParent.command(invocation, command)
+        }
+        val token = synchronized(this) {
+            if (!idleAvailable()) return ChildTaskCommandReceipt.Rejected("child_host_busy")
+            reservePreparation()
+        }
+        try {
+            val conversation = ConversationId(command.source.owner.conversationId)
+            if (!conversationExists(conversation)) return ChildTaskCommandReceipt.Rejected("child_source_stale")
+            val key = SubAgentConfigKey.Conversation(conversation.value)
+            var frozenAssistantId: String? = null
+            val models = try {
+                val assistantId = database.assistantId(conversation) ?: throw MissingAssistantBindingException()
+                frozenAssistantId = assistantId
+                val profile = assistantStore.read(assistantId)?.let { it.copy(enabledSkillIds = it.enabledSkillIds.toList()) }
+                    ?: throw AssistantNotFoundException(assistantId)
+                val memory = if (profile.memoryEnabled) assistantAssets.memory(assistantId).content else ""
+                val frozen = object : AssistantStore by assistantStore {
+                    override fun read(id: String): AssistantProfile? = profile.takeIf { it.id == id }
+                }
+                val assistantContext = AssistantRunContext.capture(frozen, assistantId, memory)
+                childBindings.freeze(key, childPreferences.snapshot(key)) { provider ->
+                    val delegate = assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
+                    messageImages.wrap(delegate, provider)
+                }
+            } catch (_: Exception) { return ChildTaskCommandReceipt.Rejected("child_model_binding_unavailable") }
+            if (command.profileId !in models) return ChildTaskCommandReceipt.Rejected("invalid_child_profile")
+            if (preparationCancelled(token)) return ChildTaskCommandReceipt.Rejected("cancelled_before_admission")
+            val run = RunId(UUID.randomUUID().toString())
+            val user = Message(MessageId(UUID.randomUUID().toString()), conversation, run, Message.USER_ROLE,
+                listOf(MessageBlock.Text("child-command", "子任务${command.kind.name}；来源 ${command.source.owner.childRunId}\n${command.instruction}")), RunStatus.COMPLETED)
+            val initial = Message(MessageId(UUID.randomUUID().toString()), conversation, run, Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+            database.send(user, initial, expectedAssistantId = frozenAssistantId, preserveDraft = true)
+            return ChildTaskCommandHost.run(initial, command, checkNotNull(childSupervisor), models, database, runtime,
+                cancelled = { preparationCancelled(token) }, onChanged = ::backgroundTasksChanged,
+                retain = { tasks -> synchronized(this) {
+                    check(!closed && !preparationCancelled(token))
+                    backgroundRuns[run] = tasks
+                } })
+        } finally { finishPreparation(token); backgroundTasksChanged() }
+    }
+
     // Only the supervisor knows when admission is sealed and every actual transport has exited.
     // Terminal history, cancellation requests, and an empty snapshot are not release boundaries.
     private fun pruneBackgroundRuns() {
@@ -2189,7 +2258,7 @@ class ChatController internal constructor(private val application:Application,
     private fun closeStorageWhenIdle() {
         pruneBackgroundRuns()
         if(resources!=null || preparing || generationEntry!=null || virtualDisplayEntry!=null || generationReaders!=0 ||
-            unacceptedTools.isNotEmpty() || imageReaders!=0 || videoReaders!=0 || closingStorage) return
+            unacceptedTools.isNotEmpty() || imageReaders!=0 || videoReaders!=0 || childCommandReaders!=0 || closingStorage) return
         if(!childrenClosed) {
             if(!childrenClosing) {
                 childrenClosing=true

@@ -59,16 +59,18 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
     private data class Completion(val index: Int, val child: ChildRunOwner, val message: Message, val text: String)
 
     fun execute(context: ToolExecutionContext, tasks: List<ChildModelTask>): ExecutionReceipt =
-        executeBatch(context, tasks, null, null)
+        executeBatch(context, tasks, null, null, null)
 
     internal fun executeQueued(context: ToolExecutionContext, records: List<ChildTaskRecord>,
-        pause: ChildTaskPauseControl? = null): ExecutionReceipt {
+        pause: ChildTaskPauseControl? = null, preceding: ChildTaskRecord? = null): ExecutionReceipt {
         require(pause == null || records.size == 1) { "pause_requires_exact_child" }
-        return executeBatch(context, records.map { ChildModelTask(it.profileId, it.prompt) }, records, pause)
+        require(preceding == null || (records.size == 1 && preceding.status == ChildTaskStatus.COMPLETED &&
+            records.single().sourceTaskId == preceding.owner.childRunId && records.single().commandKind == ChildTaskCommandKind.APPEND))
+        return executeBatch(context, records.map { ChildModelTask(it.profileId, it.prompt) }, records, pause, preceding)
     }
 
     private fun executeBatch(context: ToolExecutionContext, tasks: List<ChildModelTask>,
-        queued: List<ChildTaskRecord>?, pause: ChildTaskPauseControl?): ExecutionReceipt {
+        queued: List<ChildTaskRecord>?, pause: ChildTaskPauseControl?, preceding: ChildTaskRecord?): ExecutionReceipt {
         val snapshot = tasks.toList()
         if (snapshot.size !in 1..MAX_TASKS || snapshot.any {
             it.profileId !in models || it.prompt.isBlank() || it.prompt.length > 4096 || bytes(it.prompt) > 16 * 1024
@@ -261,7 +263,13 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                 val attached = synchronized(gate) { if (closed) false else { runners.add(runner); true } }
                                 try {
                                     if (attached && !cancelled()) {
-                                        val result = runner.run(initial, listOf(user))
+                                        val previous = preceding?.let { source -> listOf(
+                                            Message(MessageId(UUID.randomUUID().toString()), initial.conversationId, initial.runId,
+                                                Message.USER_ROLE, listOf(MessageBlock.Text("source-input", source.prompt)), RunStatus.COMPLETED),
+                                            Message(MessageId(UUID.randomUUID().toString()), initial.conversationId, initial.runId,
+                                                Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("source-result", source.text)), RunStatus.COMPLETED)
+                                        ) } ?: emptyList()
+                                        val result = runner.run(initial, previous + user)
                                         scope.requireOwner(result)
                                         check(result.status == RunStatus.COMPLETED && !cancelled())
                                         val text = result.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }

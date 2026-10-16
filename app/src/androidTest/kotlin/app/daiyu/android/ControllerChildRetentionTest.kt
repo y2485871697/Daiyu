@@ -7,6 +7,9 @@ import android.test.InstrumentationTestCase
 import app.daiyu.android.delegation.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.delegation.ChildTaskStatus
+import app.daiyu.android.domain.delegation.ChildTaskCommand
+import app.daiyu.android.domain.delegation.ChildTaskCommandKind
+import app.daiyu.android.domain.delegation.ChildTaskCommandReceipt
 import app.daiyu.android.domain.delegation.ChildTaskStop
 import app.daiyu.android.storage.*
 import java.util.UUID
@@ -39,6 +42,7 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
         val parentEntered = CountDownLatch(1)
         val parentRelease = CountDownLatch(if (holdParent) 1 else 0)
         val childOpens = AtomicInteger()
+        val childHistories = java.util.Collections.synchronizedList(mutableListOf<List<Message>>())
         val parentOpens = AtomicInteger()
         val child = SubAgentModel("child-record", "child-api")
         val provider = SubAgentProvider("explicit-provider", "Fixture", listOf(child))
@@ -52,7 +56,7 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
                     override fun open(history: List<Message>): ModelSession = error("explicit definitions required")
                     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
                         val isChild = config.model == "child-api"
-                        if (isChild) { check(definitions.isEmpty()); childOpens.incrementAndGet() }
+                        if (isChild) { check(definitions.isEmpty()); childHistories.add(history.toList()); childOpens.incrementAndGet() }
                         else { check(definitions.any { it.name == "start_child_tasks" }); parentOpens.incrementAndGet() }
                         var round = 0
                         return object : ModelSession {
@@ -177,6 +181,86 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
     }
     override fun tearDown() {
         try { fixtures.forEach { it.dispose() } } finally { super.tearDown() }
+    }
+
+    fun testControllerAppendUsesNewOwnerAndWaitsForOriginalWorkerAndCleanup() {
+        val f = fresh(holdChildCleanup = true)
+        send(f); assertTrue(f.childEntered.await(5, TimeUnit.SECONDS))
+        awaitChange(f, "parent ended") { f.controller.active == null }
+        val original = f.controller.childTasks(f.conversation.id).single()
+        val command = ChildTaskCommand("records-append-${f.id}", original, ChildTaskCommandKind.APPEND, f.profile.id, "review this additional constraint")
+        f.database.draft(f.conversation.id, "keep this conversation draft")
+        val accepted = f.controller.directChildTask(command) as ChildTaskCommandReceipt.Accepted
+        assertTrue(accepted.task.owner.parentRunId != original.owner.parentRunId)
+        f.database.readableDatabase.rawQuery("SELECT draft FROM conversations WHERE id=?", arrayOf(f.conversation.id.value)).use {
+            assertTrue(it.moveToFirst()); assertEquals("keep this conversation draft", it.getString(0))
+        }
+        assertEquals(original.owner.childRunId, accepted.task.sourceTaskId)
+        assertEquals(1, f.parentOpens.get()); assertEquals(1, f.childOpens.get())
+        releaseChild(f)
+        assertTrue(f.childCancelled.await(5, TimeUnit.SECONDS))
+        checkNotNull(f.childWorker.get()).join(5000)
+        assertEquals("successor must not open while old cleanup remains blocked", 1, f.childOpens.get())
+        assertTrue(f.controller.hasLiveChildTasks())
+        f.childCleanupRelease.countDown()
+        awaitChange(f, "both requests truly drained") { !f.controller.hasLiveChildTasks() }
+        val rows = f.controller.childTasks(f.conversation.id)
+        assertEquals(2, rows.size); assertEquals(2, f.childOpens.get()); assertEquals(1, f.parentOpens.get())
+        val sentText = f.childHistories[1].flatMap { it.blocks }.filterIsInstance<MessageBlock.Text>().map { it.text }
+        assertTrue(sentText.contains(original.prompt)); assertTrue(sentText.contains("retained answer")); assertTrue(sentText.contains(command.instruction))
+        val preserved = rows.single { it.owner == original.owner }
+        assertEquals(original.prompt, preserved.prompt); assertEquals("retained answer", preserved.text)
+        assertEquals(original.revision + 1, preserved.revision)
+        assertEquals(ChildTaskStatus.COMPLETED, rows.single { it.owner == accepted.task.owner }.status)
+        assertEquals(accepted.task.owner, (f.controller.directChildTask(command) as ChildTaskCommandReceipt.Accepted).task.owner)
+        assertEquals(2, f.childOpens.get())
+        assertEquals(ChildTaskCommandReceipt.Rejected("child_request_conflict"), f.controller.directChildTask(command.copy(instruction = "changed")))
+    }
+
+    fun testControllerReplacementStopsButDoesNotRecycleOldTransportReservation() {
+        val f = fresh(holdChildCleanup = true)
+        send(f); assertTrue(f.childEntered.await(5, TimeUnit.SECONDS))
+        awaitChange(f, "parent ended") { f.controller.active == null }
+        val original = f.controller.childTasks(f.conversation.id).single()
+        val command = ChildTaskCommand("records-replace-${f.id}", original, ChildTaskCommandKind.REPLACE, f.profile.id, "replacement input")
+        assertEquals(ChildTaskCommandReceipt.Rejected("child_execution_confirmation_required"), f.controller.directChildTask(command))
+        val accepted = f.controller.directChildTask(command.copy(acknowledgePossibleExecution = true)) as ChildTaskCommandReceipt.Accepted
+        assertTrue(f.childCancelled.await(5, TimeUnit.SECONDS))
+        assertEquals(1, f.childOpens.get()); assertTrue(f.controller.hasLiveChildTasks())
+        releaseChild(f); checkNotNull(f.childWorker.get()).join(5000)
+        assertEquals(1, f.childOpens.get())
+        assertEquals(1L, f.childCleanupExited.count)
+        f.childCleanupRelease.countDown()
+        awaitChange(f, "replacement drained") { !f.controller.hasLiveChildTasks() }
+        assertEquals(2, f.childOpens.get()); assertEquals(1, f.parentOpens.get())
+        val rows = f.controller.childTasks(f.conversation.id)
+        assertEquals(original.prompt, rows.single { it.owner == original.owner }.prompt)
+        assertEquals(ChildTaskStatus.UNKNOWN, rows.single { it.owner == original.owner }.status)
+        val replacement = rows.single { it.owner == accepted.task.owner }
+        assertEquals("replacement input", replacement.prompt); assertEquals(original.owner.childRunId, replacement.sourceTaskId)
+        assertEquals(ChildTaskStatus.COMPLETED, replacement.status)
+    }
+
+    fun testControllerUnknownRedispatchRequiresSingleExplicitConfirmationAndPreservesSource() {
+        val f = fresh()
+        send(f); assertTrue(f.childEntered.await(5, TimeUnit.SECONDS))
+        awaitChange(f, "parent ended") { f.controller.active == null }
+        val running = f.controller.childTasks(f.conversation.id).single()
+        assertEquals(ChildTaskStop.REQUESTED, f.controller.stopChildTask(running))
+        releaseChild(f)
+        awaitChange(f, "old request drained") { !f.controller.hasLiveChildTasks() }
+        val unknown = f.controller.childTasks(f.conversation.id).single()
+        assertEquals(ChildTaskStatus.UNKNOWN, unknown.status)
+        val command = ChildTaskCommand("records-redispatch-${f.id}", unknown, ChildTaskCommandKind.REDISPATCH, f.profile.id, unknown.prompt)
+        assertEquals(ChildTaskCommandReceipt.Rejected("child_execution_confirmation_required"), f.controller.directChildTask(command))
+        assertEquals(1, f.childOpens.get())
+        val confirmed = command.copy(acknowledgePossibleExecution = true)
+        val dispatched = f.controller.directChildTask(confirmed) as ChildTaskCommandReceipt.Accepted
+        awaitChange(f, "new request drained") { !f.controller.hasLiveChildTasks() }
+        assertEquals(2, f.childOpens.get()); assertEquals(1, f.parentOpens.get())
+        assertEquals(unknown.copy(revision = unknown.revision + 1), f.controller.childTasks(f.conversation.id).single { it.owner == unknown.owner })
+        assertEquals(dispatched.task.owner, (f.controller.directChildTask(confirmed) as ChildTaskCommandReceipt.Accepted).task.owner)
+        assertEquals(2, f.childOpens.get())
     }
 
     fun testControllerPauseAndResumeKeepTheOriginalLiveChildAndRejectWrongOwner() {

@@ -55,6 +55,209 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
         } finally { super.tearDown() }
     }
 
+    fun testSealedBindingCannotAdmitDirectedWorkAndSourceKeepsCapacityUntilDrain() {
+        val db = fresh(); val runtime = lease(db); val owner = parent(db)
+        val entered = CountDownLatch(1); val release = CountDownLatch(1); val drained = CountDownLatch(1)
+        val model = ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                entered.countDown(); check(release.await(5, TimeUnit.SECONDS)); sink(ModelEvent.TextFinal("result", "source result"))
+            }
+            override fun cancel() {}
+        } }
+        val supervisor = RetainedChildTasks(runtime.childTasks, maxRetainedTasks = 1)
+        val session = SessionCapabilities("commands", emptySet()); val authorization = TaskAuthorization(session.sessionId, owner.runId.value)
+        val binding = supervisor.bind(owner, session, authorization, mapOf("review" to ChildModelDefinition("pool", 1) { model }))
+        val invocation = ToolInvocation(ToolCallId("initial"), "start_child_tasks", "{}")
+        val accepted = supervisor.submit(binding, ToolExecutionContext(owner, invocation, authorization) { false },
+            listOf(ChildModelTask("review", "source prompt"))) as ChildTaskAdmission.Accepted
+        try {
+            assertTrue(entered.await(3, TimeUnit.SECONDS))
+            val source = checkNotNull(runtime.childTasks.get(accepted.tasks.single().owner))
+            val command = ChildTaskCommand("directed", source, ChildTaskCommandKind.APPEND, "review", "additional")
+            assertEquals(ChildTaskCommandReceipt.Rejected("child_retention_limit"), supervisor.command(binding, invocation, command))
+            supervisor.finishParent(binding)
+            assertEquals(ChildTaskCommandReceipt.Rejected("child_binding_closed"), supervisor.command(binding, invocation, command))
+            assertFalse(supervisor.isReleased(binding))
+            try { supervisor.bind(owner, session, authorization, mapOf("review" to ChildModelDefinition("pool", 1) { model })); fail("must not revive sealed owner") }
+            catch (_: IllegalStateException) { }
+            assertEquals(1, runtime.childTasks.list(owner.conversationId.value).size)
+        } finally {
+            release.countDown(); supervisor.closeWhenIdle { drained.countDown() }
+            assertTrue(drained.await(5, TimeUnit.SECONDS))
+        }
+        assertTrue(supervisor.isReleased(binding))
+        try { supervisor.bind(owner, session, authorization, mapOf("review" to ChildModelDefinition("pool", 1) { model })); fail("must not revive owner") }
+        catch (_: IllegalStateException) { }
+    }
+
+    fun testDirectedCommandCasProvenanceAndDurableReplay() {
+        val db = fresh(); val runtime = lease(db); val owner = parent(db)
+        val source = tasks(owner, 1).single()
+        runtime.childTasks.enqueue(owner, listOf(source)); runtime.childTasks.started(source)
+        runtime.childTasks.finished(source, ChildTaskStatus.COMPLETED, "original result")
+        val completed = checkNotNull(runtime.childTasks.get(source.owner))
+        val command = ChildTaskCommand("durable-call", completed, ChildTaskCommandKind.APPEND, "review", "additional instruction")
+        val successor = tasks(owner, 1).single().copy(prompt = command.instruction, sourceTaskId = source.owner.childRunId,
+            commandKind = command.kind)
+        assertEquals(ChildTaskCommandReceipt.Accepted(successor), runtime.childTasks.enqueueCommand(owner, command, successor))
+        val preserved = checkNotNull(runtime.childTasks.get(source.owner))
+        assertEquals(completed.copy(revision = 1), preserved)
+        assertEquals("original result", preserved.text); assertEquals(source.prompt, preserved.prompt)
+        assertEquals(ChildTaskCommandReceipt.Rejected("child_request_conflict"),
+            runtime.childTasks.commandReceipt(command.copy(instruction = "different")))
+        val stale = command.copy(callId = "stale-call")
+        assertEquals(ChildTaskCommandReceipt.Rejected("child_source_stale"),
+            runtime.childTasks.enqueueCommand(owner, stale, successor.copy(owner = successor.owner.copy(childRunId = "another"))))
+        runtime.close(); db.close()
+        val reopened = lease(db)
+        val replay = reopened.childTasks.commandReceipt(command) as ChildTaskCommandReceipt.Accepted
+        assertEquals(successor.owner, replay.task.owner)
+        assertEquals(ChildTaskStatus.NOT_EXECUTED, replay.task.status)
+        assertEquals(successor.sourceTaskId, replay.task.sourceTaskId)
+        assertEquals(2, reopened.childTasks.list(owner.conversationId.value).size)
+    }
+
+    fun testUnknownCommandRequiresExplicitAcknowledgementAndRollbackIsAtomic() {
+        val db = fresh(); val runtime = lease(db); val owner = parent(db)
+        val source = tasks(owner, 1).single()
+        runtime.childTasks.enqueue(owner, listOf(source)); runtime.childTasks.started(source)
+        runtime.childTasks.finished(source, ChildTaskStatus.UNKNOWN, detail = "test_unconfirmed")
+        val unknown = checkNotNull(runtime.childTasks.get(source.owner))
+        val command = ChildTaskCommand("unknown-call", unknown, ChildTaskCommandKind.REDISPATCH, "review", source.prompt)
+        val successor = tasks(owner, 1).single().copy(sourceTaskId = source.owner.childRunId, commandKind = command.kind, prompt = command.instruction)
+        assertEquals(ChildTaskCommandReceipt.Rejected("child_execution_confirmation_required"),
+            runtime.childTasks.enqueueCommand(owner, command, successor))
+        val confirmed = command.copy(acknowledgePossibleExecution = true)
+        db.writableDatabase.execSQL("CREATE TRIGGER command_insert_failure BEFORE INSERT ON child_task_commands BEGIN SELECT RAISE(ABORT,'fixture'); END")
+        rejects { runtime.childTasks.enqueueCommand(owner, confirmed, successor) }
+        assertEquals(unknown, runtime.childTasks.get(source.owner))
+        assertNull(runtime.childTasks.commandReceipt(confirmed)); assertEquals(1, runtime.childTasks.list(owner.conversationId.value).size)
+        db.writableDatabase.execSQL("DROP TRIGGER command_insert_failure")
+        assertTrue(runtime.childTasks.enqueueCommand(owner, confirmed, successor) is ChildTaskCommandReceipt.Accepted)
+        assertEquals(successor.owner, (runtime.childTasks.enqueueCommand(owner, confirmed, successor) as ChildTaskCommandReceipt.Accepted).task.owner)
+        assertEquals(2, runtime.childTasks.list(owner.conversationId.value).size)
+    }
+
+    private fun commandRows(db: ConversationDatabase): List<List<String?>> =
+        db.readableDatabase.rawQuery("SELECT call_id,fingerprint,source_id,successor_id,expected_revision,acknowledged " +
+            "FROM child_task_commands ORDER BY call_id", null).use { c ->
+            buildList { while (c.moveToNext()) add((0 until c.columnCount).map { c.getString(it) }) }
+        }
+
+    private fun assertCommandTriggersRollBack(triggerBodies: List<String>) {
+        val db = fresh(); val runtime = lease(db); val owner = parent(db)
+        val initial = tasks(owner, 1).single()
+        runtime.childTasks.enqueue(owner, listOf(initial)); runtime.childTasks.started(initial)
+        runtime.childTasks.finished(initial, ChildTaskStatus.UNKNOWN, detail = "original_unknown")
+        val unknown = checkNotNull(runtime.childTasks.get(initial.owner))
+        val priorCommand = ChildTaskCommand("prior-command", unknown, ChildTaskCommandKind.REDISPATCH,
+            "review", "prior instruction", acknowledgePossibleExecution = true)
+        val priorSuccessor = tasks(owner, 1).single().copy(prompt = priorCommand.instruction,
+            sourceTaskId = unknown.owner.childRunId, commandKind = priorCommand.kind)
+        assertEquals(ChildTaskCommandReceipt.Accepted(priorSuccessor),
+            runtime.childTasks.enqueueCommand(owner, priorCommand, priorSuccessor))
+        // Start at a nonzero revision and retain an unrelated successor/tombstone to check rollback isolation.
+        val source = checkNotNull(runtime.childTasks.get(initial.owner))
+        assertEquals(1L, source.revision)
+        val command = ChildTaskCommand("candidate-command", source, ChildTaskCommandKind.REDISPATCH,
+            "review", "candidate instruction", acknowledgePossibleExecution = true)
+        val successor = tasks(owner, 1).single().copy(prompt = command.instruction,
+            sourceTaskId = source.owner.childRunId, commandKind = command.kind)
+        val beforeTasks = runtime.childTasks.list(owner.conversationId.value)
+        val beforeCommands = commandRows(db)
+        val beforeMessages = db.messages(owner.conversationId)
+        triggerBodies.forEachIndexed { index, body ->
+            db.writableDatabase.execSQL("CREATE TRIGGER command_write_fixture $body")
+            try {
+                rejects { runtime.childTasks.enqueueCommand(owner, command, successor) }
+                assertEquals("source after trigger $index", source, runtime.childTasks.get(source.owner))
+                assertNull("successor after trigger $index", runtime.childTasks.get(successor.owner))
+                assertNull("receipt after trigger $index", runtime.childTasks.commandReceipt(command))
+                assertEquals("tasks after trigger $index", beforeTasks, runtime.childTasks.list(owner.conversationId.value))
+                assertEquals("tombstones after trigger $index", beforeCommands, commandRows(db))
+                assertEquals("messages after trigger $index", beforeMessages, db.messages(owner.conversationId))
+                assertEquals(ChildTaskCommandReceipt.Accepted(priorSuccessor), runtime.childTasks.commandReceipt(priorCommand))
+            } finally {
+                db.writableDatabase.execSQL("DROP TRIGGER command_write_fixture")
+            }
+        }
+        // The identical request remains admissible after every failed write and gains exactly one durable receipt.
+        assertEquals(ChildTaskCommandReceipt.Accepted(successor), runtime.childTasks.enqueueCommand(owner, command, successor))
+        assertEquals(source.copy(revision = 2), runtime.childTasks.get(source.owner))
+        assertEquals(successor, runtime.childTasks.get(successor.owner))
+        assertEquals(ChildTaskCommandReceipt.Accepted(successor), runtime.childTasks.commandReceipt(command))
+        assertEquals(ChildTaskCommandReceipt.Accepted(successor), runtime.childTasks.enqueueCommand(owner, command, successor))
+        assertEquals(ChildTaskCommandReceipt.Accepted(priorSuccessor), runtime.childTasks.commandReceipt(priorCommand))
+        assertEquals(3, runtime.childTasks.list(owner.conversationId.value).size)
+        val persistedCommands = commandRows(db)
+        assertEquals(2, persistedCommands.size)
+        assertEquals(listOf(command.callId, command.fingerprint(), source.owner.childRunId, successor.owner.childRunId,
+            source.revision.toString(), "1"), persistedCommands.single { it[0] == command.callId })
+        assertEquals(beforeMessages, db.messages(owner.conversationId))
+    }
+
+    fun testCommandIgnoredWritesRollBackWithoutPollution() {
+        assertCommandTriggersRollBack(listOf(
+            "BEFORE UPDATE OF control_revision ON child_tasks BEGIN SELECT RAISE(IGNORE); END",
+            "BEFORE INSERT ON child_tasks WHEN NEW.source_task_id IS NOT NULL BEGIN SELECT RAISE(IGNORE); END",
+            "BEFORE INSERT ON child_task_commands BEGIN SELECT RAISE(IGNORE); END"
+        ))
+    }
+
+    fun testCommandAfterTaskRewritesRollBackWithoutPollution() {
+        assertCommandTriggersRollBack(listOf(
+            "AFTER UPDATE OF control_revision ON child_tasks BEGIN " +
+                "UPDATE child_tasks SET prompt='rewritten source' WHERE task_id=NEW.task_id; END",
+            "AFTER INSERT ON child_tasks WHEN NEW.source_task_id IS NOT NULL BEGIN " +
+                "UPDATE child_tasks SET prompt='rewritten successor' WHERE task_id=NEW.task_id; END",
+            // These fire on the final write: checking source/successor before inserting the tombstone is insufficient.
+            "AFTER INSERT ON child_task_commands BEGIN " +
+                "UPDATE child_tasks SET control_revision=NEW.expected_revision WHERE task_id=NEW.source_id; END",
+            "AFTER INSERT ON child_task_commands BEGIN " +
+                "UPDATE child_tasks SET detail='rewritten source' WHERE task_id=NEW.source_id; END",
+            "AFTER INSERT ON child_task_commands BEGIN " +
+                "UPDATE child_tasks SET prompt='late rewritten successor' WHERE task_id=NEW.successor_id; END",
+            "AFTER INSERT ON child_task_commands BEGIN " +
+                "UPDATE child_tasks SET status='NOT_EXECUTED' WHERE task_id=NEW.successor_id; END",
+            "AFTER INSERT ON child_task_commands BEGIN " +
+                "DELETE FROM child_tasks WHERE task_id=NEW.successor_id; END"
+        ))
+    }
+
+    fun testCommandAfterTaskIntegerRewritesRollBackWithoutPollution() {
+        val assignments = listOf(
+            "control_revision=control_revision+0.5",
+            "generation=generation+0.5",
+            "task_index=task_index+0.5",
+            // getInt() would wrap this INTEGER back to the expected index.
+            "task_index=task_index+4294967296"
+        )
+        assertCommandTriggersRollBack(listOf("source_id", "successor_id").flatMap { target ->
+            assignments.map { assignment ->
+                "AFTER INSERT ON child_task_commands BEGIN " +
+                    "UPDATE child_tasks SET $assignment WHERE task_id=NEW.$target; END"
+            }
+        })
+    }
+
+    fun testCommandAfterTombstoneRewritesRollBackWithoutPollution() {
+        val assignments = listOf(
+            "fingerprint='rewritten fingerprint'",
+            "source_id=NEW.successor_id",
+            "successor_id=NEW.source_id",
+            "expected_revision=NEW.expected_revision+1",
+            "expected_revision=NEW.expected_revision+0.5",
+            "acknowledged=0",
+            "acknowledged=1.5",
+            "acknowledged=4294967297",
+            "call_id='rewritten-call-id'"
+        )
+        assertCommandTriggersRollBack(assignments.map { assignment ->
+            "AFTER INSERT ON child_task_commands BEGIN " +
+                "UPDATE child_task_commands SET $assignment WHERE call_id=NEW.call_id; END"
+        } + "AFTER INSERT ON child_task_commands BEGIN DELETE FROM child_task_commands WHERE call_id=NEW.call_id; END")
+    }
+
     fun testRecoveryPreservesCompletedAndFencesRunningAndQueuedWithoutReplay() {
         val db = fresh(); val first = lease(db); val owner = parent(db); val rows = tasks(owner)
         first.childTasks.enqueue(owner, rows)
@@ -106,7 +309,7 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
     fun testVersionSevenUpgradeKeepsHistoryAndCreatesTaskSchema() {
         val db = fresh(); val owner = parent(db); val before = db.messages(owner.conversationId)
         db.writableDatabase.execSQL("DROP TABLE child_tasks"); app.daiyu.android.removeAssistantSchemaForLegacyFixture(db.writableDatabase); db.writableDatabase.version = 7; db.close()
-        assertEquals(13, db.readableDatabase.version); assertEquals(before, db.messages(owner.conversationId))
+        assertEquals(14, db.readableDatabase.version); assertEquals(before, db.messages(owner.conversationId))
         assertTrue(SQLiteChildTaskStore(db).list(owner.conversationId.value, 20).isEmpty())
         val runtime = lease(db); val newOwner = parent(db); val rows = tasks(newOwner, 1)
         runtime.childTasks.enqueue(newOwner, rows)

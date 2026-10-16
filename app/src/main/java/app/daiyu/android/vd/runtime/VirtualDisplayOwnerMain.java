@@ -1,6 +1,9 @@
 package app.daiyu.android.vd.runtime;
 
 import java.security.SecureRandom;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.io.IOException;
 
 import android.os.Handler;
 import android.os.Looper;
@@ -9,15 +12,14 @@ import android.os.Process;
 /**
  * {@code app_process} entrypoint for the root VirtualDisplay owner.
  *
- * <p>Startup order matters: the process must be root, a main {@link Looper} must exist before any
- * display work, the display and its retained {@link android.media.ImageReader} are created on that
- * looper, and only then is the IPC socket bound and the single handshake line printed. A caller
- * therefore either sees {@code VD_OWNER_READY} with a socket name and token, or sees
- * {@code VD_OWNER_ERROR} with an exit code; there is no half-ready state.
+ * <p>Bootstrap creates NO display: check root, prepare looper, acquire the fixed trusted receipt
+ * root's lifetime lock, bind IPC, then publish the one private bootstrap line. READY means only
+ * authentication is available. The authenticated application UID must initialize a trusted run
+ * binding and a fresh durable STARTED generation before the coordinator creates the display.
  *
- * <p>The token is printed once on stdout and is the only secret the peer needs. The peer uid is
- * supplied on the command line and is checked against the kernel's peer credentials on every
- * connection.
+ * <p>The token is printed once on a PRIVATE launcher stdout pipe, never a log/model channel.
+ * The trusted launcher supplies the application UID and pre-existing private receipt root.
+ * Neither the receipt root nor display configuration can be overridden by business JSON.
  *
  * <p>The main looper prepared by {@link Looper#prepareMainLooper()} cannot be quit, so
  * {@link Looper#loop()} never returns. The process is ended only from the IPC stop callback, and
@@ -26,7 +28,7 @@ import android.os.Process;
  *
  * <pre>
  * app_process /system/bin app.daiyu.android.vd.runtime.VirtualDisplayOwnerMain \
- *     --socket &lt;abstract-name&gt; --allow-uid &lt;app-uid&gt; \
+ *     --socket &lt;abstract-name&gt; --allow-uid &lt;app-uid&gt; --receipt-root &lt;private-root&gt; \
  *     [--width W] [--height H] [--density DPI] [--name NAME]
  * </pre>
  */
@@ -68,40 +70,43 @@ public final class VirtualDisplayOwnerMain {
         Looper.prepareMainLooper();
         Handler handler = new Handler();
 
-        VirtualDisplayOwner owner;
+        final OwnerReceiptStore store;
         try {
-            owner = VirtualDisplayOwner.create(parsed.name, parsed.width, parsed.height,
-                    parsed.densityDpi, handler);
-        } catch (OwnerException ex) {
-            print(ERROR_PREFIX + " code=" + ex.code + " message=" + ex.getMessage());
+            store = new OwnerReceiptStore(parsed.receiptRoot);
+        } catch (IOException | RuntimeException ex) {
+            print(ERROR_PREFIX + " code=RECEIPT_ROOT_UNAVAILABLE");
             return 4;
         }
-
+        final OwnerReceiptCoordinator coordinator = new OwnerReceiptCoordinator(store,
+                new OwnerReceiptCoordinator.Factory() {
+                    @Override public OwnerReceiptCoordinator.Backend create() throws OwnerException {
+                        return new OwnerCommandDispatcher(VirtualDisplayOwner.create(parsed.name,
+                                parsed.width, parsed.height, parsed.densityDpi, handler));
+                    }
+                });
         String token = newToken();
-        OwnerCommandDispatcher dispatcher = new OwnerCommandDispatcher(owner);
         OwnerIpcServer server;
         try {
-            server = new OwnerIpcServer(parsed.socket, parsed.allowUid, token, handler, dispatcher,
+            server = new OwnerIpcServer(parsed.socket, parsed.allowUid, token, handler, coordinator,
                     new Runnable() {
-                        @Override
-                        public void run() {
-                            // IPC posts this only after release is verified and the response
-                            // attempt finishes, including a failed reply or abandoned waiter.
-                            // Only verified release may end the process: exiting while tasks
-                            // remain would tear the display down with them.
-                            if (!owner.isReleased()) {
-                                print(STOPPED_PREFIX + " displayId=" + owner.displayId()
-                                        + " released=false");
-                                return;
+                        @Override public void run() {
+                            // Verified release AND durable operation/generation finals precede
+                            // this callback, even if the response delivery was lost.
+                            if (!coordinator.shouldStop()) return;
+                            try {
+                                coordinator.closeAfterStop();
+                            } catch (IOException ex) {
+                                print(ERROR_PREFIX + " code=RECEIPT_CLOSE_UNCONFIRMED");
+                                return; // never advertise successful lifecycle completion
                             }
-                            print(STOPPED_PREFIX + " displayId=" + owner.displayId()
-                                    + " released=true");
+                            print(STOPPED_PREFIX + " released=true receiptsFinal=true");
                             System.exit(0);
                         }
                     });
         } catch (OwnerException ex) {
-            // returning non-zero exits the process, which tears the display down with it
-            print(ERROR_PREFIX + " code=" + ex.code + " message=" + ex.getMessage());
+            // No initialize could run: no owner/display exists on this startup failure path.
+            try { store.close(); } catch (IOException ignored) { /* process exits, no execution */ }
+            print(ERROR_PREFIX + " code=IPC_UNAVAILABLE");
             return 5;
         }
 
@@ -111,8 +116,7 @@ public final class VirtualDisplayOwnerMain {
                 + " pid=" + Process.myPid()
                 + " uid=" + Process.myUid()
                 + " allowUid=" + parsed.allowUid
-                + " displayId=" + owner.displayId()
-                + " uniqueId=" + owner.uniqueId());
+                + " initialized=false");
         server.start();
 
         // The main looper prepared above cannot be quit, so this never returns. The session ends
@@ -129,7 +133,7 @@ public final class VirtualDisplayOwnerMain {
 
     private static void printUsage() {
         print("usage: app_process /system/bin app.daiyu.android.vd.runtime.VirtualDisplayOwnerMain "
-                + "--socket <abstract-name> --allow-uid <uid> "
+                + "--socket <abstract-name> --allow-uid <app-uid> --receipt-root <private-root> "
                 + "[--width W] [--height H] [--density DPI] [--name NAME]");
     }
 
@@ -147,6 +151,7 @@ public final class VirtualDisplayOwnerMain {
     /** Parsed command line. Values stay {@code null} when the device geometry should be used. */
     static final class Args {
         final String socket;
+        final Path receiptRoot;
         final int allowUid;
         final Integer width;
         final Integer height;
@@ -154,9 +159,10 @@ public final class VirtualDisplayOwnerMain {
         final String name;
         final boolean help;
 
-        private Args(String socket, int allowUid, Integer width, Integer height, Integer densityDpi,
+        private Args(String socket, Path receiptRoot, int allowUid, Integer width, Integer height, Integer densityDpi,
                 String name, boolean help) {
             this.socket = socket;
+            this.receiptRoot = receiptRoot;
             this.allowUid = allowUid;
             this.width = width;
             this.height = height;
@@ -167,6 +173,7 @@ public final class VirtualDisplayOwnerMain {
 
         static Args parse(String[] args) {
             String socket = null;
+            Path receiptRoot = null;
             Integer allowUid = null;
             Integer width = null;
             Integer height = null;
@@ -180,6 +187,9 @@ public final class VirtualDisplayOwnerMain {
                         help = true;
                     } else if ("--socket".equals(arg)) {
                         socket = value(args, ++i, arg);
+                    } else if ("--receipt-root".equals(arg)) {
+                        try { receiptRoot = Paths.get(value(args, ++i, arg)); }
+                        catch (RuntimeException invalid) { throw new IllegalArgumentException("receipt-root"); }
                     } else if ("--allow-uid".equals(arg)) {
                         allowUid = Integer.valueOf(positive(args, ++i, arg));
                     } else if ("--width".equals(arg)) {
@@ -196,7 +206,7 @@ public final class VirtualDisplayOwnerMain {
                 }
             }
             if (help) {
-                return new Args(null, 0, null, null, null, null, true);
+                return new Args(null, null, 0, null, null, null, null, true);
             }
             if (socket == null || socket.isEmpty()) {
                 throw new IllegalArgumentException("socket required");
@@ -204,10 +214,14 @@ public final class VirtualDisplayOwnerMain {
             if (!OwnerProtocol.isSafeIdentifier(socket)) {
                 throw new IllegalArgumentException("socket");
             }
-            if (allowUid == null || allowUid.intValue() <= 0) {
-                throw new IllegalArgumentException("allow-uid required");
+            if (allowUid == null || allowUid.intValue() % 100000 < 10000
+                    || allowUid.intValue() % 100000 > 19999) {
+                throw new IllegalArgumentException("application allow-uid required");
             }
-            return new Args(socket, allowUid.intValue(), width, height, density, name, false);
+            if (receiptRoot == null || !receiptRoot.isAbsolute() || !receiptRoot.equals(receiptRoot.normalize())) {
+                throw new IllegalArgumentException("absolute normalized receipt-root required");
+            }
+            return new Args(socket, receiptRoot, allowUid.intValue(), width, height, density, name, false);
         }
 
         private static String value(String[] args, int index, String flag) {

@@ -15,16 +15,21 @@ import org.json.JSONObject;
  * The owner never writes a bare newline inside a response because {@link #encodeLine} relies on
  * {@link JSONObject#toString()} escaping control characters.
  *
- * <p>Every request carries {@code v} (protocol version), {@code op} (operation) and {@code token}
- * (per-session secret printed once on the owner's stdout). The token is checked before any
- * operation runs, so an unauthenticated peer cannot probe display state.
+ * <p>Every wire request carries {@code v=2}, {@code op} and {@code token}; the bootstrap token
+ * belongs only on the launcher's private stdout pipe, never logs or model data. Business requests
+ * also carry generation/operationId/parameters. {@link #parseWireRequest} is the ONLY IPC parser;
+ * the package-only flat decoder exists solely for the unchanged owner's internal wrap method.
+ * UID and token checks precede dispatch, initialization, receipt reads and display work.
  *
  * <p>Operations whose behaviour is not implemented are listed in {@link #MISSING_OPS} and answer
  * with {@code ok=false}. There is no catch-all "success" reply: an unknown op, a bad token or a
  * failed side effect always produces an {@code error} code.
  */
 public final class OwnerProtocol {
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
+
+    public static final String OP_INITIALIZE = "initialize";
+    public static final String OP_RECEIPT = "receipt";
 
     public static final String OP_STATUS = "status";
     public static final String OP_LAUNCH = "launch";
@@ -35,6 +40,7 @@ public final class OwnerProtocol {
 
     /** Operations this build answers successfully. */
     public static final String[] SUPPORTED_OPS = {
+            OP_INITIALIZE, OP_RECEIPT,
             OP_STATUS, OP_LAUNCH, OP_INPUT, OP_SNAPSHOT, OP_HANDOFF, OP_RELEASE,
     };
 
@@ -75,12 +81,13 @@ public final class OwnerProtocol {
     private static final int MAX_TOKEN_CHARS = 256;
 
     private static final Set<String> OPS = new HashSet<String>(Arrays.asList(
+            OP_INITIALIZE, OP_RECEIPT,
             OP_STATUS, OP_LAUNCH, OP_INPUT, OP_SNAPSHOT, OP_HANDOFF, OP_RELEASE));
 
     private OwnerProtocol() {
     }
 
-    /** Parsed, validated request. Unknown fields are ignored; known fields are type-checked. */
+    /** Parsed envelope. v2 rejects every unknown field; payload is never logged or persisted. */
     public static final class Request {
         public final String op;
         public final String token;
@@ -147,7 +154,8 @@ public final class OwnerProtocol {
         }
     }
 
-    public static Request parseRequest(String line) throws OwnerProtocolException {
+    /** Strict public IPC entry. The socket MUST use this, never the internal owner decoder. */
+    public static Request parseWireRequest(String line) throws OwnerProtocolException {
         if (line == null || line.isEmpty()) {
             throw new OwnerProtocolException(ERROR_PROTOCOL, "empty line");
         }
@@ -169,7 +177,7 @@ public final class OwnerProtocol {
         }
         String op = (String) opRaw;
         if (!OPS.contains(op)) {
-            throw new OwnerProtocolException(ERROR_UNKNOWN_OP, op);
+            throw new OwnerProtocolException(ERROR_UNKNOWN_OP, "unknown operation");
         }
         Object tokenRaw = obj.opt(FIELD_TOKEN);
         if (!(tokenRaw instanceof String)) {
@@ -179,7 +187,160 @@ public final class OwnerProtocol {
         if (token.isEmpty() || token.length() > MAX_TOKEN_CHARS) {
             throw new OwnerProtocolException(ERROR_AUTH_REQUIRED, "token");
         }
-        return new Request(op, token, obj);
+        Request request = new Request(op, token, obj);
+        if (OP_INITIALIZE.equals(op)) {
+            onlyFields(obj, "v", "op", "token", "generation", "binding");
+            pathId(request.requireString("generation"));
+            trustedBindingObject(obj);
+        } else if (OP_RECEIPT.equals(op)) {
+            onlyFields(obj, "v", "op", "token", "generation", "binding", "operation",
+                    "operationId", "parameters");
+            pathId(request.requireString("generation"));
+            trustedBindingObject(obj);
+            if (obj.has("operation")) {
+                String target = request.requireString("operation");
+                if (!isBusinessOperation(target)) throw protocol("receipt operation");
+                pathId(request.requireString("operationId"));
+                businessParameters(target, object(obj, "parameters"));
+            } else if (obj.has("operationId") || obj.has("parameters")) {
+                throw protocol("generation lookup fields");
+            }
+        } else {
+            onlyFields(obj, "v", "op", "token", "generation", "operationId", "parameters");
+            pathId(request.requireString("generation"));
+            pathId(request.requireString("operationId"));
+            businessParameters(op, object(obj, "parameters"));
+        }
+        return request;
+    }
+
+    /**
+     * Package-only compatibility seam for VirtualDisplayOwner.wrap, NOT an IPC decoder.
+     * Original owner entrypoints consume flat parameters and reparse them. The dispatcher adds
+     * only v/op/a public non-credential marker; authentication has already happened in IPC.
+     * Kept separate so no flat request can bypass the strict wire receipt envelope.
+     */
+    static Request parseRequest(String line) throws OwnerProtocolException {
+        if (line == null || line.length() > MAX_REQUEST_CHARS) throw protocol("owner parameters");
+        try {
+            JSONObject object = new JSONObject(line);
+            if (!isVersion(object.opt("v"))) throw protocol("version");
+            Request header = new Request("", "", object);
+            String op = header.requireString("op");
+            if (!isBusinessOperation(op)) throw protocol("owner operation");
+            header.requireString("token"); // legacy parser field, never the authentication token
+            object.remove("v"); object.remove("op"); object.remove("token");
+            return new Request(op, "", businessParameters(op, object));
+        } catch (JSONException invalid) { throw protocol("owner parameters"); }
+    }
+
+    static JSONObject ownerBusinessPayload(Request request) {
+        try {
+            JSONObject parameters = new JSONObject(request.payload.toString());
+            parameters.put("v", VERSION);
+            parameters.put("op", request.op);
+            parameters.put("token", "internal-parameters-not-a-credential");
+            return parameters;
+        } catch (JSONException invalid) { throw new IllegalArgumentException("owner parameters"); }
+    }
+
+    static boolean isBusinessOperation(String op) {
+        return OPS.contains(op) && !OP_INITIALIZE.equals(op) && !OP_RECEIPT.equals(op);
+    }
+
+    static String pathId(String value) throws OwnerProtocolException {
+        try { return OwnerOperationIdentity.pathId(value); }
+        catch (IllegalArgumentException invalid) { throw protocol("identity"); }
+    }
+
+    static JSONObject object(JSONObject parent, String key) throws OwnerProtocolException {
+        Object raw = parent.opt(key);
+        if (!(raw instanceof JSONObject)) throw protocol("object field");
+        return (JSONObject) raw;
+    }
+
+    // Only authenticated host traffic may be converted into a RunBinding, in the coordinator.
+    static JSONObject trustedBindingObject(JSONObject envelope) throws OwnerProtocolException {
+        JSONObject binding = object(envelope, "binding");
+        onlyFields(binding, "session", "task", "conversation", "run", "assistantMessage", "runOwner");
+        Request fields = new Request("", "", binding);
+        for (String key : new String[]{"session", "task", "conversation", "run", "assistantMessage", "runOwner"}) {
+            String value = fields.requireString(key);
+            if (value.length() > OwnerOperationIdentity.MAX_BINDING_CHARS) throw protocol("binding");
+        }
+        return binding;
+    }
+
+    static void onlyFields(JSONObject object, String... allowed) throws OwnerProtocolException {
+        Set<String> keys = new HashSet<String>(Arrays.asList(allowed));
+        for (Iterator<String> it = object.keys(); it.hasNext();) {
+            if (!keys.contains(it.next())) throw protocol("unsupported field");
+        }
+    }
+
+    /** One detached, default-complete snapshot used for BOTH identity and original execution.
+     * Null displayId means the display owned by this generation, not the current default display.
+     */
+    static JSONObject businessParameters(String op, JSONObject supplied) throws OwnerProtocolException {
+        JSONObject out;
+        try { out = new JSONObject(supplied.toString()); }
+        catch (JSONException invalid) { throw protocol("parameters"); }
+        Request p = new Request(op, "", out);
+        try {
+            if (OP_STATUS.equals(op)) {
+                onlyFields(out); // status() has no business arguments
+            } else if (OP_LAUNCH.equals(op)) {
+                onlyFields(out, "displayId", "package", "component", "action", "flags", "categories");
+                for (String key : new String[]{"package", "component", "action"}) {
+                    if (out.has(key)) p.requireString(key);
+                }
+                out.put("flags", p.optionalInt("flags", 0));
+                if (!out.has("categories")) out.put("categories", new org.json.JSONArray());
+                Object categories = out.opt("categories");
+                if (!(categories instanceof org.json.JSONArray)) throw protocol("categories");
+                org.json.JSONArray array = (org.json.JSONArray) categories;
+                for (int i = 0; i < array.length(); i++) {
+                    if (!(array.opt(i) instanceof String)) throw protocol("categories");
+                }
+            } else if (OP_INPUT.equals(op)) {
+                String kind = p.requireString("kind");
+                if ("tap".equals(kind)) {
+                    onlyFields(out, "displayId", "kind", "x", "y");
+                    p.requireInt("x"); p.requireInt("y");
+                } else if ("swipe".equals(kind)) {
+                    onlyFields(out, "displayId", "kind", "x1", "y1", "x2", "y2", "durationMs");
+                    p.requireInt("x1"); p.requireInt("y1"); p.requireInt("x2"); p.requireInt("y2");
+                    out.put("durationMs", p.optionalInt("durationMs", 300));
+                } else if ("key".equals(kind)) {
+                    onlyFields(out, "displayId", "kind", "keyCode"); p.requireInt("keyCode");
+                } else if ("text".equals(kind)) {
+                    onlyFields(out, "displayId", "kind", "text"); p.requireString("text");
+                } else throw protocol("input kind");
+            } else if (OP_SNAPSHOT.equals(op)) {
+                onlyFields(out, "displayId", "include", "maxBytes");
+                out.put("include", p.optionalBoolean("include", true));
+                int max = p.optionalInt("maxBytes", 6 * 1024 * 1024);
+                out.put("maxBytes", max <= 0 ? 6 * 1024 * 1024 : Math.min(max, 6 * 1024 * 1024));
+            } else if (OP_HANDOFF.equals(op)) {
+                onlyFields(out, "displayId", "taskIds");
+                if (out.has("taskIds")) {
+                    Object ids = out.opt("taskIds");
+                    if (!(ids instanceof org.json.JSONArray)) throw protocol("taskIds");
+                    org.json.JSONArray array = (org.json.JSONArray) ids;
+                    for (int i = 0; i < array.length(); i++) {
+                        if (asInt(array.opt(i)) == null) throw protocol("taskIds");
+                    }
+                }
+            } else if (OP_RELEASE.equals(op)) {
+                onlyFields(out, "displayId");
+            } else throw protocol("operation");
+            if (out.has("displayId")) p.requireInt("displayId");
+        } catch (JSONException invalid) { throw protocol("parameters"); }
+        return out;
+    }
+
+    private static OwnerProtocolException protocol(String message) {
+        return new OwnerProtocolException(ERROR_PROTOCOL, message);
     }
 
     public static JSONObject ok(String op, JSONObject fields) {

@@ -40,6 +40,37 @@ final class OwnerIpcServer {
         boolean shouldStop();
     }
 
+    /** Shared by the real connection gate and offline contract tests; not a dispatch bypass. */
+    static boolean isAuthenticatedRequest(int allowedUid, int peerUid, String token,
+            OwnerProtocol.Request request) {
+        return peerUid == allowedUid && request != null
+                && OwnerProtocol.constantTimeEquals(request.token, token);
+    }
+
+    /** Transport uncertainty never authorizes replay; only observations and controlled cleanup pass.
+     * Shared with offline tests. The coordinator still requires its live claim and durable receipts.
+     */
+    static final class MutationFence {
+        private volatile boolean uncertain;
+
+        boolean isUncertain() { return uncertain; }
+
+        boolean allows(String op) {
+            return !uncertain || OwnerProtocol.OP_STATUS.equals(op)
+                    || OwnerProtocol.OP_SNAPSHOT.equals(op) || OwnerProtocol.OP_RECEIPT.equals(op)
+                    || OwnerProtocol.OP_HANDOFF.equals(op) || OwnerProtocol.OP_RELEASE.equals(op);
+        }
+
+        void responseLost(String op) {
+            if (!OwnerProtocol.OP_RECEIPT.equals(op) && OwnerOperationPolicy.mayMutate(op)) uncertain = true;
+        }
+
+        void waitAbandoned(String op, boolean started) {
+            if (!OwnerProtocol.OP_RECEIPT.equals(op)
+                    && OwnerOperationPolicy.timeoutMayHaveMutated(op, started)) uncertain = true;
+        }
+    }
+
     private static final int READ_LIMIT = OwnerProtocol.MAX_REQUEST_CHARS + 1;
 
     private final LocalServerSocket server;
@@ -53,7 +84,7 @@ final class OwnerIpcServer {
     private final Object activeLock = new Object();
     private final AtomicBoolean quitPosted = new AtomicBoolean();
     private Connection activeConnection;
-    private volatile boolean mutationUncertain;
+    private final MutationFence mutationFence = new MutationFence();
     private volatile boolean stopped;
     private Thread acceptThread;
 
@@ -92,9 +123,11 @@ final class OwnerIpcServer {
 
     void stop() {
         stopped = true;
+        LocalSocket activeSocket;
         synchronized (activeLock) {
-            if (activeConnection != null) closeQuietly(activeConnection.socket);
+            activeSocket = activeConnection == null ? null : activeConnection.socket;
         }
+        if (activeSocket != null) closeQuietly(activeSocket);
         try {
             server.close();
         } catch (IOException ignored) {
@@ -138,15 +171,17 @@ final class OwnerIpcServer {
                     return;
                 }
                 synchronized (activeLock) {
-                    if (activeConnection != null) {
-                        writeLine(socket, OwnerProtocol.fail(null,
-                                OwnerProtocol.ERROR_SESSION_BUSY, "session busy"));
-                        return;
+                    if (activeConnection == null) {
+                        activeConnection = this;
+                        claimed = true;
                     }
-                    activeConnection = this;
-                    claimed = true;
                 }
-                serve();
+                if (!claimed) {
+                    writeLine(socket, OwnerProtocol.fail(null,
+                            OwnerProtocol.ERROR_SESSION_BUSY, "session busy"));
+                    return;
+                }
+                serve(credentials.getUid());
             } catch (IOException ignored) {
                 // Transport loss alone must not release or terminate the display.
             } finally {
@@ -161,7 +196,7 @@ final class OwnerIpcServer {
             }
         }
 
-        private void serve() throws IOException {
+        private void serve(int peerUid) throws IOException {
             InputStream in = socket.getInputStream();
             OutputStream out = socket.getOutputStream();
             boolean authenticated = false;
@@ -180,19 +215,20 @@ final class OwnerIpcServer {
                 }
                 OwnerProtocol.Request request;
                 try {
-                    request = OwnerProtocol.parseRequest(line);
+                    request = OwnerProtocol.parseWireRequest(line);
                 } catch (OwnerProtocolException ex) {
                     writeLine(out, OwnerProtocol.fail(null, ex.code, ex.getMessage()));
                     continue;
                 }
-                if (!OwnerProtocol.constantTimeEquals(request.token, token)) {
+                if (!isAuthenticatedRequest(allowedUid, peerUid, token, request)) {
                     writeLine(out, OwnerProtocol.fail(request.op, OwnerProtocol.ERROR_AUTH_REJECTED,
                             "token"));
                     return;
                 }
                 authenticated = true;
-                if (mutationUncertain && !OwnerProtocol.OP_STATUS.equals(request.op)
-                        && !OwnerProtocol.OP_SNAPSHOT.equals(request.op)) {
+                // Still after UID + token authentication. Cleanup is independently receipt-gated;
+                // a lost response must not strand a healthy live generation or replay a mutation.
+                if (!mutationFence.allows(request.op)) {
                     writeLine(out, OwnerProtocol.fail(request.op, "SESSION_UNCERTAIN", "mutation outcome unknown"));
                     return;
                 }
@@ -200,11 +236,11 @@ final class OwnerIpcServer {
                 try {
                     JSONObject response = execute(request, completion);
                     if (OwnerProtocol.OP_STATUS.equals(request.op)) {
-                        try { response.put("mutationUncertain", mutationUncertain || response.optBoolean("mutationUncertain", false)); }
+                        try { response.put("mutationUncertain", mutationFence.isUncertain() || response.optBoolean("mutationUncertain", false)); }
                         catch (org.json.JSONException ex) { throw new IOException("status serialization failed"); }
                     }
                     try { writeLine(socket, out, response); }
-                    catch (IOException ex) { if (OwnerOperationPolicy.mayMutate(request.op)) mutationUncertain = true; throw ex; }
+                    catch (IOException ex) { mutationFence.responseLost(request.op); throw ex; }
                 } finally {
                     // Success, failed flush and abandoned waiters all complete the delivery attempt.
                     // If dispatch is still running, it will observe this and stop only after release
@@ -217,7 +253,8 @@ final class OwnerIpcServer {
         /** Runs the op on the owner looper and waits for its response. */
         private JSONObject execute(OwnerProtocol.Request request,
                 final OwnerReleaseCompletion completion) throws IOException {
-            final ResultBox box = new ResultBox(request.payload.optLong("timeoutMs",15000L));
+            // v2 deliberately has no caller-controlled timeout field; unknown fields are rejected.
+            final ResultBox box = new ResultBox(15000L);
             Runnable action = new Runnable() {
                 @Override
                 public void run() {
@@ -249,7 +286,7 @@ final class OwnerIpcServer {
             if (response == null) {
                 synchronized (box) {
                     box.cancelled = true;
-                    if (OwnerOperationPolicy.timeoutMayHaveMutated(request.op, box.started)) mutationUncertain = true;
+                    mutationFence.waitAbandoned(request.op, box.started);
                 }
                 handler.removeCallbacks(action);
                 throw new IOException("owner did not answer");

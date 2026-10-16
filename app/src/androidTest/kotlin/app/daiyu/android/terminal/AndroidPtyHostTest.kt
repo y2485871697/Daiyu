@@ -77,6 +77,18 @@ class AndroidPtyHostTest : InstrumentationTestCase() {
         } finally { root.deleteRecursively() }
     }
 
+    fun testLinuxOpenWithoutSelectedGenerationDoesNotCreatePtyJournal() {
+        val root = File(context.cacheDir, "linux-pty-unselected-${UUID.randomUUID()}").apply { mkdirs() }
+        val journal = File(root, "journal")
+        try {
+            expectRefusal("linux_environment_not_selected") {
+                AndroidPtyHost.openLinux(context, owner(), LinuxEnvironmentStore(File(root, "selection")),
+                    LinuxGenerationRef("android", "installed"), root, root, journal, "unselected")
+            }
+            assertFalse(journal.exists())
+        } finally { root.deleteRecursively() }
+    }
+
     fun testActualOpenKeepsOwnerUnknownDeliveryAndWaitStatusSemantics() {
         val root = File(context.cacheDir, "pty-installed-${UUID.randomUUID()}").apply { mkdirs() }
         val owner = owner()

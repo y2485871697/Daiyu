@@ -69,4 +69,24 @@ object AndroidPtyHost {
     ): PtyRunSession = PtyRunSession.open(
         owner, helper(context), argv, environment, cwd, journalDirectory, sessionScope, rows, columns,
     )
+
+    /** Worker-only Linux entry. Keep the result, or LinuxPtyStartupFailure.cleanup,
+     * until awaitTermination confirms process exit; closing alone retains its lease. */
+    @JvmStatic
+    fun openLinux(
+        context: Context,
+        owner: PtyRunOwner,
+        store: LinuxEnvironmentStore,
+        expected: LinuxGenerationRef,
+        tempDirectory: File,
+        hostWorkingDirectory: File,
+        journalDirectory: File,
+        sessionScope: String,
+        rows: Int = 24,
+        columns: Int = 80,
+    ): LinuxPtySession = LinuxPtySession.open(
+        owner, store, expected, helper(context), tempDirectory, hostWorkingDirectory,
+        journalDirectory, sessionScope, rows, columns,
+    )
+
 }

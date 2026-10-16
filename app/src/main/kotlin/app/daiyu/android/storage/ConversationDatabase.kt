@@ -11,7 +11,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 11), ConversationStore {
+class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 12), ConversationStore {
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
         db, assistantPreferences.getString(app.daiyu.android.assistants.LegacyAssistantCodec.KEY, null))
@@ -36,6 +36,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         SQLiteChildTaskStore.installSchema(db)
         app.daiyu.android.model.usage.SQLiteChildUsageStore.installSchema(db)
         installGenerationSchema(db)
+        SQLiteMessageVideoStore.installSchema(db)
     }
     private fun installGenerationSchema(db: SQLiteDatabase) {
         SQLiteGenerationAttemptStore.installSchema(db)
@@ -46,7 +47,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..10 && newVersion == 11) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..11 && newVersion == 12) { "不支持此数据库版本，保留原数据" }
         if (oldVersion < 10) {
             db.execSQL("ALTER TABLE conversations ADD COLUMN assistant_id TEXT")
             installAssistants(db)
@@ -62,7 +63,8 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             app.daiyu.android.model.usage.SQLiteChildUsageStore.installSchema(db)
             createUiFolders(db)
         }
-        upgradeGenerationSchema(db)
+        if (oldVersion < 11) upgradeGenerationSchema(db)
+        SQLiteMessageVideoStore.installSchema(db)
     }
     private fun upgradeGenerationSchema(db: SQLiteDatabase) {
         val hasOutputs = db.rawQuery("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -191,6 +193,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     fun draft(id: ConversationId, text: String) {check(writableDatabase.update("conversations",ContentValues().apply {put("draft",text)},"id=?",arrayOf(id.value))==1) {"会话不存在"}}
     fun rename(id: ConversationId, title: String) { require(title.isNotBlank());check(writableDatabase.update("conversations",ContentValues().apply {put("title",title)},"id=?",arrayOf(id.value))==1) {"会话不存在"}}
     fun delete(id: ConversationId) { transaction { db ->
+        SQLiteMessageVideoStore.deleteConversation(db, id.value)
         db.delete(SQLiteGenerationOutputStore.TABLE, "conversation_id=?", arrayOf(id.value))
         db.rawQuery("SELECT 1 FROM generation_outputs WHERE conversation_id=? LIMIT 1", arrayOf(id.value)).use {
             check(!it.moveToFirst()) { "生成引用未删除，保留会话" }
@@ -215,7 +218,21 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             MessageHistoryCodec.decode(JSONArray(requireNotNull(text(historyColumn))))).also {
                 MessageHistoryCodec.validate(it)
                 MessageImages.validate(it)
+                SQLiteMessageVideoStore.read(db, it)
             }
+    }
+    internal fun videoInputs(messages: List<Message>): List<app.daiyu.android.model.videos.MessageVideoInput> {
+        val db = readableDatabase
+        db.beginTransaction()
+        try {
+            val result = messages.flatMap { expected ->
+                val stored = storedMessage(db, expected.conversationId, expected.id.value)
+                check(stored == expected) { "video_history_changed" }
+                SQLiteMessageVideoStore.read(db, stored)
+            }
+            db.setTransactionSuccessful()
+            return result
+        } finally { db.endTransaction() }
     }
     private fun validateRunHistory(db: SQLiteDatabase, id: ConversationId, run: RunId) {
         val ids = db.rawQuery("SELECT id FROM messages WHERE conversation_id=? AND run_id=? ORDER BY seq",
@@ -223,7 +240,8 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         MessageHistory.validate(ids.map { storedMessage(db,id,it) })
     }
     fun send(user:Message,assistant:Message,newConversation:Boolean=false,
-        expectedAssistantId:String? = if(newConversation) selectedAssistantId() else assistantId(user.conversationId)):Conversation {
+        expectedAssistantId:String? = if(newConversation) selectedAssistantId() else assistantId(user.conversationId),
+        videoInputs: List<app.daiyu.android.model.videos.MessageVideoInput> = emptyList()):Conversation {
         require(user.conversationId==assistant.conversationId && user.runId==assistant.runId)
         require(user.role=="user" && user.status==RunStatus.COMPLETED && assistant.role=="assistant" && assistant.status==RunStatus.RUNNING)
         var conversation:Conversation?=null
@@ -245,6 +263,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             check(userRowId != -1L) {"用户消息未持久化"}
             val assistantRowId=db.insertOrThrow("messages",null,values(assistant))
             check(assistantRowId != -1L) {"运行消息未持久化"}
+            SQLiteMessageVideoStore.insert(db, user, videoInputs)
             // Verify both receipts after all inserts, so trigger side effects cannot leave a half-run.
             for((rowId,message) in listOf(userRowId to user,assistantRowId to assistant)) {
                 check(db.rawQuery("SELECT 1 FROM messages WHERE seq=? AND id=? AND conversation_id=? AND run_id=? AND role=? AND status=?",
@@ -282,6 +301,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 }
                 check(identical) {"消息已结束或所属会话不存在，拒绝迟到回执"}
             }
+            SQLiteMessageVideoStore.read(db, message)
             validateRunHistory(db,message.conversationId,message.runId)
         } } catch(e:Exception) {throw PersistenceException(e)}
     }
@@ -304,6 +324,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     internal fun writeRuntimeMessage(db: SQLiteDatabase, message: Message) {
         check(db.update("messages", values(message), "id=? AND conversation_id=? AND run_id=? AND role='assistant' AND status='RUNNING'",
             arrayOf(message.id.value, message.conversationId.value, message.runId.value)) == 1) { "运行消息已结束，拒绝迟到检查点" }
+        SQLiteMessageVideoStore.read(db, message)
         validateRunHistory(db, message.conversationId, message.runId)
     }
     fun exportBackup():String = exportBackup(null)
@@ -314,6 +335,9 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         val messageWhere=if(conversationId==null) "" else " WHERE conversation_id=?"
         val args=conversationId?.let {arrayOf(it.value)}
         transaction {db->
+            check(!SQLiteMessageVideoStore.hasVideos(db, conversationId?.value)) {
+                "文本备份不能保留原视频，请使用支持视频原件的备份格式"
+            }
             val conversationCount=db.rawQuery("SELECT count(*) FROM conversations$conversationWhere",args).use {it.moveToFirst();it.getLong(0)}
             require(conversationId==null || conversationCount==1L) {"会话不存在或已删除"}
             val messageCount=db.rawQuery("SELECT count(*) FROM messages$messageWhere",args).use {it.moveToFirst();it.getLong(0)}

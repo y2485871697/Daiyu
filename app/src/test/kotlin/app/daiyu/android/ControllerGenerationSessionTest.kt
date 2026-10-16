@@ -382,4 +382,23 @@ class ControllerGenerationSessionTest {
             s.cleanupOnWorker(0)
         }
     }
+    @Test fun fatalStopPublishesUnknownBeforeCallbackAndIsNotRetried() {
+        val stops = AtomicInteger()
+        val failed = session(stop = { stops.incrementAndGet(); throw AssertionError("stop failed") })
+        val notified = CountDownLatch(1)
+        val next = CountDownLatch(1)
+        val observed = AtomicReference<GenerationToolsCloseResult?>()
+        val lane = ControllerGenerationCleanupQueue(workers = 1, capacity = 1, timeoutMillis = 0)
+        try {
+            assertTrue(lane.offer(failed) { observed.set(failed.closeResult); notified.countDown() })
+            assertTrue(notified.await(5, TimeUnit.SECONDS))
+            assertTrue(observed.get() is GenerationToolsCloseResult.Unknown)
+            assertFalse(failed.canRetire)
+            failed.cleanupOnWorker(0)
+            assertEquals(1, stops.get())
+            assertTrue(lane.offer(session()) { next.countDown() })
+            assertTrue(next.await(5, TimeUnit.SECONDS))
+        } finally { lane.close() }
+    }
+
 }

@@ -145,3 +145,8 @@ The caller supplies the actual persisted binding and original `GenerationAttempt
 - `app/src/androidTest/.../ControllerGenerationResourcesTest.kt`: isolated in-memory SQLite with static PNG; exact persistent account/assistant/run/tool and authoritative history validation; duplicate call denial; real output registration/metadata/original roundtrip; wrong fingerprint/account/tool rejection; no path/receipt in metadata.
 
 Tests are **source additions only**. Compilation, the targeted tests and any device run remain the main agent's responsibility. No paid calls or full Gradle execution are required for these fixtures.
+
+
+Fatal worker errors also publish sticky Unknown and clear the running marker in a finally block
+before the queue completion notification. The Error then propagates to the executor; it is not
+silently swallowed or retried. Added a callback/next-task regression source; execution pending.

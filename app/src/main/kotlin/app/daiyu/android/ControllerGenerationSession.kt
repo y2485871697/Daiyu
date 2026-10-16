@@ -189,23 +189,28 @@ internal class ControllerGenerationSession(
             if (cleanupRunning || cleanupResult != null) return
             cleanupRunning = true
         }
-        val result = try {
-            try { parentStop() }
-            finally { token.close() }
-            val own = token.awaitClose(timeoutMillis)
-            val parent = parentDrain(timeoutMillis)
-            when {
-                own is GenerationToolsCloseResult.Unknown -> own
-                parent is GenerationToolsCloseResult.Unknown -> parent
-                else -> GenerationToolsCloseResult.Drained
+        var result: GenerationToolsCloseResult = GenerationToolsCloseResult.Unknown("generation_cleanup_failed")
+        try {
+            result = try {
+                try { parentStop() }
+                finally { token.close() }
+                val own = token.awaitClose(timeoutMillis)
+                val parent = parentDrain(timeoutMillis)
+                when {
+                    own is GenerationToolsCloseResult.Unknown -> own
+                    parent is GenerationToolsCloseResult.Unknown -> parent
+                    else -> GenerationToolsCloseResult.Drained
+                }
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+                GenerationToolsCloseResult.Unknown("generation_cleanup_interrupted")
+            } catch (_: Exception) {
+                GenerationToolsCloseResult.Unknown("generation_cleanup_failed")
             }
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-            GenerationToolsCloseResult.Unknown("generation_cleanup_interrupted")
-        } catch (_: Exception) {
-            GenerationToolsCloseResult.Unknown("generation_cleanup_failed")
+        } finally {
+            // Even a fatal worker failure publishes a terminal observation before notification.
+            synchronized(this) { cleanupResult = result; cleanupRunning = false }
         }
-        synchronized(this) { cleanupResult = result; cleanupRunning = false }
     }
 }
 

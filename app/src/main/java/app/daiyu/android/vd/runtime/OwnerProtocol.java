@@ -30,6 +30,8 @@ public final class OwnerProtocol {
 
     public static final String OP_INITIALIZE = "initialize";
     public static final String OP_RECEIPT = "receipt";
+    /** Host-only process shutdown, never a receipted display/business operation. */
+    public static final String OP_SHUTDOWN_UNINITIALIZED = "shutdown_uninitialized";
 
     public static final String OP_STATUS = "status";
     public static final String OP_LAUNCH = "launch";
@@ -40,7 +42,7 @@ public final class OwnerProtocol {
 
     /** Operations this build answers successfully. */
     public static final String[] SUPPORTED_OPS = {
-            OP_INITIALIZE, OP_RECEIPT,
+            OP_INITIALIZE, OP_RECEIPT, OP_SHUTDOWN_UNINITIALIZED,
             OP_STATUS, OP_LAUNCH, OP_INPUT, OP_SNAPSHOT, OP_HANDOFF, OP_RELEASE,
     };
 
@@ -81,7 +83,7 @@ public final class OwnerProtocol {
     private static final int MAX_TOKEN_CHARS = 256;
 
     private static final Set<String> OPS = new HashSet<String>(Arrays.asList(
-            OP_INITIALIZE, OP_RECEIPT,
+            OP_INITIALIZE, OP_RECEIPT, OP_SHUTDOWN_UNINITIALIZED,
             OP_STATUS, OP_LAUNCH, OP_INPUT, OP_SNAPSHOT, OP_HANDOFF, OP_RELEASE));
 
     private OwnerProtocol() {
@@ -188,7 +190,9 @@ public final class OwnerProtocol {
             throw new OwnerProtocolException(ERROR_AUTH_REQUIRED, "token");
         }
         Request request = new Request(op, token, obj);
-        if (OP_INITIALIZE.equals(op)) {
+        if (OP_SHUTDOWN_UNINITIALIZED.equals(op)) {
+            onlyFields(obj, "v", "op", "token");
+        } else if (OP_INITIALIZE.equals(op)) {
             onlyFields(obj, "v", "op", "token", "generation", "binding");
             pathId(request.requireString("generation"));
             trustedBindingObject(obj);
@@ -245,7 +249,8 @@ public final class OwnerProtocol {
     }
 
     static boolean isBusinessOperation(String op) {
-        return OPS.contains(op) && !OP_INITIALIZE.equals(op) && !OP_RECEIPT.equals(op);
+        return OPS.contains(op) && !OP_INITIALIZE.equals(op) && !OP_RECEIPT.equals(op)
+                && !OP_SHUTDOWN_UNINITIALIZED.equals(op);
     }
 
     static String pathId(String value) throws OwnerProtocolException {

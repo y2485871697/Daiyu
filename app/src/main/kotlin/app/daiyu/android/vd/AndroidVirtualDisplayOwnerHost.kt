@@ -61,7 +61,7 @@ class AndroidVirtualDisplayOwnerHost private constructor(private val config: () 
                     if (line.startsWith("VD_OWNER_READY")) {
                         if (ready == null) ready = OwnerReady.parse(line, cfg.socket, cfg.uid)
                         bootstrap.countDown()
-                    } else if (line == "VD_OWNER_STOPPED released=true receiptsFinal=true") {
+                    } else if (isStoppedMarker(line)) {
                         stopped = true
                     } else if (line.startsWith("VD_OWNER_ERROR")) bootstrap.countDown()
                     // Never publish stdout, stderr, parse errors, or the READY line anywhere.
@@ -94,7 +94,9 @@ class AndroidVirtualDisplayOwnerHost private constructor(private val config: () 
         val b = binding ?: return Start.UNKNOWN
         return try {
             val transport = LocalOwnerTransport.connect(r.socket, r.pid)
-            client = VirtualDisplayOwnerClient(g, b, r.credential, transport)
+            // Preserve process shutdown admission, including a lost response, across reconnect.
+            client = client?.reconnectTransport(transport)
+                ?: VirtualDisplayOwnerClient(g, b, r.credential, transport)
             Start.READY
         } catch (_: Exception) { Start.UNKNOWN }
     }
@@ -108,12 +110,21 @@ class AndroidVirtualDisplayOwnerHost private constructor(private val config: () 
             false
         } catch (e: ErrnoException) { e.errno == OsConstants.ESRCH }
         catch (_: Exception) { false }
-        val drained = stopped && launcherExit == 0 && gone
+        val drained = isDrained(stopped, launcherExit, gone)
         return Observation(if (!attempted) Lifecycle.NOT_STARTED else if (drained) Lifecycle.DRAINED else Lifecycle.UNKNOWN,
             stopped, launcherExit, pid, gone)
     }
 
     override fun toString() = "AndroidVirtualDisplayOwnerHost(host-only)"
+
+    internal companion object {
+        fun isStoppedMarker(line: String): Boolean =
+            line == "VD_OWNER_STOPPED released=true receiptsFinal=true" ||
+                line == "VD_OWNER_STOPPED initialized=false receiptsClosed=true"
+
+        fun isDrained(stopped: Boolean, launcherExit: Int?, ownerGone: Boolean): Boolean =
+            stopped && launcherExit == 0 && ownerGone
+    }
 }
 
 private class OwnerReady(val socket: String, val pid: Int, val credential: OwnerCredential) {

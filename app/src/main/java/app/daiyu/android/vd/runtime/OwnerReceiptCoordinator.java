@@ -34,6 +34,8 @@ final class OwnerReceiptCoordinator implements OwnerIpcServer.Dispatcher {
     private String generation;
     private OwnerReceiptStore.Claim generationClaim;
     private boolean initializationAttempted;
+    private boolean uninitializedShutdownAttempted;
+    private boolean uninitializedStopped;
     // Persistence/uncaught-boundary uncertainty is terminal, including for cleanup.
     private boolean executionBlocked;
     // Business failure fences original mutations, not a separately receipted first cleanup.
@@ -50,6 +52,7 @@ final class OwnerReceiptCoordinator implements OwnerIpcServer.Dispatcher {
 
     @Override public JSONObject dispatch(OwnerProtocol.Request request) {
         try {
+            if (OwnerProtocol.OP_SHUTDOWN_UNINITIALIZED.equals(request.op)) return shutdownUninitialized(request);
             if (OwnerProtocol.OP_RECEIPT.equals(request.op)) return lookup(request);
             if (OwnerProtocol.OP_INITIALIZE.equals(request.op)) return initialize(request);
             return operate(request);
@@ -58,14 +61,44 @@ final class OwnerReceiptCoordinator implements OwnerIpcServer.Dispatcher {
         } catch (IOException unavailable) {
             // A write might already be durable. Never retry it here or switch generations.
             if (!OwnerProtocol.OP_RECEIPT.equals(request.op)) executionBlocked = true;
+            if (OwnerProtocol.OP_SHUTDOWN_UNINITIALIZED.equals(request.op)) {
+                return OwnerProtocol.fail(request.op, "SHUTDOWN_UNINITIALIZED_UNKNOWN",
+                        "store close outcome unconfirmed; observe process only");
+            }
             return OwnerProtocol.fail(request.op, "RECEIPT_UNAVAILABLE", "receipt outcome unconfirmed; lookup only");
         } catch (Throwable unexpected) {
             if (!OwnerProtocol.OP_RECEIPT.equals(request.op)) executionBlocked = true;
+            if (OwnerProtocol.OP_SHUTDOWN_UNINITIALIZED.equals(request.op)) {
+                return OwnerProtocol.fail(request.op, "SHUTDOWN_UNINITIALIZED_UNKNOWN",
+                        "shutdown outcome unconfirmed; observe process only");
+            }
             return OwnerProtocol.fail(request.op, OwnerProtocol.ERROR_INTERNAL, "owner outcome unconfirmed; lookup only");
         }
     }
 
+    /** Runs only on the same owner looper as initialize. No lookup, claim or receipt writes. */
+    private JSONObject shutdownUninitialized(OwnerProtocol.Request request) throws IOException, JSONException {
+        if (initializationAttempted || executionBlocked || backend != null || generationClaim != null
+                || uninitializedShutdownAttempted || stop) {
+            return OwnerProtocol.fail(request.op, "SHUTDOWN_UNINITIALIZED_DENIED",
+                    "initialization or shutdown admission already closed");
+        }
+        // Fence BEFORE close, including a throwing/uncertain close. Never reopen or retry.
+        uninitializedShutdownAttempted = true;
+        initializationAttempted = true;
+        JSONObject out = OwnerProtocol.ok(request.op, null);
+        out.put("initialized", false);
+        out.put("receiptsClosed", true);
+        store.close();
+        uninitializedStopped = true;
+        stop = true;
+        return out;
+    }
+
     private JSONObject initialize(OwnerProtocol.Request request) throws IOException, OwnerProtocolException, JSONException {
+        if (uninitializedShutdownAttempted) {
+            return OwnerProtocol.fail(request.op, "INITIALIZATION_CLOSED", "process shutdown admission closed");
+        }
         String wanted = OwnerProtocol.pathId(request.requireString("generation"));
         OwnerOperationIdentity.RunBinding trusted = binding(request);
         // Lookup first is deliberate: an existing record NEVER recreates an owner, even STARTED.
@@ -255,7 +288,15 @@ final class OwnerReceiptCoordinator implements OwnerIpcServer.Dispatcher {
 
     /** Only main's verified terminal callback may relinquish the lifetime lock. */
     void closeAfterStop() throws IOException {
+        if (uninitializedStopped && stop) return; // store already closed before shutdown success
         if (!stop || backend == null || !backend.shouldStop()) throw new IOException("owner not terminal");
         store.close();
+    }
+
+    String stoppedMarker() throws IOException {
+        if (!stop) throw new IOException("owner not terminal");
+        return uninitializedStopped
+                ? "VD_OWNER_STOPPED initialized=false receiptsClosed=true"
+                : "VD_OWNER_STOPPED released=true receiptsFinal=true";
     }
 }

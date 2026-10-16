@@ -136,9 +136,23 @@ sealed class GenerationAssetResult {
     data class Failed(val reason: GenerationFailure) : GenerationAssetResult()
 }
 
-/** Injected HTTP implementations must execute at most once: no redirects/auth/transport retries. */
+/**
+ * Injected HTTP implementations must execute at most once: no redirects/auth/transport retries.
+ * The one-argument SAM remains source-compatible. Legacy implementations are observable while
+ * running but cannot be forcibly aborted; override the cancellation overload to register live I/O.
+ */
 fun interface GenerationHttp {
     fun execute(request: GenerationHttpRequest): GenerationHttpResponse
+
+    fun execute(request: GenerationHttpRequest, cancellation: GenerationCancellation): GenerationHttpResponse {
+        val execution = cancellation.begin()
+        try {
+            cancellation.throwIfCancelled()
+            return execute(request).also { cancellation.throwIfCancelled() }
+        } finally {
+            execution.finish()
+        }
+    }
 }
 
 class GenerationHttpRequest internal constructor(

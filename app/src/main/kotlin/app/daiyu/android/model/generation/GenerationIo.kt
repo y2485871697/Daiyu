@@ -16,6 +16,8 @@ class GenerationIo(
     private val authorizeDownload: (String) -> Boolean,
     private val http: GenerationHttp = UrlConnectionGenerationHttp(),
     private val isCancelled: () -> Boolean = { false },
+    /** Allocate a fresh handle for every parent-owned run; never reset/reuse a cancelled handle. */
+    val cancellation: GenerationCancellation = GenerationCancellation(),
 ) {
     internal fun submit(plan: GenerationRequestPlan, parse: (GenerationHttpResponse) -> Submission): Submission {
         if (cancelled()) return Submission.NotExecuted(GenerationFailure.CANCELLED)
@@ -33,10 +35,11 @@ class GenerationIo(
             }
             GenerationReservation.Started -> Unit
         }
-        val result = if (cancelled()) Submission.NotExecuted(GenerationFailure.CANCELLED) else {
+        // Once reserved, cancellation is ambiguous and must never reopen this identity for POST.
+        val result = if (cancelled()) Submission.Unknown(GenerationFailure.CANCELLED) else {
             try {
                 // The only POST call site. A failure after durable reservation is always ambiguous.
-                val response = http.execute(request)
+                val response = http.execute(request, cancellation)
                 when {
                     cancelled() -> Submission.Unknown(GenerationFailure.CANCELLED)
                     response.statusCode !in 200..299 -> Submission.Unknown(GenerationFailure.HTTP, response.statusCode)
@@ -44,8 +47,8 @@ class GenerationIo(
                     response.bytes.size > request.maxResponseBytes -> Submission.Unknown(GenerationFailure.PROTOCOL)
                     else -> try { parse(response) } catch (_: Exception) { Submission.Unknown(GenerationFailure.PROTOCOL) }
                 }
-            } catch (_: Exception) {
-                Submission.Unknown(if (cancelled()) GenerationFailure.CANCELLED else GenerationFailure.TRANSPORT)
+            } catch (failure: Exception) {
+                Submission.Unknown(transportFailure(failure))
             }
         }
         // A failed outcome write must not erase a successful/partial result. The durable reservation
@@ -64,7 +67,7 @@ class GenerationIo(
         if (cancelled()) return Submission.Unknown(GenerationFailure.CANCELLED, handle = handle)
         val result = try {
             val response = http.execute(GenerationHttpRequest("GET", handle.pollUrl, headers(plan), null,
-                GenerationRequestPlan.MAX_JSON_BYTES))
+                GenerationRequestPlan.MAX_JSON_BYTES), cancellation)
             when {
                 cancelled() -> Submission.Unknown(GenerationFailure.CANCELLED, handle = handle)
                 response.statusCode !in 200..299 -> Submission.Unknown(GenerationFailure.HTTP, response.statusCode, handle)
@@ -77,7 +80,7 @@ class GenerationIo(
                     }
                 } catch (_: Exception) { Submission.Unknown(GenerationFailure.PROTOCOL, handle = handle) }
             }
-        } catch (_: Exception) { Submission.Unknown(GenerationFailure.TRANSPORT, handle = handle) }
+        } catch (failure: Exception) { Submission.Unknown(transportFailure(failure), handle = handle) }
         // Transient read failures do not overwrite a known pending handle in durable storage.
         if (result is Submission.Completed || result is Submission.Pending ||
             (result is Submission.Unknown && result.reason == GenerationFailure.REMOTE_FAILED)) {
@@ -116,8 +119,9 @@ class GenerationIo(
                 val response = try {
                     http.execute(GenerationHttpRequest("GET", source.url,
                         if (source.authenticated) headers(plan) + ("Accept" to "video/*, application/octet-stream")
-                        else emptyMap(), null, limit))
-                } catch (_: Exception) { return GenerationAssetResult.Failed(GenerationFailure.TRANSPORT) }
+                        else emptyMap(), null, limit), cancellation)
+                } catch (failure: Exception) { return GenerationAssetResult.Failed(transportFailure(failure)) }
+                if (cancelled()) return GenerationAssetResult.Failed(GenerationFailure.CANCELLED)
                 if (response.statusCode !in 200..299) return GenerationAssetResult.Failed(GenerationFailure.HTTP)
                 bytes = response.bytes
                 declared = response.mimeType.substringBefore(';').trim()
@@ -156,7 +160,11 @@ class GenerationIo(
         return plans.map { GenerationBatchItem(it.identity, submit(it)) }
     }
 
-    private fun cancelled(): Boolean = Thread.currentThread().isInterrupted || try { isCancelled() } catch (_: Exception) { true }
+    private fun cancelled(): Boolean = cancellation.isCancellationRequested ||
+        Thread.currentThread().isInterrupted || try { isCancelled() } catch (_: Exception) { true }
+    private fun transportFailure(failure: Exception): GenerationFailure =
+        if (failure is GenerationCancelledException || cancelled()) GenerationFailure.CANCELLED
+        else GenerationFailure.TRANSPORT
     private fun headers(plan: GenerationRequestPlan): Map<String, String> = buildMap {
         put("Accept", "application/json")
         plan.authorization?.let { put("Authorization", it) }
@@ -180,13 +188,24 @@ class GenerationIo(
 class UrlConnectionGenerationHttp(
     private val connect: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection },
 ) : GenerationHttp {
-    override fun execute(request: GenerationHttpRequest): GenerationHttpResponse {
-        require(request.method == "POST" || request.method == "GET")
-        require(request.maxResponseBytes > 0)
-        GenerationRequestPlan.checkedDownload(request.url)
-        check(CookieHandler.getDefault() == null) { "Generation requires isolated cookies" }
-        val connection = connect(URL(request.url))
+    override fun execute(request: GenerationHttpRequest): GenerationHttpResponse =
+        execute(request, GenerationCancellation())
+
+    override fun execute(
+        request: GenerationHttpRequest,
+        cancellation: GenerationCancellation,
+    ): GenerationHttpResponse {
+        // Begin before connection creation: cancellation cannot claim a delayed factory has exited.
+        val execution = cancellation.begin()
         try {
+            cancellation.throwIfCancelled()
+            require(request.method == "POST" || request.method == "GET")
+            require(request.maxResponseBytes > 0)
+            GenerationRequestPlan.checkedDownload(request.url)
+            check(CookieHandler.getDefault() == null) { "Generation requires isolated cookies" }
+            val connection = connect(URL(request.url))
+            // Register before any operation that can connect/write/read; late registration aborts.
+            execution.register(connection)
             connection.instanceFollowRedirects = false
             connection.useCaches = false
             connection.connectTimeout = 30_000
@@ -197,18 +216,39 @@ class UrlConnectionGenerationHttp(
                 val body = requireNotNull(request.body)
                 connection.doOutput = true
                 connection.setFixedLengthStreamingMode(body.size)
-                connection.outputStream.use { it.write(body) }
+                cancellation.throwIfCancelled()
+                val output = connection.outputStream
+                execution.register(output)
+                try {
+                    cancellation.throwIfCancelled()
+                    output.write(body)
+                } finally { execution.release(output) }
             } else require(request.body == null)
+            cancellation.throwIfCancelled()
             val status = connection.responseCode
+            cancellation.throwIfCancelled()
             if (status !in 200..299) {
-                try { connection.errorStream?.close() } catch (_: Exception) { /* status wins */ }
+                try {
+                    connection.errorStream?.let { error ->
+                        execution.register(error)
+                        execution.release(error)
+                    }
+                } catch (failure: Exception) {
+                    // Preserve the HTTP status on error-body failures, but never hide cancellation.
+                    if (failure is GenerationCancelledException) throw failure
+                }
+                cancellation.throwIfCancelled()
                 return GenerationHttpResponse(status, byteArrayOf())
             }
             require(connection.contentLengthLong <= request.maxResponseBytes)
-            val bytes = connection.inputStream.use { input ->
+            cancellation.throwIfCancelled()
+            val input = connection.inputStream
+            execution.register(input)
+            val bytes = try {
                 ByteArrayOutputStream().use { out ->
                     val buffer = ByteArray(8192)
                     while (true) {
+                        cancellation.throwIfCancelled()
                         val count = input.read(buffer)
                         if (count < 0) break
                         require(out.size().toLong() + count <= request.maxResponseBytes)
@@ -216,10 +256,11 @@ class UrlConnectionGenerationHttp(
                     }
                     out.toByteArray()
                 }
-            }
+            } finally { execution.release(input) }
+            cancellation.throwIfCancelled()
             return GenerationHttpResponse(status, bytes, connection.contentType.orEmpty())
         } finally {
-            try { connection.disconnect() } catch (_: Exception) { /* cleanup only */ }
+            execution.finish()
         }
     }
 }

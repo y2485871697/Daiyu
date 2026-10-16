@@ -94,9 +94,10 @@ internal object RunCheckpointCodec {
         value.usage.forEach { require(value.phase == ExecutionPhase.TERMINAL || it.request.owner == value.owner) }
         require((m.status == RunStatus.RUNNING) == (value.phase != ExecutionPhase.TERMINAL))
         require(value.history.all { it.conversationId == m.conversationId })
+        require(value.supplements.map { it.id }.distinct().size == value.supplements.size)
         require(value.supplements.all { it.conversationId == m.conversationId && it.runId == m.runId &&
             it.id != m.id && it.role == Message.USER_ROLE && it.status == RunStatus.COMPLETED &&
-            it.error == null && it.historySegments.isEmpty() })
+            it.error == null && it.historySegments.isEmpty() && it.blocks.none { block -> block is MessageBlock.Tool } })
         require(value.tools.size <= 10_000 && value.outputs.size <= 10_000)
         require(value.tools.map { it.invocation.id }.distinct().size == value.tools.size)
         value.tools.forEach { require(it.invocation.id.value.isNotBlank() && it.invocation.id.value.length <= 200 &&

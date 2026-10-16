@@ -115,4 +115,67 @@ class ControllerRunControlTest:InstrumentationTestCase() {
         assertEquals(1,f.opens.get())
     }
 
+
+    fun testPausedDurableSupplementKeepsDraftAndResumesWithOneHistoryMessage() {
+        val f=fresh();val first=f.session();val second=f.session("after supplement")
+        val owner=start(f);assertTrue(first.entered.await(5,TimeUnit.SECONDS))
+        f.database.draft(owner.conversationId,"retained draft")
+        controlMain {assertTrue(f.controller.pause(owner))}
+        awaitControl("paused before supplement") {f.controller.runState(owner)?.phase==ExecutionPhase.PAUSED}
+        val result=java.util.concurrent.atomic.AtomicReference<app.daiyu.android.domain.runtime.SupplementAdmission?>()
+        val id=MessageId("durable-added")
+        controlMain {assertTrue(f.controller.admitSupplement(owner,id,"added user") {result.set(it)})}
+        awaitControl("durable supplement receipt") {result.get()!=null}
+        assertEquals(app.daiyu.android.domain.runtime.SupplementAdmission.Accepted(id),result.get())
+        assertEquals(3,f.database.messages(owner.conversationId).size)
+        assertEquals("retained draft",f.database.conversations().single().draft)
+        controlMain {assertEquals(ExecutionPhase.PAUSED,f.controller.runState(owner)!!.phase);assertEquals(1,f.opens.get());assertTrue(f.controller.resume(owner))}
+        assertTrue(second.entered.await(5,TimeUnit.SECONDS));second.release.countDown()
+        awaitControl("supplemented run finishes") {f.controller.active==null}
+        val expanded=MessageHistory.expand(f.database.messages(owner.conversationId).map {it.second})
+        assertEquals(1,expanded.count {it.id==id});assertEquals(1,MessageHistory.expand(f.histories.last()).count {it.id==id})
+        assertEquals(RunStatus.COMPLETED,f.database.messages(owner.conversationId).single {it.second.id==owner.id}.second.status)
+        assertEquals("retained draft",f.database.conversations().single().draft)
+    }
+    fun testSupplementRejectsStreamingWrongOwnerAndStoppedWithoutClearingDraft() {
+        val f=fresh();val first=f.session();val owner=start(f);assertTrue(first.entered.await(5,TimeUnit.SECONDS))
+        f.database.draft(owner.conversationId,"unsent")
+        val results=java.util.concurrent.LinkedBlockingQueue<app.daiyu.android.domain.runtime.SupplementAdmission>()
+        controlMain {assertFalse(f.controller.admitSupplement(owner,MessageId("streaming"),"added") {results.add(it)})}
+        assertTrue(results.poll(5,TimeUnit.SECONDS) is app.daiyu.android.domain.runtime.SupplementAdmission.Rejected)
+        controlMain {assertTrue(f.controller.pause(owner))}
+        awaitControl("paused for wrong owner") {f.controller.runState(owner)?.phase==ExecutionPhase.PAUSED}
+        controlMain {assertFalse(f.controller.admitSupplement(owner.copy(runId=RunId("wrong")),MessageId("wrong"),"added") {results.add(it)})}
+        assertTrue(results.poll(5,TimeUnit.SECONDS) is app.daiyu.android.domain.runtime.SupplementAdmission.Rejected)
+        controlMain {assertTrue(f.controller.stop(owner));assertFalse(f.controller.admitSupplement(owner,MessageId("stopped"),"added") {results.add(it)})}
+        assertTrue(results.poll(5,TimeUnit.SECONDS) is app.daiyu.android.domain.runtime.SupplementAdmission.Rejected)
+        awaitControl("stopped supplement run") {f.controller.active==null}
+        assertEquals(2,f.database.messages(owner.conversationId).size);assertEquals("unsent",f.database.conversations().single().draft)
+        assertEquals(1,f.opens.get())
+    }
+
+    fun testAcceptedPausedSupplementSurvivesStopAndCloseWithoutModelReopen() {
+        for(closeImmediately in listOf(false,true)) {
+            val f=fresh();val first=f.session();val owner=start(f);assertTrue(first.entered.await(5,TimeUnit.SECONDS))
+            f.database.draft(owner.conversationId,"kept after close")
+            controlMain {assertTrue(f.controller.pause(owner))}
+            awaitControl("paused before retained admission") {f.controller.runState(owner)?.phase==ExecutionPhase.PAUSED}
+            val result=java.util.concurrent.atomic.AtomicReference<app.daiyu.android.domain.runtime.SupplementAdmission?>()
+            val id=MessageId("retained-added")
+            controlMain {assertTrue(f.controller.admitSupplement(owner,id,"retained user") {result.set(it)})}
+            awaitControl("retained admission committed") {result.get()!=null}
+            assertEquals(app.daiyu.android.domain.runtime.SupplementAdmission.Accepted(id),result.get())
+            if(!closeImmediately) {
+                controlMain {assertTrue(f.controller.stop(owner))}
+                awaitControl("retained admission stopped") {f.controller.active==null}
+            }
+            f.controller.close()
+            app.daiyu.android.storage.ConversationDatabase(f.application).use { reopened ->
+                val messages=reopened.messages(owner.conversationId).map {it.second}
+                assertEquals(1,messages.count {it.id==id});assertEquals(RunStatus.STOPPED,messages.single {it.id==owner.id}.status)
+                assertEquals("kept after close",reopened.conversations().single().draft)
+            }
+            assertEquals(1,f.opens.get())
+        }
+    }
 }

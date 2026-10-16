@@ -20,6 +20,7 @@ import app.daiyu.android.domain.tools.ExecutionReceipt
 import app.daiyu.android.question.*
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import app.daiyu.android.domain.runtime.SupplementAdmission
 import app.daiyu.android.domain.runtime.ExecutionState
 import app.daiyu.android.skills.SkillRunSession
 import app.daiyu.android.skills.SkillToolRegistry
@@ -485,6 +486,26 @@ class ChatController internal constructor(private val application:Application,
             owner.role==Message.ASSISTANT_ROLE) runner else null
     }
     @Synchronized internal fun runState(owner:Message):ExecutionState? = ownedRunner(owner)?.state()
+    /** Backend-only paused text admission. The Boolean is queueing, never a durable receipt.
+     * Callers retain the messageId and draft until Accepted for the matching editor owner. */
+    internal fun admitSupplement(owner:Message, messageId:MessageId, text:String,
+        complete:(SupplementAdmission)->Unit):Boolean {
+        val owned=synchronized(this) {
+            resources?.takeIf {!it.fenced && it.runner===ownedRunner(owner)}?.runner
+        }
+        fun deliver(result:SupplementAdmission) {
+            handler.post {
+                try {complete(result)} catch (_:Exception) { }
+                synchronized(this) {if(owned!=null && ownedRunner(owner)===owned) notifyChanged()}
+            }
+        }
+        if(owned==null || text.isBlank()) {
+            deliver(SupplementAdmission.Rejected(messageId));return false
+        }
+        val user=Message(messageId,owner.conversationId,owner.runId,Message.USER_ROLE,
+            listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
+        return owned.admitSupplement(user,::deliver)
+    }
     internal fun pause(owner:Message):Boolean {
         val owned=synchronized(this) {ownedRunner(owner)} ?: return false
         val accepted=owned.pause()

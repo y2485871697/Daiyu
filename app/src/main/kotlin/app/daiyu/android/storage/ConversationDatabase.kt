@@ -158,6 +158,14 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             require(it.runId == expected.runId && it.role == Message.ASSISTANT_ROLE)
         }
     }
+    internal fun insertRuntimeSupplement(db: SQLiteDatabase, assistant: Message, supplement: Message) {
+        check(db.inTransaction())
+        require(supplement.conversationId == assistant.conversationId && supplement.runId == assistant.runId &&
+            supplement.id != assistant.id && supplement.role == Message.USER_ROLE && supplement.status == RunStatus.COMPLETED &&
+            supplement.error == null && supplement.historySegments.isEmpty() && supplement.protocolItems.isEmpty() &&
+            supplement.blocks.isNotEmpty() && supplement.blocks.all { it is MessageBlock.Text })
+        db.insertOrThrow("messages", null, values(supplement))
+    }
     internal fun writeRuntimeMessage(db: SQLiteDatabase, message: Message) {
         check(db.update("messages", values(message), "id=? AND conversation_id=? AND run_id=? AND role='assistant' AND status='RUNNING'",
             arrayOf(message.id.value, message.conversationId.value, message.runId.value)) == 1) { "运行消息已结束，拒绝迟到检查点" }

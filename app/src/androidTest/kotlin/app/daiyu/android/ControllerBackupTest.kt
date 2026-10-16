@@ -171,6 +171,7 @@ class ControllerBackupTest:InstrumentationTestCase() {
         main {
             try {f.controller.importUserBackup(poison,true);fail("import gate must reject")} catch(_:IllegalStateException) {}
             try {f.controller.exportUserBackup(poison,true);fail("export gate must reject")} catch(_:IllegalStateException) {}
+            try {f.controller.exportConversationBackup(poison,ConversationId("gate"));fail("conversation export gate must reject")} catch(_:IllegalStateException) {}
             assertEquals(0L,f.controller.dataRevision)
         }
     }
@@ -308,4 +309,37 @@ class ControllerBackupTest:InstrumentationTestCase() {
         }}.startsWith("导入失败"))
         assertEquals(0,imports);assertEquals(before,f.db.exportBackup());assertEquals(0L,f.controller.dataRevision)
     }
+    fun testSingleConversationUriExportUsesExplicitIdAndNeverExportsSettingsOrOtherDrafts() {
+        val f=fresh();seed(f);settings(f)
+        val selected=f.db.conversations().single().id;val other=f.db.create().id
+        f.db.rename(other,"OTHER_CONVERSATION");f.db.draft(other,"OTHER_DRAFT")
+        f.backup.setNonSecretConfiguration(mapOf("model" to "IMPORTED_GLOBAL_MODEL"))
+        val before=f.backup.exportPackage();val output=File(f.directory,"single.json")
+        assertTrue(task(f) {f.controller.exportConversationBackup(Uri.fromFile(output),selected)}.startsWith("单会话中立备份已导出"))
+        val payload=JSONObject(JSONObject(output.readText()).getString("payload"))
+        assertEquals(0,payload.getJSONObject("config").length());assertEquals(1,f.backup.preflight(output.readText()).conversations)
+        for(marker in listOf("source-model","IMPORTED_GLOBAL_MODEL","OTHER_CONVERSATION","OTHER_DRAFT","unsent draft","SECRET_")) assertFalse(output.readText().contains(marker))
+        val target=fresh();target.db.draft("keep target global draft")
+        assertTrue(task(target) {target.controller.importUserBackup(Uri.fromFile(output),true)}.startsWith("已导入1个会话"))
+        assertEquals(listOf(selected),target.db.conversations().map {it.id})
+        assertEquals(f.db.messages(selected).map {it.second},target.db.messages(selected).map {it.second})
+        assertEquals("conversation draft",target.db.conversations().single().draft);assertEquals("keep target global draft",target.db.draft())
+        assertTrue(byteArrayOf(0,1,2,-1).contentEquals(target.backup.attachment("fixture-asset")))
+        assertEquals(before,f.backup.exportPackage());assertEquals(0L,f.controller.dataRevision)
+        assertEquals(0,f.calls.get());assertEquals(0,target.calls.get())
+    }
+    fun testSingleConversationExportRejectsMissingBeforeOpeningOutputAndHandlesWriteFailure() {
+        val f=fresh();seed(f);val selected=f.db.conversations().single().id
+        val deleted=f.db.create().id;f.db.delete(deleted);val before=f.backup.exportPackage()
+        val output=File(f.directory,"unchanged.json").apply {writeText("existing target must not be truncated")}
+        for(id in listOf(ConversationId("missing"),deleted,ConversationId("' OR 1=1 --"))) {
+            assertTrue(task(f) {f.controller.exportConversationBackup(Uri.fromFile(output),id)}.startsWith("导出失败"))
+            assertEquals("existing target must not be truncated",output.readText())
+        }
+        val invalid=File(File(f.directory,"missing-parent"),"failed.json")
+        assertTrue(task(f) {f.controller.exportConversationBackup(Uri.fromFile(invalid),selected)}.startsWith("导出失败"))
+        assertFalse(invalid.exists());assertEquals(before,f.backup.exportPackage())
+        assertEquals(0L,f.controller.dataRevision);assertEquals(0,f.calls.get())
+    }
+
 }

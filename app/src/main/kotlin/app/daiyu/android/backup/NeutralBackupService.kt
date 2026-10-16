@@ -7,6 +7,7 @@ import android.util.Base64
 import app.daiyu.android.context.*
 import app.daiyu.android.domain.context.ContextRevision
 import app.daiyu.android.storage.ConversationDatabase
+import app.daiyu.android.domain.ConversationId
 import app.daiyu.android.domain.messagesEndpoint
 import org.json.JSONArray
 import org.json.JSONObject
@@ -70,10 +71,13 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         setNonSecretConfiguration(context.getSharedPreferences("model-settings", Context.MODE_PRIVATE).all)
     fun importedConfiguration(): JSONObject = transactions.run { db -> readConfig(db) }
 
-    fun exportPackage(configuration: Map<String, Any?>? = null): String = transactions.run { db ->
-        val text = store.exportBackup()
+    fun exportPackage(configuration: Map<String, Any?>? = null): String = exportPackage(configuration, null)
+    /** A conversation package excludes global drafts/configuration and never follows parent provenance. */
+    fun exportConversation(conversationId: ConversationId): String = exportPackage(emptyMap(), conversationId)
+    private fun exportPackage(configuration: Map<String, Any?>?, conversationId: ConversationId?): String = transactions.run { db ->
+        val text = if (conversationId == null) store.exportBackup() else store.exportConversationBackup(conversationId)
         val tables = JSONObject()
-        COLUMNS.forEach { (table, _) -> tables.put(table, readTable(db, table)) }
+        COLUMNS.forEach { (table, _) -> tables.put(table, readTable(db, table, conversationId)) }
         val config = if (configuration == null) readConfig(db) else projectConfiguration(configuration).first
         validateConfig(config)
         val hashes = mutableSetOf<String>()
@@ -216,9 +220,16 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
     private fun inventoryJson(i: BackupInventory) = JSONObject().put("conversations", i.conversations).put("messages", i.messages)
         .put("branches", i.branches).put("archives", i.archives).put("attachments", i.attachments)
         .put("blob_bytes", i.blobBytes).put("config_entries", i.configEntries).put("requires_authorization", true)
-    private fun readTable(db: SQLiteDatabase, table: String): JSONArray {
+    private fun readTable(db: SQLiteDatabase, table: String, conversationId: ConversationId?): JSONArray {
         val columns = COLUMNS.getValue(table)
-        return db.rawQuery("SELECT ${columns.joinToString(",")} FROM $table ORDER BY ${columns.first()}", null).use { c ->
+        val where = if (conversationId == null) "" else when (table) {
+            "context_branches", "context_archives" -> " WHERE conversation_id=?"
+            "context_usage" -> " WHERE branch_id=?"
+            "neutral_assets" -> " WHERE message_id IN (SELECT id FROM messages WHERE conversation_id=?)"
+            else -> error("未知备份表")
+        }
+        return db.rawQuery("SELECT ${columns.joinToString(",")} FROM $table$where ORDER BY ${columns.first()}",
+            conversationId?.let { arrayOf(it.value) }).use { c ->
             JSONArray().apply { while (c.moveToNext()) { val row = JSONObject(); columns.forEachIndexed { i, key ->
                 row.put(key, when { c.isNull(i) -> JSONObject.NULL; c.getType(i) == android.database.Cursor.FIELD_TYPE_INTEGER -> c.getLong(i); else -> c.getString(i) })
             }; put(row) } }

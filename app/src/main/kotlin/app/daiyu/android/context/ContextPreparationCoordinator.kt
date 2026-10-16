@@ -10,9 +10,9 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Required host adapter. It must reject mappings it cannot preserve, not invent capacities.
- * In particular the retained setting counts messages and allows zero; ContextPolicy counts
- * turns and requires >=1. The reference's full-window pressure threshold also differs from
- * ContextPolicy's reserve-adjusted threshold. This component supplies no silent approximation.
+ * The legacy keepRecentMessages counts messages and allows zero; ContextPolicy counts turns.
+ * Production v2 explicitly supplies keepTurns and adopts ContextPolicy's reserve-adjusted
+ * threshold. A v1 record must be explicitly re-saved, never silently approximated.
  */
 fun interface CompressionPolicyResolver {
     fun resolve(settings: CompressionSettings): CompressionPolicy

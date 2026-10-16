@@ -63,12 +63,21 @@ class NonSecretRestorePlan internal constructor(
     val before: Map<String, Any?> = Collections.unmodifiableMap(LinkedHashMap(before))
     val after: Map<String, Any?> = Collections.unmodifiableMap(LinkedHashMap(after))
 }
-class ModelSettingsStore internal constructor(context:Context,private val keyAliasPrefix:String) {
+class ModelSettingsStore internal constructor(
+    context: Context,
+    private val keyAliasPrefix: String,
+    private val namespace: String = "model-settings",
+) {
     constructor(context:Context):this(context,"model-api-key")
-    private val preferences=context.getSharedPreferences("model-settings",Context.MODE_PRIVATE)
+    init {
+        require(namespace.matches(Regex("[a-zA-Z0-9._-]+"))) { "模型设置 namespace 无效" }
+        require(keyAliasPrefix.isNotBlank())
+    }
+    private val preferences=context.getSharedPreferences(namespace,Context.MODE_PRIVATE)
     private val restoreIdentity = Any()
     internal val modelCatalog by lazy { FileSavedModelCatalogPersistence(
-        File(context.filesDir, "model-catalog/primary.bin"), CatalogModelParametersCodec) }
+        File(context.filesDir, if (namespace == "model-settings") "model-catalog/primary.bin"
+            else "model-catalog/$namespace.bin"), CatalogModelParametersCodec) }
     internal fun modelCatalogSnapshot(): SavedModelCatalogSnapshot<CatalogModelParameters> =
         modelCatalog.registerFrom {
             val editing = synchronized(lock) { editingWithoutCredential() }
@@ -202,6 +211,9 @@ class ModelSettingsStore internal constructor(context:Context,private val keyAli
                 ""
             } else {
                 val alias=if("key-alias" in values) values["key-alias"] as? String ?: throw CredentialUnavailableException() else keyAliasPrefix
+                // Isolated profiles must never decrypt a copied main-model alias or use its legacy key.
+                if (namespace != "model-settings" && !alias.startsWith("$keyAliasPrefix."))
+                    throw CredentialUnavailableException()
                 val key=existingKey(alias) ?: throw CredentialUnavailableException()
                 val iv=values["iv"] as? String ?: throw CredentialUnavailableException()
                 val cipher=Cipher.getInstance("AES/GCM/NoPadding")

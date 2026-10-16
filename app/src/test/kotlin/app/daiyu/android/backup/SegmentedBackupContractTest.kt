@@ -46,6 +46,7 @@ class SegmentedBackupContractTest {
             when (val block = it.blocks.single()) {
                 is MessageBlock.Text -> block.text
                 is MessageBlock.Tool -> block.result
+                is MessageBlock.Image -> error("This legacy text/tool fixture must not contain an image")
             }
         })
         assertEquals(owner.blocks[1], expanded[1].blocks.single())
@@ -234,6 +235,7 @@ class SegmentedBackupContractTest {
                         is MessageBlock.Tool -> JSONObject().put("type", "tool")
                             .put("id", block.invocation.id.value).put("name", block.invocation.name)
                             .put("arguments", block.invocation.arguments).put("result", block.result ?: JSONObject.NULL)
+                        is MessageBlock.Image -> error("The pre-image compatibility oracle accepts only text/tool fixtures")
                     })
                 }
             }

@@ -4,6 +4,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.MessageHistoryCodec
+import app.daiyu.android.storage.MessageImageReferenceCodec
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -115,6 +116,7 @@ object ArchiveCodec {
         require(values.size <= MAX_BLOCKS) { "消息块数量超限" }
         return JSONArray().apply { values.forEach { b -> put(when (b) {
             is MessageBlock.Text -> JSONObject().put("type", "text").put("item", b.itemId).put("text", b.text)
+            is MessageBlock.Image -> MessageImageReferenceCodec.encodeBlock(b)
             is MessageBlock.Tool -> JSONObject().put("type", "tool").put("id", b.invocation.id.value)
                 .put("name", b.invocation.name).put("arguments", b.invocation.arguments).put("result", b.result ?: JSONObject.NULL)
         }) } }
@@ -157,7 +159,11 @@ object ArchiveCodec {
                 decoded
             } else emptyList()
             Message(MessageId(id), ConversationId(conversation), RunId(run), role, decodedBlocks,
-                status, errorText, protocol, segments)
+                status, errorText, protocol, segments).also {
+                // A reference is not its own authority: check the enclosing row and
+                // each segment's real message identity, including legacy-shaped rows.
+                MessageImages.validate(it)
+            }
         }.also { MessageHistory.validate(it) }
     }
 
@@ -170,6 +176,7 @@ object ArchiveCodec {
             val b = blocks.getJSONObject(j)
             val type = stringField(b, "type")
             when (type) {
+                "image" -> MessageImageReferenceCodec.decodeBlock(b)
                 "text" -> {
                     require(b.keys().asSequence().toSet() == setOf("type", "item", "text")) { "文本块字段非法" }
                     val item = stringField(b, "item"); val text = stringField(b, "text")
@@ -197,10 +204,13 @@ object ArchiveCodec {
         checkIdentity(message.runId.value, "run")
         require(message.role == "user" || message.role == "assistant") { "消息归属角色非法" }
         require(message.blocks.size <= MAX_BLOCKS) { "消息块数量超限" }
+        // Shared policy checks enclosing owners, duplicate assets and aggregate limits.
+        MessageImages.validate(message)
         val toolIds = HashSet<String>()
         message.blocks.forEach { block ->
             when (block) {
                 is MessageBlock.Text -> { checkIdentity(block.itemId, "item"); checkSize(block.text, "text") }
+                is MessageBlock.Image -> Unit // Strict reference metadata is validated by core-domain.
                 is MessageBlock.Tool -> {
                     require(message.role == "assistant") { "用户消息不能包含工具调用" }
                     checkIdentity(block.invocation.id.value, "tool id"); checkIdentity(block.invocation.name, "tool name")

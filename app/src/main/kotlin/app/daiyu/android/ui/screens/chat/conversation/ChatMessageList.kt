@@ -58,6 +58,7 @@ internal fun ChatMessageList(
     modifier: Modifier = Modifier,
     scrollRequest: ChatScrollRequest? = null,
     turnExtras: @Composable (String) -> Unit = {},
+    imageLoader: MessageImageLoader? = null,
 ) {
     val listState = rememberLazyListState()
     val dragging by listState.interactionSource.collectIsDraggedAsState()
@@ -119,12 +120,12 @@ internal fun ChatMessageList(
         },
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 64.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp)) {
-            items(turns, key = { it.id }, contentType = { if (it is ChatTurnUi.User) "user" else "assistant" }) { turn ->
+            items(turns, key = { it.listKey }, contentType = { if (it is ChatTurnUi.User) "user" else "assistant" }) { turn ->
                 Column(Modifier.testTag("chat-turn:${turn.id}")) {
                     when (turn) {
-                        is ChatTurnUi.User -> UserTurn(turn, actions)
+                        is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
                         is ChatTurnUi.Assistant -> Column {
-                            AssistantTurn(turn, actions)
+                            AssistantTurn(turn, actions, imageLoader)
                             turnExtras(turn.id)
                         }
                     }
@@ -145,17 +146,22 @@ internal fun ChatMessageList(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions) {
+internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLoader: MessageImageLoader? = null) {
     var showMenu by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
         Box {
-            Text(turn.text, Modifier.widthIn(max = 320.dp)
+            Column(Modifier.widthIn(max = 320.dp)
                 .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 6.dp, bottomStart = 16.dp))
                 .background(MiuixTheme.colorScheme.primaryContainer)
                 .combinedClickable(onClick = {}, onLongClick = { showMenu = true })
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-                color = MiuixTheme.colorScheme.onSurface,
-                style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 25.sp))
+                .padding(horizontal = 16.dp, vertical = 12.dp)) {
+                if (turn.content.isNotEmpty()) {
+                    MessageContent(turn.content, actions, imageLoader, markdown = false)
+                } else {
+                    Text(turn.text, color = MiuixTheme.colorScheme.onSurface,
+                        style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 25.sp))
+                }
+            }
             UserTurnMenu(showMenu, { showMenu = false }, turn.id, actions)
         }
         MessageTimestamp(turn.timestamp, Modifier.padding(top = 6.dp, end = 4.dp))
@@ -163,22 +169,40 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions) {
 }
 
 @Composable
-internal fun AssistantTurn(turn: ChatTurnUi.Assistant, actions: ChatScreenActions) {
+internal fun AssistantTurn(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, imageLoader: MessageImageLoader? = null) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        turn.workProcess?.let { WorkProcessCard(it, actions.onRetryStep) }
-        if (turn.finalText.isNotBlank()) {
-            val answer = remember(turn.finalText) { MarkdownText.render(turn.finalText).toString() }
-            SelectionContainer {
-                Text(answer, color = MiuixTheme.colorScheme.onSurface,
-                    style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 25.sp))
-            }
-        } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {
-            Text("正在思考…", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, style = MiuixTheme.textStyles.body2)
+        if (turn.content.isNotEmpty()) {
+            // Splitting these blocks into a work card and a final answer would reorder images.
+            MessageContent(turn.content, actions, imageLoader, markdown = true)
+        } else {
+            AssistantTextContent(turn, actions)
         }
         if (!turn.error.isNullOrBlank()) {
             Text(turn.error, color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.body2,
                 maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
-        if (turn.status != RunStatus.RUNNING) MessageActionBar(turn.id, actions, timestamp = turn.timestamp)
+        if (turn.status != RunStatus.RUNNING) {
+            // Preserve legacy text/tool actions. Mixed content is authoritative, so images
+            // (or their metadata) alone must not offer body-text copy or speech actions.
+            val hasTextActions = turn.content.isEmpty() || turn.content.any {
+                it is MessageContentUi.Text && it.text.isNotBlank()
+            }
+            MessageActionBar(turn.id, actions, timestamp = turn.timestamp,
+                allowSpeech = hasTextActions, showCopyAction = hasTextActions)
+        }
+    }
+}
+
+@Composable
+private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions) {
+    turn.workProcess?.let { WorkProcessCard(it, actions.onRetryStep) }
+    if (turn.finalText.isNotBlank()) {
+        val answer = remember(turn.finalText) { MarkdownText.render(turn.finalText).toString() }
+        SelectionContainer {
+            Text(answer, color = MiuixTheme.colorScheme.onSurface,
+                style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 25.sp))
+        }
+    } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {
+        Text("正在思考…", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, style = MiuixTheme.textStyles.body2)
     }
 }

@@ -20,11 +20,15 @@ data class ChatScrollRequest(val serial: Long, val messageId: String? = null, va
 sealed interface ChatTurnUi {
     val id: String
     val timestamp: String
+    /** Separate from the action/message id: an owner may have several history segments. */
+    val listKey: String get() = id
 
     data class User(
         override val id: String,
         val text: String,
         override val timestamp: String = "",
+        val content: List<MessageContentUi> = emptyList(),
+        override val listKey: String = id,
     ) : ChatTurnUi
 
     data class Assistant(
@@ -34,6 +38,8 @@ sealed interface ChatTurnUi {
         val finalText: String = "",
         val status: RunStatus = RunStatus.COMPLETED,
         val error: String? = null,
+        val content: List<MessageContentUi> = emptyList(),
+        override val listKey: String = id,
     ) : ChatTurnUi
 }
 

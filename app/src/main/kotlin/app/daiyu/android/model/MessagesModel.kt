@@ -12,27 +12,38 @@ import javax.net.ssl.HttpsURLConnection
 class MessagesModel internal constructor(
     private val settings: ModelSettings,
     private val maxTokens: Int,
-    private val connect: (URL) -> HttpsURLConnection
+    private val connect: (URL) -> HttpsURLConnection,
+    private val imageInputSupported: Boolean?,
 ) : ModelPort {
+    internal constructor(settings: ModelSettings, maxTokens: Int, connect: (URL) -> HttpsURLConnection) :
+        this(settings, maxTokens, connect, null)
     constructor(settings: ModelSettings, maxTokens: Int = 4096) :
         this(settings, maxTokens, { it.openConnection() as HttpsURLConnection })
     internal constructor(settings: ModelSettings, connect: (URL) -> HttpsURLConnection) : this(settings, 4096, connect)
+    internal constructor(snapshot: ProviderSnapshot) : this(snapshot.asModelSettings(), 4096,
+        { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported)
 
     override fun open(history: List<Message>): ModelSession = open(history, settings.enabledTools())
     override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession =
         open(history, MessagesRequest.definitions(tools))
     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession =
-        Session(settings, maxTokens, history, definitions.toList(), connect)
+        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, null)
+    override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
+        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, images)
 
     private class Session(
         private val settings: ModelSettings,
         private val maxTokens: Int,
         history: List<Message>,
         private val tools: List<ToolDefinition>,
-        private val connect: (URL) -> HttpsURLConnection
+        private val connect: (URL) -> HttpsURLConnection,
+        capability: Boolean?,
+        images: ModelImagePlan?,
     ) : ModelSession {
         private val endpoint = MessagesRequest.endpoint(settings)
-        private val messages = MessagesRequest.history(history)
+        private val historySnapshot = app.daiyu.android.model.images.FrozenMessageImagePlan.snapshot(history)
+        private val imagePlan = ImageRequestPreflight.history(settings, ProviderProtocol.MESSAGES, capability, historySnapshot, images)
+        private val messages = MessagesRequest.history(historySnapshot, imagePlan)
         private val ownItems = mutableListOf<String>()
         private val cancelled = AtomicBoolean(false)
         @Volatile private var connection: HttpsURLConnection? = null
@@ -59,6 +70,7 @@ class MessagesModel internal constructor(
                 messages.put(item); ownItems.add(item.toString())
             }
             val request = settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens), ProviderProtocol.MESSAGES)
+            val requestBytes = ImageRequestPreflight.bytes(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null
             val deliver: (ModelEvent) -> Unit = { event ->
                 checkCancelled()
@@ -76,7 +88,7 @@ class MessagesModel internal constructor(
                 conn.setRequestProperty("anthropic-version", "2023-06-01")
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.setRequestProperty("Accept", "text/event-stream")
-                conn.outputStream.use { it.write(request.toString().toByteArray(Charsets.UTF_8)) }
+                conn.outputStream.use { it.write(requestBytes) }
                 checkCancelled()
                 val status = conn.responseCode
                 checkCancelled()
@@ -95,6 +107,7 @@ class MessagesModel internal constructor(
                     val raw = MessagesStream.read(reader, cancelled::get, deliver)
                     checkCancelled()
                     val item = JSONObject(raw)
+                    app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImageNode(item)
                     val content = item.getJSONArray("content")
                     val calls = mutableSetOf<String>()
                     for (i in 0 until content.length()) {

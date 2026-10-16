@@ -4,6 +4,7 @@ import app.daiyu.android.domain.ConversationId
 import app.daiyu.android.domain.Message
 import app.daiyu.android.domain.MessageBlock
 import app.daiyu.android.domain.MessageId
+import app.daiyu.android.domain.MessageHistorySegment
 import app.daiyu.android.domain.RunId
 import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.domain.ToolCallId
@@ -74,9 +75,82 @@ class ChatTurnMapperTest {
         val ignored = user.copy(role = "system")
         val turns = ChatTurnMapper.map(listOf(user, assistant, ignored)) { "12:34" }
         assertEquals(2, turns.size)
-        assertEquals(ChatTurnUi.User("user", "Question", "12:34"), turns.first())
+        val userTurn = turns.first() as ChatTurnUi.User
+        assertEquals("user", userTurn.id)
+        assertEquals("Question", userTurn.text)
+        assertEquals("12:34", userTurn.timestamp)
+        assertEquals("turn:12:conversation3:run4:user1:0", userTurn.listKey)
         assertEquals("12:34", turns.last().timestamp)
         assertEquals("Offline", (turns.last() as ChatTurnUi.Assistant).error)
+    }
+
+    @Test fun rawIdsCannotCollideWithLegacyOrCurrentSyntheticKeys() {
+        val owner = message(text("answer", "Answer"))
+        val singleKey = mapped(owner).listKey
+        // The first id collided with the old global-index key for the first owner segment.
+        // The second guards against mixing raw ids with even the new encoded keys.
+        val legacyAlias = owner.copy(id = MessageId("conversation:run:assistant:0"))
+        val encodedAlias = owner.copy(id = MessageId(singleKey))
+        val messages = listOf(owner, owner, legacyAlias, encodedAlias)
+        val turns = ChatTurnMapper.map(messages)
+
+        assertEquals(turns.size, turns.map { it.listKey }.toSet().size)
+        assertEquals(singleKey, turns.first().listKey)
+        assertEquals(messages.map { it.id.value }, turns.map { it.id })
+        assertTrue(turns.all { it.listKey != it.id })
+    }
+
+    @Test fun identityEncodingIsUnambiguousForColonsAndLengthMarkers() {
+        val identities = listOf(
+            Triple("a:b", "c", "d"),
+            Triple("a", "b:c", "d"),
+            Triple("a", "b", "c:d"),
+            Triple("1:a", "2:b", "3:c"),
+            Triple("1", "a:2", "b:3:c"),
+            Triple("会话:12:", "run:1:0", "turn:3:消息"),
+        )
+        val messages = identities.map { (conversation, run, id) ->
+            message().copy(conversationId = ConversationId(conversation), runId = RunId(run), id = MessageId(id))
+        }
+        val turns = ChatTurnMapper.map(messages)
+
+        assertEquals(messages.size, turns.map { it.listKey }.toSet().size)
+        // Each different full identity starts at its own segment zero, even with shared ids.
+        assertEquals(messages.map { mapped(it).listKey }, turns.map { it.listKey })
+        assertEquals(messages.map { it.id.value }, turns.map { it.id })
+    }
+
+    private fun segmentedOwner() = message().copy(historySegments = listOf(
+        MessageHistorySegment(MessageId("assistant"), Message.ASSISTANT_ROLE, listOf(text("before", "Before"))),
+        MessageHistorySegment(MessageId("supplement"), Message.USER_ROLE, listOf(text("question", "Question"))),
+        MessageHistorySegment(MessageId("assistant"), Message.ASSISTANT_ROLE, listOf(text("after", "After"))),
+        MessageHistorySegment(MessageId("assistant"), Message.ASSISTANT_ROLE, listOf(text("final", "Final"))),
+    ))
+
+    @Test fun prependingEarlierOwnersKeepsExistingSegmentKeysStable() {
+        val visible = listOf(segmentedOwner(), message().copy(id = MessageId("later")))
+        val before = ChatTurnMapper.map(visible)
+        val earlier = listOf(
+            message().copy(runId = RunId("earlier:run")), // Same raw id, different owner identity.
+            message().copy(conversationId = ConversationId("earlier:conversation")),
+        )
+        val after = ChatTurnMapper.map(earlier + visible)
+
+        assertEquals(before.map { it.listKey }, after.drop(earlier.size).map { it.listKey })
+        assertEquals(before.map { it.id }, after.drop(earlier.size).map { it.id })
+        assertEquals(after.size, after.map { it.listKey }.toSet().size)
+    }
+
+    @Test fun multipleSegmentsOfOneOwnerHaveUniqueStableKeysAndOriginalActionIds() {
+        val owner = segmentedOwner()
+        val turns = ChatTurnMapper.map(listOf(owner))
+        val assistantTurns = turns.filterIsInstance<ChatTurnUi.Assistant>()
+
+        assertEquals(listOf("assistant", "supplement", "assistant", "assistant"), turns.map { it.id })
+        assertEquals(4, turns.map { it.listKey }.toSet().size)
+        assertEquals(listOf("0", "1", "2").map { "turn:12:conversation3:run9:assistant1:$it" },
+            assistantTurns.map { it.listKey })
+        assertEquals(turns.map { it.listKey }, ChatTurnMapper.map(listOf(owner)) { "different timestamp" }.map { it.listKey })
     }
 
     @Test fun emptyListIsEmptyAndToolFirstCreatesOneSegment() {

@@ -12,7 +12,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 13), ConversationStore {
+class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 14), ConversationStore {
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
         db, assistantPreferences.getString(app.daiyu.android.assistants.LegacyAssistantCodec.KEY, null))
@@ -49,7 +49,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..12 && newVersion == 13) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..13 && newVersion == 14) { "不支持此数据库版本，保留原数据" }
         if (oldVersion < 10) {
             db.execSQL("ALTER TABLE conversations ADD COLUMN assistant_id TEXT")
             installAssistants(db)
@@ -66,6 +66,8 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             createUiFolders(db)
         }
         if (oldVersion < 11) upgradeGenerationSchema(db)
+        SQLiteChildTaskStore.installCommandSchema(db)
+        if (oldVersion == 13) return // Existing video witnesses remain byte-for-byte unchanged.
         SQLiteMessageVideoStore.installSchema(db)
         ControllerVideoManifestWitness.installSchema(db)
         check(!db.rawQuery("SELECT 1 FROM message_video_inputs v LEFT JOIN messages m ON m.id=v.message_id WHERE m.id IS NULL LIMIT 1", null).use { it.moveToFirst() })
@@ -252,10 +254,13 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             arrayOf(id.value,run.value)).use { c -> buildList { while(c.moveToNext()) add(c.getString(0)) } }
         MessageHistory.validate(ids.map { storedMessage(db,id,it) })
     }
+    /** preserveDraft is for explicit local child-command receipt runs, never composer sends. */
     fun send(user:Message,assistant:Message,newConversation:Boolean=false,
         expectedAssistantId:String? = if(newConversation) selectedAssistantId() else assistantId(user.conversationId),
-        videoInputs: List<app.daiyu.android.model.videos.MessageVideoInput> = emptyList()):Conversation {
+        videoInputs: List<app.daiyu.android.model.videos.MessageVideoInput> = emptyList(),
+        preserveDraft: Boolean = false):Conversation {
         require(user.conversationId==assistant.conversationId && user.runId==assistant.runId)
+        require(!preserveDraft || !newConversation)
         require(user.role=="user" && user.status==RunStatus.COMPLETED && assistant.role=="assistant" && assistant.status==RunStatus.RUNNING)
         var conversation:Conversation?=null
         transaction { db ->
@@ -264,6 +269,9 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             if (!newConversation) check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND assistant_id=?",
                 arrayOf(user.conversationId.value, expectedAssistantId)).use { it.moveToFirst() }) { "会话助手绑定已变化；草稿保留" }
             val expectedComposer=if(newConversation) "" else composerDraft(db)
+            val retainedDraft = if (preserveDraft) db.rawQuery("SELECT draft FROM conversations WHERE id=?", arrayOf(user.conversationId.value)).use {
+                check(it.moveToFirst()); it.getString(0)
+            } else ""
             var newConversationRowId:Long?=null
             if(newConversation) {
                 val value=Conversation(user.conversationId,"新会话","",System.currentTimeMillis(),assistantId=expectedAssistantId)
@@ -271,7 +279,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 check(newConversationRowId != -1L) {"新会话未持久化"}
                 check(db.update("composer",ContentValues().apply {put("draft","")},"id=1",null)==1)
             }
-            check(db.update("conversations",ContentValues().apply {put("draft","");put("updated",System.currentTimeMillis())},"id=?",arrayOf(user.conversationId.value))==1) {"会话不存在"}
+            check(db.update("conversations",ContentValues().apply {if (!preserveDraft) put("draft","");put("updated",System.currentTimeMillis())},"id=?",arrayOf(user.conversationId.value))==1) {"会话不存在"}
             // RAISE(IGNORE) can return -1 without throwing, even from insertOrThrow.
             val userRowId=db.insertOrThrow("messages",null,values(user))
             check(userRowId != -1L) {"用户消息未持久化"}
@@ -290,10 +298,13 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             app.daiyu.android.ControllerVideoHistory(this).assertAppended(db, videoHistory, user, assistant, videoInputs)
             conversation=db.rawQuery("SELECT title,updated,folder,pinned,rowid,length(CAST(draft AS BLOB))=0,assistant_id FROM conversations WHERE id=?",arrayOf(user.conversationId.value)).use {
                 check(it.moveToFirst() && (newConversationRowId==null || it.getLong(4)==newConversationRowId)) {"发送会话身份不匹配"}
-                check(it.getInt(5)==1) {"发送会话草稿未清空"}
+                val nextDraft = if (preserveDraft) db.rawQuery("SELECT draft FROM conversations WHERE id=?", arrayOf(user.conversationId.value)).use { c ->
+                    check(c.moveToFirst()); c.getString(0)
+                }.also { draft -> check(draft == retainedDraft) { "子任务命令改变了草稿" } }
+                    else { check(it.getInt(5)==1) {"发送会话草稿未清空"}; "" }
                 check(it.getString(6)==expectedAssistantId) { "发送助手绑定回执不匹配" }
                 requireAssistant(db, expectedAssistantId)
-                Conversation(user.conversationId,it.getString(0),"",it.getLong(1),it.getString(2),it.getInt(3)!=0,it.getString(6))
+                Conversation(user.conversationId,it.getString(0),nextDraft,it.getLong(1),it.getString(2),it.getInt(3)!=0,it.getString(6))
             }
             check(composerDraft(db)==expectedComposer) {"发送草稿不匹配"}
         }

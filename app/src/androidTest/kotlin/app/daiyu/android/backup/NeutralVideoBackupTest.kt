@@ -78,7 +78,7 @@ class NeutralVideoBackupTest : InstrumentationTestCase() {
         val (context, db) = fresh(); val assets = Assets(); val backup = service(context, db, assets)
         assertEquals(1, backup.preflight(source).attachments)
         assertFalse(backup.importPackage(source).alreadyImported)
-        assertEquals(13, db.writableDatabase.version)
+        assertEquals(14, db.writableDatabase.version)
         assertTrue(bytes.contentEquals(assets.read(ref.owner, ref)))
         val message = db.messages(ConversationId(ref.owner.conversationId)).single { it.second.id.value == ref.owner.messageId }.second
         assertEquals(ref, SQLiteMessageVideoStore.read(db.readableDatabase, message).single().references.single())

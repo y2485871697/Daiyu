@@ -1,9 +1,7 @@
 package app.daiyu.android.integration.tools
 
-import app.daiyu.android.domain.delegation.ChildModelTask
-import app.daiyu.android.domain.delegation.ChildTaskAdmission
-import app.daiyu.android.domain.delegation.ChildTaskBinding
-import app.daiyu.android.domain.delegation.RetainedChildTasks
+import app.daiyu.android.domain.ToolInvocation
+import app.daiyu.android.domain.delegation.*
 import app.daiyu.android.domain.tools.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -39,7 +37,10 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
                         result.tasks.forEach { task ->
                             tasks.put(JSONObject().put("child_run_id", task.owner.childRunId)
                                 .put("task_group_id", task.owner.taskGroupId).put("generation", task.owner.generation)
-                                .put("profile_id", task.profileId))
+                                .put("profile_id", task.profileId).put("conversation_id", task.owner.conversationId)
+                                .put("parent_run_id", task.owner.parentRunId).put("assistant_message_id", task.owner.assistantMessageId)
+                                .put("parent_message_id", task.parentMessageId).put("parent_owner_id", task.parentOwnerId)
+                                .put("expected_revision", task.revision).put("expected_status", task.status.name))
                         }
                         ExecutionReceipt.Confirmed(JSONObject().put("accepted", true).put("completed", false)
                             .put("tasks", tasks).toString())
@@ -49,12 +50,61 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
         }
     }
 
+    fun command(invocation: ToolInvocation, command: ChildTaskCommand) = supervisor.command(binding, invocation, command)
+
+    fun commandTool(): RegisteredTool = object : RegisteredTool {
+        override val definition = ToolDefinition("direct_child_task", 1,
+            "定向追加、替换或失败新派。必须给出完整子任务身份与修订。追加等待原任务成功且真正排空，再以原输入/结果发起新请求；不会修改旧请求。UNKNOWN 或替换活跃任务只能在任务记录 UI 经用户单次确认后新派，模型参数不能代替确认。",
+            CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
+                ArgumentField("conversation_id", ArgumentType.Text(200, minimumLength = 1)),
+                ArgumentField("parent_run_id", ArgumentType.Text(200, minimumLength = 1)),
+                ArgumentField("task_group_id", ArgumentType.Text(200, minimumLength = 1)),
+                ArgumentField("generation", ArgumentType.Text(20, minimumLength = 1)),
+                ArgumentField("child_run_id", ArgumentType.Text(200, minimumLength = 1)),
+                ArgumentField("assistant_message_id", ArgumentType.Text(200, minimumLength = 1)),
+                ArgumentField("parent_message_id", ArgumentType.Text(200, minimumLength = 1)),
+                ArgumentField("parent_owner_id", ArgumentType.Text(200, minimumLength = 1)),
+                ArgumentField("expected_revision", ArgumentType.Text(20, minimumLength = 1)),
+                ArgumentField("kind", ArgumentType.Text(20, setOf("APPEND", "REPLACE", "REDISPATCH"), 1)),
+                ArgumentField("profile_id", ArgumentType.Text(200, profiles, 1)),
+                ArgumentField("instruction", ArgumentType.Text(4096, minimumLength = 1)),
+                ArgumentField("acknowledge_possible_execution", ArgumentType.Text(5, setOf("true", "false"), 1))
+            )))
+        override fun prepare(arguments: ToolArguments): PreparedTool {
+            val owner = ChildRunOwner(arguments.text("conversation_id"),
+                arguments.text("parent_run_id"), arguments.text("task_group_id"), arguments.text("generation").toLong(),
+                arguments.text("child_run_id"), arguments.text("assistant_message_id"))
+            val revision = arguments.text("expected_revision").toLong().also { require(it >= 0) }
+            return PreparedTool.contextual { context ->
+                val source = supervisor.source(owner)
+                if (source == null || source.parentMessageId != arguments.text("parent_message_id") || source.parentOwnerId != arguments.text("parent_owner_id"))
+                    ExecutionReceipt.NotExecuted("child_source_stale")
+                else {
+                    val expected = source.copy(revision = revision)
+                    val command = ChildTaskCommand(
+                        "${context.owner.ownerId}:${context.invocation.id.value}".let { key ->
+                            // Host owner and provider call ids are separately bounded; hash the composite namespace.
+                            java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).joinToString("") { "%02x".format(it.toInt() and 255) }
+                        }, expected, ChildTaskCommandKind.valueOf(arguments.text("kind")),
+                        arguments.text("profile_id"), arguments.text("instruction"), arguments.text("acknowledge_possible_execution") == "true")
+                    when (val result = supervisor.command(binding, context, command)) {
+                        is ChildTaskCommandReceipt.Accepted -> ExecutionReceipt.Confirmed(
+                            JSONObject().put("child_run_id", result.task.owner.childRunId).put("source_task_id", source.owner.childRunId)
+                                .put("new_request", true).toString())
+                        is ChildTaskCommandReceipt.Rejected -> ExecutionReceipt.NotExecuted(result.code)
+                        is ChildTaskCommandReceipt.Unconfirmed -> ExecutionReceipt.Unknown(result.code)
+                    }
+                }
+            }
+        }
+    }
+
     fun snapshots() = supervisor.snapshots(binding)
     /** Safe host-map eviction boundary; neither a stop request nor a terminal journal row is enough. */
     fun isReleased(): Boolean = supervisor.isReleased(binding)
-    fun stop(owner: app.daiyu.android.domain.delegation.ChildRunOwner) = supervisor.stop(binding, owner)
-    fun pause(owner: app.daiyu.android.domain.delegation.ChildRunOwner) = supervisor.pause(binding, owner)
-    fun resume(owner: app.daiyu.android.domain.delegation.ChildRunOwner) = supervisor.resume(binding, owner)
+    fun stop(owner: ChildRunOwner) = supervisor.stop(binding, owner)
+    fun pause(owner: ChildRunOwner) = supervisor.pause(binding, owner)
+    fun resume(owner: ChildRunOwner) = supervisor.resume(binding, owner)
     fun revoke() = supervisor.revoke(binding)
     override fun close() = supervisor.finishParent(binding)
 

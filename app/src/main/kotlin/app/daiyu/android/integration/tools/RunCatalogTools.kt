@@ -44,6 +44,8 @@ internal class RunCatalogTools(
     authorization: TaskAuthorization? = null,
     private val shizuku: CatalogShizukuBinding? = null,
     terminal: CatalogTerminalBinding? = null,
+    private val browser: CatalogBrowserBinding? = null,
+    private val observeBrowserClose: (CatalogBrowserBinding, (RunCatalogCloseResult) -> Unit) -> Unit = ::observeBrowserDrain,
     // Same-package failure injection; production always invokes the resource's own stop action.
     private val closeResource: (AutoCloseable) -> Unit = { it.close() },
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
@@ -52,6 +54,7 @@ internal class RunCatalogTools(
     private val authorization = authorization ?: run {
         require(shizuku == null) { "shizuku_task_authorization_required" }
         require(terminal == null) { "terminal_task_authorization_required" }
+        require(browser == null) { "browser_task_authorization_required" }
         TaskAuthorization(capabilities.sessionId, runId.value)
     }
     // No PTY is opened here, during binding, capture, advertising, or preparation.
@@ -86,6 +89,7 @@ internal class RunCatalogTools(
     private val setupLock = Any()
 
     @Volatile private var background: RunChildTasks? = null
+    private var browserTools: List<RegisteredTool> = emptyList()
     @Volatile private var owner: RunExecutionOwner? = null
     override fun bindOwner(owner: RunExecutionOwner) {
         var creating = false
@@ -98,6 +102,7 @@ internal class RunCatalogTools(
                 children?.bind(owner, capabilities, authorization)
                 shizuku?.commands?.bind(owner, capabilities, authorization)
                 terminalLeaf?.bindOwner(owner)
+                browser?.let { browserTools = it.bindOwner(owner, authorization).tools }
                 val created = if (background == null) backgroundFactory?.let { factory ->
                     createResource { factory(owner, capabilities, authorization) }
                 } else null
@@ -143,6 +148,7 @@ internal class RunCatalogTools(
                 background?.let { registry.register(it.tool()) }
                 shizuku?.let { registry.register(it.commands.tool()) }
                 terminalLeaf?.registeredTools?.forEach { registry.register(it) }
+                browserTools.forEach { registry.register(it) }
                 val result = CatalogModelBridge(registry.snapshot(), capabilities, ledger, conversationId, runId, authorization)
                 result.bindOwner(bound)
                 synchronized(closeLock) {
@@ -215,8 +221,9 @@ internal class RunCatalogTools(
         val resources = synchronized(closeLock) {
             closed.set(true)
             // Fence the terminal before stopping other resources; join is observed separately.
-            claimStops(listOfNotNull(terminalLeaf, shizuku, background, children, deviceResources, skills))
+            claimStops(listOfNotNull(browser, terminalLeaf, shizuku, background, children, deviceResources, skills))
         }
+        browser?.revoke()
         stopClaimed(resources)
     }
     // All callers hold closeLock. Claim once even when a stop throws; later observers never retry it.
@@ -262,11 +269,11 @@ internal class RunCatalogTools(
             // The terminal leaf's own dispatcher is not used by this catalog. Its worker join
             // must therefore start only after OUR final receipt persistence/observation settles.
             if (!closed.get() || !observingClose || observationsStarted || activeCreations != 0 || pendingStops != 0 ||
-                (terminalLeaf != null && activeDispatches != 0)) false
+                ((terminalLeaf != null || browser != null) && activeDispatches != 0)) false
             else {
                 observationsStarted = true
                 registeringObservations = true
-                remainingObservations = 4
+                remainingObservations = 5
                 true
             }
         }
@@ -292,6 +299,10 @@ internal class RunCatalogTools(
             observeResourceClose(terminalLeaf) { done ->
                 if (terminalLeaf == null) done(RunCatalogCloseResult.Drained)
                 else terminalLeaf.observeClose(done)
+            }
+            observeResourceClose(browser) { done ->
+                if (browser == null) done(RunCatalogCloseResult.Drained)
+                else observeBrowserClose(browser, done)
             }
             synchronized(closeLock) { registeringObservations = false }
         }
@@ -334,4 +345,25 @@ internal class RunCatalogTools(
         // No lifecycle/setup lock is held; reentrant close/observation is safe.
         notification.second.forEach { callback -> runCatching { callback(notification.first) } }
     }
+}
+
+/** Native browser close is nonblocking; retain its owner until observed, not merely requested. */
+private fun observeBrowserDrain(browser: CatalogBrowserBinding, complete: (RunCatalogCloseResult) -> Unit) {
+    val deadline = android.os.SystemClock.uptimeMillis() + 30_000L
+    val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    val observe = object : Runnable {
+        override fun run() {
+            val result = try { browser.closeResult() } catch (_: Exception) {
+                RunCatalogCloseResult.Unknown("browser_close_observation_failed")
+            }
+            when {
+                result != null -> complete(result)
+                android.os.SystemClock.uptimeMillis() >= deadline ->
+                    complete(RunCatalogCloseResult.Unknown("browser_close_timeout"))
+                !handler.postDelayed(this, 50L) ->
+                    complete(RunCatalogCloseResult.Unknown("browser_close_observation_unavailable"))
+            }
+        }
+    }
+    observe.run()
 }

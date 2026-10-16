@@ -87,7 +87,8 @@ class BrowserRunPreparationTest {
         }
         Fixture().use { f ->
             rejected { prepare(f, arguments = emptyList()) }
-            rejected { BrowserRunPreparation.prepare(identity, full, f.grant, setOf("navigate"), listOf(navigate)) }
+            val firstWrite = BrowserRunPreparation.prepare(identity, full, f.grant, setOf("navigate"), listOf(navigate))
+            assertEquals(RunBrowserTools.writeEffect(f.grant, navigate), firstWrite.preview.writes.single().effect)
             rejected { BrowserRunPreparation.prepare(identity, BrowserSettings(), f.grant, setOf("list_tabs")) }
             rejected { BrowserRunPreparation.prepare(identity, BrowserSettings(BrowserAccess.READ_ONLY),
                 f.grant, setOf("list_tabs")) }

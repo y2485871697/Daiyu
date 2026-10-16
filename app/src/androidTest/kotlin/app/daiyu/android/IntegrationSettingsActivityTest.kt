@@ -73,7 +73,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         assertEquals(before, fixture.settings.load())
         assertEquals("https://catalog.invalid/v1/models", connection.get().url.toString())
         assertNull(connection.get().getRequestProperty("Authorization"))
-        modelField("模型名").assertTextEquals("second"); editModel("API Key", "new-key"); saveModel()
+        modelField("模型名").assertEditableText("second"); editModel("API Key", "new-key"); saveModel()
         assertEquals("second", fixture.settings.load().model); assertEquals("new-key", fixture.settings.load().apiKey)
     }
     fun testCatalogChangedAndRestoredDraftRevokesLateResponseAndCanRetry() {
@@ -114,7 +114,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         reveal("settings-radio:快速").performClick(); saveModel()
         val expected = ProviderRequestOptions("{\"temperature\":0.25}", GptSpeedMode.FAST, false)
         assertEquals(expected, fixture.settings.load().requestOptions)
-        openModels(); modelField("自定义请求体").assertTextEquals(expected.customBody)
+        openModels(); modelField("自定义请求体").assertEditableText(expected.customBody)
         reveal("settings-radio:快速").assertIsSelected()
         editModel("自定义请求体", "{\"messages\":[]}"); saveModel()
         assertEquals(expected, fixture.settings.load().requestOptions); node("model-save").assertExists()
@@ -122,7 +122,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         reveal("settings-switch:Codex 档位").performClick(); saveModel()
         assertEquals(expected, fixture.settings.load().requestOptions); backToChat(activity)
         activity = recreateActivity(activity); openModels()
-        modelField("自定义请求体").assertTextEquals(expected.customBody); reveal("settings-radio:快速").assertIsSelected()
+        modelField("自定义请求体").assertEditableText(expected.customBody); reveal("settings-radio:快速").assertIsSelected()
         backToChat(activity)
     }
     // SkillManagementDialog has not changed in this migration: assert its actual native controls.

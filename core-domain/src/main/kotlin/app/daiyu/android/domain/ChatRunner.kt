@@ -1,5 +1,6 @@
 package app.daiyu.android.domain
 
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.LockSupport
 import app.daiyu.android.domain.runtime.*
@@ -196,6 +197,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var outputs = emptyList<ToolOutput>()
         var round = 0
         var requestUnconfirmed = false
+        var request: RequestCheckpoint? = null
         val executionOwner = RunExecutionOwner.issue(initial)
         val owner = executionOwner.ownerId
         var ownerBound = false
@@ -207,7 +209,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (message.status != RunStatus.RUNNING) ExecutionPhase.TERMINAL else execution.phase,
                 records.values.toList(), outputs, supplements.toList(), round, requestUnconfirmed,
                 owner = owner, revision = revision + 1,
-                pending = if (message.status == RunStatus.RUNNING) pendingCheckpoint else null)
+                pending = if (message.status == RunStatus.RUNNING) pendingCheckpoint else null, request = request)
         }
         fun checkpoint() {
             val runtime = options.runtimeStore ?: return
@@ -319,6 +321,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     if (pauseRequested || supplements.isNotEmpty() || breakStream) null
                     else { requestOpening = true; generation }
                 } ?: continue
+                request = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.OPEN)
                 requestUnconfirmed = true
                 try {
                     checkpoint() // open may itself send a request; persist uncertainty first.
@@ -408,6 +411,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     if (boundary()) { cancelSession(active); active = open() }
                     continue
                 }
+                request = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
                 requestUnconfirmed = true
                 checkpoint()
                 val sink: (ModelEvent) -> Unit = { event ->
@@ -517,6 +521,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 if (stopped.get() || terminalReserved || breakStream) throw InterruptedException()
                                 setPhase(ExecutionPhase.STREAMING, attempt)
                             }
+                            request = checkNotNull(request).copy(attemptId = UUID.randomUUID().toString(), operation = RequestOperation.RESUME)
                             // Persist the resumed request boundary before invoking transport again.
                             checkpoint()
                         }

@@ -11,6 +11,14 @@ data class ToolRecord(val invocation: ToolInvocation, val disposition: ToolDispo
 
 data class PendingToolCheckpoint(val callId: ToolCallId)
 
+enum class RequestOperation { OPEN, NEXT, RESUME }
+
+/** Host-generated admission identity, not a provider receipt or permission grant. */
+data class RequestCheckpoint(val requestId: String, val attemptId: String,
+    val owner: String, val operation: RequestOperation) {
+    init { require(listOf(requestId, attemptId, owner).all { it.isNotBlank() && it.length <= 200 }) }
+}
+
 /** Immutable, platform-serializable checkpoint. No credentials or transport objects belong here. */
 data class RunCheckpoint(
     val message: Message,
@@ -24,7 +32,8 @@ data class RunCheckpoint(
     val messageReconciled: Boolean = true,
     val owner: String = "",
     val revision: Long = 0,
-    val pending: PendingToolCheckpoint? = null
+    val pending: PendingToolCheckpoint? = null,
+    val request: RequestCheckpoint? = null
 )
 
 /** save must durably commit before returning if durable=true. Implement with a transaction/WAL. */

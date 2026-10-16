@@ -253,8 +253,8 @@ class BrowserHostContractTest {
         val root = Files.createTempDirectory("browser-test"); val outside = Files.createTempDirectory("outside")
         try {
             val p = BrowserPathMapper(root, mapOf("granted" to outside))
-            assertEquals(root.resolve("a"), p.privateFile("a"))
-            assertEquals(outside.resolve("b"), p.mappedFile("/workspace/mounts/granted/b"))
+            assertEquals(root.toRealPath().resolve("a"), p.privateFile("a"))
+            assertEquals(outside.toRealPath().resolve("b"), p.mappedFile("/workspace/mounts/granted/b"))
             rejects { p.privateFile("../escape") }; rejects { p.privateFile("/absolute") }
             rejects { p.mappedFile("/workspace/mounts/other/b") }; rejects { p.mappedFile("/sdcard/a") }
             Files.createSymbolicLink(root.resolve("link"), outside)

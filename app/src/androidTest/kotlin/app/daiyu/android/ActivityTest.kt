@@ -19,7 +19,8 @@ class ActivityTest : WiredActivityTestCase() {
             val run = RunId("scroll-$i")
             val user = Message(MessageId("su-$i"), conversation.id, run, "user", listOf(MessageBlock.Text("u", "历史用户 $i")), RunStatus.COMPLETED)
             val assistant = Message(MessageId("sa-$i"), conversation.id, run, "assistant", listOf(MessageBlock.Text("a", "历史正文 $i\n".repeat(12))), RunStatus.RUNNING)
-            db.send(user, assistant); db.save(assistant.copy(status = RunStatus.COMPLETED))
+            db.send(user, assistant)
+            if (i < 69) db.save(assistant.copy(status = RunStatus.COMPLETED))
         }
         mainThread { activity.select(conversation) }
         node("chat-turn:sa-69").assertIsDisplayed()
@@ -49,7 +50,7 @@ class ActivityTest : WiredActivityTestCase() {
         mainThread {
             @Suppress("UNCHECKED_CAST") val shown = shownField.get(activity) as List<Pair<Long, Message>>
             assertTrue(shown.size > 50)
-            assertEquals(RunStatus.COMPLETED, shown.last().second.status)
+            assertEquals(RunStatus.RUNNING, shown.last().second.status)
         }
         menu("定位用户消息")
         node("prompt-choice:1").performClick()
@@ -74,10 +75,10 @@ class ActivityTest : WiredActivityTestCase() {
         setDraft(text); node("chat-send").performClick()
         assertDraft(text); assertTrue(fixture.database.conversations().isEmpty()); assertEquals(0, fixture.opens.get())
         openModels()
-        modelField("Base URL").assertTextEquals(config.endpoint)
-        modelField("Responses 路径").assertTextEquals(config.responsesPath)
-        modelField("模型名").assertTextEquals(config.model)
-        modelField("API Key").assertTextEquals("")
+        modelField("Base URL").assertEditableText(config.endpoint)
+        modelField("Responses 路径").assertEditableText(config.responsesPath)
+        modelField("模型名").assertEditableText(config.model)
+        modelField("API Key").assertEditableText("")
         editModel("API Key", "replacement-key"); saveModel()
         assertEquals(config.copy(apiKey = "replacement-key"), fixture.settings.load())
         assertDraft(text); assertEquals(text, fixture.database.draft()); assertEquals(0, fixture.opens.get())
@@ -164,7 +165,7 @@ class ActivityTest : WiredActivityTestCase() {
         fixture.settings.save(config)
         setDraft("协议切换保留草稿"); openModels()
         reveal("settings-radio:Anthropic Messages").performClick()
-        modelField("API Key").assertTextEquals(""); modelField("Responses 路径").assertTextEquals("").assertIsNotEnabled()
+        modelField("API Key").assertEditableText(""); modelField("Responses 路径").assertEditableText("").assertIsNotEnabled()
         editModel("API Key", "synthetic-messages-key"); saveModel()
         assertEquals(config, fixture.settings.load())
         reveal("settings-switch:重输密钥并绑定").performClick(); saveModel()
@@ -173,7 +174,7 @@ class ActivityTest : WiredActivityTestCase() {
         assertEquals("", messages.responsesPath)
         assertTrue(app.daiyu.android.model.ModelFactory.create(messages) is app.daiyu.android.model.MessagesModel)
         openModels(); reveal("settings-radio:Anthropic Messages").assertIsSelected()
-        reveal("settings-radio:OpenAI Responses").performClick(); modelField("API Key").assertTextEquals("")
+        reveal("settings-radio:OpenAI Responses").performClick(); modelField("API Key").assertEditableText("")
         editModel("Responses 路径", "/responses"); editModel("API Key", "explicit-responses-key")
         reveal("settings-switch:重输密钥并绑定").performClick(); saveModel()
         assertEquals(config.copy(apiKey = "explicit-responses-key"), fixture.settings.load())

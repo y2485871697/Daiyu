@@ -24,7 +24,7 @@ class RunCheckpointCodecTest {
     private fun reject(block:()->Unit) {try {block();fail("invalid checkpoint accepted")} catch(_:Exception) {}}
     @Test fun strictVersionTypesBoundsAndOwnership() {
         val text=RunCheckpointCodec.encode(checkpoint())
-        val mutations=listOf<(JSONObject)->Unit>({it.put("version",3)}, {it.put("revision","4")},
+        val mutations=listOf<(JSONObject)->Unit>({it.put("version",4)}, {it.put("revision","4")},
             {it.put("owner","")},{it.put("round",101)},{it.put("message_reconciled",false)},
             {it.put("phase","TERMINAL")},{it.put("extra",true)}, {it.put("request_unconfirmed",1)})
         mutations.forEach {mutate-> val json=JSONObject(text);mutate(json);reject {RunCheckpointCodec.decode(json.toString())}}
@@ -68,18 +68,48 @@ class RunCheckpointCodecTest {
             phase = ExecutionPhase.WAITING_USER, tools = listOf(ToolRecord(question, ToolDisposition.IN_FLIGHT)),
             outputs = emptyList(), pending = PendingToolCheckpoint(question.id))
     }
-    @Test fun writesV2AndReadsV1OnlyWithAbsentPending() {
-        val original = checkpoint(); val v2 = JSONObject(RunCheckpointCodec.encode(original))
-        assertEquals(2, v2.getInt("version")); assertTrue(v2.has("pending")); assertTrue(v2.isNull("pending"))
+    @Test fun writesV3AndReadsLegacyOnlyWithTheirExactFields() {
+        val original = checkpoint(); val v3 = JSONObject(RunCheckpointCodec.encode(original))
+        assertEquals(3, v3.getInt("version")); assertTrue(v3.isNull("request"))
+        assertEquals(original, RunCheckpointCodec.decode(v3.toString()))
+        val v2 = JSONObject(v3.toString()).put("version", 2); v2.remove("request")
         assertEquals(original, RunCheckpointCodec.decode(v2.toString()))
         val v1 = JSONObject(v2.toString()).put("version", 1); v1.remove("pending")
         assertEquals(original, RunCheckpointCodec.decode(v1.toString()))
-        assertNull(RunCheckpointCodec.decode(v1.toString()).pending)
         reject { RunCheckpointCodec.decode(JSONObject(v1.toString()).put("pending", JSONObject.NULL).toString()) }
-        val missing = JSONObject(v2.toString()); missing.remove("pending")
-        reject { RunCheckpointCodec.decode(missing.toString()) }
-        val impossibleV1 = JSONObject(RunCheckpointCodec.encode(waiting())).put("version", 1); impossibleV1.remove("pending")
+        reject { RunCheckpointCodec.decode(JSONObject(v2.toString()).put("request", JSONObject.NULL).toString()) }
+        for (key in listOf("pending", "request")) {
+            val missing = JSONObject(v3.toString()); missing.remove(key)
+            reject { RunCheckpointCodec.decode(missing.toString()) }
+        }
+        val impossibleV1 = JSONObject(RunCheckpointCodec.encode(waiting())).put("version", 1)
+        impossibleV1.remove("pending"); impossibleV1.remove("request")
         reject { RunCheckpointCodec.decode(impossibleV1.toString()) }
+    }
+    @Test fun requestIdentityRoundTripsAllOperationsAndRecoveryKeepsOriginalOwner() {
+        for (operation in RequestOperation.entries) {
+            val original = checkpoint().copy(request = RequestCheckpoint("request", "attempt", "owner", operation))
+            assertEquals(original, RunCheckpointCodec.decode(RunCheckpointCodec.encode(original)))
+            val recovered = ProcessRecovery.interrupt(original).copy(owner = "recovery", revision = 5, messageReconciled = true)
+            assertEquals(original.request, recovered.request)
+            assertEquals(recovered, RunCheckpointCodec.decode(RunCheckpointCodec.encode(recovered)))
+        }
+    }
+    @Test fun requestIdentityRejectsMalformedShapesAndForeignActiveOwners() {
+        val value = checkpoint().copy(request = RequestCheckpoint("request", "attempt", "owner", RequestOperation.NEXT))
+        val text = RunCheckpointCodec.encode(value)
+        val mutations = listOf<(JSONObject) -> Unit>(
+            { it.put("request", "request") }, { it.put("request", org.json.JSONArray()) },
+            { it.getJSONObject("request").remove("attempt_id") },
+            { it.getJSONObject("request").put("extra", true) },
+            { it.getJSONObject("request").put("request_id", "") },
+            { it.getJSONObject("request").put("attempt_id", "x".repeat(201)) },
+            { it.getJSONObject("request").put("owner", "foreign") },
+            { it.getJSONObject("request").put("operation", "POST") },
+            { it.getJSONObject("request").put("operation", 1) })
+        mutations.forEach { mutate -> val json = JSONObject(text); mutate(json)
+            reject { RunCheckpointCodec.decode(json.toString()) } }
+        reject { RunCheckpointCodec.encode(value.copy(request = value.request!!.copy(owner = "foreign"))) }
     }
     @Test fun waitingPendingRoundTripAndStrictShape() {
         val value = waiting(); val text = RunCheckpointCodec.encode(value)

@@ -89,6 +89,7 @@ dependencies {
     // Match the Compose 1.9 runtime used by Material3 1.4; keep instrumentation APIs pinned.
     androidTestImplementation("androidx.compose.ui:ui-test-junit4:1.9.0")
     androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.7.0")
     debugImplementation("androidx.compose.ui:ui-test-manifest:1.9.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")

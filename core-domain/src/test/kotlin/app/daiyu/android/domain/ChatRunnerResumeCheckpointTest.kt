@@ -32,10 +32,15 @@ class ChatRunnerResumeCheckpointTest {
         init {
             val port = ModelPort {
                 opens++
+                assertEquals(RequestOperation.OPEN, checkpoints.last().request!!.operation)
+                assertTrue(checkpoints.last().requestUnconfirmed)
+                assertEquals(checkpoints.last().owner, checkpoints.last().request!!.owner)
                 object : ResumableModelSession {
                     override val canResume = true
                     override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                         nexts++
+                        assertEquals(RequestOperation.NEXT, checkpoints.last().request!!.operation)
+                        assertEquals(checkpoints.last().owner, checkpoints.last().request!!.owner)
                         throw ModelRequestException(ModelFailure.NETWORK)
                     }
                     override fun resume(sink: (ModelEvent) -> Unit) {
@@ -43,6 +48,12 @@ class ChatRunnerResumeCheckpointTest {
                         assertEquals(ExecutionPhase.STREAMING, checkpoints.last().phase)
                         assertTrue(checkpoints.last().requestUnconfirmed)
                         assertEquals(1, admissions)
+                        val resume = checkpoints.last().request!!
+                        val next = checkpoints.last { it.request?.operation == RequestOperation.NEXT }.request!!
+                        assertEquals(RequestOperation.RESUME, resume.operation)
+                        assertEquals(next.requestId, resume.requestId)
+                        assertNotEquals(next.attemptId, resume.attemptId)
+                        assertEquals(next.owner, resume.owner)
                     }
                     override fun cancel() {}
                 }
@@ -78,4 +89,36 @@ class ChatRunnerResumeCheckpointTest {
         f.assertNoRepost(); assertEquals(0, f.resumes); assertEquals(1, f.admissions)
         assertTrue(f.checkpoints.last().requestUnconfirmed)
     }
+    @Test fun failedOpenOrNextCheckpointPreventsThatTransportCall() {
+        for (operation in listOf(RequestOperation.OPEN, RequestOperation.NEXT)) admission(operation, false)
+    }
+    @Test fun stopDuringOpenOrNextCheckpointPreventsThatTransportCall() {
+        for (operation in listOf(RequestOperation.OPEN, RequestOperation.NEXT)) admission(operation, true)
+    }
+    private fun admission(operation: RequestOperation, stop: Boolean) {
+        lateinit var runner: ChatRunner
+        var opens = 0; var nexts = 0
+        val runtime = object : RuntimeStore {
+            override fun save(checkpoint: RunCheckpoint) {
+                if (checkpoint.phase != ExecutionPhase.TERMINAL && checkpoint.request?.operation == operation) {
+                    assertTrue(checkpoint.requestUnconfirmed)
+                    assertEquals(checkpoint.owner, checkpoint.request.owner)
+                    if (stop) runner.stop() else error("admission persistence unavailable")
+                }
+            }
+        }
+        val port = ModelPort {
+            opens++
+            object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) { nexts++ }
+                override fun cancel() {}
+            }
+        }
+        runner = ChatRunner(port, object : ConversationStore { override fun save(message: Message) {} },
+            BatteryTool { error("unexpected tool") }, RunnerOptions(runtimeStore = runtime)) {}
+        assertEquals(if (stop) RunStatus.STOPPED else RunStatus.FAILED, runner.run(initial(), emptyList()).status)
+        assertEquals(if (operation == RequestOperation.OPEN) 0 else 1, opens)
+        assertEquals(0, nexts)
+    }
+
 }

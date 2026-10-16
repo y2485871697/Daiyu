@@ -74,4 +74,5 @@ data class ComposerUi(
     val contextLabel: String = "上下文",
     val listening: Boolean = false,
     val enabled: Boolean = true,
+    val controlOwnerKey: String? = null,
 )

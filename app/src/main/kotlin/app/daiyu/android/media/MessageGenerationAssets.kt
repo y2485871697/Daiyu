@@ -39,10 +39,12 @@ class GenerationAssetOwner(val accountScope: String, val binding: GenerationAtte
 
 /** Required live owner admission, separate from the transport cancellation handle.
  * The parent must revoke BEFORE changing/deleting the execution owner, and before cancelling HTTP.
- * revoke and the final publication execute under the SAME monitor: whichever enters first wins.
+ * revoke, final publication and output registration execute under the SAME monitor: first wins.
  * validateOwner must query/validate the real owner (including account, run and tool call), not just
  * return true. It runs under this monitor; never acquire this fence while holding a DB transaction.
- * A fresh fence may be created for recovery, but only after revalidating the persisted owner.
+ * The parent must share this fence across all leaves of the same live owner. Recovery cannot
+ * replace a revoked fence to resurrect permission. After restart, creating a fence requires both
+ * revalidating the persisted owner and the parent's current cancellation/account policy.
  */
 class GenerationAssetFence(
     val owner: GenerationAssetOwner,
@@ -167,6 +169,17 @@ class MessageGenerationAssets internal constructor(
             if (!exists(directory(slot))) null
             else readRecord(slot).also { openVerified(it).use { } }
         } }
+    }
+
+    /**
+     * Final output-store admission only. The caller has already verified files, outside SQLite.
+     * Holds the same gate as publication/revoke until the SQL callback has COMMITTED or failed.
+     * Never call from a DB transaction, or do asset/file IO in the callback: gate -> DB only.
+     * Owner equality also matters for an absent slot, which has no Pending to compare.
+     */
+    internal fun <T> admitRegistration(expectedOwner: GenerationAssetOwner, sql: () -> T): T = guarded {
+        if (owner.fields() != expectedOwner.fields()) reject(GenerationAssetFailure.OWNER_REJECTED)
+        fence.admit(sql)
     }
 
     /** Lookup only in this real owner's namespace. Forged/foreign receipts fail closed. */

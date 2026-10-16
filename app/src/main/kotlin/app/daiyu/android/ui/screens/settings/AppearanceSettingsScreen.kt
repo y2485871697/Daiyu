@@ -23,6 +23,7 @@ internal data class AppearanceSettingsUi(
     val themeMode: SettingsThemeMode = SettingsThemeMode.SYSTEM,
     val interfaceScale: Float = 1f,
     val showMessageTimestamps: Boolean = false,
+    val wallpaperColors: Boolean = false,
 )
 
 /** Presentation only: icon entries preserve the host's existing custom icon implementation. */
@@ -31,6 +32,7 @@ internal fun AppearanceSettingsScreen(
     state: AppearanceSettingsUi,
     onThemeModeChange: (SettingsThemeMode) -> Unit,
     onInterfaceScaleChange: (Float) -> Unit,
+    onWallpaperColorsChange: (Boolean) -> Unit,
     onOpenAppIcon: () -> Unit,
     onOpenIconAppearance: () -> Unit,
     onOpenPet: () -> Unit,
@@ -54,6 +56,9 @@ internal fun AppearanceSettingsScreen(
                 ).forEach { (mode, title) ->
                     SettingsRadioRow(title, state.themeMode == mode) { onThemeModeChange(mode) }
                 }
+            }
+            SettingsCard(Modifier.padding(top = 8.dp)) {
+                SettingsSwitchRow("壁纸取色", state.wallpaperColors, onWallpaperColorsChange)
             }
         }
         item(key = "appearance_scale") {

@@ -7,7 +7,7 @@ const val DEFAULT_INTERFACE_SCALE = 1f
 
 data class AppearanceSettings(
     val themeMode: AppearanceThemeMode = AppearanceThemeMode.LIGHT,
-    val monetEnabled: Boolean = true,
+    val monetEnabled: Boolean = false,
     val paletteStyle: AppearancePaletteStyle = AppearancePaletteStyle.NEUTRAL,
     val accentColor: AppearanceAccentColor = AppearanceAccentColor.SYSTEM,
     val pureBlackEnabled: Boolean = false,
@@ -24,7 +24,6 @@ data class AppearanceSettings(
     val iconCatColor: Int = DEFAULT_ICON_CAT,
 ) {
     fun normalized(): AppearanceSettings = copy(
-        monetEnabled = true,
         interfaceScale = normalizeInterfaceScale(interfaceScale),
         iconLightColor = iconLightColor or 0xFF000000.toInt(),
         iconDarkColor = iconDarkColor or 0xFF000000.toInt(),

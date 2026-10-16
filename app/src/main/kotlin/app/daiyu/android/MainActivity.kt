@@ -94,6 +94,11 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : ComponentActivity() {
     private val controller get() = (application as ChatApplication).controller
+    private var hapticsHost: app.daiyu.android.haptics.HapticsActivityHost? = null
+    private fun syncHaptics() {
+        hapticsHost?.sync(selected?.id?.value, retainedPage == "chat" && !sidebarVisible,
+            retainedPage == "haptics")
+    }
     private val retainedData by lazy { RetainedConversationData(controller.database, ContextService(this, controller.database)) }
     private val assistantStore get() = controller.assistantStore
     private val assistantAssets get() = controller.assistantAssets
@@ -131,6 +136,7 @@ class MainActivity : ComponentActivity() {
             speechHost.setVisible(value == "chat" && !sidebarVisible)
             imageHost.setVisible(value == "chat" && !sidebarVisible, selected?.id?.value)
             retainedPageState = value
+            syncHaptics()
         }
     private var paneState by mutableStateOf(ConversationPaneUiState(emptyList(), null, ""))
     private var chatState by mutableStateOf(ChatScreenState("代鱼"))
@@ -231,6 +237,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        hapticsHost = app.daiyu.android.haptics.HapticsActivityHost(
+            (application as ChatApplication).hapticsRuntime, window.decorView, this, controller)
         interactiveModeObservation = controller.interactiveMode.observe { interactiveModeEnabled = it }
         appearance = loadAppearance()
         activityCallbacksAllowed = true
@@ -256,7 +264,7 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "appearance" -> retainedPage = "settings"
+                        "appearance", "haptics" -> retainedPage = "settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
                         else -> returnToChat()
@@ -330,7 +338,21 @@ class MainActivity : ComponentActivity() {
                         onOpenSubAgents = { retainedPage = "subagents" },
                         onOpenAssistants = { openAssistantPicker(global = true) },
                         onOpenAppearance = { retainedPage = "appearance" },
+                        onOpenHaptics = {
+                            if (activityUsable() && retainedPage == "settings") retainedPage = "haptics"
+                        },
                     )
+                    "haptics" -> hapticsHost?.let { host ->
+                        host.settingsOwner?.let { owner -> key(owner) {
+                            HapticsSettingsScreen(host.runtime, owner.feedback,
+                                onBack = {
+                                    if (host.isCurrentSettings(owner) && retainedPage == "haptics") {
+                                        retainedPage = "settings"
+                                    }
+                                },
+                                ownerCurrent = { host.isCurrentSettings(owner) && retainedPage == "haptics" })
+                        } }
+                    }
                     "models" -> modelDraft?.let { value ->
                         ModelSettingsScreen(
                             draft = value, onDraftChange = { changeModelDraft(it) },
@@ -863,6 +885,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        hapticsHost?.close(); hapticsHost = null
         interactiveModeObservation?.close()
         interactiveModeObservation = null
         cancelShizukuEditor()
@@ -1156,6 +1179,7 @@ class MainActivity : ComponentActivity() {
         return result
     }
     private fun publishChat() {
+        syncHaptics()
         // Also catches new-chat -> persisted conversation after sending, without auto-playing.
         speechHost.syncConversation(selected?.id?.value)
         imageHost.syncConversation(selected?.id?.value)

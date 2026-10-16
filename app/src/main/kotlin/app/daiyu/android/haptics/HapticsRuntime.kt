@@ -28,26 +28,31 @@ class HapticsRuntime internal constructor(
     private var activeUiPort: HapticPort? = null
     // The engine only arbitrates its Sessions. UI playback must share the same motor owner.
     private var latestPlaybackToken: Any? = null
+    // Playback and capability revocation share a lock. Engine/View work stays on main, while
+    // a controller stop on any thread can reject queued ticks and cancel only its own motor.
+    private val playbackLock = Any()
 
-    private fun ownedPort(view: View): HapticPort {
+    private fun ownedPort(view: View, allowed: () -> Boolean = { true }): HapticPort {
         val delegate = portFactory(view)
         return object : HapticPort {
             private var token: Any? = null
 
-            override fun play(request: HapticRequest): HapticDelivery {
+            override fun play(request: HapticRequest): HapticDelivery = synchronized(playbackLock) {
+                if (!allowed()) return@synchronized HapticDelivery.UNAVAILABLE
                 val result = delegate.play(request)
                 if (result == HapticDelivery.PLAYED) {
                     token = Any()
                     latestPlaybackToken = token
                 }
-                return result
+                result
             }
 
-            override fun cancel() {
-                val owned = token ?: return
+            override fun cancel() = synchronized(playbackLock) {
+                val owned = token ?: return@synchronized
                 token = null
-                if (latestPlaybackToken !== owned) return
-                // Revoke before calling the device, even if cancellation throws.
+                if (latestPlaybackToken !== owned) return@synchronized
+                // Revoke before calling the device, even if cancellation throws. cancel() does
+                // not access the View, and may also be called by a background controller stop.
                 latestPlaybackToken = null
                 delegate.cancel()
             }
@@ -89,11 +94,13 @@ class HapticsRuntime internal constructor(
     fun attach(view: View, conversationId: String, resumed: Boolean = false): Session {
         checkMain()
         check(!closed)
-        return Session(engine.attach(conversationId, ownedPort(view), resumed))
+        return Session(view, conversationId, resumed)
     }
 
-    inner class Session internal constructor(private val owner: HapticEngine.Owner) : AutoCloseable {
+    inner class Session internal constructor(view: View, conversationId: String, resumed: Boolean) : AutoCloseable {
         @Volatile private var disposed = false
+        private val port = ownedPort(view) { !disposed }
+        private val owner = engine.attach(conversationId, port, resumed)
         fun lifecycle(resumed: Boolean, visibleOutput: Boolean, enabled: Boolean = true) {
             checkMain()
             if (!disposed && !closed) {
@@ -122,11 +129,14 @@ class HapticsRuntime internal constructor(
         fun toolAppeared(id: String) = dispatch { if (!disposed) engine.toolAppeared(owner, id) }
         fun reasoningCompleted(id: String) = dispatch { if (!disposed) engine.reasoningCompleted(owner, id) }
         override fun close() {
-            checkMain()
-            if (disposed) return
-            disposed = true
-            engine.detach(owner)
-            schedule()
+            synchronized(playbackLock) {
+                if (disposed) return
+                disposed = true
+                try { port.cancel() } catch (_: Exception) { /* Revocation still wins. */ }
+            }
+            // Logical cancellation above is synchronous even if an already queued drain runs
+            // before this main-thread removal. Its port can no longer play.
+            dispatch { engine.detach(owner) }
         }
     }
 

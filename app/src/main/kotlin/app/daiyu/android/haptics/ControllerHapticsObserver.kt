@@ -19,12 +19,17 @@ class ControllerHapticsObserver(
     private val host: HapticsHostBinding,
 ) : AutoCloseable {
     private var closed = false
-    var run: HapticsHostBinding.Run? = null
+    @Volatile var run: HapticsHostBinding.Run? = null
         private set
     private val text = linkedMapOf<String, String>()
     private val tools = mutableSetOf<String>()
     private val listener: () -> Unit = { accept(controller.active, seed = false) }
     private val hostClosed = host.onClosed(::close)
+    private val revocation = controller.observeRunRevocation { owner ->
+        // May run on a control thread. Do not wait for a terminal snapshot or the main looper.
+        run?.takeIf { it.runId == owner.runId.value && it.messageId == owner.id.value &&
+            host.conversationId == owner.conversationId.value }?.stop()
+    }
 
     init {
         checkMain()
@@ -37,7 +42,8 @@ class ControllerHapticsObserver(
         checkMain()
         if (closed) return
         if (!host.acceptsRuns || message == null || message.conversationId.value != host.conversationId ||
-            message.role != Message.ASSISTANT_ROLE || message.status != RunStatus.RUNNING) {
+            message.role != Message.ASSISTANT_ROLE || message.status != RunStatus.RUNNING ||
+            !controller.isRunUnfenced(message)) {
             run?.stop(); run = null; text.clear(); tools.clear()
             return
         }
@@ -53,6 +59,8 @@ class ControllerHapticsObserver(
             run = current
         }
         val activeRun = checkNotNull(current)
+        // A background stop may have raced creation before run was published to the listener.
+        if (!controller.isRunUnfenced(message)) { activeRun.stop(); return }
         // Stable item/call IDs dedupe repeated controller notifications and history segment overlap.
         val blocks = (message.historySegments.filter { it.role == Message.ASSISTANT_ROLE }
             .flatMap { it.blocks } + message.blocks).associateBy { block -> when (block) {
@@ -86,6 +94,7 @@ class ControllerHapticsObserver(
         if (closed) return
         closed = true
         controller.unobserve(listener)
+        revocation.close()
         hostClosed.close()
         run?.stop(); run = null; text.clear(); tools.clear()
     }

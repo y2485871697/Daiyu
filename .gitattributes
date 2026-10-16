@@ -5,3 +5,6 @@
 *.jpg binary
 *.webp binary
 *.zip binary
+# Preserve the fixed upstream COPYING bytes, including its terminal blank line.
+THIRD_PARTY/sherpa-ncnn/KISSFFT-COPYING whitespace=-blank-at-eof
+app/src/main/assets/licenses/sherpa-ncnn/KISSFFT-COPYING whitespace=-blank-at-eof

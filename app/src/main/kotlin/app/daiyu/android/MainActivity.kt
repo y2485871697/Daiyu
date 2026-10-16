@@ -99,6 +99,7 @@ import app.daiyu.android.ui.screens.search.ConversationSearchScreen
 import app.daiyu.android.ui.screens.search.MessageSearchScreen
 import app.daiyu.android.ui.screens.stats.UsageStatsScreen
 import java.util.concurrent.atomic.AtomicBoolean
+import androidx.compose.ui.graphics.asImageBitmap
 
 class MainActivity : ComponentActivity() {
     private val controller get() = (application as ChatApplication).controller
@@ -169,15 +170,22 @@ class MainActivity : ComponentActivity() {
     private var shizukuEditor by mutableStateOf<ShizukuEditor?>(null)
     private var shizukuInFlight by mutableStateOf<ControllerShizukuPreparation?>(null)
     private val shizukuWritesBlocked: Boolean get() = shizukuInFlight != null ||
-        controller.shizukuPreparation()?.isSubmitted() == true
+        controller.shizukuPreparation()?.isSubmitted() == true || controller.generationSubmissionPending()
     private val imagePicker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         imageHost.picked(uris)
     }
-    private var sidebarVisible by mutableStateOf(false)
+    private var sidebarVisibleState by mutableStateOf(false)
+    private var sidebarVisible: Boolean
+        get() = sidebarVisibleState
+        set(value) {
+            if (value && !sidebarVisibleState) cancelGenerationOutputs()
+            sidebarVisibleState = value
+        }
     private var retainedPageState by mutableStateOf("chat")
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
+            if (value != retainedPageState) cancelGenerationOutputs()
             if (value != "generation-settings") {
                 generationSettingsVisit?.active?.set(false)
                 generationSettingsVisit = null
@@ -228,6 +236,13 @@ class MainActivity : ComponentActivity() {
     private var browserApproval by mutableStateOf<ControllerBrowserPreparation?>(null)
     private var browserPreparing by mutableStateOf(false)
     private var browserRequest: Any? = null
+    private var generationApproval by mutableStateOf<ChatController.GenerationEntry?>(null)
+    private var generationForm by mutableStateOf(app.daiyu.android.ui.GenerationApprovalForm())
+    private var generationFormRevision by mutableStateOf(0L)
+    private var generationRequest: Any? = null
+    private var generationOutputs by mutableStateOf<List<ChatController.GenerationAssetDisplay>?>(null)
+    private var generationOutputsRequest: Any? = null
+    private var generationReceiptNotice by mutableStateOf<ChatController.GenerationReceiptNotice?>(null)
     private val supplementDraft = PausedSupplementDraft()
     private val selections get() = controller.selections
     private var shown = mutableListOf<Pair<Long, Message>>()
@@ -359,7 +374,9 @@ class MainActivity : ComponentActivity() {
                         onDeleteConversation = { item -> guard { deleteRetainedConversation(item.id) } },
                         onDeleteAll = { guard {
                             check(controller.active == null) { "请先停止当前运行" }
-                            retainedData.deleteAll(); select(null); updatePane()
+                            controller.mutateGenerationOwners(completed = { success ->
+                                if (activityUsable() && success) { select(null); updatePane() }
+                            }, mutation = { retainedData.deleteAll() })
                         } },
                         onOpenMessageSearch = { guard { openSearch("message-search") } },
                         onOpenConversationSearch = { guard { searchConversations() } },
@@ -609,6 +626,22 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 PromptSurface()
+                generationReceiptNotice?.let { notice ->
+                    androidx.compose.ui.window.Popup(alignment = androidx.compose.ui.Alignment.TopCenter) {
+                        androidx.compose.material3.Surface(tonalElevation = 8.dp) {
+                            androidx.compose.material3.TextButton(
+                                modifier = Modifier.testTag("generation-receipt-ack"),
+                                onClick = {
+                                    if (activityUsable() && controller.acknowledgeGenerationReceipt(notice)) {
+                                        generationReceiptNotice = null
+                                        refresh()
+                                    }
+                                }) {
+                                androidx.compose.material3.Text("生成消息已保存，确认收件（保留当前草稿）")
+                            }
+                        }
+                    }
+                }
                 chatModelPicker?.let { picker ->
                     val owner = chatModelOwner
                     ChatModelPicker(picker, onSelect = { selectChatModel(it, owner) },
@@ -799,6 +832,16 @@ class MainActivity : ComponentActivity() {
                 enabled = available && !browserPreparing && browserApproval == null && pendingTextSend == null,
                 modifier = Modifier.testTag("browser-approval-entry").heightIn(min = 48.dp),
                 onClick = ::openBrowserApproval)
+            top.yukonga.miuix.kmp.basic.TextButton(
+                text = "图片 / 视频生成审批",
+                enabled = available && pendingTextSend == null && generationApproval == null &&
+                    !controller.generationSubmissionPending(),
+                modifier = Modifier.testTag("generation-approval-entry").heightIn(min = 48.dp),
+                onClick = ::openGenerationApproval)
+            top.yukonga.miuix.kmp.basic.TextButton(text = "读取本会话生成资产",
+                modifier = Modifier.testTag("generation-output-entry").heightIn(min = 48.dp),
+                onClick = ::openGenerationOutputs)
+            GenerationSurfaces()
             browserApproval?.let { pending ->
                 val observedState by produceState(pending.state, pending) {
                     while (true) {
@@ -841,7 +884,160 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun cancelGenerationEditor() {
+        generationRequest = null
+        val entry = generationApproval
+        generationApproval = null
+        if (entry != null && !entry.submitted) controller.abandonGeneration(entry)
+    }
+
+    private fun openGenerationApproval() {
+        if (!activityUsable() || retainedPage != "chat" || sidebarVisible || !selectionReady ||
+            pendingTextSend != null || imageHost.hasAttachments || draft.isBlank() ||
+            controller.generationSubmissionPending()) return
+        cancelGenerationEditor(); cancelBrowserEditor(); cancelShizukuEditor()
+        val request = Any()
+        generationRequest = request
+        val generation = editorGeneration
+        val revision = draftRevision
+        val text = draft
+        val conversation = selected
+        lifecycleScope.launch {
+            var entry: ChatController.GenerationEntry? = null
+            var retained = false
+            try {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                    entry = controller.prepareGeneration(conversation, generation,
+                        GenerationEditorSnapshot(revision, text))
+                }
+                if (activityUsable() && generationRequest === request && generation == editorGeneration &&
+                    revision == draftRevision && text == draft && conversation?.id == selected?.id &&
+                    retainedPage == "chat" && !sidebarVisible && !imageHost.hasAttachments) {
+                    generationApproval = entry
+                    generationForm = app.daiyu.android.ui.GenerationApprovalForm(prompt = text,
+                        maxPolls = entry?.settings?.maxPolls?.toString() ?: "4")
+                    generationFormRevision = revision
+                    retained = entry != null
+                    if (!retained) toast(controller.problem ?: "生成入口未受理；草稿保留")
+                }
+            } finally {
+                if (!retained) entry?.let(controller::abandonGeneration)
+                if (generationRequest === request) generationRequest = null
+            }
+        }
+    }
+
+    @Composable private fun GenerationSurfaces() {
+        generationApproval?.let { entry ->
+            androidx.compose.ui.window.Dialog(onDismissRequest = ::cancelGenerationEditor) {
+                androidx.compose.material3.Surface {
+                    Column(Modifier.fillMaxWidth().heightIn(max = 620.dp)
+                        .verticalScroll(rememberScrollState()).padding(16.dp)) {
+                        androidx.compose.material3.Text(ControllerGenerationResources.DOWNLOAD_STATUS)
+                        androidx.compose.material3.Text("当前入口仅支持文本生成；原图和 mask 的安全导入尚未接线。生成配置保存不会启动请求。")
+                        app.daiyu.android.ui.GenerationApprovalHost(
+                            identity = entry.identity,
+                            editor = GenerationEditorSnapshot(generationFormRevision, draft),
+                            profiles = entry.settings.profiles,
+                            downloads = entry.settings.downloads,
+                            form = generationForm,
+                            confirmationHandoff = entry.handoff,
+                            onFormChange = { value ->
+                                if (!entry.submitted) { generationForm = value; generationFormRevision++ }
+                            },
+                            onPickReference = { toast("此入口尚不支持安全导入原图；未修改草稿或发送请求") },
+                            onPickMask = { toast("此入口尚不支持安全导入 mask；未修改草稿或发送请求") },
+                            onConfirmed = {
+                                val valid = activityUsable() && generationApproval === entry &&
+                                    selected?.id == entry.conversation?.id && editorGeneration == entry.editorGeneration &&
+                                    draftRevision == entry.initialEditor.revision && draft == entry.initialEditor.text &&
+                                    !imageHost.hasAttachments
+                                val accepted = valid && controller.sendGeneration(entry,
+                                    GenerationEditorSnapshot(generationFormRevision, draft))
+                                generationApproval = null
+                                if (accepted) publishChat()
+                                else toast("本次生成未受理；草稿保留，请等待清理后重新预览")
+                                accepted
+                            },
+                            onCancelled = ::cancelGenerationEditor)
+                        androidx.compose.material3.TextButton(onClick = ::cancelGenerationEditor) {
+                            androidx.compose.material3.Text("关闭生成表单")
+                        }
+                    }
+                }
+            }
+        }
+        generationOutputs?.let { outputs ->
+            androidx.compose.material3.AlertDialog(onDismissRequest = ::cancelGenerationOutputs,
+                title = { androidx.compose.material3.Text("已登记生成资产") },
+                text = {
+                    Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                        if (outputs.isEmpty()) androidx.compose.material3.Text("暂无已登记资产；不会解析模型结果 URL，也不会重试生成。")
+                        outputs.forEach { output ->
+                            val meta = output.metadata
+                            androidx.compose.material3.Text("${meta.kind} · ${meta.mimeType} · ${meta.bytes} bytes · ${meta.width}×${meta.height}")
+                            output.thumbnail?.let { bitmap ->
+                                androidx.compose.foundation.Image(
+                                    bitmap = bitmap.asImageBitmap(),
+                                    contentDescription = "已校验的生成图片", modifier = Modifier.fillMaxWidth())
+                            }
+                            if (meta.kind == app.daiyu.android.model.generation.GenerationKind.VIDEO)
+                                androidx.compose.material3.Text("原视频已通过私有读取校验；当前入口不提供视频播放或导出。")
+                        }
+                    }
+                }, confirmButton = { androidx.compose.material3.TextButton(onClick = ::cancelGenerationOutputs) {
+                    androidx.compose.material3.Text("关闭")
+                } })
+        }
+    }
+
+    private fun cancelGenerationOutputs() {
+        generationOutputsRequest = null
+        generationOutputs = null
+    }
+
+    private fun openGenerationOutputs() {
+        val conversation = selected ?: return
+        if (!activityUsable() || !selectionReady || retainedPage != "chat" || sidebarVisible) return
+        cancelGenerationOutputs()
+        val request = Any().also { generationOutputsRequest = it }
+        val generation = editorGeneration
+        if (!controller.loadGenerationOutputs(conversation.id) { outputs ->
+            if (activityUsable() && generationOutputsRequest === request && retainedPage == "chat" &&
+                !sidebarVisible && selected?.id == conversation.id && editorGeneration == generation) {
+                generationOutputsRequest = null
+                if (outputs == null) toast("生成资产读取失败或授权已撤销；未重试生成")
+                else generationOutputs = outputs
+            }
+        }) {
+            if (generationOutputsRequest === request) generationOutputsRequest = null
+            toast("请等待当前数据操作完成")
+        }
+    }
+
+    private fun settleGenerationReceipt() {
+        generationReceiptNotice = controller.pendingGenerationReceiptNotice()
+        val notice = generationReceiptNotice ?: return
+        val entry = notice.entry
+        if (!entry.submitted || selected?.id != entry.conversation?.id ||
+            editorGeneration != entry.editorGeneration || draftRevision != entry.initialEditor.revision ||
+            draft != entry.initialEditor.text || imageHost.hasAttachments) return
+        val accepted = controller.consumeGenerationReceipt(entry, editorGeneration,
+            GenerationEditorSnapshot(draftRevision, draft)) { conversation ->
+            selected = conversation
+            editorGeneration++; draftRevision++
+            draft = ""; selectionStart = 0; selectionEnd = 0
+            controller.preferences.edit().putString("selected", conversation.id.value).apply()
+        }
+        if (accepted) {
+            generationReceiptNotice = null
+            publishChat(); selected?.let(::loadAcceptedHistory)
+        }
+    }
+
     private fun cancelBrowserEditor() {
+        cancelGenerationEditor()
+        cancelGenerationOutputs()
         browserRequest = null
         browserPreparing = false
         val pending = browserApproval
@@ -1312,9 +1508,12 @@ class MainActivity : ComponentActivity() {
         check(controller.active?.conversationId != conversation.id && !controller.hasLiveChildTasks(conversation.id)) {
             "请先停止此会话的运行和后台子任务"
         }
-        controller.database.delete(conversation.id)
-        if (selected?.id == conversation.id) select(null)
-        updatePane()
+        controller.mutateGenerationOwners(setOf(id), completed = { success ->
+            if (activityUsable() && success) {
+                if (selected?.id == conversation.id) select(null)
+                updatePane()
+            }
+        }, mutation = { controller.database.delete(conversation.id) })
     }
     private fun confirmDelete(id: String) {
         prompt = ConfirmPrompt("删除会话", "确认删除此会话及其消息？", "删除", true,
@@ -1537,6 +1736,7 @@ class MainActivity : ComponentActivity() {
         (if (controlTouchActive) controlTouchOwner else controlOwner)?.takeIf { it.conversationId == selected?.id }
     private fun refresh() {
         if (!activityUsable()) return
+        settleGenerationReceipt()
         trackShizukuPreparation()
         backupBusy = controller.dataBusy
         chatModelPicker = chatModelPicker?.copy(enabled = controller.active == null && !controller.dataBusy && controller.ready)

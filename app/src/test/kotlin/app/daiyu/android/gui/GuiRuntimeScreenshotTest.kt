@@ -102,7 +102,7 @@ class GuiRuntimeScreenshotTest {
                 isEnabled = true; isVisibleToUser = true; isClickable = true
                 setBoundsInScreen(Rect(0, 0, 100, 100))
                 ReflectionHelpers.setField(this, "mWindowId", windowId)
-                shadowOf(this).setWindow(window)
+                shadowOf(this).setAccessibilityWindowInfo(window)
                 shadowOf(this).setRefreshReturnValue(true)
                 shadowOf(this).setOnPerformActionListener { _, _ -> nodeActions++; true }
             }

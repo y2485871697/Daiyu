@@ -830,7 +830,11 @@ class MainActivity : ComponentActivity() {
         val owner: R08CleanupUiOwner, val adapter: ControllerVirtualCleanupAdapter) {
         var request by mutableStateOf<R08CleanupApprovalRequest?>(null)
         var decided by mutableStateOf(false)
-        var status by mutableStateOf("正在检查原运行排空状态；不观察物理退出、不发送 Release。")
+        var status by mutableStateOf("请选择显式观察任务或仅申请 Release；打开页面不执行 owner 操作。")
+        var tasks by mutableStateOf<ControllerVirtualDisplaySession.RetainedTasks?>(null)
+        var selectedTaskIds by mutableStateOf<Set<Int>>(emptySet())
+        var busy by mutableStateOf(false)
+        var observationStarted by mutableStateOf(false)
     }
     // Workers read only this atomic owner, never Compose state or the current text editor.
     private val currentCleanupOwner = AtomicReference<R08CleanupUiOwner?>(null)
@@ -2062,7 +2066,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.testTag("vd-cancel"), onClick = virtualDisplayCancelAction(entry, null))
             }
             controller.virtualDisplayEntry()?.let { originalEntry ->
-                top.yukonga.miuix.kmp.basic.TextButton(text = "为原副屏申请额外 Release 收尾",
+                top.yukonga.miuix.kmp.basic.TextButton(text = "原副屏任务交付 / Release 收尾",
                     enabled = originalEntry.revoked && selected?.id == originalEntry.conversationId,
                     modifier = Modifier.testTag("vd-cleanup-entry"),
                     onClick = { openVirtualDisplayCleanup(originalEntry) })
@@ -3120,13 +3124,69 @@ class MainActivity : ComponentActivity() {
             ?: run { owner.close(); currentCleanupOwner.compareAndSet(owner, null); return }
         val visit = VirtualDisplayCleanupVisit(originalEntry, owner, adapter)
         virtualDisplayCleanupVisit = visit
+    }
+
+    private fun prepareVirtualDisplayCleanup(visit: VirtualDisplayCleanupVisit) {
+        if (!cleanupVisitCurrent(visit) || visit.busy || visit.request != null) return
+        visit.busy = true
         lifecycleScope.launch {
-            val request = withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { adapter.prepareOnWorker() }
-            if (cleanupVisitCurrent(visit) && request != null && adapter.canPublish(request)) {
-                visit.request = request
-                visit.status = "请核对原 owner 的独立一次 Release 授权；不是原文本权限恢复。"
-            } else if (cleanupVisitCurrent(visit)) {
-                visit.status = "暂不可收尾：排空未完成、请求已回答或结果 UNKNOWN。未发送，不自动重试。"
+            val request = try {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { visit.adapter.prepareOnWorker() }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+            if (cleanupVisitCurrent(visit)) {
+                visit.busy = false
+                if (request != null && visit.adapter.canPublish(request)) {
+                    visit.request = request
+                    visit.status = "请核对原 owner 的独立 Release；本次不交付任务。"
+                } else visit.status = "暂不可释放：排空未完成、仍持有任务或请求已处理。未发送，不自动重试。"
+            } else closeVirtualDisplayCleanup(visit)
+        }
+    }
+
+    private fun observeVirtualDisplayTasks(visit: VirtualDisplayCleanupVisit) {
+        if (!cleanupVisitCurrent(visit) || visit.busy || visit.observationStarted || visit.request != null) return
+        visit.busy = true; visit.observationStarted = true
+        lifecycleScope.launch {
+            val result = try {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { visit.adapter.observeTasksOnWorker() }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { ControllerVirtualDisplaySession.TasksResult.Unknown }
+            if (cleanupVisitCurrent(visit)) {
+                visit.busy = false
+                visit.status = when (result) {
+                    is ControllerVirtualDisplaySession.TasksResult.Observed -> {
+                        if (visit.adapter.canPublishTasks(result.tasks)) {
+                            visit.tasks = result.tasks
+                            if (result.tasks.candidateTaskIds.isEmpty()) "原 owner 没有可交付的 live owned task。"
+                            else "请明确选择原副屏 ${result.tasks.displayId} 的任务；未选任务可能被清理。默认不选。"
+                        } else "原访问已失效；不发布任务候选。"
+                    }
+                    ControllerVirtualDisplaySession.TasksResult.Unknown -> "任务观察 UNKNOWN；保留原身份，不重试、不交付。"
+                    ControllerVirtualDisplaySession.TasksResult.Unavailable -> "任务观察未执行或已处理；请检查原运行是否排空。"
+                }
+            } else closeVirtualDisplayCleanup(visit)
+        }
+    }
+
+    private fun prepareVirtualDisplayTaskHandoff(visit: VirtualDisplayCleanupVisit) {
+        val tasks = visit.tasks ?: return
+        if (!cleanupVisitCurrent(visit) || visit.busy || visit.request != null || visit.selectedTaskIds.isEmpty()) return
+        val selected = tasks.candidateTaskIds.filter { it in visit.selectedTaskIds }
+        visit.busy = true
+        lifecycleScope.launch {
+            val request = try {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                    visit.adapter.prepareTaskHandoffOnWorker(tasks, selected)
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+            if (cleanupVisitCurrent(visit)) {
+                visit.busy = false
+                if (request != null && visit.adapter.canPublish(request)) {
+                    visit.request = request
+                    visit.status = "选择已冻结；请核对完整 Handoff → 条件 Release 参数和授权。"
+                } else visit.status = "交付审批未冻结；原状态已改变或选择不可用，不自动重试。"
             } else closeVirtualDisplayCleanup(visit)
         }
     }
@@ -3140,14 +3200,19 @@ class MainActivity : ComponentActivity() {
         visit.decided = true
         visit.status = "已显式批准；排队 worker 将再次检查原父记录、本地 drain 和 UI admission。"
         lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
-                visit.adapter.releaseOnWorker(request)
-            }
+            val result = try {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { visit.adapter.releaseOnWorker(request) }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { ControllerVirtualDisplaySession.CleanupResult.UNKNOWN }
             if (cleanupVisitCurrent(visit)) visit.status = when (result) {
                 ControllerVirtualDisplaySession.CleanupResult.CONFIRMED ->
-                    "Release 已确认；不是物理退出证明。保留原记录，请单独核实停止。"
+                    "Release 已确认；本次不代表交付任务。保留原记录，请单独核实物理退出。"
+                ControllerVirtualDisplaySession.CleanupResult.DELIVERED_AND_RELEASED ->
+                    "所选非空任务已确认交付，Release 已确认；请单独核实 owner 物理退出。"
+                ControllerVirtualDisplaySession.CleanupResult.DELIVERED_RETAINED ->
+                    "所选任务已确认交付；Release 未确认或未发送，保留原 owner、journal 和 lease，不补发。"
                 ControllerVirtualDisplaySession.CleanupResult.UNKNOWN ->
-                    "Release UNKNOWN；保留原身份、journal 和 lease，不重发、不重连。"
+                    "收尾 UNKNOWN；保留原身份、journal 和 lease，不重发、不重连。"
                 ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
                 ControllerVirtualDisplaySession.CleanupResult.NOT_APPROVED ->
                     "Release 未发送或已处理；不自动重试，保留原记录。"
@@ -3172,6 +3237,34 @@ class MainActivity : ComponentActivity() {
                 properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
                 androidx.compose.material3.Surface {
                     Column(Modifier.fillMaxSize().padding(16.dp)) {
+                        if (visit.request == null) {
+                            androidx.compose.material3.TextButton(onClick = { prepareVirtualDisplayCleanup(visit) },
+                                enabled = !visit.busy, modifier = Modifier.testTag("vd-cleanup-release-only")) {
+                                androidx.compose.material3.Text("仅申请 Release 收尾（不交付任务）")
+                            }
+                            androidx.compose.material3.TextButton(onClick = { observeVirtualDisplayTasks(visit) },
+                                enabled = !visit.busy && !visit.observationStarted,
+                                modifier = Modifier.testTag("vd-cleanup-observe-tasks")) {
+                                androidx.compose.material3.Text("显式观察原副屏可交付任务（只读）")
+                            }
+                            visit.tasks?.let { tasks ->
+                                Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
+                                    tasks.candidateTaskIds.forEach { id ->
+                                        androidx.compose.material3.Checkbox(checked = id in visit.selectedTaskIds,
+                                            onCheckedChange = { checked -> if (!visit.busy) {
+                                                visit.selectedTaskIds = if (checked) visit.selectedTaskIds + id else visit.selectedTaskIds - id
+                                            } }, enabled = !visit.busy,
+                                            modifier = Modifier.testTag("vd-delivery-task-$id"))
+                                        androidx.compose.material3.Text("原副屏 ${tasks.displayId} · owned task $id")
+                                    }
+                                }
+                                androidx.compose.material3.Button(onClick = { prepareVirtualDisplayTaskHandoff(visit) },
+                                    enabled = !visit.busy && visit.selectedTaskIds.isNotEmpty(),
+                                    modifier = Modifier.testTag("vd-cleanup-freeze-delivery")) {
+                                    androidx.compose.material3.Text("冻结所选任务交付审批")
+                                }
+                            }
+                        }
                         visit.request?.let { request ->
                             R08CleanupApprovalScreen(request,
                                 onDecision = { req, accepted -> answerVirtualDisplayCleanup(visit, req, accepted) },

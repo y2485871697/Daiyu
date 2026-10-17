@@ -266,7 +266,7 @@ internal class R08PersistentJournal internal constructor(
         private val HASH = Regex("[0-9a-f]{64}")
         private val GENERATION = Regex("[A-Za-z0-9_-]{1,64}")
         private val EVENT_NAME = Regex("[0-9]{20}\\.(event|pending)")
-        private val OPERATIONS = setOf("start", "initialize", "launch", "input", "release")
+        private val OPERATIONS = setOf("start", "initialize", "launch", "input", "status", "snapshot", "handoff", "release")
         // Retained for process lifetime: removing an idle entry races a waiter/new instance.
         private val gates = ConcurrentHashMap<Path, ReentrantLock>()
 

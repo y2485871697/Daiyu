@@ -22,18 +22,22 @@ import java.util.concurrent.atomic.AtomicInteger
 class ControllerVirtualDisplaySessionTest {
     private class Journal : R08VirtualDisplayJournal {
         val claims = mutableMapOf<String, R08VirtualDisplayIntent>()
+        var onClaim: (R08VirtualDisplayIntent) -> Unit = {}
         override fun claim(intent: R08VirtualDisplayIntent): R08VirtualDisplayPermit {
+            onClaim(intent)
             val old = claims.putIfAbsent(intent.operationId, intent)
             require(old == null || old == intent)
             return if (old == null) R08VirtualDisplayPermit.EXECUTE_ONCE else R08VirtualDisplayPermit.LOOKUP_ONLY
         }
         var failHandoffComplete = false
+        var onComplete: (R08VirtualDisplayIntent) -> Unit = {}
         var failCleanupComplete = false
         val evidence = mutableListOf<Pair<R08VirtualDisplayIntent, R08VirtualDisplayEvidence>>()
         override fun complete(intent: R08VirtualDisplayIntent, evidence: R08VirtualDisplayEvidence) {
             if (failHandoffComplete && intent.operation == "handoff") throw IOException("lost handoff completion")
             if (failCleanupComplete && intent.invocationId == "host-cleanup-release-v1") throw IOException("lost completion")
             this.evidence += intent to evidence
+            onComplete(intent)
         }
         val finals = mutableListOf<Pair<String, R08VirtualDisplayEvidence>>()
         override fun finalOutcome(bindingKey: String, generation: String, invocationId: String,
@@ -64,6 +68,7 @@ class ControllerVirtualDisplaySessionTest {
                 AndroidVirtualDisplayOwnerHost.Lifecycle.UNKNOWN, false, null, 77, false)
             return !failStart
         }
+        var statusBody: JSONObject? = null
         var confirmInitialize = false
         var confirmRelease = false
         var confirmLaunch = false
@@ -83,6 +88,7 @@ class ControllerVirtualDisplaySessionTest {
         override fun execute(id: String, operation: String, parameters: JSONObject): OwnerReply {
             writes++
             executed += Triple(id, operation, parameters.toString())
+            if (operation == "status" && statusBody != null) return OwnerReply(OwnerReply.Outcome.REPLIED, statusBody)
             if (operation == "launch" && confirmLaunch) return OwnerReply(OwnerReply.Outcome.REPLIED, JSONObject()
                 .put("ok", true).put("launched", true).put("receipt", JSONObject().put("state", "SUCCEEDED")))
             if (operation == "handoff") {
@@ -216,6 +222,115 @@ class ControllerVirtualDisplaySessionTest {
         fun observe(parentDrained: Boolean = true) = work { session.observeCloseOnWorker(parentDrained) }
         override fun close() { session.close(); executor.shutdownNow() }
     }
+
+    private fun retainedTasks(f: Fixture): ControllerVirtualDisplaySession.RetainedTasks {
+        f.initialized()
+        f.session.close()
+        f.endpoint.statusBody = JSONObject().put("ok", true).put("receiptOnly", false)
+            .put("receipt", JSONObject().put("state", "SUCCEEDED")).put("ready", true)
+            .put("session", "active").put("mutationUncertain", false).put("finishing", false)
+            .put("handoffComplete", false).put("releaseAttempted", false).put("sourceState", "occupied")
+            .put("displayId", 7).put("retainedTaskIds", org.json.JSONArray(listOf(12, 23, 34)))
+            .put("liveTaskIds", org.json.JSONArray(listOf(12, 23))).put("goneTaskIds", org.json.JSONArray(listOf(34)))
+        return (f.work { f.session.observeTasksOnceOnWorker(true) } as
+            ControllerVirtualDisplaySession.TasksResult.Observed).tasks
+    }
+
+    private fun deliveryRequest(f: Fixture): app.daiyu.android.vdapproval.R08CleanupApprovalRequest {
+        val tasks = retainedTasks(f)
+        assertSame(tasks, (f.work { f.session.observeTasksOnceOnWorker(true) } as
+            ControllerVirtualDisplaySession.TasksResult.Observed).tasks)
+        assertEquals(1, f.endpoint.executed.count { it.second == "status" })
+        assertNull(f.work { f.session.prepareTaskHandoffOnWorker(tasks, emptyList(), true) })
+        assertNull(f.work { f.session.prepareTaskHandoffOnWorker(tasks, listOf(12, 12), true) })
+        assertNull(f.work { f.session.prepareTaskHandoffOnWorker(tasks, listOf(34), true) })
+        val request = checkNotNull(f.work { f.session.prepareTaskHandoffOnWorker(tasks, listOf(23), true) })
+        assertSame(request, f.work { f.session.prepareTaskHandoffOnWorker(tasks, listOf(23), true) })
+        assertTrue(request.deliversTasks)
+        assertEquals(listOf(23), request.selectedTaskIds)
+        assertEquals(listOf("handoff", "release"), request.review.rows.map { it.operation })
+        assertSame(f.owner, request.review.plan.owner)
+        assertSame(f.capabilities, request.review.plan.capabilities)
+        f.endpoint.handoffBody = JSONObject().put("ok", true).put("handedOff", true).put("sourceEmpty", true)
+            .put("cleanupOnly", false).put("keptTaskIds", org.json.JSONArray(listOf(23)))
+            .put("receipt", JSONObject().put("state", "SUCCEEDED"))
+        assertTrue(f.session.answerCleanupFromUi(request, true))
+        return request
+    }
+
+    @Test fun selectedTasksAreFrozenAndDeliveredBeforeReleaseWithoutReopeningOriginalAuthorization() = Fixture().use { f ->
+        val request = deliveryRequest(f)
+        f.endpoint.confirmRelease = true
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.DELIVERED_AND_RELEASED,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+        assertEquals(listOf("status", "handoff", "release"), f.endpoint.executed.map { it.second })
+        assertEquals("{\"taskIds\":[23]}", f.endpoint.executed.single { it.second == "handoff" }.third)
+        assertEquals(0, f.parent.lease.releases.get())
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+        assertEquals(1, f.endpoint.handoffIds.size)
+        assertEquals(1, f.endpoint.releaseIds.size)
+        f.endpoint.drained()
+        assertEquals(ControllerVirtualDisplaySession.CloseResult.Drained, f.observe())
+    }
+
+    @Test fun deliveryUnknownOrUnpersistedHandoffNeverSendsReleaseOrReplays() {
+        for (lostCompletion in listOf(false, true)) Fixture().use { f ->
+            val request = deliveryRequest(f)
+            f.endpoint.confirmRelease = true
+            if (lostCompletion) f.parent.lease.journal.failHandoffComplete = true
+            else f.endpoint.handoffBody = null
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNKNOWN,
+                f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+            assertEquals(0, f.endpoint.releaseIds.size)
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+                f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+            assertEquals(1, f.endpoint.handoffIds.size)
+        }
+    }
+
+    @Test fun closingAfterHandoffPersistenceAllowsOnlySeparatelyApprovedUnclaimedRelease() = Fixture().use { f ->
+        val request = deliveryRequest(f)
+        var active = true
+        f.parent.lease.journal.onComplete = { if (it.operation == "handoff") active = false }
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.DELIVERED_RETAINED,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) { active } })
+        assertEquals(0, f.endpoint.releaseIds.size)
+        val release = checkNotNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+        assertFalse(release.deliversTasks)
+        assertTrue(f.session.answerCleanupFromUi(release, true))
+        f.endpoint.confirmRelease = true
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.CONFIRMED,
+            f.work { f.session.releaseInitializedOnceOnWorker(release, true) })
+        assertEquals(1, f.endpoint.handoffIds.size)
+        assertEquals(1, f.endpoint.releaseIds.size)
+    }
+
+    @Test fun revocationDuringEachDurableClaimFencesTheNotYetSentStep() {
+        for (operation in listOf("handoff", "release")) Fixture().use { f ->
+            val request = deliveryRequest(f)
+            var active = true
+            f.parent.lease.journal.onClaim = { if (it.operation == operation) active = false }
+            val expected = if (operation == "handoff") ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE
+                else ControllerVirtualDisplaySession.CleanupResult.DELIVERED_RETAINED
+            assertEquals(expected, f.work { f.session.releaseInitializedOnceOnWorker(request, true) { active } })
+            assertEquals(0, f.endpoint.executed.count { it.second == operation })
+            assertTrue(f.parent.lease.journal.evidence.any {
+                it.first.operation == operation && it.second == R08VirtualDisplayEvidence.NOT_EXECUTED })
+            assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+        }
+    }
+
+    @Test fun confirmedDeliveryWithUnknownReleaseKeepsLeaseAndDoesNotOfferReplay() = Fixture().use { f ->
+        val request = deliveryRequest(f)
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.DELIVERED_RETAINED,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+        assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+        assertEquals(1, f.endpoint.handoffIds.size)
+        assertEquals(1, f.endpoint.releaseIds.size)
+        assertEquals(0, f.parent.lease.releases.get())
+    }
+
     private fun assertStopped(future: Future<*>) {
         try { future.get(5, TimeUnit.SECONDS); fail("accepted run continued") }
         catch (failure: ExecutionException) {

@@ -1367,7 +1367,10 @@ class MainActivity : ComponentActivity() {
                         },
                         isCurrent = { activityUsable() && voiceForeground && retainedPage == "voice-settings" },
                         invalidate = { invalidateConfiguredVoice(); speechHost.stop(speechHost.owner); dictationHost.invalidate() },
-                        onBack = { if (activityUsable()) retainedPage = "settings" })
+                        onBack = { if (activityUsable()) retainedPage = "settings" },
+                        onOpenOfflineSpeech = {
+                            if (activityUsable() && voiceForeground && retainedPage == "voice-settings") retainedPage = "offline-speech"
+                        })
                     "session-gateway" -> {
                         val owner = gatewayOwner
                         val value = gatewayDraft
@@ -1409,10 +1412,6 @@ class MainActivity : ComponentActivity() {
                         Column(Modifier.fillMaxSize()) {
                         top.yukonga.miuix.kmp.basic.TextButton(text = "保留会话网关",
                             modifier = Modifier.testTag("open-session-gateway"), onClick = { guard { openSessionGateway() } })
-                        top.yukonga.miuix.kmp.basic.TextButton(text = "语音设置 / 实时通话",
-                            modifier = Modifier.testTag("open-voice-settings"), onClick = {
-                                if (activityUsable() && retainedPage == "settings") retainedPage = "voice-settings"
-                            })
                         Box(Modifier.weight(1f)) { DaiyuSettingsScreen(
                         onBack = { returnToChat() }, onRoute = { route -> openSettingsFromPage(route) },
                         onOpenSubAgents = { retainedPage = "subagents" },

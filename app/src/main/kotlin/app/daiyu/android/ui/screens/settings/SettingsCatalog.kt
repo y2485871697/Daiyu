@@ -60,11 +60,9 @@ internal object SettingsCatalog {
             SettingsEntry("clear_logs", "清除日志", DaiyuIcons.Delete, SettingControl.ACTION),
         )),
         SettingsGroup("permissions", "权限", "授权检查、悬浮窗与无障碍", listOf(
-            SettingsEntry("permission_check", "权限检查", DaiyuIcons.Shield, SettingControl.PAGE),
             SettingsEntry("enhancements", "Root 与系统增强", DaiyuIcons.Device, SettingControl.PAGE, localPage = SettingsLocalPage.ENHANCEMENTS),
             SettingsEntry("overlay", "悬浮窗权限", DaiyuIcons.VirtualScreen, SettingControl.PAGE, localPage = SettingsLocalPage.OVERLAY),
             SettingsEntry("accessibility", "无障碍与 GUI 设置", DaiyuIcons.Accessibility, SettingControl.PAGE, FeatureRoute.GUI_SETTINGS),
-            SettingsEntry("accessibility_keep", "无障碍服务状态与重新绑定", DaiyuIcons.Shield, SettingControl.PAGE, FeatureRoute.GUI_SETTINGS),
         )),
         SettingsGroup("about", "关于", "版本、社区与项目入口", listOf(
             SettingsEntry("updates", "检查更新", DaiyuIcons.Refresh, SettingControl.PAGE, localPage = SettingsLocalPage.UPDATES),

@@ -35,7 +35,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     }
     fun testOriginalSettingsAppearOutsideExistingChatTreeWithoutStateLabels() {
         openHub()
-        assertEquals(40, entries.size)
+        assertEquals(38, entries.size)
         entries.forEach { item -> entry(item.id).assertIsEnabled().assertTextContains(item.title) }
         ui.onAllNodes(SemanticsMatcher("forbidden state marker") { semantics ->
             val texts = semantics.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text).orEmpty()
@@ -47,7 +47,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         setDraft("Gemini UI 草稿"); val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
         openHub()
-        val implemented = setOf("assistants", "subagents", "appearance", "haptics", "voice", "source", "default_reasoning", "telegram", "qq", "relay_st", "relay_moyu", "relay", "platform_tools", "permission_check")
+        val implemented = setOf("assistants", "subagents", "appearance", "haptics", "voice", "source", "default_reasoning", "telegram", "qq", "relay_st", "relay_moyu", "relay", "platform_tools")
         val placeholder = entries.single { it.id == "donate" }
         val unwired = entries.filter { it.route == null && it.localPage == null && it.id !in implemented && it != placeholder }
         assertEquals(4, unwired.size)

@@ -71,7 +71,7 @@ internal class ControllerChildBrowserPlan private constructor(
 
     companion object {
         fun prepare(parent: ControllerBrowserPreparation, prompt: String, allowedActions: Set<String>,
-            writes: List<String>): ControllerChildBrowserPlan {
+            writes: List<String>, downloads: app.daiyu.android.browser.download.BrowserDownloadShelf? = null): ControllerChildBrowserPlan {
             require(parent.state == ControllerBrowserPreparation.State.PREVIEW && prompt.isNotBlank() &&
                 prompt.length <= 4096 && prompt.toByteArray(Charsets.UTF_8).size <= 16 * 1024) { "invalid_child_prompt" }
             val identity = parent.identity
@@ -85,7 +85,8 @@ internal class ControllerChildBrowserPlan private constructor(
                 parent.preview.writes.map { it.effect }.toSet() + childEffects)
             val scope = ChildRunScope.capture(owner, capabilities, authorization, capabilities.enabled, childEffects)
             val session = CatalogChildBrowserSession.prepare(scope, parent.assistant, parent.settings, grant,
-                allowedActions.toSet(), writes.toList())
+                allowedActions.toSet(), writes.toList(),
+                downloads?.recorder(identity.conversationId.value, grant.owner) ?: {})
             return ControllerChildBrowserPlan(parent, prompt, scope, authorization, session)
         }
     }

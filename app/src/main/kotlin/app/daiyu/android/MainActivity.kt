@@ -614,7 +614,7 @@ class MainActivity : ComponentActivity() {
         set(value) {
             // Opening revokes even without a visit; closing cannot revive clicks rendered behind it.
             if (value != sidebarVisibleState) revokeContextManagementEntry()
-            if (value && !sidebarVisibleState) { revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
+            if (value && !sidebarVisibleState) { cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
             sidebarVisibleState = value
         }
     private class ContextManagementVisit(val owner: ContextManagementOwner,
@@ -637,6 +637,7 @@ class MainActivity : ComponentActivity() {
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
             if (value != retainedPageState && revokeContextManagementEntry()) editorGeneration++
             if (value != retainedPageState) cancelDeferredOpenedBackup()
+            if (value != "chat") cancelBrowserDownloadVisit()
             if (value != "reconnect-settings") {
                 reconnectSettingsPageOwner?.revoke()
                 reconnectSettingsPageOwner = null
@@ -689,15 +690,16 @@ class MainActivity : ComponentActivity() {
     private var chatState by mutableStateOf(ChatScreenState("代鱼"))
     private var interactiveModeEnabled by mutableStateOf(false)
     private var interactiveModeObservation: AutoCloseable? = null
-    private var selected: Conversation? = null
+    @Volatile private var selected: Conversation? = null
         set(value) {
             if (field?.id != value?.id && revokeContextManagementEntry()) editorGeneration++
+            if (field?.id != value?.id) cancelBrowserDownloadVisit()
             field = value
         }
     private var draft by mutableStateOf("")
     private var selectionStart = 0
     private var selectionEnd = 0
-    private var selectionReady = false
+    @Volatile private var selectionReady = false
     private val messageActionHost by lazy { ControllerMessageActionHost(controller) }
     private var messageActionVisit = Any()
     private var messageActionSnapshot: app.daiyu.android.storage.MessageActionSnapshot? = null
@@ -737,9 +739,9 @@ class MainActivity : ComponentActivity() {
         }
         if (!admitted) messageActionLoading = null
     }
-    private var editorGeneration = 0L
+    @Volatile private var editorGeneration = 0L
         set(value) {
-            if (field != value) { revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private var draftRevision = 0L
@@ -876,6 +878,19 @@ class MainActivity : ComponentActivity() {
     private var generationOutputs by mutableStateOf<List<ChatController.GenerationAssetDisplay>?>(null)
     private var historicalGenerationOutputs by mutableStateOf<List<ChatController.HistoricalGenerationAssetDisplay>?>(null)
     private var pendingHistoricalOriginal: app.daiyu.android.backup.HistoricalGenerationOutput? = null
+    // Memory-only, one-way capability for a chat/editor visit. Workers only read its
+    // atomic cancellation flag, never route/sidebar/Compose state that can undergo ABA.
+    private class BrowserDownloadVisit(val conversation: ConversationId, val generation: Long) {
+        val active = AtomicBoolean(true)
+    }
+    private var browserDownloadVisit: BrowserDownloadVisit? = null
+    private data class BrowserDownloadListing(val visit: BrowserDownloadVisit,
+        val references: List<app.daiyu.android.browser.download.BrowserCompletedDownload>)
+    private var browserDownloadOutputs by mutableStateOf<BrowserDownloadListing?>(null)
+    private data class BrowserSaveSelection(val requestCode: Int, val visit: BrowserDownloadVisit,
+        val reference: app.daiyu.android.browser.download.BrowserCompletedDownload)
+    private var pendingBrowserDownload: BrowserSaveSelection? = null
+    private var nextBrowserSaveRequestCode = 14000
     private var generationOutputsRequest: Any? = null
     private var generationReceiptNotice by mutableStateOf<ChatController.GenerationReceiptNotice?>(null)
     private val supplementDraft = PausedSupplementDraft()
@@ -893,7 +908,7 @@ class MainActivity : ComponentActivity() {
     private var controlTouchActive = false
     private var controlTouchGeneration = 0L
     private val listener: () -> Unit = { refresh() }
-    private var activityCallbacksAllowed = false
+    @Volatile private var activityCallbacksAllowed = false
     private var refreshRateWindowResumed = false
     private var previousPreferredRefreshRate: Float? = null
     private var requestedPreferredRefreshRate: Float? = null
@@ -977,6 +992,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        nextBrowserSaveRequestCode = state?.getInt("browser-save-next", 14000) ?: 14000
         lifecycleScope.launch {
             // Application-retained deferred: first Keystore/disk read runs on IO, once per process.
             val runtime = (application as ChatApplication).balanceHost.get()
@@ -1003,7 +1019,7 @@ class MainActivity : ComponentActivity() {
         interactiveModeObservation = controller.interactiveMode.observe { interactiveModeEnabled = it }
         appearance = loadAppearance()
         activityCallbacksAllowed = true
-        pendingBackupRequest = state?.getInt("pending-backup-request", 0)?.takeIf { it != 0 }
+        pendingBackupRequest = state?.getInt("pending-backup-request", 0)?.takeIf { it != 0 && it !in 14000..65534 }
         conversationExport = ConversationExportSelection(
             state?.getString("pending-conversation-export").takeIf { pendingBackupRequest == 105 })
         exportPickerPending = pendingBackupRequest == 105
@@ -1946,6 +1962,10 @@ class MainActivity : ComponentActivity() {
             top.yukonga.miuix.kmp.basic.TextButton(text = "读取本会话生成资产",
                 modifier = Modifier.testTag("generation-output-entry").heightIn(min = 48.dp),
                 onClick = ::openGenerationOutputs)
+            top.yukonga.miuix.kmp.basic.TextButton(text = "保存本会话浏览器下载原件",
+                modifier = Modifier.testTag("browser-download-output-entry").heightIn(min = 48.dp),
+                onClick = ::openBrowserDownloadOutputs)
+            BrowserDownloadOutputsSurface()
             TerminalComposerEntry()
             GenerationSurfaces()
             browserApproval?.let { pending ->
@@ -2427,6 +2447,81 @@ class MainActivity : ComponentActivity() {
                     androidx.compose.material3.Text("关闭")
                 } })
         }
+    }
+
+    private fun cancelBrowserDownloadVisit() {
+        browserDownloadVisit?.active?.set(false)
+        browserDownloadVisit = null
+        browserDownloadOutputs = null
+        pendingBrowserDownload?.let { selection ->
+            // Do not clear another feature's picker or recycle this request code.
+            if (pendingBackupRequest == selection.requestCode) pendingBackupRequest = null
+        }
+        pendingBrowserDownload = null
+    }
+
+    private fun browserDownloadVisitCurrent(visit: BrowserDownloadVisit) =
+        visit.active.get() && browserDownloadVisit === visit && activityUsable() &&
+            selected?.id == visit.conversation && editorGeneration == visit.generation &&
+            selectionReady && retainedPage == "chat" && !sidebarVisible
+
+    private fun openBrowserDownloadOutputs() {
+        val conversation = selected?.id ?: return
+        if (!activityUsable() || !selectionReady || retainedPage != "chat" || sidebarVisible) return
+        val visit = browserDownloadVisit?.takeIf(::browserDownloadVisitCurrent) ?: run {
+            cancelBrowserDownloadVisit()
+            BrowserDownloadVisit(conversation, editorGeneration).also { browserDownloadVisit = it }
+        }
+        browserDownloadOutputs = BrowserDownloadListing(visit, controller.completedBrowserDownloads(conversation))
+    }
+
+    @Composable private fun BrowserDownloadOutputsSurface() {
+        browserDownloadOutputs?.takeIf { browserDownloadVisitCurrent(it.visit) }?.let { listing ->
+            androidx.compose.material3.AlertDialog(onDismissRequest = { browserDownloadOutputs = null },
+                title = { androidx.compose.material3.Text("浏览器已完成下载原件") },
+                text = {
+                    Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
+                        androidx.compose.material3.Text("仅列本次宿主已登记的可信完成产物；不会解析模型路径、重新下载或自动共享。重启后不从历史回执恢复保存授权。")
+                        if (listing.references.isEmpty()) androidx.compose.material3.Text("暂无可信完成产物。")
+                        listing.references.forEach { reference ->
+                            androidx.compose.material3.Text("${reference.lease.owner.kind} · ${reference.size} bytes · SHA-256 ${reference.sha256}")
+                            androidx.compose.material3.TextButton(
+                                enabled = controller.active == null && !controller.dataBusy,
+                                modifier = Modifier.testTag("browser-download-save:${reference.id}"),
+                                onClick = { backupGuard { pickBrowserDownloadOriginal(listing, reference) } }
+                            ) { androidx.compose.material3.Text("另存为原文件") }
+                        }
+                    }
+                }, confirmButton = { androidx.compose.material3.TextButton(onClick = { browserDownloadOutputs = null }) {
+                    androidx.compose.material3.Text("关闭")
+                } })
+        }
+    }
+
+    @Suppress("DEPRECATION") private fun pickBrowserDownloadOriginal(listing: BrowserDownloadListing,
+        reference: app.daiyu.android.browser.download.BrowserCompletedDownload) {
+        check(pendingBackupRequest == null && pendingBrowserDownload == null) { "文件选择尚未返回；请先完成或取消选择" }
+        check(browserDownloadVisitCurrent(listing.visit) && browserDownloadOutputs === listing) {
+            "原会话已变化；请重新打开下载原件"
+        }
+        controller.browserDownloads.assertOwned(listing.visit.conversation.value, reference)
+        check(nextBrowserSaveRequestCode < 65535) { "文件选择次数已达上限；请重建页面" }
+        val selection = BrowserSaveSelection(nextBrowserSaveRequestCode++, listing.visit, reference)
+        pendingBrowserDownload = selection
+        pendingBackupRequest = selection.requestCode
+        try {
+            startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "application/octet-stream"
+                putExtra(Intent.EXTRA_TITLE, "daiyu-browser-${reference.id}.download")
+            }, selection.requestCode)
+        } catch (failure: Exception) {
+            pendingBrowserDownload = null; pendingBackupRequest = null; throw failure
+        }
+    }
+
+    private fun assertBrowserSaveOwner(selection: BrowserSaveSelection) {
+        check(browserDownloadVisitCurrent(selection.visit)) { "原会话已变化；本次保存已失效" }
     }
 
     private fun cancelGenerationOutputs() {
@@ -3118,6 +3213,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(state: Bundle) {
         cancelDeferredOpenedBackup() // A recreated visit must require a fresh external open.
+        state.putInt("browser-save-next", nextBrowserSaveRequestCode)
+
         state.putBoolean("terminal-page", retainedPage == "terminal")
         state.putBoolean("balance-page", retainedPage == "balance-settings") // Route only, no balance credentials.
         state.putInt("pending-backup-request", pendingBackupRequest ?: 0)
@@ -3168,6 +3265,12 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        // The outstanding DocumentsUI needs this pause to return its one-shot result.
+        // Once consumed, a copy owns only this visit's atomic flag: backgrounding
+        // revokes it, even if a blocked provider has not returned (not a drain).
+        val picker = pendingBrowserDownload
+        if (picker == null || pendingBackupRequest != picker.requestCode ||
+            !browserDownloadVisitCurrent(picker.visit)) cancelBrowserDownloadVisit()
         controller.invalidateVideo(videoUi)
         videoDialog?.dismiss(); videoDialog = null
         (application as ChatApplication).let { app ->
@@ -3213,6 +3316,8 @@ class MainActivity : ComponentActivity() {
         if (revokeContextManagementEntry()) editorGeneration++
         cancelDeferredOpenedBackup()
         revokeTerminalJobsVisit()
+        cancelBrowserDownloadVisit()
+
         invalidateMessageActionEditor()
         reconnectSettingsPageOwner?.revoke()
         reconnectSettingsPageOwner = null
@@ -4163,6 +4268,26 @@ class MainActivity : ComponentActivity() {
     }
     @Suppress("DEPRECATION") override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        val browserSelection = pendingBrowserDownload
+        if (browserSelection?.requestCode == requestCode && pendingBackupRequest == requestCode) {
+            // Consume once, even on cancellation/invalid URI. Distinct request codes ensure a
+            // late/duplicate callback cannot target a newer selection. No reference is restored.
+            pendingBrowserDownload = null; pendingBackupRequest = null
+            if (resultCode != RESULT_OK) return
+            backupGuard {
+                assertBrowserSaveOwner(browserSelection)
+                val uri = data?.data
+                require(uri?.scheme == "content") { "未返回文档目标；未保存原件" }
+                // Capture the original visit, not the current UI owner or a replacement
+                // token. The callback above consumed the request before any worker starts.
+                val visit = browserSelection.visit
+                controller.saveBrowserDownload(visit.conversation, browserSelection.reference,
+                    checkNotNull(uri), assertUiOwner = {
+                        check(visit.active.get()) { "原会话已变化；本次保存已失效" }
+                    })
+            }
+            return
+        }
         if (requestCode !in setOf(101, 102, 103, 104, 105, 106) || pendingBackupRequest != requestCode) return
         pendingBackupRequest = null
         if (requestCode == 106) {

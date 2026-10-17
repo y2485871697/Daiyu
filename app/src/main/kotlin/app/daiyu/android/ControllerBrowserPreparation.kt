@@ -114,8 +114,9 @@ internal class ControllerBrowserPreparation private constructor(
     }
 
     fun openOnWorker(context: Context, privateRoot: Path,
-                     main: BrowserMainDispatcher = AndroidBrowserMainDispatcher()): CatalogBrowserBinding? =
-        openOnWorker(main) { token -> CatalogBrowserBinding.open(context, privateRoot, assistant, token) }
+                     main: BrowserMainDispatcher = AndroidBrowserMainDispatcher(),
+                     onDownloadCompleted: (app.daiyu.android.browser.download.BrowserCompletedDownload) -> Unit = {}): CatalogBrowserBinding? =
+        openOnWorker(main) { token -> CatalogBrowserBinding.open(context, privateRoot, assistant, token, onDownloadCompleted) }
 
     /**
      * Worker-only wait. Interruption cancels admission but NEVER drops a queued/late native handle.

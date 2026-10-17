@@ -103,4 +103,43 @@ class ConversationReasoningPreferenceTest {
         assertEquals(ReasoningEffort.DEFAULT, ConversationReasoningPreference(values).get("conversation"))
         assertEquals("default", values.values.values.single())
     }
+    @Test fun draftDefaultNeverChangesExistingConversationWithOrWithoutExplicitChoice() {
+        val values = MemoryKeyValue()
+        val preference = ConversationReasoningPreference(values)
+        preference.set("old", ReasoningEffort.HIGH)
+        preference.set(null, ReasoningEffort.LOW)
+        val restored = ConversationReasoningPreference(values)
+        assertEquals(ReasoningEffort.LOW, restored.snapshot(null))
+        assertEquals(ReasoningEffort.HIGH, restored.snapshot("old"))
+        assertEquals(ReasoningEffort.DEFAULT, restored.snapshot("old-without-choice"))
+    }
+
+    @Test fun disablingStartingDefaultPreservesAcceptedChoiceAndModelDefaultPolicy() {
+        val preference = ConversationReasoningPreference(MemoryKeyValue())
+        preference.set(null, ReasoningEffort.LOW)
+        preference.retainAccepted("accepted", preference.snapshot(null))
+        preference.set(null, ReasoningEffort.DEFAULT)
+        assertEquals(ReasoningEffort.DEFAULT, preference.snapshot(null))
+        assertEquals(ReasoningEffort.LOW, preference.snapshot("accepted"))
+    }
+
+    @Test fun failedStartingDefaultSaveFencesDraftWithoutDamagingOldConversation() {
+        val values = mutableMapOf<String, String>()
+        var fails = false
+        val preference = ConversationReasoningPreference(object : ConversationReasoningPreference.KeyValue {
+            override fun get(key: String) = values[key]
+            override fun set(key: String, value: String) { values[key] = value; check(!fails) }
+        })
+        preference.set("old", ReasoningEffort.LOW)
+        fails = true
+        try { preference.set(null, ReasoningEffort.HIGH); throw AssertionError("save accepted") }
+        catch (_: IllegalStateException) {}
+        assertEquals(ReasoningEffort.LOW, preference.snapshot("old"))
+        try { preference.snapshot(null); throw AssertionError("unconfirmed starting default accepted") }
+        catch (_: IllegalStateException) {}
+        fails = false
+        preference.set(null, ReasoningEffort.MINIMAL)
+        assertEquals(ReasoningEffort.MINIMAL, preference.snapshot(null))
+    }
+
 }

@@ -18,7 +18,7 @@ class HostAtomicFileShadow {
     @RealObject private lateinit var atomicFile: AtomicFile
     @Implementation protected fun finishWrite(stream: FileOutputStream?) {
         if (File.separatorChar != '\\') {
-            Shadow.directlyOn<Any?>(atomicFile, AtomicFile::class.java, "finishWrite",
+            Shadow.directlyOn<Any?, AtomicFile>(atomicFile, AtomicFile::class.java, "finishWrite",
                 ClassParameter.from(FileOutputStream::class.java, stream))
             return
         }

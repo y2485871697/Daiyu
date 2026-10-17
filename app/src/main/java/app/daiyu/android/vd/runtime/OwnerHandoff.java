@@ -672,16 +672,30 @@ final class OwnerHandoff {
             verifyDisplay(source,unique);focus(witness);
             anchor.check(roots().get(anchor.id),source);
             phase="remove-anchor";
-            if(!Boolean.TRUE.equals(invokeAtm("removeTask",new Class<?>[]{int.class},anchor.id)))throw new IllegalStateException("anchor removal failed");
-            for(int attempt=0;attempt<20 && roots().containsKey(anchor.id);attempt++)Thread.sleep(100L);
-            if(roots().containsKey(anchor.id))throw new IllegalStateException("anchor removal uncertain");
-            verifyDisplay(source,unique);focus(witness);
+            final Task removalAnchor=anchor;
+            OwnerAnchorRemoval.remove(anchor.id,new OwnerAnchorRemoval.Access() {
+                public boolean remove() throws Exception {
+                    try { return Boolean.TRUE.equals(invokeAtm("removeTask",new Class<?>[]{int.class},removalAnchor.id)); }
+                    catch(java.lang.reflect.InvocationTargetException alreadyGone) { return false; }
+                }
+                public OwnedTaskStates observe() throws Exception {
+                    verifyDisplay(source,unique);
+                    focus(witness);
+                    return OwnedTaskStates.read(source,roots(),Collections.singletonMap(removalAnchor.id,removalAnchor));
+                }
+                public void pause() throws Exception { Thread.sleep(100L); }
+            });
+            phase="verify:display";verifyDisplay(source,unique);
+            phase="verify:focus";focus(witness);
+            phase="verify:source-empty";
             for(Object t:roots().values())if(number(t,"displayId")==source)throw new IllegalStateException("source occupied");
+            phase="verify:selected";
             for(Integer id:selected)owned.get(id).check(roots().get(id),0);
             // Report gone from a FINAL snapshot so a task that vanished mid-handoff is not lost:
             // every unselected, unremoved owned task must now be absent from the whole hierarchy.
             Map<Integer,Task> unselected=new LinkedHashMap<Integer,Task>();
             for(Map.Entry<Integer,Task> e:owned.entrySet()) if(!selected.contains(e.getKey())) unselected.put(e.getKey(),e.getValue());
+            phase="verify:residual";
             OwnedTaskStates end=OwnedTaskStates.read(source,roots(),unselected);
             if(!end.live.isEmpty()||!end.escaped.isEmpty())throw new IllegalStateException("residual owned task");
             JSONArray gone=new JSONArray();

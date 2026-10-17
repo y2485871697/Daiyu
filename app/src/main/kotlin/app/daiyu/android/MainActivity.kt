@@ -1777,7 +1777,7 @@ class MainActivity : ComponentActivity() {
         onDeleteTurn = messageCallbacks.onDeleteTurn, onRetryStep = messageCallbacks.onRetryStep,
         onOpenSidebar = { openSidebar() }, onTextChange = { if (editorMatches()) updateDraft(it) },
         onSelectionChange = { start, end ->
-            if (editorMatches() && (selectionStart != start || selectionEnd != end)) {
+            if (editorMatches() && !imageHost.sending && (selectionStart != start || selectionEnd != end)) {
                 offlineHost.invalidate()
                 selectionStart = start; selectionEnd = end
                 chatState = chatState.copy(composer = chatState.composer.copy(

@@ -67,6 +67,23 @@ class SqliteAssistantStore(private val database: ConversationDatabase) : Assista
         value
     }
 
+    override fun compareAndSet(expected: AssistantProfile, updated: AssistantProfile): AssistantProfile = change { db ->
+        require(expected.id == updated.id)
+        AssistantStorage.id(updated.id)
+        // The same SQLite transaction owns comparison AND UPDATE. No insert/upsert here:
+        // an editor whose row was deleted cannot resurrect it.
+        if (readSnapshot(db).profiles.firstOrNull { it.id == expected.id } != expected)
+            throw StaleAssistantProfileException()
+        val value = updated.copy(name = updated.name.trim().ifBlank { AssistantPrompt.DEFAULT_NAME },
+            enabledSkillIds = updated.enabledSkillIds.toList())
+        val position = db.rawQuery("SELECT position FROM assistants WHERE id=?", arrayOf(expected.id)).use {
+            check(it.moveToFirst()); it.getLong(0)
+        }
+        check(db.update("assistants", values(value, position), "id=?", arrayOf(expected.id)) == 1)
+        check(readSnapshot(db).profiles.single { it.id == value.id } == value) { "助手保存回执不匹配" }
+        value
+    }
+
     override fun delete(id: String) = change { db ->
         val before = readSnapshot(db)
         require(before.profiles.any { it.id == id }) { "助手不存在" }

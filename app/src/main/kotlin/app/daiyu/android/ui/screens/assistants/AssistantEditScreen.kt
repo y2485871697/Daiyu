@@ -18,6 +18,7 @@ import androidx.compose.material.icons.rounded.DesignServices
 import androidx.compose.material.icons.rounded.Extension
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -34,7 +35,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.R
 import app.daiyu.android.assistants.AssistantAssets
-import app.daiyu.android.assistants.AssistantMemorySnapshot
+import app.daiyu.android.assistants.AssistantMemoryDraft
+import app.daiyu.android.assistants.AssistantEditSession
 import app.daiyu.android.assistants.AssistantSkill
 import app.daiyu.android.assistants.AssistantStore
 import app.daiyu.android.ui.components.AssistantAvatar
@@ -69,39 +71,50 @@ fun AssistantEditScreen(
         LaunchedEffect(assistantId) { onBack() }
         return
     }
-    var name by remember(assistantId) { mutableStateOf(original.name) }
-    var prompt by remember(assistantId) { mutableStateOf(original.prompt) }
-    var avatarFileName by remember(assistantId) { mutableStateOf(original.avatarFileName) }
-    var memoryEnabled by remember(assistantId) { mutableStateOf(original.memoryEnabled) }
-    var persistedMemoryEnabled by remember(assistantId) { mutableStateOf(original.memoryEnabled) }
-    var enabledSkillIds by remember(assistantId) { mutableStateOf(original.enabledSkillIds.toSet()) }
-    var persistedSkillIds by remember(assistantId) { mutableStateOf(original.enabledSkillIds.toSet()) }
-    var memoryDraft by remember(assistantId) { mutableStateOf("") }
-    var memoryRevision by remember(assistantId) { mutableStateOf("") }
-    var memorySaved by remember(assistantId) { mutableStateOf("") }
-    var cropBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    var saving by remember { mutableStateOf(false) }
+    val session = remember(assistantId, store, assets) { AssistantEditSession(store, original) }
+    DisposableEffect(session) { onDispose { session.close() } }
+    val memoryEditor = remember(session) { AssistantMemoryDraft() }
+    val initialReadTicket = remember(session) { memoryEditor.beginRead() }
+    var name by remember(session) { mutableStateOf(original.name) }
+    var prompt by remember(session) { mutableStateOf(original.prompt) }
+    var avatarFileName by remember(session) { mutableStateOf(original.avatarFileName) }
+    var memoryEnabled by remember(session) { mutableStateOf(original.memoryEnabled) }
+    var persistedMemoryEnabled by remember(session) { mutableStateOf(original.memoryEnabled) }
+    var enabledSkillIds by remember(session) { mutableStateOf(original.enabledSkillIds.toSet()) }
+    var persistedSkillIds by remember(session) { mutableStateOf(original.enabledSkillIds.toSet()) }
+    var memoryDraft by remember(session) { mutableStateOf("") }
+    var memoryRevision by remember(session) { mutableStateOf("") }
+    var memorySaved by remember(session) { mutableStateOf("") }
+    var cropBitmap by remember(session) { mutableStateOf<Bitmap?>(null) }
+    var saving by remember(session) { mutableStateOf(false) }
     val avatarBitmap = remember(assistantId, avatarFileName) { assets.avatarBitmap(avatarFileName) }
     val memoryBytes = remember(memoryDraft) { memoryDraft.toByteArray(Charsets.UTF_8).size }
     val memoryOverLimit = memoryBytes > AssistantAssets.MAX_MEMORY_BYTES
     val dirty = name.trim() != original.name || prompt != original.prompt || avatarFileName != original.avatarFileName ||
         memoryEnabled != persistedMemoryEnabled || enabledSkillIds != persistedSkillIds || memoryDraft != memorySaved
 
-    LaunchedEffect(assistantId) {
-        val snapshot = withContext(Dispatchers.IO) { runCatching { assets.memory(assistantId) }.getOrNull() }
-        memoryDraft = snapshot?.content.orEmpty()
-        memorySaved = snapshot?.content.orEmpty()
-        memoryRevision = snapshot?.revision.orEmpty()
+    LaunchedEffect(session) {
+        val result = withContext(Dispatchers.IO) { runCatching { assets.memory(assistantId) } }
+        if (session.isActive) result.onSuccess { snapshot ->
+            memoryEditor.completeRead(initialReadTicket, snapshot)
+            memoryDraft = memoryEditor.content
+            memorySaved = memoryEditor.saved
+            memoryRevision = memoryEditor.revision.orEmpty()
+        }.onFailure {
+            android.widget.Toast.makeText(context, "记忆读取失败，已输入草稿保留；请重新打开后合并", android.widget.Toast.LENGTH_LONG).show()
+        }
     }
+    // The launcher survives recomposition; a result still belongs to the page that launched it.
+    var pickerOwner by remember { mutableStateOf<AssistantEditSession?>(null) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri: Uri? ->
-        if (uri != null) cropBitmap = decodeAvatarBitmap(context, uri)
+        val owner = pickerOwner
+        pickerOwner = null
+        if (uri != null && owner === session && session.isActive && !saving) cropBitmap = decodeAvatarBitmap(context, uri)
     }
     fun persistAssistantToggles(nextMemory: Boolean = memoryEnabled, nextSkills: Set<String> = enabledSkillIds) {
         scope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching {
-                val current = requireNotNull(store.read(assistantId)) { "助手不存在" }
-                store.save(current.copy(memoryEnabled = nextMemory, enabledSkillIds = nextSkills.toList()))
-            } }
+            val result = runCatching { session.toggles(nextMemory, nextSkills) }
+            if (!session.isActive) return@launch
             if (result.isSuccess) {
                 persistedMemoryEnabled = nextMemory
                 persistedSkillIds = nextSkills
@@ -110,27 +123,29 @@ fun AssistantEditScreen(
         }
     }
     fun save() {
-        if (!dirty || saving || memoryOverLimit || memoryRevision.isBlank()) return
+        if (!session.isActive || !dirty || saving || memoryOverLimit || memoryRevision.isBlank()) return
         val targetMemory = memoryDraft
         val baseRevision = memoryRevision
-        val targetProfile = original.copy(name = name, prompt = prompt, avatarFileName = avatarFileName,
-            memoryEnabled = memoryEnabled, enabledSkillIds = enabledSkillIds.toList())
+        val targetName = name
+        val targetPrompt = prompt
+        val targetMemoryEnabled = memoryEnabled
+        val targetSkills = enabledSkillIds.toSet()
         val memoryChanged = targetMemory != memorySaved
         saving = true
         scope.launch {
-            var savedSnapshot: AssistantMemorySnapshot? = null
-            val result = withContext(Dispatchers.IO) { runCatching {
-                if (memoryChanged) savedSnapshot = assets.saveMemory(assistantId, targetMemory, baseRevision)
-                requireNotNull(store.read(assistantId)) { "助手不存在" }
-                store.save(targetProfile)
-            } }
-            savedSnapshot?.let { memoryRevision = it.revision; memorySaved = it.content }
+            val result = runCatching {
+                session.save(targetName, targetPrompt, targetMemoryEnabled, targetSkills) {
+                    if (memoryChanged) assets.saveMemory(assistantId, targetMemory, baseRevision) else null
+                }
+            }
+            if (!session.isActive) return@launch
+            result.getOrNull()?.memory?.let { memoryRevision = it.revision; memorySaved = it.content }
             saving = false
-            if (result.isSuccess) { onSaved(assistantId); onBack() }
+            if (result.isSuccess) { onSaved(assistantId); session.close(); onBack() }
             else android.widget.Toast.makeText(context, result.exceptionOrNull()?.message ?: "保存失败，草稿已保留", android.widget.Toast.LENGTH_LONG).show()
         }
     }
-    MiuixScaffoldPage(title = stringResource(R.string.assistant_edit_title), onBack = onBack,
+    MiuixScaffoldPage(title = stringResource(R.string.assistant_edit_title), onBack = { session.close(); onBack() },
         actions = {
             Text(text = stringResource(R.string.action_save),
                 color = if (dirty && !saving && !memoryOverLimit) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface.copy(alpha = 0.38f),
@@ -141,8 +156,11 @@ fun AssistantEditScreen(
             Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
                 Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    AssistantAvatar(bitmap = avatarBitmap, size = 56.dp, modifier = Modifier.clickable {
-                        picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                    AssistantAvatar(bitmap = avatarBitmap, size = 56.dp, modifier = Modifier.clickable(enabled = !saving) {
+                        if (session.isActive && pickerOwner == null) {
+                            pickerOwner = session
+                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        }
                     })
                     Text(text = name.trim().ifBlank { stringResource(R.string.assistant_unnamed) }, style = MiuixTheme.textStyles.title3)
                 }
@@ -152,7 +170,7 @@ fun AssistantEditScreen(
         item(key = "identity") {
             Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TextField(value = name, onValueChange = { name = it }, label = stringResource(R.string.assistant_name),
+                    TextField(value = name, onValueChange = { if (session.isActive && !saving) name = it }, label = stringResource(R.string.assistant_name), enabled = !saving,
                         modifier = Modifier.fillMaxWidth(), singleLine = true)
                 }
             }
@@ -160,7 +178,7 @@ fun AssistantEditScreen(
         item(key = "prompt_title") { SmallTitle(stringResource(R.string.assistant_prompt_title)) }
         item(key = "prompt") {
             Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
-                TextField(value = prompt, onValueChange = { prompt = it }, label = "",
+                TextField(value = prompt, onValueChange = { if (session.isActive && !saving) prompt = it }, label = "", enabled = !saving,
                     modifier = Modifier.fillMaxWidth().padding(16.dp).height(240.dp), singleLine = false)
             }
         }
@@ -169,9 +187,11 @@ fun AssistantEditScreen(
             Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
                 SwitchPreference(title = stringResource(R.string.ui_enable_memory_4b69b7),
                     summary = stringResource(R.string.assistant_memory_summary), checked = memoryEnabled,
-                    onCheckedChange = { memoryEnabled = it; persistAssistantToggles(nextMemory = it) })
+                    onCheckedChange = { if (session.isActive && !saving) { memoryEnabled = it; persistAssistantToggles(nextMemory = it) } })
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    TextField(value = memoryDraft, onValueChange = { memoryDraft = it }, label = "MEMORY.md",
+                    TextField(value = memoryDraft, onValueChange = {
+                        if (session.isActive && !saving) { memoryEditor.edit(it); memoryDraft = it }
+                    }, label = "MEMORY.md", enabled = !saving,
                         useLabelAsPlaceholder = true, singleLine = false, minLines = 6, maxLines = 12,
                         textStyle = MiuixTheme.textStyles.body2.copy(fontFamily = FontFamily.Monospace), modifier = Modifier.fillMaxWidth())
                     if (memoryOverLimit) Text(text = stringResource(R.string.memory_over_limit), color = MiuixTheme.colorScheme.error,
@@ -189,9 +209,11 @@ fun AssistantEditScreen(
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp))
                 } else installedSkills.forEach { skill ->
                     AssistantSkillSwitchRow(skill, enabledSkillIds.contains(skill.id), !saving) { enabled ->
-                        val next = if (enabled) enabledSkillIds + skill.id else enabledSkillIds - skill.id
-                        enabledSkillIds = next
-                        persistAssistantToggles(nextSkills = next)
+                        if (session.isActive && !saving) {
+                            val next = if (enabled) enabledSkillIds + skill.id else enabledSkillIds - skill.id
+                            enabledSkillIds = next
+                            persistAssistantToggles(nextSkills = next)
+                        }
                     }
                 }
             }
@@ -200,16 +222,23 @@ fun AssistantEditScreen(
     cropBitmap?.let { bitmap ->
         AvatarCropDialog(bitmap = bitmap, onCancel = { cropBitmap = null }, onConfirm = { cropped ->
             cropBitmap = null
+            val accepted = session.isActive && !saving
             scope.launch {
-                val updated = withContext(Dispatchers.IO) {
-                    val fileName = assets.saveAvatar(assistantId, cropped)
-                    val current = requireNotNull(store.read(assistantId)) { "助手不存在" }
-                    store.save(current.copy(avatarFileName = fileName))
+                try {
+                    if (!accepted) return@launch
+                    // Publish a new immutable file name; a failed profile CAS must not
+                    // overwrite an avatar file already referenced by a newer profile.
+                    val result = runCatching { session.avatar { assets.saveAvatar(java.util.UUID.randomUUID().toString(), cropped) } }
+                    if (session.isActive) result.onSuccess {
+                        avatarFileName = it.avatarFileName
+                        onSaved(assistantId)
+                    }.onFailure {
+                        android.widget.Toast.makeText(context, it.message ?: "保存失败，草稿已保留", android.widget.Toast.LENGTH_LONG).show()
+                    }
+                } finally {
+                    if (cropped !== bitmap) cropped.recycle()
+                    bitmap.recycle()
                 }
-                avatarFileName = updated.avatarFileName
-                onSaved(assistantId)
-                if (cropped !== bitmap) cropped.recycle()
-                bitmap.recycle()
             }
         })
     }

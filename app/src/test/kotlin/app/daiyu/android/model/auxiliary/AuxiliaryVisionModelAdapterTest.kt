@@ -187,12 +187,12 @@ class AuxiliaryVisionModelAdapterTest {
             editableSettings = editableSettings.copy(endpoint = "https://main.invalid/v1", model = "main-api-model", apiKey = "other-key")
             val connection = FakeConnection(complete(protocol))
             var connections = 0
-            val adapter = AuxiliaryVisionModelAdapter(frozen) { url ->
+            val adapter = AuxiliaryVisionModelAdapter(frozen, connect = { url ->
                 connections++
                 assertEquals(frozen.snapshot.asModelSettings().requestEndpoint(), url.toString())
                 assertNotEquals(editableSettings.requestEndpoint(), url.toString())
                 connection
-            }
+            })
             val resolver = Resolver()
             val bridge = AuxiliaryVisionBridge(frozen, resolver, adapter, encoder)
             try {
@@ -240,7 +240,7 @@ class AuxiliaryVisionModelAdapterTest {
         val orphan = frame(json("response.output_text.delta").put("item_id", "orphan")
             .put("content_index", 0).put("delta", "unconfirmed text must not escape"))
         val connection = FakeConnection(orphan + responseComplete("confirmed only"))
-        val adapter = AuxiliaryVisionModelAdapter(selected) { connection }
+        val adapter = AuxiliaryVisionModelAdapter(selected, connect = { connection })
         try {
             assertEquals("confirmed only", adapter(request(selected)))
             assertTrue(connection.inputClosed)
@@ -254,7 +254,7 @@ class AuxiliaryVisionModelAdapterTest {
                 val selected = binding(settings(protocol).copy(requestOptions = ProviderRequestOptions(custom)))
                 var connections = 0
                 assertThrows(IllegalArgumentException::class.java) {
-                    AuxiliaryVisionModelAdapter(selected) { connections++; FakeConnection(complete(protocol)) }
+                    AuxiliaryVisionModelAdapter(selected, connect = { connections++; FakeConnection(complete(protocol)) })
                 }
                 assertEquals(0, connections)
             }
@@ -269,7 +269,7 @@ class AuxiliaryVisionModelAdapterTest {
             val otherModel = binding(settings(protocol).copy(model = "other-api-model"))
             val wrongPlan = this.request(otherModel).images
             var connections = 0
-            val adapter = AuxiliaryVisionModelAdapter(selected) { connections++; FakeConnection(complete(protocol)) }
+            val adapter = AuxiliaryVisionModelAdapter(selected, connect = { connections++; FakeConnection(complete(protocol)) })
             try {
                 val row = request.history.single()
                 listOf(
@@ -296,7 +296,7 @@ class AuxiliaryVisionModelAdapterTest {
                 val selected = binding(settings(protocol))
                 val connection = FakeConnection(events)
                 var connections = 0
-                val adapter = AuxiliaryVisionModelAdapter(selected) { connections++; connection }
+                val adapter = AuxiliaryVisionModelAdapter(selected, connect = { connections++; connection })
                 try {
                     val failure = assertThrows(ModelRequestException::class.java) { adapter(request(selected)) }
                     assertEquals(expected, failure.failure)
@@ -327,7 +327,7 @@ class AuxiliaryVisionModelAdapterTest {
                 val selected = binding(settings(protocol))
                 val connection = FakeConnection(events)
                 var connections = 0
-                val adapter = AuxiliaryVisionModelAdapter(selected) { connections++; connection }
+                val adapter = AuxiliaryVisionModelAdapter(selected, connect = { connections++; connection })
                 val bridge = AuxiliaryVisionBridge(selected, Resolver(), adapter, encoder)
                 var published: AuxiliaryVisionPreparedRequest? = null
                 val source = listOf(row())
@@ -348,7 +348,7 @@ class AuxiliaryVisionModelAdapterTest {
             val selected = binding(settings(protocol))
             val connection = FakeConnection("", status = 503)
             var connections = 0
-            val adapter = AuxiliaryVisionModelAdapter(selected) { connections++; connection }
+            val adapter = AuxiliaryVisionModelAdapter(selected, connect = { connections++; connection })
             try {
                 val failure = assertThrows(ModelRequestException::class.java) { adapter(request(selected)) }
                 assertEquals(ModelFailure.SERVER, failure.failure)
@@ -366,7 +366,7 @@ class AuxiliaryVisionModelAdapterTest {
                 val request = request(selected)
                 val connection = FakeConnection("", blockRead = true)
                 var connections = 0
-                val adapter = AuxiliaryVisionModelAdapter(selected) { connections++; connection }
+                val adapter = AuxiliaryVisionModelAdapter(selected, connect = { connections++; connection })
                 val result = AtomicReference<String?>()
                 val failure = AtomicReference<Throwable?>()
                 val worker = Thread {
@@ -397,14 +397,14 @@ class AuxiliaryVisionModelAdapterTest {
             val selected = binding(settings(protocol))
             val request = request(selected)
             var connections = 0
-            val never = AuxiliaryVisionModelAdapter(selected) { connections++; FakeConnection(complete(protocol)) }
+            val never = AuxiliaryVisionModelAdapter(selected, connect = { connections++; FakeConnection(complete(protocol)) })
             never.close()
             assertThrows(CancellationException::class.java) { never(request) }
             assertEquals(0, connections)
 
             val late = FakeConnection(complete(protocol))
             lateinit var adapter: AuxiliaryVisionModelAdapter
-            adapter = AuxiliaryVisionModelAdapter(selected) { connections++; adapter.close(); late }
+            adapter = AuxiliaryVisionModelAdapter(selected, connect = { connections++; adapter.close(); late })
             try {
                 assertThrows(CancellationException::class.java) { adapter(request) }
                 assertEquals(1, connections)

@@ -12,6 +12,8 @@ import app.daiyu.android.domain.runtime.RunExecutionOwner
 import app.daiyu.android.domain.tools.*
 import app.daiyu.android.integration.tools.*
 import app.daiyu.android.storage.*
+import app.daiyu.android.platform.DeviceResultPolicy
+import app.daiyu.android.platform.PlatformReadTool
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -53,7 +55,7 @@ class ControllerDeviceResourcesTest : InstrumentationTestCase() {
         }
         fun startRead() {
             val tools = field(controller, "runTools") as RunCatalogTools
-            val authorization = field(tools, "authorization") as TaskAuthorization
+            val authorization = field(tools, "boundAuthorization") as TaskAuthorization
             val owner = field(tools, "owner") as RunExecutionOwner
             val devices = field(tools, "deviceResources") as RunDeviceResources
             val capabilities = SessionCapabilities(authorization.sessionId, setOf(AndroidToolRegistry.BATTERY_CAPABILITY))
@@ -90,9 +92,42 @@ class ControllerDeviceResourcesTest : InstrumentationTestCase() {
             f.modelRelease.countDown(); f.releaseRead(); f.controller.stop(); f.controller.close(); f.database.close()
             f.app.deleteDatabase("conversations.db"); f.app.deleteDatabase("questions.db"); f.database.runtimeLockFile.delete()
             f.app.getSharedPreferences("model-settings", 0).edit().clear().commit(); f.app.getSharedPreferences("conversation-ui", 0).edit().clear().commit()
+            f.app.getSharedPreferences("platform-read-settings", 0).edit().clear().commit()
             val keys = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
             java.util.Collections.list(keys.aliases()).filter { it == f.alias || it.startsWith("${f.alias}.") }.forEach { keys.deleteEntry(it) }
         } } finally { super.tearDown() }
+    }
+    fun testProductionSendFreezesPlatformSelectionPolicyAndSameResourceBindingWithoutDataReads() {
+        val f = fresh()
+        val selected = PlatformReadTool.CONTACTS
+        f.controller.platformSettings.select(selected, true)
+        f.controller.platformSettings.consentModel(selected, true)
+        assertNotNull(f.controller.send(null, "synthetic platform settings freeze"))
+        assertTrue(f.modelEntered.await(5, TimeUnit.SECONDS))
+        val tools = Fixture.field(f.controller, "runTools") as RunCatalogTools
+        val devices = Fixture.field(tools, "deviceResources") as RunDeviceResources
+        val grants = Fixture.field(tools, "capabilities") as SessionCapabilities
+        val authorization = Fixture.field(tools, "boundAuthorization") as TaskAuthorization
+        val owner = Fixture.field(tools, "owner") as RunExecutionOwner
+        assertSame(grants, Fixture.field(devices, "capabilities"))
+        assertSame(authorization, Fixture.field(devices, "authorization"))
+        assertSame(owner, Fixture.field(devices, "owner"))
+        assertEquals(setOf(selected.capability), grants.enabled.filter { it.startsWith("platform.") }.toSet())
+        assertTrue(AndroidToolRegistry.BATTERY_CAPABILITY in grants.enabled)
+        val policy = Fixture.field(checkNotNull(devices.platformBackend), "resultPolicy") as DeviceResultPolicy
+        assertFalse(policy.allowsShared(selected.toolName))
+        f.controller.platformSettings.select(selected, false)
+        f.controller.platformSettings.select(PlatformReadTool.TIME, true)
+        f.controller.platformSettings.consentHistory(selected, true)
+        assertTrue(selected.capability in grants.enabled); assertFalse(PlatformReadTool.TIME.capability in grants.enabled)
+        assertFalse(policy.allowsShared(selected.toolName))
+        val next = f.controller.platformSettings.freeze()
+        assertEquals(setOf(PlatformReadTool.TIME), next.platformAllowed)
+        assertTrue(next.resultPolicy.allowsShared(selected.toolName))
+        // No Catalog call is executed: only production wiring and frozen values are inspected.
+        f.modelRelease.countDown()
+        awaitControl("platform run closes through existing resources") { f.controller.active == null }
+        assertNull(Fixture.field(f.controller, "resources"))
     }
     fun testCompletedRunnerRetainsRunUntilDeviceReadConfirmsClose() {
         val f = fresh(); val owner = start(f)

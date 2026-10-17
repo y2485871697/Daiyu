@@ -18,7 +18,20 @@ for folder in ("app/src", "core-domain/src"):
         if path.is_file() and path != LEGAL_PROVENANCE:
             assert b"io.github.mangi.eta" not in path.read_bytes(), path
 manifest = ET.parse(ROOT / "app/src/main/AndroidManifest.xml").getroot()
-assert {node.attrib["{http://schemas.android.com/apk/res/android}name"] for node in manifest.findall("uses-permission")} == {"android.permission.INTERNET", "android.permission.VIBRATE", "android.permission.RECORD_AUDIO"}, "Exact integrated feature permission boundary"
+ANDROID = "{http://schemas.android.com/apk/res/android}"
+expected_permissions = {
+    "INTERNET": None, "VIBRATE": None, "RECORD_AUDIO": None,
+    "ACCESS_NETWORK_STATE": None, "ACCESS_WIFI_STATE": None,
+    "BLUETOOTH": "30", "BLUETOOTH_CONNECT": None,
+    "READ_CONTACTS": None, "READ_CALENDAR": None, "READ_EXTERNAL_STORAGE": "32",
+    "READ_MEDIA_IMAGES": None, "READ_MEDIA_VIDEO": None, "READ_MEDIA_AUDIO": None,
+    "READ_MEDIA_VISUAL_USER_SELECTED": None,
+}
+permissions = manifest.findall("uses-permission")
+assert len(permissions) == len(expected_permissions), "Exact integrated feature permission count"
+assert {node.attrib[ANDROID + "name"]: node.get(ANDROID + "maxSdkVersion") for node in permissions} == {
+    "android.permission." + name: maximum for name, maximum in expected_permissions.items()
+}, "Exact integrated feature permission boundary and legacy API caps"
 assert 'applicationId = "app.daiyu.android"' in (ROOT / "app/build.gradle.kts").read_text(encoding="utf-8")
 assert 'rootProject.name = "代鱼"' in (ROOT / "settings.gradle.kts").read_text(encoding="utf-8")
 print("Module boundary, independent identity and integrated permissions: passed")

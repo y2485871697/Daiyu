@@ -225,6 +225,7 @@ class ChatController internal constructor(private val application:Application,
         val lifetime = synchronized(this) { resources?.takeIf { it.auxiliary != null } }
         lifetime?.let { stop(it.initial) }
     }
+    internal val platformSettings = PlatformToolSettings(application)
     internal val interactiveMode = app.daiyu.android.config.InteractiveModePreference(preferences)
     private val executor=Executors.newSingleThreadExecutor()
     private val handler=Handler(Looper.getMainLooper())
@@ -1895,6 +1896,9 @@ class ChatController internal constructor(private val application:Application,
         require(shizukuPreparation==null || (imageAttempt==null && shizukuAuthorization!=null))
         require(generation == null || (shizukuPreparation == null && browserBinding == null && imageAttempt == null))
         if(preparationCancelled(token)) return null
+        // Independent platform capability and destination consents are frozen once for this run.
+        // The exact policy and selection below reach the same catalog/resource owner and drain.
+        val platformSnapshot = platformSettings.freeze()
         // Freeze the persisted draft before any model/history preparation. Legacy send callers
         // may send text different from their persisted draft; CAS still protects that exact draft.
         val frozenDraft = try {
@@ -2123,11 +2127,12 @@ class ChatController internal constructor(private val application:Application,
                 ChildModelBatch(childModels, store = checkNotNull(runtimeStore).childTasks,
                     usageRecorder = checkNotNull(runtimeStore).childUsage), childModels.keys)
             preparingChildren = children
-            val devices = RunDeviceResources(application)
+            val devices = RunDeviceResources(application, resultPolicy = platformSnapshot.resultPolicy)
             preparingDevices = devices
             val registry = AndroidToolRegistry.create(devices, contextTools, enableUserBarrier=interactiveSnapshot.enabled)
             val capabilities = SessionCapabilities(terminalRun?.preview?.identity?.sessionId ?: run.value,
-                (if (virtualDisplay == null) AndroidToolRegistry.capabilitiesFor(config.enabledTools()) else emptySet()) + contextTools.map { it.definition.capability } +
+                (if (virtualDisplay == null) AndroidToolRegistry.capabilitiesFor(config.enabledTools(),
+                    platformAllowed = platformSnapshot.platformAllowed) else emptySet()) + contextTools.map { it.definition.capability } +
                     setOf(SkillRunSession.READ, SkillRunSession.RESOURCE) +
                     (if (assistantContext.memoryReadPort == null) emptySet() else setOf(ScopedAssistantMemoryTools.READ)) +
                     (if (interactiveSnapshot.enabled) setOf(AndroidToolRegistry.ASK_USER_CAPABILITY) else emptySet()) +

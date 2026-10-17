@@ -134,7 +134,8 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                     check(attachments(db).map { it.toString() } == snapshot.attachments.map { it.toString() })
                     check(archives(db).map { it.toString() } == snapshot.archives.map { it.toString() })
                     snapshot.history.forEachIndexed { index, message ->
-                        check(SQLiteMessageVideoStore.readVerified(db, message) == snapshot.inputs[index]) { "来源视频或witness已变化" }
+                        check(MessageVideoInputCodec.encode(message, SQLiteMessageVideoStore.readVerified(db, message)) ==
+                            MessageVideoInputCodec.encode(message, snapshot.inputs[index])) { "来源视频或witness已变化" }
                     }
                     snapshot.generation?.let { generation!!.verifySource(db, it) }
                 }
@@ -166,7 +167,10 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                 // exact destination static collection and absence of fabricated live receipts.
                 val actual = ContextService.read(db, copy)
                 check(actual == copied)
-                actual.forEachIndexed { index, message -> check(SQLiteMessageVideoStore.readVerified(db, message) == copiedVideos[index]) }
+                actual.forEachIndexed { index, message ->
+                    check(MessageVideoInputCodec.encode(message, SQLiteMessageVideoStore.readVerified(db, message)) ==
+                        MessageVideoInputCodec.encode(message, copiedVideos[index])) { "分支视频或witness读回不匹配" }
+                }
                 values.keySet().forEach { key ->
                     val value = values.getAsString(key)
                     val predicate = if (value == null) "$key IS NULL" else "$key IS ?"

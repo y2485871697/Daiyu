@@ -34,7 +34,10 @@ class ControllerGenerationResourcesTest : AndroidTestCase() {
         account = "account"
         root = File(context.cacheDir, "generation-reader-${UUID.randomUUID()}").apply { mkdirs() }
         db = SQLiteDatabase.openOrCreateDatabase(File(root, "reader.db"), null)
-        db.execSQL("PRAGMA journal_mode=DELETE")
+        db.rawQuery("PRAGMA journal_mode=DELETE", null).use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("delete", cursor.getString(0))
+        }
         db.execSQL("PRAGMA synchronous=FULL")
         db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY)")
         db.execSQL("CREATE TABLE messages(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL," +

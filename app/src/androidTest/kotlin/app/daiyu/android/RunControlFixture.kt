@@ -20,7 +20,10 @@ internal class RunControlFixture(base:Context,
     mcpTransport: (app.daiyu.android.mcp.McpServer) -> app.daiyu.android.mcp.McpHttpSession = { app.daiyu.android.mcp.McpHttpSession(it) },
     beforeOpen: (List<Message>) -> Unit = {},
     beforeModel: () -> Unit = {}) : AutoCloseable {
-    private class FixtureApplication(base:Context):Application() {init {attachBaseContext(base)}}
+    private class FixtureApplication(base:Context):Application() {
+        init {attachBaseContext(base)}
+        override fun getApplicationContext(): Context = this
+    }
     val application:Application=FixtureApplication(testContext(base,"run-control-${UUID.randomUUID()}-"))
     val database=ConversationDatabase(application)
     private val alias="app.daiyu.android.test.run-control.${UUID.randomUUID()}"

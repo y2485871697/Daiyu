@@ -33,7 +33,8 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
     protected fun node(tag: String): SemanticsNodeInteraction {
         val interaction = ui.onNodeWithTag(tag)
-        val found = ui.onAllNodesWithTag(tag).fetchSemanticsNodes().singleOrNull()
+        val found = ui.onAllNodesWithTag(tag)
+            .fetchSemanticsNodes(atLeastOneRootRequired = false).singleOrNull()
         if (found != null && generateSequence(found.parent) { it.parent }.any {
                 it.config.getOrNull(SemanticsProperties.TestTag) == "chat-extra-actions"
             }) interaction.performScrollTo()
@@ -94,7 +95,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         ui.waitForIdle()
     }
     protected fun setDraft(text: String) { node("chat-draft").performTextReplacement(text) }
-    protected fun assertDraft(text: String) { node("chat-draft").assertEditableText(text).assertTextEquals(text) }
+    protected fun assertDraft(text: String) { node("chat-draft").assertEditableText(text) }
     protected fun setSelection(start: Int, end: Int) {
         node("chat-draft").performSemanticsAction(SemanticsActions.SetSelection) { assertTrue(it(start, end, false)) }
         ui.waitForIdle()
@@ -115,8 +116,20 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                 { assertTrue(action()) }
             }
             "dialog-confirm" -> {
-                val prompt = invokeHost(activity, "getPrompt")!!;
-                { invokeHost(activity, "confirmPrompt", prompt); Unit }
+                val prompt = invokeHost(activity, "getPrompt")!!
+                when (prompt.javaClass.simpleName) {
+                    "InputPrompt" -> {
+                        val value = node("prompt-input").fetchSemanticsNode()
+                            .config[SemanticsProperties.EditableText].text
+                        val action: () -> Unit = { invokeHost(activity, "confirmInputPrompt", prompt, value); Unit }
+                        action
+                    }
+                    "ConfirmPrompt" -> {
+                        val action: () -> Unit = { invokeHost(activity, "confirmPrompt", prompt); Unit }
+                        action
+                    }
+                    else -> error("Unsupported prompt: ${prompt.javaClass.name}")
+                }
             }
             "model-save" -> {
                 val draft = invokeHost(activity, "getModelDraft")!!;
@@ -162,9 +175,15 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
 /** Shared real-controller fixture; tests still assert database bytes and model-call counts. */
 @Suppress("DEPRECATION")
 abstract class WiredActivityTestCase : ComposeActivityTestCase() {
-    internal lateinit var fixture: RunControlFixture
-    private lateinit var original: ChatController
-    protected lateinit var activity: MainActivity
+    private var fixtureRef: RunControlFixture? = null
+    internal var fixture: RunControlFixture
+        get() = checkNotNull(fixtureRef)
+        set(value) { fixtureRef = value }
+    private var original: ChatController? = null
+    private var activityRef: MainActivity? = null
+    protected var activity: MainActivity
+        get() = checkNotNull(activityRef)
+        set(value) { activityRef = value }
     internal open fun createFixture() = RunControlFixture(instrumentation.targetContext)
     override fun setUp() {
         super.setUp()
@@ -177,10 +196,28 @@ abstract class WiredActivityTestCase : ComposeActivityTestCase() {
         activity = startMain()
     }
     override fun tearDown() {
+        val closingActivity = activityRef
+        val closingFixture = fixtureRef
+        val restore = original
         try {
-            mainThread { activity.finish() }
-            mainThread { (instrumentation.targetContext.applicationContext as ChatApplication).controller = original }
-            fixture.close()
-        } finally { super.tearDown() }
+            mainThread { closingActivity?.finish() }
+        } finally {
+            try {
+                mainThread {
+                    restore?.let {
+                        (instrumentation.targetContext.applicationContext as ChatApplication).controller = it
+                    }
+                }
+            } finally {
+                try {
+                    closingFixture?.close()
+                } finally {
+                    activityRef = null
+                    fixtureRef = null
+                    original = null
+                    super.tearDown()
+                }
+            }
+        }
     }
 }

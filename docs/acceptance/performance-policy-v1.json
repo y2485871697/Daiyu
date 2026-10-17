@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "policy_id": "vivo-v2419a-ac072-073-v1",
+  "approval": {
+    "source": "explicit_user_choice",
+    "date": "2026-10-17",
+    "question_id": "question-e42f35b1-7b70-4b16-8655-05dcbada5a75",
+    "option_id": "approve_original_candidates",
+    "scope": "Freeze the original AC-072/073 candidate thresholds, not measurement results."
+  },
+  "environment": {
+    "device_model": "V2419A",
+    "os_version": "15",
+    "sdk": 35,
+    "device_type": "physical",
+    "build_type": "release",
+    "refresh_rate_hz": 60
+  },
+  "dataset": {
+    "conversations": 1000,
+    "messages": 10000,
+    "text_mb": 10,
+    "attachments": 100,
+    "tool_steps": 500,
+    "migration_package_mb": 100
+  },
+  "AC-072": {
+    "min_rounds_per_latency": 20,
+    "cold_start_input_ready_p95_ms_max": 1500,
+    "long_conversation_tail_operable_ms_max": 1000,
+    "input_feedback_p95_ms_max": 100,
+    "stop_feedback_p95_ms_max": 100,
+    "frame_scenarios": [
+      "scroll",
+      "streaming",
+      "ime"
+    ],
+    "min_duration_seconds_per_frame_scenario": 30,
+    "frame_over_16_7_ms_ratio_max": 0.05,
+    "frame_over_50_ms_ratio_max": 0.01,
+    "frame_duration_ms_max": 700,
+    "anr_count_max": 0
+  },
+  "AC-073": {
+    "conversation_switches": 100,
+    "memory_growth_mb_max": 20,
+    "memory_growth_trend": "non_positive_after_stable_reclamation",
+    "migration_seconds_max": 30,
+    "migration_progress_must_be_visible": true,
+    "migration_integrity_ratio": 1,
+    "diagnostics_modes": [
+      "off",
+      "on"
+    ],
+    "diagnostics_overhead": "report_both_modes_and_difference_no_unapproved_threshold"
+  },
+  "measurement_status": "not_run",
+  "collection_authenticated": false,
+  "business_acceptance": false,
+  "notes": [
+    "Byte definitions, dataset digest, exact release build identity, measurement endpoints and raw capture links must be recorded before collection.",
+    "This approval freezes thresholds; it does not create a measured baseline, fabricate samples or satisfy any business assertion."
+  ]
+}

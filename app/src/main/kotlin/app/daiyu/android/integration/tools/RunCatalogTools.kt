@@ -241,7 +241,7 @@ internal class RunCatalogTools(
                 val bound = checkNotNull(owner) { "tool_owner_not_bound" }
                 val authorization = checkNotNull(boundAuthorization) { "tool_owner_not_bound" }
                 beginCreation(); creating = true
-                val scope = createResource { capture(capabilities, authorization) }
+                val scope = capture(capabilities, authorization)
                 val publish = synchronized(closeLock) {
                     if (closed.get()) false else { skills = scope; true }
                 }

@@ -20,8 +20,8 @@ class SessionGatewayMainSettingsTest : WiredActivityTestCase() {
         awaitControl("gateway save finished") { !fixture.controller.dataBusy }
         ui.waitForIdle()
     }
-    private fun hostField(name: String): Any? = MainActivity::class.java.getDeclaredField(name)
-        .apply { isAccessible = true }.get(activity)
+    private fun hostField(name: String): Any? = (MainActivity::class.java.getDeclaredField("$name\$delegate")
+        .apply { isAccessible = true }.get(activity) as androidx.compose.runtime.State<*>).value
     private fun staleSave(owner: ModelSettingsSaveOwner, rule: SessionGatewayRule) {
         MainActivity::class.java.getDeclaredMethod("saveSessionGateway", ModelSettingsSaveOwner::class.java,
             SessionGatewayRule::class.java).apply { isAccessible = true }.invoke(activity, owner, rule)

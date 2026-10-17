@@ -92,7 +92,7 @@ class RecordedUsageConsumptionDatabaseTest : InstrumentationTestCase() {
             assertEquals(projection.combined.input.reportedTokens, json.getLong("input_tokens"))
             assertEquals(133L, json.getLong("total_tokens")) // cached tokens are not added again
             assertEquals("provider_reported", json.getString("source"))
-            assertEquals("runtime_checkpoints+child_request_usage+runtime_preparations", json.getString("record_source"))
+            assertEquals("runtime_checkpoints+child_request_usage+runtime_preparations+typed_context_usage", json.getString("record_source"))
             assertTrue(json.isNull("reasoning_tokens"))
             assertEquals(1, json.getJSONObject("coverage").getJSONObject("child").getInt("total_tasks"))
             assertEquals(checkpoint, runtime.readCommittedCheckpoint(checkpoint))

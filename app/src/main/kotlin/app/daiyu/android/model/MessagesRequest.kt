@@ -284,6 +284,15 @@ internal object MessagesRequest {
                     require(role == "assistant")
                     block.strictString("id"); block.strictString("name"); block.getJSONObject("input")
                 }
+                "thinking" -> {
+                    require(role == "assistant")
+                    block.strictString("thinking")
+                    require(block.strictString("signature").isNotBlank()) { "Thinking history requires its native signature" }
+                }
+                "redacted_thinking" -> {
+                    require(role == "assistant")
+                    require(block.strictString("data").isNotBlank())
+                }
                 "tool_result" -> {
                     require(role == "user")
                     block.strictString("tool_use_id"); block.strictString("content")

@@ -99,7 +99,7 @@ class ContextRegistry(private val service: ContextService) {
                 }
                 val totals = service.usage(branch, run)
                 totals.toJson().put("ok", true).put("source", "provider_reported")
-                    .put("record_source", "runtime_checkpoints+child_request_usage+runtime_preparations")
+                    .put("record_source", "runtime_checkpoints+child_request_usage+runtime_preparations+typed_context_usage")
             }
             else -> JSONObject().put("ok", false).put("error", "unknown_tool")
         }

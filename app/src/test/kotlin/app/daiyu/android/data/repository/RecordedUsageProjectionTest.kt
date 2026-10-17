@@ -46,6 +46,42 @@ class RecordedUsageProjectionTest {
         assertEquals("—（已报告 0，未知 1）", formatReportedUsage(value.main.input))
     }
 
+    @Test fun preparationAndPurposeMissingReportsAndBudgetsAreVisibleWithoutTokenZeros() {
+        val base = projection(emptyList()).attributed
+        val value = RecordedUsageProjection(base.copy(parentCoverage = base.parentCoverage.copy(
+            totalPreparations = 4, inspectedPreparations = 2, preparationsWithoutUsage = 1, unreadablePreparations = 1,
+            mainRequestsWithoutUsage = 2, totalAuxiliaryRequests = 3, inspectedAuxiliaryRequests = 1,
+            auxiliaryRequestsWithoutUsage = 1, totalTitleRequests = 2, inspectedTitleRequests = 1, titleRequestsWithoutUsage = 1)))
+        assertTrue(value.coverageDescription.contains("摘要准备：检查 2/4，缺 Usage 1，坏行 1，预算延后 2"))
+        assertTrue(value.coverageDescription.contains("主请求缺报 2"))
+        assertTrue(value.coverageDescription.contains("辅助视觉：检查 1/3，缺 Usage 1"))
+        assertTrue(value.coverageDescription.contains("标题：检查 1/2，缺 Usage 1"))
+        assertNull(value.combined.input.reportedTokens)
+        assertEquals(0L, value.combined.requestSnapshotCount)
+        assertFalse(value.attributed.scanComplete)
+    }
+
+    @Test fun manualOperationCoverageIsSeparateAndNeverInventsReportedTokenZeros() {
+        val base = projection(emptyList()).attributed
+        val value = RecordedUsageProjection(base.copy(parentCoverage = base.parentCoverage.copy(
+            totalManualSummaryRequests = 4, inspectedManualSummaryRequests = 2,
+            manualSummaryWithoutUsage = 1, unreadableManualSummaryRequests = 1)))
+        assertTrue(value.coverageDescription.contains("手动摘要：检查 2/4，缺 Usage 1，坏行 1，预算延后 2"))
+        assertNull(value.manualSummary.input.reportedTokens)
+        assertEquals(0L, value.combined.requestSnapshotCount)
+        assertFalse(value.attributed.scanComplete)
+        val manual = AttributedRequestUsage("conversation", null, null, null, null,
+            UsageOrigin.ConversationPreparation("conversation", "operation"),
+            RequestCheckpoint("manual", "attempt", "owner", RequestOperation.NEXT), ModelEvent.Usage(0, null, 0),
+            app.daiyu.android.domain.runtime.UsageRequestSource.MANUAL_SUMMARY)
+        val reported = projection(listOf(manual))
+        assertEquals(0L, reported.main.requestSnapshotCount)
+        assertEquals(0L, reported.child.requestSnapshotCount)
+        assertEquals(1L, reported.manualSummary.requestSnapshotCount)
+        assertEquals("0（已报告 1，未知 0）", formatReportedUsage(reported.manualSummary.input))
+        assertEquals(1L, reported.combined.requestSnapshotCount)
+    }
+
     @Test fun badMissingAndDeferredRowsAreVisibleCoverageNotSyntheticRequests() {
         val value = projection(emptyList(), missing = 2, bad = 1, deferred = 1)
         assertEquals(0L, value.combined.requestSnapshotCount)

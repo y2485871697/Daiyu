@@ -47,7 +47,7 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         worker = ContextManagementWorker(service, { configuration }, ProductionCompressionPolicyResolver,
             object : ContextManagementSummaryProfiles {
                 override fun describe(binding: SummaryModelBinding) = target?.takeIf { it.binding == binding }
-                override fun freeze(expected: SummaryProfileDescriptor): BoundSummaryModel? {
+                override fun freeze(expected: SummaryProfileDescriptor, usagePort: BoundSummaryUsagePort): BoundSummaryModel? {
                     if (target != expected) throw SummaryProfileChangedException()
                     resolutions++
                     return resolve()
@@ -134,7 +134,7 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         val profileWorker = ContextManagementWorker(service, { configuration }, ProductionCompressionPolicyResolver,
             object : ContextManagementSummaryProfiles {
                 override fun describe(binding: SummaryModelBinding) = store.descriptor(binding)
-                override fun freeze(expected: SummaryProfileDescriptor): BoundSummaryModel {
+                override fun freeze(expected: SummaryProfileDescriptor, usagePort: BoundSummaryUsagePort): BoundSummaryModel {
                     store.configuration(expected) // Same production atomic compare-and-capture port.
                     resolutions++
                     return bound()

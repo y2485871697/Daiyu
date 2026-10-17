@@ -140,15 +140,24 @@ class ChatController internal constructor(private val application:Application,
     }
     // The Activity editor and run preparation share this exact independent store instance.
     internal val reconnectSettings = app.daiyu.android.model.reconnect.ReconnectSettingsStore(application)
+    internal val reasoningPreference = app.daiyu.android.ui.model.ConversationReasoningPreference(preferences)
     internal val titleSettings by lazy { titleSettingsOverride ?: app.daiyu.android.title.TitleModelSettingsStore(application) }
     private val titleCoordinatorDelegate = lazy {
         app.daiyu.android.title.TitleModelCoordinator(titleSettings,
             app.daiyu.android.title.SqliteTitleCommitAdapter({ database.writableDatabase },
-                app.daiyu.android.title.ParentTitleUsagePort { db, receipt ->
-                    check(db === database.writableDatabase && db.inTransaction())
-                    contextService.recordUsage(app.daiyu.android.domain.context.UsageRecord(
-                        receipt.requestId, receipt.parentRunId.value, receipt.conversationId.value,
-                        receipt.usage?.inputTokens, receipt.usage?.outputTokens, receipt.usage?.cachedTokens))
+                object : app.daiyu.android.title.ParentTitleUsagePort {
+                    override fun beginRequest(db: android.database.sqlite.SQLiteDatabase, receipt: app.daiyu.android.title.ParentTitleUsage) {
+                        check(db === database.writableDatabase && db.inTransaction())
+                        app.daiyu.android.model.usage.SQLiteAdditionalUsageStore.beginTitle(db, receipt)
+                    }
+                    override fun observeRequest(db: android.database.sqlite.SQLiteDatabase, receipt: app.daiyu.android.title.ParentTitleUsage) {
+                        check(db === database.writableDatabase && db.inTransaction())
+                        app.daiyu.android.model.usage.SQLiteAdditionalUsageStore.observeTitle(db, receipt)
+                    }
+                    override fun recordAfterTitleSaved(db: android.database.sqlite.SQLiteDatabase, receipt: app.daiyu.android.title.ParentTitleUsage) {
+                        check(db === database.writableDatabase && db.inTransaction())
+                        app.daiyu.android.model.usage.SQLiteAdditionalUsageStore.finishTitle(db, receipt)
+                    }
                 }), titleModelFactory)
     }
     private val titleCoordinator by titleCoordinatorDelegate
@@ -248,6 +257,8 @@ class ChatController internal constructor(private val application:Application,
     // The existing preparation lane is retained until the worker (and device cleanup) exits.
     // Identity, not a Boolean reset, prevents an old completion from clearing a newer owner.
     private class Preparation(val assistantId: String?, var textTicket: TextSendTicket? = null) {
+        var summaryPreparation: app.daiyu.android.context.RuntimeSummaryPreparation? = null
+        var summaryTransferred = false
         var admittedVoiceOwner: Message? = null
         val cancellation = ContextPreparationCancellation()
         var revoked = false
@@ -958,7 +969,8 @@ class ChatController internal constructor(private val application:Application,
     private val closeDone=CountDownLatch(1)
     private var closingStorage=false
     private class RunResources(val initial:Message,val runner:ChatRunner,val tools:RunCatalogTools,
-        val auxiliary: ControllerAuxiliaryVision? = null) {
+        val auxiliary: ControllerAuxiliaryVision? = null,
+        val summaryPreparation: app.daiyu.android.context.RuntimeSummaryPreparation? = null) {
         val writer=Executors.newSingleThreadExecutor()
         val waiter=Executors.newSingleThreadExecutor()
         var question:QuestionRunSession?=null
@@ -1472,7 +1484,20 @@ class ChatController internal constructor(private val application:Application,
             }
         }
     }
+    private fun closeSummaryPreparationSafely(value: app.daiyu.android.context.RuntimeSummaryPreparation?) {
+        try { value?.close() }
+        catch (_: Exception) {
+            synchronized(this) {
+                recoveryFailed = true
+                problem = "摘要用量清理未确认；新发送已停用，未自动重发"
+                notifyChanged()
+            }
+        }
+    }
     private fun finishPreparation(token: Preparation) {
+        // Accepted READY belongs to RunResources until the first checkpoint (or final drain).
+        // Clearing the editor preparation lane must NOT cancel the handoff.
+        if (!token.summaryTransferred) closeSummaryPreparationSafely(token.summaryPreparation)
         val gui = synchronized(this) { if (preparation === token) guiEntry?.takeIf { it.catalog == null } else null }
         if (gui != null) {
             gui.session?.close()
@@ -2173,6 +2198,17 @@ class ChatController internal constructor(private val application:Application,
             if(imageAttempt!=null) require(selected?.asModelSettings()==config) {"stale_image_provider"}
             selected?.takeIf {it.asModelSettings()==config} ?: ProviderSnapshot.capture(config)
         } catch (_:Exception) {problem="图片模型配置已变化；草稿保留，未发起网络请求";notifyChanged();return null}
+        // One immutable request policy, read once before context/model preparation. Changing
+        // the UI/store during streaming, pause/continue or tool rounds affects only the next run.
+        val frozenReasoning = try { reasoningPreference.snapshot(conversation?.id?.value) }
+        catch (_: Exception) { problem="思考偏好无效或读取失败；请重新保存，草稿保留";notifyChanged();return null }
+        val requestProvider = try { app.daiyu.android.model.ReasoningRequestPolicy.freeze(provider, frozenReasoning) }
+        catch (failure: Exception) {
+            problem=if (failure is IllegalArgumentException) failure.message ?: "当前模型协议不支持此思考配置；草稿保留"
+                else "推理参数格式无效；Responses 使用 reasoning 对象，Messages 仅支持 enabled/disabled thinking；草稿保留"
+            notifyChanged();return null
+        }
+        val requestConfig = requestProvider.asModelSettings()
         // sendPrepared runs on the preparation worker. Freeze once, AFTER the exact provider;
         // no settings IO on pause/continue/tool rounds, and no fallback on a corrupt/fenced store.
         val frozenReconnect = try {
@@ -2184,6 +2220,8 @@ class ChatController internal constructor(private val application:Application,
         val conversationId=gui?.conversationId ?: virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
         val run=gui?.runId ?: virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
+        if (conversation == null) try { reasoningPreference.retainAccepted(conversationId.value, frozenReasoning) }
+        catch (_: Exception) { problem="会话思考偏好保存未确认；草稿保留，未发起请求";notifyChanged();return null }
         // One acceptance candidate, including its media reconstruction and all run owners.
         // This value must not change during preflight, streaming, or receipt reconciliation.
         val acceptedAt = System.currentTimeMillis()
@@ -2201,6 +2239,11 @@ class ChatController internal constructor(private val application:Application,
                 browserPreparation != null || browserBinding != null)) {
             problem="当前专用批准不能与原视频历史混合发送；保留草稿，请使用原视频文本发送入口"
             notifyChanged(); return null
+        }
+        if ((videoAttempt != null || physicalVideoHistory.inputs.isNotEmpty()) &&
+            frozenReasoning != app.daiyu.android.delegation.ReasoningEffort.DEFAULT) {
+            problem="原视频批准尚未接通独立思考偏好；请选择默认，草稿保留，未发起请求"
+            notifyChanged();return null
         }
         var videoPrepared: PreparedControllerVideoSend? = null
         var videoPlan: ControllerVideoModelPlan? = null
@@ -2271,7 +2314,9 @@ class ChatController internal constructor(private val application:Application,
         val preparedContext = try {
             // All sends, including the very first message, share the same frozen policy/budget.
             val coordinator = contextPreparation
-            val frozen = coordinator.freeze(conversationId,listOf(user),token.cancellation)
+            val summary = checkNotNull(runtimeStore).summaryPreparation(conversationId, run, assistant.id, token.cancellation)
+            token.summaryPreparation = summary
+            val frozen = coordinator.freeze(conversationId,listOf(user),token.cancellation, summaryUsage = summary.usagePort)
             if (video == null) coordinator.prepare(frozen) else {
                 // A video run must not silently replace physical/retained history with a text summary.
                 // Keep the same policy/budget and acceptance revision, but send every physical row.
@@ -2322,14 +2367,15 @@ class ChatController internal constructor(private val application:Application,
                 preparationCancelled(token) || !auxiliaryCurrent() ||
                     imageAttempt?.handle?.isCancelled()==true || shizukuPreparation?.isCancelled()==true
             }
-            val delegate=sessionModel?.invoke(provider,assistantContext,SessionGatewayContext(conversationId))
-                ?: assistantModel?.invoke(provider,assistantContext)
-                ?: if(plan.hasImages && auxiliaryFrozen == null) imageModel(provider) else model(config)
+            val delegate=sessionModel?.invoke(requestProvider,assistantContext,SessionGatewayContext(conversationId))
+                ?: assistantModel?.invoke(requestProvider,assistantContext)
+                ?: if(plan.hasImages && auxiliaryFrozen == null) imageModel(requestProvider) else model(requestConfig)
             if (auxiliaryFrozen == null) messageImages.wrap(delegate,provider,conversationId)
             else {
                 ControllerAuxiliaryVision.create(delegate, auxiliarySelection,
                     listOf(independentModels.visionCandidate(auxiliaryFrozen)), messageImageResolver(conversationId),
-                    checkNotNull(authorization)::authorize).also { auxiliaryPort = it }
+                    checkNotNull(authorization)::authorize,
+                    beginUsage = { checkNotNull(runtimeStore).auxiliaryUsage(assistant) }).also { auxiliaryPort = it }
             }
             }
         } catch (_:Exception) {
@@ -2491,6 +2537,7 @@ class ChatController internal constructor(private val application:Application,
         if (!mayCommit) { auxiliaryPort?.close(); closeUnacceptedTools(tools); return null }
         var databaseSendEntered=false
         val saved=try {
+            checkNotNull(token.summaryPreparation).seal()
             if (videoAttempt != null) {
                 val receipt = videoAttempt.commit(database, physicalVideoHistory, checkNotNull(videoPrepared),
                     checkNotNull(videoPlan), assistantContext.assistantId, frozenDraft,
@@ -2564,7 +2611,7 @@ class ChatController internal constructor(private val application:Application,
         synchronized(this) { virtualDisplay?.accepted = true; gui?.accepted = true }
         video?.first?.accepted(user, videoPrepared?.inputs.orEmpty())
         generation?.session?.recordPersistence(generation.identity, GenerationPersistenceReceipt.Accepted(saved))
-        val lifetime=RunResources(assistant,owned,tools,auxiliaryPort)
+        val lifetime=RunResources(assistant,owned,tools,auxiliaryPort,token.summaryPreparation)
         val installed=synchronized(this) {
             if(closed || token.revoked || !auxiliaryCurrent() ||
                 token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true ||
@@ -2573,6 +2620,7 @@ class ChatController internal constructor(private val application:Application,
                 problem=null;active=assistant
                 token.admittedVoiceOwner = assistant // Exact admitted run, not a later current/history guess.
                 runner=owned;runTools=tools;resources=lifetime
+                token.summaryTransferred = true
                 reconnectResources=lifetime
                 generation?.let { it.runner=owned; it.catalog=tools }
                 enqueueSlice(lifetime,allowStopped=true) {
@@ -2725,6 +2773,7 @@ class ChatController internal constructor(private val application:Application,
             handler.post {
                 // Terminal worker/drain boundary, not the end of a WAITING_USER slice.
                 lifetime.auxiliary?.close()
+                closeSummaryPreparationSafely(lifetime.summaryPreparation)
                 lifetime.tools.closeWithResult { result ->
                     handler.post {synchronized(this) {
                         if(resources===lifetime) {

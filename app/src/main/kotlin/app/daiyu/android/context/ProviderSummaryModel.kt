@@ -126,7 +126,7 @@ internal class ProviderSummaryModelPort(
         val frozen = freezeContextMessages(history)
         deadline.check()
         usagePort?.let { port ->
-            require(frozen.all { it.conversationId.value == port.parent.conversationId }) {
+            require(frozen.all { it.conversationId.value == port.conversationId }) {
                 "summary_usage_parent_conversation_mismatch"
             }
             port.claim() // A bound host request/attempt cannot silently open another POST.

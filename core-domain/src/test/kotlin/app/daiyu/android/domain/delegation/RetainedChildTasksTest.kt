@@ -360,7 +360,7 @@ class RetainedChildTasksTest {
             assertEquals(admitted.tasks.single().owner.childRunId, row.runId)
             assertEquals(parent.message.runId.value, row.parentRunId); assertEquals(parent.message.id.value, row.parentMessageId)
             assertEquals(ModelEvent.Usage(null, 0, 0), row.snapshot)
-            assertEquals(UsageOrigin.Child(row.runId, "p", admitted.tasks.single().owner.taskGroupId), row.origin)
+            assertEquals(UsageOrigin.Child(requireNotNull(row.runId), "p", admitted.tasks.single().owner.taskGroupId), row.origin)
             assertTrue(row.request.requestId.isNotBlank()); assertTrue(row.request.attemptId.isNotBlank())
         } finally { release.countDown(); drained(supervisor) }
     }

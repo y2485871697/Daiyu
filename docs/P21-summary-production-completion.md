@@ -1,5 +1,7 @@
 # P21 生产摘要 Usage：runtime preparation → 同源 checkpoint 交接
 
+> 后续生产缺口修补及当前限制见 [P21-v17-production-gaps.md](P21-v17-production-gaps.md)。本文v16/helper待接线、handoff清空has_usage等为历史状态；不得据此宣称手动压缩已入账或测试已通过。
+
 ## 本实现的边界与证据
 
 按委派先阅读 `docs/P21-usage-production.md`，再逐项核对真实实现，不能把旧文档的 port 声明当作已接线证据。

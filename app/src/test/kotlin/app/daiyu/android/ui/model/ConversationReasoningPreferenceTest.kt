@@ -50,6 +50,51 @@ class ConversationReasoningPreferenceTest {
         assertEquals(true, values.values.keys.all { it.startsWith("reasoning:") })
     }
 
+    @Test fun runtimeSnapshotRejectsUnknownAndReadFailuresInsteadOfSilentlyUsingDefault() {
+        val values = MemoryKeyValue()
+        val preference = ConversationReasoningPreference(values)
+        preference.set("conversation", ReasoningEffort.LOW)
+        values.values[values.values.keys.single()] = "unsupported-future-value"
+        try { preference.snapshot("conversation"); throw AssertionError("unknown runtime preference accepted") }
+        catch (_: IllegalStateException) {}
+        val unreadable = ConversationReasoningPreference(object : ConversationReasoningPreference.KeyValue {
+            override fun get(key: String): String? = throw IllegalStateException("unreadable")
+            override fun set(key: String, value: String) {}
+        })
+        assertEquals(ReasoningEffort.DEFAULT, unreadable.get("conversation")) // Display only.
+        try { unreadable.snapshot("conversation"); throw AssertionError("unreadable runtime preference accepted") }
+        catch (_: IllegalStateException) {}
+    }
+
+    @Test fun acceptedStandaloneChoiceIsDetachedAndDoesNotOverwriteConversationEdits() {
+        val values = MemoryKeyValue()
+        val preference = ConversationReasoningPreference(values)
+        preference.set(null, ReasoningEffort.LOW)
+        val frozen = preference.snapshot(null)
+        preference.set(null, ReasoningEffort.HIGH)
+        preference.retainAccepted("first", frozen)
+        assertEquals(ReasoningEffort.LOW, preference.snapshot("first"))
+        preference.set("first", ReasoningEffort.OFF)
+        preference.retainAccepted("first", frozen)
+        assertEquals(ReasoningEffort.OFF, preference.snapshot("first"))
+        assertEquals(ReasoningEffort.HIGH, preference.snapshot(null))
+        assertEquals(ReasoningEffort.DEFAULT, preference.snapshot("other"))
+    }
+
+    @Test fun failedSaveFencesRuntimeUntilAnExplicitConfirmedSave() {
+        var stored: String? = null
+        var fails = true
+        val preference = ConversationReasoningPreference(object : ConversationReasoningPreference.KeyValue {
+            override fun get(key: String) = stored
+            override fun set(key: String, value: String) { stored = value; check(!fails) }
+        })
+        try { preference.set(null, ReasoningEffort.LOW); throw AssertionError("save accepted") } catch (_: IllegalStateException) {}
+        try { preference.snapshot(null); throw AssertionError("unconfirmed value accepted") } catch (_: IllegalStateException) {}
+        fails = false
+        preference.set(null, ReasoningEffort.HIGH)
+        assertEquals(ReasoningEffort.HIGH, preference.snapshot(null))
+    }
+
     @Test fun settingDefaultReplacesPreviousSelection() {
         val values = MemoryKeyValue()
         val preference = ConversationReasoningPreference(values)

@@ -58,7 +58,8 @@ class RecordedUsageReaderDatabaseTest : InstrumentationTestCase() {
     fun testMissingLegacyAndCorruptRowsStayDistinctWhileGoodUsageSurvives() {
         val missing = seed(); val legacy = seed(null); val corrupt = seed(); val good = seed()
         runtime.commitCheckpoint(legacy); runtime.commitCheckpoint(corrupt); runtime.commitCheckpoint(good)
-        val v3 = JSONObject(RunCheckpointCodec.encode(legacy)).put("version", 3); v3.remove("usage")
+        val v3 = JSONObject(RunCheckpointCodec.encode(legacy)).put("version", 3)
+        v3.remove("usage"); v3.remove("usage_requests")
         writePayload(legacy, v3.toString()); writePayload(corrupt, "{}")
         val value = read()
         assertEquals(4, value.totalAssistantMessages); assertEquals(4, value.inspectedAssistantMessages)

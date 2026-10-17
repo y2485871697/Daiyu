@@ -24,7 +24,11 @@ data class ParentTitleUsage(
     val parentRunId: RunId,
     /** Last provider snapshot replaces earlier snapshots. null means no report, not zero. */
     val usage: ModelEvent.Usage?,
-)
+    val request: app.daiyu.android.domain.runtime.RequestCheckpoint = app.daiyu.android.domain.runtime.RequestCheckpoint(
+        requestId, requestId, requestId, app.daiyu.android.domain.runtime.RequestOperation.NEXT),
+) {
+    init { require(request.requestId == requestId && request.operation == app.daiyu.android.domain.runtime.RequestOperation.NEXT) }
+}
 
 /** Required parent-owned port. Persist into the EXISTING usage store using THIS transaction.
  * Do not call a different DB/helper, dispatch an asynchronous write, or create a title ledger.
@@ -32,6 +36,9 @@ data class ParentTitleUsage(
  * requests in a usage-only transaction (legacy method name retained). No network/UI work. */
 fun interface ParentTitleUsagePort {
     fun recordAfterTitleSaved(db: SQLiteDatabase, receipt: ParentTitleUsage)
+    /** Durable admission before the only actual next(); compatibility ports may opt out. */
+    fun beginRequest(db: SQLiteDatabase, receipt: ParentTitleUsage) {}
+    fun observeRequest(db: SQLiteDatabase, receipt: ParentTitleUsage) {}
 }
 
 class TitleUsagePersistenceException(cause: Exception) : IllegalStateException("标题用量持久化未确认", cause)
@@ -90,6 +97,16 @@ class SqliteTitleCommitAdapter(
     /** A real failed/revoked/stale request still consumed provider resources. Use the SAME
      * parent ledger, preserving null when no usage was reported; never fabricate zero. */
     fun recordRequestUsage(receipt: ParentTitleUsage) = transaction { db -> recordUsage(db, receipt) }
+
+    fun beginRequestUsage(receipt: ParentTitleUsage) = transaction { db ->
+        try { usage.beginRequest(db, receipt) }
+        catch (failure: Exception) { throw TitleUsagePersistenceException(failure) }
+    }
+
+    fun observeRequestUsage(receipt: ParentTitleUsage) = transaction { db ->
+        try { usage.observeRequest(db, receipt) }
+        catch (failure: Exception) { throw TitleUsagePersistenceException(failure) }
+    }
 
     private fun recordUsage(db: SQLiteDatabase, receipt: ParentTitleUsage) {
         try { usage.recordAfterTitleSaved(db, receipt) }

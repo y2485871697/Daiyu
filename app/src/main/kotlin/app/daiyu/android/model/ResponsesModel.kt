@@ -102,6 +102,7 @@ class ResponsesModel internal constructor(
                 settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools), ProviderProtocol.RESPONSES),
                 assistantInstructions,
             )
+            ReasoningRequestPolicy.validate(request, ProviderProtocol.RESPONSES)
             val finalUrl = settings.requestEndpoint()
             SessionGateway.applyResponses(request, finalUrl, settings.requestOptions.sessionGateway, sessionContext)
             val sessionHeaders = SessionGateway.headers(finalUrl, sessionContext)

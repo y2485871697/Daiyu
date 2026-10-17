@@ -48,6 +48,26 @@ class RecordedContextUsageAdapterTest {
         assertEquals(1L, child.inputTokens); assertEquals(3L, child.totalTokens)
     }
 
+    @Test fun manualOperationIsConversationOwnedAndMissingReportCoverageDoesNotLeakIntoRunGrant() {
+        val manual = AttributedRequestUsage("conversation", null, null, null, null,
+            UsageOrigin.ConversationPreparation("conversation", "operation"),
+            RequestCheckpoint("manual", "attempt", "owner", RequestOperation.NEXT), ModelEvent.Usage(3, 0, 0),
+            app.daiyu.android.domain.runtime.UsageRequestSource.MANUAL_SUMMARY)
+        val base = stats(listOf(row("parent", false, ModelEvent.Usage(10, 20, 5)), manual))
+        val data = base.copy(parentCoverage = base.parentCoverage.copy(totalManualSummaryRequests = 3,
+            inspectedManualSummaryRequests = 2, manualSummaryWithoutUsage = 1))
+        val conversation = ContextUsageSnapshot(data, null).toJson()
+        assertEquals(13L, conversation.getLong("input_tokens"))
+        assertEquals(1, conversation.getJSONObject("request_sources").getInt("manual_summary"))
+        val coverage = conversation.getJSONObject("coverage").getJSONObject("manual_summary")
+        assertEquals(1, coverage.getInt("without_usage")); assertEquals(1, coverage.getInt("deferred"))
+        assertTrue(conversation.getBoolean("incomplete"))
+        val run = ContextUsageSnapshot(data, "parent").toJson()
+        assertEquals(10L, run.getLong("input_tokens"))
+        assertEquals(0, run.getJSONObject("request_sources").getInt("manual_summary"))
+        assertFalse(run.getJSONObject("coverage").has("manual_summary"))
+    }
+
     @Test fun emptyAndCorruptCoverageDoNotBecomeZeroTokenRequests() {
         val empty = ContextUsageSnapshot(stats(emptyList(), missing = 2, corrupt = 1), null).toJson()
         assertEquals(0L, empty.getLong("requests")); assertTrue(empty.isNull("input_tokens"))

@@ -33,7 +33,9 @@ class ContextUsageSnapshot internal constructor(
     val incomplete: Boolean get() = runId != null || !attributed.scanComplete || requests == 0L ||
         reportedRequests != requests || summary.cached.unknownRequestCount > 0 ||
         attributed.parentCoverage.messagesWithoutCheckpoint > 0 || attributed.parentCoverage.messagesWithoutUsage > 0 ||
-        attributed.childCoverage.tasksWithoutReportedUsage > 0 || attributed.parentCoverage.preparationsWithoutUsage > 0
+        attributed.childCoverage.tasksWithoutReportedUsage > 0 || attributed.parentCoverage.preparationsWithoutUsage > 0 ||
+        attributed.parentCoverage.mainRequestsWithoutUsage > 0 || attributed.parentCoverage.auxiliaryRequestsWithoutUsage > 0 ||
+        attributed.parentCoverage.titleRequestsWithoutUsage > 0 || attributed.parentCoverage.manualSummaryWithoutUsage > 0
 
     internal fun toJson(): JSONObject = JSONObject().put("requests", requests)
         .put("request_count_kind", "persisted_usage_snapshots")
@@ -41,7 +43,10 @@ class ContextUsageSnapshot internal constructor(
         .put("request_sources", JSONObject()
             .put("main", selected.count { it.origin == app.daiyu.android.domain.usage.UsageOrigin.Main && it.source == app.daiyu.android.domain.runtime.UsageRequestSource.MAIN })
             .put("child", selected.count { it.origin is app.daiyu.android.domain.usage.UsageOrigin.Child && it.source == app.daiyu.android.domain.runtime.UsageRequestSource.MAIN })
-            .put("summary", selected.count { it.source == app.daiyu.android.domain.runtime.UsageRequestSource.SUMMARY }))
+            .put("summary", selected.count { it.source == app.daiyu.android.domain.runtime.UsageRequestSource.SUMMARY })
+            .put("auxiliary_vision", selected.count { it.source == app.daiyu.android.domain.runtime.UsageRequestSource.AUXILIARY_VISION })
+            .put("title", selected.count { it.source == app.daiyu.android.domain.runtime.UsageRequestSource.TITLE })
+            .put("manual_summary", selected.count { it.source == app.daiyu.android.domain.runtime.UsageRequestSource.MANUAL_SUMMARY }))
         .put("input_tokens", inputTokens ?: JSONObject.NULL)
         .put("output_tokens", outputTokens ?: JSONObject.NULL)
         .put("cached_tokens", cachedTokens ?: JSONObject.NULL)
@@ -69,10 +74,21 @@ class ContextUsageSnapshot internal constructor(
             .put("parent", JSONObject().put("total_messages", p.totalAssistantMessages)
                 .put("inspected_messages", p.inspectedAssistantMessages)
                 .put("without_checkpoint", p.messagesWithoutCheckpoint).put("without_usage", p.messagesWithoutUsage)
-                .put("unreadable", p.unreadableCheckpoints).put("deferred", p.deferredCheckpoints))
+                .put("unreadable", p.unreadableCheckpoints).put("deferred", p.deferredCheckpoints)
+                .put("requests_without_usage", p.mainRequestsWithoutUsage))
             .put("preparation", JSONObject().put("total", p.totalPreparations)
                 .put("inspected", p.inspectedPreparations).put("without_usage", p.preparationsWithoutUsage)
                 .put("unreadable", p.unreadablePreparations).put("deferred", p.totalPreparations - p.inspectedPreparations))
+            .put("auxiliary_vision", JSONObject().put("total", p.totalAuxiliaryRequests)
+                .put("inspected", p.inspectedAuxiliaryRequests).put("without_usage", p.auxiliaryRequestsWithoutUsage)
+                .put("unreadable", p.unreadableAuxiliaryRequests).put("deferred", p.totalAuxiliaryRequests - p.inspectedAuxiliaryRequests))
+            .put("title", JSONObject().put("total", p.totalTitleRequests)
+                .put("inspected", p.inspectedTitleRequests).put("without_usage", p.titleRequestsWithoutUsage)
+                .put("unreadable", p.unreadableTitleRequests).put("deferred", p.totalTitleRequests - p.inspectedTitleRequests))
+            .put("manual_summary", JSONObject().put("total", p.totalManualSummaryRequests)
+                .put("inspected", p.inspectedManualSummaryRequests).put("without_usage", p.manualSummaryWithoutUsage)
+                .put("unreadable", p.unreadableManualSummaryRequests)
+                .put("deferred", p.totalManualSummaryRequests - p.inspectedManualSummaryRequests))
             .put("child", JSONObject().put("total_tasks", c.totalTasks).put("inspected_tasks", c.inspectedTasks)
                 .put("without_usage", c.tasksWithoutReportedUsage).put("not_started", c.notStartedTasks)
                 .put("unreadable", c.unreadableTasks).put("deferred", c.deferredTasks))
@@ -80,7 +96,7 @@ class ContextUsageSnapshot internal constructor(
 }
 
 /** Explicit read-only bridge to the SAME committed checkpoint/child reader as the stats UI.
- * Never reads/writes context_usage; legacy receipt APIs remain separate compatibility code. */
+ * Only explicitly typed context_usage admissions join the authority; legacy receipts remain excluded. */
 internal object RecordedContextUsageAdapter {
     fun read(db: SQLiteDatabase, branchId: String, runId: String?): ContextUsageSnapshot {
         check(db.inTransaction()) { "context_usage_transaction_required" }

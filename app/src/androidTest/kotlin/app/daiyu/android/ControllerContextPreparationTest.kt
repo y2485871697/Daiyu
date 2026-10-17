@@ -81,6 +81,22 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         assertNull(controller.problem)
         return f
     }
+    fun testSummaryCleanupFailureFencesNewSendsWithoutEscapingCleanupCaller() {
+        val opens = AtomicInteger()
+        val f = fresh { ModelPort { opens.incrementAndGet(); session() } }
+        val reservation = RuntimeSummaryPreparation(BoundSummaryUsagePort("fixture", {}, {}),
+            ContextPreparationCancellation(), {}, { throw android.database.sqlite.SQLiteException("fixture") })
+        val close = ChatController::class.java.getDeclaredMethod("closeSummaryPreparationSafely", RuntimeSummaryPreparation::class.java)
+            .apply { isAccessible = true }
+        val idle = ChatController::class.java.getDeclaredMethod("idleAvailable").apply { isAccessible = true }
+        main {
+            close.invoke(f.controller, reservation)
+            assertTrue(f.controller.problem?.contains("摘要用量清理未确认") == true)
+            assertEquals(false, idle.invoke(f.controller))
+        }
+        assertEquals(0, opens.get())
+    }
+
     private fun seed(f: Fixture, turns: Int = 6): Conversation {
         val owner = f.db.create("default")
         repeat(turns) { n ->
@@ -125,6 +141,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
 
     fun testRunnerReceivesPreparedSummaryAndExactlyOnePendingMessage() {
         val opened = CountDownLatch(1)
+        val releaseMain = CountDownLatch(1)
         val history = AtomicReference<List<Message>>()
         val summary = BoundSummaryModel(binding,SummaryModelTransport { _, _ -> object : ModelSession {
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
@@ -134,11 +151,21 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
             override fun cancel() {}
         } },100000,90000,{SummaryRequestDeadline(60000)})
         val f = fresh(CompressionSettings(true,10000,1000,10,2,binding),SummaryModelResolver {summary}) {
-            ModelPort { input -> history.set(input);opened.countDown();session() }
+            ModelPort { input ->
+                history.set(input);opened.countDown()
+                assertTrue(releaseMain.await(10, TimeUnit.SECONDS))
+                session()
+            }
         }
         val owner=seed(f);f.db.draft(owner.id,"pending-once")
         assertTrue(send(f,owner,"pending-once") is ChatController.TextSendResult.Accepted)
         await(opened)
+        // sendText's completion ran AFTER finishPreparation; the run, not the editor token,
+        // still owns the summary handle. It must remain HANDED rather than revoked.
+        f.db.readableDatabase.rawQuery("SELECT state FROM runtime_preparations WHERE conversation_id=?", arrayOf(owner.id.value)).use {
+            assertTrue(it.moveToFirst()); assertEquals("HANDED", it.getString(0))
+        }
+        releaseMain.countDown()
         val input=history.get()
         assertTrue(input.first().id.value.startsWith("summary-"))
         assertEquals(1,input.count {row -> row.blocks.filterIsInstance<MessageBlock.Text>().any {it.text=="pending-once"}})

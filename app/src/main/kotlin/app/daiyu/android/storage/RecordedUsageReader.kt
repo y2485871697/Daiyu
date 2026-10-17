@@ -7,6 +7,9 @@ import app.daiyu.android.domain.ConversationId
 import app.daiyu.android.domain.usage.*
 import app.daiyu.android.model.usage.AttributedUsageStats
 import app.daiyu.android.model.usage.SQLiteChildUsageStore
+import app.daiyu.android.model.usage.SQLiteAdditionalUsageStore
+import app.daiyu.android.domain.runtime.RequestOperation
+import app.daiyu.android.domain.runtime.UsageRequestSource
 import java.util.concurrent.CancellationException
 
 internal data class RecordedUsageBudget(
@@ -46,6 +49,7 @@ internal object RecordedUsageReader {
         val total = db.rawQuery("SELECT COUNT(*)$from$where", args).use { it.moveToFirst(); it.getInt(0) }
         val snapshots = ArrayList<AttributedRequestUsage>()
         var inspected = 0; var absent = 0; var empty = 0; var unreadable = 0; var deferred = 0
+        var mainMissing = 0
         var chargedBytes = 0L
         db.rawQuery("SELECT m.id,m.conversation_id,m.run_id,m.status,r.message_id,length(CAST(r.payload AS BLOB))" +
             from + " LEFT JOIN runtime_checkpoints r ON r.message_id=m.id" + where +
@@ -65,11 +69,20 @@ internal object RecordedUsageReader {
                     null
                 }
                 if (saved == null || saved.message.conversationId.value != rows.getString(1) ||
-                    saved.message.runId.value != rows.getString(2) || saved.message.status.name != rows.getString(3)) {
+                    saved.message.runId.value != rows.getString(2) || saved.message.status.name != rows.getString(3) ||
+                    saved.usage.any { it.source == UsageRequestSource.MANUAL_SUMMARY }) {
                     unreadable++; continue
                 }
-                if (saved.usage.isEmpty()) { empty++; continue }
                 if (saved.usage.size > budget.maxUsageRecords - snapshots.size) { deferred++; continue }
+                // A summary report is not evidence that any MAIN request reported Usage.
+                val main = saved.usage.filter { it.source == UsageRequestSource.MAIN }
+                if (main.isEmpty()) empty++
+                val admitted = saved.usageRequests.ifEmpty {
+                    listOfNotNull(saved.request?.takeIf { it.operation != RequestOperation.OPEN })
+                }
+                mainMissing += admitted.count { request -> main.none {
+                    it.request.owner == request.owner && it.request.requestId == request.requestId
+                } }
                 saved.usage.forEach { usage ->
                     snapshots.add(AttributedRequestUsage(saved.message.conversationId.value, saved.message.runId.value,
                         saved.message.id.value, saved.message.runId.value, saved.message.id.value,
@@ -80,8 +93,19 @@ internal object RecordedUsageReader {
         val preparing = app.daiyu.android.context.SQLitePreparationRuntime.readUsage(db, conversationId,
             minOf(budget.maxMessages, budget.maxUsageRecords - snapshots.size))
         snapshots.addAll(preparing.requests)
+        val auxiliary = SQLiteAdditionalUsageStore.read(db, conversationId, UsageRequestSource.AUXILIARY_VISION,
+            minOf(budget.maxMessages, budget.maxUsageRecords - snapshots.size))
+        snapshots.addAll(auxiliary.requests)
+        val title = SQLiteAdditionalUsageStore.read(db, conversationId, UsageRequestSource.TITLE,
+            minOf(budget.maxMessages, budget.maxUsageRecords - snapshots.size))
+        snapshots.addAll(title.requests)
+        val manual = SQLiteAdditionalUsageStore.read(db, conversationId, UsageRequestSource.MANUAL_SUMMARY,
+            minOf(budget.maxMessages, budget.maxUsageRecords - snapshots.size))
+        snapshots.addAll(manual.requests)
         return RecordedUsageStats(aggregateRecordedUsage(snapshots.asSequence().map { it.snapshot }), total, inspected,
             absent, empty, unreadable, deferred, preparing.total, preparing.inspected, preparing.missingUsage,
-            preparing.unreadable) to snapshots.toList()
+            preparing.unreadable, mainMissing, auxiliary.total, auxiliary.inspected, auxiliary.missing, auxiliary.unreadable,
+            title.total, title.inspected, title.missing, title.unreadable,
+            manual.total, manual.inspected, manual.missing, manual.unreadable) to snapshots.toList()
     }
 }

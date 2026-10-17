@@ -10,6 +10,12 @@ sealed interface MessageBlock {
     data class Image(val reference: MessageImageReference) : MessageBlock
 }
 
+/** Public text actually reported by a provider (summary or native thinking), not hidden reasoning.
+ * Signatures/encrypted/redacted data belong only to authoritative protocolItems. */
+data class ReportedReasoning(val itemId: String, val text: String) {
+    init { require(itemId.isNotBlank() && itemId.length <= 512 && text.length <= 2_000_000) }
+}
+
 /** One ordered item in an assistant owner's persisted history. */
 data class MessageHistorySegment(
     val messageId: MessageId,
@@ -17,7 +23,8 @@ data class MessageHistorySegment(
     val blocks: List<MessageBlock>,
     val protocolItems: List<String> = emptyList(),
     /** Epoch milliseconds recorded when this message was accepted; null means unknown. */
-    val createdAt: Long? = null
+    val createdAt: Long? = null,
+    val reportedReasoning: List<ReportedReasoning> = emptyList()
 ) {
     init { require(createdAt == null || createdAt >= 0) }
 }
@@ -37,7 +44,10 @@ data class Message(
      * Callers creating a new accepted message record the clock once. Decoders and historical
      * messages must use null when the original time is unknown; never invent a read-time value.
      */
-    val createdAt: Long? = null
+    val createdAt: Long? = null,
+    /** Expanded-history display projection only. Durable owners keep this in historySegments;
+     * model request encoders must never turn this into user/assistant body text. */
+    val reportedReasoning: List<ReportedReasoning> = emptyList()
 ) {
     init { require(createdAt == null || createdAt >= 0) }
 
@@ -69,6 +79,7 @@ object MessageHistory {
                         role = segment.role,
                         blocks = segment.blocks,
                         protocolItems = segment.protocolItems,
+                        reportedReasoning = segment.reportedReasoning,
                         historySegments = emptyList(),
                         // A supplement must never inherit its assistant owner's time.
                         createdAt = segment.createdAt ?: originalRows[
@@ -111,6 +122,9 @@ object MessageHistory {
         identity(segment.messageId.value)
         require(segment.role == Message.USER_ROLE || segment.role == Message.ASSISTANT_ROLE)
         MessageImages.validateSegment(segment)
+        require(segment.reportedReasoning.isEmpty() || segment.role == Message.ASSISTANT_ROLE)
+        require(segment.reportedReasoning.size <= 1024 && segment.reportedReasoning.map { it.itemId }.distinct().size == segment.reportedReasoning.size)
+        require(segment.reportedReasoning.sumOf { it.text.length.toLong() } <= 2_000_000)
         val calls = mutableSetOf<ToolCallId>()
         segment.blocks.forEach { block -> when (block) {
             is MessageBlock.Text -> identity(block.itemId)

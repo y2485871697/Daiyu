@@ -27,7 +27,7 @@ class ChatRunnerReasoningObserverTest {
         sink(ModelEvent.ReasoningFinal("late", "OK.\n".repeat(2000)))
     }
 
-    @Test fun forwardsOnlyAcceptedReasoningEventsInOrderWithoutProjectingThem() {
+    @Test fun forwardsOnlyAcceptedReasoningEventsInOrderWithoutMixingThemIntoBody() {
         val delta = ModelEvent.ReasoningDelta("reason", "Consider the inputs.")
         val final = ModelEvent.ReasoningFinal("reason", "The inputs are sufficient.")
         val observed = mutableListOf<ModelEvent>()

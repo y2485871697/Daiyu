@@ -3,6 +3,7 @@ package app.daiyu.android.integration.tools
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.tools.SessionCapabilities
 import app.daiyu.android.vdapproval.VirtualDisplayApprovalRequest
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -23,7 +24,7 @@ class R08VirtualDisplayPlanTest {
             "org.example.notes/." + "A".repeat(236)).forEach { component ->
             val prepared = plan(R08VirtualDisplayAction.Launch("org.example.notes", component))
             val operation = prepared.writes.single()
-            val canonical = "{\"categories\":[],\"component\":\"$component\",\"flags\":0,\"package\":\"org.example.notes\"}"
+            val canonical = "{\"categories\":[],\"component\":${JSONObject.quote(component)},\"flags\":0,\"package\":\"org.example.notes\"}"
             assertSame(owner, prepared.owner)
             assertSame(caps, prepared.capabilities)
             assertEquals(canonical, operation.canonicalParameters)

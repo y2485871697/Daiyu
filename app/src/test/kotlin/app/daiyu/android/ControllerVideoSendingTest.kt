@@ -18,6 +18,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.URL
@@ -403,6 +404,7 @@ class ControllerVideoSendingTest {
         rejected { DatabaseTransactions { sql }.run { adapter.history.assertCurrent(it, snapshot) } }
     }
 
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
     @Test fun historicalImagesAndVideosShareOneResponsesPayloadWithoutLosingInstructions() {
         val conversation = db.create("default")
         val png = java.util.Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGP4z8DwH4QZYAwAR8oH+WdZbrcAAAAASUVORK5CYII=")
@@ -435,9 +437,22 @@ class ControllerVideoSendingTest {
         ui.send(port.open(plan.history))
         val body = JSONObject(connection.sent.toString("UTF-8"))
         assertEquals("image + video instructions", body.getString("instructions"))
-        assertTrue(body.toString().contains("data:image/png;base64,"))
-        assertTrue(body.toString().contains("data:video/mp4;base64,"))
+        assertEquals(listOf("data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(png)),
+            inputMediaUrls(body, "input_image", "image_url"))
+        assertEquals(listOf("data:video/mp4;base64,AQID", "data:video/mp4;base64,BAUG"),
+            inputMediaUrls(body, "input_video", "video_url"))
         assertTrue(connection.sent.size() > 0)
+    }
+
+    private fun inputMediaUrls(body: JSONObject, type: String, field: String): List<String> {
+        val input = body.getJSONArray("input")
+        return (0 until input.length()).flatMap { index ->
+            val row = input.getJSONObject(index)
+            if (row.optString("role") != "user") return@flatMap emptyList<String>()
+            val content = row.optJSONArray("content") ?: return@flatMap emptyList<String>()
+            (0 until content.length()).map { content.getJSONObject(it) }
+                .filter { it.getString("type") == type }.map { it.getString(field) }
+        }
     }
 
     /** Synthetic UI driver for these existing payload tests, not a production auto-approval. */
@@ -532,8 +547,8 @@ class ControllerVideoSendingTest {
             val body = JSONObject(connection.sent.toString("UTF-8"))
             assertEquals("preserved assistant instructions", body.getString("instructions"))
             val wire = body.toString()
-            assertTrue(wire.contains("data:video/mp4;base64,AQID"))
-            assertTrue(wire.contains("data:video/mp4;base64,BAUG"))
+            assertEquals(listOf("data:video/mp4;base64,AQID", "data:video/mp4;base64,BAUG"),
+                inputMediaUrls(body, "input_video", "video_url"))
             assertTrue(wire.contains("plain text continuation"))
             assertFalse(wire.contains("fixture-secret"))
         }

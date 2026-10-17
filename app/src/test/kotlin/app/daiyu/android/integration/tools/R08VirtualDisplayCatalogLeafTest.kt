@@ -192,14 +192,17 @@ class R08VirtualDisplayCatalogLeafTest {
         assertConfirmed(f.dispatch(f.step("launch")))
         f.journal.lookupOnly = true
         assertTrue(f.dispatch(f.step("handoff")).single().outcome is DispatchOutcome.Unknown)
-        assertTrue(f.dispatch(f.step("handoff", "new-handoff-call"), f.step("release"))
-            .all { it.outcome is DispatchOutcome.Unknown })
+        val results = f.dispatch(f.step("handoff", "new-handoff-call"), f.step("release"))
+        assertEquals(2, results.size)
+        assertEquals(DispatchOutcome.Unknown("unknown_effect_protected"), results[0].outcome)
+        assertEquals(DispatchOutcome.NotExecuted("unknown_effect_protected"), results[1].outcome)
         val query = f.endpoint.requests.last()
         val intent = f.plan.intent("handoff", f.plan.writes.single { it.operation == "handoff" })
         assertEquals("receipt", query.getString("op"))
         assertEquals("handoff", query.getString("operation"))
         assertEquals(intent.operationId, query.getString("operationId"))
         assertTrue(f.endpoint.requests.none { it.getString("op") in setOf("handoff", "release") })
+        assertEquals(1, f.endpoint.requests.count { it.getString("op") == "receipt" })
         f.endpoint.lifecycle = AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED
         assertEquals(R08VirtualDisplayCloseResult.Unknown(), closeResult(f))
     }

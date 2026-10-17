@@ -470,6 +470,22 @@ internal class RunCatalogTools(
         return original.prepareInitializedCleanupOnWorker(parentDrained = true)
     }
 
+    internal fun observeVirtualDisplayTasksOnWorker(original: ControllerVirtualDisplaySession,
+        parentDrained: Boolean): ControllerVirtualDisplaySession.TasksResult {
+        check(android.os.Looper.getMainLooper()?.thread !== Thread.currentThread()) { "virtual_display_worker_required" }
+        if (!parentDrained || !virtualDisplayCleanupLocallyDrained(original))
+            return ControllerVirtualDisplaySession.TasksResult.Unavailable
+        return original.observeTasksOnceOnWorker(true)
+    }
+
+    internal fun prepareVirtualDisplayTaskHandoffOnWorker(original: ControllerVirtualDisplaySession,
+        tasks: ControllerVirtualDisplaySession.RetainedTasks, selected: List<Int>, parentDrained: Boolean,
+        admissionStillValid: () -> Boolean): R08CleanupApprovalRequest? {
+        check(android.os.Looper.getMainLooper()?.thread !== Thread.currentThread()) { "virtual_display_worker_required" }
+        if (!parentDrained || !virtualDisplayCleanupLocallyDrained(original)) return null
+        return original.prepareTaskHandoffOnWorker(tasks, selected, true, admissionStillValid)
+    }
+
     /** Recheck the SAME gate at send admission; an earlier preparation/approval is not drain
      * evidence. The session still owns approval, fixed journal intent and one-attempt semantics.
      * No external/session code runs under closeLock. Closed local admission cannot reopen.

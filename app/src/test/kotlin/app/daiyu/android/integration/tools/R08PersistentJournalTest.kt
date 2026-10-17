@@ -52,18 +52,21 @@ class R08PersistentJournalTest {
 
     @Test fun independentInvocationsAndAllPreparedWriteKindsRemainDistinct() = fixture { root, _ ->
         val journal = R08PersistentJournal(root)
-        val intents = listOf("start", "initialize", "launch", "input", "release").map { operation ->
+        val intents = listOf("start", "initialize", "launch", "input", "status", "snapshot", "handoff", "release").map { operation ->
             intent(invocation = "invocation-$operation").copy(operation = operation,
                 canonicalParameters = when (operation) {
                     "launch" -> "{\"package\":\"com.example.app\"}"
                     "input" -> "{\"kind\":\"tap\",\"x\":1,\"y\":2}"
+                    "handoff" -> "{\"taskIds\":[12,23]}"
                     else -> "{}"
                 })
         }
         intents.forEach { assertEquals(execute, journal.claim(it)) }
-        assertEquals(5, events(root).size)
+        assertEquals(8, events(root).size)
         val reopened = R08PersistentJournal(root)
         intents.forEach { assertEquals(lookup, reopened.claim(it)) }
+        assertEquals(unknown, reopened.claim(intents.single { it.operation == "handoff" }
+            .copy(canonicalParameters = "{\"taskIds\":[23]}")))
         assertEquals(intents.map { it.operation }, events(root).map { decode(it).fields[4] })
     }
 

@@ -29,6 +29,7 @@ internal class ControllerVirtualCleanupAdapter(
     private val closed = AtomicBoolean(false)
     private val lock = Any()
     private var prepared: R08CleanupApprovalRequest? = null
+    private var observed: ControllerVirtualDisplaySession.RetainedTasks? = null
 
     private fun visitActive(): Boolean = !closed.get() && uiOwner.isActive
     private fun eligible(): Boolean = visitActive() && currentUiOwner() === uiOwner &&
@@ -46,6 +47,31 @@ internal class ControllerVirtualCleanupAdapter(
         return synchronized(lock) {
             if (!visitActive()) null else { prepared = request; request }
         }
+    }
+
+    fun observeTasksOnWorker(): ControllerVirtualDisplaySession.TasksResult {
+        worker()
+        if (!eligible()) return ControllerVirtualDisplaySession.TasksResult.Unavailable
+        val result = catalog.observeVirtualDisplayTasksOnWorker(session, true)
+        if (!eligible()) return ControllerVirtualDisplaySession.TasksResult.Unavailable
+        if (result is ControllerVirtualDisplaySession.TasksResult.Observed) synchronized(lock) {
+            if (!visitActive()) return ControllerVirtualDisplaySession.TasksResult.Unavailable
+            observed = result.tasks
+        }
+        return result
+    }
+
+    fun canPublishTasks(original: ControllerVirtualDisplaySession.RetainedTasks): Boolean =
+        eligible() && synchronized(lock) { visitActive() && observed === original }
+
+    fun prepareTaskHandoffOnWorker(original: ControllerVirtualDisplaySession.RetainedTasks,
+        selected: List<Int>): R08CleanupApprovalRequest? {
+        worker()
+        if (!canPublishTasks(original)) return null
+        val request = catalog.prepareVirtualDisplayTaskHandoffOnWorker(session, original, selected.toList(), true,
+            ::visitActive) ?: return null
+        if (!eligible()) return null
+        return synchronized(lock) { if (!visitActive()) null else { prepared = request; request } }
     }
 
     /** Check AGAIN on the UI lane before publishing a worker result. No physical observation. */
@@ -82,6 +108,7 @@ internal class ControllerVirtualCleanupAdapter(
         synchronized(lock) {
             prepared?.let { session.answerCleanupFromUi(it, false) }
             prepared = null
+            observed = null
         }
     }
 

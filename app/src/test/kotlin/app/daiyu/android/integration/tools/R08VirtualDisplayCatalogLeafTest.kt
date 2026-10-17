@@ -98,6 +98,12 @@ class R08VirtualDisplayCatalogLeafTest {
             if (negative) return result.put("receiptOnly", false).put("error", "INPUT_FAILED").put("message", "test failure")
             when (wire) {
                 "initialize" -> result.put("initialized", true).put("displayId", 7).put("uniqueId", "virtual:test")
+                "launch" -> result.put("receiptOnly", false).put("launched", true).put("displayId", 7)
+                    .put("taskIds", org.json.JSONArray().put(81)).put("exitCode", 0).put("output", "")
+                "handoff" -> result.put("receiptOnly", false).put("handedOff", true).put("sourceEmpty", true)
+                    .put("cleanupOnly", true).put("keptTaskIds", org.json.JSONArray())
+                    .put("removedTaskIds", org.json.JSONArray()).put("goneTaskIds", org.json.JSONArray())
+                    .put("focusSamples", org.json.JSONArray())
                 "input" -> result.put("receiptOnly", false).put("executed", true)
                     .put("kind", q.getJSONObject("parameters").getString("kind")).put("displayId", 7).put("exitCode", 0)
                 "snapshot" -> result.put("receiptOnly", false).put("displayId", 7).put("frameCount", 1)
@@ -109,13 +115,17 @@ class R08VirtualDisplayCatalogLeafTest {
         }
     }
 
-    private inner class Fixture(store: ToolLedgerStore = InMemoryToolLedgerStore(), enabled: Boolean = true) {
+    private inner class Fixture(store: ToolLedgerStore = InMemoryToolLedgerStore(), enabled: Boolean = true,
+                                withLaunchHandoff: Boolean = false) {
         val owner = runnerOwner(message)
         val caps = SessionCapabilities("session", if (enabled) setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY) else emptySet())
-        val plan = R08VirtualDisplayPlan.prepare(owner, caps, "stable_generation", listOf(
+        val plan = R08VirtualDisplayPlan.prepare(owner, caps, "stable_generation", listOfNotNull(
             R08VirtualDisplayWrite("start", R08VirtualDisplayAction.Start),
             R08VirtualDisplayWrite("initialize", R08VirtualDisplayAction.Initialize),
             R08VirtualDisplayWrite("tap", R08VirtualDisplayAction.Tap(12, 34)),
+            if (withLaunchHandoff) R08VirtualDisplayWrite("launch",
+                R08VirtualDisplayAction.Launch("org.example.notes", "org.example.notes/.MainActivity")) else null,
+            if (withLaunchHandoff) R08VirtualDisplayWrite("handoff", R08VirtualDisplayAction.Handoff) else null,
             R08VirtualDisplayWrite("release", R08VirtualDisplayAction.Release)
         ), listOf(R08VirtualDisplayRead("frame", snapshot = true, include = false)))
         val request = VirtualDisplayApprovalRequest(plan)
@@ -154,6 +164,44 @@ class R08VirtualDisplayCatalogLeafTest {
         f.leaf.observeClose { result = it; done.countDown() }
         assertTrue(done.await(5, TimeUnit.SECONDS))
         return checkNotNull(result)
+    }
+
+    @Test fun productionClientSendsFrozenExplicitLaunchThenHandoffThenRelease() {
+        val f = Fixture(withLaunchHandoff = true)
+        f.initialize()
+        assertConfirmed(f.dispatch(f.step("launch"), f.step("handoff"), f.step("release")))
+        assertEquals(listOf("initialize", "launch", "handoff", "release"), f.endpoint.requests.map { it.getString("op") })
+        f.plan.writes.filter { it.operation in setOf("launch", "handoff", "release") }.forEach { operation ->
+            val request = f.endpoint.requests.single { it.getString("op") == operation.operation }
+            assertEquals(operation.parameters().toString(), request.getJSONObject("parameters").toString())
+            val intent = f.plan.intent(operation.id, operation)
+            assertEquals(intent.operationId, request.getString("operationId"))
+            assertEquals(intent, f.journal.claims[intent.operationId])
+        }
+        assertFalse(f.leaf.heldState().uncertain)
+        assertEquals(0, f.leaf.heldState().pendingFinalOutcomes)
+        assertTrue(f.journal.final.all { it == R08VirtualDisplayEvidence.CONFIRMED })
+        assertEquals(R08VirtualDisplayCloseResult.Unknown(), closeResult(f))
+        f.endpoint.lifecycle = AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED
+        assertEquals(R08VirtualDisplayCloseResult.Drained, closeResult(f))
+    }
+
+    @Test fun existingHandoffClaimOnlyQueriesOriginalReceiptNeverResendsOrReleases() {
+        val f = Fixture(withLaunchHandoff = true)
+        f.initialize()
+        assertConfirmed(f.dispatch(f.step("launch")))
+        f.journal.lookupOnly = true
+        assertTrue(f.dispatch(f.step("handoff")).single().outcome is DispatchOutcome.Unknown)
+        assertTrue(f.dispatch(f.step("handoff", "new-handoff-call"), f.step("release"))
+            .all { it.outcome is DispatchOutcome.Unknown })
+        val query = f.endpoint.requests.last()
+        val intent = f.plan.intent("handoff", f.plan.writes.single { it.operation == "handoff" })
+        assertEquals("receipt", query.getString("op"))
+        assertEquals("handoff", query.getString("operation"))
+        assertEquals(intent.operationId, query.getString("operationId"))
+        assertTrue(f.endpoint.requests.none { it.getString("op") in setOf("handoff", "release") })
+        f.endpoint.lifecycle = AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED
+        assertEquals(R08VirtualDisplayCloseResult.Unknown(), closeResult(f))
     }
 
     @Test fun approvalRequiresExplicitAnswerAndCannotBeReboundToCopiedCapabilities() {

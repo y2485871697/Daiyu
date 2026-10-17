@@ -13,7 +13,20 @@ internal data class CatalogModelParameters(
     val deviceStatusEnabled: Boolean = false,
     val requestOptions: ProviderRequestOptions = ProviderRequestOptions(),
 ) {
+    /** Retain only the CURRENT connection/credential; model-local policy comes from this record. */
+    fun applyTo(current: ModelSettings, model: String): ModelSettings = current.copy(
+        model = model, batteryEnabled = batteryEnabled, deviceStatusEnabled = deviceStatusEnabled,
+        requestOptions = requestOptions,
+    )
+
     companion object {
+        fun updated(settings: ModelSettings, previous: SavedCatalogModel<CatalogModelParameters>?): SavedCatalogModel<CatalogModelParameters> {
+            val parameters = previous?.settings ?: CatalogModelParameters()
+            return SavedCatalogModel(settings.model, previous?.displayName ?: settings.model,
+                parameters.copy(batteryEnabled = settings.batteryEnabled,
+                    deviceStatusEnabled = settings.deviceStatusEnabled, requestOptions = settings.requestOptions))
+        }
+
         /** Preserve the loadForEditing error flag: its fallback options are NOT saved policy. */
         fun fromEditing(editing: EditingSettings): SavedCatalogModel<CatalogModelParameters> {
             check(!editing.requestOptionsUnavailable) { "原请求策略不可用，请先修复并保存配置" }

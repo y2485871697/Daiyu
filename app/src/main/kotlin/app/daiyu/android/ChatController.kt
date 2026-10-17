@@ -2018,6 +2018,38 @@ class ChatController internal constructor(private val application:Application,
     private val retainedTerminalJobs = mutableListOf<TerminalJobSession>()
     @Synchronized internal fun terminalJobRuns(conversation: ConversationId): List<TerminalJobSession> =
         retainedTerminalJobs.filter { it.plan.conversationId == conversation }.toList()
+    internal data class TerminalJobsSnapshot(val sessions: List<TerminalJobSession>,
+        val history: List<app.daiyu.android.terminal.TerminalJobHistoryReader.Record>,
+        val skipped: Int, val error: String?)
+
+    /** Read-only restart evidence. Only a real Controller conversation may select the owner;
+     * this path never creates a TerminalJobSession, Registry or TaskAuthorization. */
+    internal fun terminalJobsOnWorker(conversation: ConversationId, admit: () -> Boolean): TerminalJobsSnapshot {
+        checkTerminalHistoryOwner(conversation, admit)
+        val scan = app.daiyu.android.terminal.TerminalJobHistoryReader(application).list(conversation.value)
+        checkTerminalHistoryOwner(conversation, admit)
+        val live = terminalJobRuns(conversation)
+        val ids = live.mapNotNull { it.jobId }.toSet()
+        return TerminalJobsSnapshot(live, scan.records.filter { it.jobId !in ids }, scan.skipped, scan.error)
+    }
+    internal fun terminalJobHistoryPageOnWorker(conversation: ConversationId,
+        original: app.daiyu.android.terminal.TerminalJobHistoryReader.Record,
+        offset: Long, limit: Int, admit: () -> Boolean): org.json.JSONObject {
+        checkTerminalHistoryOwner(conversation, admit)
+        require(original.owner == conversation.value)
+        check(terminalJobRuns(conversation).none { it.jobId == original.jobId }) { "original_live_job_retained" }
+        val page = app.daiyu.android.terminal.TerminalJobHistoryReader(application)
+            .page(conversation.value, original, offset, limit)
+        checkTerminalHistoryOwner(conversation, admit)
+        return page
+    }
+    private fun checkTerminalHistoryOwner(conversation: ConversationId, admit: () -> Boolean) {
+        check(Looper.myLooper() != Looper.getMainLooper())
+        check(admit()) // Pure visit admission, never caller code under the Controller monitor.
+        check(synchronized(this) { !closed })
+        check(conversationExists(conversation)) { "terminal_history_conversation_unavailable" }
+    }
+
     internal fun inspectTerminalJobOnWorker(conversation: ConversationId, original: TerminalJobSession): org.json.JSONObject {
         check(Looper.myLooper() != Looper.getMainLooper())
         check(synchronized(this) { original in retainedTerminalJobs && original.plan.conversationId == conversation })

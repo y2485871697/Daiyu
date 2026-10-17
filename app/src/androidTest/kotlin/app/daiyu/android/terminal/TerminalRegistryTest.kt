@@ -47,6 +47,26 @@ class TerminalRegistryTest:InstrumentationTestCase() {
     }
     private fun open(registry:TerminalRegistry,id:String="open")=registry.execute("terminal_open",JSONObject().put("request_id",id)).getString("session_id")
     private fun command(session:String,id:String="exec",mode:String="async")=JSONObject().put("request_id",id).put("session_id",session).put("command","printf test").put("mode",mode)
+    fun testIndependentHistoryReaderReadsOriginalRegistryMetadataWithoutUsingItsLiveHandle() {
+        val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
+        val owner=UUID.randomUUID().toString()
+        val context=isolatedContext(root)
+        val registry=fakeRegistry(context,owner)
+        try {
+            registry.startProcess={ FakeProcess() }
+            val dispatched=registry.execute("terminal_exec",command(open(registry)))
+            val id=dispatched.getString("job_id")
+            val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
+            while(!registry.inspectJob(id).optBoolean("output_complete") && System.nanoTime()<deadline) Thread.sleep(5)
+            assertTrue(registry.inspectJob(id).getBoolean("output_complete"))
+            val original=TerminalJobHistoryReader(context).list(owner).records.single()
+            val page=TerminalJobHistoryReader(context).page(owner,original)
+            assertEquals(id,original.jobId)
+            assertEquals("actual-output",page.getString("stdout"))
+            assertEquals("unknown_after_process_restart",page.getString("state"))
+            assertTrue(page.isNull("exit_code")); assertEquals("unknown",page.getString("execution"))
+        } finally { registry.close(); root.deleteRecursively() }
+    }
     fun testClosedOrdinaryScopeWaitsForActualOutputPumpNotJustExitCode() {
         val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
         val entered=CountDownLatch(1); val release=CountDownLatch(1)

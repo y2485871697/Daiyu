@@ -40,6 +40,7 @@ internal object SettingsCatalog {
             SettingsEntry("backup", "数据备份", DaiyuIcons.Backup, SettingControl.PAGE, FeatureRoute.BACKUP),
         )),
         SettingsGroup("tools", "工具", "工作区、Linux 与任务执行偏好", listOf(
+            SettingsEntry("platform_tools", "平台只读工具与私密出站", DaiyuIcons.Shield, SettingControl.PAGE),
             SettingsEntry("workspace", "工作区与文件", DaiyuIcons.Folder, SettingControl.PAGE),
             SettingsEntry("terminal", "终端", DaiyuIcons.Terminal, SettingControl.PAGE, FeatureRoute.TERMINAL),
             SettingsEntry("browser", "浏览器", DaiyuIcons.Browser, SettingControl.PAGE, FeatureRoute.BROWSER_SETTINGS),

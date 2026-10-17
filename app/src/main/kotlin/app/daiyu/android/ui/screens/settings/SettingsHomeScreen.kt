@@ -85,6 +85,7 @@ internal fun DaiyuSettingsScreen(
     onOpenAssistants: (() -> Unit)? = null,
     onOpenAppearance: (() -> Unit)? = null,
     onOpenHaptics: (() -> Unit)? = null,
+    onOpenPlatformTools: (() -> Unit)? = null,
 ) {
     var query by rememberSaveable { mutableStateOf("") }
     var section by rememberSaveable { mutableStateOf<String?>(null) }
@@ -104,6 +105,7 @@ internal fun DaiyuSettingsScreen(
             "subagents" -> onOpenSubAgents?.invoke()
             "appearance" -> onOpenAppearance?.invoke()
             "haptics" -> onOpenHaptics?.invoke()
+            "platform_tools", "permission_check" -> onOpenPlatformTools?.invoke()
             "relay" -> {
                 if (section != "about") { section = "about"; relayExpanded = true }
                 else relayExpanded = !relayExpanded

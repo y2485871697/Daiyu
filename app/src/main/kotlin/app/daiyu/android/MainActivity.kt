@@ -126,6 +126,47 @@ class MainActivity : ComponentActivity() {
     private var generationSettingsVisit by mutableStateOf<GenerationSettingsVisit?>(null)
     private var browserSettingsPageOwner: app.daiyu.android.browser.BrowserSettingsSaveOwner? = null
     private var reconnectSettingsPageOwner by mutableStateOf<app.daiyu.android.model.reconnect.ReconnectSettingsSaveOwner?>(null)
+    private var platformSettingsPageOwner: Any? = null
+    private var platformSettingsRevision by mutableStateOf(0)
+    private val platformSaf by lazy { app.daiyu.android.platform.PlatformSafGrants(applicationContext) }
+    private var platformPermissionOwner: Any? = null
+    private var platformSafRequest: Pair<Any, Boolean>? = null
+    private fun platformPageCurrent(owner: Any?) = owner != null && platformSettingsPageOwner === owner &&
+        activityUsable() && retainedPage == "platform-settings"
+    private val platformPermissionRequest = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        val owner = platformPermissionOwner; platformPermissionOwner = null
+        if (platformPageCurrent(owner)) {
+            platformSettingsRevision++
+            toast("系统授权结果已更新；工具选择和私密出站同意未更改")
+        }
+    }
+    private val platformSafPicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val request = platformSafRequest; platformSafRequest = null
+        if (request != null && platformPageCurrent(request.first) && result.resultCode == RESULT_OK) {
+            val accepted = result.data?.let { platformSaf.accept(it, request.second) } == true
+            platformSettingsRevision++
+            toast(if (accepted) "精确持久只读授权已保存；未开启工具，未发送URI或数据" else "未确认精确持久只读授权；文件访问仍拒绝")
+        }
+    }
+    private fun requestPlatformPermission(tool: app.daiyu.android.platform.PlatformReadTool, permission: String) {
+        val owner = platformSettingsPageOwner
+        if (!platformPageCurrent(owner) || platformPermissionOwner != null || platformSafRequest != null) return
+        if (tool == app.daiyu.android.platform.PlatformReadTool.PERMISSIONS && permission.isEmpty()) {
+            startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        } else {
+            val permissions = app.daiyu.android.platform.PlatformSettingsAccess.permissionRequest(tool, permission)
+            platformPermissionOwner = owner
+            try { platformPermissionRequest.launch(permissions) }
+            catch (failure: Exception) { platformPermissionOwner = null; throw failure }
+        }
+    }
+    private fun pickPlatformSaf(tree: Boolean) {
+        val owner = platformSettingsPageOwner
+        if (!platformPageCurrent(owner) || platformPermissionOwner != null || platformSafRequest != null) return
+        platformSafRequest = checkNotNull(owner) to tree
+        try { platformSafPicker.launch(app.daiyu.android.platform.PlatformSettingsAccess.pickerIntent(tree)) }
+        catch (failure: Exception) { platformSafRequest = null; throw failure }
+    }
     private var hapticsHost: app.daiyu.android.haptics.HapticsActivityHost? = null
     private fun syncHaptics() {
         hapticsHost?.sync(selected?.id?.value, retainedPage == "chat" && !sidebarVisible,
@@ -589,6 +630,13 @@ class MainActivity : ComponentActivity() {
                 compressionSettingsPageOwner?.revoke()
                 compressionSettingsPageOwner = null
             }
+            if (value == "platform-settings") {
+                if (platformSettingsPageOwner == null) platformSettingsPageOwner = Any()
+            } else {
+                platformSettingsPageOwner = null
+                // Retain outstanding request tokens until their callback consumes them. Otherwise a
+                // late result could be confused with a second picker opened on a newer page visit.
+            }
             if (value != "terminal") terminalPageOwner = null
             if (value != "linux-settings") {
                 linuxSettingsVisit = null
@@ -844,7 +892,7 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings" -> retainedPage = "settings"
+                        "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
                         "pet-model-settings" -> retainedPage = "pet-settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
@@ -1059,6 +1107,20 @@ class MainActivity : ComponentActivity() {
                             top.yukonga.miuix.kmp.basic.Text(gatewayError ?: "正在加载会话网关设置")
                         }
                     }
+                    "platform-settings" -> platformSettingsPageOwner?.let { owner -> key(owner) {
+                        PlatformToolSettingsScreen(applicationContext, controller.platformSettings, platformSettingsRevision,
+                            grants = { platformSaf.grants() }, ownerCurrent = { platformPageCurrent(owner) },
+                            onBack = { if (platformPageCurrent(owner)) retainedPage = "settings" },
+                            onPermission = ::requestPlatformPermission, onPick = ::pickPlatformSaf,
+                            onCopy = { uri ->
+                                if (platformPageCurrent(owner)) {
+                                    getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("SAF URI", uri.toString()))
+                                    toast("仅复制精确URI；尚未发送给模型")
+                                }
+                            }, onRevoke = { uri ->
+                                if (platformPageCurrent(owner)) { platformSaf.revoke(uri); platformSettingsRevision++ }
+                            })
+                    } }
                     "settings" -> Column(Modifier.fillMaxSize()) {
                         top.yukonga.miuix.kmp.basic.TextButton(text = "保留会话网关",
                             modifier = Modifier.testTag("open-session-gateway"), onClick = { guard { openSessionGateway() } })
@@ -1073,6 +1135,9 @@ class MainActivity : ComponentActivity() {
                         onOpenAppearance = { retainedPage = "appearance" },
                         onOpenHaptics = {
                             if (activityUsable() && retainedPage == "settings") retainedPage = "haptics"
+                        },
+                        onOpenPlatformTools = {
+                            if (activityUsable() && retainedPage == "settings") retainedPage = "platform-settings"
                         },
                     ) } }
                     "offline-speech" -> app.daiyu.android.ui.screens.settings.OfflineSpeechSettingsScreen(
@@ -2367,6 +2432,7 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume(); voiceForeground = true; speechHost.setForeground(true)
         prepareMessageActionSnapshot()
+        if (retainedPage == "platform-settings") platformSettingsRevision++
         controller.attachVideoUi(videoUi)
         settleRetainedVideoReceipt()
         controller.recoverVideos { if (activityUsable()) publishChat() }

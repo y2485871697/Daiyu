@@ -50,7 +50,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         val implemented = setOf("assistants", "subagents", "appearance", "haptics", "voice", "source", "default_reasoning", "telegram", "qq", "relay_st", "relay_moyu", "relay", "platform_tools", "logging", "export_logs", "clear_logs")
         val placeholder = entries.single { it.id == "donate" }
         val unwired = entries.filter { it.route == null && it.localPage == null && it.id !in implemented && it != placeholder }
-        assertEquals(1, unwired.size)
+        assertEquals(0, unwired.size)
         fun assertUnchanged() {
             assertEquals(before, fixture.database.exportBackup()); assertEquals(settings, fixture.settings.loadForEditing().settings)
             assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())

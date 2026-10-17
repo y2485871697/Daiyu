@@ -156,6 +156,7 @@ class LinuxChrootProductionDeviceTest : InstrumentationTestCase() {
             assertEquals("original_scope_and_pids_gone", after.trim())
             report.put("after", after).put("passed", true)
         } catch (failure: LinuxPtyStartupFailure) {
+            report.put("startup_diagnostics", (failure.cause as? PtyStartupFailure)?.diagnostics ?: JSONObject.NULL)
             startup = failure.cleanup; primary = failure; throw failure
         } catch (failure: Throwable) { primary = failure; throw failure }
         finally {
@@ -173,8 +174,15 @@ class LinuxChrootProductionDeviceTest : InstrumentationTestCase() {
             } finally {
                 report.put("joined", joined).put("failed", primary != null)
                 if (primary != null) report.put("passed", false)
-                val evidence = File(checkNotNull(context.getExternalFilesDir("chroot-device")), "$token.json")
-                evidence.writeText(report.toString(2))
+                try {
+                    val evidence = File(checkNotNull(context.getExternalFilesDir("chroot-device")), "$token.json")
+                    java.io.FileOutputStream(evidence).use { output ->
+                        output.write(report.toString(2).toByteArray(Charsets.UTF_8))
+                        output.fd.sync()
+                    }
+                } catch (evidenceFailure: Exception) {
+                    if (primary != null) primary.addSuppressed(evidenceFailure) else throw evidenceFailure
+                }
             }
         }
     }

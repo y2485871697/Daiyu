@@ -9,6 +9,14 @@ import kotlin.math.roundToInt
 
 @Suppress("DEPRECATION")
 class PetOverlayHostTest : InstrumentationTestCase() {
+    fun testInstalledPackageDeclaresOverlaySpecialAccess() {
+        val context = instrumentation.targetContext
+        val permissions = context.packageManager.getPackageInfo(context.packageName,
+            android.content.pm.PackageManager.GET_PERMISSIONS).requestedPermissions.orEmpty()
+        assertTrue("Pet application overlays require a manifest declaration",
+            "android.permission.SYSTEM_ALERT_WINDOW" in permissions)
+    }
+
     fun testOverlayChildWrapsInsteadOfFillingScreenAndRetainsDragRange() = verifyOverlayChildWrapsInsteadOfFillingScreenAndRetainsDragRange()
 
     private fun verifyOverlayChildWrapsInsteadOfFillingScreenAndRetainsDragRange() {

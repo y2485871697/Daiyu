@@ -271,13 +271,14 @@ class MainActivity : ComponentActivity() {
                 if (universalAdmissionSnapshot != VoiceAdmission.READY || selected?.id?.value != turn.permit.conversationId || draft.isNotEmpty()) {
                     result(VoiceControlReceipt.Rejected(turn.requestId))
                 } else {
+                    val before = checkNotNull(universalEditor)
                     universalOwnMutation = true
                     try { updateDraft(text) } finally { universalOwnMutation = false }
                     if (draft != text || selected?.id?.value != turn.permit.conversationId) {
                         revokeUniversalVoice(); result(VoiceControlReceipt.Rejected(turn.requestId))
                     } else {
                         val expected = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
-                        universalEditor = expected
+                        migrateUniversalEditor(before, expected)
                         refreshUniversalAdmission()
                         try { sendDraft(text, UniversalSend(turn, expected, result)) }
                         catch (_: Exception) { revokeUniversalVoice(); result(VoiceControlReceipt.Unknown(turn.requestId)) }
@@ -304,6 +305,10 @@ class MainActivity : ComponentActivity() {
             })
     }
     private val universalVoice: ActivityUniversalVoiceHost get() = universalVoiceDelegate.value
+    private fun migrateUniversalEditor(before: ChatController.TextSendOwner, after: ChatController.TextSendOwner) {
+        universalEditor = after
+        if (voiceConversationDialogOwner == before) voiceConversationDialogOwner = after
+    }
     private fun microphoneGranted() = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
     private fun universalQuestionWaiting(message: Message): Boolean = message.blocks.filterIsInstance<MessageBlock.Tool>()
         .mapNotNull { controller.questionProjection(message, it.invocation) }
@@ -351,6 +356,7 @@ class MainActivity : ComponentActivity() {
     }
     private var preparedSpeech: FrozenVoiceSpeech? = null
     private var voiceConsent: android.app.AlertDialog? = null
+    private var voiceConversationDialogOwner by mutableStateOf<ChatController.TextSendOwner?>(null)
     private var voiceRequestEpoch = 0L
     private val speechHost by lazy {
         VoiceHost(lifecycleScope, audioGate) {
@@ -369,14 +375,24 @@ class MainActivity : ComponentActivity() {
             controller.textSendState() == null &&
             target.conversationId == selected?.id?.value &&
             target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
+    private var dictationDraft: Pair<DictationDraftTarget, app.daiyu.android.voice.offline.SpeechDraft>? = null
+    private fun captureDictationDraft(target: DictationDraftTarget) {
+        dictationDraft = target to app.daiyu.android.voice.offline.SpeechDraft(draft, selectionStart, selectionEnd)
+    }
+    private fun applyRecognizedDraft(target: DictationDraftTarget, recognized: String) {
+        val captured = dictationDraft?.takeIf { it.first == target }?.second
+        check(voiceEditorCurrent(target) && captured != null) { "dictation_editor_changed" }
+        val next = checkNotNull(captured.accept(draft, recognized)) { "dictation_draft_changed" }
+        dictationDraft = null
+        updateDraft(next)
+        check(draft == next) { "dictation_draft_not_saved" }
+        selectionStart = captured.cursor; selectionEnd = captured.cursor
+        publishChat()
+    }
     private val remoteVoice by lazy {
         ActivityRemoteVoiceHost(applicationContext, lifecycleScope, voiceRuntime, ::voiceEditorCurrent,
-            applyDraft = { target, text ->
-                if (voiceEditorCurrent(target)) {
-                    updateDraft(text); check(draft == text) { "remote_dictation_draft_not_saved" }
-                    selectionStart = text.length; selectionEnd = text.length; publishChat()
-                }
-            }, requestPermission = { microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO) })
+            applyDraft = ::applyRecognizedDraft,
+            requestPermission = { microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO) })
     }
     private val cascadeVoice by lazy {
         ActivityCascadeVoiceHost(applicationContext, voiceRuntime) {
@@ -389,6 +405,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun invalidatePreparedSpeech() {
         voiceRequestEpoch++
+        dictationDraft = null
         voiceConsent?.dismiss(); voiceConsent = null; preparedSpeech = null
     }
     private fun invalidateConfiguredVoice() {
@@ -452,12 +469,7 @@ class MainActivity : ComponentActivity() {
                     target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
             },
             requestPermission = { microphonePermission.launch(android.Manifest.permission.RECORD_AUDIO) },
-            applyDraft = { _, text ->
-                updateDraft(text)
-                check(draft == text) { "dictation_draft_not_saved" }
-                selectionStart = text.length; selectionEnd = text.length
-                publishChat()
-            })
+            applyDraft = ::applyRecognizedDraft)
     }
     private val offlineMicrophonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (activityUsable()) toast(if (granted) "麦克风权限已授予，请再次点击离线语音" else "麦克风权限被拒绝；草稿未更改")
@@ -616,7 +628,7 @@ class MainActivity : ComponentActivity() {
         set(value) {
             // Opening revokes even without a visit; closing cannot revive clicks rendered behind it.
             if (value != sidebarVisibleState) revokeContextManagementEntry()
-            if (value && !sidebarVisibleState) { revokePlatformActionVisit(); revokeLegacyLibrary(); cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
+            if (value && !sidebarVisibleState) { voiceConversationDialogOwner = null; revokePlatformActionVisit(); revokeLegacyLibrary(); cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
             sidebarVisibleState = value
         }
     private class ContextManagementVisit(val owner: ContextManagementOwner,
@@ -686,7 +698,7 @@ class MainActivity : ComponentActivity() {
         set(value) {
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
             if (value != retainedPageState && revokeContextManagementEntry()) editorGeneration++
-            if (value != retainedPageState) { revokePlatformActionVisit(); cancelDeferredOpenedBackup(); revokeLegacyLibrary() }
+            if (value != retainedPageState) { voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelDeferredOpenedBackup(); revokeLegacyLibrary() }
             if (value != "chat") cancelBrowserDownloadVisit()
             if (value != "reconnect-settings") {
                 reconnectSettingsPageOwner?.revoke()
@@ -1407,6 +1419,9 @@ class MainActivity : ComponentActivity() {
                         onOpenHaptics = {
                             if (activityUsable() && retainedPage == "settings") retainedPage = "haptics"
                         },
+                        onOpenVoice = {
+                            if (activityUsable() && retainedPage == "settings") retainedPage = "voice-settings"
+                        },
                         onOpenPlatformTools = {
                             if (activityUsable() && retainedPage == "settings") retainedPage = "platform-settings"
                         },
@@ -1730,10 +1745,9 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             } })
-        return ChatScreenActions(
-        onVisibleCompleted = completionReadAction(),
-        onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
-        onVoice = {
+        fun currentChat() = editorMatches() && draftRevision == renderedDraftRevision && controller.ready &&
+            !controller.dataBusy && voiceForeground && retainedPage == "chat" && !sidebarVisible
+        fun requestDictation() {
             if (editorMatches() && terminalEditor == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null && !videoSending &&
                 draftRevision == renderedDraftRevision && voiceForeground &&
                 retainedPage == "chat" && !sidebarVisible &&
@@ -1743,13 +1757,18 @@ class MainActivity : ComponentActivity() {
                     val target = DictationDraftTarget(selected?.id?.value, editorGeneration, draftRevision)
                     val config = try { voiceRuntime.snapshot() } catch (_: Exception) { null }
                     when (config?.dictation) {
-                        "SYSTEM" -> { invalidateConfiguredVoice(); dictationHost.start(target) }
-                        "DOUBAO" -> { revokeUniversalVoice(); invalidatePreparedSpeech(); dictationHost.invalidate(); offlineHost.invalidate(); remoteVoice.dictate(target) }
+                        "SYSTEM" -> { invalidateConfiguredVoice(); captureDictationDraft(target); dictationHost.start(target) }
+                        "DOUBAO" -> {
+                            val ownedTarget = remoteVoice.dictationTarget?.takeIf(::voiceEditorCurrent) ?: target
+                            revokeUniversalVoice(); invalidatePreparedSpeech(); dictationHost.invalidate(); offlineHost.invalidate()
+                            captureDictationDraft(ownedTarget); remoteVoice.dictate(ownedTarget)
+                        }
                         else -> toast("听写未配置或凭据不可用，请打开语音设置")
                     }
                 }
             }
-        }, onContextClick = {
+        }
+        fun openContextPage() {
             val conversation = selected
             if (editorMatches() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
                 renderedContextEntryEpoch == contextManagementEntryEpoch && conversation != null &&
@@ -1763,7 +1782,11 @@ class MainActivity : ComponentActivity() {
                     contextManagementVisit = ContextManagementVisit(owner, adapter)
                 }
             }
-        },
+        }
+        return ChatScreenActions(
+        onVisibleCompleted = completionReadAction(),
+        onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
+        onVoice = ::requestDictation, onContextClick = ::openContextPage,
         onRegenerate = messageCallbacks.onRegenerate, onSpeak = { id ->
             if (editorMatches() && controller.ready && !controller.dataBusy &&
                 speechHost.owner == renderedSpeechOwner && selected?.id?.value == renderedConversation) {
@@ -1779,6 +1802,7 @@ class MainActivity : ComponentActivity() {
         onSelectionChange = { start, end ->
             if (editorMatches() && !imageHost.sending && (selectionStart != start || selectionEnd != end)) {
                 offlineHost.invalidate()
+                if (dictationDraft != null) { dictationHost.invalidate(); invalidateConfiguredVoice() }
                 selectionStart = start; selectionEnd = end
                 chatState = chatState.copy(composer = chatState.composer.copy(
                     selectionStart = start, selectionEnd = end))
@@ -1826,6 +1850,15 @@ class MainActivity : ComponentActivity() {
                     imagePanelVisible = false; videoPanelVisible = true
                 }
             }
+            ChatMenuAction.INTERACTIVE_MODE -> if (currentChat())
+                controller.interactiveMode.setEnabled(!controller.interactiveMode.enabled)
+            ChatMenuAction.CONTEXT_STATS, ChatMenuAction.COMPRESS_CONTEXT, ChatMenuAction.CONTEXT_SCOPE -> openContextPage()
+            ChatMenuAction.AUTO_COMPRESS -> if (currentChat()) openCompressionSettings()
+            ChatMenuAction.VOICE_INPUT -> requestDictation()
+            ChatMenuAction.VOICE_CHAT -> if (currentChat()) {
+                voiceConversationDialogOwner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+            }
+            ChatMenuAction.VOICE_DOUBAO -> if (currentChat()) retainedPage = "voice-settings"
             ChatMenuAction.NEW_CHAT -> select(null)
             ChatMenuAction.RENAME -> selected?.let { conversation ->
                 editConversation(conversation.id.value, false)
@@ -1937,8 +1970,17 @@ class MainActivity : ComponentActivity() {
         val cascadeStatus by cascadeVoice.status.collectAsStateWithLifecycle()
         val voiceConfig by voiceRuntime.configuration.collectAsStateWithLifecycle()
         val conversationVoiceConfig by voiceRuntime.conversationConfiguration.collectAsStateWithLifecycle()
+        val dialogOwner = voiceConversationDialogOwner
+        val showConversationDialog = currentEditor() && dialogOwner != null &&
+            dialogOwner == ChatController.TextSendOwner(selected?.id, capturedGeneration, capturedRevision)
         ProductionUniversalVoicePanel(universalVoice, conversationVoiceConfig,
-            configure = { if (currentEditor()) retainedPage = "voice-settings" }, start = ::startUniversalVoice)
+            configure = { if (currentEditor()) retainedPage = "voice-settings" },
+            start = { profile, limits ->
+                if (currentEditor() && voiceRequestEpoch == capturedVoiceEpoch && controller.ready && !controller.dataBusy)
+                    startUniversalVoice(profile, limits)
+            },
+            openRequested = showConversationDialog,
+            onCloseRequest = { if (voiceConversationDialogOwner == dialogOwner) voiceConversationDialogOwner = null })
         top.yukonga.miuix.kmp.basic.Text("听写：${if (voiceConfig?.dictation == "DOUBAO") "豆包联网" else "系统 / 未配置"}；最终结果只填草稿")
         ProductionPersonalCascadeConsent(
             host = cascadeVoice,
@@ -3889,6 +3931,7 @@ class MainActivity : ComponentActivity() {
             if (app.petSettingsNavigator === openPetSettings) app.petSettingsNavigator = null
         }
         voiceForeground = false
+        voiceConversationDialogOwner = null
         unknownBranchOutcome = null // unmount only; the controller receipt is not consumed
         stopCascadeVoice()
         invalidateConfiguredVoice()
@@ -3927,6 +3970,7 @@ class MainActivity : ComponentActivity() {
         controller.invalidateVideo(videoUi)
         // Idempotent fallback as well as the earlier onPause cancellation.
         voiceForeground = false
+        voiceConversationDialogOwner = null
         stopCascadeVoice()
         invalidateConfiguredVoice()
         dictationHost.invalidate()
@@ -3972,6 +4016,7 @@ class MainActivity : ComponentActivity() {
         browserSettingsPageOwner = null
         hapticsHost?.close(); hapticsHost = null
         voiceForeground = false
+        voiceConversationDialogOwner = null
         revokeUniversalVoice()
         if (universalVoiceDelegate.isInitialized()) universalVoice.close()
         universalUnobserve?.invoke(); universalUnobserve = null
@@ -4297,6 +4342,7 @@ class MainActivity : ComponentActivity() {
         check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null)) { "请等待本次发送结果" }
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
         if (revokeContextManagementEntry()) editorGeneration++
+        voiceConversationDialogOwner = null
         fenceVideoRoute()
         val shizukuOwned = shizukuEditor != null || shizukuWritesBlocked
         cancelShizukuEditor()
@@ -4398,7 +4444,7 @@ class MainActivity : ComponentActivity() {
             universalOwnMutation = false
             val after = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
             if (ownsEditor && productionUniversalEditorMigration(universal.expected, before, after,
-                    result is ChatController.TextSendResult.Accepted, draft.isEmpty())) universalEditor = after
+                    result is ChatController.TextSendResult.Accepted, draft.isEmpty())) migrateUniversalEditor(before, after)
             else if (samePermit && completingOriginal) revokeUniversalVoice()
             val receipt = productionUniversalReceipt(universal.turn, universal.expected, result) { owner, exact ->
                 if (universal.retained.add(owner)) universalAssistants[owner] = exact

@@ -8,6 +8,7 @@ import android.speech.SpeechRecognizer
 import androidx.compose.ui.test.*
 import app.daiyu.android.voice.*
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.runBlocking
 
 /**
  * Real MainActivity/actions/editor/ActivityResultRegistry, fake recognizer/player only.
@@ -59,8 +60,20 @@ class DictationActivityTest : WiredActivityTestCase() {
         .single { it.name == name && it.parameterCount == args.size }
         .apply { isAccessible = true }.invoke(activity, *args)
 
+    override fun createFixture() = super.createFixture().also { fixture ->
+        runBlocking {
+            fixture.controller.voiceRuntime.save(VoiceConfiguration(engine = "SYSTEM", dictation = "SYSTEM"))
+        }
+    }
     override fun setUp() {
         super.setUp()
+        awaitControl("SYSTEM dictation profile ready") {
+            fixture.controller.voiceRuntime.configuration.value?.dictation == "SYSTEM"
+        }
+        mainThread {
+            assertFalse("System dictation fixture requires offline dictation disabled",
+                app.daiyu.android.voice.offline.OfflineSpeechPack.state.value.enabled)
+        }
         platform = Platform()
         mainThread {
             host = call("getDictationHost") as ComposerDictationHost
@@ -84,16 +97,16 @@ class DictationActivityTest : WiredActivityTestCase() {
     private fun voice() { mainThread { retainedControls(activity).onVoice() } }
     private fun permissionResult(granted: Boolean) {
         mainThread {
-            // The microphone launcher is MainActivity's first registration. Resolve its actual
+            // Resolve the SYSTEM dictation launcher's actual
             // randomized request code from the real registry; exercise RequestPermission parsing.
             val registry = activity.activityResultRegistry
             val map = registry.javaClass.superclass?.declaredFields.orEmpty().asSequence()
                 .plus(registry.javaClass.declaredFields.asSequence())
                 .mapNotNull { f ->
                     f.isAccessible = true
-                    (f.get(registry) as? Map<*, *>)?.takeIf { it["activity_rq#0"] is Int }
+                    (f.get(registry) as? Map<*, *>)?.takeIf { it["activity_rq#3"] is Int }
                 }.first()
-            val code = map["activity_rq#0"] as Int
+            val code = map["activity_rq#3"] as Int
             // Substitute only the platform permission request, marking that same registered
             // launcher as in-flight just as ActivityResultRegistry.launch normally does.
             val launchedField = registry.javaClass.superclass!!.declaredFields.single {
@@ -101,7 +114,7 @@ class DictationActivityTest : WiredActivityTestCase() {
             }.apply { isAccessible = true }
             @Suppress("UNCHECKED_CAST")
             val launched = launchedField.get(registry) as MutableCollection<String>
-            launched.add("activity_rq#0")
+            launched.add("activity_rq#3")
             activity.onRequestPermissionsResult(code, arrayOf(Manifest.permission.RECORD_AUDIO),
                 intArrayOf(if (granted) PackageManager.PERMISSION_GRANTED else PackageManager.PERMISSION_DENIED))
         }

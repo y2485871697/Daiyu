@@ -28,14 +28,16 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
         conversation: Conversation, key: String, text: String,
         userTransform: (Message) -> Message = { it },
         answerTransform: (Message) -> Message = { it },
+        complete: Boolean = true,
     ): Pair<Message, Message> {
         val user = userTransform(Message(MessageId("user-$key"), conversation.id, RunId(key), "user",
             listOf(MessageBlock.Text("text-$key", text)), RunStatus.COMPLETED))
         val answer = answerTransform(user.copy(id = MessageId("answer-$key"), role = "assistant",
             status = RunStatus.RUNNING, protocolItems = emptyList()))
         database.send(user, answer)
-        database.save(answer.copy(status = RunStatus.COMPLETED))
-        return user to answer.copy(status = RunStatus.COMPLETED)
+        val stored = if (complete) answer.copy(status = RunStatus.COMPLETED) else answer
+        if (complete) database.save(stored)
+        return user to stored
     }
 
     fun testCurrentScopeIsReadBeforeGlobalCapAndStillFindsOldMessages() {
@@ -123,12 +125,12 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
         assertEquals("中文标题", data.search("真正中文正文").first().conversationTitle)
     }
 
-    private fun segmented(conversation: Conversation, key: String, count: Int): Message =
+    private fun segmented(conversation: Conversation, key: String, count: Int, complete: Boolean = true): Message =
         turn(conversation, key, "ordinary user", answerTransform = { owner ->
             owner.copy(historySegments = List(count) { index ->
                 MessageHistorySegment(owner.id, "assistant", listOf(MessageBlock.Text("part-$index", "paged needle $index")))
             })
-        }).second
+        }, complete = complete).second
 
     fun test201HitsContinueWithoutRepeatingSameOwnerSegments() = assertSegmentPages(201, listOf(200, 1))
 
@@ -197,7 +199,7 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
         segmented(firstConversation, "revision", 201)
         database.organize(firstConversation.id, "", true)
         val secondConversation = database.create("default")
-        val unread = turn(secondConversation, "unread", "not a match").second
+        val unread = turn(secondConversation, "unread", "not a match", complete = false).second
         val first = data.searchPage("paged needle")
         val cursor = requireNotNull(first.nextCursor)
         invalidated { data.searchPage("other", cursor = cursor) }
@@ -213,7 +215,7 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
 
     fun testScopedCursorIgnoresUnrelatedHistoryButRejectsOwnerChangesAndDeletion() {
         val conversation = database.create("default")
-        val owner = segmented(conversation, "scoped-revision", 201)
+        val owner = segmented(conversation, "scoped-revision", 201, complete = false)
         val cursor = requireNotNull(data.searchPage("paged needle", conversation.id.value).nextCursor)
         turn(database.create("default"), "unrelated", "paged needle unrelated")
         assertEquals(1, data.searchPage("paged needle", conversation.id.value, cursor).results.size)

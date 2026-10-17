@@ -23,7 +23,8 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
     private fun openEditor() {
         setDraft(text)
         node("shizuku-text-entry").performClick()
-        ui.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.ToggleableState)).performClick()
+        ui.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.ToggleableState) and
+            hasAnyAncestor(hasTestTag("shizuku-text-panel"))).performClick()
         ui.onNode(hasSetTextAction() and hasText("精确 UID：0 或 2000（必选，无默认值）"))
             .performScrollTo().performTextReplacement("2000")
         ui.onNode(hasSetTextAction() and hasText("本次精确 shell 命令"))
@@ -45,7 +46,8 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         node("shizuku-text-entry").assertIsEnabled().performClick()
         assertNull(fixture.controller.shizukuPreparation())
         ui.onNodeWithText("本次精确 shell 命令").assertDoesNotExist()
-        ui.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.ToggleableState)).performClick()
+        ui.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.ToggleableState) and
+            hasAnyAncestor(hasTestTag("shizuku-text-panel"))).performClick()
         ui.onNode(hasSetTextAction() and hasText("本次精确 shell 命令"))
             .performScrollTo().performTextReplacement(command)
         // Even with valid text/command/timeout, no UID was selected.

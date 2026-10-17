@@ -2,6 +2,12 @@
 
 `scripts/acceptance/performance.py` 只读取本地 JSON 与产物，使用 Python 标准库；不启动进程、不执行输入中的命令、不访问网络、不连接设备，也不采集性能数据。它复用同目录 `evidence.py` 的安全有界读取、拒绝重复键的 JSON 读取、相对路径约束与完整 SHA 格式检查。
 
+## 2026-10-17 用户门槛审批
+
+用户通过 `approve_original_candidates` 明确批准原 AC-072/073 候选值作为正式门槛；固定规则见 `performance-policy-v1.json`，审批绑定当前 vivo V2419A、Android 15、release 和实际 60Hz。原始输入规格保留，不回写历史候选描述。
+
+该审批只冻结验收规则，不生成实测基准或原始样本。准确 release 构建、合成数据集摘要、采集起止事件、原始帧/内存/迁移证据仍需补齐；现有 debug/synthetic 结果不抵扣物理 release 性能。通用离线比较器的基准字节 pin 和完整场景独立复核要求保持。
+
 ## 依据与边界
 
 依据 `docs/refactor-input/acceptance.json`：

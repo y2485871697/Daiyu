@@ -250,7 +250,7 @@ class TextSendActivityTest : WiredActivityTestCase() {
     }
 
     fun testRotationKeepsPendingEditorFrozenUntilLateRejectionIsConsumed() {
-        val source = fixture.database.create()
+        val source = fixture.database.create("default")
         val target = fixture.database.create()
         val text = "  原会话发送\n  "
         val nextDraft = "  新 owner 草稿\n保留  "
@@ -341,7 +341,7 @@ class TextSendActivityTest : WiredActivityTestCase() {
     }
 
     private fun destroyAfterUiSendCommit(recreate: Boolean) {
-        val source = fixture.database.create()
+        val source = fixture.database.create("default")
         val text = "  UI 实际发送的精确原文\n末尾  "
         val newer = "  重建后新草稿\n不能被旧 callback 清除  "
         val session = fixture.session(holdSeconds = 120)
@@ -451,7 +451,7 @@ class TextSendActivityTest : WiredActivityTestCase() {
         adoptRetainedControllerReceipt(beforeCompletion = false)
 
     private fun adoptRetainedControllerReceipt(beforeCompletion: Boolean) {
-        val source = fixture.database.create()
+        val source = fixture.database.create("default")
         val text = "  已提交的精确草稿\n  "
         mainThread { activity.select(source) }
         setDraft(text); setSelection(1, 4)

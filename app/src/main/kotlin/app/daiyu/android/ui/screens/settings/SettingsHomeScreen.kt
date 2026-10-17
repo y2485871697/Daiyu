@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +38,8 @@ import app.daiyu.android.ui.icons.DaiyuIcons
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+private class SettingsHomeVisit { var active = true }
 
 @Composable
 internal fun SettingsIcon(icon: androidx.compose.ui.graphics.vector.ImageVector) {
@@ -77,6 +80,7 @@ private fun OriginalSettingsRow(entry: SettingsEntry, onClick: () -> Unit) {
         summary = when (entry.id) {
             "accessibility" -> "查看服务与授权边界；进入设置不向模型授权"
             "accessibility_keep" -> "仅用户显式请求系统重绑，不保证连接或保活"
+            "task_surface" -> "前台、后台或每次运行询问；不改变当前运行"
             else -> null
         }, leading = { SettingsIcon(entry.icon) })
 }
@@ -92,6 +96,9 @@ internal fun DaiyuSettingsScreen(
     onOpenHaptics: (() -> Unit)? = null,
     onOpenPlatformTools: (() -> Unit)? = null,
 ) {
+    val visit = remember { SettingsHomeVisit() }
+    DisposableEffect(visit) { onDispose { visit.active = false } }
+    var localPage by remember { mutableStateOf<SettingsLocalPage?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     var section by rememberSaveable { mutableStateOf<String?>(null) }
     var relayExpanded by rememberSaveable { mutableStateOf(false) }
@@ -99,12 +106,18 @@ internal fun DaiyuSettingsScreen(
     val listState = rememberLazyListState()
     LaunchedEffect(section, query) { listState.scrollToItem(0) }
     val focus = LocalFocusManager.current
+    if (localPage == SettingsLocalPage.TASK_SURFACE) {
+        TaskSurfaceSettingsPanel(onBack = { if (visit.active) localPage = null }, modifier = modifier)
+        return
+    }
     val selectedGroup = SettingsCatalog.groups.find { it.id == section }
     val pageTitle = selectedGroup?.title ?: "设置"
     val back: () -> Unit = { if (section != null) section = null else onBack() }
     BackHandler(enabled = section != null) { section = null }
-    val open: (SettingsEntry) -> Unit = { entry ->
+    val open: (SettingsEntry) -> Unit = open@ { entry ->
+        if (!visit.active || localPage != null) return@open
         focus.clearFocus()
+        if (entry.localPage != null) { localPage = entry.localPage; return@open }
         when (entry.id) {
             "assistants" -> onOpenAssistants?.invoke()
             "subagents" -> onOpenSubAgents?.invoke()

@@ -285,7 +285,9 @@ class TerminalEnvironmentHostTest {
         val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync, fileKey = ::hostLinuxFileKey)
         val reference = LinuxGenerationRef(spec.environmentId, spec.generation)
         val selection = File(directory, "selected-linux.json")
-        for ((file, field) in listOf(spec.proot to "proot_sha256", spec.loader to "loader_sha256")) {
+        val proot = requireNotNull(spec.proot)
+        val loader = requireNotNull(spec.loader)
+        for ((file, field) in listOf(proot to "proot_sha256", loader to "loader_sha256")) {
             val originalFile = file.readBytes()
             val originalSelection = selection.readText()
             file.writeText("forged replacement with self-reported hash")

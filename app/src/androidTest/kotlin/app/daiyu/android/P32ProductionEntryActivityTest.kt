@@ -61,30 +61,50 @@ class P32ProductionEntryActivityTest : WiredActivityTestCase() {
     fun testOriginalSendDraftProducesSavedExactOwnerReceiptWithoutAnotherSender() {
         val conversation = fixture.database.create()
         val session = fixture.session("answer", held = true)
-        val receipts = CopyOnWriteArrayList<VoiceControlReceipt>()
-        mainThread {
-            activity.select(conversation)
-            retainedControls(activity).onTextChange("one original send")
-            val expected = ChatController.TextSendOwner(conversation.id, field("editorGeneration") as Long,
-                field("draftRevision") as Long)
-            val permit = VoiceControlPermit("test-permit", conversation.id.value, "test-lifecycle", profile(), VoiceControlLimits(), Long.MAX_VALUE)
-            val turn = VoiceControlTurn(permit, 1, "test-request")
-            val type = MainActivity::class.java.declaredClasses.single { it.simpleName == "UniversalSend" }
-            val constructor = type.declaredConstructors.single().apply { isAccessible = true }
-            val callback: (VoiceControlReceipt) -> Unit = { receipts.add(it) }
-            val send = constructor.newInstance(turn, expected, callback)
-            call("sendDraft", "one original send", send)
+        val rawReceipts = CopyOnWriteArrayList<VoiceControlReceipt>()
+        val deliveries = CopyOnWriteArrayList<VoiceControlReceipt>()
+        val stoppedOwners = CopyOnWriteArrayList<VoiceAssistantOwner>()
+        try {
+            mainThread {
+                activity.select(conversation)
+                retainedControls(activity).onTextChange("one original send")
+                val expected = ChatController.TextSendOwner(conversation.id, field("editorGeneration") as Long,
+                    field("draftRevision") as Long)
+                val permit = VoiceControlPermit("test-permit", conversation.id.value, "test-lifecycle", profile(), VoiceControlLimits(), Long.MAX_VALUE)
+                val turn = VoiceControlTurn(permit, 1, "test-request")
+                val type = MainActivity::class.java.declaredClasses.single { it.simpleName == "UniversalSend" }
+                val constructor = type.declaredConstructors.single().apply { isAccessible = true }
+                val fence = AndroidUniversalReceiptFence(turn, { deliveries.add(it) }, { stoppedOwners.add(it) })
+                val callback: (VoiceControlReceipt) -> Unit = {
+                    rawReceipts.add(it)
+                    fence.accept(it)
+                }
+                val send = constructor.newInstance(turn, expected, callback)
+                call("sendDraft", "one original send", send)
+            }
+            awaitTextSendResult(activity)
+            awaitControl("durable voice business delivery") { deliveries.isNotEmpty() }
+            awaitControl("one original fake model open") { fixture.opens.get() == 1 }
+            ui.waitForIdle()
+            val accepted = deliveries.single() as VoiceControlReceipt.Accepted
+            val rows = fixture.database.messages(conversation.id).map { it.second }
+            assertEquals(2, rows.size)
+            assertEquals(1, rows.count { it.role == Message.USER_ROLE })
+            val exact = rows.single { it.role == Message.ASSISTANT_ROLE }
+            val exactOwner = VoiceAssistantOwner(conversation.id.value, exact.runId.value, exact.id.value)
+            assertEquals(exactOwner, accepted.assistant)
+            // Retained-state refresh and the original callback may both report durable Accepted.
+            // Only the fenced business delivery is single; do not suppress either production path.
+            val raw = rawReceipts.toList()
+            assertTrue("original send must report a raw receipt", raw.isNotEmpty())
+            assertTrue("all raw receipts must be Accepted for the same exact persisted owner",
+                raw.all { it is VoiceControlReceipt.Accepted && it.assistant == exactOwner &&
+                    it.requestId == accepted.requestId })
+            assertTrue("duplicate Accepted must not stop the original owner", stoppedOwners.isEmpty())
+            assertEquals(1, fixture.opens.get())
+            assertDraft("")
+        } finally {
+            session.release.countDown()
         }
-        awaitTextSendResult(activity)
-        awaitControl("durable voice receipt") { receipts.isNotEmpty() }
-        awaitControl("one original fake model open") { fixture.opens.get() == 1 }
-        val accepted = receipts.single() as VoiceControlReceipt.Accepted
-        val rows = fixture.database.messages(conversation.id).map { it.second }
-        assertEquals(1, rows.count { it.role == Message.USER_ROLE })
-        val exact = rows.single { it.role == Message.ASSISTANT_ROLE }
-        assertEquals(VoiceAssistantOwner(conversation.id.value, exact.runId.value, exact.id.value), accepted.assistant)
-        assertEquals(1, fixture.opens.get())
-        assertDraft("")
-        session.release.countDown()
     }
 }

@@ -43,6 +43,11 @@ COPIES = (
     "LICENSE", "LICENSE-ncnn", "LICENSE-kaldi-native-fbank", "KISSFFT-COPYING",
     "KISSFFT-LICENSE", "MODEL-CARD.md", "NOTICE.md",
 ))
+COPIES += tuple(("THIRD_PARTY/license-bundle/maven/" + artifact + "/" + name,
+                 "maven/" + artifact + "/" + name)
+                for artifact in ("commons-compress-1.28.0", "commons-codec-1.19.0",
+                                 "commons-io-2.20.0", "commons-lang3-3.18.0")
+                for name in ("LICENSE.txt", "NOTICE.txt"))
 EXISTING = (
     "GPL-3.0.txt", "NOTICE-proot.txt", "proot-5.1.107.92.txt",
     "talloc-2.4.3.txt", "libandroid-shmem-0.7.txt",

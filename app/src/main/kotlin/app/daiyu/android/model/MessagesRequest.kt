@@ -153,7 +153,7 @@ internal object MessagesRequest {
     fun history(history: List<Message>, images: app.daiyu.android.model.images.FrozenMessageImagePlan? = null): JSONArray {
         val messages = JSONArray()
         val expanded = MessageHistory.expand(history)
-        app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImages(expanded)
+        app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImages(expanded, ProviderProtocol.MESSAGES)
         expanded.forEachIndexed { messageIndex, message ->
             require(message.role == "user" || message.blocks.none { it is MessageBlock.Image }) { "Images require user history" }
             require(message.protocolItems.isEmpty() || message.blocks.none { it is MessageBlock.Image }) {

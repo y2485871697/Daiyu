@@ -245,7 +245,8 @@ class ControllerGenerationPreparationTest {
         assertTrue(auth.allows(assetOwner, "https://cdn.example/image.png?signature=exact"))
         for (url in listOf("http://cdn.example/image.png", "https://cdn.example.evil/image", "https://evil.example/image",
             "https://user@cdn.example/image", "https://cdn.example:444/image", "https://cdn.example/image#fragment",
-            "https://127.0.0.1/image", "https://cdn.example/../image")) assertFalse(url, auth.allows(assetOwner, url))
+            "https://127.0.0.1/image", "https://cdn.example/../image",
+            "https://cdn.example/%2e%2e/image", "https://cdn.example/a/%2e%2e/image")) assertFalse(url, auth.allows(assetOwner, url))
         assertEquals(1, checks)
         networkAllowed = false; assertFalse(auth.allows(assetOwner, "https://cdn.example/image"))
         networkAllowed = true; current = false; assertFalse(auth.allows(assetOwner, "https://cdn.example/image"))

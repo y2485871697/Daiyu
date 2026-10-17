@@ -61,7 +61,7 @@ class FrozenMessageVideoPlan private constructor(
             checkCancelled()
             capability.validate(provider.asModelSettings())
             val expanded = FrozenMessageImagePlan.snapshot(history)
-            FrozenMessageImagePlan.rejectRawImages(expanded)
+            FrozenMessageImagePlan.rejectRawImages(expanded, provider.protocol)
             val source = inputs.toList()
             require(source.isNotEmpty() && source.all { it.references.isNotEmpty() }) { "Video inputs must not be empty" }
             require(source.map { it.owner }.toSet().size == source.size) { "Duplicate video message owner" }

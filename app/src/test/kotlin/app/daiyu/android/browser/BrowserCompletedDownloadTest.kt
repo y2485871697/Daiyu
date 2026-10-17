@@ -35,7 +35,7 @@ class BrowserCompletedDownloadTest {
         throw AssertionError("Expected rejection")
     }
 
-    @Test fun completedCapabilityRetainsOriginalLeaseAndExactBytesAfterNormalRunClose() = Fixture().use { f ->
+    @Test fun completedCapabilityRetainsOriginalLeaseAndExactBytesAfterNormalRunClose(): Unit = Fixture().use { f ->
         val (receipt, ref) = f.complete()
         assertEquals(f.lease, ref.lease)
         assertEquals(receipt.size, ref.size)
@@ -74,7 +74,7 @@ class BrowserCompletedDownloadTest {
         }
     }
 
-    @Test fun destinationFailuresAndMutationDuringCopyNeverReturnSuccess() = Fixture().use { f ->
+    @Test fun destinationFailuresAndMutationDuringCopyNeverReturnSuccess(): Unit = Fixture().use { f ->
         val (receipt, ref) = f.complete()
         rejects { ref.saveOriginal({ throw SecurityException("revoked provider") }) {} }
         rejects { ref.saveOriginal({ object : OutputStream() {

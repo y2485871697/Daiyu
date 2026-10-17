@@ -14,6 +14,12 @@ import okhttp3.Request
 import okhttp3.Response
 import java.io.IOException
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+private class AccountTransportException(message: String) : IllegalStateException(message),
+    kotlinx.coroutines.CopyableThrowable<AccountTransportException> {
+    override fun createCopy(): AccountTransportException? = null
+}
+
 internal class AccountResponse(val status: Int, val bytes: ByteArray) {
     override fun toString() = "AccountResponse(status=$status, redacted)"
 }
@@ -58,14 +64,14 @@ internal class OkHttpAccountTransport(private val calls: Call.Factory = sharedCa
         }
         return suspendCancellableCoroutine { continuation ->
             val call = try { calls.newCall(builder.build()) } catch (_: Exception) {
-                if (continuation.isActive) continuation.resumeWithException(IllegalStateException("账户请求未确认，请手动查询状态"))
+                if (continuation.isActive) continuation.resumeWithException(AccountTransportException("账户请求未确认，请手动查询状态"))
                 return@suspendCancellableCoroutine
             }
             continuation.invokeOnCancellation { call.cancel() }
             try { call.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {
                     // Never propagate a URL, signed header, payload or transport exception.
-                    if (continuation.isActive) continuation.resumeWithException(IllegalStateException("账户请求未确认，请手动查询状态"))
+                    if (continuation.isActive) continuation.resumeWithException(AccountTransportException("账户请求未确认，请手动查询状态"))
                 }
                 override fun onResponse(call: Call, response: Response) {
                     try {
@@ -90,12 +96,12 @@ internal class OkHttpAccountTransport(private val calls: Call.Factory = sharedCa
                         if (continuation.isActive) continuation.resume(result)
                     } catch (_: Exception) {
                         call.cancel()
-                        if (continuation.isActive) continuation.resumeWithException(IllegalStateException("账户响应读取失败，请手动查询状态"))
+                        if (continuation.isActive) continuation.resumeWithException(AccountTransportException("账户响应读取失败，请手动查询状态"))
                     }
                 }
             }) } catch (_: Exception) {
                 call.cancel()
-                if (continuation.isActive) continuation.resumeWithException(IllegalStateException("账户请求未确认，请手动查询状态"))
+                if (continuation.isActive) continuation.resumeWithException(AccountTransportException("账户请求未确认，请手动查询状态"))
             }
         }
     }

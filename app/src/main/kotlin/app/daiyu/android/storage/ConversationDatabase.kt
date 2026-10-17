@@ -12,7 +12,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 14), ConversationStore {
+class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 15), ConversationStore {
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
         db, assistantPreferences.getString(app.daiyu.android.assistants.LegacyAssistantCodec.KEY, null))
@@ -27,7 +27,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
     }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0,assistant_id TEXT)")
-        db.execSQL("CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL,role TEXT NOT NULL,blocks TEXT NOT NULL,status TEXT NOT NULL,error TEXT,protocol TEXT NOT NULL,history_segments TEXT NOT NULL DEFAULT '[]')")
+        db.execSQL("CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL,role TEXT NOT NULL,blocks TEXT NOT NULL,status TEXT NOT NULL,error TEXT,protocol TEXT NOT NULL,history_segments TEXT NOT NULL DEFAULT '[]',created_at INTEGER CHECK(created_at IS NULL OR (typeof(created_at)='integer' AND created_at>=0)))")
         db.execSQL("CREATE INDEX messages_tail ON messages(conversation_id,seq)")
         createUiFolders(db)
         createComposer(db)
@@ -49,7 +49,15 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..13 && newVersion == 14) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..14 && newVersion == 15) { "不支持此数据库版本，保留原数据" }
+        // No backfill: conversation.updated is not evidence of any message's creation time.
+        // Existing-column check also supports old-schema test fixtures retaining newer columns.
+        val hasMessageTime = db.rawQuery("PRAGMA table_info(messages)", null).use { c ->
+            var found = false
+            while (c.moveToNext()) if (c.getString(1) == "created_at") found = true
+            found
+        }
+        if (!hasMessageTime) db.execSQL("ALTER TABLE messages ADD COLUMN created_at INTEGER CHECK(created_at IS NULL OR (typeof(created_at)='integer' AND created_at>=0))")
         if (oldVersion < 10) {
             db.execSQL("ALTER TABLE conversations ADD COLUMN assistant_id TEXT")
             installAssistants(db)
@@ -66,8 +74,8 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             createUiFolders(db)
         }
         if (oldVersion < 11) upgradeGenerationSchema(db)
-        SQLiteChildTaskStore.installCommandSchema(db)
-        if (oldVersion == 13) return // Existing video witnesses remain byte-for-byte unchanged.
+        if (oldVersion < 14) SQLiteChildTaskStore.installCommandSchema(db)
+        if (oldVersion >= 13) return // Existing command/video rows and witnesses remain unchanged.
         SQLiteMessageVideoStore.installSchema(db)
         ControllerVideoManifestWitness.installSchema(db)
         check(!db.rawQuery("SELECT 1 FROM message_video_inputs v LEFT JOIN messages m ON m.id=v.message_id WHERE m.id IS NULL LIMIT 1", null).use { it.moveToFirst() })
@@ -225,11 +233,14 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             arrayOf(messageId, conversation.value)).use { c ->
             check(c.moveToFirst()) { "消息不存在" }; Triple(c.getString(0), c.getString(1), c.getString(2))
         }
+        val createdAt = db.rawQuery("SELECT created_at FROM messages WHERE id=?", arrayOf(messageId)).use {
+            check(it.moveToFirst()); if (it.isNull(0)) null else it.getLong(0)
+        }
         fun text(column: String) = SQLiteText.read(db, "messages", column, "id", messageId)
         return Message(MessageId(messageId), conversation, RunId(metadata.first), metadata.second,
             decode(JSONArray(requireNotNull(text("blocks")))), RunStatus.valueOf(metadata.third), text("error"),
             jsonStrings(JSONArray(requireNotNull(text("protocol")))),
-            MessageHistoryCodec.decode(JSONArray(requireNotNull(text(historyColumn))))).also {
+            MessageHistoryCodec.decode(JSONArray(requireNotNull(text(historyColumn)))), createdAt = createdAt).also {
                 MessageHistoryCodec.validate(it)
                 MessageImages.validate(it)
                 if (verifyVideoWitness) SQLiteMessageVideoStore.readVerified(db, it)
@@ -316,6 +327,9 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             check(!db.rawQuery("SELECT 1 FROM runtime_checkpoints WHERE message_id=?", arrayOf(message.id.value)).use { it.moveToFirst() }) {
                 "运行已由原子检查点所有者管理，拒绝旧消息写入路径"
             }
+            check(storedMessage(db, message.conversationId, message.id.value).createdAt == message.createdAt) {
+                "消息创建时间不可更改"
+            }
             val encoded = values(message)
             val count=db.update("messages",encoded,"id=? AND conversation_id=? AND run_id=? AND role=? AND status='RUNNING' AND EXISTS (SELECT 1 FROM conversations WHERE id=?)",
                 arrayOf(message.id.value,message.conversationId.value,message.runId.value,message.role,message.conversationId.value))
@@ -350,6 +364,9 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         SQLiteMessageVideoStore.insert(db, supplement, emptyList())
     }
     internal fun writeRuntimeMessage(db: SQLiteDatabase, message: Message) {
+        check(storedMessage(db, message.conversationId, message.id.value).createdAt == message.createdAt) {
+            "消息创建时间不可更改"
+        }
         check(db.update("messages", values(message), "id=? AND conversation_id=? AND run_id=? AND role='assistant' AND status='RUNNING'",
             arrayOf(message.id.value, message.conversationId.value, message.runId.value)) == 1) { "运行消息已结束，拒绝迟到检查点" }
         SQLiteMessageVideoStore.readVerified(db, message)
@@ -411,13 +428,15 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
                 reserve(value);conversations.put(value)
             }}
             val messages=JSONArray()
-            db.rawQuery("SELECT id,conversation_id,run_id,role,blocks,status,error,protocol,history_segments FROM messages$messageWhere ORDER BY seq",args).use {c->while(c.moveToNext()) {
+            db.rawQuery("SELECT id,conversation_id,run_id,role,blocks,status,error,protocol,history_segments,created_at FROM messages$messageWhere ORDER BY seq",args).use {c->while(c.moveToNext()) {
                 val blocks=JSONArray(c.getString(4));validateBlocks(blocks)
                 val protocol=JSONArray(c.getString(7))
                 val value=JSONObject().put("id",c.getString(0)).put("conversation_id",c.getString(1)).put("run_id",c.getString(2)).put("role",c.getString(3)).put("blocks",blocks).put("status",c.getString(5)).put("error",c.getString(6) ?: JSONObject.NULL).put("protocol",protocol)
+                val createdAt = if (c.isNull(9)) null else c.getLong(9)
+                MessageTimeCodec.write(value, createdAt)
                 val rawSegments=c.getString(8)
                 val segments=MessageHistoryCodec.decode(JSONArray(rawSegments))
-                val projection=Message(MessageId(c.getString(0)),ConversationId(c.getString(1)),RunId(c.getString(2)),c.getString(3),decode(blocks),RunStatus.valueOf(c.getString(5)),c.getString(6),jsonStrings(protocol),historySegments=segments)
+                val projection=Message(MessageId(c.getString(0)),ConversationId(c.getString(1)),RunId(c.getString(2)),c.getString(3),decode(blocks),RunStatus.valueOf(c.getString(5)),c.getString(6),jsonStrings(protocol),historySegments=segments,createdAt=createdAt)
                 MessageHistoryCodec.validate(projection)
                 MessageImages.validate(projection)
                 SQLiteMessageVideoStore.readVerified(db, projection)
@@ -460,7 +479,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             Conversation(ConversationId(id),string(c,"title"),string(c,"draft"),integer(c,"updated"),folder,boolean(c,"pinned"),assistantId)
         }
         val restored=(0 until messages.length()).map {i->val m=messages.getJSONObject(i)
-            require(m.keys().asSequence().toSet().let {it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol") || it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol","history_segments")})
+            require((m.keys().asSequence().toSet() - MessageTimeCodec.FIELD).let {it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol") || it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol","history_segments")})
             val id=identity(string(m,"id"));require(messageIds.add(id));val conversation=identity(string(m,"conversation_id"));require(conversation in ids)
             val role=string(m,"role");require(role in setOf("user","assistant"))
             val status=RunStatus.valueOf(string(m,"status"));val encoded=m.getJSONArray("blocks");validateBlocks(encoded);val blocks=decode(encoded)
@@ -481,7 +500,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             val restored = Message(MessageId(id),ConversationId(conversation),RunId(identity(string(m,"run_id"))),role,blocks,
                 if(status==RunStatus.RUNNING) RunStatus.INTERRUPTED else status,
                 if(status==RunStatus.RUNNING) "导入时原运行未结束；未自动重发请求或工具" else originalError,jsonStrings(protocol),
-                historySegments = segments)
+                historySegments = segments, createdAt = MessageTimeCodec.read(m))
             MessageHistoryCodec.validate(restored)
             MessageImages.validate(restored)
             restored
@@ -645,6 +664,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         put("id",message.id.value);put("conversation_id",message.conversationId.value);put("run_id",message.runId.value)
         put("role",message.role);put("blocks",encode(message.blocks).toString());put("status",message.status.name);put("error",message.error);put("protocol",JSONArray(message.protocolItems).toString())
         put(historyColumn, if (message.historySegments.isEmpty()) "[]" else MessageHistoryCodec.encode(message.historySegments).toString())
+        put("created_at", message.createdAt)
     }
     private fun transaction(block:(SQLiteDatabase)->Unit) { val db=writableDatabase;db.beginTransaction();try {block(db);db.setTransactionSuccessful()} finally {db.endTransaction()} }
     fun messages(id: ConversationId, before: Long = Long.MAX_VALUE, limit: Int = 50): List<Pair<Long,Message>> {

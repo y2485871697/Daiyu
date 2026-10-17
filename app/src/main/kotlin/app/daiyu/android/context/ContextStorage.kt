@@ -4,6 +4,7 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.MessageHistoryCodec
+import app.daiyu.android.storage.MessageTimeCodec
 import app.daiyu.android.storage.MessageImageReferenceCodec
 import org.json.JSONArray
 import org.json.JSONObject
@@ -105,6 +106,7 @@ object ArchiveCodec {
                 MessageHistoryCodec.validate(message)
                 item.put("history_segments", MessageHistoryCodec.encode(message.historySegments))
             }
+            MessageTimeCodec.write(item, message.createdAt)
             value.put(item)
         }
         return value.toString().toByteArray(Charsets.UTF_8).also {
@@ -134,7 +136,8 @@ object ArchiveCodec {
         val identities = HashSet<ArchiveIdentity>()
         return (0 until array.length()).map { i ->
             val m = array.getJSONObject(i)
-            val keys = m.keys().asSequence().toSet()
+            val keys = m.keys().asSequence().toSet() - MessageTimeCodec.FIELD
+            val createdAt = MessageTimeCodec.read(m)
             require(keys == LEGACY_KEYS || keys == HISTORY_KEYS) { "归档字段不完整或含未知字段" }
             val id = identity(m, "id"); val conversation = identity(m, "conversation")
             val run = identity(m, "run"); val role = stringField(m, "role")
@@ -154,12 +157,12 @@ object ArchiveCodec {
                 // The segment codec validates segment shape and identities.  Validate
                 // the complete owning message as well, rather than trusting JSON IDs.
                 val message = Message(MessageId(id), ConversationId(conversation), RunId(run), role,
-                    decodedBlocks, status, errorText, protocol, decoded)
+                    decodedBlocks, status, errorText, protocol, decoded, createdAt = createdAt)
                 if (decoded.isNotEmpty()) MessageHistoryCodec.validate(message)
                 decoded
             } else emptyList()
             Message(MessageId(id), ConversationId(conversation), RunId(run), role, decodedBlocks,
-                status, errorText, protocol, segments).also {
+                status, errorText, protocol, segments, createdAt = createdAt).also {
                 // A reference is not its own authority: check the enclosing row and
                 // each segment's real message identity, including legacy-shaped rows.
                 MessageImages.validate(it)

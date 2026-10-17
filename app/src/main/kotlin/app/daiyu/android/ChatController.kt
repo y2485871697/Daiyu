@@ -870,9 +870,10 @@ class ChatController internal constructor(private val application:Application,
             if (command.profileId !in models) return ChildTaskCommandReceipt.Rejected("invalid_child_profile")
             if (preparationCancelled(token)) return ChildTaskCommandReceipt.Rejected("cancelled_before_admission")
             val run = RunId(UUID.randomUUID().toString())
+            val acceptedAt = System.currentTimeMillis()
             val user = Message(MessageId(UUID.randomUUID().toString()), conversation, run, Message.USER_ROLE,
-                listOf(MessageBlock.Text("child-command", "子任务${command.kind.name}；来源 ${command.source.owner.childRunId}\n${command.instruction}")), RunStatus.COMPLETED)
-            val initial = Message(MessageId(UUID.randomUUID().toString()), conversation, run, Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+                listOf(MessageBlock.Text("child-command", "子任务${command.kind.name}；来源 ${command.source.owner.childRunId}\n${command.instruction}")), RunStatus.COMPLETED, createdAt = acceptedAt)
+            val initial = Message(MessageId(UUID.randomUUID().toString()), conversation, run, Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING, createdAt = acceptedAt)
             database.send(user, initial, expectedAssistantId = frozenAssistantId, preserveDraft = true)
             return ChildTaskCommandHost.run(initial, command, checkNotNull(childSupervisor), models, database, runtime,
                 cancelled = { preparationCancelled(token) }, onChanged = ::backgroundTasksChanged,
@@ -1723,10 +1724,13 @@ class ChatController internal constructor(private val application:Application,
         val conversationId=virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
         val run=virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
-        var user=try {imageAttempt?.prepare(imageAttachments.store,messageImageAssets) ?:
-            Message(videoAttempt?.userId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
+        // One acceptance candidate, including its media reconstruction and all run owners.
+        // This value must not change during preflight, streaming, or receipt reconciliation.
+        val acceptedAt = System.currentTimeMillis()
+        var user=try {imageAttempt?.prepare(imageAttachments.store,messageImageAssets,acceptedAt) ?:
+            Message(videoAttempt?.userId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED,createdAt=acceptedAt)
         } catch (_:Exception) {problem="图片冻结失败或模型不支持；草稿保留，未发起网络请求";notifyChanged();return null}
-        val assistant=Message(virtualDisplay?.assistantId ?: terminalRun?.preview?.identity?.assistantMessageId ?: videoAttempt?.assistantId ?: generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING)
+        val assistant=Message(virtualDisplay?.assistantId ?: terminalRun?.preview?.identity?.assistantMessageId ?: videoAttempt?.assistantId ?: generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING,createdAt=acceptedAt)
         val physicalVideoHistory = try { ControllerVideoHistory(database).capture(conversationId) }
         catch (_: Exception) {
             problem="原视频来源无法确认；草稿保留，未启动模型请求";notifyChanged();return null
@@ -1776,8 +1780,11 @@ class ChatController internal constructor(private val application:Application,
             while (!ready.await(50, TimeUnit.MILLISECONDS)) check(!preparationCancelled(token))
             val session = checkNotNull(created)
             val capability = session.authorize(proof)
-            videoPrepared = videoAttempt?.prepare(videoAttachments.store, provider, capability) { session.isRevoked() }
-            videoPrepared?.let { user = it.user }
+            videoPrepared = videoAttempt?.prepare(videoAttachments.store, provider, capability, acceptedAt) { session.isRevoked() }
+            videoPrepared?.let {
+                check(it.user == user && it.assistant == assistant) { "video_candidate_changed" }
+                user = it.user
+            }
             videoPlan = if (videoPrepared != null) messageVideos.preflight(physicalVideoHistory, provider,
                 capability, videoPrepared) { session.isRevoked() }
             else messageVideos.preflightText(physicalVideoHistory, provider, capability, user) { session.isRevoked() }
@@ -2493,8 +2500,9 @@ class ChatController internal constructor(private val application:Application,
         if(owned==null || text.isBlank()) {
             deliver(SupplementAdmission.Rejected(messageId));return false
         }
+        val acceptedAt = System.currentTimeMillis()
         val user=Message(messageId,owner.conversationId,owner.runId,Message.USER_ROLE,
-            listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED)
+            listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED,createdAt=acceptedAt)
         return owned.admitSupplement(user,::deliver)
     }
     internal fun pause(owner:Message):Boolean {

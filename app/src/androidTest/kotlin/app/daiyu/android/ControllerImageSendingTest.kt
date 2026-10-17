@@ -115,6 +115,58 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         } } finally { super.tearDown() }
     }
 
+    fun testPreparedImageTimeAndReceiptReconstructionUseOriginalRowIncludingLegacyNullAndEpoch() {
+        val f = fixture()
+        val journal = f.app.getSharedPreferences("image-send-identities", 0)
+        for (time in listOf<Long?>(null, 0L, 123456789L)) {
+            val conversation = f.db.create("default")
+            val owner = ImageAttachmentOwner(conversation.id.value, "time-editor")
+            val parts = listOf(ImageSendPart.Text("body"), ImageSendPart.Image(image(f, owner)))
+            fun attempt() = ControllerImageAttempt(owner, 1, parts, provider(f),
+                ImageSendHandle(owner, 1), journal)
+            val original = attempt()
+            assertNull(original.reserve(f.db))
+            val user = original.prepare(f.controller.imageAttachments.store,
+                MessageImageAssetStore(File(f.app.filesDir, "time-assets")), time)
+            assertEquals(time, user.createdAt)
+            val assistant = Message(original.assistantId, conversation.id, original.runId,
+                Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING, createdAt = time)
+            f.db.send(user, assistant)
+            f.db.save(assistant.copy(status = RunStatus.COMPLETED))
+            // Recovery reconstructs full user equality using this original row's time, not now.
+            val recovered = attempt().reserve(f.db) as ImageSendResult.Accepted
+            assertEquals(original.userId, recovered.userId)
+            assertEquals(original.assistantId, recovered.assistantId)
+            assertEquals(listOf(time, time), f.db.messages(conversation.id).map { it.second.createdAt })
+            assertEquals(user, f.db.messages(conversation.id).first().second)
+        }
+        assertEquals(0, f.probe.opens.get())
+    }
+
+    fun testProductionImagePairSharesFrozenTimeWithRunnerAndStreamingCompletion() {
+        val f = fixture(); val conversation = f.db.create("default")
+        val owner = ImageAttachmentOwner(conversation.id.value, "production-time-editor")
+        val attachment = image(f, owner)
+        val before = System.currentTimeMillis()
+        val receipt = submit(f, conversation, owner, 1,
+            listOf(ImageSendPart.Text("body"), ImageSendPart.Image(attachment))) as ImageSendResult.Accepted
+        val after = System.currentTimeMillis()
+        await(f) { f.controller.active == null }
+        val rows = f.db.messages(conversation.id).map { it.second }
+        val user = rows.single { it.id == receipt.userId }
+        val assistant = rows.single { it.id == receipt.assistantId }
+        assertTrue(checkNotNull(user.createdAt) in before..after)
+        assertEquals(user.createdAt, assistant.createdAt)
+        assertEquals(user, f.probe.histories.single().single { it.id == user.id })
+        assertTrue(assistant.historySegments.isNotEmpty())
+        assertTrue(assistant.historySegments.all { it.createdAt == assistant.createdAt })
+        val replay = submit(f, conversation, owner, 1,
+            listOf(ImageSendPart.Text("body"), ImageSendPart.Image(attachment))) as ImageSendResult.Accepted
+        assertEquals(receipt.userId, replay.userId)
+        assertEquals(1, f.probe.opens.get())
+        assertEquals(rows, f.db.messages(conversation.id).map { it.second })
+    }
+
     fun testImageAttemptFreezesWithActualAuxiliaryRouteWithoutClaimingMainSupportsImages() {
         val f = fixture(); val conversation = f.db.create("default")
         val owner = ImageAttachmentOwner(conversation.id.value, "independent-route-editor")

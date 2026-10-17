@@ -108,7 +108,7 @@ internal class ControllerVideoJournal(private val preferences: SharedPreferences
                     ?: error("video_original_body_missing")
                 check(expectedText == null || expectedText == body)
                 check(user == Message(userId, conversationId, runId, Message.USER_ROLE,
-                    listOf(MessageBlock.Text("user", body)), RunStatus.COMPLETED))
+                    listOf(MessageBlock.Text("user", body)), RunStatus.COMPLETED, createdAt = user.createdAt))
                 check(saved.getString("fingerprint") == videoFingerprint(body, draft.videos))
                 check(assistant.id == assistantId && assistant.conversationId == conversationId &&
                     assistant.role == Message.ASSISTANT_ROLE && assistant.runId == runId)
@@ -161,6 +161,9 @@ internal class ControllerVideoAttempt(
     private var reserved = false
     private var settled = false
     private var databaseEntered = false
+    // Supplied by the candidate creator; never read the clock in constructors or recovery.
+    private var createdAt: Long? = null
+    private var timeFrozen = false
     var acceptedConversation: Conversation? = null; private set
 
     init {
@@ -194,8 +197,12 @@ internal class ControllerVideoAttempt(
     }
 
     fun prepare(assets: VideoAssetStore, provider: ProviderSnapshot, capability: OpenRouterVideoCapability,
-        cancelled: () -> Boolean): PreparedControllerVideoSend {
+        createdAt: Long? = null, cancelled: () -> Boolean): PreparedControllerVideoSend {
         check(reserved && !settled && !databaseEntered) { "video_attempt_not_fresh" }
+        require(createdAt == null || createdAt >= 0)
+        check(!timeFrozen || this.createdAt == createdAt) { "video_candidate_time_changed" }
+        this.createdAt = createdAt
+        timeFrozen = true
         capability.validate(provider.asModelSettings())
         if (cancelled()) throw VideoAttachmentException(VideoAttachmentFailure.CANCELLED)
         // Enforce provider limits before publishing any original, not only during base64 freezing.
@@ -211,9 +218,9 @@ internal class ControllerVideoAttempt(
     }
 
     private fun expectedUser() = Message(userId, conversationId, runId, Message.USER_ROLE,
-        listOf(MessageBlock.Text("user", request.text)), RunStatus.COMPLETED)
+        listOf(MessageBlock.Text("user", request.text)), RunStatus.COMPLETED, createdAt = createdAt)
     private fun expectedAssistant() = Message(assistantId, conversationId, runId, Message.ASSISTANT_ROLE,
-        emptyList(), RunStatus.RUNNING)
+        emptyList(), RunStatus.RUNNING, createdAt = createdAt)
     private fun expectedInputs(): List<MessageVideoInput> {
         val owner = MessageVideoOwner(conversationId.value, userId.value)
         return listOf(MessageVideoInput(owner, request.videos.map {

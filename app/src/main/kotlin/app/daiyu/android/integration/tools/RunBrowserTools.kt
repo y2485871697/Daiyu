@@ -65,8 +65,13 @@ internal object RunBrowserTools {
         authorization: TaskAuthorization,
         confirmation: Confirmation?,
     ): List<RegisteredTool> {
+        // Confirmed child tokens already validate the ORIGINAL inherited TaskAuthorization.
+        // Its sessionId belongs to the parent; browser resource/effect keys use childRunId.
+        // Legacy callers retain the strict resource-session == task-session contract.
         require(owner.runId.value == authorization.taskId &&
-            session.grant.owner.sessionId == authorization.sessionId) { "tool_run_owner_mismatch" }
+            (confirmation?.token?.taskSessionId ?: session.grant.owner.sessionId) == authorization.sessionId) {
+            "tool_run_owner_mismatch"
+        }
         return listOf(false, true).map { write ->
             object : RegisteredTool {
                 override val definition = ToolDefinition(

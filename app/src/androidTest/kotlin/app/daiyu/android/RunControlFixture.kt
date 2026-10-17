@@ -16,6 +16,7 @@ internal class RunControlFixture(base:Context,
     virtualDisplayFactory: ControllerVirtualDisplayFactory = ControllerVirtualDisplayFactory.REAL,
     onSession: ((app.daiyu.android.model.ProviderSnapshot, app.daiyu.android.assistants.AssistantRunContext,
         app.daiyu.android.model.sessiongateway.SessionGatewayContext) -> Unit)? = null,
+    beforeOpen: (List<Message>) -> Unit = {},
     beforeModel: () -> Unit = {}) : AutoCloseable {
     private class FixtureApplication(base:Context):Application() {init {attachBaseContext(base)}}
     val application:Application=FixtureApplication(testContext(base,"run-control-${UUID.randomUUID()}-"))
@@ -33,6 +34,7 @@ internal class RunControlFixture(base:Context,
             // Test-only gate in real preparation, before the SQLite receipt or model open.
             beforeModel()
             ModelPort {history ->
+                beforeOpen(history)
                 opens.incrementAndGet()
                 synchronized(queued) {histories.add(history);checkNotNull(queued.pollFirst())}
             }

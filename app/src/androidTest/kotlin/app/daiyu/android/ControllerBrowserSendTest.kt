@@ -29,6 +29,7 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
     private lateinit var browserSettings: BrowserSettingsStore
     private val modelFactories = AtomicInteger()
     private val sessionOwners = java.util.Collections.synchronizedList(mutableListOf<app.daiyu.android.domain.ConversationId>())
+    private val beforeOpen = AtomicReference<((List<app.daiyu.android.domain.Message>) -> Unit)?>()
     private val gates = mutableListOf<WorkerGate>()
     private val controller get() = fixture.controller
 
@@ -47,9 +48,12 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
             override fun getApplicationContext(): Context = this
             override fun getFilesDir(): File = root
         }
-        fixture = RunControlFixture(isolatedContext, onSession = { _, _, context ->
-            sessionOwners.add(context.conversationId); assertNull(context.project)
-        }) { modelFactories.incrementAndGet() }
+        fixture = RunControlFixture(isolatedContext,
+            onSession = { _, _, context ->
+                sessionOwners.add(context.conversationId); assertNull(context.project)
+            }, beforeOpen = { history -> beforeOpen.get()?.invoke(history) }) {
+            modelFactories.incrementAndGet()
+        }
         assertSame(isolatedContext, fixture.application.applicationContext)
         assertEquals(root, fixture.application.filesDir)
         awaitControl("controller ready") { controller.ready }
@@ -392,6 +396,140 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         assertNull(controller.browserPreparation())
         val reopened = ConversationDatabase(fixture.application)
         try { assertUncommitted(draft, reopened) } finally { reopened.close() }
+    }
+
+    fun testFreshFilesRealHostThroughControllerReturnsDurableAcceptedPairBeforeModelOpen() {
+        val draft = draft()
+        val pending = prepare(draft)
+        val session = fixture.session("browser accepted answer", held = true)
+        assertNoBrowserOrModel()
+        val checked = CountDownLatch(1)
+        val openFailure = AtomicReference<Throwable?>()
+        beforeOpen.set { history ->
+            try {
+                val rows = fixture.database.messages(pending.identity.conversationId).map { it.second }
+                assertEquals("durable user + assistant precede ModelPort.open", 2, rows.size)
+                assertTrue(rows.all { it.runId == pending.identity.runId })
+                assertEquals(draft.text, rows.single { it.role == app.daiyu.android.domain.Message.USER_ROLE }
+                    .blocks.filterIsInstance<app.daiyu.android.domain.MessageBlock.Text>().single().text)
+                assertEquals(pending.identity.assistantMessageId,
+                    rows.single { it.role == app.daiyu.android.domain.Message.ASSISTANT_ROLE }.id)
+                assertTrue(history.isNotEmpty())
+                assertTrue(File(root, "browser-runs/downloads").isDirectory)
+                assertTrue(File(root, "browser-runs/cookie-offloads").isDirectory)
+            } catch (failure: Throwable) { openFailure.set(failure) }
+            finally { checked.countDown() }
+        }
+        val ticket = ChatController.TextSendTicket()
+        val done = CountDownLatch(1)
+        val result = AtomicReference<ChatController.TextSendResult>()
+        controlMain {
+            assertTrue(pending.confirm(pending.preview, draft))
+            assertFalse(File(root, "browser-runs").exists())
+            assertTrue(controller.sendBrowser(pending, draft, ticket) { result.set(it); done.countDown() })
+        }
+        await(done); await(checked); await(session.entered)
+        openFailure.get()?.let { throw it }
+        val accepted = result.get() as ChatController.TextSendResult.Accepted
+        assertEquals(ChatController.TextSendOwner(null, 17, 23), accepted.owner)
+        assertEquals(pending.identity.conversationId, accepted.conversation.id)
+        assertEquals(ControllerBrowserPreparation.State.TRANSFERRED, pending.state)
+        assertEquals(1, fixture.opens.get())
+        controlMain { controller.acknowledgeTextSend(ticket) }
+        session.release.countDown()
+        awaitControl("real browser/model teardown") { controller.active == null }
+        controller.close()
+        val reopened = ConversationDatabase(fixture.application)
+        try {
+            val rows = reopened.messages(accepted.conversation.id).map { it.second }
+            assertEquals(2, rows.size)
+            assertEquals(pending.identity.assistantMessageId,
+                rows.single { it.role == app.daiyu.android.domain.Message.ASSISTANT_ROLE }.id)
+            assertEquals("", reopened.draft())
+        } finally { reopened.close() }
+    }
+
+    fun testAcceptedParentLaunchesIndependentlyApprovedChildUsingRealAndroidAssembly() {
+        val draft = draft()
+        val pending = prepare(draft)
+        val plan = checkNotNull(controller.prepareBrowserChild(pending, "explicit browser child",
+            setOf("list_tabs"), emptyList()))
+        val first = fixture.session("one answer", held = true)
+        val second = fixture.session("another answer", held = true)
+        val ticket = ChatController.TextSendTicket()
+        val done = CountDownLatch(1)
+        val result = AtomicReference<ChatController.TextSendResult>()
+        controlMain {
+            assertTrue(plan.confirm(plan.preview))
+            assertTrue(pending.confirm(pending.preview, draft))
+            assertTrue(controller.sendBrowser(pending, draft, ticket) { result.set(it); done.countDown() })
+        }
+        await(done); await(first.entered); await(second.entered)
+        assertTrue(result.get() is ChatController.TextSendResult.Accepted)
+        assertEquals(2, fixture.opens.get())
+        assertEquals(listOf(pending.identity.conversationId, pending.identity.conversationId), sessionOwners)
+        assertFalse(plan.drained)
+        assertTrue(fixture.histories.any { history -> history.any { it.runId.value == plan.scope.owner.childRunId } })
+        val journal = app.daiyu.android.storage.SQLiteChildTaskStore(fixture.database)
+        val running = checkNotNull(journal.get(plan.scope.owner))
+        assertEquals(app.daiyu.android.domain.delegation.ChildTaskStatus.RUNNING, running.status)
+        assertEquals(pending.identity.assistantMessageId.value, running.parentMessageId)
+        assertEquals(plan.scope.owner, running.owner)
+        controlMain {
+            assertTrue(controller.hasLiveChildTasks(pending.identity.conversationId))
+            assertEquals(app.daiyu.android.domain.delegation.ChildTaskStop.NOT_FOUND,
+                controller.stopChildTask(running.copy(owner = running.owner.copy(generation = running.owner.generation + 1))))
+            assertEquals(app.daiyu.android.domain.delegation.ChildTaskStop.NOT_FOUND,
+                controller.stopChildTask(running.copy(owner = running.owner.copy(childRunId = "sibling-child"))))
+            assertFalse(plan.drained)
+            controller.acknowledgeTextSend(ticket)
+        }
+        first.release.countDown(); second.release.countDown()
+        awaitControl("child worker, transport and real native host drain") { plan.drained && controller.active == null }
+        assertEquals(app.daiyu.android.domain.delegation.ChildTaskStatus.COMPLETED, journal.get(plan.scope.owner)?.status)
+        controller.close()
+        val reopened = ConversationDatabase(fixture.application)
+        try {
+            val durable = app.daiyu.android.storage.SQLiteChildTaskStore(reopened).get(plan.scope.owner)
+            assertNotNull(durable)
+            assertEquals(app.daiyu.android.domain.delegation.ChildTaskStatus.COMPLETED, durable?.status)
+            assertEquals(2, reopened.messages(pending.identity.conversationId).size)
+        } finally { reopened.close() }
+    }
+
+    fun testIndependentChildApprovalIsRequiredAndQueuedCancellationIsZeroIO() {
+        val draft = draft()
+        val pending = prepare(draft)
+        val plan = checkNotNull(controller.prepareBrowserChild(pending, "independent child prompt",
+            setOf("list_tabs"), emptyList()))
+        assertSame(plan, pending.childPlan)
+        assertNull(controller.prepareBrowserChild(pending, "second child", setOf("list_tabs"), emptyList()))
+        val sibling = ControllerChildBrowserPlan.prepare(pending, "different frozen child", setOf("list_tabs"), emptyList())
+        assertFalse(plan.confirm(sibling.preview))
+        sibling.close()
+        assertEquals(pending.identity.runId.value, plan.scope.owner.parentRunId)
+        assertEquals(plan.scope.owner, plan.preview.childOwner)
+        controlMain {
+            assertFalse("parent click is not child consent", pending.confirm(pending.preview, draft))
+            assertTrue(plan.confirm(plan.preview))
+            assertFalse(plan.confirm(plan.preview))
+            assertTrue(pending.confirm(pending.preview, draft))
+        }
+        assertUncommitted(draft)
+        val gate = holdWorker()
+        val ticket = ChatController.TextSendTicket()
+        val done = CountDownLatch(1)
+        val result = AtomicReference<ChatController.TextSendResult>()
+        controlMain {
+            assertTrue(controller.sendBrowser(pending, draft, ticket) { result.set(it); done.countDown() })
+            assertTrue(controller.cancelTextSend(ticket))
+        }
+        gate.release.countDown(); await(done)
+        assertTrue(result.get() is ChatController.TextSendResult.Rejected)
+        assertUncommitted(draft)
+        assertTrue(plan.drained)
+        assertTrue(app.daiyu.android.storage.SQLiteChildTaskStore(fixture.database).list(pending.identity.conversationId.value).isEmpty())
+        controlMain { controller.acknowledgeTextSend(ticket) }
     }
 
     fun testInvalidJsonNeverCreatesBrowserOrMessagePairAndEachFailureReleasesSlot() {

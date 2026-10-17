@@ -1,4 +1,6 @@
-# R10 / P34：浏览器偏好与纯授权准备（未接运行入口）
+# R10 / P34：浏览器偏好与纯授权准备（历史阶段记录）
+
+> 下文保留原候选阶段范围，不代表最新生产状态。MAIN 父入口已由唯一清单较晚记录接入；本轮独立 CHILD / 精确 fetch / worker 根目录 helper 与父接线合同见 `docs/P34-final-integration.md`。Cookie / history 仍默认拒绝。
 
 ## 范围与状态
 

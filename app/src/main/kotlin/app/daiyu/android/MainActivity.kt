@@ -80,6 +80,7 @@ import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.ui.FeatureRoute
 import app.daiyu.android.ui.RetainedConversationData
 import app.daiyu.android.ui.BrowserApprovalHost
+import app.daiyu.android.ui.ChildBrowserApprovalHost
 import app.daiyu.android.ui.ShizukuApprovalHost
 import app.daiyu.android.ui.screens.shizuku.ShizukuScreen
 import androidx.compose.foundation.rememberScrollState
@@ -1610,6 +1611,12 @@ class MainActivity : ComponentActivity() {
                         kotlinx.coroutines.delay(100)
                     }
                 }
+                val childApprovalReady by produceState(pending.childPlan?.confirmed != false, pending) {
+                    while (true) {
+                        value = pending.childPlan?.confirmed != false
+                        kotlinx.coroutines.delay(100)
+                    }
+                }
                 BrowserApprovalHost(
                     draft = BrowserDraftSnapshot(BrowserDraftOwner(selected?.id, editorGeneration, draftRevision), draft),
                     assistant = pending.assistant, settings = pending.settings,
@@ -1630,7 +1637,13 @@ class MainActivity : ComponentActivity() {
                             queued
                         }
                     }, onCancel = { if (browserApproval === it) cancelBrowserEditor() },
-                    problem = controller.problem)
+                    problem = controller.problem,
+                    childApprovalReady = childApprovalReady,
+                    childApproval = { ChildBrowserApprovalHost(pending, controller::prepareBrowserChild) })
+            }
+            if (controller.browserChildPlans().isNotEmpty()) {
+                top.yukonga.miuix.kmp.basic.TextButton(text = "停止工具型浏览器子任务（UNKNOWN 保留）",
+                    modifier = Modifier.testTag("child-browser-stop"), onClick = controller::stopBrowserChildren)
             }
             val editor = shizukuEditor
             if (editor != null && !hasImages) key(editor) {

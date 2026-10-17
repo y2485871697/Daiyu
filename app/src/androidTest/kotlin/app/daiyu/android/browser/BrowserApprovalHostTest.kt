@@ -6,6 +6,8 @@ import androidx.compose.ui.test.*
 import app.daiyu.android.BrowserDraftOwner
 import app.daiyu.android.BrowserDraftSnapshot
 import app.daiyu.android.ControllerBrowserPreparation
+import app.daiyu.android.ControllerChildBrowserPlan
+import app.daiyu.android.ui.ChildBrowserApprovalHost
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.assistants.AssistantProfile
 import app.daiyu.android.browser.session.BrowserAccess
@@ -77,6 +79,32 @@ class BrowserApprovalHostTest : WiredActivityTestCase() {
         assertEquals(1, confirmations.get())
         assertEquals(ControllerBrowserPreparation.State.CONFIRMED, p.state)
         ui.onNodeWithTag("browser-confirm").assertIsNotEnabled()
+    }
+
+    fun testIndependentChildExactFetchApprovalDoesNotFollowParentClickOrFullPreference() {
+        val p = ControllerBrowserPreparation.prepare(conversation, originalDraft, assistant, provider, settings,
+            BrowserGrant(BrowserOwner("ui-child-parent", BrowserOwnerKind.MAIN), BrowserAccess.FULL), setOf("list_tabs"))
+        val raw = """ {"action":"fetch","tab_id":0,"url":"https://fixture.invalid/child-file"} """
+        val child = ControllerChildBrowserPlan.prepare(p, "independent child prompt", setOf("fetch"), listOf(raw))
+        assertTrue(p.attachChild(child))
+        assertFalse(p.confirm(p.preview, originalDraft))
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings()) {
+                    ChildBrowserApprovalHost(p) { _, _, _, _ -> error("already frozen") }
+                }
+            }
+        }
+        ui.waitForIdle()
+        assertFalse(child.confirmed)
+        ui.onNodeWithTag("child-browser-review").performClick()
+        ui.waitForIdle()
+        ui.onNodeWithTag("child-browser-write-1", useUnmergedTree = true).performScrollTo().assertTextEquals(raw)
+        ui.onNodeWithTag("child-browser-confirm").performClick()
+        ui.waitForIdle()
+        assertTrue(child.confirmed)
+        assertTrue(p.confirm(p.preview, originalDraft))
+        p.cancel()
     }
 
     fun testSameTextWithNewRevisionInvalidatesPreviewWithoutConfirmation() {

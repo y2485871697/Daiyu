@@ -41,7 +41,9 @@ internal class CatalogBrowserBinding private constructor(
     val session: BrowserToolSession get() = host.session
     val requiredWrites: Set<WriteEffect> = java.util.Collections.unmodifiableSet(
         confirmed.preview.writes.map { it.effect }.toSet())
-    val sessionId: String get() = confirmed.preview.grant.owner.sessionId
+    /** Inherited task session for CHILD, not the resource pool/effect namespace. */
+    val sessionId: String get() = confirmed.taskSessionId
+    val browserOwnerId: String get() = confirmed.preview.grant.owner.sessionId
     val runId: String get() = confirmed.preview.identity.runId.value
     private val lock = Any()
     private var closed = false
@@ -137,7 +139,8 @@ internal class CatalogBrowserBinding private constructor(
         ): CatalogBrowserBinding = CatalogBrowserBinding(AndroidHost(host), assistant, confirmed)
 
         /** Android-main-Looper operation AFTER trusted confirmation, never during preview.
-         * No history, cookie-name authorization, offload path, fetch or child capability is added.
+         * MAIN/CHILD/fetch capability comes only from the explicitly confirmed token.
+         * No history, cookie-name authorization or offload capability is inferred.
          * The actual constructor's BrowserRunConstructionException is deliberately rethrown
          * unchanged: its closeWithResult() owns partial cleanup and must remain with the parent.
          */
@@ -158,6 +161,7 @@ internal class CatalogBrowserBinding private constructor(
             confirmed: BrowserRunAuthorization,
             factory: () -> Host,
         ): CatalogBrowserBinding = try {
+            require(assistant.id == confirmed.preview.identity.assistantId) { "browser_assistant_changed" }
             CatalogBrowserBinding(factory(), assistant, confirmed)
         } catch (failure: Exception) {
             confirmed.revoke()

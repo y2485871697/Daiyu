@@ -19,7 +19,7 @@ internal object OfflineSpeechPack {
         val downloadedBytes: Long = 0,
         val error: Boolean = false,
     )
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val scope by lazy { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
     private val mutable = MutableStateFlow(State())
     val state = mutable.asStateFlow()
     private var initialized = false

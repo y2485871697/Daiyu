@@ -17,8 +17,9 @@ internal object ImageRequestPreflight {
 
     fun history(settings: ModelSettings, protocol: ProviderProtocol, capability: Boolean?,
                 history: List<Message>, input: ModelImagePlan?): FrozenMessageImagePlan? {
+        settings.requestOptions.validate(protocol)
         val expanded = FrozenMessageImagePlan.snapshot(history)
-        FrozenMessageImagePlan.rejectRawImages(expanded)
+        FrozenMessageImagePlan.rejectRawImages(expanded, protocol)
         val hasImages = expanded.any { row -> row.blocks.any { it is MessageBlock.Image } }
         ImageInputEncoder.requireSupported(hasImages, capability)
         val plan = input?.let {

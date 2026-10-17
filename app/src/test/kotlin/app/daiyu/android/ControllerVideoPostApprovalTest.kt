@@ -345,9 +345,10 @@ class ControllerVideoPostApprovalTest {
 
     @Test fun revokeDoesNotWaitForMainDispatchOrBlockedAuthorityRead() {
         val beforeDispatch = ask(request())
+        val queued = checkNotNull(host.queue.poll(3, TimeUnit.SECONDS))
         adapter.revoke()
         assertNull(beforeDispatch.join())
-        host.pump() // An already queued action is harmless after revocation.
+        queued() // An already queued action is harmless after revocation.
         assertTrue(host.dialogs.isEmpty())
 
         val localHost = Host(authority())

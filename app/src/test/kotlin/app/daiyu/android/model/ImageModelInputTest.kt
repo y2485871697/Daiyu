@@ -106,6 +106,33 @@ class ImageModelInputTest {
         assertNotNull("must fail closed", failure)
         return failure!!
     }
+    @Test fun ignoredSyntaxCannotBypassRawMediaAndReplayedSyntaxRemainsStrict() {
+        for (protocol in protocols) {
+            val ignored = row().copy(role = "assistant", blocks = emptyList(), status = RunStatus.STOPPED,
+                protocolItems = listOf("{"))
+            FrozenMessageImagePlan.rejectRawImages(listOf(ignored), protocol)
+            assertNotNull(rejected { FrozenMessageImagePlan.rejectRawImages(
+                listOf(ignored.copy(protocolItems = listOf(rawCodeInterpreterImage))), protocol) })
+            val malformedMedia = listOf(
+                "{'type':'input_image','image_url':'https://example.invalid/x.png'}",
+                "{'type':'input_video','video_url':'https://example.invalid/x.mp4'}",
+                "{\"type\":\"input_\\u0069mage\",\"metadata\":" + "[".repeat(130) + "0" + "]".repeat(130) + "}",
+            )
+            malformedMedia.forEach { raw ->
+                assertTrue(rejected { FrozenMessageImagePlan.rejectRawImages(
+                    listOf(ignored.copy(protocolItems = listOf(raw))), protocol) } is IllegalArgumentException)
+            }
+            for (status in listOf(RunStatus.COMPLETED, RunStatus.INTERRUPTED)) {
+                assertTrue(rejected { FrozenMessageImagePlan.rejectRawImages(
+                    listOf(ignored.copy(status = status)), protocol) } is org.json.JSONException)
+            }
+        }
+        val user = row().copy(blocks = emptyList(), protocolItems = listOf("{"))
+        FrozenMessageImagePlan.rejectRawImages(listOf(user), ProviderProtocol.RESPONSES)
+        assertTrue(rejected { FrozenMessageImagePlan.rejectRawImages(
+            listOf(user), ProviderProtocol.MESSAGES) } is org.json.JSONException)
+    }
+
     private fun content(protocol: ProviderProtocol, body: JSONObject, index: Int = 0): JSONArray =
         body.getJSONArray(if (protocol == ProviderProtocol.RESPONSES) "input" else "messages")
             .getJSONObject(index).getJSONArray("content")

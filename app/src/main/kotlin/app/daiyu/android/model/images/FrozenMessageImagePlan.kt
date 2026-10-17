@@ -5,12 +5,14 @@ import app.daiyu.android.domain.MessageBlock
 import app.daiyu.android.domain.MessageHistory
 import app.daiyu.android.domain.MessageImageOwner
 import app.daiyu.android.domain.ModelImagePlan
+import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.media.ImageAttachmentException
 import app.daiyu.android.media.ImageAttachmentFailure
 import app.daiyu.android.media.MessageImageResolver
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.ProviderSnapshot
 import app.daiyu.android.storage.ModelSettings
+import org.json.JSONException
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -53,7 +55,7 @@ class FrozenMessageImagePlan private constructor(
             }
             checkCancelled()
             val expanded = snapshot(history)
-            rejectRawImages(expanded)
+            rejectRawImages(expanded, provider.protocol)
             val hasImages = expanded.any { row -> row.blocks.any { it is MessageBlock.Image } }
             ImageInputEncoder.requireSupported(hasImages, provider.imageInputSupported)
             // Bound the ENTIRE expanded history before any resolver can allocate original bytes.
@@ -99,11 +101,38 @@ class FrozenMessageImagePlan private constructor(
         }
 
         /** Saved provider bytes are never an authority for local images, even on ignored rows. */
-        internal fun rejectRawImages(history: List<Message>) {
-            history.forEach { row -> row.protocolItems.forEach {
-                rejectRawImageNode(app.daiyu.android.model.MessagesRequest.jsonObject(it,
-                    app.daiyu.android.model.MessagesRequest.MAX_MESSAGE_CONTAINER_DEPTH))
-            } }
+        internal fun rejectRawImages(history: List<Message>, protocol: ProviderProtocol? = null) {
+            history.forEach { row ->
+                val mustValidateSyntax = when (protocol) {
+                    ProviderProtocol.RESPONSES -> row.role != "user" &&
+                        (row.status == RunStatus.COMPLETED || row.role == "assistant" && row.status == RunStatus.INTERRUPTED)
+                    ProviderProtocol.MESSAGES -> row.role != "assistant" ||
+                        row.status == RunStatus.COMPLETED || row.status == RunStatus.INTERRUPTED
+                    else -> true
+                }
+                row.protocolItems.forEach { raw ->
+                    val item = try {
+                        app.daiyu.android.model.MessagesRequest.jsonObject(raw,
+                            app.daiyu.android.model.MessagesRequest.MAX_MESSAGE_CONTAINER_DEPTH)
+                    } catch (failure: JSONException) {
+                        if (mustValidateSyntax) throw failure
+                        rejectMalformedRawMedia(raw)
+                        null
+                    }
+                    // Even ignored rows cannot authorize raw media; only unused syntax is skipped.
+                    if (item != null) rejectRawImageNode(item)
+                }
+            }
+        }
+
+        // Invalid, unused items are never replayed. Conservatively reject media tokens even
+        // when malformed syntax or excessive depth prevents structural inspection.
+        private val rawUnicodeEscape = Regex("""\\u([0-9a-fA-F]{4})""")
+        private val malformedMediaToken = Regex(
+            "(?<![A-Za-z0-9_])(?:image|input_image|image_url|output_image|video|input_video|video_url)(?![A-Za-z0-9_])")
+        private fun rejectMalformedRawMedia(raw: String) {
+            val decoded = rawUnicodeEscape.replace(raw) { it.groupValues[1].toInt(16).toChar().toString() }
+            require(!malformedMediaToken.containsMatchIn(decoded)) { "Raw protocol image/video input is not authorized" }
         }
 
         /** Inspect protocol positions, never arbitrary tool arguments, schemas or metadata. */
@@ -163,8 +192,11 @@ class FrozenMessageImagePlan private constructor(
         private fun rejectImageBlock(block: JSONObject) {
             // Raw protocol media is never an alternative authority to a verified local plan.
             // This also makes Messages and default Responses fail closed for video input.
-            require(block.optString("type") !in setOf("image", "input_image", "image_url", "output_image",
-                "video", "input_video", "video_url") && !block.has("image_url") && !block.has("video_url")) {
+            val type = block.optString("type")
+            require(type !in setOf("image", "input_image", "image_url", "output_image") && !block.has("image_url")) {
+                "Raw protocol image input is not authorized"
+            }
+            require(type !in setOf("video", "input_video", "video_url") && !block.has("video_url")) {
                 "Raw protocol image/video input is not authorized"
             }
         }

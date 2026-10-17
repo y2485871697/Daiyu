@@ -10,7 +10,7 @@ internal object ResponsesRequest {
     fun history(history: List<Message>, images: FrozenMessageImagePlan? = null,
                 videos: app.daiyu.android.model.videos.FrozenMessageVideoPlan? = null): JSONArray {
         val expanded = MessageHistory.expand(history)
-        FrozenMessageImagePlan.rejectRawImages(expanded)
+        FrozenMessageImagePlan.rejectRawImages(expanded, ProviderProtocol.RESPONSES)
         val input = JSONArray()
         expanded.forEachIndexed { messageIndex, message ->
             if (message.role == "user") {

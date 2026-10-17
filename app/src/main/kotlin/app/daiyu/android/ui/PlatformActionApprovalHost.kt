@@ -8,6 +8,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ChatController
 import app.daiyu.android.ControllerPlatformActionPreparation
@@ -148,21 +150,32 @@ import org.json.JSONObject
                 }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             } },
-            confirmButton = { Button(enabled = !sending && !frozen.submitted &&
-                (!frozen.requiresLocation || (locationState is TaskSurfaceDecision.Ready && location?.ready(TaskSurface.FOREGROUND) != null)), modifier = Modifier.testTag("platform-action-confirm"), onClick = {
-                sending = true
-                if (!current(owner, text)) {
-                    controller.rejectPlatformAction(frozen); preview = null; error = "草稿或页面已变化，未发送"
-                } else if (!controller.confirmPlatformAction(frozen) { saved ->
-                    if (saved != null && current(owner, text) && saved.id == frozen.conversationId) {
-                        preview = null // Ownership transfers to RunResources; disposal must not stop acceptance.
-                        accepted(frozen, saved)
-                    } else {
-                        controller.rejectPlatformAction(frozen); preview = null
-                        error = "未受理或原编辑器已变化；未清除新草稿，未自动重发"
-                    }
-                }) error = "批准已失效；未重复发送"
-            }) { Text("批准精确动作并发送") } },
+            confirmButton = {
+                val confirmEnabled = !sending && !frozen.submitted &&
+                    (!frozen.requiresLocation || (locationState is TaskSurfaceDecision.Ready &&
+                        location?.ready(TaskSurface.FOREGROUND) != null))
+                val approve: () -> Unit = {
+                    sending = true
+                    if (!current(owner, text)) {
+                        controller.rejectPlatformAction(frozen); preview = null; error = "草稿或页面已变化，未发送"
+                    } else if (!controller.confirmPlatformAction(frozen) { saved ->
+                        if (saved != null && current(owner, text) && saved.id == frozen.conversationId) {
+                            preview = null // Ownership transfers to RunResources; disposal must not stop acceptance.
+                            accepted(frozen, saved)
+                        } else {
+                            controller.rejectPlatformAction(frozen); preview = null
+                            error = "未受理或原编辑器已变化；未清除新草稿，未自动重发"
+                        }
+                    }) error = "批准已失效；未重复发送"
+                }
+                Button(enabled = confirmEnabled,
+                    modifier = Modifier.testTag("platform-action-confirm").semantics {
+                        // Keep the UI callback independent of ClickableNode attachment.
+                        onClick {
+                            if (confirmEnabled) { approve(); true } else false
+                        }
+                    }, onClick = approve) { Text("批准精确动作并发送") }
+            },
             dismissButton = { TextButton(onClick = { controller.rejectPlatformAction(frozen); preview = null }) { Text("拒绝 / 停止原准备") } })
     }
 }

@@ -1427,6 +1427,7 @@ class MainActivity : ComponentActivity() {
                         top.yukonga.miuix.kmp.basic.TextButton(text = "保留会话网关",
                             modifier = Modifier.testTag("open-session-gateway"), onClick = { guard { openSessionGateway() } })
                         Box(Modifier.weight(1f)) { DaiyuSettingsScreen(
+                        diagnostics = controller.diagnostics,
                         engineeringUi = engineeringUi,
                         onBack = { returnToChat() }, onRoute = { route -> openSettingsFromPage(route) },
                         onOpenSubAgents = { retainedPage = "subagents" },

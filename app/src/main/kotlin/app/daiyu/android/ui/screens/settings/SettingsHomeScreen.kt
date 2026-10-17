@@ -81,7 +81,11 @@ private fun SettingsSearch(query: String, onQueryChange: (String) -> Unit) {
 
 @Composable
 private fun OriginalSettingsRow(entry: SettingsEntry, defaultReasoning: ReasoningEffort, defaultReasoningError: String?,
-    onDefaultReasoningToggle: ((Boolean) -> Unit)?, onClick: () -> Unit) {
+    onDefaultReasoningToggle: ((Boolean) -> Unit)?, diagnostics: SettingsDiagnosticsUi, onClick: () -> Unit) {
+    if (entry.id in setOf("logging", "export_logs", "clear_logs")) {
+        SettingsDiagnosticRow(entry, diagnostics)
+        return
+    }
     if (entry.id == "default_reasoning" && onDefaultReasoningToggle != null) {
         SettingsSwitchRow(entry.title, defaultReasoning !in setOf(ReasoningEffort.DEFAULT, ReasoningEffort.OFF),
             enabled = defaultReasoningError == null, tag = "settings-row:${entry.title}",
@@ -114,12 +118,14 @@ internal fun DaiyuSettingsScreen(
     defaultReasoningError: String? = null,
     onDefaultReasoningChange: ((ReasoningEffort) -> Unit)? = null,
     engineeringUi: Boolean = false,
+    diagnostics: app.daiyu.android.diagnostics.DiagnosticLogStore? = null,
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val visit = remember { SettingsHomeVisit() }
     DisposableEffect(visit) { onDispose { visit.active = false } }
     var localPage by remember { mutableStateOf<SettingsLocalPage?>(null) }
+    val diagnosticsUi = rememberSettingsDiagnostics(diagnostics) { visit.active && localPage == null }
     var query by rememberSaveable { mutableStateOf("") }
     var section by rememberSaveable { mutableStateOf<String?>(null) }
     var relayExpanded by rememberSaveable { mutableStateOf(false) }
@@ -197,7 +203,7 @@ internal fun DaiyuSettingsScreen(
                 SettingsCard {
                     selectedGroup.entries.filter { relayExpanded || it.id !in setOf("relay_st", "relay_moyu") }
                         .forEach { entry ->
-                            OriginalSettingsRow(entry, defaultReasoning, defaultReasoningError, defaultReasoningToggle) { open(entry) }
+                            OriginalSettingsRow(entry, defaultReasoning, defaultReasoningError, defaultReasoningToggle, diagnosticsUi) { open(entry) }
                         }
                 }
             }
@@ -221,7 +227,7 @@ internal fun DaiyuSettingsScreen(
                     group.entries.forEach { entry ->
                         item(key = "search_entry_${entry.id}") {
                             SettingsCard(Modifier.padding(bottom = 6.dp)) {
-                                OriginalSettingsRow(entry, defaultReasoning, defaultReasoningError, defaultReasoningToggle) { open(entry) }
+                                OriginalSettingsRow(entry, defaultReasoning, defaultReasoningError, defaultReasoningToggle, diagnosticsUi) { open(entry) }
                             }
                         }
                     }

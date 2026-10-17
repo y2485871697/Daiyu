@@ -166,7 +166,11 @@ val verifyHostPty=tasks.register<Exec>("verifyHostPty") {
     commandLine("python3",verifier.asFile.absolutePath,hostPty.get().asFile.absolutePath,
         report.get().asFile.absolutePath)
 }
+// Keep the build on JDK 27; Robolectric cannot instrument its runtime classes.
+val hostTestJavaLauncher = extensions.getByType<org.gradle.jvm.toolchain.JavaToolchainService>()
+    .launcherFor { languageVersion.set(org.gradle.jvm.toolchain.JavaLanguageVersion.of(21)) }
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+    javaLauncher.set(hostTestJavaLauncher)
     if(System.getProperty("os.name").startsWith("Linux",ignoreCase=true)) {
         dependsOn(verifyHostPty)
         systemProperty("daiyu.pty.helper",hostPty.get().asFile.absolutePath)

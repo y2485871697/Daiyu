@@ -100,6 +100,8 @@ class SyntheticPackageTests(unittest.TestCase):
         self.assertIn('setRoot("src/performanceTest")', gradle)
         release = gradle.split('        release {', 1)[1].split('\n        }', 1)[0]
         self.assertIn('isDebuggable = false', release)
+        self.assertIn('isProfileable = daiyuPhysicalPerformance', release)
+        self.assertNotIn('src/performance/AndroidManifest.xml', gradle)
         self.assertIn('if (daiyuSyntheticApplication) applicationIdSuffix = ".synthetic"', release)
         self.assertIn(':app:assembleRelease :app:assembleReleaseAndroidTest', synthetic)
         self.assertIn('name: 代鱼Release性能测试包', synthetic)

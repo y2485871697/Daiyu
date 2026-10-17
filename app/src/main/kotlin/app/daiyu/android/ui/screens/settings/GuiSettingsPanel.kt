@@ -70,8 +70,14 @@ internal fun GuiSettingsPanel(
                 SettingsRow(title = "前往系统无障碍设置", summary = "可能读取个人信息、操作其他应用。仅你可在系统页面明确开启或关闭。",
                     tag = "gui-open-system", onClick = { if (active()) notice = describe(GuiSystemSettings.openFromUser(context)) })
                 SettingsRow(title = "刷新服务状态", tag = "gui-refresh", onClick = { if (active()) refresh() })
-                SettingsRow(title = "请求系统重新绑定", summary = "仅系统已启用时由你显式请求；系统可以拒绝，不保证连接或持续存活。无 root 保活、不点击权限、不静默启用。",
-                    tag = "gui-rebind", onClick = { if (active()) { notice = describe(GuiSystemSettings.requestRebindFromUser(context)); refresh() } })
+                SettingsRow(title = "前往系统设置手动重新启用", summary = "仅系统已启用时打开设置。请自行关闭后重新开启本应用服务，返回后刷新状态；应用不会直接请求重绑、静默启用或恢复旧任务。",
+                    tag = "gui-rebind", onClick = { if (active()) {
+                        notice = when (val result = GuiSystemSettings.requestRebindFromUser(context)) {
+                            is GuiResult.Value -> "已打开系统无障碍设置；请手工关闭后重新开启本应用服务。返回后刷新状态，旧任务不会自动恢复。"
+                            else -> describe(result)
+                        }
+                        refresh()
+                    } })
                 SettingsRow(title = "服务重绑与能力边界", summary = "不提供强制保活、提权或后台自动观察。锁屏/其他会话占用时拒绝；截图仅 API 30+ 且另行授权。",
                     tag = "gui-boundaries")
             }

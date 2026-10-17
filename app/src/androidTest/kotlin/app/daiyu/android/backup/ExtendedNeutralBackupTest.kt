@@ -40,7 +40,7 @@ class ExtendedNeutralBackupTest : InstrumentationTestCase() {
     }
     private data class Generated(val binding: GenerationAttemptBinding, val attempt: GenerationAttempt,
         val plan: GenerationRequestPlan, val media: MessageGenerationAssets, val reference: GenerationOutputReference)
-    private fun generate(f: Fixture, conversation: ConversationId = f.db.create().id, closeTool: Boolean = false): Generated {
+    private fun generate(f: Fixture, conversation: ConversationId = f.db.create("default").id, closeTool: Boolean = false): Generated {
         val run = RunId("run-${UUID.randomUUID()}"); val assistantId = MessageId("a-${UUID.randomUUID()}")
         val binding = GenerationAttemptBinding(conversation.value, assistantId.value, run.value, "image-call", "generate_images")
         val call = MessageBlock.Tool(ToolInvocation(ToolCallId(binding.toolCallId), binding.toolName, "{}"))
@@ -180,7 +180,7 @@ class ExtendedNeutralBackupTest : InstrumentationTestCase() {
         assertEquals(1, forgedLive.count("generation_outputs")) // Rejection does not silently delete/repair the bad destination.
     }
     fun testOrdinaryAttachmentsAndArchivesAreReverifiedOnDuplicateWithoutOverwrite() {
-        val source = fresh(); val conversation = source.db.create().id
+        val source = fresh(); val conversation = source.db.create("default").id
         repeat(5) { index ->
             val run = RunId("archive-run-$index")
             val assistant = Message(MessageId("archive-a-$index"), conversation, run, "assistant", listOf(MessageBlock.Text("t", "answer $index ".repeat(200))), RunStatus.RUNNING)
@@ -288,7 +288,7 @@ class ExtendedNeutralBackupTest : InstrumentationTestCase() {
         }
     }
     fun testReadonlyGenerationOutsideTheCopiedPrefixDoesNotBlockTextBranch() {
-        val source = fresh(); val owner = source.db.create().id
+        val source = fresh(); val owner = source.db.create("default").id
         val run = RunId("early-${UUID.randomUUID()}")
         val user = Message(MessageId("early-u-${UUID.randomUUID()}"), owner, run, "user",
             listOf(MessageBlock.Text("t", "earlier text")), RunStatus.COMPLETED, createdAt = 1_700_000_000_000L)

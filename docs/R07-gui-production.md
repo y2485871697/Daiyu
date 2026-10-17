@@ -16,7 +16,7 @@ No shell, build, test runner, device/UI interaction, installation, service enabl
 * `gui/GuiAccessibilityService.kt`: real system-bound `AccessibilityService`, on-demand bounded tree, retained node handles, platform node/global actions, optional platform screenshots.
 * `gui/GuiRunSession.kt`: user-issued in-memory run lease; immutable explicit authorization freeze; real Runner owner / exact TaskAuthorization binding; cancellable worker-to-main posting.
 * `gui/GuiScreenToolFactory.kt`: two contextual RegisteredTools for the **existing** catalog/dispatcher/ledger, not another executor.
-* `gui/GuiSystemSettings.kt`: user-click-only system settings and system-governed rebind request.
+* `gui/GuiSystemSettings.kt`: user-click-only public accessibility settings and a manual service disable/re-enable entry.
 * `ui/screens/settings/GuiSettingsPanel.kt`: independent status/settings and optional per-run approval page.
 * Manifest service declaration, `res/xml/gui_accessibility_service.xml`, and dedicated `res/values/gui_strings.xml`.
 
@@ -82,7 +82,7 @@ GuiSettingsPanel(onBack = { /* parent's existing return-to-settings transition *
 
 Map `accessibility` to that page. The existing `accessibility_keep` entry is labelled a forced-keep toggle: the parent should change it to a page/status entry (or an explicit unsupported explanation) and route it to the same system-governed rebind explanation, **not** persist a successful-looking toggle. For `enhancements` (currently “Root 与系统增强”), route only its accessibility subsection here or use a separate parent explanation; this leaf does not implement root/system enhancement authority. Do not redirect overlay, terminal, Shizuku or R08 settings to GUI grants. Existing global catalog/routes, MainActivity and Controller were intentionally not edited here.
 
-`GuiSystemSettings.openFromUser` opens system service details with fallback to the generic accessibility settings page, only on explicit click. `requestRebindFromUser` first checks Android's enabled-service list, then calls `AccessibilityService.requestRebind`. A successful request is not a connected-service receipt. There is no boot receiver, background retry, root keepalive or silent re-enable.
+`GuiSystemSettings.openFromUser` opens the public accessibility settings page only on explicit click. `requestRebindFromUser` first checks Android's enabled-service list, then opens that same page so the user can manually disable and re-enable this app's service. Android exposes no public accessibility-service requestRebind API; the app does not claim to issue one. A successful page launch is not a connected-service receipt. There is no boot receiver, background retry, root keepalive or silent re-enable.
 
 ## Added tests and remaining verification
 

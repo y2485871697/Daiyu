@@ -5,9 +5,12 @@ import app.daiyu.android.ui.FeatureRoute
 import app.daiyu.android.ui.icons.DaiyuIcons
 
 internal enum class SettingControl { PAGE, TOGGLE, CHOICE, ACTION }
+/** Pages hosted by the retained settings home, not an Activity-level FeatureRoute. */
+internal enum class SettingsLocalPage { TASK_SURFACE }
 internal data class SettingsEntry(
     val id: String, val title: String, val icon: ImageVector,
     val control: SettingControl = SettingControl.PAGE, val route: FeatureRoute? = null,
+    val localPage: SettingsLocalPage? = null,
 )
 internal data class SettingsGroup(val id: String, val title: String, val summary: String, val entries: List<SettingsEntry>)
 
@@ -45,7 +48,8 @@ internal object SettingsCatalog {
             SettingsEntry("terminal", "终端", DaiyuIcons.Terminal, SettingControl.PAGE, FeatureRoute.TERMINAL),
             SettingsEntry("browser", "浏览器", DaiyuIcons.Browser, SettingControl.PAGE, FeatureRoute.BROWSER_SETTINGS),
             SettingsEntry("linux", "Linux 工具环境", DaiyuIcons.Terminal, SettingControl.PAGE, FeatureRoute.LINUX_SETTINGS),
-            SettingsEntry("task_surface", "Agent任务偏好", DaiyuIcons.VirtualScreen, SettingControl.PAGE),
+            SettingsEntry("task_surface", "Agent任务偏好", DaiyuIcons.VirtualScreen, SettingControl.PAGE,
+                localPage = SettingsLocalPage.TASK_SURFACE),
         )),
         SettingsGroup("haptics", "震动", "震动反馈与试听", listOf(
             SettingsEntry("haptics", "震动列表", DaiyuIcons.Vibration, SettingControl.PAGE),

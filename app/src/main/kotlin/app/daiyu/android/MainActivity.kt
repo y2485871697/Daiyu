@@ -218,7 +218,7 @@ class MainActivity : ComponentActivity() {
         refreshUniversalAdmission()
         if (original != null && universalVoiceDelegate.isInitialized()) universalVoice.permissionResult(original, granted)
     }
-    private val universalVoiceDelegate = lazy {
+    private val universalVoiceDelegate: Lazy<ActivityUniversalVoiceHost> = lazy {
         universalUnobserve = voiceRuntime.observeInvalidation { profile ->
             if (profile == null || profile == VoiceProfile.CONVERSATION) {
                 universalAdmissionSnapshot = VoiceAdmission.REVOKED
@@ -301,7 +301,7 @@ class MainActivity : ComponentActivity() {
                 // Keep the original callback association: Unknown is not proof that nothing was saved.
             })
     }
-    private val universalVoice get() = universalVoiceDelegate.value
+    private val universalVoice: ActivityUniversalVoiceHost get() = universalVoiceDelegate.value
     private fun microphoneGranted() = checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
     private fun universalQuestionWaiting(message: Message): Boolean = message.blocks.filterIsInstance<MessageBlock.Tool>()
         .mapNotNull { controller.questionProjection(message, it.invocation) }
@@ -438,7 +438,7 @@ class MainActivity : ComponentActivity() {
         if (activityUsable()) toast(if (granted) "麦克风权限已授予，请再次点击语音开始听写"
             else "麦克风权限被拒绝；草稿未更改")
     }
-    private val dictationHost by lazy {
+    private val dictationHost: ComposerDictationHost by lazy {
         ComposerDictationHost(applicationContext, audioGate,
             isEditorCurrent = { target ->
                 activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&

@@ -180,7 +180,7 @@ internal class ActivityVoiceAccountPreviewHost(
             admission: (AccountPreviewRequest) -> Boolean): ActivityVoiceAccountPreviewHost {
             val app = context.applicationContext
             return ActivityVoiceAccountPreviewHost(scope, configuration, admission) { request ->
-                AccountPreviewSpeechPlayer(app, scope, request) { admission(request) }
+                AccountPreviewSpeechPlayer(app, scope, request, admission = { admission(request) })
             }
         }
         private fun sameConfiguration(a: SpeechProviderConfig, b: SpeechProviderConfig) =

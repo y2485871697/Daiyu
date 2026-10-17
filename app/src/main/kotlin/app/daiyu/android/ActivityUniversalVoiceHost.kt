@@ -67,7 +67,7 @@ internal class ActivityUniversalVoiceHost(
         checkAdmission(permit) == VoiceAdmission.READY
     } catch (_: Exception) { false }
 
-    private val ports = object : VoiceControlPorts {
+    private val ports: VoiceControlPorts = object : VoiceControlPorts {
         override fun dispatch(action: () -> Unit) = post(action)
         override fun nowMillis() = SystemClock.elapsedRealtime()
         override fun schedule(delayMillis: Long, action: () -> Unit): VoiceControlCancellation {
@@ -175,7 +175,7 @@ internal class ActivityUniversalVoiceHost(
             revokePendingTicket(permit)
         }
     }
-    private val controller = VoiceModeController(ports)
+    private val controller: VoiceModeController = VoiceModeController(ports)
     val state get() = controller.state
 
     fun start(profile: VoiceControlProfile, limits: VoiceControlLimits = VoiceControlLimits()): String? {

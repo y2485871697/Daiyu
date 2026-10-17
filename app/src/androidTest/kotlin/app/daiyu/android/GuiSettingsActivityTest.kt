@@ -49,7 +49,7 @@ class GuiSettingsActivityTest : WiredActivityTestCase() {
             enterFromPermissions(id)
             reveal("gui-status", page).assertExists()
             reveal("gui-open-system", page).assertHasClickAction()
-            reveal("gui-rebind", page).assertTextContains("系统可以拒绝", substring = true)
+            reveal("gui-rebind", page).assertTextContains("手动重新启用", substring = true)
             reveal("gui-disclosure", page).assertTextContains("整个有界观察和完整输入将发送给当前模型", substring = true)
             reveal("gui-no-run", page).assertExists()
             reveal("gui-refresh", page).performClick()
@@ -99,6 +99,15 @@ class GuiSettingsActivityTest : WiredActivityTestCase() {
         } finally { session.release.countDown() }
         awaitControl("original task finishes") { fixture.controller.active == null }
     }
+    fun testPublicSystemSettingsOpensOnceWithoutGrantingARun() {
+        val attempted = mutableListOf<String?>()
+        val capturingContext = object : ContextWrapper(activity) {
+            override fun startActivity(intent: Intent) { attempted += intent.action }
+        }
+        mainThread { assertTrue(GuiSystemSettings.openFromUser(capturingContext) is GuiResult.Value) }
+        assertEquals(listOf(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS), attempted)
+        assertNoGuiPreparation()
+    }
     fun testSystemSettingsFailureIsExplicitAndDoesNotCreateAGuiRun() {
         val attempted = mutableListOf<String?>()
         val refusingContext = object : ContextWrapper(activity) {
@@ -112,8 +121,7 @@ class GuiSettingsActivityTest : WiredActivityTestCase() {
             assertTrue(result is GuiResult.Rejected)
             assertEquals("SYSTEM_SETTINGS_UNAVAILABLE", (result as GuiResult.Rejected).code)
         }
-        assertEquals(listOf(android.provider.Settings.ACTION_ACCESSIBILITY_DETAILS_SETTINGS,
-            android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS), attempted)
+        assertEquals(listOf(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS), attempted)
         assertNoGuiPreparation()
     }
 }

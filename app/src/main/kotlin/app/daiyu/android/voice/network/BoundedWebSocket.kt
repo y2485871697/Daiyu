@@ -115,7 +115,7 @@ internal class BoundedWebSocket(
         checkNetwork(LoggerFactory.getILoggerFactory() is NOPLoggerFactory)
     }
 
-    private val client = object : WebSocketClient(
+    private val client: WebSocketClient = object : WebSocketClient(
         uri, BoundedDraft(limit), headers, NetworkLimits.CONNECT_TIMEOUT_MS,
     ) {
         override fun onOpen(handshake: ServerHandshake) {

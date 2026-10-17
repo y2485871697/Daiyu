@@ -69,7 +69,7 @@ class AcceptedHistoryActivityTest : WiredActivityTestCase() {
             assertEquals(before.composer.modelLabel, after.composer.modelLabel)
             assertEquals(before.composer.assistantLabel, after.composer.assistantLabel)
             assertEquals("new draft without remapping history", after.composer.text)
-            assertEquals(after.composer.text, fixture.database.draft(conversation.id))
+            assertEquals(after.composer.text, fixture.database.conversations().single { it.id == conversation.id }.draft)
         }
         assertDraft("new draft without remapping history")
     }

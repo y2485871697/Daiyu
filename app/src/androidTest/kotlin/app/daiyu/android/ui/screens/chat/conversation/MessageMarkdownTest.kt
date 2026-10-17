@@ -27,6 +27,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import app.daiyu.android.ComposeActivityTestCase
+import app.daiyu.android.MarkdownBlock
+import app.daiyu.android.MarkdownParser
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicBoolean
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.domain.MessageImageOwner
 import app.daiyu.android.domain.MessageImageReference
@@ -47,6 +51,67 @@ class MessageMarkdownTest : ComposeActivityTestCase() {
     private val reference = MessageImageReference(owner, "00000000-0000-0000-0000-000000000001",
         "image/png", 10, "b".repeat(64), 2, 2)
     private val image = MessageImageUi(owner, reference)
+
+    fun testBlockedOldParseCannotReplaceCurrentRawOrFormattedBody() {
+        for (mixed in listOf(false, true)) {
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val parser: (String) -> List<MarkdownBlock> = { text ->
+                assertNotSame(android.os.Looper.getMainLooper().thread, Thread.currentThread())
+                if (text == "**old**") { entered.countDown(); release.await() }
+                MarkdownParser.parse(text)
+            }
+            var current by mutableStateOf("**old**")
+            try {
+                show {
+                    CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                        Column(Modifier.testTag("race")) {
+                            AssistantTurn(ChatTurnUi.Assistant("race-$mixed", status = RunStatus.RUNNING,
+                                finalText = if (mixed) "" else current,
+                                content = if (mixed) listOf(MessageContentUi.Text("body", current)) else emptyList()),
+                                ChatScreenActions())
+                        }
+                    }
+                }
+                ui.waitUntil(timeoutMillis = 5_000) { entered.count == 0L }
+                mainThread { current = "**current**" }
+                val raw = annotation(body("race", "**current**"))
+                assertTrue(raw.spanStyles.isEmpty())
+                assertTrue(raw.getLinkAnnotations(0, raw.length).isEmpty())
+                ui.onNodeWithText("**old**", useUnmergedTree = true).assertDoesNotExist()
+                release.countDown()
+                val formatted = annotation(body("race", "current"))
+                assertTrue(formatted.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+                ui.onNodeWithText("old", useUnmergedTree = true).assertDoesNotExist()
+            } finally { release.countDown() }
+        }
+    }
+
+    fun testCompletedTurnCannotConfirmReadUntilCurrentMarkdownIsReady() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val confirmed = CopyOnWriteArrayList<Set<String>>()
+        val turn = ChatTurnUi.Assistant("read-ready", finalText = "**answer**", status = RunStatus.COMPLETED)
+        val parser: (String) -> List<MarkdownBlock> = { text ->
+            entered.countDown(); release.await(); MarkdownParser.parse(text)
+        }
+        try {
+            show {
+                CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                    ChatMessageList(listOf(turn), false,
+                        ChatScreenActions(onVisibleCompleted = { confirmed += it }))
+                }
+            }
+            ui.waitUntil(timeoutMillis = 5_000) { entered.count == 0L }
+            ui.mainClock.advanceTimeBy(100)
+            ui.waitForIdle()
+            ui.onNodeWithText("**answer**", useUnmergedTree = true).assertIsDisplayed()
+            assertTrue(confirmed.none { turn.listKey in it })
+            release.countDown()
+            awaitNodes(hasText("answer"))
+            ui.waitUntil(timeoutMillis = 5_000) { confirmed.any { turn.listKey in it } }
+        } finally { release.countDown() }
+    }
 
     fun testDepthFallbackHasNoComposeLinkAnnotations() {
         for (closed in listOf(true, false)) {
@@ -81,9 +146,17 @@ class MessageMarkdownTest : ComposeActivityTestCase() {
         ui.waitForIdle()
     }
 
-    private fun body(parent: String, text: String = visible) = ui.onNode(
-        hasText(text) and hasAnyAncestor(hasTestTag(parent)), useUnmergedTree = true,
-    )
+    private fun awaitNodes(matcher: SemanticsMatcher, count: Int = 1) {
+        ui.waitUntil(timeoutMillis = 5_000) {
+            ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().size == count
+        }
+    }
+
+    private fun body(parent: String, text: String = visible): SemanticsNodeInteraction {
+        val matcher = hasText(text) and hasAnyAncestor(hasTestTag(parent))
+        awaitNodes(matcher)
+        return ui.onNode(matcher, useUnmergedTree = true)
+    }
 
     private fun annotation(node: SemanticsNodeInteraction): AnnotatedString =
         node.fetchSemanticsNode().config[SemanticsProperties.Text].single()
@@ -196,6 +269,7 @@ class MessageMarkdownTest : ComposeActivityTestCase() {
 
     fun testUserTextStaysOriginalInBothBranchesAndUnsafeAssistantLinksStayInert() {
         val unsafe = "[x](javascript:alert) [y](content://private/1) <b>raw HTML</b>"
+        val unsafeReady = AtomicBoolean(false)
         show {
             Column {
                 Column(Modifier.testTag("user-plain")) {
@@ -207,7 +281,8 @@ class MessageMarkdownTest : ComposeActivityTestCase() {
                     )), ChatScreenActions())
                 }
                 Column(Modifier.testTag("unsafe")) {
-                    AssistantTurn(ChatTurnUi.Assistant("unsafe", finalText = unsafe, status = RunStatus.RUNNING), ChatScreenActions())
+                    AssistantTurn(ChatTurnUi.Assistant("unsafe", finalText = unsafe, status = RunStatus.RUNNING),
+                        ChatScreenActions(), onContentReady = { unsafeReady.set(it) })
                 }
             }
         }
@@ -219,6 +294,7 @@ class MessageMarkdownTest : ComposeActivityTestCase() {
             assertTrue(text.getLinkAnnotations(0, text.length).isEmpty())
             clickCharacter(node, source.lastIndexOf("site"))
         }
+        ui.waitUntil(timeoutMillis = 5_000) { unsafeReady.get() }
         val unsafeNode = body("unsafe", unsafe)
         assertTrue(annotation(unsafeNode).getLinkAnnotations(0, unsafe.length).isEmpty())
         clickCharacter(unsafeNode, 1)
@@ -234,6 +310,7 @@ class MessageMarkdownTest : ComposeActivityTestCase() {
                     "~~~md\n${code}~~~\n\n<div>raw</div> [x](javascript:alert)")
             }
         }
+        awaitNodes(hasText("Heading"))
         val heading = ui.onNodeWithText("Heading", useUnmergedTree = true)
         val layouts = mutableListOf<TextLayoutResult>()
         heading.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
@@ -270,6 +347,7 @@ class MessageMarkdownTest : ComposeActivityTestCase() {
         val horizontal = SemanticsMatcher("horizontal table viewport") {
             it.config.contains(SemanticsProperties.HorizontalScrollAxisRange)
         }
+        awaitNodes(horizontal)
         val viewport = ui.onNode(horizontal, useUnmergedTree = true)
         val scroll = viewport.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
         assertTrue("wide grid must have a scrollable remainder", scroll.maxValue() > 0f)
@@ -294,6 +372,7 @@ class MessageMarkdownTest : ComposeActivityTestCase() {
         val horizontal = SemanticsMatcher("horizontal table viewport") {
             it.config.contains(SemanticsProperties.HorizontalScrollAxisRange)
         }
+        awaitNodes(horizontal, 2)
         ui.onAllNodes(horizontal, useUnmergedTree = true).assertCountEquals(2)
         ui.onNodeWithText("header-39", useUnmergedTree = true).assertExists()
         ui.onNodeWithText("value-39", useUnmergedTree = true).assertExists()
@@ -320,6 +399,9 @@ class MessageMarkdownTest : ComposeActivityTestCase() {
         show { ChatMessageList(listOf(first, second), false, ChatScreenActions(), imageLoader = loader) }
         ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodesWithContentDescription("消息图片 1").fetchSemanticsNodes().size == 1 }
         assertEquals(listOf(Triple(owner, reference, 1024)), requests.toList())
+        awaitNodes(hasText("first"))
+        awaitNodes(hasTestTag("message-content-text:0") and hasText("before"))
+        awaitNodes(hasTestTag("message-content-text:3") and hasText("after"))
         val positions = listOf(
             ui.onNodeWithText("first", useUnmergedTree = true),
             ui.onNodeWithTag("message-content-text:0", useUnmergedTree = true),
@@ -329,6 +411,7 @@ class MessageMarkdownTest : ComposeActivityTestCase() {
         ).map { it.fetchSemanticsNode().boundsInRoot.top }
         assertTrue(positions.zipWithNext().all { (a, b) -> a < b })
         mainThread { second = second.copy(content = blocks("**changed**")) }
+        awaitNodes(hasTestTag("message-content-text:0") and hasText("changed"))
         ui.onNodeWithTag("message-content-text:0", useUnmergedTree = true).assertTextEquals("changed")
         assertEquals("text updates must not restart the keyed image load", 1, requests.size)
         mainThread { second = second.copy(content = blocks("**changed**", image.copy(

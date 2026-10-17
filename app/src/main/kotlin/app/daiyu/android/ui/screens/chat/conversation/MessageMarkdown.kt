@@ -25,6 +25,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -52,15 +55,32 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 /** Shared selectable body; Markdown never loads images, executes HTML or opens a URI on render. */
 @Composable
 internal fun MessageMarkdown(text: String, modifier: Modifier = Modifier, markdown: Boolean = true) {
+    val blocks = if (markdown) rememberMarkdownProjection(listOf(text))?.blocks?.get(text) else null
+    ParsedMessageMarkdown(text, blocks, modifier)
+}
+
+internal val LocalMarkdownParser = staticCompositionLocalOf<(String) -> List<MarkdownBlock>> { MarkdownParser::parse }
+
+@Composable
+internal fun rememberMarkdownProjection(sources: List<String>): MarkdownProjection? {
+    val parser = LocalMarkdownParser.current
+    val completed by produceState<MarkdownProjection?>(null, sources, parser) {
+        value = projectMarkdown(sources, parser)
+    }
+    // produceState retains its old value until the replacement effect starts.
+    return completed?.takeIf { it.sources == sources && it.parser == parser }
+}
+
+@Composable
+internal fun ParsedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, modifier: Modifier = Modifier) {
     val uriHandler = LocalUriHandler.current
-    val blocks = remember(text, markdown) { if (markdown) MarkdownParser.parse(text) else emptyList() }
     val openLink: (String) -> Unit = remember(uriHandler) { { url ->
         // Recheck at the capability boundary; tolerate a missing external handler.
         if (MarkdownText.isSafeLink(url)) runCatching { uriHandler.openUri(url) }
         Unit
     } }
     SelectionContainer {
-        if (!markdown) BasicText(text, modifier = modifier, style = messageBodyStyle())
+        if (blocks == null) BasicText(text, modifier = modifier, style = messageBodyStyle())
         else if (blocks.singleOrNull() is MarkdownBlock.Paragraph) {
             // Preserve the existing tagged/selectable text node for ordinary message segments.
             MarkdownInlineText((blocks.single() as MarkdownBlock.Paragraph).content, openLink, modifier)

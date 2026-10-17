@@ -31,7 +31,7 @@ internal fun PlatformToolSettingsScreen(context: Context, settings: PlatformTool
     MiuixScaffoldPage(title = "平台只读工具与私密出站", onBack = onBack,
         modifier = Modifier.testTag("platform-tool-settings")) {
         item(key = "policy") {
-            SettingsNote("13项独立选择，默认全部关闭。系统授权、工具选择、发给模型、写入历史是四个不同决定，互不代开。私密工具必须同时同意模型与历史，才会读取并进入同一工具账本/历史/模型通道；不同意则安全拒绝。设置修改仅影响下次run，已运行任务使用冻结值；立即停止请使用聊天的停止按钮。")
+            SettingsNote("${PlatformReadTool.entries.size}项独立选择，默认全部关闭。系统授权、工具选择、发给模型、写入历史是四个不同决定，互不代开。私密工具必须同时同意模型与历史，才会读取并进入同一工具账本/历史/模型通道；不同意则安全拒绝。设置修改仅影响下次run，已运行任务使用冻结值；立即停止请使用聊天的停止按钮。")
             error?.let { SettingsNote(it) }
             SettingsRow("打开本应用系统权限设置", onClick = { act { onPermission(PlatformReadTool.PERMISSIONS, "") } },
                 summary = "可撤回授权；不会自动开启任何工具或私密出站")
@@ -55,7 +55,9 @@ internal fun PlatformToolSettingsScreen(context: Context, settings: PlatformTool
                         it == android.Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED
                     }.forEach { permission ->
                         SettingsRow("请求 $permission", onClick = { act { onPermission(tool, permission) } },
-                            summary = "仅此明确系统授权；拒绝后不会代开或降级绕过。Android 14+图片/视频可仅选中")
+                            summary = if (tool == PlatformReadTool.LAST_KNOWN_LOCATION)
+                                "仅申请前台位置：精确请求同时附带大致位置，可在系统中仅同意大致；不申请后台位置，不开启工具或读取缓存"
+                            else "仅此明确系统授权；拒绝后不会代开或降级绕过。Android 14+图片/视频可仅选中")
                     }
                 }
             }

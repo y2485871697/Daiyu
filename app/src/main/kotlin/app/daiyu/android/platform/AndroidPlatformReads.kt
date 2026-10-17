@@ -20,8 +20,10 @@ import java.util.TimeZone
 /** Catalog adapter around preserved device reads/queries plus app search and granted-document reads.
  * App SDK identity only: no shell, root, Shizuku, permission acquisition, network probes or logging.
  */
-internal class AndroidPlatformReads(context: Context, private val resultPolicy: DeviceResultPolicy = DeviceResultPolicy()) : PlatformReadBackend {
+internal class AndroidPlatformReads(context: Context, private val resultPolicy: DeviceResultPolicy = DeviceResultPolicy(),
+    lastKnownLocationSource: LastKnownLocationSource? = null) : PlatformReadBackend {
     private val app = context.applicationContext ?: context
+    private val locationCache = lastKnownLocationSource ?: AndroidLastKnownLocationSource(app)
     private class Rejected(val code: String, val permission: String? = null) : RuntimeException()
 
     override fun read(tool: PlatformReadTool, arguments: ToolArguments, cancelled: () -> Boolean): String = try {
@@ -51,6 +53,7 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
             PlatformReadTool.CALENDAR -> DeviceQueries.calendar(app, args, cancelled)
             PlatformReadTool.CONTACTS -> DeviceQueries.contacts(app, args, cancelled)
             PlatformReadTool.NOTIFICATIONS -> DeviceQueries.notifications(app, args, cancelled)
+            PlatformReadTool.LAST_KNOWN_LOCATION -> LastKnownLocationReads.read(app, locationCache, cancelled)
         }
         checkReadCancellation(cancelled)
         val delivered = resultPolicy.forSharedDelivery(tool.toolName, result.put("observed_at", System.currentTimeMillis()))
@@ -71,6 +74,7 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
 
     private fun permissionDenial(tool: PlatformReadTool, args: JSONObject): JSONObject? = when (tool) {
         PlatformReadTool.NETWORK -> requirePermission(app, Manifest.permission.ACCESS_NETWORK_STATE)
+        PlatformReadTool.LAST_KNOWN_LOCATION -> LastKnownLocationReads.permissionDenial(app)
         PlatformReadTool.CALENDAR -> requirePermission(app, Manifest.permission.READ_CALENDAR)
         PlatformReadTool.CONTACTS -> requirePermission(app, Manifest.permission.READ_CONTACTS)
         PlatformReadTool.MEDIA -> if (DeviceQueries.selectedMedia(app, args.getString("kind"))) null
@@ -92,6 +96,7 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
     private fun permissions(): JSONObject {
         val states = JSONArray()
         val permissions = mutableListOf(Manifest.permission.ACCESS_NETWORK_STATE, Manifest.permission.ACCESS_WIFI_STATE,
+            Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.READ_CALENDAR, Manifest.permission.READ_CONTACTS, Manifest.permission.READ_EXTERNAL_STORAGE)
         if (Build.VERSION.SDK_INT >= 31) permissions += Manifest.permission.BLUETOOTH_CONNECT else permissions += Manifest.permission.BLUETOOTH
         if (Build.VERSION.SDK_INT >= 33) permissions += listOf(Manifest.permission.READ_MEDIA_IMAGES,

@@ -77,6 +77,29 @@ class GuiLeaseGateTest {
         val nextAction = action.copy(observationId = "next")
         assertEquals("EXACT_ACTION_NOT_AUTHORIZED", code(gate.consumeAction(lease, nextAction, 3)))
     }
+    @Test fun replacementRetirementInvalidatesOldIdAndActionsWithoutChangingReadBudgets() {
+        val gate = gate(); val lease = lease(gate)
+        gate.approveReads(lease, GuiReadApproval(2, 1))
+        gate.publish(lease, observation())
+        val action = GuiAction("obs", GuiOperation.BACK)
+        gate.approveAction(lease, action, 3)
+        gate.retireObservation(lease)
+        assertNull(lease.observation)
+        assertTrue(gate.approvedActions(lease).isEmpty())
+        assertEquals("OBSERVATION_REQUIRED", gate.validateObservation(lease, "obs", 3)?.code)
+        assertEquals("OBSERVATION_REQUIRED", code(gate.consumeAction(lease, action, 3)))
+        assertEquals(2, lease.reads)
+        assertEquals(1, lease.screenshots)
+    }
+    @Test fun retiredOldLeaseCannotClearTheNewOwnersSnapshot() {
+        val gate = gate(); val old = lease(gate)
+        gate.close(old)
+        val current = lease(gate)
+        val observation = observation()
+        gate.publish(current, observation)
+        gate.retireObservation(old)
+        assertSame(observation, current.observation)
+    }
     @Test fun actionSnapshotIsDefensivelyCopied() {
         val gate = gate(); val lease = lease(gate)
         gate.publish(lease, observation())

@@ -48,8 +48,8 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         val settings = fixture.settings.loadForEditing().settings
         openHub()
         val implemented = setOf("assistants", "subagents", "appearance", "haptics", "relay", "platform_tools", "permission_check")
-        val unwired = entries.filter { it.route == null && it.id !in implemented }
-        assertEquals(16, unwired.size)
+        val unwired = entries.filter { it.route == null && it.localPage == null && it.id !in implemented }
+        assertEquals(15, unwired.size)
         fun assertUnchanged() {
             assertEquals(before, fixture.database.exportBackup()); assertEquals(settings, fixture.settings.loadForEditing().settings)
             assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())
@@ -86,6 +86,29 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         assertEquals(chatSettings, fixture.settings.loadForEditing().settings)
         backToChat(activity); node("page:设置").assertExists()
         backToChat(activity); assertDraft("独立生成设置保留草稿")
+    }
+    fun testTaskSurfaceSearchAndCategoryOpenRealLocalPageWithoutSendingOrSaving() {
+        setDraft("任务位置设置保留草稿")
+        val before = fixture.database.exportBackup()
+        val settings = fixture.settings.loadForEditing().settings
+        val catalogEntry = entries.single { it.id == "task_surface" }
+        assertEquals(app.daiyu.android.ui.screens.settings.SettingsLocalPage.TASK_SURFACE, catalogEntry.localPage)
+        openHub(); entry("task_surface").performClick()
+        node("page:Agent任务偏好").assertExists()
+        node("settings-radio:前台执行").assertExists()
+        node("settings-radio:后台执行").assertExists()
+        node("settings-radio:每次运行询问").assertExists()
+        backToChat(activity); node("page:设置").assertExists()
+        reveal("settings-search", "设置").performTextReplacement("")
+        reveal("settings-row:工具", "设置").performClick()
+        reveal("settings-row:Agent任务偏好", "工具").performClick()
+        node("page:Agent任务偏好").assertExists()
+        backToChat(activity); node("page:工具").assertExists()
+        backToChat(activity); node("page:设置").assertExists()
+        backToChat(activity); assertDraft("任务位置设置保留草稿")
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(settings, fixture.settings.loadForEditing().settings)
+        assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
     }
     fun testOldGenerationSettingsEntryCannotOpenAfterActivityRecreation() {
         setDraft("设置旧入口保留草稿")
@@ -124,12 +147,17 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
                 assertFalse(fixture.controller.runState(owner)!!.pauseRequested)
                 assertEquals(1L, session.cancelled.count); assertEquals(1, fixture.opens.get())
             }
-            for (id in listOf("default_reasoning", "logging", "task_surface")) {
+            for (id in listOf("default_reasoning", "logging")) {
                 entry(id).performClick(); node("page:设置").assertExists()
                 assertEquals(owner.id, fixture.controller.active!!.id)
                 assertFalse(fixture.controller.runState(owner)!!.pauseRequested)
                 assertEquals(1L, session.cancelled.count); assertEquals(1, fixture.opens.get())
             }
+            entry("task_surface").performClick(); node("page:Agent任务偏好").assertExists()
+            assertEquals(owner.id, fixture.controller.active!!.id)
+            assertFalse(fixture.controller.runState(owner)!!.pauseRequested)
+            assertEquals(1L, session.cancelled.count); assertEquals(1, fixture.opens.get())
+            backToChat(activity); node("page:设置").assertExists()
             backToChat(activity); assertDraft("保留追加草稿")
         } finally { session.release.countDown() }
         awaitControl("original finishes") { fixture.controller.active == null }; assertEquals(1, fixture.opens.get())

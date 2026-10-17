@@ -1,5 +1,6 @@
 """Synthetic process tests; these do not claim Android instrumentation coverage."""
 import importlib.util
+import json
 import os
 import re
 from pathlib import Path
@@ -117,7 +118,7 @@ class ProcessTests(unittest.TestCase):
         self.assertEqual((sdk / 'adb.real').read_bytes(), first)
 
     def smoke(self, api=26, case='ok', source_text=None, extra_source=None,
-              source_name='Test.kt', extra_sources=None, expected_classes=None, reported_count=None):
+              source_name='Test.kt', extra_sources=None, expected_classes=None, reported_count=None, shard_count=1, shard_index=0):
         (self.root / 'delivery/tests').mkdir(parents=True, exist_ok=True)
         (self.root / 'delivery/app.apk').touch()
         (self.root / 'delivery/tests/platform-test.apk').touch()
@@ -202,7 +203,8 @@ exit 0
         if reported_count is None:
             reported_count = 3 if case == 'multi' else 2 if case == 'count' else 1
         env = dict(self.env, API=str(api), CASE=case,
-                   TEST_CLASSES=expected_classes, TEST_COUNT=str(reported_count), FAKE_UI=str(fake_ui))
+                   TEST_CLASSES=expected_classes, TEST_COUNT=str(reported_count), FAKE_UI=str(fake_ui),
+                   SMOKE_SHARD_COUNT=str(shard_count), SMOKE_SHARD_INDEX=str(shard_index))
         return self.run_process(['bash', str(ROOT / 'scripts/smoke_boot.sh')], env=env)
 
     def run_process(self, argv, env=None, timeout=15):
@@ -249,6 +251,34 @@ exit 0
                 # Failure occurs before any UI/launch evidence can be created.
                 self.assertFalse((self.root / 'smoke/启动.png').exists())
 
+    def test_four_shards_are_disjoint_deterministic_and_complete(self):
+        sources = {f"Extra{i}.kt": f"package app.daiyu.android\nclass Extra{i}Test : android.test.InstrumentationTestCase() {{\n fun testOne() {{}}\n}}\n" for i in range(8)}
+        all_names = sorted(["app.daiyu.android.FirstTest"] + [f"app.daiyu.android.Extra{i}Test" for i in range(8)])
+        groups = [all_names[i::4] for i in range(4)]
+        observed, previous = set(), None
+        for index in range(4):
+            result = self.smoke(extra_sources=sources, expected_classes=",".join(groups[index]),
+                                reported_count=len(groups[index]), shard_count=4, shard_index=index)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            manifest = json.loads((self.root / "smoke/instrumentation-shards.json").read_text())
+            canonical = {k: v for k, v in manifest.items() if k != "shard_index"}
+            if previous is not None:
+                self.assertEqual(canonical, previous)
+            previous = canonical
+            self.assertEqual(manifest["shard_index"], index)
+            names = manifest["shards"][index]["classes"]
+            self.assertEqual(names, groups[index])
+            self.assertFalse(observed.intersection(names))
+            observed.update(names)
+        self.assertEqual(observed, set(all_names))
+        self.assertEqual(manifest["total_tests"], 9)
+
+    def test_invalid_shard_parameters_fail_before_instrumentation(self):
+        for count, index in [(0, 0), (4, -1), (4, 4), (17, 0), (4, 0), ("bad", 0)]:
+            result = self.smoke(shard_count=count, shard_index=index)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((self.root / "smoke/instrumentation-args.txt").exists())
+
     def test_all_source_classes_are_selected(self):
         result = self.smoke(case='multi', extra_source=(
             'package app.daiyu.android.other\nclass SecondTest : android.test.InstrumentationTestCase() {\n fun testTwo() {}\n fun testThree() {}\n}\n'))
@@ -281,6 +311,11 @@ exit 0
         self.assertEqual(args[3:7], ['-w', '-e', 'class', classes])
         self.assertEqual((self.root / 'smoke/instrumentation-targets.txt').read_text().splitlines(),
                          ['5', classes])
+
+    def test_final_java_test_class_is_discovered(self):
+        result = self.smoke(source_name="FinalTest.java",
+                            source_text=JAVA_FIRST_SOURCE.replace("public class", "public final class"))
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
 
     def test_java_source_count_must_match_instrumentation(self):
         result = self.smoke(

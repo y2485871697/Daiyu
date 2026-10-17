@@ -176,18 +176,42 @@ class FinalDeliveryTests(unittest.TestCase):
             self.assertEqual(str(caught.exception), code)
 
     def add_cloud(self, apis=("26", "37.2")):
-        snapshot = {"schema_version": 1, "run": copy.deepcopy(self.run), "jobs": [], "reports": []}
-        for job_id, api in enumerate(apis, 201):
-            log = self.put(api + "/platform-tests.txt", b"OK (1 test)\nINSTRUMENTATION_CODE: -1\n")
-            logcat = self.put(api + "/logcat.txt", b"I/Runner: finished\n")
-            report = self.put(api + "/report.json", {"schema_version": 1, "head_sha": SHA,
-                "run_id": 42, "run_attempt": 1, "job_id": job_id, "api": api, "exit_code": 0,
-                "expected_tests": 1, "instrumentation": log, "logcat": logcat})
-            snapshot["jobs"].append({"id": job_id, "head_sha": SHA, "run_id": 42, "run_attempt": 1,
-                "api": api, "name": "启动验证 API " + api, "status": "completed", "conclusion": "success",
-                "report_sha256": report["sha256"]})
-            snapshot["reports"].append({"api": api, "job_id": job_id, **report})
+        snapshot = {"schema_version": 2, "run": copy.deepcopy(self.run), "jobs": [], "reports": []}
+        classes = {f"fixture.Class{i}Test": 1 for i in range(4)}
+        groups = [dict(index=i, expected_tests=1, classes=[f"fixture.Class{i}Test"]) for i in range(4)]
+        for api in apis:
+            for index in range(4):
+                job_id = 201 + (0 if api == "26" else 4) + index
+                base = f"{api}/shard-{index}/"
+                identity = dict(shard_index=index, shard_count=4)
+                inventory = self.put(base + "inventory.json", dict(schema_version=1, **identity,
+                    total_tests=4, all_classes=classes, shards=groups))
+                log = self.put(base + "platform-tests.txt", b"OK (1 test)\nINSTRUMENTATION_CODE: -1\n")
+                logcat = self.put(base + "logcat.txt", b"I/Runner: finished\n")
+                report = self.put(base + "report.json", {"schema_version": 2, "head_sha": SHA,
+                    "run_id": 42, "run_attempt": 1, "job_id": job_id, "api": api, "exit_code": 0,
+                    "expected_tests": 1, "instrumentation": log, "logcat": logcat,
+                    "inventory": inventory, **identity})
+                snapshot["jobs"].append({"id": job_id, "head_sha": SHA, "run_id": 42, "run_attempt": 1,
+                    "api": api, "name": f"启动验证 API {api} 分片{index}", "status": "completed", "conclusion": "success",
+                    "report_sha256": report["sha256"], **identity})
+                snapshot["reports"].append({"api": api, "job_id": job_id, **identity, **report})
         self.doc["cloud"] = self.put("snapshot.json", snapshot)
+
+    def test_cloud_non_object_and_legacy_version_rejected(self):
+        for value in ([], None, "snapshot", 7, {"schema_version": 1}):
+            self.doc["cloud"] = self.put("non-object-cloud.json", value)
+            self.reject("sharded_cloud_required")
+
+    def test_missing_one_shard_never_satisfies_final_cloud(self):
+        self.add_cloud()
+        ref = self.doc["cloud"]
+        snapshot = json.loads((self.root / ref["path"]).read_bytes())
+        snapshot["jobs"].pop()
+        snapshot["reports"].pop()
+        self.doc["cloud"] = self.put(ref["path"], snapshot)
+        result = self.verify()
+        self.assertFalse(result["cloud"]["cloud_regression_satisfied"])
 
     def add_business(self, passed=False):
         ledger = template.make_template(self.spec, self.spec_digest, SHA, "ledger")
@@ -222,7 +246,7 @@ class FinalDeliveryTests(unittest.TestCase):
         self.assertEqual(result["status"], "incomplete")
         self.assertEqual(result["business"]["counts"]["not_run"], 81)
         self.assertTrue(result["cloud"]["cloud_regression_satisfied"])
-        self.assertEqual(len(result["cloud_log_sha256"]), 2)
+        self.assertEqual(len(result["cloud_log_sha256"]), 8)
 
     def test_plan_or_self_report_is_not_a_ledger_and_not_run_template_is_not_pass(self):
         self.add_business()

@@ -33,6 +33,14 @@ python3 -B scripts/acceptance/cloud_report.py \
 
 退出码：`0` 表示本地云端回归矩阵自洽完整；`1` 表示输入自洽但缺 API；`2` 表示输入不可读、不安全、身份不符、失败/冲突或其他非法输入。退出码 0 **不是业务验收通过**。错误输出也明确含两个 satisfied=false、`trusted_collection=false` 和 `acceptance_items_credited=0`。失败、取消、超时、未知 conclusion、进行中及跳过状态不能产生 passed。
 
+## 当前分片输入 v2
+
+当前workflow对每个API固定执行4片（index 0..3），共8个独立job。snapshot与各report使用`schema_version=2`；job、report引用及report三层均增加整数`shard_index`、`shard_count=4`。job精确名称为`启动验证 API <api> 分片<index>`，artifact为`代鱼启动证据-API<api>-分片<index>`，各片解包到独立目录，原文不拼接。
+
+report另增加`inventory: {path, sha256}`，绑定该片原始`instrumentation-shards.json`。manifest包含schema_version=1、shard_index、shard_count、total_tests、all_classes（完整类名到方法数）、shards（index/expected_tests/classes）。校验固定8成员、每片身份和计数、类集合两两不交及并集等于完整库存、八份库存完全一致；缺一片即`cloud_regression_satisfied=false`，`missing_shards`给具体组合。不能用另一API补缺片。每份原文仍逐片通过唯一OK及最终-1检查；新增manifest仅证明已pin输入覆盖自洽，源码全集与真实执行的认证仍须独立采集。
+
+快照和各JSON上限2MiB、每份原文4MiB，八份report/库存与16份原文合计最多96MiB。保留安全路径、摘要、重复键拒绝及所有身份门禁。归一化示例见`final-delivery-entry.md`。最终入口只接受v2；下述v1只保留历史未分片报告审阅，不能将旧两个job标成当前八片通过。
+
 ## 精确输入格式 v1
 
 这是归一化的离线审阅格式，**不是原始 GitHub REST 响应的任意子集**。所有对象仅接受下列键，未知键拒绝（包括 `command` 或自报 `passed`）。GitHub 采集与归一化必须在本工具以外完成；本工具不为该过程背书。数字字段必须是 JSON integer，不能是 boolean、float 或 string。
@@ -127,7 +135,7 @@ API37.2 使用自己的 job ID、API 与文件。所有路径都相对于 `--evi
 - 全部文件通过既有 evidence 的安全接口读取：每个路径分量均不跟随 symlink，拒绝目录/FIFO/设备等非普通文件，安全 POSIX 原语不可用时 fail closed。
 - artifact 引用只允许根内 POSIX 相对路径；拒绝绝对路径、`..`、`.`、空分量、反斜线、NUL、Windows drive 前缀，以及超过 512 字符的路径。父目录 symlink 也拒绝。
 - 不同 report/原文引用不能重复使用同一路径；跨 API 不得共享一份原文来补齐矩阵。硬链接/相同字节的独立文件不构成可信采集证明，工具不声称排除伪造。
-- snapshot 及每份 JSON 上限 2 MiB；每份原文上限 4 MiB；两个 API 报告和四份原文合计按 JSON 上限保守计费不超过 20 MiB（另加 snapshot 上限 2 MiB）。不解压文件，不递归发现文件。
+- snapshot 及每份 JSON 上限 2 MiB；每份原文上限 4 MiB；历史v1的两个API报告和四份原文原先预算20MiB；当前v2按JSON上限保守计费不超过96MiB（另加 snapshot 上限 2 MiB）。不解压文件，不递归发现文件。
 - JSON 拒绝重复键、NaN/Infinity 与非法编码。输入错误仅返回固定诊断码，不泄露文件名、原文或参数。
 
 ## 维护与本地测试

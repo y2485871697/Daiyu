@@ -47,20 +47,21 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         setDraft("Gemini UI 草稿"); val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
         openHub()
-        val implemented = setOf("assistants", "subagents", "appearance", "haptics", "voice", "source", "default_reasoning", "relay", "platform_tools", "permission_check")
-        val unwired = entries.filter { it.route == null && it.localPage == null && it.id !in implemented }
-        assertEquals(10, unwired.size)
+        val implemented = setOf("assistants", "subagents", "appearance", "haptics", "voice", "source", "default_reasoning", "telegram", "qq", "relay_st", "relay_moyu", "relay", "platform_tools", "permission_check")
+        val placeholder = entries.single { it.id == "donate" }
+        val unwired = entries.filter { it.route == null && it.localPage == null && it.id !in implemented && it != placeholder }
+        assertEquals(4, unwired.size)
         fun assertUnchanged() {
             assertEquals(before, fixture.database.exportBackup()); assertEquals(settings, fixture.settings.loadForEditing().settings)
             assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())
         }
-        unwired.forEach { item ->
+        (unwired + placeholder).forEach { item ->
             entry(item.id).performClick(); node("page:设置").assertExists()
             assertUnchanged()
         }
         entry("relay").performClick(); node("page:关于").assertExists(); assertUnchanged()
         for (title in listOf("ST API", "摸鱼")) {
-            reveal("settings-row:$title", "关于").performClick(); node("page:关于").assertExists()
+            reveal("settings-row:$title", "关于").assertExists(); node("page:关于").assertExists()
             assertUnchanged()
         }
         backToPage(activity, "page:设置"); node("page:设置").assertExists()

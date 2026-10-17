@@ -30,6 +30,7 @@ internal class ActivityRemoteVoiceHost(
     private val mutableListeningTarget = MutableStateFlow<DictationDraftTarget?>(null)
     val listeningTarget = mutableListeningTarget.asStateFlow()
     private var attempt: Attempt? = null
+    internal val dictationTarget: DictationDraftTarget? get() = attempt?.target
     private var duplex: DoubaoDuplexSession? = null
     private var observation: Job? = null
     private var epoch = 0L

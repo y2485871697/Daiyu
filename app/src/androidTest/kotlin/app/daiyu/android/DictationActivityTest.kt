@@ -174,6 +174,7 @@ class DictationActivityTest : WiredActivityTestCase() {
 
     fun testActivityPermissionDenialGrantAndExplicitRetryNeverSend() {
         setDraft("original")
+        setSelection(0, "original".length)
         platform.permission = false
         voice()
         assertEquals(1, permissionRequests)
@@ -199,6 +200,42 @@ class DictationActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
         assertNull(fixture.controller.active)
         assertEquals(1, platform.destroys)
+    }
+
+    fun testSystemDictationReplacesOnlyCapturedForwardSelection() {
+        setDraft("leftRIGHTtail")
+        setSelection(4, 9)
+        voice()
+        platform.listeners.last().onResults(result("middle"))
+        instrumentation.waitForIdleSync()
+        assertDraft("leftmiddletail")
+        assertSelection(10, 10)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testSystemDictationInsertsAtCursorAndPreservesSuffix() {
+        setDraft("lefttail")
+        setSelection(4, 4)
+        voice()
+        platform.listeners.last().onResults(result("middle"))
+        instrumentation.waitForIdleSync()
+        assertDraft("leftmiddletail")
+        assertSelection(10, 10)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testSystemDictationRejectsMovedSelectionEvenAfterItReturns() {
+        setDraft("leftRIGHTtail")
+        setSelection(9, 4)
+        voice()
+        val old = platform.listeners.last()
+        setSelection(0, 0)
+        setSelection(9, 4)
+        old.onResults(result("stale"))
+        instrumentation.waitForIdleSync()
+        assertDraft("leftRIGHTtail")
+        assertSelection(9, 4)
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testActivityEditReentryAndBackgroundReleaseAndDiscardOldTargets() {

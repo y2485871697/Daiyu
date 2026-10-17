@@ -16,8 +16,11 @@ internal fun ProductionUniversalVoicePanel(
     configuration: VoiceConfiguration?,
     configure: () -> Unit,
     start: (VoiceControlProfile, VoiceControlLimits) -> Unit,
+    openRequested: Boolean = false,
+    onCloseRequest: () -> Unit = {},
 ) {
-    var expanded by remember { mutableStateOf(false) }
+    var locallyExpanded by remember { mutableStateOf(false) }
+    val expanded = locallyExpanded || openRequested
     val state by host.state.collectAsState()
     val profiles = remember(configuration?.revision) {
         configuration?.let { config -> listOf(
@@ -30,10 +33,11 @@ internal fun ProductionUniversalVoicePanel(
     TextButton(text = if (expanded) "收起 UNIVERSAL 手动语音面板（结束本次）" else "打开 UNIVERSAL 手动持续语音面板",
         modifier = Modifier.testTag("voice-universal-open"), onClick = {
             if (expanded) state.permitId?.let { host.stop(it) }
-            expanded = !expanded
+            locallyExpanded = !expanded
+            if (expanded) onCloseRequest()
         })
     if (expanded) androidx.compose.ui.window.Dialog(onDismissRequest = {
-        state.permitId?.let { host.stop(it) }; expanded = false
+        state.permitId?.let { host.stop(it) }; locallyExpanded = false; onCloseRequest()
     }) {
         androidx.compose.material3.Surface {
             androidx.compose.foundation.layout.Column(Modifier
@@ -41,10 +45,10 @@ internal fun ProductionUniversalVoicePanel(
                 top.yukonga.miuix.kmp.basic.Text("需先选择已保存会话并清空草稿；个人音色使用独立有限级联授权，本入口不复用其许可。")
                 VoiceControlPanel(state, profiles, selected, limits,
                     onSelectProfile = { selected = it }, onLimitsChange = { limits = it },
-                    onConfigureProfile = { expanded = false; configure() }, onStart = start, onStop = host::stop,
+                    onConfigureProfile = { locallyExpanded = false; onCloseRequest(); configure() }, onStart = start, onStop = host::stop,
                     modifier = Modifier.testTag("voice-universal-control"))
                 TextButton(text = "关闭面板并结束本次", onClick = {
-                    state.permitId?.let { host.stop(it) }; expanded = false
+                    state.permitId?.let { host.stop(it) }; locallyExpanded = false; onCloseRequest()
                 })
             }
         }

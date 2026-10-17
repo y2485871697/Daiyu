@@ -95,6 +95,7 @@ internal fun DaiyuSettingsScreen(
     onOpenAppearance: (() -> Unit)? = null,
     onOpenHaptics: (() -> Unit)? = null,
     onOpenPlatformTools: (() -> Unit)? = null,
+    onOpenVoice: (() -> Unit)? = null,
 ) {
     val visit = remember { SettingsHomeVisit() }
     DisposableEffect(visit) { onDispose { visit.active = false } }
@@ -123,6 +124,7 @@ internal fun DaiyuSettingsScreen(
             "subagents" -> onOpenSubAgents?.invoke()
             "appearance" -> onOpenAppearance?.invoke()
             "haptics" -> onOpenHaptics?.invoke()
+            "voice" -> onOpenVoice?.invoke()
             "platform_tools", "permission_check" -> onOpenPlatformTools?.invoke()
             "relay" -> {
                 if (section != "about") { section = "about"; relayExpanded = true }

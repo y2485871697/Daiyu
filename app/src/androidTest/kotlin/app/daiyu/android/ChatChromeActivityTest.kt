@@ -150,11 +150,11 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         show(composer())
         touch(button("更多"))
         for (text in listOf("会话", "工具与工作区", "上下文", "会话管理", "重命名", "会话 ID", "导出",
-            "加载更早消息", "定位用户消息", "回到底部", "设置")) {
+            "加载更早消息", "定位用户消息", "回到底部", "设置", "启动 Kimi Web", "停止 Kimi Web")) {
             ui.onNodeWithText(text, substring = false, useUnmergedTree = true).assertDoesNotExist()
         }
         val expected = listOf("NEW_CHAT", "SEARCH", "INTERACTIVE_MODE", "OPEN_TERMINAL", "OPEN_BROWSER",
-            "OPEN_WORKSPACE", "SUB_AGENT", "OPEN_KIMI", "CONTEXT_STATS", "COMPRESS_CONTEXT", "AUTO_COMPRESS")
+            "OPEN_WORKSPACE", "SUB_AGENT", "CONTEXT_STATS", "COMPRESS_CONTEXT", "AUTO_COMPRESS")
         val actual = ui.onAllNodes(SemanticsMatcher("overflow menu item") {
             it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("chat-menu:") == true
         }).fetchSemanticsNodes().map { it.config[SemanticsProperties.TestTag].removePrefix("chat-menu:") }

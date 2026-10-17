@@ -33,7 +33,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 enum class ChatMenuAction {
     LOAD_EARLIER, LOCATE_USER, BOTTOM, SEARCH, SETTINGS,
     NEW_CHAT, RENAME, INTERACTIVE_MODE, CONVERSATION_ID, EXPORT, CONTEXT_STATS,
-    COMPRESS_CONTEXT, AUTO_COMPRESS, SUB_AGENT, OPEN_TERMINAL, OPEN_BROWSER, OPEN_WORKSPACE, OPEN_KIMI, STOP_KIMI,
+    COMPRESS_CONTEXT, AUTO_COMPRESS, SUB_AGENT, OPEN_TERMINAL, OPEN_BROWSER, OPEN_WORKSPACE,
     ATTACH_IMAGE, ATTACH_VIDEO, ATTACH_FILE, ATTACH_FOLDER, ATTACH_PATH, GENERATE_IMAGE, GENERATE_VIDEO,
     VOICE_INPUT, VOICE_CHAT, VOICE_DOUBAO, CONTEXT_SCOPE,
 }
@@ -41,8 +41,7 @@ enum class ChatMenuAction {
 private data class MenuEntry(val title: String, val icon: ImageVector, val action: ChatMenuAction)
 
 @Composable
-internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit,
-    kimiRunning: Boolean = false) {
+internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit) {
     val groups = listOf(
         listOf(
             MenuEntry("新建会话", DaiyuIcons.NewChat, ChatMenuAction.NEW_CHAT),
@@ -54,7 +53,6 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
             MenuEntry("打开浏览器", DaiyuIcons.Browser, ChatMenuAction.OPEN_BROWSER),
             MenuEntry("浏览工作区文件", DaiyuIcons.Folder, ChatMenuAction.OPEN_WORKSPACE),
             MenuEntry("子代理状态", DaiyuIcons.SubAgent, ChatMenuAction.SUB_AGENT),
-            MenuEntry(if (kimiRunning) "打开 Kimi Web · 运行中" else "启动 Kimi Web", DaiyuIcons.Model, ChatMenuAction.OPEN_KIMI),
         ),
         listOf(
             MenuEntry("Token 用量", DaiyuIcons.Chart, ChatMenuAction.CONTEXT_STATS),
@@ -71,10 +69,6 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
         groups.forEachIndexed { index, entries ->
             if (index > 0) HorizontalDivider(Modifier.padding(vertical = 4.dp), color = colors.outline)
             entries.forEach { entry -> ChatMenuItem(entry, onDismiss, onAction, Modifier.height(40.dp)) }
-        }
-        if (kimiRunning) {
-            HorizontalDivider(color = colors.outline)
-            ChatMenuItem(MenuEntry("停止 Kimi Web", DaiyuIcons.Stop, ChatMenuAction.STOP_KIMI), onDismiss, onAction, Modifier.height(40.dp))
         }
     }
 }

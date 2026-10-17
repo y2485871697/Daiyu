@@ -1127,13 +1127,15 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onBack = { closeSearch(page) },
                             ) else MessageSearchScreen(
-                                onSearch = { query -> retainedData.search(query) },
-                                currentConversationId = page.conversationId,
-                                onSearchCurrentConversation = { query, id ->
-                                    check(id == page.conversationId) { "搜索范围已改变" }
-                                    retainedData.searchCurrentConversation(query, id)
+                                onSearchPage = { request, cursor, signal ->
+                                    check(request.conversationId == null || request.conversationId == page.conversationId) {
+                                        "搜索范围已改变"
+                                    }
+                                    retainedData.searchPage(request.query, request.conversationId, cursor,
+                                        cancellationSignal = signal)
                                 },
-                                resultLimit = RetainedConversationData.SEARCH_RESULT_LIMIT,
+                                currentConversationId = page.conversationId,
+                                supportsCurrentConversation = true,
                                 onOpenHit = { hit ->
                                     if (searchPage === page && retainedPage == page.route) guard { openHistoryHit(hit) }
                                 },

@@ -29,28 +29,25 @@ internal data class MessageSearchRequest(val query: String, val conversationId: 
  * P27 read-only message search. Pass each complete hit, including ownerMessageId, back to the host;
  * navigation/window loading belongs to the host, never to text matching in this screen.
  *
- * onSearch directly accepts RetainedConversationData.search. Its current cap is 200. The optional
- * current-conversation reader must scope BEFORE searching/limiting: filtering a capped global
- * result is NOT a valid implementation, so that scope is unavailable until such a reader exists.
- * Readers run on IO; capture any mutable host inputs before supplying them.
+ * onSearchPage must scope BEFORE matching and return a revision-bound continuation. It runs
+ * synchronously on IO with a per-request CancellationSignal; capture mutable host inputs first.
+ * The host must opt into current scope only when its reader supports that scope.
  */
 @Composable
 internal fun MessageSearchScreen(
-    onSearch: suspend (String) -> List<MessageSearchHit>,
+    onSearchPage: MessageSearchPageReader,
     onOpenHit: (MessageSearchHit) -> Unit,
     onBack: () -> Unit,
     currentConversationId: String? = null,
-    onSearchCurrentConversation: (suspend (query: String, conversationId: String) -> List<MessageSearchHit>)? = null,
-    resultLimit: Int? = 200,
+    supportsCurrentConversation: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
-    val requests = remember(scope) { SearchRequestState<MessageSearchRequest, MessageSearchHit>(scope) }
+    val requests = remember(scope) { MessageSearchRequestState(scope) }
     val snapshot by requests.state.collectAsState()
-    val latestSearch by rememberUpdatedState(onSearch)
-    val latestCurrentSearch by rememberUpdatedState(onSearchCurrentConversation)
+    val latestSearch by rememberUpdatedState(onSearchPage)
     var query by rememberSaveable { mutableStateOf("") }
     var searchCurrent by rememberSaveable { mutableStateOf(false) }
-    val canSearchCurrent = currentConversationId != null && onSearchCurrentConversation != null
+    val canSearchCurrent = currentConversationId != null && supportsCurrentConversation
     val request = MessageSearchRequest(query.trim(), currentConversationId.takeIf { searchCurrent && canSearchCurrent })
 
     fun search() {
@@ -58,12 +55,7 @@ internal fun MessageSearchScreen(
             requests.cancel()
             return
         }
-        val readAll = latestSearch
-        val readCurrent = latestCurrentSearch
-        requests.start(request, debounceMillis = 180) { input ->
-            if (input.conversationId == null) readAll(input.query)
-            else checkNotNull(readCurrent)(input.query, input.conversationId)
-        }
+        requests.start(request, debounceMillis = 180, read = latestSearch)
     }
     LaunchedEffect(request, query, canSearchCurrent) { search() }
     DisposableEffect(requests) { onDispose { requests.cancel() } }
@@ -113,7 +105,6 @@ internal fun MessageSearchScreen(
             else -> {
                 item(key = "search_result_count") {
                     SearchNotice(stringResource(R.string.search_message_count, snapshot.results.size))
-                    if (resultLimit != null) SearchNotice(stringResource(R.string.search_limited_results, resultLimit))
                 }
                 if (snapshot.results.isEmpty()) item(key = "search_empty") {
                     SearchNotice(stringResource(R.string.search_no_results), "search:empty")
@@ -131,6 +122,25 @@ internal fun MessageSearchScreen(
                         tag = "search:message:${hit.conversationId}:${hit.messageId}",
                         onClick = { requests.cancel(); onOpenHit(hit) },
                     )
+                }
+                item(key = "search_continuation") {
+                    when (snapshot.appendPhase) {
+                        SearchAppendPhase.Loading -> SearchLoading { requests.cancel() }
+                        SearchAppendPhase.ReadError -> SearchReadError { requests.loadMore() }
+                        SearchAppendPhase.Invalidated -> {
+                            SearchNotice(stringResource(R.string.search_history_changed), "search:history_changed")
+                            TextButton(text = stringResource(R.string.search_refresh), onClick = { search() })
+                        }
+                        SearchAppendPhase.Cancelled -> {
+                            SearchNotice(stringResource(R.string.search_cancelled))
+                            if (snapshot.nextCursor != null) TextButton(
+                                text = stringResource(R.string.search_retry), onClick = { requests.loadMore() },
+                            )
+                        }
+                        SearchAppendPhase.Idle -> if (snapshot.nextCursor != null) TextButton(
+                            text = stringResource(R.string.search_load_more), onClick = { requests.loadMore() },
+                        )
+                    }
                 }
             }
         }

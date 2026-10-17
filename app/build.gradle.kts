@@ -97,7 +97,6 @@ android {
         }
         getByName("test").kotlin.directories.add(browserRoot.dir("adapter/src/test/kotlin").asFile.absolutePath)
         if (daiyuPhysicalPerformance) {
-            getByName("release").manifest.srcFile("src/performance/AndroidManifest.xml")
             getByName("androidTest") {
                 setRoot("src/performanceTest")
                 kotlin.directories.clear()
@@ -131,6 +130,7 @@ android {
         release {
             isMinifyEnabled = false
             isDebuggable = false
+            isProfileable = daiyuPhysicalPerformance
             if (daiyuSyntheticApplication) applicationIdSuffix = ".synthetic"
             if (fixedSigning) signingConfig = signingConfigs.getByName("release")
         }

@@ -185,7 +185,8 @@ internal class ControllerMessageVideos(
         postApproval: ControllerVideoPostApproval? = null,
         onFrozenPlan: (ControllerVideoModelPlan) -> Unit = {},
         modelFactory: (ProviderSnapshot, String?, OpenRouterVideoCapability?, VideoPostApprovalProvider?) -> ResponsesModel = { p, i, c, a ->
-            ResponsesModel(p, i, c, a)
+            ResponsesModel(p, i, c, a,
+                sessionContext = app.daiyu.android.model.sessiongateway.SessionGatewayContext(conversation))
         }): ModelPort = object : ModelPort {
         private fun openPlan(source: List<Message>, definitions: List<ToolDefinition>, supplied: ModelImagePlan? = null): ModelSession {
             val snapshot = history.capture(conversation)

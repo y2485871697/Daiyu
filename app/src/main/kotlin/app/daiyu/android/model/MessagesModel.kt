@@ -2,6 +2,8 @@ package app.daiyu.android.model
 
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ModelSettings
+import app.daiyu.android.model.sessiongateway.SessionGateway
+import app.daiyu.android.model.sessiongateway.SessionGatewayContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URL
@@ -15,22 +17,24 @@ class MessagesModel internal constructor(
     private val connect: (URL) -> HttpsURLConnection,
     private val imageInputSupported: Boolean?,
     private val assistantInstructions: String? = null,
+    private val sessionContext: SessionGatewayContext? = null,
 ) : ModelPort {
     internal constructor(settings: ModelSettings, maxTokens: Int, connect: (URL) -> HttpsURLConnection) :
         this(settings, maxTokens, connect, null)
     constructor(settings: ModelSettings, maxTokens: Int = 4096) :
         this(settings, maxTokens, { it.openConnection() as HttpsURLConnection })
     internal constructor(settings: ModelSettings, connect: (URL) -> HttpsURLConnection) : this(settings, 4096, connect)
-    internal constructor(snapshot: ProviderSnapshot, assistantInstructions: String? = null) : this(snapshot.asModelSettings(), 4096,
-        { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported, assistantInstructions)
+    internal constructor(snapshot: ProviderSnapshot, assistantInstructions: String? = null,
+                         sessionContext: SessionGatewayContext? = null) : this(snapshot.asModelSettings(), 4096,
+        { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported, assistantInstructions, sessionContext)
 
     override fun open(history: List<Message>): ModelSession = open(history, settings.enabledTools())
     override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession =
         open(history, MessagesRequest.definitions(tools))
     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession =
-        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, null, assistantInstructions)
+        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, null, assistantInstructions, sessionContext)
     override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
-        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, images, assistantInstructions)
+        Session(settings, maxTokens, history, definitions.toList(), connect, imageInputSupported, images, assistantInstructions, sessionContext)
 
     private class Session(
         private val settings: ModelSettings,
@@ -41,6 +45,7 @@ class MessagesModel internal constructor(
         capability: Boolean?,
         images: ModelImagePlan?,
         private val assistantInstructions: String?,
+        private val sessionContext: SessionGatewayContext?,
     ) : ModelSession {
         private val endpoint = MessagesRequest.endpoint(settings)
         private val historySnapshot = app.daiyu.android.model.images.FrozenMessageImagePlan.snapshot(history)
@@ -75,6 +80,9 @@ class MessagesModel internal constructor(
                 settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens), ProviderProtocol.MESSAGES),
                 assistantInstructions,
             )
+            settings.requestOptions.sessionGateway.requireExecutable()
+            SessionGateway.applyAnthropic(request, sessionContext)
+            val sessionHeaders = SessionGateway.headers(endpoint, sessionContext)
             val requestBytes = ImageRequestPreflight.bytes(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null
             val deliver: (ModelEvent) -> Unit = { event ->
@@ -93,6 +101,7 @@ class MessagesModel internal constructor(
                 conn.setRequestProperty("anthropic-version", "2023-06-01")
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.setRequestProperty("Accept", "text/event-stream")
+                sessionHeaders.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 conn.outputStream.use { it.write(requestBytes) }
                 checkCancelled()
                 val status = conn.responseCode

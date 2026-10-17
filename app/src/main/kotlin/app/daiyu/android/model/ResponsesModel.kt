@@ -2,6 +2,8 @@ package app.daiyu.android.model
 
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ModelSettings
+import app.daiyu.android.model.sessiongateway.SessionGateway
+import app.daiyu.android.model.sessiongateway.SessionGatewayContext
 import app.daiyu.android.model.videos.FrozenMessageVideoPlan
 import app.daiyu.android.model.videos.OpenRouterVideoCapability
 import app.daiyu.android.model.videos.VideoPostApprovalProvider
@@ -20,22 +22,26 @@ class ResponsesModel internal constructor(
     private val assistantInstructions: String? = null,
     private val videoInputCapability: OpenRouterVideoCapability? = null,
     private val videoPostApprovalProvider: VideoPostApprovalProvider? = null,
+    private val sessionContext: SessionGatewayContext? = null,
 ) : ModelPort {
     internal constructor(settings: ModelSettings, connect: (URL) -> HttpsURLConnection) : this(settings, connect, null)
     constructor(settings: ModelSettings) : this(settings, { it.openConnection() as HttpsURLConnection }, null)
     internal constructor(snapshot: ProviderSnapshot, assistantInstructions: String? = null,
                          videoInputCapability: OpenRouterVideoCapability? = null,
-                         videoPostApprovalProvider: VideoPostApprovalProvider? = null) : this(snapshot.asModelSettings(),
+                         videoPostApprovalProvider: VideoPostApprovalProvider? = null,
+                         sessionContext: SessionGatewayContext? = null) : this(snapshot.asModelSettings(),
         { it.openConnection() as HttpsURLConnection }, snapshot.imageInputSupported, assistantInstructions,
-        videoInputCapability, videoPostApprovalProvider)
+        videoInputCapability, videoPostApprovalProvider, sessionContext)
     override fun open(history: List<Message>): ModelSession = open(history, settings.enabledTools())
     override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = open(history, tools.map {
         ToolDefinition(it.toolName, it.description, """{"type":"object","properties":{},"required":[],"additionalProperties":false}""")
     })
     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession =
-        Session(settings, history, connect, definitions.toList(), imageInputSupported, null, assistantInstructions)
+        Session(settings, history, connect, definitions.toList(), imageInputSupported, null, assistantInstructions,
+            sessionContext = sessionContext)
     override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
-        Session(settings, history, connect, definitions.toList(), imageInputSupported, images, assistantInstructions)
+        Session(settings, history, connect, definitions.toList(), imageInputSupported, images, assistantInstructions,
+            sessionContext = sessionContext)
 
     /** Explicit OpenRouter extension only. Generic ModelPort/ModelFactory paths remain unchanged.
      * Pass the same run-local capability used to freeze videos to this model's constructor.
@@ -45,7 +51,7 @@ class ResponsesModel internal constructor(
     fun open(history: List<Message>, definitions: List<ToolDefinition>, videos: FrozenMessageVideoPlan,
              images: ModelImagePlan? = null): ModelSession =
         Session(settings, history, connect, definitions.toList(), imageInputSupported, images,
-            assistantInstructions, videoInputCapability, videos, videoPostApprovalProvider)
+            assistantInstructions, videoInputCapability, videos, videoPostApprovalProvider, sessionContext)
 
     private class Session(
         private val settings: ModelSettings,
@@ -58,6 +64,7 @@ class ResponsesModel internal constructor(
         private val videoCapability: OpenRouterVideoCapability? = null,
         videos: FrozenMessageVideoPlan? = null,
         private val videoPostApprovalProvider: VideoPostApprovalProvider? = null,
+        private val sessionContext: SessionGatewayContext? = null,
     ) : ModelSession {
         private val cancelled = AtomicBoolean(false)
         private val postLock = Any()
@@ -95,6 +102,9 @@ class ResponsesModel internal constructor(
                 settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools), ProviderProtocol.RESPONSES),
                 assistantInstructions,
             )
+            val finalUrl = settings.requestEndpoint()
+            SessionGateway.applyResponses(request, finalUrl, settings.requestOptions.sessionGateway, sessionContext)
+            val sessionHeaders = SessionGateway.headers(finalUrl, sessionContext)
             // Video-only allowlist and exact history binding apply to the final merged payload
             // on EVERY round, before serialization/connect. Ordinary provider options stay flexible.
             videoPlan?.validateRequest(settings, request, input)
@@ -148,7 +158,7 @@ class ResponsesModel internal constructor(
                     pendingPost.consume(approval)
                 }
                 checkCancelled()
-                val conn = connect(URL(settings.requestEndpoint()))
+                val conn = connect(URL(finalUrl))
                 // Own the result before checking cancellation so a late factory return is always
                 // disconnected by finally, even when it must never be published or write a body.
                 ownedConnection = conn
@@ -164,6 +174,7 @@ class ResponsesModel internal constructor(
                 conn.connectTimeout = 20_000; conn.readTimeout = 60_000
                 conn.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
                 conn.setRequestProperty("Content-Type", "application/json"); conn.setRequestProperty("Accept", "text/event-stream")
+                sessionHeaders.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 checkCancelled()
                 conn.outputStream.use { it.write(requestBytes) }
                 checkCancelled()

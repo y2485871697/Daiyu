@@ -1,5 +1,6 @@
 package app.daiyu.android.model
 
+import app.daiyu.android.model.sessiongateway.SessionGatewayRule
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -7,12 +8,14 @@ import org.json.JSONObject
 data class ProviderRequestOptions(
     val customBody: String = "",
     val speedMode: GptSpeedMode? = null,
-    val codex: Boolean = false
+    val codex: Boolean = false,
+    val sessionGateway: SessionGatewayRule = SessionGatewayRule(),
 ) {
     override fun toString(): String =
         "ProviderRequestOptions(customBody=<redacted>, speedMode=$speedMode, codex=$codex)"
 
     fun validate(protocol: ProviderProtocol) {
+        sessionGateway.validate()
         require(customBody.length <= MAX_BODY_BYTES && customBody.toByteArray(Charsets.UTF_8).size <= MAX_BODY_BYTES) {
             "自定义请求体过大"
         }
@@ -76,7 +79,8 @@ data class ProviderRequestOptions(
     }
 
     internal fun encode(): String = JSONObject().put("custom_body", customBody)
-        .put("speed_mode", speedMode?.name ?: JSONObject.NULL).put("codex", codex).toString()
+        .put("speed_mode", speedMode?.name ?: JSONObject.NULL).put("codex", codex)
+        .put("session_gateway", sessionGateway.toJson()).toString()
 
     private fun parseBody(): JSONObject = try {
         MessagesRequest.jsonObject(customBody, MAX_BODY_DEPTH)
@@ -94,14 +98,18 @@ data class ProviderRequestOptions(
         internal fun decode(raw: String?): ProviderRequestOptions {
             if (raw == null) return ProviderRequestOptions()
             return try {
-                require(raw.length <= MAX_BODY_BYTES * 6 + 256)
-                val value = MessagesRequest.jsonObject(raw, 2)
-                require(value.keys().asSequence().toSet() == setOf("custom_body", "speed_mode", "codex"))
+                require(raw.length <= MAX_BODY_BYTES * 6 + 128 * 1024)
+                val value = MessagesRequest.jsonObject(raw, 3)
+                val keys = value.keys().asSequence().toSet()
+                val legacyKeys = setOf("custom_body", "speed_mode", "codex")
+                require(keys == legacyKeys || keys == legacyKeys + "session_gateway")
                 val body = value.get("custom_body") as? String ?: error("body")
                 val codex = value.get("codex") as? Boolean ?: error("codex")
                 val speed = value.get("speed_mode")
                 val mode = if (speed == JSONObject.NULL) null else GptSpeedMode.valueOf(speed as? String ?: error("speed"))
-                ProviderRequestOptions(body, mode, codex)
+                val rule = if (value.has("session_gateway"))
+                    SessionGatewayRule.fromJson(value.getJSONObject("session_gateway")) else SessionGatewayRule()
+                ProviderRequestOptions(body, mode, codex, rule)
             } catch (_: Exception) {
                 throw IllegalStateException("模型请求配置无效；请重新保存")
             }

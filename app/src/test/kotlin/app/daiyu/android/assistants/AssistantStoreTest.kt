@@ -6,6 +6,22 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class AssistantStoreTest {
+    @Test fun fullProfileCasAcrossPreferenceOwnersRejectsStaleAndDeletedRows() {
+        val preferences = PreferencesFake().preferences
+        val first = SharedPreferencesAssistantStore(preferences)
+        val second = SharedPreferencesAssistantStore(preferences)
+        val original = first.read(AssistantPrompt.DEFAULT_ID)!!
+        val changed = second.compareAndSet(original, original.copy(prompt = "external"))
+        assertThrows(StaleAssistantProfileException::class.java) {
+            first.compareAndSet(original, original.copy(memoryEnabled = false))
+        }
+        assertEquals(changed, first.read(original.id))
+        first.create()
+        second.delete(original.id)
+        assertThrows(StaleAssistantProfileException::class.java) { first.compareAndSet(changed, changed.copy(name = "resurrection")) }
+        assertNull(first.read(original.id))
+    }
+
     @Test fun seedsOriginalDefaultAssistant() {
         val preferences = PreferencesFake().preferences
         val store = SharedPreferencesAssistantStore(preferences)

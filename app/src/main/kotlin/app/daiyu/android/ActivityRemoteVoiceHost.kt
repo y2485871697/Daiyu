@@ -26,6 +26,9 @@ internal class ActivityRemoteVoiceHost(
     private val gate = ActivityVoiceAudio.gate
     private val mutable = MutableStateFlow("")
     val status = mutable.asStateFlow()
+    // Published only after the owned Android capture has actually started, never on a tap/connect.
+    private val mutableListeningTarget = MutableStateFlow<DictationDraftTarget?>(null)
+    val listeningTarget = mutableListeningTarget.asStateFlow()
     private var attempt: Attempt? = null
     private var duplex: DoubaoDuplexSession? = null
     private var observation: Job? = null
@@ -96,6 +99,7 @@ internal class ActivityRemoteVoiceHost(
         }
     }
     fun invalidate() {
+        mutableListeningTarget.value = null // Fence before cancelling/draining old callbacks.
         mutable.value = ""
         epoch++
         observation?.cancel(); observation = null
@@ -134,6 +138,7 @@ internal class ActivityRemoteVoiceHost(
                                             scope.launch { fail() }
                                     }
                                     input.capturing()
+                                    if (current()) mutableListeningTarget.value = target
                                     mutable.value = "正在豆包听写；再次点击语音结束录音，结果仅填入草稿"
                                 }
                                 coroutineScope {
@@ -172,6 +177,7 @@ internal class ActivityRemoteVoiceHost(
         fun finishInput() {
             if (!current() || !input.finishCapture()) return
             // Stop capture before closing input; sender sends one final marker after draining frames.
+            mutableListeningTarget.value = null
             audio.closeAndDrain(); frames.close()
             mutable.value = "录音已结束，正在等待最终结果…"
         }
@@ -191,7 +197,10 @@ internal class ActivityRemoteVoiceHost(
         fun cleanup() {
             if (ended) return
             input.end()
-            if (attempt === this) attempt = null
+            if (attempt === this) {
+                mutableListeningTarget.value = null
+                attempt = null
+            }
             frames.cancel(); job?.cancel()
             audio.closeAndDrain()
         }

@@ -73,9 +73,10 @@ internal class ComposerDictationHost(
             if (!current(target)) return
             when (state.phase) {
                 VoicePhase.PREPARING, VoicePhase.LISTENING -> mutableState.value = mutableState.value.copy(
-                    target = target, listening = true,
+                    target = target, listening = state.phase == VoicePhase.LISTENING,
                     status = if (state.detail == "recognition_final_pending") "正在等待最终识别结果…" else "正在听写；再次点击语音或停止按钮可取消")
-                VoicePhase.COMPLETE -> Unit // finalDraft follows; partial must never substitute for it.
+                VoicePhase.COMPLETE -> mutableState.value = mutableState.value.copy(listening = false)
+                    // finalDraft follows; partial must never substitute for it.
                 VoicePhase.FAILED -> {
                     session = null
                     if (permissionInFlight != target) active = null
@@ -98,11 +99,11 @@ internal class ComposerDictationHost(
 
     fun start(target: DictationDraftTarget) {
         if (closed || !isEditorCurrent(target)) return
-        if (mutableState.value.listening) { invalidate(); return }
+        if (active != null && permissionInFlight == null) { invalidate(); return }
         if (permissionInFlight != null) return
         invalidate()
         active = target
-        mutableState.value = ComposerDictationState(target, listening = true, status = "正在准备听写…")
+        mutableState.value = ComposerDictationState(target, status = "正在准备听写…")
         try {
             val next = factory(target, callbacks, ::current)
             session = next

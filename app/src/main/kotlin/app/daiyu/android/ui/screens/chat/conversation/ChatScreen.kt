@@ -48,6 +48,8 @@ data class ChatScreenActions(
     val onRetryStep: (String) -> Unit = {},
     val onMenuAction: (ChatMenuAction) -> Unit = {},
     val onInteractiveModeChange: (Boolean) -> Unit = {},
+    /** Measured visible completed turn keys after a frame, not merely selected/loaded history. */
+    val onVisibleCompleted: (Set<String>) -> Unit = {},
 )
 
 @Composable

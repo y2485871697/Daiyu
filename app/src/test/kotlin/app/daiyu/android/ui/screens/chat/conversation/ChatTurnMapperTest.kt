@@ -62,6 +62,18 @@ class ChatTurnMapperTest {
         }
     }
 
+    @Test fun structuredFailureNeedsTrustedReceiptFlagAndDoesNotParseArbitraryJson() {
+        val original = message(tool("one", "{\"ok\":false,\"error\":\"permission_denied\"}"), text("answer", "done"))
+        assertEquals(WorkStepState.OK, mapped(original).workProcess!!.segments.single().steps.single().state)
+        val failed = ChatTurnMapper.map(listOf(original), confirmedToolError = { _, _ -> true })
+            .single() as ChatTurnUi.Assistant
+        assertEquals(WorkStepState.FAILED, failed.workProcess!!.segments.single().steps.single().state)
+        assertEquals("失败", failed.workProcess.summary)
+        val unknown = ChatTurnMapper.map(listOf(original), confirmedToolError = { _, _ -> null })
+            .single() as ChatTurnUi.Assistant
+        assertEquals(mapped(original), unknown)
+    }
+
     @Test fun retainsTrailingToolInsteadOfDroppingIt() {
         val turn = mapped(message(tool("one"), text("answer", "Partial answer"), tool("two", null), status = RunStatus.RUNNING))
         assertEquals("Partial answer", turn.finalText)

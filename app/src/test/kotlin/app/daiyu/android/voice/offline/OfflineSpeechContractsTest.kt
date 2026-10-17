@@ -69,7 +69,12 @@ class OfflineSpeechContractsTest {
             current = { it == target }, currentText = { text },
             applyDraft = { captured, next, position -> assertEquals(target, captured); text = next; cursor = position; commits++ })
         host.start(target, text, 7, 10)
+        assertFalse(host.state.value.listening) // Loading a model / clicking is not capture.
+        assertEquals(target, host.state.value.target)
         attempts.single().events.partial("preview")
+        assertFalse(host.state.value.listening) // A partial alone is not the authoritative event.
+        attempts.single().events.listening()
+        assertTrue(host.state.value.listening)
         assertEquals("before OLD after", text)
         assertEquals("preview", host.state.value.preview)
         attempts.single().events.complete("你好")
@@ -77,6 +82,9 @@ class OfflineSpeechContractsTest {
         assertEquals(9, cursor)
         assertEquals(1, commits)
         attempts.single().events.complete("duplicate")
+        attempts.single().events.listening()
+        assertFalse(host.state.value.listening) // Late capture cannot resurrect a retired owner.
+        assertNull(host.state.value.target)
         assertEquals(1, commits)
         assertEquals(1, attempts.single().closes)
     }

@@ -66,7 +66,7 @@ internal fun ShizukuScreen(
     }
     val runState = if (session != null) session.states.collectAsState().value else null
     fun requestPermission() {
-        if (busy) return
+        if (busy || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
         busy = true
         error = null
         scope.launch {
@@ -80,7 +80,7 @@ internal fun ShizukuScreen(
     }
     fun open() {
         val run = session ?: return
-        if (busy) return
+        if (busy || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
         busy = true
         error = null
         scope.launch {

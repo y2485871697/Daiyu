@@ -55,15 +55,19 @@ internal class OfflineSpeechSession(
 ) : OfflineSpeechAttempt {
     interface Events {
         fun listening()
+        /** Capture has released the microphone; decoder tail/final may still be running. */
+        fun captureStopped()
         fun partial(text: String)
         fun complete(text: String)
         fun cancelled()
         fun failed()
     }
     private val cancelled = AtomicBoolean(false)
+    private val captureStopped = AtomicBoolean(false)
     private val audioLock = Any()
     private var microphone: OfflineSpeechDevice.Microphone? = null
     private var audioFailure: Throwable? = null
+    @Volatile private var captureStarted = false
     private var started = false
     private fun active() = !cancelled.get() && allowed()
 
@@ -103,8 +107,9 @@ internal class OfflineSpeechSession(
                 val audio = device.microphone()
                 microphone = audio // Publish before start, so failed initialization is released too.
                 audio.start()
+                captureStarted = true
             }
-            post { if (active() && gate.current(lease)) events.listening() }
+            post { if (active() && !captureStopped.get() && gate.current(lease)) events.listening() }
             val samples = ShortArray(1600)
             val start = device.now()
             var lastText = ""
@@ -131,7 +136,7 @@ internal class OfflineSpeechSession(
             if (!active() || !gate.current(lease)) return
             // Stop capture at the endpoint/deadline, before potentially slow decoder-tail work.
             // Any failure is retained until releaseAfter can poison the shared gate.
-            releaseAudio()
+            releaseAudioAndReportStopped()
             if (!active()) return
             // Flush only natural endpoint/timeout, never explicit cancellation.
             engine.accept(FloatArray(4800))
@@ -149,7 +154,7 @@ internal class OfflineSpeechSession(
             var nativeClosed = false
             try {
                 val released = gate.releaseAfter(lease) {
-                    try { releaseAudio() } finally { nativeClosed = true; native?.close() }
+                    try { releaseAudioAndReportStopped() } finally { nativeClosed = true; native?.close() }
                 }
                 if (!released) {
                     // Preemption already synchronously released audio. Native resources are still
@@ -170,6 +175,14 @@ internal class OfflineSpeechSession(
                     text != null -> events.complete(text)
                 }
             }
+        }
+    }
+
+    private fun releaseAudioAndReportStopped() {
+        releaseAudio()
+        if (captureStarted && captureStopped.compareAndSet(false, true)) {
+            // The lease can retire before UI dispatch; the original attempt still awaits final.
+            post { if (active()) events.captureStopped() }
         }
     }
 

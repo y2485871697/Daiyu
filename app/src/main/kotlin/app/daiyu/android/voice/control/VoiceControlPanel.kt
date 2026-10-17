@@ -64,6 +64,7 @@ private fun phaseLabel(phase: VoiceControlPhase): String = when (phase) {
     VoiceControlPhase.PERMISSION_REQUIRED -> "等待本次麦克风授权（尚未打开音频）"
     VoiceControlPhase.CONNECTING -> "准备收听"
     VoiceControlPhase.LISTENING -> "正在收听最终识别"
+    VoiceControlPhase.WAITING_FOR_FINAL -> "收音已结束，等待最终识别"
     VoiceControlPhase.SUBMITTING -> "等待确切发送收据（不重发）"
     VoiceControlPhase.WAITING_FOR_BODY -> "已绑定本次 assistant，等待正文"
     VoiceControlPhase.SPEAKING -> "正文播放中（可能等待完整句子/音频）"

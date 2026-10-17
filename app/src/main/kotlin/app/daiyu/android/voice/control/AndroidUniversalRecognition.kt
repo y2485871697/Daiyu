@@ -30,7 +30,10 @@ internal sealed class UniversalRecognitionConfiguration {
     data object Offline : UniversalRecognitionConfiguration()
 }
 
-internal class AndroidUniversalRecognition(private val context: Context) {
+internal class AndroidUniversalRecognition(
+    private val context: Context,
+    private val systemDictation: () -> AndroidDictation = { AndroidDictation(context.applicationContext, ActivityVoiceAudio.gate) },
+) {
     fun available(config: UniversalRecognitionConfiguration): Boolean = when (config) {
         is UniversalRecognitionConfiguration.System -> config.language.isNotBlank()
         is UniversalRecognitionConfiguration.Doubao -> config.key.isNotBlank() &&
@@ -59,7 +62,7 @@ internal class AndroidUniversalRecognition(private val context: Context) {
         allowed: () -> Boolean, events: VoiceControlPorts.RecognitionEvents): VoiceControlRecognition {
         val closed = AtomicBoolean(false)
         val releaseFailure = AtomicReference<Throwable?>(null)
-        val dictation = AndroidDictation(context.applicationContext, ActivityVoiceAudio.gate)
+        val dictation = systemDictation()
         val input = object : VoiceControlRecognition {
             override fun closeAndDrain() {
                 closed.set(true)
@@ -87,12 +90,15 @@ internal class AndroidUniversalRecognition(private val context: Context) {
                     if (closed.get()) return
                     when (state.phase) {
                         VoicePhase.LISTENING -> if (live()) events.listening() else events.failed()
+                        VoicePhase.PREPARING -> if (state.detail == "recognition_final_pending") {
+                            if (live()) events.captureStopped() else events.failed()
+                        }
                         VoicePhase.FAILED, VoicePhase.CANCELLED -> {
                             if (state.detail == "recognizer_release_failed") releaseFailure.set(
                                 IllegalStateException("universal_recognizer_release_failed"))
                             events.failed()
                         }
-                        else -> Unit // End-of-speech/PREPARING is not a final result.
+                        else -> Unit // Only onResults/finalDraft supplies a final result.
                     }
                 }
             }, config.language, { !closed.get() && allowed() })
@@ -107,6 +113,7 @@ internal class AndroidUniversalRecognition(private val context: Context) {
             { !closed.get() && allowed() && offlineReady() }, AndroidOfflineSpeechDevice(context.applicationContext),
             object : OfflineSpeechSession.Events {
                 override fun listening() { if (!closed.get() && allowed()) events.listening() }
+                override fun captureStopped() { if (!closed.get() && allowed()) events.captureStopped() }
                 override fun partial(text: String) { if (!closed.get() && allowed()) events.partial(text) }
                 override fun complete(text: String) {
                     if (!closed.get() && allowed() && closed.compareAndSet(false, true)) events.finalResult(text)
@@ -202,6 +209,7 @@ internal class AndroidUniversalRecognition(private val context: Context) {
             if (!live() || !finishing.compareAndSet(false, true)) return
             main.removeCallbacks(ceiling)
             audio.closeAndDrain() // Stop/release capture before sending last; network remains open.
+            if (live()) events.captureStopped()
             frames.close()
         }
         private fun complete(text: String) {

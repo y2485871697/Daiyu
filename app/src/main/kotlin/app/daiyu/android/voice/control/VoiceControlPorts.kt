@@ -75,7 +75,10 @@ interface VoiceControlPorts {
     fun requestMicrophonePermission(permit: VoiceControlPermit)
     fun recognize(turn: VoiceControlTurn, events: RecognitionEvents): VoiceControlRecognition
     interface RecognitionEvents {
+        /** Authoritative capture start, never inferred from a hypothesis. */
         fun listening()
+        /** This turn stopped capturing, but still owns its pending final (not a final result). */
+        fun captureStopped()
         fun partial(text: String)
         /** Must mean a final result, not end-of-speech or the last partial. */
         fun finalResult(text: String)

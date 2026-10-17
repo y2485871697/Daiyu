@@ -1,5 +1,5 @@
 name: 代鱼构建
-run-name: ${{ inputs.mode == 'smoke' && format('代鱼双API补检 {0}', inputs.check_id) || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || '代鱼构建' }}
+run-name: ${{ inputs.mode == 'smoke' && format('代鱼双API补检 {0}', inputs.check_id) || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
 on:
   workflow_dispatch:
     inputs:
@@ -23,7 +23,7 @@ on:
         options: [all, unit, lint]
         default: all
       expected_sha:
-        description: 检查目标完整提交SHA（自动补检必填）
+        description: 构建或检查目标完整提交SHA（自动调度必填，手动可留空）
         type: string
         default: ''
       check_id:
@@ -116,6 +116,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+      - name: 核对完整构建源码身份
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         with:
           distribution: temurin

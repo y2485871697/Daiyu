@@ -1,20 +1,35 @@
-"""GitHub checks-only runner: exact revision, per-item exit codes and hashes."""
+"""GitHub revision guard and checks-only runner with per-item evidence."""
 import argparse
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import zipfile
 from evidence import SCOPES, UNIT_REPORTS, atomic_json, configuration, digest, verify_xml
 
 
+def verify_revision():
+    """Fail closed on dispatch drift; an empty manual target still binds checkout."""
+    expected = os.environ.get('EXPECTED_SHA', '')
+    if expected and not re.fullmatch(r'[0-9a-fA-F]{40}', expected):
+        raise ValueError('invalid_expected_sha')
+    github_sha = os.environ.get('GITHUB_SHA', '')
+    if not re.fullmatch(r'[0-9a-fA-F]{40}', github_sha):
+        raise ValueError('invalid_github_sha')
+    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+    if not re.fullmatch(r'[0-9a-fA-F]{40}', sha):
+        raise ValueError('invalid_checkout_sha')
+    if sha != github_sha or (expected and expected != sha):
+        raise ValueError('checkout_sha_mismatch')
+    return sha
+
+
 def run(scope):
+    sha = verify_revision()
     root = Path.cwd()
     output = root / 'cooperation-reports'
     output.mkdir(exist_ok=True)
-    sha = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-    if sha != os.environ['GITHUB_SHA'] or (os.environ.get('EXPECTED_SHA') and os.environ['EXPECTED_SHA'] != sha):
-        raise ValueError('checkout_sha_mismatch')
     config = configuration(root)
     tracked = subprocess.check_output(['git', 'ls-files', '-z']).decode().split('\0')
     source_hashes = {n: digest(root / n) for n in tracked if n}
@@ -63,8 +78,16 @@ def run(scope):
     return 0
 
 
-if __name__ == '__main__':
+def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--scope', choices=('all', 'unit', 'lint'), default='all')
-    args = parser.parse_args()
-    sys.exit(run(args.scope))
+    parser.add_argument('--verify-revision-only', action='store_true')
+    args = parser.parse_args(argv)
+    if args.verify_revision_only:
+        verify_revision()
+        return 0
+    return run(args.scope)
+
+
+if __name__ == '__main__':
+    sys.exit(main())

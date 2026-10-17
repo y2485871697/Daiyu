@@ -629,7 +629,7 @@ class ChatController internal constructor(private val application:Application,
                     else GenerationToolsCloseResult.Unknown("generation_parent_catalog_not_drained")
                 }
             }
-        }).also { entry.session = it }
+        }, originalEditor = entry.initialEditor).also { entry.session = it }
     }
 
     private fun stopGenerationParent(entry: GenerationEntry) {
@@ -664,7 +664,15 @@ class ChatController internal constructor(private val application:Application,
             val confirmed = entry.handoff.token ?: return false
             if (generationEntry !== entry || entry.submitted || entry.abandoned || closed ||
                 confirmed.preview.identity != entry.identity || !confirmed.preview.editor.matches(current) ||
-                entry.initialEditor.text != current.text || current.attachmentIds.isNotEmpty()) return false
+                entry.initialEditor.text != current.text || entry.initialEditor.attachmentIds.isNotEmpty()) return false
+            // These are immutable GENERATION form inputs, not ordinary chat draft attachments.
+            // Keep the draft prohibition above and require exact ordered, role-bound input IDs.
+            val batches = confirmed.preview.config.batches
+            if (batches.any { batch -> batch.items.any {
+                    !GenerationFormInputs.supported(batch.protocol, it.references, it.mask)
+                } } || current.attachmentIds != batches.flatMap { batch -> batch.items.flatMap {
+                    GenerationFormInputs.ids(it.references, it.mask)
+                } }) return false
             if (!confirmed.preview.config.batches.all { batch -> entry.settings.profiles.any { profile ->
                     profile.freeze(batch.id, batch.items).fingerprint == batch.fingerprint
                 } }) return false

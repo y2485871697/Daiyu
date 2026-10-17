@@ -253,6 +253,7 @@ private class TerminalSession(
                         if (block.optString("type") == "text") add(block.getString("text"))
                     }
                 }
+                ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI -> throw IllegalArgumentException("摘要模型尚不支持 ${protocol.wireName}")
                 ProviderProtocol.UNKNOWN -> throw ModelRequestException(ModelFailure.PROTOCOL)
             }
         }

@@ -52,7 +52,8 @@ data class SessionGatewayRule(
         private val RUNTIME_FIELDS = setOf(
             "model", "input", "messages", "tools", "stream", "store", "instructions", "system", "max_tokens",
             "max_output_tokens", "include", "previous_response_id", "conversation", "background", "tool_choice",
-            "parallel_tool_calls", "metadata", "service_tier", "reasoning", "temperature", "top_p", "stop_sequences"
+            "parallel_tool_calls", "metadata", "service_tier", "reasoning", "temperature", "top_p", "stop_sequences",
+            "contents", "systemInstruction", "generationConfig", "toolConfig", "stream_options", "n"
         )
 
         fun encode(rule: SessionGatewayRule): String = rule.toJson().toString()

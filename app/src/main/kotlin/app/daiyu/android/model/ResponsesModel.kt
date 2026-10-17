@@ -102,9 +102,9 @@ class ResponsesModel internal constructor(
                 settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools), ProviderProtocol.RESPONSES),
                 assistantInstructions,
             )
-            ReasoningRequestPolicy.validate(request, ProviderProtocol.RESPONSES)
             val finalUrl = settings.requestEndpoint()
             SessionGateway.applyResponses(request, finalUrl, settings.requestOptions.sessionGateway, sessionContext)
+            ReasoningRequestPolicy.validate(request, ProviderProtocol.RESPONSES)
             val sessionHeaders = SessionGateway.headers(finalUrl, sessionContext)
             // Video-only allowlist and exact history binding apply to the final merged payload
             // on EVERY round, before serialization/connect. Ordinary provider options stay flexible.

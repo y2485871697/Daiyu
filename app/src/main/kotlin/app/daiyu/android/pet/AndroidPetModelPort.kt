@@ -33,6 +33,7 @@ class AndroidPetModelPort internal constructor(
         when (settings.protocol) {
             ProviderProtocol.RESPONSES -> ResponsesModel(settings)
             ProviderProtocol.MESSAGES -> MessagesModel(settings, limit)
+            ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI -> error("Pet model does not yet support ${settings.protocol.wireName}")
             ProviderProtocol.UNKNOWN -> error("Unsupported pet protocol")
         }
     })
@@ -108,6 +109,7 @@ class AndroidPetModelPort internal constructor(
                 val options = when (resolved.settings.protocol) {
                     ProviderProtocol.RESPONSES -> ProviderRequestOptions("{\"max_output_tokens\":${frozenRequest.maxOutputTokens}}")
                     ProviderProtocol.MESSAGES -> ProviderRequestOptions()
+                    ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI -> error("Pet model does not yet support ${resolved.settings.protocol.wireName}")
                     ProviderProtocol.UNKNOWN -> error("Unsupported pet protocol")
                 }
                 resolved.copy(selection = resolved.selection.copy(), settings = resolved.settings.copy(

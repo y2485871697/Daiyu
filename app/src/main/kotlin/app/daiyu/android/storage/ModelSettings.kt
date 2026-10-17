@@ -35,6 +35,7 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
             require(responsesPath.isEmpty()) { "Messages 不使用 Responses 路径" }
             messagesEndpoint(endpoint)
         }
+        ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI -> app.daiyu.android.model.NativeCompletionRequest.endpoint(this)
         ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(protocol.wireName)
     }
     fun requestSnapshot(): ProviderSnapshot = ProviderSnapshot.capture(this)
@@ -123,10 +124,16 @@ class ModelSettingsStore internal constructor(
         if(supplied["protocol"] == "responses") after.remove("protocol")
         if(supplied.isNotEmpty()) {
             val protocol = after["protocol"] ?: "responses"
-            require(protocol == "responses" || protocol == "messages") { "模型协议无效" }
-            if(protocol == "messages") {
-                require(after["responses-path"] == null || after["responses-path"] == "") { "Messages 不使用 Responses 路径" }
-                (after["endpoint"] as? String)?.takeIf { it.isNotEmpty() }?.let { messagesEndpoint(it) }
+            require(protocol in setOf("responses", "messages", "chat_completions", "gemini")) { "模型协议无效" }
+            if(protocol != "responses") {
+                require(after["responses-path"] == null || after["responses-path"] == "") { "所选协议不使用 Responses 路径" }
+                (after["endpoint"] as? String)?.takeIf { it.isNotEmpty() }?.let {
+                    ModelSettings(it, after["model"] as? String ?: "restore-model", "validation-only", false,
+                        protocol = ProviderProtocol.entries.first { p -> p.wireName == protocol }).requestEndpoint()
+                }
+            }
+            if (protocol == "responses") (after["endpoint"] as? String)?.takeIf { it.isNotEmpty() }?.let {
+                responsesEndpoint(it, after["responses-path"] as? String ?: "")
             }
             // Backup data is not authorization to execute device tools.
             after["battery"] = false
@@ -185,6 +192,8 @@ class ModelSettingsStore internal constructor(
         else when(preferences.getString("protocol", null)) {
             "responses" -> ProviderProtocol.RESPONSES
             "messages" -> ProviderProtocol.MESSAGES
+            "chat_completions" -> ProviderProtocol.CHAT_COMPLETIONS
+            "gemini" -> ProviderProtocol.GEMINI
             else -> ProviderProtocol.UNKNOWN
         }
     } catch (_: Exception) { ProviderProtocol.UNKNOWN }
@@ -290,7 +299,7 @@ class ModelSettingsStore internal constructor(
             committed=preferences.edit().putString("endpoint",settings.endpoint).putString("model",settings.model)
                 .putString("responses-path",settings.responsesPath).putBoolean("device-status",settings.deviceStatusEnabled).putBoolean("battery",settings.batteryEnabled)
                 .apply {
-                    if(settings.protocol == ProviderProtocol.MESSAGES) putString("protocol", "messages")
+                    if(settings.protocol != ProviderProtocol.RESPONSES) putString("protocol", settings.protocol.wireName)
                     else remove("protocol")
                 }
                 .apply {
@@ -371,11 +380,15 @@ class ModelSettingsStore internal constructor(
                     require(value is Boolean) { "工具开关须为布尔值" }
                 } else {
                     require(value is String) { "配置字段须为文本" }
-                    if(name == "protocol") require(value == "responses" || value == "messages") { "模型协议无效" }
+                    if(name == "protocol") require(value in setOf("responses", "messages", "chat_completions", "gemini")) { "模型协议无效" }
                     require(value.length <= if(name == "model") 200 else 2000) { "配置字段过长" }
                     require(!value.contains('\n') && !value.contains('\r')) { "配置字段含非法换行" }
                     if(value.isNotEmpty()) when(name) {
-                        "endpoint" -> responsesEndpoint(value)
+                        "endpoint" -> {
+                            val uri = try { URI(value) } catch (_: Exception) { throw IllegalArgumentException("服务地址无效") }
+                            require(uri.scheme.equals("https", true) && !uri.host.isNullOrBlank() && uri.userInfo == null &&
+                                uri.query == null && uri.fragment == null && (uri.port == -1 || uri.port in 1..65535)) { "请输入无查询参数的 HTTPS 服务地址" }
+                        }
                         "responses-path" -> {
                             responsesEndpoint("https://restore.invalid", value)
                             require(!value.contains("..") && !URI(value).path.orEmpty().contains("..")) { "非法 Responses 路径" }

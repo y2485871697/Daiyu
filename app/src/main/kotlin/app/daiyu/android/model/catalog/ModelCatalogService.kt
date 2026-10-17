@@ -67,6 +67,8 @@ internal fun catalogRequest(settings: ModelSettings): RemoteModelRequest {
     val protocol = when (settings.protocol) {
         ProviderProtocol.RESPONSES -> RemoteModelProtocol.OPENAI
         ProviderProtocol.MESSAGES -> RemoteModelProtocol.ANTHROPIC
+        ProviderProtocol.CHAT_COMPLETIONS -> RemoteModelProtocol.OPENAI
+        ProviderProtocol.GEMINI -> RemoteModelProtocol.GEMINI
         ProviderProtocol.UNKNOWN -> throw RemoteModelException(RemoteModelFailure.REQUEST)
     }
     if (settings.apiKey.length > 8192 ||
@@ -78,11 +80,27 @@ internal fun catalogRequest(settings: ModelSettings): RemoteModelRequest {
         // Validate the configured authority before deriving exactly one same-origin resource.
         remoteModelsEndpoint(settings.endpoint, protocol)
         val path = uri.rawPath.orEmpty().trimEnd('/')
-        val suffix = if (settings.protocol == ProviderProtocol.RESPONSES) "/v1/responses" else "/v1/messages"
-        val inferenceSuffix = if (settings.protocol == ProviderProtocol.RESPONSES) "/responses" else "/messages"
-        val looksLikeInference = path.endsWith("/responses") || path.endsWith("/messages")
-        require(!looksLikeInference || path.endsWith(suffix))
-        val basePath = if (path.endsWith(suffix)) path.removeSuffix(inferenceSuffix) else path
+        val basePath = when (settings.protocol) {
+            ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES -> {
+                val suffix = if (settings.protocol == ProviderProtocol.RESPONSES) "/v1/responses" else "/v1/messages"
+                val inferenceSuffix = if (settings.protocol == ProviderProtocol.RESPONSES) "/responses" else "/messages"
+                val looksLikeInference = path.endsWith("/responses") || path.endsWith("/messages")
+                require(!looksLikeInference || path.endsWith(suffix))
+                if (path.endsWith(suffix)) path.removeSuffix(inferenceSuffix) else path
+            }
+            ProviderProtocol.CHAT_COMPLETIONS -> {
+                require(!path.endsWith("/responses") && !path.endsWith("/messages"))
+                path.removeSuffix("/chat/completions")
+            }
+            ProviderProtocol.GEMINI -> {
+                require(!path.endsWith("/responses") && !path.endsWith("/messages") && !path.endsWith("/chat/completions"))
+                if (path.contains("/models/")) {
+                    require(path.endsWith(":streamGenerateContent"))
+                    path.substringBeforeLast("/models/")
+                } else path
+            }
+            ProviderProtocol.UNKNOWN -> throw IllegalArgumentException("Unknown protocol")
+        }
         "${uri.scheme}://${uri.rawAuthority}$basePath"
     } catch (_: Exception) { throw RemoteModelException(RemoteModelFailure.INVALID_ENDPOINT) }
     // The inference-only model, body policy and responsesPath do not select a catalogue URL.

@@ -35,7 +35,7 @@ data class RootScopeLaunch internal constructor(val rootfs: File, val su: File, 
         require(su.isAbsolute && su.toPath().normalize() == su.toPath() && su.isFile)
     }
     companion object {
-        private val transportPaths = listOf("/system/bin/su", "/system/bin/chroot", "/system/bin/env")
+        private val transportPaths = listOf("/system/bin/su", "/system/bin/chroot", "/system/bin/env", "/system/bin/sh")
         internal fun isFixedTransport(file: File): Boolean = file.path in transportPaths
         internal fun trustedTransportIdentity(file: File): String {
             require(isFixedTransport(file))

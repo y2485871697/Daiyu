@@ -3672,54 +3672,53 @@ class ChatController internal constructor(private val application:Application,
     }
     internal fun exportUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver) {
         dataTask(work={
-            val text=if(complete) {
-                neutralBackup.exportPackage(settings.nonSecretConfiguration())
-            } else database.exportBackup()
-            resolver.openOutputStream(uri,"wt")?.use {
-                it.write(text.toByteArray(Charsets.UTF_8))
-            } ?: throw java.io.IOException("无法打开目标")
+            if(complete) {
+                neutralBackup.prepareExport(settings.nonSecretConfiguration()).use { prepared ->
+                    resolver.openOutputStream(uri,"wt")?.use { prepared.writeTo(it) }
+                        ?: throw java.io.IOException("无法打开目标")
+                }
+            } else {
+                val text=database.exportBackup()
+                resolver.openOutputStream(uri,"wt")?.use { target -> target.writer(Charsets.UTF_8).apply { write(text); flush() } }
+                    ?: throw java.io.IOException("无法打开目标")
+            }
             if(complete) "完整中立备份已导出；不含凭据或系统授权，请妥善保管"
             else "纯文本兼容备份已导出；不含附件、归档与分支元数据"
         })
     }
     internal fun exportConversationBackup(uri:Uri,conversationId:ConversationId,resolver:android.content.ContentResolver=application.contentResolver) {
         dataTask(work={
-            val text=neutralBackup.exportConversation(conversationId)
-            resolver.openOutputStream(uri,"wt")?.use {
-                it.write(text.toByteArray(Charsets.UTF_8))
-            } ?: throw java.io.IOException("无法打开目标")
+            neutralBackup.prepareExport(emptyMap(),conversationId).use { prepared ->
+                resolver.openOutputStream(uri,"wt")?.use { prepared.writeTo(it) }
+                    ?: throw java.io.IOException("无法打开目标")
+            }
             "单会话中立备份已导出；不含全局草稿、配置、凭据或运行恢复状态，请妥善保管"
         })
     }
     internal fun importUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver) {
         dataTask(importing=true,work={
-            val stream=resolver.openInputStream(uri)
-                ?: throw java.io.IOException("无法打开备份")
-            val text=stream.use { readBackupText(it,if(complete) 112L*1024*1024 else 16L*1024*1024) }
             if(complete) {
-                val result=neutralBackup.importPackage(text)
+                val result=neutralBackup.importPackageFrom {
+                    resolver.openInputStream(uri) ?: throw java.io.IOException("无法打开备份")
+                }
                 val inventory=result.inventory
-                if(result.alreadyImported) "此完整备份已导入过；未重复追加，未执行历史请求"
+                val summary=if(result.alreadyImported) "此完整备份已导入过；未重复追加，未执行历史请求"
                 else "已导入${inventory.conversations}个会话、${inventory.messages}条消息、"+
                     "${inventory.branches}个分支、${inventory.archives}个归档、${inventory.attachments}个附件；"+
                     "非秘密配置仅保存为备份元数据，未执行历史请求"
+                result.cleanupProblem?.let { "$summary；$it" } ?: summary
             } else {
+                val text=(resolver.openInputStream(uri) ?: throw java.io.IOException("无法打开备份")).use {
+                    readBackupText(it,16L*1024*1024)
+                }
                 val counts=database.importBackup(text)
                 "已导入${counts.first}个会话、${counts.second}条消息；未执行历史请求"
             }
         })
     }
     internal fun readBackupText(stream:java.io.InputStream,limit:Long):String {
-        val out=java.io.ByteArrayOutputStream();val buffer=ByteArray(8192)
-        while(true) {
-            val count=stream.read(buffer);if(count<0) break
-            require(out.size().toLong()+count<=limit)
-            out.write(buffer,0,count)
-        }
-        return Charsets.UTF_8.newDecoder()
-            .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
-            .decode(java.nio.ByteBuffer.wrap(out.toByteArray())).toString()
+        require(limit in 1..Int.MAX_VALUE.toLong())
+        return app.daiyu.android.context.Utf8Payload.read(stream,limit.toInt())
     }
     /** Destructive owner boundary used by both conversation deletion and delete-all in Main.
      * Seal is only in-memory under the short admission lock. Waiting for publications, closing

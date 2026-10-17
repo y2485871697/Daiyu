@@ -27,6 +27,11 @@ class CompletionProjectionActivityTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
         session.release.countDown()
         awaitControl("durable terminal") { fixture.controller.active == null }
+        awaitControl("completed retained pane projection") {
+            pane().historyConversations.singleOrNull {
+                it.id == owner.conversationId.value
+            }?.hasCompletionMarker == true
+        }
         ui.waitForIdle()
         val id = owner.conversationId
         lateinit var old: ConversationCompletionMarkers.Receipt
@@ -61,6 +66,9 @@ class CompletionProjectionActivityTest : WiredActivityTestCase() {
             ConversationCompletionMarkers.read(fixture.database.readableDatabase, id) == null
         }
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        awaitControl("acknowledged retained pane projection") {
+            pane().historyConversations.singleOrNull { it.id == id.value }?.hasCompletionMarker == false
+        }
         mainThread { assertFalse(pane().historyConversations.single { it.id == id.value }.hasCompletionMarker) }
         assertEquals(1, fixture.opens.get()) // Reading never sends/replays a request.
     }

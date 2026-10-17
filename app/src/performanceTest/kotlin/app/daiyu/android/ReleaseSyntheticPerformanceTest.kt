@@ -167,7 +167,8 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
 
 private class PerformanceFixture(private val base: Context, id: String) : AutoCloseable {
     private val prefix = "performance-$id-"
-    private val root = File(base.cacheDir, "performance-fixture-$id").apply { check(mkdirs()) }
+    private var controllerConstructionStarted = false
+    private val root = File(base.cacheDir, "performance-fixture-$id")
     private val databases = java.util.Collections.synchronizedSet(linkedSetOf<String>())
     private val preferences = java.util.Collections.synchronizedSet(linkedSetOf<String>())
     private val isolated = object : ContextWrapper(base) {
@@ -188,25 +189,62 @@ private class PerformanceFixture(private val base: Context, id: String) : AutoCl
         init { attachBaseContext(base) }
         override fun getApplicationContext(): Context = this
     }
-    private val application = FixtureApplication(isolated)
-    val database = ConversationDatabase(application)
-    private val surfaces = TaskSurfaceStore(object : TaskSurfacePersistence {
-        private var record: String? = null
-        @Synchronized override fun read() = record
-        @Synchronized override fun write(record: String) { this.record = record }
-    }).apply { check(save(TaskSurfacePreference.FOREGROUND)) }
-    val controller = ChatController(application, database,
-        ModelSettingsStore(application, "app.daiyu.android.synthetic.performance.$id"),
-        application.getSharedPreferences("conversation-ui", 0),
-        { error("external_model_request_forbidden") }, taskSurfaceStore = surfaces)
+    lateinit var database: ConversationDatabase
+        private set
+    lateinit var controller: ChatController
+        private set
+
+    init {
+        try {
+            check(root.mkdirs())
+            val application = FixtureApplication(isolated)
+            database = ConversationDatabase(application)
+            val surfaces = TaskSurfaceStore(object : TaskSurfacePersistence {
+                private var record: String? = null
+                @Synchronized override fun read() = record
+                @Synchronized override fun write(record: String) { this.record = record }
+            }).apply { check(save(TaskSurfacePreference.FOREGROUND)) }
+            val modelSettings = ModelSettingsStore(application, "app.daiyu.android.synthetic.performance.$id")
+            val uiPreferences = application.getSharedPreferences("conversation-ui", 0)
+            controllerConstructionStarted = true
+            controller = ChatController(application, database, modelSettings, uiPreferences,
+                { error("external_model_request_forbidden") }, taskSurfaceStore = surfaces)
+        } catch (failure: Throwable) {
+            try { close() } catch (cleanup: Throwable) {
+                if (cleanup !== failure) failure.addSuppressed(cleanup)
+            }
+            throw failure
+        }
+    }
+
     override fun close() {
-        controller.close()
+        if (::controller.isInitialized) {
+            check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) {
+                "synthetic_fixture_close_requires_worker"
+            }
+            controller.close()
+        } else {
+            check(!controllerConstructionStarted) { "synthetic_controller_construction_drain_unconfirmed" }
+        }
+        var failure: Throwable? = null
+        fun attempt(action: () -> Unit) {
+            try { action() } catch (caught: Throwable) {
+                val first = failure
+                if (first == null) failure = caught else if (first !== caught) first.addSuppressed(caught)
+            }
+        }
+        attempt { if (::database.isInitialized) database.close() }
         synchronized(databases) { databases.toList() }.forEach { name ->
-            check(!base.getDatabasePath(name).exists() || base.deleteDatabase(name)) { "synthetic_database_cleanup_failed" }
+            attempt {
+                check(!base.getDatabasePath(name).exists() || base.deleteDatabase(name)) {
+                    "synthetic_database_cleanup_failed"
+                }
+            }
         }
         synchronized(preferences) { preferences.toList() }.forEach { name ->
-            check(base.deleteSharedPreferences(name)) { "synthetic_preferences_cleanup_failed" }
+            attempt { check(base.deleteSharedPreferences(name)) { "synthetic_preferences_cleanup_failed" } }
         }
-        check(root.deleteRecursively()) { "synthetic_cache_cleanup_failed" }
+        attempt { check(!root.exists() || root.deleteRecursively()) { "synthetic_cache_cleanup_failed" } }
+        failure?.let { throw it }
     }
 }

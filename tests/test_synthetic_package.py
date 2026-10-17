@@ -1,6 +1,7 @@
 """No APK build or installation: isolated manifest/signature binding contracts."""
 import importlib.util
 import json
+import re
 from pathlib import Path
 import sys
 import tempfile
@@ -51,6 +52,14 @@ class SyntheticPackageTests(unittest.TestCase):
             (APP, TEST.replace('android.test.InstrumentationTestRunner', 'other.Runner')),
             (APP, TEST.replace('</manifest>', '<instrumentation/></manifest>')),
             (APP, TEST.replace('</manifest>', '<application><provider android:authorities="app.daiyu.android.provider"/></application></manifest>')),
+            (APP, TEST.replace('package="app.daiyu.android.synthetic.test"', 'package="app.daiyu.android.test"')),
+            (APP, TEST.replace('package="app.daiyu.android.synthetic.test"',
+                'android:sharedUserId="app.daiyu.android" package="app.daiyu.android.synthetic.test"')),
+            (APP, TEST[:TEST.index('<instrumentation')] + '</manifest>'),
+            (APP[:APP.index('<application')] + '</manifest>', TEST),
+            (APP.replace('android:authorities="app.daiyu.android.synthetic.shizuku"', ''), TEST),
+            (APP.replace('app.daiyu.android.synthetic.shizuku',
+                'app.daiyu.android.synthetic.shizuku;app.daiyu.android.provider'), TEST),
         ]:
             with self.subTest(app=app, tests=tests), self.assertRaises(ValueError):
                 package.verify_manifests(app, tests)
@@ -61,6 +70,7 @@ class SyntheticPackageTests(unittest.TestCase):
         package.verify_manifests(release, TEST, variant='release-synthetic')
         for app in (APP, release.replace('debuggable="false"', 'debuggable="true"'),
                     release.replace('shell="true"', 'shell="false"'),
+                    release.replace(' android:shell="true"', ''),
                     release.replace('<profileable android:shell="true"/>',
                                     '<profileable android:shell="true"/><profileable android:shell="true"/>'),
                     release.replace('package="app.daiyu.android.synthetic"', 'package="app.daiyu.android"'),
@@ -119,3 +129,17 @@ class SyntheticPackageTests(unittest.TestCase):
         self.assertIn('verify_synthetic_package.py', synthetic)
         self.assertNotIn('verify_signing.py', synthetic)
         self.assertIn('name: 代鱼开发包', build)
+
+    def test_performance_source_and_entry_count(self):
+        root = ROOT / 'app/src/performanceTest'
+        manifest = root / 'AndroidManifest.xml'
+        self.assertTrue(manifest.is_file())
+        sources = sorted((root / 'kotlin').rglob('*.kt'))
+        names = {path.name for path in sources}
+        self.assertTrue({'ReleaseSyntheticPerformanceTest.kt', 'SyntheticFrameCollector.kt'} <= names)
+        entry = next(path for path in sources if path.name == 'ReleaseSyntheticPerformanceTest.kt').read_text()
+        self.assertRegex(entry, r'class\s+ReleaseSyntheticPerformanceTest\s*:\s*InstrumentationTestCase\(\)')
+        entries = [(path.name, name) for path in sources for name in
+                   re.findall(r'^\s*fun\s+(test\w+)\s*\(\s*\)', path.read_text(), re.MULTILINE)]
+        self.assertEqual([('ReleaseSyntheticPerformanceTest.kt',
+                           'testCollectRawFramesAndSyntheticInputUpperBounds')], entries)

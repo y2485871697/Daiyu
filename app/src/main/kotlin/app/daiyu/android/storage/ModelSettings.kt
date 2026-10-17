@@ -91,6 +91,11 @@ class ModelSettingsStore internal constructor(
     /** Read-only, network/credential-free. Does not resurrect a deleted provider or migrate defaults. */
     internal fun localModelCatalogSnapshot(): SavedModelCatalogSnapshot<CatalogModelParameters>? = modelCatalog.current()
 
+    /** Directory browsing needs only the protocol, never key decryption or execution readiness. */
+    internal fun localModelCatalogProtocol(): ProviderProtocol = synchronized(lock) {
+        readProtocol().also { check(it != ProviderProtocol.UNKNOWN) { "模型协议无效；请到模型设置重新选择" } }
+    }
+
     /** Worker-only strict path: UI must retain this ticket from the displayed local snapshot. */
     internal fun selectCatalogModel(expected: ModelSettings, selection: CatalogModelSelection<CatalogModelParameters>): Unit =
         modelCatalog.consumeSelection(selection) { record -> synchronized(lock) {

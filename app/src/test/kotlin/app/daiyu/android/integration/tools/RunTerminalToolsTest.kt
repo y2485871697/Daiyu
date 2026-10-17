@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Real central owner/authorization/ledger; deterministic transports, no shell or network. */
 class RunTerminalToolsTest {
+    private val hostCwd = File(System.getProperty("java.io.tmpdir")).absoluteFile.toPath().normalize().toFile()
     private fun message() = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
 
@@ -72,9 +73,9 @@ class RunTerminalToolsTest {
         generation: String = "generation",
         input: ByteArray = "printf approved\n".toByteArray(),
         sequence: Long = 41,
-        launch: TerminalPtyLaunch = TerminalPtyLaunch.Android(listOf("/system/bin/sh"), mapOf("PATH" to "/system/bin"), File("/tmp")),
+        launch: TerminalPtyLaunch = TerminalPtyLaunch.Android(listOf("/system/bin/sh"), mapOf("PATH" to "/system/bin"), hostCwd),
     ) = TerminalPtyPlan(ConversationId("conversation"), "session", "run", "environment", generation, launch,
-        File("/tmp/terminal-test-journal"), "scope", listOf(
+        File(hostCwd, "terminal-test-journal"), "scope", listOf(
             TerminalPtyStep.Open("open"), TerminalPtyStep.Input("input", "host_request", sequence, input),
             TerminalPtyStep.Resize("resize", "host_resize", 90, 30, 100),
         ), listOf(TerminalPtyRead("page", 0, 1024)))
@@ -221,7 +222,7 @@ class RunTerminalToolsTest {
         val input = "printf approved\n".toByteArray()
         val argv = mutableListOf("/system/bin/sh")
         val env = mutableMapOf("PATH" to "/system/bin")
-        val launch = TerminalPtyLaunch.Android(argv, env, File("/tmp"))
+        val launch = TerminalPtyLaunch.Android(argv, env, hostCwd)
         val plan = plan(input = input, launch = launch)
         val originalEffect = plan.effects.getValue("input")
         input.fill(0); argv[0] = "/different"; env["PATH"] = "/different"
@@ -251,7 +252,7 @@ class RunTerminalToolsTest {
         assertNotEquals(original, plan(generation = "other").effects)
         assertNotEquals(original, plan(input = "different\n".toByteArray()).effects)
         assertNotEquals(original, plan(sequence = 42).effects)
-        assertNotEquals(original, plan(launch = TerminalPtyLaunch.Android(listOf("/other/sh"), emptyMap(), File("/tmp"))).effects)
+        assertNotEquals(original, plan(launch = TerminalPtyLaunch.Android(listOf("/other/sh"), emptyMap(), hostCwd)).effects)
     }
 
     /** Real dispatcher-issued context, with cancellation gated only at the binding entry.
@@ -581,7 +582,7 @@ class RunTerminalToolsTest {
     @Test fun nonMonotonicOrReusedControlSequencesAreRejectedBeforeApproval() {
         try {
             TerminalPtyPlan(ConversationId("conversation"), "session", "run", "environment", "generation",
-                TerminalPtyLaunch.Android(listOf("/system/bin/sh"), emptyMap(), File("/tmp")), File("/tmp/journal"), "scope",
+                TerminalPtyLaunch.Android(listOf("/system/bin/sh"), emptyMap(), hostCwd), File(hostCwd, "journal"), "scope",
                 listOf(TerminalPtyStep.Open("open"), TerminalPtyStep.Resize("resize", "one", 0, 24, 80),
                     TerminalPtyStep.Interrupt("interrupt", "two", 0)))
             fail("reused control sequence accepted")

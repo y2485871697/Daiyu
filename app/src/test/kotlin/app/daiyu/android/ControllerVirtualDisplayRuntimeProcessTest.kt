@@ -33,10 +33,10 @@ class ControllerVirtualDisplayRuntimeProcessTest {
     @Test fun liveLeaseExcludesAnotherProcessEvenAfterSameProcessGateRejection() = withDirectory { base ->
         val root = base.resolve("leases")
         val gate = Semaphore(1)
-        val store = LeaseStore({ root }, gate)
+        val store = LeaseStore({ root }, gate, fileSystem(base))
         val lease = store.reserve(::processPlan)
         assertEquals(23, RuntimeChildJvm.probe(base, root.resolve("lease.lock")))
-        assertThrows(IOException::class.java) { LeaseStore({ root }, gate).reserve(::processPlan) }
+        assertThrows(IOException::class.java) { LeaseStore({ root }, gate, fileSystem(base)).reserve(::processPlan) }
         // Independent OS probe, not lease.durable / semaphore state, detects dropped POSIX locks.
         assertEquals(23, RuntimeChildJvm.probe(base, root.resolve("lease.lock")))
         lease.releaseAfterDrain()
@@ -58,7 +58,7 @@ class ControllerVirtualDisplayRuntimeProcessTest {
                         var prepared = false
                         val before = snapshot(root)
                         assertThrows(IOException::class.java) {
-                            LeaseStore({ root }, blockedGate).reserve { prepared = true; processPlan(it) }
+                            LeaseStore({ root }, blockedGate, fileSystem(base)).reserve { prepared = true; processPlan(it) }
                         }
                         assertFalse(prepared) // a different process gate cannot bypass the OS lock
                         assertEquals(0, blockedGate.availablePermits())
@@ -69,7 +69,7 @@ class ControllerVirtualDisplayRuntimeProcessTest {
                 assertEquals(0, RuntimeChildJvm.probe(base, root.resolve("lease.lock")))
                 val before = snapshot(root)
                 val gate = Semaphore(1) // independent of the exited writer's in-memory gate
-                val reopened = LeaseStore({ root }, gate)
+                val reopened = LeaseStore({ root }, gate, fileSystem(base))
                 if (mode == "released") {
                     val next = reopened.reserve(::processPlan)
                     assertFalse(before.keys.any { it.startsWith(next.directory.fileName.toString() + "/") })
@@ -95,7 +95,7 @@ class ControllerVirtualDisplayRuntimeProcessTest {
         val directory = System.getProperty("r08.child.root") ?: return
         val root = Path.of(directory)
         val mode = System.getProperty("r08.child.mode")
-        val store = LeaseStore({ root }, Semaphore(1)) { mutation, point ->
+        val store = LeaseStore({ root }, Semaphore(1), fileSystem(root.parent)) { mutation, point ->
             if (mutation == Mutation.RESERVE && point.name == mode) throw IOException("injected")
         }
         val lease = if (mode in setOf("active", "released")) store.reserve(::processPlan) else {
@@ -110,14 +110,17 @@ class ControllerVirtualDisplayRuntimeProcessTest {
     }
 
     private fun snapshot(root: Path): Map<String, List<Byte>> = Files.walk(root).use { paths ->
-        paths.filter { Files.isRegularFile(it) }.toList().associate {
-            root.relativize(it).toString() to Files.readAllBytes(it).toList()
+        paths.filter { Files.isRegularFile(it) && it.fileName.toString() != "lease.lock" }.toList().associate {
+            root.relativize(it).joinToString("/") { part -> part.toString() } to Files.readAllBytes(it).toList()
         }
     }
 
+    private val fileSystems = mutableMapOf<Path, R08HostFileSystemFixture>()
+    private fun fileSystem(base: Path) = fileSystems.getOrPut(base) { R08HostFileSystemFixture(base) }
     private fun withDirectory(block: (Path) -> Unit) {
         val base = Files.createTempDirectory("r08-child-").toRealPath()
         try { block(base) } finally {
+            fileSystems.remove(base)?.close()
             Files.walk(base).use { paths ->
                 paths.sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) }
             }
@@ -185,9 +188,22 @@ internal object RuntimeChildJvm {
         }
         val inherited = System.getProperties().stringPropertyNames().filter { it.startsWith("robolectric.") }
             .map { "-D$it=${System.getProperty(it)}" }
-        return ProcessBuilder(listOf(Path.of(System.getProperty("java.home"), "bin", "java").toString()) +
-            inherited + properties + listOf("-cp", paths.joinToString(File.pathSeparator),
-            RuntimeChildJvmMain::class.java.name) + args)
+        val executable = Path.of(System.getProperty("java.home"), "bin",
+            if (System.getProperty("os.name").startsWith("Windows", true)) "java.exe" else "java")
+        val arguments = inherited + properties + listOf("-cp", paths.joinToString(File.pathSeparator),
+            RuntimeChildJvmMain::class.java.name) + args
+        fun encode(value: String): String {
+            require(value.none { it == '\u0000' || it == '\r' || it == '\n' })
+            return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+        }
+        val argumentFile = Files.createTempFile(log.parent, "r08-jvm-", ".args")
+        val charset = java.nio.charset.Charset.forName(System.getProperty("native.encoding", "UTF-8"))
+        val encoder = charset.newEncoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+            .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+        java.io.OutputStreamWriter(Files.newOutputStream(argumentFile), encoder).use { writer ->
+            arguments.forEach { writer.write(encode(it)); writer.write("\n") }
+        }
+        return ProcessBuilder(executable.toString(), "@${argumentFile.toAbsolutePath()}")
             .redirectErrorStream(true).redirectOutput(log.toFile()).start()
     }
 }

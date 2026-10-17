@@ -17,16 +17,27 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
+import org.robolectric.shadows.ShadowAccessibilityNodeInfo
 import org.robolectric.annotation.LooperMode
 import org.robolectric.util.ReflectionHelpers
 import org.robolectric.util.ReflectionHelpers.ClassParameter
 
 /** Exercises the real runtime/gate/traversal/callback path, not a second model of its policy. */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [30])
+@Config(sdk = [30], shadows = [GuiRuntimeScreenshotTest.CopyingWindowNodeShadow::class])
 @LooperMode(LooperMode.Mode.PAUSED)
 @Suppress("DEPRECATION")
 class GuiRuntimeScreenshotTest {
+    // A caller owns the returned window, not the node shadow's backing instance.
+    @Implements(AccessibilityNodeInfo::class)
+    class CopyingWindowNodeShadow : ShadowAccessibilityNodeInfo() {
+        @Implementation
+        public override fun getWindow(): AccessibilityWindowInfo? =
+            super.getWindow()?.let { AccessibilityWindowInfo.obtain(it) }
+    }
+
     private lateinit var service: GuiAccessibilityService
     private lateinit var session: GuiRunSession
     private lateinit var platform: Platform
@@ -101,7 +112,7 @@ class GuiRuntimeScreenshotTest {
                 packageName = pkg; className = "View"; this.text = text
                 isEnabled = true; isVisibleToUser = true; isClickable = true
                 setBoundsInScreen(Rect(0, 0, 100, 100))
-                ReflectionHelpers.setField(this, "mWindowId", windowId)
+                ReflectionHelpers.setField(this, "mWindowId", this@Platform.windowId)
                 shadowOf(this).setAccessibilityWindowInfo(window)
                 shadowOf(this).setRefreshReturnValue(true)
                 shadowOf(this).setOnPerformActionListener { _, _ -> nodeActions++; true }
@@ -141,6 +152,10 @@ class GuiRuntimeScreenshotTest {
             assertTrue(session.approveExactActionFromUser(it) is GuiResult.Value)
         }
     private fun screenshot(observation: GuiObservation) = GuiRuntime.screenshot(session.lease, observation.observationId)
+    private fun <T> java.util.concurrent.CompletableFuture<T>.completed(): T {
+        assertTrue("Expected completion; callbacks=${platform.callbacks.size}, encoderTasks=${worker.tasks.size}", isDone)
+        return get(1, java.util.concurrent.TimeUnit.SECONDS)
+    }
     private fun rejected(result: GuiResult<*>, code: String) { assertEquals(GuiResult.Rejected(code), result) }
     private fun assertDisposed(frame: Frame) { assertEquals(listOf("software", "hardware", "buffer"), frame.disposed) }
 
@@ -160,13 +175,36 @@ class GuiRuntimeScreenshotTest {
         assertTrue(shadowOf(service).globalActionsPerformed.isEmpty())
     }
 
+    @Test fun recyclingReturnedWindowDoesNotInvalidateFixtureNodeWindowIds() {
+        platform.windowId = 41
+        val root = checkNotNull(platform.root(service))
+        try {
+            val child = checkNotNull(root.getChild(0))
+            try {
+                val first = checkNotNull(root.window)
+                try {
+                    assertEquals(41, first.id)
+                    assertEquals(AccessibilityWindowInfo.TYPE_APPLICATION, first.type)
+                    assertTrue(first.isActive)
+                    assertEquals(0, first.displayId)
+                } finally { first.recycle() }
+                assertEquals(41, root.windowId)
+                assertEquals(41, child.windowId)
+                val second = checkNotNull(child.window)
+                try { assertEquals(41, second.id) } finally { second.recycle() }
+                assertEquals(41, root.windowId)
+                assertEquals(41, child.windowId)
+            } finally { child.recycle() }
+        } finally { root.recycle() }
+    }
+
     @Test fun liveSelfTokenAllowsOnlyTheOwnApplicationTreeExactNodeActionAndScreenshot() {
         openSelf()
         val observation = observe(); val action = approve(observation)
         assertEquals(service.packageName, observation.packageName)
         assertTrue(session.validateExactActionFromUser(action) is GuiResult.Value)
         val future = screenshot(observation); val frame = platform.success(); worker.runAll()
-        assertTrue(future.join() is GuiResult.Value); assertDisposed(frame)
+        assertTrue(future.completed() is GuiResult.Value); assertDisposed(frame)
         assertEquals(GuiResult.Value("PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED"), GuiRuntime.action(session.lease, action))
         assertEquals(1, platform.nodeActions)
         assertTrue(shadowOf(service).globalActionsPerformed.isEmpty())
@@ -215,7 +253,7 @@ class GuiRuntimeScreenshotTest {
         platform.pkg = "chosen.app"
         val observation = observe()
         platform.pkg = "external.app"
-        rejected(screenshot(observation).join(), "SCREENSHOT_TREE_UNVERIFIABLE")
+        rejected(screenshot(observation).completed(), "SCREENSHOT_TREE_UNVERIFIABLE")
         rejected(GuiRuntime.validateExactTarget(session.lease, GuiAction(observation.observationId, GuiOperation.TAP, 1)),
             "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
         assertTrue(platform.callbacks.isEmpty()); assertNoActions()
@@ -237,7 +275,7 @@ class GuiRuntimeScreenshotTest {
         val observation = observe(); val action = approve(observation)
         platform.pkg = "external.app"
         rejected(GuiRuntime.action(session.lease, action), "SELF_APP_TARGET_LOST")
-        rejected(screenshot(observation).join(), "SELF_APP_TARGET_LOST")
+        rejected(screenshot(observation).completed(), "SELF_APP_TARGET_LOST")
         assertNull(session.lease.observation); assertTrue(session.lease.actions.isEmpty())
         assertEquals(1, session.lease.screenshots)
         // Returning to self does not resurrect the old node/id/approval.
@@ -251,7 +289,7 @@ class GuiRuntimeScreenshotTest {
         val observation = observe(); val action = approve(observation)
         platform.pkg = "external.app"; GuiRuntime.changed(service)
         rejected(GuiRuntime.action(session.lease, action), "SELF_APP_TARGET_LOST")
-        rejected(screenshot(observation).join(), "SELF_APP_TARGET_LOST")
+        rejected(screenshot(observation).completed(), "SELF_APP_TARGET_LOST")
         assertTrue(platform.callbacks.isEmpty()); assertNoActions()
     }
 
@@ -266,7 +304,7 @@ class GuiRuntimeScreenshotTest {
             val observation = observe(); val action = approve(observation)
             loseTarget(platform)
             rejected(GuiRuntime.action(session.lease, action), "SELF_APP_TARGET_LOST")
-            rejected(screenshot(observation).join(), "SELF_APP_TARGET_LOST")
+            rejected(screenshot(observation).completed(), "SELF_APP_TARGET_LOST")
             assertTrue(platform.callbacks.isEmpty()); assertNoActions()
         }
     }
@@ -282,7 +320,7 @@ class GuiRuntimeScreenshotTest {
         admitted = false
         rejected(GuiRuntime.action(session.lease, action), "SELF_APP_TARGET_LOST")
         rejected(session.previewFromUser(), "SELF_APP_TARGET_LOST")
-        rejected(screenshot(observation).join(), "SELF_APP_TARGET_LOST")
+        rejected(screenshot(observation).completed(), "SELF_APP_TARGET_LOST")
         admitted = true; current = false // run.end / original surface owner is no longer current
         rejected(session.approveReadsFromUser(GuiReadApproval(1, 1)), "SELF_APP_TARGET_LOST")
         assertTrue(platform.callbacks.isEmpty()); assertNoActions()
@@ -293,11 +331,11 @@ class GuiRuntimeScreenshotTest {
         val observation = observe(); val action = approve(observation)
         platform.screenUnlocked = false
         rejected(GuiRuntime.action(session.lease, action), "SCREEN_LOCKED_NOT_EXECUTED")
-        rejected(screenshot(observation).join(), "SCREEN_LOCKED_NOT_EXECUTED")
+        rejected(screenshot(observation).completed(), "SCREEN_LOCKED_NOT_EXECUTED")
         platform.screenUnlocked = true; platform.permissionEnabled = false
         rejected(GuiRuntime.action(session.lease, action), "SERVICE_PERMISSION_REVOKED_NOT_EXECUTED")
         assertFalse(session.lease.valid)
-        rejected(screenshot(observation).join(), "SERVICE_DISCONNECTED_NOT_EXECUTED")
+        rejected(screenshot(observation).completed(), "SERVICE_DISCONNECTED_NOT_EXECUTED")
         assertTrue(platform.callbacks.isEmpty()); assertNoActions()
     }
 
@@ -307,7 +345,7 @@ class GuiRuntimeScreenshotTest {
         val frame = platform.success()
         platform.pkg = "external.app"
         worker.runAll()
-        rejected(future.join(), "SELF_APP_TARGET_LOST"); assertDisposed(frame)
+        rejected(future.completed(), "SELF_APP_TARGET_LOST"); assertDisposed(frame)
         session.close(); assertTrue(session.releaseConfirmed)
         assertNoActions()
     }
@@ -318,7 +356,7 @@ class GuiRuntimeScreenshotTest {
         val observation = observe(); val future = screenshot(observation)
         current = false
         val frame = platform.success()
-        rejected(future.join(), "SELF_APP_TARGET_LOST")
+        rejected(future.completed(), "SELF_APP_TARGET_LOST")
         assertEquals(0, frame.encoded); assertDisposed(frame)
         session.close(); assertTrue(session.releaseConfirmed); assertNoActions()
     }
@@ -330,7 +368,7 @@ class GuiRuntimeScreenshotTest {
         worker.runAll(deliver = false)
         current = false
         shadowOf(Looper.getMainLooper()).idle()
-        rejected(future.join(), "SELF_APP_TARGET_LOST"); assertDisposed(frame)
+        rejected(future.completed(), "SELF_APP_TARGET_LOST"); assertDisposed(frame)
         session.close(); assertTrue(session.releaseConfirmed); assertNoActions()
     }
 
@@ -400,7 +438,7 @@ class GuiRuntimeScreenshotTest {
         session.close(); assertFalse(session.releaseConfirmed)
         rejected(GuiRuntime.openForUser(GuiOwner("replacement", "run")), "FOREGROUND_DRAIN_PENDING_NOT_EXECUTED")
         worker.runAll()
-        rejected(future.join(), "GUI_AUTHORIZATION_REVOKED"); assertDisposed(frame)
+        rejected(future.completed(), "GUI_AUTHORIZATION_REVOKED"); assertDisposed(frame)
         assertTrue(session.releaseConfirmed)
         openTarget(null)
         rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
@@ -408,29 +446,29 @@ class GuiRuntimeScreenshotTest {
     }
 
     @Test fun windowChangesWithoutAnEventRefuseBeforePlatformSubmission() {
-        val observation = observe(); platform.windowId++
-        rejected(screenshot(observation).join(), "SCREENSHOT_WINDOW_CHANGED")
+        val observation = observe(); assertEquals(platform.windowId, observation.windowId); platform.windowId++
+        rejected(screenshot(observation).completed(), "SCREENSHOT_WINDOW_CHANGED")
         assertTrue(platform.callbacks.isEmpty())
         assertEquals(1, session.lease.screenshots)
     }
 
     @Test fun nodeChangesWithoutAnEventRefuseBeforePlatformSubmission() {
         val observation = observe(); platform.label = "after"
-        rejected(screenshot(observation).join(), "SCREENSHOT_TREE_CHANGED")
+        rejected(screenshot(observation).completed(), "SCREENSHOT_TREE_CHANGED")
         assertTrue(platform.callbacks.isEmpty())
     }
 
     @Test fun packageChangesWithoutAnEventRefuseBeforePlatformSubmission() {
         val observation = observe(); platform.pkg = "another.app"
-        rejected(screenshot(observation).join(), "SCREENSHOT_WINDOW_CHANGED")
+        rejected(screenshot(observation).completed(), "SCREENSHOT_WINDOW_CHANGED")
         assertTrue(platform.callbacks.isEmpty())
     }
 
     @Test fun movedDisplayOrUnavailableTreeCannotBeVerified() {
         val observation = observe(); platform.displayId = 1
-        rejected(screenshot(observation).join(), "SCREENSHOT_TREE_UNVERIFIABLE")
+        rejected(screenshot(observation).completed(), "SCREENSHOT_TREE_UNVERIFIABLE")
         platform.displayId = 0; platform.missing = true
-        rejected(screenshot(observation).join(), "SCREENSHOT_TREE_UNVERIFIABLE")
+        rejected(screenshot(observation).completed(), "SCREENSHOT_TREE_UNVERIFIABLE")
         assertTrue(platform.callbacks.isEmpty())
     }
 
@@ -438,7 +476,7 @@ class GuiRuntimeScreenshotTest {
         platform.label = "x".repeat(513)
         val observation = observe()
         assertTrue(observation.truncated)
-        rejected(screenshot(observation).join(), "SCREENSHOT_TREE_UNVERIFIABLE")
+        rejected(screenshot(observation).completed(), "SCREENSHOT_TREE_UNVERIFIABLE")
         assertTrue(platform.callbacks.isEmpty())
     }
 
@@ -448,7 +486,7 @@ class GuiRuntimeScreenshotTest {
         rejected(session.previewFromUser(), "NO_ACTIVE_EXTERNAL_WINDOW")
         assertNull(session.lease.observation)
         assertTrue(session.lease.actions.isEmpty())
-        rejected(screenshot(observation).join(), "OBSERVATION_REQUIRED")
+        rejected(screenshot(observation).completed(), "OBSERVATION_REQUIRED")
         rejected(session.approveExactActionFromUser(GuiAction(observation.observationId, GuiOperation.TAP, 1)), "OBSERVATION_REQUIRED")
     }
 
@@ -460,7 +498,7 @@ class GuiRuntimeScreenshotTest {
         assertFalse(future.isDone)
         assertEquals(0, frame.encoded)
         worker.runAll()
-        val image = (future.join() as GuiResult.Value).value
+        val image = (future.completed() as GuiResult.Value).value
         assertEquals(observation.observationId, image.observationId)
         assertSame(observation, session.lease.observation)
         assertEquals(setOf(action), session.lease.actions)
@@ -476,7 +514,7 @@ class GuiRuntimeScreenshotTest {
         val future = screenshot(observation); val frame = platform.success()
         platform.label = "changed without accessibility event"
         worker.runAll()
-        rejected(future.join(), "SCREENSHOT_TREE_CHANGED")
+        rejected(future.completed(), "SCREENSHOT_TREE_CHANGED")
         assertSame(observation, session.lease.observation)
         assertEquals(setOf(action), session.lease.actions)
         assertDisposed(frame)
@@ -490,7 +528,7 @@ class GuiRuntimeScreenshotTest {
         assertEquals(1, frame.encoded); assertFalse(future.isDone)
         platform.label = "changed after encoding"
         shadowOf(Looper.getMainLooper()).idle()
-        rejected(future.join(), "SCREENSHOT_TREE_CHANGED")
+        rejected(future.completed(), "SCREENSHOT_TREE_CHANGED")
         assertDisposed(frame)
     }
 
@@ -498,7 +536,7 @@ class GuiRuntimeScreenshotTest {
         val observation = observe(); val future = screenshot(observation)
         val frame = platform.success(); platform.displayId = 1
         worker.runAll()
-        rejected(future.join(), "SCREENSHOT_TREE_UNVERIFIABLE")
+        rejected(future.completed(), "SCREENSHOT_TREE_UNVERIFIABLE")
         assertDisposed(frame)
     }
 
@@ -506,7 +544,7 @@ class GuiRuntimeScreenshotTest {
         val observation = observe(); val future = screenshot(observation)
         platform.windowId++
         val frame = platform.success(); worker.runAll()
-        rejected(future.join(), "SCREENSHOT_WINDOW_CHANGED")
+        rejected(future.completed(), "SCREENSHOT_WINDOW_CHANGED")
         assertDisposed(frame)
     }
 
@@ -515,7 +553,7 @@ class GuiRuntimeScreenshotTest {
         session.close(); assertFalse(session.releaseConfirmed)
         rejected(GuiRuntime.openForUser(GuiOwner("next", "run")), "FOREGROUND_DRAIN_PENDING_NOT_EXECUTED")
         val frame = platform.success()
-        rejected(future.join(), "GUI_AUTHORIZATION_REVOKED")
+        rejected(future.completed(), "GUI_AUTHORIZATION_REVOKED")
         assertEquals(0, frame.encoded); assertTrue(worker.tasks.isEmpty())
         assertDisposed(frame); assertTrue(session.releaseConfirmed)
     }
@@ -535,7 +573,7 @@ class GuiRuntimeScreenshotTest {
         val frame = platform.success(); session.close()
         assertFalse(session.releaseConfirmed)
         worker.runAll()
-        rejected(future.join(), "GUI_AUTHORIZATION_REVOKED")
+        rejected(future.completed(), "GUI_AUTHORIZATION_REVOKED")
         assertDisposed(frame); assertTrue(session.releaseConfirmed)
     }
 
@@ -543,7 +581,7 @@ class GuiRuntimeScreenshotTest {
         val observation = observe(); val future = screenshot(observation)
         GuiRuntime.encoder = Executor { throw RejectedExecutionException() }
         val frame = platform.success()
-        rejected(future.join(), "SCREENSHOT_ENCODING_UNAVAILABLE")
+        rejected(future.completed(), "SCREENSHOT_ENCODING_UNAVAILABLE")
         assertDisposed(frame); session.close(); assertTrue(session.releaseConfirmed)
     }
 
@@ -551,19 +589,19 @@ class GuiRuntimeScreenshotTest {
         val observation = observe(); val future = screenshot(observation)
         val frame = platform.success(Frame().apply { encodeFailure = true })
         worker.runAll()
-        rejected(future.join(), "SCREENSHOT_UNAVAILABLE")
+        rejected(future.completed(), "SCREENSHOT_UNAVAILABLE")
         assertDisposed(frame); session.close(); assertTrue(session.releaseConfirmed)
     }
 
     @Test fun submissionUnknownRetainsReservationUntilLateSuccessDisposal() {
         val observation = observe(); platform.throwOnSubmit = true
         val future = screenshot(observation)
-        rejected(future.join(), "SCREENSHOT_DELIVERY_UNCONFIRMED")
+        rejected(future.completed(), "SCREENSHOT_DELIVERY_UNCONFIRMED")
         session.close(); assertFalse(session.releaseConfirmed)
         val frame = platform.success()
         assertEquals(0, frame.encoded); assertDisposed(frame)
         assertTrue(session.releaseConfirmed)
-        rejected(future.join(), "SCREENSHOT_DELIVERY_UNCONFIRMED")
+        rejected(future.completed(), "SCREENSHOT_DELIVERY_UNCONFIRMED")
     }
 
     @Test fun failedDisposalAttemptsEveryResourceAndCannotManufactureDrain() {

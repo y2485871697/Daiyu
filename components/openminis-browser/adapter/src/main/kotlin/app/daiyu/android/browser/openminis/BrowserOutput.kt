@@ -58,7 +58,7 @@ internal object BrowserOutput {
             "BROWSER_OPENMINIS_IMAGE_PATH_INVALID"
         }
         check(file.canonicalPath == file.absolutePath && Files.isRegularFile(file.toPath(), LinkOption.NOFOLLOW_LINKS)
-            && file.canRead() && file.length() >= 4) { "BROWSER_OPENMINIS_IMAGE_FILE_MISSING" }
+            && file.canRead() && file.length() >= 4 && file.toPath().toRealPath().toString() == file.absolutePath) { "BROWSER_OPENMINIS_IMAGE_FILE_MISSING" }
         // A path alone is not evidence that capture wrote a JPEG. Never return arbitrary local text.
         file.inputStream().use { stream ->
             check(stream.read() == 0xff && stream.read() == 0xd8 && stream.read() == 0xff) {

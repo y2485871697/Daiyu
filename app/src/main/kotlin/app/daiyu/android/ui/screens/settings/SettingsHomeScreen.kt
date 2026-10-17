@@ -159,6 +159,8 @@ internal fun DaiyuSettingsScreen(
         }
         if (openedPage == SettingsLocalPage.TASK_SURFACE) {
             TaskSurfaceSettingsPanel(onBack = localBack, modifier = modifier)
+        } else if (openedPage == SettingsLocalPage.WORKSPACE) {
+            WorkspaceSettingsScreen(onBack = localBack, modifier = modifier)
         } else if (openedPage == SettingsLocalPage.UPDATES) {
             SettingsReleasePage(remember { app.daiyu.android.update.GithubReleaseChecker() },
                 currentVersion = app.daiyu.android.BuildConfig.VERSION_NAME, onBack = localBack, modifier = modifier)

@@ -6,7 +6,7 @@ import app.daiyu.android.ui.icons.DaiyuIcons
 
 internal enum class SettingControl { PAGE, TOGGLE, CHOICE, ACTION }
 /** Pages hosted by the retained settings home, not an Activity-level FeatureRoute. */
-internal enum class SettingsLocalPage { TASK_SURFACE, ENHANCEMENTS, SHIZUKU_ACCESS, OVERLAY, UPDATES }
+internal enum class SettingsLocalPage { TASK_SURFACE, ENHANCEMENTS, SHIZUKU_ACCESS, OVERLAY, UPDATES, WORKSPACE }
 internal data class SettingsEntry(
     val id: String, val title: String, val icon: ImageVector,
     val control: SettingControl = SettingControl.PAGE, val route: FeatureRoute? = null,
@@ -44,7 +44,7 @@ internal object SettingsCatalog {
         )),
         SettingsGroup("tools", "工具", "工作区、Linux 与任务执行偏好", listOf(
             SettingsEntry("platform_tools", "平台只读工具与私密出站", DaiyuIcons.Shield, SettingControl.PAGE),
-            SettingsEntry("workspace", "工作区与文件", DaiyuIcons.Folder, SettingControl.PAGE),
+            SettingsEntry("workspace", "工作区与文件", DaiyuIcons.Folder, SettingControl.PAGE, localPage = SettingsLocalPage.WORKSPACE),
             SettingsEntry("terminal", "终端", DaiyuIcons.Terminal, SettingControl.PAGE, FeatureRoute.TERMINAL),
             SettingsEntry("browser", "浏览器", DaiyuIcons.Browser, SettingControl.PAGE, FeatureRoute.BROWSER_SETTINGS),
             SettingsEntry("linux", "Linux 工具环境", DaiyuIcons.Terminal, SettingControl.PAGE, FeatureRoute.LINUX_SETTINGS),

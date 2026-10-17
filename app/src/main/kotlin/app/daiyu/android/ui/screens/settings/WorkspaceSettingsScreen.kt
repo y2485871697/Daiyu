@@ -1,0 +1,184 @@
+package app.daiyu.android.ui.screens.settings
+
+import android.app.Activity
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.net.Uri
+import android.provider.DocumentsContract
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.daiyu.android.platform.PlatformSettingsAccess
+import app.daiyu.android.ui.components.MiuixScaffoldPage
+import app.daiyu.android.workspace.WorkspaceFilesAccess
+import app.daiyu.android.workspace.WorkspaceListing
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import top.yukonga.miuix.kmp.basic.TextButton
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+
+private class WorkspaceRevoke(val uri: Uri)
+
+@Composable
+internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier,
+    suppliedAccess: WorkspaceFilesAccess? = null) {
+    val context = LocalContext.current
+    val access = suppliedAccess ?: remember(context) { WorkspaceFilesAccess(context.applicationContext) }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val scope = rememberCoroutineScope()
+    val visit = remember(access, lifecycle) { AtomicBoolean(true) }
+    val epoch = remember(access, lifecycle) { AtomicLong() }
+    var grants by remember(access) { mutableStateOf<List<Uri>>(emptyList()) }
+    var loaded by remember(access) { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var notice by remember { mutableStateOf<String?>(null) }
+    var listing by remember { mutableStateOf<WorkspaceListing?>(null) }
+    var shownTree by remember { mutableStateOf<Uri?>(null) }
+    var pendingTree by remember { mutableStateOf<Boolean?>(null) }
+    var request by remember { mutableStateOf<AtomicBoolean?>(null) }
+    var revoking by remember { mutableStateOf<WorkspaceRevoke?>(null) }
+    fun current() = visit.get() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+    fun invalidateRead() { request?.set(true); request = null; listing = null; shownTree = null }
+    fun refresh() {
+        if (!current() || busy) return
+        invalidateRead(); revoking = null; grants = emptyList(); loaded = false; notice = null
+        val token = AtomicBoolean(false); request = token
+        scope.launch {
+            try {
+                val values = withContext(Dispatchers.IO) { access.grants() }
+                if (current() && request === token && !token.get()) { grants = values; loaded = true; request = null }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { if (current() && request === token && !token.get()) { grants = emptyList(); loaded = true; request = null; notice = "共享目录暂时不可用，请刷新或重新选择" } }
+        }
+    }
+    DisposableEffect(access, lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) refresh()
+            if (event == Lifecycle.Event.ON_PAUSE) { epoch.incrementAndGet(); invalidateRead(); revoking = null; grants = emptyList(); loaded = false }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { visit.set(false); invalidateRead(); lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(access) { refresh() }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val tree = pendingTree
+        pendingTree = null
+        if (visit.get() && tree != null && result.resultCode == Activity.RESULT_OK && result.data != null) {
+            val data = result.data!!
+            busy = true; invalidateRead()
+            val admittedEpoch = epoch.get()
+            scope.launch {
+                try {
+                    val accepted = withContext(Dispatchers.IO) { visit.get() && access.accept(data, tree) }
+                    val values = withContext(Dispatchers.IO) { access.grants() }
+                    if (current() && epoch.get() == admittedEpoch) {
+                        grants = values; loaded = true
+                        notice = if (accepted) "已添加只读共享${if (tree) "目录" else "文件"}" else "未取得有效的持久只读授权，请重新选择"
+                    }
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { if (current() && epoch.get() == admittedEpoch) notice = "共享未确认成功，请刷新并检查系统授权" }
+                finally { if (visit.get()) { busy = false; if (current() && (epoch.get() != admittedEpoch || !loaded)) refresh() } }
+            }
+        }
+    }
+    fun pick(tree: Boolean) {
+        if (!current() || busy || pendingTree != null) return
+        pendingTree = tree; revoking = null; invalidateRead()
+        try { picker.launch(PlatformSettingsAccess.pickerIntent(tree)) }
+        catch (_: Exception) { pendingTree = null; notice = "未能打开系统文件选择器" }
+    }
+    fun copy(uri: Uri) {
+        if (!current() || busy || !loaded) return
+        val available = uri in grants || listing?.files?.any { it.uri == uri } == true
+        if (!available) return
+        try {
+            checkNotNull(context.getSystemService(ClipboardManager::class.java))
+                .setPrimaryClip(ClipData.newPlainText("文件引用", uri.toString()))
+            notice = "已复制文件引用；尚未发送"
+        } catch (_: Exception) { notice = "文件引用未复制" }
+    }
+    val revoke = revoking
+    if (revoke != null) app.daiyu.android.ui.components.DaiyuConfirmDialog(
+        title = "撤销共享授权", confirmText = "撤销", destructive = true, message = "撤销后，本应用将无法再读取该目录或文件。不会删除原文件。",
+        onDismiss = { if (revoking === revoke) revoking = null }, onConfirm = {
+            if (current() && !busy && loaded && revoke.uri in grants && revoking === revoke) {
+                revoking = null; busy = true; invalidateRead()
+                val admittedEpoch = epoch.get()
+                scope.launch {
+                    try {
+                        withContext(Dispatchers.IO) { if (visit.get()) access.revoke(revoke.uri) }
+                        val values = withContext(Dispatchers.IO) { access.grants() }
+                        if (current() && epoch.get() == admittedEpoch) { grants = values; loaded = true; notice = "共享授权已撤销" }
+                    } catch (cancelled: CancellationException) { throw cancelled }
+                    catch (_: Exception) { if (current() && epoch.get() == admittedEpoch) notice = "撤销未确认成功，请刷新并检查系统授权" }
+                    finally { if (visit.get()) { busy = false; if (current() && (epoch.get() != admittedEpoch || !loaded)) refresh() } }
+                }
+            }
+        })
+    val back: () -> Unit = { if (current()) { visit.set(false); revoking = null; invalidateRead(); onBack() } }
+    BackHandler { back() }
+    MiuixScaffoldPage(title = "工作区与文件", onBack = back, modifier = modifier) {
+        item(key = "sharing") {
+            SettingsNote("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。")
+            SettingsCard {
+                SettingsRow("共享目录", onClick = { pick(true) }, tag = "workspace-pick-directory")
+                SettingsRow("共享文件", onClick = { pick(false) }, tag = "workspace-pick-file")
+                SettingsRow("刷新", onClick = { refresh() }, tag = "workspace-refresh")
+            }
+            notice?.let { SettingsNote(it) }
+            if (busy || !loaded) SettingsNote("正在读取共享状态")
+            else if (request != null) SettingsNote("正在读取目录")
+            else if (grants.isEmpty()) SettingsNote("还没有共享目录或文件")
+        }
+        grants.forEachIndexed { index, uri ->
+            item(key = "grant:$uri") {
+                SettingsCard {
+                    SettingsRow(if (DocumentsContract.isTreeUri(uri)) "共享目录 ${index + 1}" else "共享文件 ${index + 1}",
+                        summary = uri.toString(), tag = "workspace-grant:$index")
+                    if (DocumentsContract.isTreeUri(uri)) TextButton("查看文件", modifier = Modifier.testTag("workspace-browse:$index"), onClick = {
+                        if (current() && !busy && loaded) {
+                            invalidateRead(); notice = null
+                            val token = AtomicBoolean(false); request = token
+                            scope.launch {
+                                try {
+                                    val result = withContext(Dispatchers.IO) { access.files(uri) { !visit.get() || token.get() } }
+                                    if (current() && request === token && !token.get()) { listing = result; shownTree = uri }
+                                } catch (cancelled: CancellationException) { throw cancelled }
+                                catch (_: Exception) { if (current() && request === token && !token.get()) notice = "目录未读取，请刷新或重新选择" }
+                                finally { if (request === token) request = null }
+                            }
+                        }
+                    })
+                    TextButton("复制引用", modifier = Modifier.testTag("workspace-copy:$index"), onClick = { copy(uri) })
+                    TextButton("撤销共享", modifier = Modifier.testTag("workspace-revoke:$index"), onClick = {
+                        if (current() && !busy && loaded) revoking = WorkspaceRevoke(uri)
+                    })
+                }
+            }
+        }
+        listing?.let { result ->
+            item(key = "files-heading") {
+                SettingsSectionTitle("目录中的文件")
+                if (result.files.isEmpty()) SettingsNote("此目录为空")
+                if (result.truncated) SettingsNote("仅显示部分文件，请在系统文件选择器中缩小目录范围")
+            }
+            result.files.forEachIndexed { index, file ->
+                item(key = "file:${shownTree}:${file.uri}") {
+                    SettingsCard { SettingsRow(file.name, summary = if (file.directory) "子目录 · 点击复制引用" else "点击复制文件引用",
+                        tag = "workspace-file:$index", onClick = { copy(file.uri) }) }
+                }
+            }
+        }
+    }
+}

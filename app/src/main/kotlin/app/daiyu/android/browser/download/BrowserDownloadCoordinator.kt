@@ -3,6 +3,7 @@ package app.daiyu.android.browser.download
 import app.daiyu.android.browser.session.BrowserSessionRegistry
 import app.daiyu.android.browser.session.BrowserTabLease
 import java.io.InputStream
+import java.io.OutputStream
 import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
@@ -36,7 +37,18 @@ class BrowserDownloadCoordinator internal constructor(
     )
     private val lock = Any()
     private val entries = mutableMapOf<String, Entry>()
+    private data class Completed(val reference: BrowserCompletedDownload, val receipt: BrowserDownloadReceipt)
+    private val completed = linkedMapOf<String, Completed>()
+    private var completionObserver: (BrowserCompletedDownload) -> Unit = {}
+    private var observerInstalled = false
     init { require(maxBytes > 0 && maxPending > 0) }
+
+    /** Trusted host wiring only, before the first reservation; never a tool argument. */
+    fun observeCompleted(observer: (BrowserCompletedDownload) -> Unit) = synchronized(lock) {
+        check(!observerInstalled && entries.isEmpty() && completed.isEmpty())
+        observerInstalled = true
+        completionObserver = observer
+    }
 
     fun reserve(lease: BrowserTabLease): BrowserDownloadTicket {
         sessions.assertAllowed(lease, "fetch")
@@ -112,17 +124,73 @@ class BrowserDownloadCoordinator internal constructor(
             val receipt = BrowserDownloadReceipt(entry.target, count, digest.digest().joinToString("") { "%02x".format(it) })
             sessions.publish(ticket.lease) { synchronized(lock) {
                 check(entry.state == State.WRITING) { "BROWSER_DOWNLOAD_CANCELLED" }
+                val reference = BrowserCompletedDownload(ticket.id, ticket.lease, receipt.size, receipt.sha256, this)
+                completed[ticket.id] = Completed(reference, receipt)
+                completionObserver(reference)
+                while (completed.size > 128) completed.remove(completed.keys.first())
                 entry.activeWriter = false
                 entries.remove(ticket.id)
             } }
             entry.invalidation?.close()
             return receipt
         } catch (e: Exception) {
-            synchronized(lock) { if (entry.state != State.CANCELLED) entry.state = State.FAILED; entry.input = null; entry.activeWriter = false }
+            synchronized(lock) { completed.remove(ticket.id); if (entry.state != State.CANCELLED) entry.state = State.FAILED; entry.input = null; entry.activeWriter = false }
             try { input.close() } catch (close: Exception) { e.addSuppressed(close) }
             cleanup(entry, e)
             throw e
         }
+    }
+
+    /** Two bounded passes: validate BEFORE opening/truncating a destination, then copy exact
+     * original bytes with another digest. Destination open/write/flush/close or owner failure
+     * always propagates; a provider may retain a partial document, never a success receipt.
+     * Completion identity pins the original lease; no caller-supplied path is accepted.
+     */
+    internal fun saveCompleted(reference: BrowserCompletedDownload,
+        openDestination: () -> OutputStream, assertOwner: () -> Unit) {
+        val record = synchronized(lock) {
+            val record = completed[reference.id] ?: error("BROWSER_SAVE_REFERENCE_EXPIRED")
+            check(record.reference === reference) { "BROWSER_SAVE_REFERENCE" }
+            record
+        }
+        fun checkOwner() {
+            assertOwner()
+            synchronized(lock) { check(completed[reference.id] === record) { "BROWSER_SAVE_REFERENCE_EXPIRED" } }
+        }
+        fun transfer(output: OutputStream?) {
+            checkOwner()
+            val path = paths.recheckPrivate(record.receipt.path)
+            check(Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS) &&
+                Files.size(path) == reference.size && reference.size in 1..maxBytes) { "BROWSER_SAVE_SIZE" }
+            val digest = MessageDigest.getInstance("SHA-256")
+            var count = 0L
+            Files.newInputStream(path, LinkOption.NOFOLLOW_LINKS).use { input ->
+                val buffer = ByteArray(8192)
+                while (true) {
+                    checkOwner()
+                    val size = input.read(buffer)
+                    checkOwner()
+                    if (size == -1) break
+                    check(size > 0 && count <= reference.size - size) { "BROWSER_SAVE_SIZE" }
+                    output?.write(buffer, 0, size)
+                    digest.update(buffer, 0, size)
+                    count += size
+                }
+            }
+            check(count == reference.size && digest.digest().joinToString("") { "%02x".format(it) } == reference.sha256) {
+                "BROWSER_SAVE_DIGEST"
+            }
+            checkOwner()
+        }
+        transfer(null)
+        checkOwner()
+        openDestination().use { output ->
+            checkOwner()
+            transfer(output)
+            output.flush()
+            checkOwner()
+        }
+        checkOwner()
     }
 
     fun cancel(ticket: BrowserDownloadTicket) {

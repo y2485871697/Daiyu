@@ -20,6 +20,7 @@ internal class CatalogChildBrowserSession private constructor(
     val scope: ChildRunScope,
     private val assistant: AssistantProfile,
     private val preparation: BrowserRunPreparation,
+    private val onDownloadCompleted: (app.daiyu.android.browser.download.BrowserCompletedDownload) -> Unit,
 ) : AutoCloseable {
     val preview: BrowserRunPreview get() = preparation.preview
     private val lock = Any()
@@ -42,7 +43,7 @@ internal class CatalogChildBrowserSession private constructor(
     /** Main Looper only, after the worker mkdir helper. Opens no tab and executes no command. */
     fun openOnMain(context: Context, privateRoot: Path): Boolean {
         check(android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) { "browser_main_required" }
-        return open { CatalogBrowserBinding.open(context, privateRoot, assistant, it) }
+        return open { CatalogBrowserBinding.open(context, privateRoot, assistant, it, onDownloadCompleted) }
     }
 
     internal fun open(factory: (BrowserRunAuthorization) -> CatalogBrowserBinding): Boolean {
@@ -138,10 +139,11 @@ internal class CatalogChildBrowserSession private constructor(
     companion object {
         fun prepare(scope: ChildRunScope, assistant: AssistantProfile, settings: BrowserSettings,
                     grant: BrowserGrant, allowedActions: Set<String>,
-                    writeArguments: List<String> = emptyList()): CatalogChildBrowserSession {
+                    writeArguments: List<String> = emptyList(),
+                    onDownloadCompleted: (app.daiyu.android.browser.download.BrowserCompletedDownload) -> Unit = {}): CatalogChildBrowserSession {
             val frozen = assistant.copy(enabledSkillIds = java.util.Collections.unmodifiableList(assistant.enabledSkillIds.toList()))
             return CatalogChildBrowserSession(scope, frozen, BrowserRunPreparation.prepareChild(
-                scope, frozen.id, settings, grant, allowedActions, writeArguments))
+                scope, frozen.id, settings, grant, allowedActions, writeArguments), onDownloadCompleted)
         }
     }
 }

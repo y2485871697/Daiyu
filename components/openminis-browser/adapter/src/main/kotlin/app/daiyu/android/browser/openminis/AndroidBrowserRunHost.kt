@@ -39,6 +39,7 @@ class AndroidBrowserRunHost(
     cookieAuthorizeName: (BrowserTabLease, String, String) -> Boolean,
     historyApproval: OpenMinisHistoryApproval = OpenMinisHistoryApproval.DENY,
     requestOverride: ((WebResourceRequest) -> WebResourceResponse?)? = null,
+    onDownloadCompleted: (app.daiyu.android.browser.download.BrowserCompletedDownload) -> Unit = {},
 ) : AutoCloseable {
     private val ui = AndroidBrowserUiDispatcher()
     private val sessions = BrowserSessionRegistry()
@@ -70,7 +71,9 @@ class AndroidBrowserRunHost(
             cookies = BrowserCookieBackend(sessions, ui, AndroidCookieStore(), webHost::currentUrl,
                 cookieRoot, cookieEnvPath, cookieAuthorizeName).also { partialCookies = it }
             val http = BrowserHttpDownloader(sessions,
-                BrowserDownloadCoordinator(sessions, BrowserPathMapper(downloadRoot))).also { partialHttp = it }
+                BrowserDownloadCoordinator(sessions, BrowserPathMapper(downloadRoot)).also {
+                    it.observeCompleted(onDownloadCompleted)
+                }).also { partialHttp = it }
             fetch = BrowserFetchBackend(sessions, http).also { partialFetch = it }
             val router = object : AsyncBrowserBackend {
                 override fun execute(command: BrowserCommand, lease: BrowserTabLease): CompletableFuture<BrowserExecutionResult> =

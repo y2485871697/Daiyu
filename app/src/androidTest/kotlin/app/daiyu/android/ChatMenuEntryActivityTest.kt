@@ -1,6 +1,10 @@
 package app.daiyu.android
 
+import android.app.Instrumentation
+import android.content.Intent
 import androidx.compose.ui.test.*
+import app.daiyu.android.platform.PlatformSafGrants
+import java.util.concurrent.atomic.AtomicInteger
 import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 
 /** Real menu callbacks enter existing owners; opening a page must not send a request. */
@@ -93,6 +97,68 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         }
         node("voice-universal-control").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
+    }
+
+    fun testWorkspaceMenuOpensExistingReadOnlyPageWithoutPickerOrModelAndReturnsDirectlyToChat() {
+        selectDraft()
+        val before = fixture.database.exportBackup()
+        val settings = fixture.settings.load()
+        val grants = PlatformSafGrants(instrumentation.targetContext).grants()
+        val launches = AtomicInteger()
+        val monitor = object : Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
+                if (intent.action !in setOf(Intent.ACTION_OPEN_DOCUMENT_TREE, Intent.ACTION_OPEN_DOCUMENT)) return null
+                launches.incrementAndGet()
+                return Instrumentation.ActivityResult(android.app.Activity.RESULT_CANCELED, null)
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        try {
+            menu(ChatMenuAction.OPEN_WORKSPACE)
+            awaitUniqueTag("page:工作区与文件")
+            node("workspace-pick-directory").assertIsDisplayed().assertIsEnabled()
+            node("workspace-pick-file").assertExists().assertIsEnabled()
+            assertEquals(0, launches.get())
+            assertEquals(grants, PlatformSafGrants(instrumentation.targetContext).grants())
+            assertEquals(before, fixture.database.exportBackup())
+            assertEquals(settings, fixture.settings.load())
+            assertNull(fixture.controller.active)
+            assertEquals(0, fixture.opens.get())
+            backToChat(activity)
+            assertDraft("menu draft stays unsent")
+            openSettings()
+            node("page:设置").assertExists()
+            node("page:工作区与文件").assertDoesNotExist()
+            backToChat(activity)
+            assertEquals(0, launches.get())
+        } finally { instrumentation.removeMonitor(monitor) }
+    }
+
+    fun testWorkspaceMenuRetainedCallbackCannotNavigateWhilePausedOnAnotherPageOrAfterEditorReplacement() {
+        selectDraft()
+        val menu = retainedControls(activity).onMenuAction
+        val before = fixture.database.exportBackup()
+        val settings = fixture.settings.load()
+        realPauseResume(activity, atPause = { menu(ChatMenuAction.OPEN_WORKSPACE) })
+        awaitUniqueTag("chat-draft")
+        node("page:工作区与文件").assertDoesNotExist()
+        openSettings()
+        mainThread { menu(ChatMenuAction.OPEN_WORKSPACE) }
+        node("page:设置").assertExists()
+        node("page:工作区与文件").assertDoesNotExist()
+        backToChat(activity)
+        assertEquals(before, fixture.database.exportBackup())
+        val conversation = fixture.database.conversations().single()
+        mainThread { activity.select(conversation) }
+        val reentered = fixture.database.exportBackup()
+        mainThread { menu(ChatMenuAction.OPEN_WORKSPACE) }
+        node("chat-draft").assertExists()
+        node("page:工作区与文件").assertDoesNotExist()
+        assertDraft("menu draft stays unsent")
+        assertEquals(reentered, fixture.database.exportBackup())
+        assertEquals(settings, fixture.settings.load())
+        assertEquals(0, fixture.opens.get())
+        assertNull(fixture.controller.active)
     }
 
     fun testSettingsVoiceRowEntersExistingConfiguration() {

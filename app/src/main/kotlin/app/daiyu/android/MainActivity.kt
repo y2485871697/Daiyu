@@ -1423,6 +1423,12 @@ class MainActivity : ComponentActivity() {
                                 if (platformPageCurrent(owner)) { platformSaf.revoke(uri); platformSettingsRevision++ }
                             })
                     } }
+                    "chat-workspace" -> app.daiyu.android.ui.screens.settings.WorkspaceSettingsScreen(
+                        onBack = {
+                            if (activityUsable() && retainedPage == "chat-workspace") returnToChat()
+                        },
+                        modifier = Modifier.fillMaxSize(),
+                    )
                     "settings" -> {
                         var defaultReasoningResult by remember { mutableStateOf(runCatching { reasoningPreference.snapshot(null) }) }
                         Column(Modifier.fillMaxSize()) {
@@ -1911,6 +1917,7 @@ class MainActivity : ComponentActivity() {
             ChatMenuAction.SEARCH -> openSearch("message-search")
             ChatMenuAction.SETTINGS -> retainedPage = "settings"
             ChatMenuAction.OPEN_TERMINAL -> openTerminal()
+            ChatMenuAction.OPEN_WORKSPACE -> if (currentChat()) retainedPage = "chat-workspace"
             ChatMenuAction.CONVERSATION_ID -> selected?.let {
                 (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("会话 ID", it.id.value))
             }

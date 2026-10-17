@@ -596,14 +596,53 @@ class MainActivity : ComponentActivity() {
     private var selectionStart = 0
     private var selectionEnd = 0
     private var selectionReady = false
+    private val messageActionHost by lazy { ControllerMessageActionHost(controller) }
+    private var messageActionVisit = Any()
+    private var messageActionSnapshot: app.daiyu.android.storage.MessageActionSnapshot? = null
+    private data class MessageActionRenderKey(val conversation: ConversationId, val editor: Long,
+        val rows: String, val data: Long)
+    private var messageActionKey: MessageActionRenderKey? = null
+    private var messageActionLoading: MessageActionRenderKey? = null
+    private var messageActionAttempted: MessageActionRenderKey? = null
+    private fun invalidateMessageActionEditor() {
+        messageActionHost.invalidate()
+        messageActionVisit = Any()
+        messageActionSnapshot = null; messageActionKey = null
+        messageActionLoading = null; messageActionAttempted = null
+    }
+    private fun prepareMessageActionSnapshot() {
+        val owner = selected?.id ?: run { invalidateMessageActionEditor(); return }
+        if (!activityUsable() || !voiceForeground || !selectionReady || !controller.ready || controller.dataBusy || controller.active != null) return
+        val key = MessageActionRenderKey(owner, editorGeneration,
+            app.daiyu.android.domain.context.ContextRevision.digest(shown.map { it.second }), controller.dataRevision)
+        if (messageActionKey == key || messageActionLoading == key || messageActionAttempted == key) return
+        messageActionSnapshot = null; messageActionKey = null
+        // Failed, mismatched and rejected reads consume this key too; refresh is not retry authority.
+        messageActionAttempted = key; messageActionLoading = key
+        val visit = messageActionVisit
+        val admitted = controller.loadMessageActionSnapshot(owner) { candidate ->
+            if (messageActionVisit === visit && messageActionLoading == key) {
+                messageActionLoading = null
+                val rows = shown.map { it.second }
+                if (activityUsable() && voiceForeground && selected?.id == key.conversation && editorGeneration == key.editor &&
+                    controller.dataRevision == key.data &&
+                    app.daiyu.android.domain.context.ContextRevision.digest(rows) == key.rows &&
+                    candidate != null && candidate.conversationId == owner && candidate.matchesRendered(rows)) {
+                    messageActionSnapshot = candidate; messageActionKey = key
+                    publishChat()
+                }
+            }
+        }
+        if (!admitted) messageActionLoading = null
+    }
     private var editorGeneration = 0L
         set(value) {
-            if (field != value) { invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private var draftRevision = 0L
         set(value) {
-            if (field != value) { invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { messageActionHost.invalidate(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private data class PendingTextSend(val owner: ChatController.TextSendOwner, val text: String,
@@ -1202,6 +1241,47 @@ class MainActivity : ComponentActivity() {
             renderedOwner != null && it.id == renderedOwner.id && it.runId == renderedOwner.runId && it.conversationId == renderedOwner.conversationId
         }
         fun pendingFeature() { Toast.makeText(this, "该功能界面已保留，后端尚未接入", Toast.LENGTH_SHORT).show() }
+        val actionSnapshot = messageActionSnapshot?.takeIf {
+            it.conversationId.value == renderedConversation && it.matchesRendered(shown.map { row -> row.second })
+        }
+        val messageCallbacks = messageActionHost.bind(actionSnapshot,
+            isCurrent = { editorMatches() && draftRevision == renderedDraftRevision &&
+                voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+                terminalEditor == null && virtualDisplayEditor == null && !videoSending &&
+                !imageHost.sending && !shizukuWritesBlocked },
+            result = { outcome -> guard {
+                when (outcome) {
+                    is MessageActionResult.EditDraft -> {
+                        updateDraft(outcome.text)
+                        selectionStart = draft.length; selectionEnd = draft.length; publishChat()
+                    }
+                    is MessageActionResult.Branch -> select(outcome.conversation)
+                    MessageActionResult.Deleted -> { shown.clear(); refresh() }
+                    is MessageActionResult.Regenerated -> {
+                        select(outcome.conversation)
+                        when (outcome.outcome) {
+                            RegenerationSendOutcome.ACCEPTED -> Unit
+                            RegenerationSendOutcome.NOT_SENT -> toast("新分支和原用户草稿已保留；本次未发送")
+                            RegenerationSendOutcome.UNKNOWN -> {
+                                shown.clear(); refresh()
+                                toast("新分支发送保存结果 UNKNOWN；请核实历史和服务端结果，不会自动重发或重新准备")
+                            }
+                        }
+                    }
+                    is MessageActionResult.Rejected -> {
+                        if (actionSnapshot == null) {
+                            prompt = ChoicePrompt("消息操作快照不可用", listOf("重新获取消息操作", "取消"), { choice ->
+                                if (choice == 0 && editorMatches() && draftRevision == renderedDraftRevision &&
+                                    retainedPage == "chat" && !sidebarVisible && messageActionLoading == null) guard {
+                                    messageActionSnapshot = null; messageActionKey = null; messageActionAttempted = null
+                                    prepareMessageActionSnapshot(); publishChat()
+                                }
+                            })
+                        } else toast(outcome.reason)
+                    }
+                    is MessageActionResult.Unknown -> { shown.clear(); refresh(); toast(outcome.reason) }
+                }
+            } })
         return ChatScreenActions(
         onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
         onVoice = {
@@ -1221,7 +1301,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }, onContextClick = { pendingFeature() },
-        onRegenerate = { pendingFeature() }, onSpeak = { id ->
+        onRegenerate = messageCallbacks.onRegenerate, onSpeak = { id ->
             if (editorMatches() && controller.ready && !controller.dataBusy &&
                 speechHost.owner == renderedSpeechOwner && selected?.id?.value == renderedConversation) {
                 // Resolve the CURRENT displayed answer, never a captured stream/tool payload.
@@ -1230,8 +1310,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
         },
-        onBranch = { pendingFeature() }, onEditUser = { pendingFeature() }, onDeleteTurn = { pendingFeature() },
-        onRetryStep = { pendingFeature() },
+        onBranch = messageCallbacks.onBranch, onEditUser = messageCallbacks.onEditUser,
+        onDeleteTurn = messageCallbacks.onDeleteTurn, onRetryStep = messageCallbacks.onRetryStep,
         onOpenSidebar = { openSidebar() }, onTextChange = { if (editorMatches()) updateDraft(it) },
         onSelectionChange = { start, end ->
             if (editorMatches()) {
@@ -2062,7 +2142,7 @@ class MainActivity : ComponentActivity() {
         if (rows == null) { toast("消息已保存；历史加载失败"); return }
         val active = controller.active?.takeIf { it.conversationId == conversation.id }
         shown = rows.map { if (active != null && it.second.id == active.id) it.first to active else it }.toMutableList()
-        publishChat(); jumpToBottom()
+        prepareMessageActionSnapshot(); publishChat(); jumpToBottom()
     }
 
     @Composable private fun PromptSurface() {
@@ -2145,6 +2225,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onResume() {
         super.onResume(); voiceForeground = true; speechHost.setForeground(true)
+        prepareMessageActionSnapshot()
         controller.attachVideoUi(videoUi)
         settleRetainedVideoReceipt()
         controller.recoverVideos { if (activityUsable()) publishChat() }
@@ -2186,6 +2267,7 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
     override fun onStop() {
+        invalidateMessageActionEditor()
         controller.invalidateVideo(videoUi)
         // Idempotent fallback as well as the earlier onPause cancellation.
         voiceForeground = false
@@ -2197,6 +2279,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        invalidateMessageActionEditor()
         fenceVideoRoute()
         controller.detachVideoUi(videoUi)
         pendingTextSend?.let { controller.cancelTextSend(it.ticket) }
@@ -2432,7 +2515,7 @@ class MainActivity : ComponentActivity() {
         // Resolve the owner/window before leaving search, so a deleted hit keeps its source page.
         openRetainedConversation(hit.conversationId)
         shown = window
-        publishChat(); requestScroll(hit.messageId, false, hit.segmentIndex)
+        prepareMessageActionSnapshot(); publishChat(); requestScroll(hit.messageId, false, hit.segmentIndex)
     }
     private fun toast(text: String) { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }
     private fun guard(action: () -> Unit) {
@@ -2716,6 +2799,7 @@ class MainActivity : ComponentActivity() {
                     shown = persisted.map { entry -> if (active != null && entry.second.id == active.id) entry.first to active else entry }.toMutableList()
                 }
             }
+            prepareMessageActionSnapshot()
             publishChat()
             if (sidebarVisible || retainedPage == "manage") updatePane()
         }
@@ -2796,7 +2880,7 @@ class MainActivity : ComponentActivity() {
         val earlier = controller.database.messages(id, shown.firstOrNull()?.first ?: Long.MAX_VALUE)
         if (earlier.isEmpty()) { toast("没有更早消息"); return }
         requestScroll(follow = false)
-        shown.addAll(0, earlier); publishChat()
+        shown.addAll(0, earlier); prepareMessageActionSnapshot(); publishChat()
     }
     private fun copyMessage(id: String) {
         val message = shown.firstOrNull { it.second.id.value == id }?.second ?: return

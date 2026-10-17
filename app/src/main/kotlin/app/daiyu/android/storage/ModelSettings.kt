@@ -87,6 +87,19 @@ class ModelSettingsStore internal constructor(
             check(current.protocol != ProviderProtocol.UNKNOWN) { "请先修复模型协议" }
             listOf(CatalogModelParameters.fromCurrent(current))
         }
+    /** Read-only, network/credential-free. Does not resurrect a deleted provider or migrate defaults. */
+    internal fun localModelCatalogSnapshot(): SavedModelCatalogSnapshot<CatalogModelParameters>? = modelCatalog.current()
+
+    /** Worker-only strict path: UI must retain this ticket from the displayed local snapshot. */
+    internal fun selectCatalogModel(expected: ModelSettings, selection: CatalogModelSelection<CatalogModelParameters>): Unit =
+        modelCatalog.consumeSelection(selection) { record -> synchronized(lock) {
+            val current = load()
+            check(current == expected) { "模型配置已变更，请重新打开选择器" }
+            val selected = record.settings.applyTo(current, record.id)
+            selected.validate()
+            if (selected != current) save(selected)
+        } }
+
     internal fun nonSecretConfiguration(): Map<String, Any?> = synchronized(lock) { readNonSecretConfiguration() }
     private fun readNonSecretConfiguration(includeProtocol: Boolean = true): Map<String, Any?> = buildMap {
         listOf("endpoint", "model", "responses-path").forEach { key ->
@@ -144,6 +157,14 @@ class ModelSettingsStore internal constructor(
             changed.forEach { putField(editor, it, plan.after) }
             if(writeGate) editor.putBoolean(REBIND_REQUIRED, true)
             check(editor.commit()) { "配置恢复提交失败" }
+            // Rebound connections remain gated until an explicit credential save rotates identity.
+            // Tool-only restores still update the active model's durable local policy.
+            if (!plan.credentialRebindRequired) {
+                val editing = editingWithoutCredential()
+                if (!editing.requestOptionsUnavailable) modelCatalog.updateRegisteredModel(editing.settings.model) {
+                    CatalogModelParameters.updated(editing.settings, it)
+                }
+            }
         } catch (_: Exception) {
             val restored = try {
                 val editor = preferences.edit()
@@ -232,12 +253,23 @@ class ModelSettingsStore internal constructor(
         if(loaded.credentialUnavailable) throw CredentialUnavailableException()
         loaded.settings
     }
+    /** Legacy live-remote entry. New local pickers must use selectCatalogModel with their ticket. */
     fun selectModel(expected: ModelSettings, model: String): Unit = modelCatalog.configurationChange { synchronized(lock) {
         check(load() == expected) { "模型配置已变更，请重新打开选择器" }
-        if (model != expected.model) save(expected.copy(model = model))
+        val local = modelCatalogSnapshot().selectionFor(model)
+        if (local != null) selectCatalogModel(expected, local)
+        else if (model != expected.model) {
+            // A remotely discovered, not-yet-local model uses detached defaults, NEVER active overrides.
+            save(CatalogModelParameters().applyTo(expected, model))
+        }
     } }
     fun save(settings:ModelSettings, protocolChangeAuthorized: Boolean = false, requestOptionsReplacementAuthorized: Boolean = false):Unit=modelCatalog.configurationChange { synchronized(lock) {
         settings.validate()
+        val previousEditing = loadForEditing()
+        val previousConnection = previousEditing.settings
+        val connectionChanged = previousEditing.credentialUnavailable ||
+            previousConnection.endpoint != settings.endpoint || previousConnection.protocol != settings.protocol ||
+            previousConnection.responsesPath != settings.responsesPath || previousConnection.apiKey != settings.apiKey
         val previousOptionsValid = try {
             val previousOptions = readRequestOptions()
             val previousProtocol = readProtocol()
@@ -268,6 +300,17 @@ class ModelSettingsStore internal constructor(
                 .putString("key-owner",owner).putString("key-alias",alias).putString("iv",Base64.encodeToString(cipher.iv,Base64.NO_WRAP)).putString("key",encrypted)
                 .remove(REBIND_REQUIRED).commit()
             check(committed) {"模型设置保存失败"}
+            // Still under catalog -> settings locks. A catalog failure compensates preferences below.
+            // A connection/key change starts a fresh identity, even if wire model IDs happen to match.
+            if (connectionChanged) modelCatalog.replaceRegisteredProvider(listOf(CatalogModelParameters.fromCurrent(settings)))
+            else {
+                if (previousConnection.model != settings.model && !previousEditing.requestOptionsUnavailable) {
+                    modelCatalog.updateRegisteredModel(previousConnection.model) {
+                        CatalogModelParameters.updated(previousConnection, it)
+                    }
+                }
+                modelCatalog.updateRegisteredModel(settings.model) { CatalogModelParameters.updated(settings, it) }
+            }
         } catch (_:Exception) {
             if(!attempted) discardKey(alias)
             else {

@@ -2352,6 +2352,18 @@ class ChatController internal constructor(private val application:Application,
             "模型已切换"
         })
     }
+    internal fun selectConfiguredCatalogModel(
+        expected: ModelSettings,
+        ticket: app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>,
+        completed: (Boolean) -> Unit,
+    ) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        invalidateVideoConfiguration()
+        dataTask(failureNotice = "模型切换未保存", completed = completed, work = {
+            settings.selectCatalogModel(expected, ticket)
+            "模型已切换"
+        })
+    }
     internal fun exportUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver) {
         dataTask(work={
             val text=if(complete) {

@@ -5,6 +5,7 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import android.test.InstrumentationTestCase
 import app.daiyu.android.model.ProviderRequestOptions
+import app.daiyu.android.model.catalog.*
 import app.daiyu.android.testContext
 import java.io.File
 import java.util.UUID
@@ -41,7 +42,8 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         val afterSave = store.modelCatalogSnapshot()
         assertEquals(first.providerIdentity, afterSave.providerIdentity)
         assertTrue(afterSave.revision > first.revision)
-        assertEquals(first.models, afterSave.models)
+        assertEquals(first.models.single().settings.localIdentity, afterSave.models.single().settings.localIdentity)
+        assertFalse(afterSave.models.single().settings.batteryEnabled)
         val reopened = ModelSettingsStore(context, prefix)
         assertEquals(afterSave, reopened.modelCatalogSnapshot())
         reopened.selectModel(reopened.load(), "model-b")
@@ -52,7 +54,118 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         val afterRestore = reopened.modelCatalogSnapshot()
         assertTrue(afterRestore.revision > afterSelect.revision)
         assertEquals(first.providerIdentity, afterRestore.providerIdentity)
-        assertEquals(first.models, afterRestore.models)
+        assertEquals(afterSelect.models, afterRestore.models)
+    }
+
+    private fun importedModel(id: String, battery: Boolean = false, device: Boolean = false) = SavedCatalogModel(
+        id, "Imported $id", CatalogModelParameters(batteryEnabled = battery, deviceStatusEnabled = device,
+            requestOptions = ProviderRequestOptions("{\"temperature\":0.2}")),
+    )
+
+    private fun append(vararg models: SavedCatalogModel<CatalogModelParameters>) {
+        val snapshot = store.modelCatalogSnapshot()
+        assertEquals(CatalogCommitResult.COMMITTED, store.modelCatalog.compareAndAppend(
+            snapshot.providerIdentity, snapshot.revision, models.toList()) { false })
+    }
+
+    private fun rejectsSelection(block: () -> Unit) {
+        var rejected = false
+        try { block() } catch (_: IllegalStateException) { rejected = true }
+        assertTrue("stale selection must fail closed", rejected)
+    }
+
+    fun testImportedPolicyRoundTripsAcrossSwitchesAndReopenWithoutLosingOtherModels() {
+        val a = initial.copy(requestOptions = ProviderRequestOptions("{\"temperature\":0.7}"))
+        store.save(a)
+        val first = store.modelCatalogSnapshot()
+        val b = importedModel("model-b", device = true)
+        val c = importedModel("model-c")
+        append(b, c)
+        val reopened = ModelSettingsStore(context, prefix)
+        val local = reopened.localModelCatalogSnapshot()!!
+        assertEquals(listOf("model-a", "model-b", "model-c"), local.models.map { it.id })
+        reopened.selectCatalogModel(a, local.selectionFor("model-b")!!)
+        assertEquals(b.settings.applyTo(a, "model-b"), reopened.load())
+        val editedB = reopened.load().copy(batteryEnabled = true,
+            requestOptions = ProviderRequestOptions("{\"temperature\":0.4}"))
+        reopened.save(editedB)
+        val beforeReturn = reopened.localModelCatalogSnapshot()!!
+        assertEquals(b.settings.localIdentity, beforeReturn.models.single { it.id == b.id }.settings.localIdentity)
+        assertEquals(c, beforeReturn.models.single { it.id == c.id })
+        reopened.selectCatalogModel(editedB, beforeReturn.selectionFor("model-a")!!)
+        assertEquals(a, reopened.load())
+        val finalSnapshot = reopened.localModelCatalogSnapshot()!!
+        assertEquals(first.models.single(), finalSnapshot.models.single { it.id == "model-a" })
+        assertEquals(editedB.requestOptions, finalSnapshot.models.single { it.id == b.id }.settings.requestOptions)
+        assertEquals(c, finalSnapshot.models.single { it.id == c.id })
+        assertEquals(finalSnapshot, ModelSettingsStore(context, prefix).localModelCatalogSnapshot())
+    }
+
+    fun testChangedConfigurationAndDeletionRejectCapturedSelections() {
+        store.save(initial)
+        append(importedModel("model-b"))
+        val before = store.localModelCatalogSnapshot()!!
+        val ticket = before.selectionFor("model-b")!!
+        store.save(initial.copy(deviceStatusEnabled = true))
+        val changed = store.load()
+        rejectsSelection { store.selectCatalogModel(changed, ticket) }
+        assertEquals(changed, store.load())
+        val latest = store.localModelCatalogSnapshot()!!
+        val latestTicket = latest.selectionFor("model-b")!!
+        assertTrue(store.modelCatalog.deleteProvider(latest.providerIdentity))
+        assertNull(store.localModelCatalogSnapshot()) // read does not re-register the tombstone
+        rejectsSelection { store.selectCatalogModel(changed, latestTicket) }
+        assertEquals(changed, store.load())
+    }
+
+    fun testSameWireModelUnderDifferentAccountNeverInheritsImportedPolicy() {
+        store.save(initial)
+        val imported = importedModel("shared-id", battery = true, device = true)
+        append(imported, importedModel("other-old-account-model"))
+        val old = store.localModelCatalogSnapshot()!!
+        val oldTicket = old.selectionFor(imported.id)!!
+        val otherAccount = initial.copy(apiKey = "different-account-key", model = imported.id,
+            batteryEnabled = false, requestOptions = ProviderRequestOptions())
+        store.save(otherAccount)
+        val fresh = store.localModelCatalogSnapshot()!!
+        assertFalse(old.providerIdentity == fresh.providerIdentity)
+        assertEquals(listOf(imported.id), fresh.models.map { it.id })
+        assertFalse(imported.settings.localIdentity == fresh.models.single().settings.localIdentity)
+        rejectsSelection { store.selectCatalogModel(otherAccount, oldTicket) }
+        store.selectCatalogModel(otherAccount, fresh.selectionFor(imported.id)!!)
+        assertEquals(otherAccount, store.load())
+        assertFalse(store.load().deviceStatusEnabled)
+        assertEquals(ProviderRequestOptions(), store.load().requestOptions)
+    }
+
+    fun testLegacyRemoteSelectionUsesDetachedDefaultsNotActiveOverrides() {
+        val a = initial.copy(deviceStatusEnabled = true,
+            requestOptions = ProviderRequestOptions("{\"temperature\":0.7}"))
+        store.save(a)
+        store.modelCatalogSnapshot()
+        store.selectModel(a, "new-remote-model")
+        val selected = store.load()
+        assertFalse(selected.batteryEnabled)
+        assertFalse(selected.deviceStatusEnabled)
+        assertEquals(ProviderRequestOptions(), selected.requestOptions)
+        val local = store.localModelCatalogSnapshot()!!
+        store.selectCatalogModel(selected, local.selectionFor(a.model)!!)
+        assertEquals(a, store.load())
+    }
+
+    fun testReadOnlyLocalCatalogDoesNotDecryptCredentialsOrAccessNetwork() {
+        store.save(initial)
+        append(importedModel("model-b"))
+        val before = store.localModelCatalogSnapshot()
+        val guarded = object : SharedPreferences by raw {
+            override fun getAll(): MutableMap<String, *> = error("must not read preferences")
+            override fun getString(key: String?, defValue: String?): String? = error("must not read preferences")
+            override fun contains(key: String?): Boolean = error("must not read preferences")
+        }
+        val guardedContext = object : ContextWrapper(context) {
+            override fun getSharedPreferences(name: String, mode: Int) = guarded
+        }
+        assertEquals(before, ModelSettingsStore(guardedContext, prefix).localModelCatalogSnapshot())
     }
 
     fun testCorruptRequestOptionsNeverInitializeFromFallbackDefaults() {

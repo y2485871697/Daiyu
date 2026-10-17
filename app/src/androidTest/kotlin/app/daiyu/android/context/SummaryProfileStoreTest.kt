@@ -57,6 +57,67 @@ class SummaryProfileStoreTest : InstrumentationTestCase() {
         assertFalse(prefs.all.keys.any { it.contains("key") || it.contains("credential") })
     }
 
+    fun testDescriptorIsRealRequestTargetAndReadsNoCredentialsEvenOnUnavailableRecords() {
+        val repository = store(); val saved = profile()
+        unavailable(SummaryProfileUnavailableReason.MISSING) { repository.descriptor(binding) }
+        repository.save(saved)
+        val descriptor = repository.descriptor(binding)
+        assertEquals(saved.provider.requestEndpoint(), descriptor.endpoint)
+        assertEquals("api-summary", descriptor.apiModel) // Binding modelId is deliberately opaque.
+        assertEquals(binding, descriptor.binding)
+        assertEquals(0, reads)
+        unavailable(SummaryProfileUnavailableReason.BINDING_MISMATCH) {
+            repository.descriptor(SummaryModelBinding("other", "opaque"))
+        }
+        assertEquals(0, reads)
+        assertFalse(descriptor.toString().contains("synthetic-only"))
+        assertFalse(prefs.getString(SummaryProfileStore.KEY, null)!!.contains("synthetic-only"))
+        val ready = prefs.getString(SummaryProfileStore.KEY, null)!!
+        val malformed = JSONObject(ready).put("endpoint", "https://user:secret@summary.invalid")
+        prefs.edit().putString(SummaryProfileStore.KEY, malformed.toString()).commit()
+        unavailable(SummaryProfileUnavailableReason.INVALID_CONFIGURATION) { repository.descriptor(binding) }
+        prefs.edit().putString(SummaryProfileStore.KEY, "{\"version\":1,\"state\":\"saving\"}").commit()
+        unavailable(SummaryProfileUnavailableReason.INCOMPLETE_SAVE) { repository.descriptor(binding) }
+        assertEquals(0, reads)
+    }
+
+    fun testEverySaveIncludingKeyOnlyAndABAInvalidatesOldConsentBeforeCredentialRead() {
+        val repository = store(); val original = profile()
+        repository.save(original)
+        val revisions = mutableSetOf(repository.descriptor(binding).revision)
+        for (changed in listOf(original.copy(provider = original.provider.copy(endpoint = "https://other.invalid")),
+            original.copy(provider = original.provider.copy(model = "other-api-model")),
+            original.copy(provider = original.provider.copy(apiKey = "synthetic-new-key")), original, original)) {
+            val before = repository.descriptor(binding)
+            repository.save(changed)
+            val after = repository.descriptor(binding)
+            assertTrue(revisions.add(after.revision))
+            try { repository.configuration(before); fail("old consent must reject") }
+            catch (_: SummaryProfileChangedException) { }
+            assertEquals(0, reads)
+        }
+        val accepted = repository.descriptor(binding)
+        val frozen = repository.configuration(accepted)
+        assertEquals(1, reads)
+        repository.save(original.copy(provider = original.provider.copy(model = "later-model", apiKey = "later-key")))
+        assertEquals("api-summary", frozen.apiModel)
+        assertEquals("synthetic-only", frozen.provider.apiKey)
+        assertEquals(original.provider.requestEndpoint(), frozen.provider.asModelSettings().requestEndpoint())
+    }
+
+    fun testLegacyProfileDoesNotInventReusableRevisionOrReadKeyForManualConsent() {
+        val repository = store(); repository.save(profile())
+        val json = JSONObject(prefs.getString(SummaryProfileStore.KEY, null)!!)
+        json.put("version", 1)
+        for (key in listOf("revision", "endpoint", "apiModel")) json.remove(key)
+        prefs.edit().putString(SummaryProfileStore.KEY, json.toString()).commit()
+        unavailable(SummaryProfileUnavailableReason.INVALID_CONFIGURATION) { repository.descriptor(binding) }
+        assertEquals(0, reads)
+        assertEquals(profile(), repository.load(binding)) // Existing send compatibility only.
+        repository.save(profile())
+        assertNotNull(repository.descriptor(binding))
+    }
+
     fun testMissingWrongBindingAndMissingBudgetRejectBeforeCredentials() {
         val store = store()
         unavailable(SummaryProfileUnavailableReason.MISSING) { store.load(binding) }

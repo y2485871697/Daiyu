@@ -1,0 +1,183 @@
+package app.daiyu.android.context
+
+import android.content.Context
+import android.os.Looper
+import app.daiyu.android.domain.ConversationId
+import app.daiyu.android.domain.Message
+import app.daiyu.android.domain.context.ContextRevision
+
+/** Exact host selection identity, not a title, parent branch, or the last visible message. */
+internal data class ContextManagementOwner(val conversationId: ConversationId, val generation: Long) {
+    init { require(generation >= 0 && conversationId.value.isNotBlank() && conversationId.value.length <= 200) }
+}
+
+internal data class ContextManagementSnapshot(
+    val conversationId: ConversationId,
+    val historyRevision: String,
+    val originals: List<Message>,
+    val effective: PreparedContext,
+    val configuration: CompressionSettings?,
+    val summaryTarget: SummaryProfileDescriptor?,
+) {
+    val canCompress: Boolean get() = originals.isNotEmpty() && configuration?.let {
+        it.contextWindowTokens != null && it.summaryModel != null && it.keepTurns != null &&
+            summaryTarget?.binding == it.summaryModel
+    } == true
+}
+
+/** Worker-only port: describe reads metadata, never credentials. freeze MUST compare the entire
+ * descriptor (including non-reusable revision) and capture one candidate atomically with save.
+ * No network until that retained candidate is consumed by the existing coordinator/service. */
+internal interface ContextManagementSummaryProfiles {
+    fun describe(binding: SummaryModelBinding): SummaryProfileDescriptor?
+    fun freeze(expected: SummaryProfileDescriptor): BoundSummaryModel?
+}
+
+internal data class ContextManagementArchive(
+    val archiveId: String,
+    val offset: Int,
+    val page: ArchivePage,
+)
+
+internal data class ContextCompressionReceipt(val archiveId: String?, val expectedHistoryRevision: String)
+
+/** A lease MUST be the parent's existing Preparation reservation, not a separate mutex.
+ * checkCurrent checks selection generation, parent token identity and revocation, without I/O.
+ * The backend checks persisted owner existence in its read transaction.
+ * cancellation is that SAME Preparation.cancellation; nonthrowing finish releases after worker drain.
+ * Implementations must not hold a controller monitor while doing I/O or cancelling transports. */
+internal interface ContextManagementLease {
+    val owner: ContextManagementOwner
+    val cancellation: ContextPreparationCancellation
+    fun checkCurrent()
+    fun finish()
+}
+
+internal interface ContextManagementBackend {
+    fun snapshot(lease: ContextManagementLease): ContextManagementSnapshot
+    fun archive(lease: ContextManagementLease, snapshot: ContextManagementSnapshot,
+        offset: Int): ContextManagementArchive
+    fun compress(lease: ContextManagementLease,
+        expected: ContextManagementSnapshot): ContextCompressionReceipt
+}
+
+/** Worker-only implementation. UI receives neither this object nor a ContextService.
+ * No sends, branches, revisions, tools, retries, capacity guesses or new boundary algorithm. */
+internal class ContextManagementWorker(
+    private val service: ContextService,
+    private val settings: () -> CompressionSettings,
+    private val policies: CompressionPolicyResolver,
+    private val profiles: ContextManagementSummaryProfiles,
+) : ContextManagementBackend {
+    override fun snapshot(lease: ContextManagementLease): ContextManagementSnapshot {
+        checkLease(lease)
+        // Broken settings must not make intact local history inaccessible. No credentials read here.
+        val configuration = try { settings() } catch (_: Exception) { null }
+        val target = try { configuration?.summaryModel?.let(profiles::describe) }
+            catch (_: Exception) { null }
+        checkLease(lease)
+        return service.readQuery {
+            // Never take the parent monitor while holding SQLite's transaction/connection lock.
+            lease.cancellation.check()
+            val id = lease.owner.conversationId
+            require(service.isUsageOwner(id.value)) { "会话不存在" }
+            val originals = freezeContextMessages(service.displayHistory(id))
+            // No summarizer / policy: this is a strictly read-only projection, even above budget.
+            val effective = service.prepareSend(id).let { it.copy(messages = freezeContextMessages(it.messages)) }
+            ContextManagementSnapshot(id, ContextRevision.digest(originals), originals, effective, configuration, target)
+        }
+    }
+
+    override fun archive(lease: ContextManagementLease, snapshot: ContextManagementSnapshot,
+        offset: Int): ContextManagementArchive {
+        checkLease(lease)
+        return service.readQuery {
+            validateSnapshot(lease, snapshot)
+            val archive = requireNotNull(snapshot.effective.archiveId) { "当前快照没有有效档案" }
+            require(service.archiveOwner(archive) == lease.owner.conversationId) { "档案不属于当前会话" }
+            val page = service.archivePage(archive, offset, PAGE_SIZE, expectedOwner = lease.owner.conversationId)
+            ContextManagementArchive(archive, offset, page.copy(messages = freezeContextMessages(page.messages)))
+        }
+    }
+
+    override fun compress(lease: ContextManagementLease,
+        expected: ContextManagementSnapshot): ContextCompressionReceipt {
+        checkLease(lease)
+        service.readQuery { validateSnapshot(lease, expected) }
+        require(expected.canCompress) { "需要明确窗口、保留轮数和独立摘要绑定" }
+        val saved = requireNotNull(expected.configuration)
+        require(settings() == saved) { "压缩设置已改变；请刷新后重新确认" }
+        // Explicit manual consent enables this SINGLE frozen preparation, not the saved auto switch.
+        // Existing coordinator still freezes/validates the exact independent candidate and cancellation.
+        val target = requireNotNull(expected.summaryTarget)
+        val coordinator = ContextPreparationCoordinator(service, { saved.copy(automatic = true) }, policies,
+            SummaryModelResolver { binding ->
+                require(binding == target.binding) { "摘要目标不匹配；请刷新并重新确认" }
+                // Atomic revision comparison + credential capture, not a check followed by resolving
+                // the current binding again. All later I/O uses this exact retained candidate.
+                profiles.freeze(target)
+            })
+        val frozen = coordinator.freeze(expected.conversationId, emptyList(), lease.cancellation)
+        val summarizer = requireNotNull(frozen.summarizer) { "独立摘要模型不可用；未回退聊天模型" }
+        checkLease(lease)
+        check(frozen.consumed.compareAndSet(false, true)) { "准备只能使用一次" }
+        // Manual intent bypasses only the automatic pressure threshold. Service owns the retained
+        // cut, full authoritative-history CAS, budget, archive publication and cancellation checks.
+        // Never call prepare() afterwards: that would risk a second summary request.
+        val archive = service.compress(expected.conversationId, frozen.policy, summarizer,
+            pendingMessages = frozen.pendingMessages, cancelled = { lease.cancellation.isCancelled })
+        // No fallible post-publication read/check: publication can already have committed.
+        return ContextCompressionReceipt(archive, expected.historyRevision)
+    }
+
+    private fun validateSnapshot(lease: ContextManagementLease, expected: ContextManagementSnapshot) {
+        // Already inside SQLite: revocation propagates through the same atomic cancellation token.
+        lease.cancellation.check()
+        val id = lease.owner.conversationId
+        require(id == expected.conversationId && service.isUsageOwner(id.value)) { "会话已变化或已删除" }
+        require(ContextRevision.digest(service.displayHistory(id)) == expected.historyRevision) {
+            "完整历史已变化；请刷新"
+        }
+        require(service.prepareSend(id).archiveId == expected.effective.archiveId) { "活动档案已变化；请刷新" }
+    }
+
+    private fun checkLease(lease: ContextManagementLease) {
+        requireWorker()
+        lease.cancellation.check()
+        lease.checkCurrent()
+    }
+
+    companion object {
+        const val PAGE_SIZE = 50
+
+        private fun requireWorker() {
+            check(Looper.myLooper() != Looper.getMainLooper()) { "上下文读取与摘要准备必须在父工作线程执行" }
+        }
+
+        /** Shares the production v2 settings, policy and retained provider candidate resolver.
+         * Parent must obtain its lazy shared service and construct this on its worker AFTER admission:
+         * first ContextService/archive-store initialization may mkdir; never evaluate it on the UI.
+         * All reads are local; only explicit compress may open summary I/O. */
+        fun production(context: Context, service: ContextService): ContextManagementWorker {
+            val app = context.applicationContext ?: context
+            return ContextManagementWorker(service, settings = {
+                requireWorker()
+                ProductionCompressionSettingsStore(app).snapshot().coordinatorSettings()
+            }, policies = ProductionCompressionPolicyResolver,
+                profiles = object : ContextManagementSummaryProfiles {
+                    override fun describe(binding: SummaryModelBinding): SummaryProfileDescriptor {
+                        requireWorker()
+                        return SummaryProfileStore(app).descriptor(binding)
+                    }
+                    override fun freeze(expected: SummaryProfileDescriptor): BoundSummaryModel? {
+                        requireWorker()
+                        val configuration = SummaryProfileStore(app).configuration(expected)
+                        return ProviderSummaryModelResolver { binding ->
+                            require(binding == expected.binding)
+                            configuration // Never look up the current binding a second time.
+                        }.resolve(expected.binding)
+                    }
+                })
+        }
+    }
+}

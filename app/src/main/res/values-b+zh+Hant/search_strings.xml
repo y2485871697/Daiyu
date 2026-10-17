@@ -24,4 +24,6 @@
     <string name="search_enter_query">輸入關鍵字搜尋訊息正文與工具記錄。</string>
     <string name="search_message_count">已傳回 %1$d 條訊息命中</string>
     <string name="search_limited_results">目前資料來源最多傳回 %1$d 條且不支援分頁，結果可能不完整。</string>
+    <string name="search_load_more">載入更多</string>
+    <string name="search_history_changed">歷史已變更。已保留現有結果，請重新整理以搜尋新歷史。</string>
 </resources>

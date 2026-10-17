@@ -24,4 +24,6 @@
     <string name="search_enter_query">Enter a keyword to search message text and tool records.</string>
     <string name="search_message_count">%1$d message results returned</string>
     <string name="search_limited_results">This source returns up to %1$d results without paging. Results may be incomplete.</string>
+    <string name="search_load_more">Load more</string>
+    <string name="search_history_changed">History changed. Existing results are kept; refresh to search the new history.</string>
 </resources>

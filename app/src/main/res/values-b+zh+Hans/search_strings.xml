@@ -24,4 +24,6 @@
     <string name="search_enter_query">输入关键词搜索消息正文与工具记录。</string>
     <string name="search_message_count">已返回 %1$d 条消息命中</string>
     <string name="search_limited_results">当前数据源最多返回 %1$d 条且不支持分页，结果可能不完整。</string>
+    <string name="search_load_more">加载更多</string>
+    <string name="search_history_changed">历史已改变。已保留现有结果，请刷新以搜索新历史。</string>
 </resources>

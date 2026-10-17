@@ -1,6 +1,9 @@
 package app.daiyu.android.ui
 
 import android.content.ContentValues
+import android.os.CancellationSignal
+import app.daiyu.android.domain.context.ContextRevision
+import java.security.MessageDigest
 import app.daiyu.android.context.ContextService
 import app.daiyu.android.context.DatabaseTransactions
 import app.daiyu.android.storage.RecordedUsageReader
@@ -35,57 +38,119 @@ internal class RetainedConversationData(private val database: ConversationDataba
     }
 
     companion object {
-        // This reader has no continuation token: never advertise pagination or unlimited results.
+        // Compatibility readers below return the first page only. Production uses searchPage.
         const val SEARCH_RESULT_LIMIT = 200
     }
 
-    fun search(query: String): List<MessageSearchHit> = searchHistory(query, null)
+    fun search(query: String): List<MessageSearchHit> = searchPage(query).results
 
-    /** Scope the SQLite read BEFORE matching/limiting, not a filter of 200 global hits. */
     fun searchCurrentConversation(query: String, conversationId: String): List<MessageSearchHit> {
         require(conversationId.isNotBlank())
-        return searchHistory(query, conversationId)
+        return searchPage(query, conversationId).results
     }
 
-    private fun searchHistory(query: String, conversationId: String?): List<MessageSearchHit> {
+    /**
+     * Result paging AFTER complete MessageHistory expansion (never LIMIT 200 physical owners).
+     * Each page verifies every scoped conversation revision in the same SQLite snapshot. This
+     * intentionally still reads whole conversations; it is not bounded database-history paging.
+     */
+    fun searchPage(
+        query: String,
+        conversationId: String? = null,
+        cursor: MessageSearchCursor? = null,
+        cancellationSignal: CancellationSignal = CancellationSignal(),
+        pageSize: Int = SEARCH_RESULT_LIMIT,
+    ): MessageSearchPage {
         val needle = query.trim()
-        if (needle.isEmpty()) return emptyList()
-        require(needle.length <= 1000)
-        val conversations = database.readableDatabase.rawQuery(
-            "SELECT id,title FROM conversations" + (if (conversationId == null) "" else " WHERE id=?") +
-                " ORDER BY pinned DESC,updated DESC,id ASC",
-            conversationId?.let { arrayOf(it) },
-        ).use { cursor -> buildList {
-            while (cursor.moveToNext()) add(ConversationId(cursor.getString(0)) to cursor.getString(1))
-        } }
-        // A removed scope is a failed read, not an apparently successful search of some other scope.
-        check(conversationId == null || conversations.size == 1) { "会话已不存在" }
-        return buildList {
-            for ((id, title) in conversations) {
-                // displayHistory binds WHERE conversation_id=? and includes old/segmented history.
-                val stored = context.displayHistory(id)
-                val owners = stored.flatMap { owner -> owner.historySegments.map {
-                    (owner.runId.value to it.messageId.value) to owner.id.value
-                } }.toMap()
+        require(needle.length <= 1000 && pageSize in 1..SEARCH_RESULT_LIMIT)
+        require(conversationId == null || conversationId.isNotBlank())
+        cancellationSignal.throwIfCanceled()
+        if (cursor != null && (cursor.query != needle || cursor.conversationId != conversationId))
+            throw SearchCursorInvalidatedException()
+        if (needle.isEmpty()) return MessageSearchPage(emptyList())
+        return context.searchRead(cancellationSignal) { db ->
+            val conversations = db.rawQuery(
+                "SELECT id,title FROM conversations" + (if (conversationId == null) "" else " WHERE id=?") +
+                    " ORDER BY pinned DESC,updated DESC,id ASC",
+                conversationId?.let { arrayOf(it) }, cancellationSignal,
+            ).use { rows -> buildList {
+                while (rows.moveToNext()) {
+                    cancellationSignal.throwIfCanceled()
+                    add(rows.getString(0) to rows.getString(1))
+                }
+            } }
+            if (cursor != null && conversations != cursor.conversations.map { it.id to it.title })
+                throw SearchCursorInvalidatedException()
+            check(conversationId == null || conversations.size == 1) { "会话已不存在" }
+            val revisions = ArrayList<SearchConversationRevision>(conversations.size)
+            val hits = ArrayList<MessageSearchHit>(pageSize)
+            var nextConversation = 0
+            var nextExpanded = 0
+            var hasMore = false
+            for ((conversationIndex, conversation) in conversations.withIndex()) {
+                cancellationSignal.throwIfCanceled()
+                val (id, title) = conversation
+                val stored = context.displayHistoryForSearch(db, ConversationId(id), cancellationSignal)
+                val revision = searchRevision(stored, cancellationSignal)
+                if (cursor != null && cursor.conversations[conversationIndex].revision != revision)
+                    throw SearchCursorInvalidatedException()
+                revisions.add(SearchConversationRevision(id, title, revision))
+                val owners = buildMap {
+                    for (owner in stored) for (segment in owner.historySegments) {
+                        cancellationSignal.throwIfCanceled()
+                        put(owner.runId.value to segment.messageId.value, owner.id.value)
+                    }
+                }
                 val occurrences = mutableMapOf<Pair<String, String>, Int>()
-                for (message in MessageHistory.expand(stored)) {
+                for ((expandedIndex, message) in MessageHistory.expand(stored).withIndex()) {
+                    cancellationSignal.throwIfCanceled()
                     val identity = message.runId.value to message.id.value
                     val segmentIndex = occurrences[identity] ?: 0
                     occurrences[identity] = segmentIndex + 1
-                    // Search explicit text/tool records, not serialized block IDs or protocol
-                    // metadata. No image/attachment tables, asset paths or sidecar files are read.
+                    // Count occurrences even before the cursor: same-owner segments across pages
+                    // must retain the exact segmentIndex used by the chat navigation mapper.
+                    if (cursor != null && (conversationIndex < cursor.nextConversation ||
+                            conversationIndex == cursor.nextConversation && expandedIndex < cursor.nextExpanded)) continue
                     val text = retainedSearchText(message.blocks)
                     val at = text.indexOf(needle, ignoreCase = true)
-                    if (at >= 0) {
-                        add(MessageSearchHit(id.value, title, message.id.value,
-                            text.substring((at - 36).coerceAtLeast(0), (at + needle.length + 80).coerceAtMost(text.length)),
-                            if (message.role == "user") "用户" else "助手",
-                            owners[identity] ?: message.id.value, segmentIndex))
-                    }
-                    if (size >= SEARCH_RESULT_LIMIT) return@buildList
+                    if (at < 0) continue
+                    if (hits.size == pageSize) { hasMore = true; continue }
+                    hits.add(MessageSearchHit(id, title, message.id.value,
+                        text.substring((at - 36).coerceAtLeast(0), (at + needle.length + 80).coerceAtMost(text.length)),
+                        if (message.role == "user") "用户" else "助手",
+                        owners[identity] ?: message.id.value, segmentIndex))
+                    nextConversation = conversationIndex
+                    nextExpanded = expandedIndex + 1
                 }
             }
+            cancellationSignal.throwIfCanceled()
+            MessageSearchPage(hits.toList(), if (hasMore) MessageSearchCursor(
+                needle, conversationId, revisions.toList(), nextConversation, nextExpanded,
+            ) else null)
         }
+    }
+
+    private fun searchRevision(stored: List<Message>, signal: CancellationSignal): String {
+        // ContextRevision includes blocks/protocol/segments/status, but deliberately omits time.
+        // Frame each owner's fixed-size content digest and its timestamp metadata separately.
+        val hash = MessageDigest.getInstance("SHA-256")
+        fun field(value: String) {
+            val bytes = value.toByteArray(Charsets.UTF_8)
+            hash.update(java.nio.ByteBuffer.allocate(4).putInt(bytes.size).array())
+            hash.update(bytes)
+        }
+        for (message in stored) {
+            signal.throwIfCanceled()
+            field(ContextRevision.digest(listOf(message)))
+            field("${message.createdAt}")
+            field(message.historySegments.size.toString())
+            for (segment in message.historySegments) {
+                signal.throwIfCanceled()
+                field("${segment.createdAt}")
+            }
+        }
+        signal.throwIfCanceled()
+        return hash.digest().joinToString("") { "%02x".format(it.toInt() and 255) }
     }
 
     fun stats(): UsageStatsSnapshot = DatabaseTransactions { database.readableDatabase }.run { db ->

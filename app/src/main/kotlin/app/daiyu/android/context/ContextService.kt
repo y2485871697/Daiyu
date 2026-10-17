@@ -3,6 +3,7 @@ package app.daiyu.android.context
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
+import android.os.CancellationSignal
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.storage.MessageHistoryCodec
 import app.daiyu.android.storage.SQLiteText
@@ -30,6 +31,23 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     constructor(context: Context, store: ConversationDatabase) : this(store, PrivateBlobs(context))
 
     fun displayHistory(id: ConversationId): List<Message> = transactions.run { read(it, id) }
+
+    /** Search owns one snapshot across scope/order/revision checks and all text reads. */
+    internal fun <T> searchRead(signal: CancellationSignal, block: (SQLiteDatabase) -> T): T {
+        signal.throwIfCanceled()
+        return transactions.run { db ->
+            signal.throwIfCanceled()
+            block(db).also { signal.throwIfCanceled() }
+        } // DatabaseTransactions always ends its transaction in finally, including cancellation.
+    }
+
+    /** Text search does not read attachment/video sidecars or blobs. */
+    internal fun displayHistoryForSearch(db: SQLiteDatabase, id: ConversationId,
+        signal: CancellationSignal): List<Message> {
+        check(db.inTransaction())
+        signal.throwIfCanceled()
+        return readHistory(db, id, signal)
+    }
 
     /** Final send CAS over ALL authoritative originals, not an effective/summary projection or
      * a paginated UI history. The caller must perform owner/draft checks and database.send in
@@ -359,22 +377,35 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     }
     companion object {
         fun read(db: SQLiteDatabase, id: ConversationId): List<Message> = DatabaseTransactions {db}.run {
-            val rows=db.rawQuery("SELECT id,run_id,role,status FROM messages WHERE conversation_id=? ORDER BY seq", arrayOf(id.value)).use { c ->
-                buildList { while(c.moveToNext()) add(listOf(c.getString(0),c.getString(1),c.getString(2),c.getString(3))) }
+            readHistory(db, id, null)
+        }
+        private fun readHistory(db: SQLiteDatabase, id: ConversationId, signal: CancellationSignal?): List<Message> {
+            signal?.throwIfCanceled()
+            val rows=db.rawQuery("SELECT id,run_id,role,status FROM messages WHERE conversation_id=? ORDER BY seq",
+                arrayOf(id.value), signal).use { c ->
+                buildList { while(c.moveToNext()) {
+                    signal?.throwIfCanceled()
+                    add(listOf(c.getString(0),c.getString(1),c.getString(2),c.getString(3)))
+                } }
             }
-            rows.map { row ->
-                fun text(column:String)=SQLiteText.read(db,"messages",column,"id",row[0])
+            return rows.map { row ->
+                signal?.throwIfCanceled()
+                fun text(column:String)=SQLiteText.read(db,"messages",column,"id",row[0], cancellationSignal = signal)
                 val p=JSONArray(requireNotNull(text("protocol")))
-                val createdAt = db.rawQuery("SELECT created_at FROM messages WHERE id=?", arrayOf(row[0])).use {
+                val createdAt = db.rawQuery("SELECT created_at FROM messages WHERE id=?", arrayOf(row[0]), signal).use {
                     check(it.moveToFirst()); if (it.isNull(0)) null else it.getLong(0)
                 }
                 Message(MessageId(row[0]),id,RunId(row[1]),row[2],ArchiveCodec.decodeBlocks(JSONArray(requireNotNull(text("blocks")))),
-                    RunStatus.valueOf(row[3]),text("error"),(0 until p.length()).map {p.getString(it)},
-                    MessageHistoryCodec.decode(JSONArray(requireNotNull(text("history_segments")))), createdAt = createdAt).also {
+                    RunStatus.valueOf(row[3]),text("error"),(0 until p.length()).map {
+                        signal?.throwIfCanceled(); p.getString(it)
+                    }, MessageHistoryCodec.decode(JSONArray(requireNotNull(text("history_segments")))), createdAt = createdAt).also {
+                        signal?.throwIfCanceled()
                         MessageHistoryCodec.validate(it)
-                        app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it)
+                        // Legacy display/send keeps its video validation; text-only search never
+                        // adds an uncancellable attachment query to the search-specific path.
+                        if (signal == null) app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it)
                     }
-            }.also {MessageHistory.expand(it)}
+            }.also { signal?.throwIfCanceled(); MessageHistory.expand(it); signal?.throwIfCanceled() }
         }
         private fun messageValues(m: Message): ContentValues {
             MessageHistoryCodec.validate(m)

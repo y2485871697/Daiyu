@@ -136,6 +136,8 @@ class ChatController internal constructor(private val application:Application,
     }, private val titleSettingsOverride: app.daiyu.android.title.TitleModelSettingsStore? = null,
     private val contextManagementFactory: (android.content.Context, ContextService) -> ContextManagementBackend =
         { context, service -> ContextManagementWorker.production(context, service) },
+    private val platformActions: app.daiyu.android.platform.actions.PlatformActionBackend =
+        app.daiyu.android.platform.actions.AndroidPlatformActionBackend(application),
     private val mcpTransport: (app.daiyu.android.mcp.McpServer) -> app.daiyu.android.mcp.McpHttpSession = {
         app.daiyu.android.mcp.McpHttpSession(it)
     }) {
@@ -437,6 +439,10 @@ class ChatController internal constructor(private val application:Application,
         finally {finishPreparation(token)}
     }
     private var pendingImage:ImageSendHandle?=null
+    // AC037 dedicated platform approval lane. Ordinary send paths never populate it.
+    private var pendingPlatformAction: ControllerPlatformActionPreparation? = null
+    private var pendingPlatformToken: Preparation? = null
+    @Synchronized internal fun platformActionPreparation() = pendingPlatformAction
     private var pendingShizuku:ControllerShizukuPreparation?=null
     private var pendingShizukuToken:Preparation?=null
     @Synchronized internal fun shizukuPreparation():ControllerShizukuPreparation? = pendingShizuku
@@ -1364,7 +1370,7 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
-        resources==null && generationEntry==null && virtualDisplayEntry==null && guiEntry==null && generationReaders==0 && pendingShizuku==null && unacceptedTools.isEmpty() &&
+        resources==null && generationEntry==null && virtualDisplayEntry==null && guiEntry==null && generationReaders==0 && pendingShizuku==null && pendingPlatformAction==null && unacceptedTools.isEmpty() &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
     internal val selections=mutableMapOf<ConversationId?,Pair<Int,Int>>()
     @Volatile var active:Message?=null;private set
@@ -1629,6 +1635,72 @@ class ChatController internal constructor(private val application:Application,
             }
         }
     }
+    // AC037: prepare is validation only; explicit confirmation issues ONE exact grant.
+    @Synchronized internal fun preparePlatformAction(conversation: Conversation?, text: String,
+        kind: app.daiyu.android.platform.actions.PlatformActionKind, arguments: String): ControllerPlatformActionPreparation? {
+        if (!idleAvailable()) return null
+        val preview = runCatching {
+            ControllerPlatformActionPreparation(conversation, text,
+                app.daiyu.android.platform.actions.PlatformAction.parse(kind, arguments), platformActions)
+        }.getOrNull() ?: return null
+        pendingPlatformToken = reservePreparation()
+        pendingPlatformAction = preview
+        notifyChanged()
+        return preview
+    }
+    internal fun rejectPlatformAction(preview: ControllerPlatformActionPreparation) {
+        val token = synchronized(this) {
+            if (pendingPlatformAction !== preview) null
+            else pendingPlatformToken?.also { it.revoked = true }
+        }
+        preview.cancel()
+        token?.cancellation?.cancel()
+        val installed = synchronized(this) { resources?.takeIf { it.initial.runId == preview.runId } }
+        installed?.let(::stopRun)
+        if (!preview.submitted && token != null) finishPlatformAction(preview)
+    }
+    internal fun confirmPlatformAction(preview: ControllerPlatformActionPreparation,
+        complete: (Conversation?) -> Unit): Boolean {
+        val token = synchronized(this) {
+            if (closed || pendingPlatformAction !== preview || preview.submitted || preview.cancelled ||
+                pendingPlatformToken?.revoked != false) return false
+            preview.approve() // User confirmation only, no Android calls.
+            checkNotNull(pendingPlatformToken)
+        }
+        try { executor.execute {
+            val saved = try {
+                if (preview.cancelled) null else sendPrepared(token, preview.conversation, preview.messageText,
+                    expectedDraftText = preview.text, platformAction = preview)
+            } catch (_: Exception) {
+                synchronized(this) { problem = "系统操作准备失败；草稿保留，未自动重发"; notifyChanged() }
+                null
+            }
+            finishPlatformAction(preview)
+            handler.post { try { complete(saved) } catch (_: Exception) {} }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            preview.cancel(); finishPlatformAction(preview); return false
+        }
+        return true
+    }
+    private fun finishPlatformAction(preview: ControllerPlatformActionPreparation) {
+        fun release() = synchronized(this) {
+            if (pendingPlatformAction === preview) {
+                val token = checkNotNull(pendingPlatformToken)
+                pendingPlatformAction = null; pendingPlatformToken = null
+                finishPreparation(token)
+            }
+        }
+        // Installed scope belongs to the original RunResources and its existing owner-drain.
+        if (synchronized(this) { resources?.initial?.runId == preview.runId }) release()
+        else preview.scope?.observeClose { result ->
+            if (result == RunCatalogCloseResult.Drained) release()
+            else synchronized(this) {
+                problem = "系统操作结果 UNKNOWN；保留原运行，不自动重试，请核实设备状态"
+                notifyChanged()
+            }
+        } ?: release()
+    }
+
     private fun closeSummaryPreparationSafely(value: app.daiyu.android.context.RuntimeSummaryPreparation?) {
         try { value?.close() }
         catch (_: Exception) {
@@ -2541,7 +2613,13 @@ class ChatController internal constructor(private val application:Application,
         terminalJobRun:TerminalJobSession?=null,
         virtualDisplay:ControllerVirtualDisplayEntry?=null,
         gui:ControllerGuiEntry?=null,
-        videoAttempt:ControllerVideoAttempt?=null):Conversation? {
+        videoAttempt:ControllerVideoAttempt?=null,
+        platformAction:ControllerPlatformActionPreparation?=null):Conversation? {
+        require(platformAction == null || (platformAction.submitted && !platformAction.cancelled &&
+            platformAction.scope != null && imageAttempt == null && shizukuPreparation == null &&
+            shizukuAuthorization == null && mcpPreparation == null && browserPreparation == null &&
+            browserBinding == null && generation == null && terminalRun == null && terminalJobRun == null &&
+            virtualDisplay == null && gui == null && videoAttempt == null && !withChildren))
         require(gui == null || (mcpPreparation == null && virtualDisplay == null && generation == null && shizukuPreparation == null &&
             shizukuAuthorization == null && browserPreparation == null && browserBinding == null &&
             imageAttempt == null && terminalRun == null && terminalJobRun == null && videoAttempt == null && !withChildren &&
@@ -2632,9 +2710,9 @@ class ChatController internal constructor(private val application:Application,
             problem="错误重连配置无效或写入未确认；请重新保存，草稿保留，未启动聊天模型请求"
             notifyChanged(); return null
         }
-        val conversationId=mcpPreparation?.scope?.conversationId ?: gui?.conversationId ?: terminalJobPreparation?.identity?.conversationId ?: virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
+        val conversationId=platformAction?.conversationId ?: mcpPreparation?.scope?.conversationId ?: gui?.conversationId ?: terminalJobPreparation?.identity?.conversationId ?: virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
-        val run=mcpPreparation?.scope?.runId ?: gui?.runId ?: terminalJobPreparation?.identity?.runId ?: virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
+        val run=platformAction?.runId ?: mcpPreparation?.scope?.runId ?: gui?.runId ?: terminalJobPreparation?.identity?.runId ?: virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
         if (conversation == null) try { reasoningPreference.retainAccepted(conversationId.value, frozenReasoning) }
         catch (_: Exception) { problem="会话思考偏好保存未确认；草稿保留，未发起请求";notifyChanged();return null }
         // One acceptance candidate, including its media reconstruction and all run owners.
@@ -2843,6 +2921,7 @@ class ChatController internal constructor(private val application:Application,
                     (if (assistantContext.memoryReadPort == null) emptySet() else setOf(ScopedAssistantMemoryTools.READ)) +
                     (if (interactiveSnapshot.enabled && gui == null) setOf(AndroidToolRegistry.ASK_USER_CAPABILITY) else emptySet()) +
                     (if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY,RunChildTasks.CAPABILITY)) +
+                    (if (platformAction == null) emptySet() else setOf(platformAction.action.kind.capability)) +
                     (if (shizukuPreparation == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)) +
                     (if (browserBinding == null) emptySet() else setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY)) +
                     (if (mcpPreparation == null) emptySet() else setOf(app.daiyu.android.mcp.McpRunScope.CAPABILITY)) +
@@ -2866,6 +2945,7 @@ class ChatController internal constructor(private val application:Application,
             val shizuku=shizukuPreparation?.open(shizukuAccess)
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
                 backgroundFactory, memoryContext=assistantContext, mcp=mcpPreparation?.scope,
+                platformAction=platformAction?.scope,
                 onCatalogReady = browserPreparation?.childPlan?.let { plan -> { realOwner: app.daiyu.android.domain.runtime.RunExecutionOwner,
                     grants: SessionCapabilities, task: app.daiyu.android.domain.tools.TaskAuthorization ->
                     plan.launch(application, realOwner, grants, task, toolLedger,
@@ -2874,7 +2954,7 @@ class ChatController internal constructor(private val application:Application,
                             ?: assistantModel?.invoke(provider, assistantContext) ?: model(config) },
                         onChanged = ::browserChildrenChanged)
                 } },
-                authorization=mcpPreparation?.scope?.authorization ?: terminalJobRun?.authorization ?: terminalRun?.authorization ?: shizukuAuthorization ?: gui?.let {
+                authorization=platformAction?.scope?.authorization ?: mcpPreparation?.scope?.authorization ?: terminalJobRun?.authorization ?: terminalRun?.authorization ?: shizukuAuthorization ?: gui?.let {
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value,
                         checkNotNull(it.delivery).writes)
                 } ?: browserPreparation?.childPlan?.parentAuthorization ?: browserBinding?.let {
@@ -2962,7 +3042,7 @@ class ChatController internal constructor(private val application:Application,
         }
         val mayCommit=synchronized(this) {
             if(preparation !== token || closed || token.revoked || token.committing ||
-                !auxiliaryCurrent() || token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true ||
+                !auxiliaryCurrent() || token.cancellation.isCancelled || platformAction?.cancelled==true || shizukuPreparation?.isCancelled()==true ||
                 mcpPreparation?.confirmed==false || browserPreparation?.isCancelled==true || (imageAttempt!=null && !imageAttempt.beginCommit())) false
             else { token.committing=true; true }
         }
@@ -3697,6 +3777,7 @@ class ChatController internal constructor(private val application:Application,
         }
         cancelPreparation()
         synchronized(this) {pendingImage}?.cancel()
+        synchronized(this) {pendingPlatformAction}?.let(::rejectPlatformAction)
         synchronized(this) {pendingShizuku}?.let(::rejectShizuku)
         val lifetime=synchronized(this) {resources?.also {fenceRun(it)}} ?: return
         lifetime.auxiliary?.cancel()
@@ -3722,6 +3803,7 @@ class ChatController internal constructor(private val application:Application,
         if (titleCoordinatorDelegate.isInitialized()) titleCoordinator.close()
         cancelPreparation()
         synchronized(this) {pendingImage}?.cancel()
+        synchronized(this) {pendingPlatformAction}?.let(::rejectPlatformAction)
         synchronized(this) {pendingShizuku}?.let(::rejectShizuku)
         lifetime?.auxiliary?.cancel()
         lifetime?.runner?.stop();lifetime?.tools?.close()

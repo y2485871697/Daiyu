@@ -31,6 +31,19 @@ class PlatformManifestBoundaryTest {
         assertFalse(names.any { it in setOf("android.permission.QUERY_ALL_PACKAGES", "android.permission.MANAGE_EXTERNAL_STORAGE",
             "android.permission.WRITE_EXTERNAL_STORAGE", "android.permission.WRITE_CONTACTS", "android.permission.WRITE_CALENDAR",
             "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE", "android.permission.POST_NOTIFICATIONS") })
+        assertEquals(19, permissions.size)
+        assertTrue(names.containsAll(setOf("com.android.alarm.permission.SET_ALARM", "android.permission.MODIFY_AUDIO_SETTINGS")))
+        assertEquals("28", permissions.single { it.getAttributeNS(android, "name") == "android.permission.CHANGE_WIFI_STATE" }
+            .getAttributeNS(android, "maxSdkVersion"))
+        assertFalse(names.any { it in setOf("android.permission.SCHEDULE_EXACT_ALARM", "android.permission.USE_EXACT_ALARM",
+            "android.permission.MEDIA_CONTENT_CONTROL", "android.permission.ACCESS_NOTIFICATION_POLICY") })
+        val queries = document.getElementsByTagName("queries")
+        assertEquals(1, queries.length)
+        val visibleActions = (queries.item(0) as org.w3c.dom.Element).getElementsByTagName("action")
+        assertEquals(setOf("android.intent.action.SET_ALARM", "android.intent.action.SET_TIMER",
+            "android.intent.action.TTS_SERVICE", "android.speech.RecognitionService"),
+            (0 until visibleActions.length).map { (visibleActions.item(it) as org.w3c.dom.Element)
+                .getAttributeNS(android, "name") }.toSet())
         val services = document.getElementsByTagName("service")
         val listener = (0 until services.length).map { services.item(it) as org.w3c.dom.Element }
             .single { it.getAttributeNS(android, "name") == ".platform.CrossAppNotificationListener" }

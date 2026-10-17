@@ -173,8 +173,20 @@ internal object OwnerResponseValidator {
                 } else require(!o.has("data") && !o.has("bytes"))
             }
             "handoff" -> {
-                require(o.get("handedOff") == true && o.get("sourceEmpty") == true && o.get("cleanupOnly") is Boolean)
-                for (k in listOf("keptTaskIds", "removedTaskIds", "goneTaskIds")) intArray(o.get(k))
+                require(o.get("handedOff") == true && o.get("sourceEmpty") == true)
+                fun ids(a: JSONArray): List<Int> {
+                    intArray(a)
+                    val result = (0 until a.length()).map { integer(a.get(it)) }
+                    require(result.all { it > 0 } && result.distinct().size == result.size)
+                    return result
+                }
+                val requested = ids(p!!.getJSONArray("taskIds"))
+                val kept = ids(o.getJSONArray("keptTaskIds"))
+                val removed = ids(o.getJSONArray("removedTaskIds"))
+                val gone = ids(o.getJSONArray("goneTaskIds"))
+                require(kept == requested)
+                require(kept.none { it in removed || it in gone })
+                require(o.get("cleanupOnly") == requested.isEmpty())
                 textArray(o.get("focusSamples"))
             }
             "release" -> { require(o.get("released") == true); positive("displayId"); nonempty(o, "uniqueId") }

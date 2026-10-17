@@ -115,9 +115,13 @@ class VirtualDisplayOwnerClientTest {
                     out.put("data", png).put("bytes", java.util.Base64.getDecoder().decode(png).size)
                 }
             }
-            "handoff" -> out.put("handedOff", true).put("sourceEmpty", true).put("cleanupOnly", true)
-                .put("keptTaskIds", JSONArray()).put("removedTaskIds", JSONArray()).put("goneTaskIds", JSONArray())
-                .put("focusSamples", JSONArray().put("OK").put("OK"))
+            "handoff" -> {
+                val selected = request.getJSONObject("parameters").getJSONArray("taskIds")
+                out.put("handedOff", true).put("sourceEmpty", true).put("cleanupOnly", selected.length() == 0)
+                    .put("keptTaskIds", JSONArray(selected.toString()))
+                    .put("removedTaskIds", JSONArray()).put("goneTaskIds", JSONArray())
+                    .put("focusSamples", JSONArray().put("OK").put("OK"))
+            }
             "release" -> out.put("released", true).put("displayId", 4).put("uniqueId", "virtual:owner")
             else -> error("unsupported fixture operation")
         }
@@ -194,8 +198,10 @@ class VirtualDisplayOwnerClientTest {
             Triple("input", JSONObject().put("kind", "text").put("text", "hello"), false),
             Triple("snapshot", JSONObject(), false),
             Triple("snapshot", JSONObject().put("include", false).put("displayId", 4), false),
-            Triple("handoff", JSONObject(), false),
+            Triple("handoff", JSONObject().put("taskIds", JSONArray()), false),
             Triple("handoff", JSONObject().put("taskIds", JSONArray()).put("displayId", 4), false),
+            Triple("handoff", JSONObject().put("taskIds", JSONArray().put(12)), false),
+            Triple("handoff", JSONObject().put("taskIds", JSONArray().put(23).put(12)).put("displayId", 4), false),
             Triple("release", JSONObject(), false),
         )
         for ((index, case) in cases.withIndex()) {
@@ -219,6 +225,107 @@ class VirtualDisplayOwnerClientTest {
             assertEquals("SUCCEEDED", result.getString("state"))
             assertEquals(op == "release", result.getJSONObject("result").getBoolean("released"))
         }
+    }
+
+    @Test fun handoffSuccessPreservesExactSelectionAndAllowsCleanup() = worker {
+        for (selected in listOf(emptyList<Int>(), listOf(12), listOf(23, 12))) {
+            val t = ScriptedTransport { request ->
+                successResponse(request).put("removedTaskIds", JSONArray().put(34))
+                    .put("goneTaskIds", JSONArray().put(45)).toString()
+            }
+            val reply = client(t).execute("handoff_valid", "handoff",
+                JSONObject().put("taskIds", JSONArray(selected)))
+            assertEquals(selected.toString(), OwnerReply.Outcome.REPLIED, reply.outcome)
+            val payload = reply.payloadCopy()!!
+            assertEquals(JSONArray(selected).toString(), payload.getJSONArray("keptTaskIds").toString())
+            assertEquals(selected.isEmpty(), payload.getBoolean("cleanupOnly"))
+            assertEquals(0, t.disconnected)
+        }
+    }
+
+    @Test fun contradictoryHandoffSuccessIsUnknownAndNeverReplayed() = worker {
+        val changes: List<Pair<String, (JSONObject) -> Unit>> = listOf(
+            "missing kept" to { o -> o.remove("keptTaskIds") },
+            "no delivery" to { o -> o.put("keptTaskIds", JSONArray()) },
+            "partial delivery" to { o -> o.put("keptTaskIds", JSONArray().put(12)) },
+            "foreign delivery" to { o -> o.put("keptTaskIds", JSONArray().put(12).put(99)) },
+            "extra delivery" to { o -> o.put("keptTaskIds", JSONArray().put(12).put(23).put(99)) },
+            "reordered delivery" to { o -> o.put("keptTaskIds", JSONArray().put(23).put(12)) },
+            "duplicate kept" to { o -> o.put("keptTaskIds", JSONArray().put(12).put(23).put(12)) },
+            "zero kept" to { o -> o.put("keptTaskIds", JSONArray().put(0).put(23)) },
+            "negative kept" to { o -> o.put("keptTaskIds", JSONArray().put(-1).put(23)) },
+            "selected removed" to { o -> o.put("removedTaskIds", JSONArray().put(12)) },
+            "selected gone" to { o -> o.put("goneTaskIds", JSONArray().put(23)) },
+            "zero removed" to { o -> o.put("removedTaskIds", JSONArray().put(0)) },
+            "negative gone" to { o -> o.put("goneTaskIds", JSONArray().put(-1)) },
+            "duplicate removed" to { o -> o.put("removedTaskIds", JSONArray().put(34).put(34)) },
+            "duplicate gone" to { o -> o.put("goneTaskIds", JSONArray().put(45).put(45)) },
+            "cleanup flag for delivery" to { o -> o.put("cleanupOnly", true) },
+        )
+        for ((label, change) in changes) {
+            val t = ScriptedTransport { request -> successResponse(request).apply(change).toString() }
+            val c = client(t)
+            val reply = c.execute("handoff_invalid", "handoff",
+                JSONObject().put("taskIds", JSONArray().put(12).put(23)))
+            assertEquals(label, OwnerReply.Outcome.UNKNOWN, reply.outcome)
+            assertNull(label, reply.payloadCopy())
+            assertEquals(label, 1, t.disconnected)
+            assertEquals(label, OwnerReply.Outcome.UNKNOWN, c.lookupGeneration().outcome)
+            assertEquals(label, listOf("handoff"), t.requests.map { it.getString("op") })
+        }
+    }
+
+    @Test fun invalidSelectionsCannotBeCertifiedByHandoffSuccess() = worker {
+        for (selected in listOf(JSONArray().put(12).put(12), JSONArray().put(0), JSONArray().put(-1))) {
+            val t = ScriptedTransport { successResponse(it).toString() }
+            val reply = client(t).execute("handoff_bad_selection", "handoff",
+                JSONObject().put("taskIds", selected))
+            assertEquals(selected.toString(), OwnerReply.Outcome.UNKNOWN, reply.outcome)
+            assertNull(reply.payloadCopy())
+            assertEquals(1, t.disconnected)
+            assertEquals(1, t.requests.size)
+        }
+    }
+
+    @Test fun cleanupOnlyCannotClaimDeliveryOrUseFalseCleanupFlag() = worker {
+        val changes: List<(JSONObject) -> Unit> = listOf(
+            { o -> o.put("cleanupOnly", false) },
+            { o -> o.put("keptTaskIds", JSONArray().put(12)) },
+        )
+        for (change in changes) {
+            val t = ScriptedTransport { request -> successResponse(request).apply(change).toString() }
+            val reply = client(t).execute("handoff_bad_cleanup", "handoff",
+                JSONObject().put("taskIds", JSONArray()))
+            assertEquals(OwnerReply.Outcome.UNKNOWN, reply.outcome)
+            assertNull(reply.payloadCopy())
+            assertEquals(1, t.disconnected)
+        }
+    }
+
+    @Test fun omittedSelectionCannotBeCertifiedAsCleanupSuccess() = worker {
+        val t = ScriptedTransport { request ->
+            OwnerProtocol.ok("handoff", null).put("generation", generation).put("receiptOnly", false)
+                .put("receipt", receipt(request, "SUCCEEDED"))
+                .put("handedOff", true).put("sourceEmpty", true).put("cleanupOnly", true)
+                .put("keptTaskIds", JSONArray()).put("removedTaskIds", JSONArray())
+                .put("goneTaskIds", JSONArray()).put("focusSamples", JSONArray()).toString()
+        }
+        val reply = client(t).execute("handoff_missing_selection", "handoff", JSONObject())
+        assertEquals(OwnerReply.Outcome.UNKNOWN, reply.outcome)
+        assertNull(reply.payloadCopy())
+        assertEquals(1, t.disconnected)
+    }
+
+    @Test fun handoffMissingSelectionPreflightFailureRemainsAReply() = worker {
+        val t = ScriptedTransport { request ->
+            OwnerProtocol.fail("handoff", "HANDOFF_PREFLIGHT_FAILED", "preflight:selection:IllegalStateException")
+                .put("generation", generation).put("receiptOnly", false)
+                .put("receipt", receipt(request, "UNKNOWN")).toString()
+        }
+        val reply = client(t).execute("handoff_preflight_failure", "handoff", JSONObject())
+        assertEquals(OwnerReply.Outcome.REPLIED, reply.outcome)
+        assertEquals(false, reply.payloadCopy()!!.getBoolean("ok"))
+        assertEquals(0, t.disconnected)
     }
 
     @Test fun lookupTerminalReceiptsRespectJavaSummarySemantics() = worker {

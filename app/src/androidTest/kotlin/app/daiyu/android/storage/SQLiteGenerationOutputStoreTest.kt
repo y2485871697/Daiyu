@@ -24,7 +24,6 @@ import app.daiyu.android.media.PendingGenerationAsset
 import app.daiyu.android.model.generation.*
 import org.json.JSONArray
 import java.io.File
-import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -36,8 +35,7 @@ import java.util.concurrent.atomic.AtomicReference
 class SQLiteGenerationOutputStoreTest : InstrumentationTestCase() {
     private val helpers = mutableListOf<SQLiteOpenHelper>()
     private val roots = mutableListOf<File>()
-    private val png get() = Base64.getDecoder().decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kF9sAAAAASUVORK5CYII=")
+    private val png get() = app.daiyu.android.validDeviceTestPng()
 
     private fun helper(file: File): SQLiteOpenHelper = object : SQLiteOpenHelper(
         instrumentation.targetContext, file.absolutePath, null, 1) {

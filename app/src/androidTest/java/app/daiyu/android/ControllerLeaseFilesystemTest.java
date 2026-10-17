@@ -22,8 +22,7 @@ public class ControllerLeaseFilesystemTest extends InstrumentationTestCase {
     public void testNoBackupModesDirectoryForceAtomicMoveAndProcessLock() throws Exception {
         Path noBackup = getInstrumentation().getTargetContext().getNoBackupFilesDir()
                 .getCanonicalFile().toPath();
-        assertEquals(PosixFilePermissions.fromString("rwx------"),
-                Files.getPosixFilePermissions(noBackup, LinkOption.NOFOLLOW_LINKS));
+        // Android owns the parent mode; our dedicated child below must be 0700.
         Path root = noBackup.resolve("r08-filesystem-test-" + UUID.randomUUID());
         Files.createDirectory(root, PosixFilePermissions.asFileAttribute(
                 PosixFilePermissions.fromString("rwx------")));

@@ -175,4 +175,20 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         db.importBackup(envelope.put("version", 1).put("payload", text).put("sha256", digest).toString())
         assertNull(db.assistantId(owner.id))
     }
+    fun testV2NullBindingReceiptIsExactAndTamperingRollsBack() {
+        val db = database(); val owner = db.create("default")
+        db.writableDatabase.execSQL("UPDATE conversations SET assistant_id=NULL WHERE id=?", arrayOf(owner.id.value))
+        val backup = db.exportConversationBackup(owner.id)
+        assertEquals(2, JSONObject(backup).getInt("version"))
+        db.delete(owner.id); db.importBackup(backup)
+        assertNull(db.assistantId(owner.id))
+        db.delete(owner.id)
+        db.writableDatabase.execSQL("CREATE TRIGGER corrupt_null_backup AFTER INSERT ON conversations BEGIN " +
+            "UPDATE conversations SET assistant_id='tampered' WHERE id=NEW.id; END")
+        try {
+            rejected { db.importBackup(backup) }
+            assertTrue(db.conversations().isEmpty())
+        } finally { db.writableDatabase.execSQL("DROP TRIGGER corrupt_null_backup") }
+    }
+
 }

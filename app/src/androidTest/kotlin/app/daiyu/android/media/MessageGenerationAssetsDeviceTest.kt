@@ -5,15 +5,13 @@ import app.daiyu.android.model.generation.GenerationKind
 import app.daiyu.android.model.generation.GenerationMediaInfo
 import app.daiyu.android.storage.GenerationAttemptBinding
 import java.io.File
-import java.util.Base64
 
 /** Static offline fixtures only. No HTTP, paid submission, codec encoding or generated video. */
 @Suppress("DEPRECATION")
 class MessageGenerationAssetsDeviceTest : AndroidTestCase() {
     private lateinit var root: File
     private lateinit var owner: GenerationAssetOwner
-    private val png: ByteArray get() = Base64.getDecoder().decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kF9sAAAAASUVORK5CYII=")
+    private val png: ByteArray get() = app.daiyu.android.validDeviceTestPng()
 
     override fun setUp() {
         super.setUp()

@@ -13,7 +13,6 @@ import app.daiyu.android.model.generation.*
 import app.daiyu.android.storage.*
 import org.json.JSONArray
 import java.io.File
-import java.util.Base64
 import java.util.UUID
 
 /** Offline real SQLite + static PNG only. Does not open the production DB or contact a service. */
@@ -26,21 +25,22 @@ class ControllerGenerationResourcesTest : AndroidTestCase() {
     private lateinit var history: String
     private lateinit var blocks: String
     private var account: String? = "account"
-    private val png get() = Base64.getDecoder().decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kF9sAAAAASUVORK5CYII=")
+    private val png get() = app.daiyu.android.validDeviceTestPng()
     private val attempt get() = GenerationAttempt(owner.binding.identity("item"), "a".repeat(64),
         GenerationProtocol.OPENAI_IMAGES_JSON)
 
     override fun setUp() {
         super.setUp()
         account = "account"
-        db = SQLiteDatabase.create(null)
+        root = File(context.cacheDir, "generation-reader-${UUID.randomUUID()}").apply { mkdirs() }
+        db = SQLiteDatabase.openOrCreateDatabase(File(root, "reader.db"), null)
+        db.execSQL("PRAGMA journal_mode=DELETE")
+        db.execSQL("PRAGMA synchronous=FULL")
         db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY)")
         db.execSQL("CREATE TABLE messages(id TEXT PRIMARY KEY,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL," +
             "role TEXT NOT NULL,status TEXT NOT NULL,blocks TEXT NOT NULL,history_segments TEXT NOT NULL)")
         SQLiteGenerationAttemptStore.installSchema(db)
         SQLiteGenerationOutputStore.installSchema(db)
-        root = File(context.cacheDir, "generation-reader-${UUID.randomUUID()}")
         owner = GenerationAssetOwner("account", GenerationAttemptBinding("conversation", "assistant", "run",
             "original-call", RunGenerationTools.IMAGE_TOOL))
         val tool = MessageBlock.Tool(ToolInvocation(ToolCallId("original-call"), owner.binding.toolName, "{}"))

@@ -1,6 +1,7 @@
 """Synthetic process tests; these do not claim Android instrumentation coverage."""
 import importlib.util
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -30,6 +31,21 @@ JAVA_SECOND_SOURCE = (
 
 
 class SourceTests(unittest.TestCase):
+    def test_smoke_nested_and_outer_budgets_cover_all_stages(self):
+        script = (ROOT / 'scripts/smoke_boot.sh').read_text()
+        workflow = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:', 1)[1]
+        wrapper = int(re.search(r'export ADB_COMMAND_TIMEOUT=(\d+)', script).group(1))
+        stages = [(phase, int(seconds)) for phase, seconds in re.findall(r'adb_stage ([a-z-]+) (\d+) ', script)]
+        instrumentation = next(seconds for phase, seconds in stages if phase == 'instrumentation')
+        self.assertGreater(wrapper, instrumentation + 5)
+        step = int(re.search(r'        timeout-minutes: (\d+)', workflow).group(1)) * 60
+        job = int(re.search(r'^    timeout-minutes: (\d+)', workflow, re.M).group(1)) * 60
+        # 600s emulator boot + all one-shot stages; loops include kill grace.
+        maximum = 600 + sum(seconds + 5 for _, seconds in stages)
+        maximum += 60 * (3 * (5 + 5) + 2) + 19 * (2 * (10 + 5) + 1) + 100
+        self.assertGreater(step, maximum)
+        self.assertGreaterEqual(job - step, 600)
+
     def test_identity_and_unchanged_application(self):
         env = dict(SOURCE_SHA='a' * 40, SOURCE_RUN_ID='123')
         record = dict(source_sha='a' * 40, run_id='123', attempt='1', application_id='app.daiyu.android')
@@ -144,7 +160,7 @@ elif a[:3]==['shell','am','instrument']:
  if case!='missing-terminal': print('INSTRUMENTATION_CODE: 0' if case=='terminal-conflict' else 'INSTRUMENTATION_CODE: -1')
  if case=='duplicate-terminal': print('INSTRUMENTATION_CODE: -1')
  if case=='after-terminal': print('INSTRUMENTATION_STATUS_CODE: 0')
- sys.exit(9 if case=='instrument-fail' else 0)
+ sys.exit(124 if case=='instrument-timeout' else 9 if case=='instrument-fail' else 0)
 elif a[:3]==['shell','am','start']: print('Status: ok')
 elif a[:3]==['shell','pm','list']: print('package:io.github.mangi.eta' if case=='old-package' else 'package:app.daiyu.android')
 elif a[:3]==['shell','uiautomator','dump'] and case=='dump-fail': sys.exit(8)
@@ -176,7 +192,7 @@ elif a[:3]==['emu','screenrecord','screenshot']: Path(a[-1],'Screenshot_fake.png
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         self.assertEqual((self.root / 'smoke/启动.png').read_bytes(), b'\x89PNG\r\n\x1a\n')
         self.assertIn('phase=instrumentation exit=0', (self.root / 'smoke/stages.txt').read_text())
-        self.assertIn('phase=instrumentation budget=600s', (self.root / 'smoke/stages.txt').read_text())
+        self.assertIn('phase=instrumentation budget=2400s', (self.root / 'smoke/stages.txt').read_text())
         args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
         self.assertEqual(args[3:7], ['-w', '-e', 'class', 'app.daiyu.android.FirstTest'])
 
@@ -294,6 +310,14 @@ elif a[:3]==['emu','screenrecord','screenshot']: Path(a[-1],'Screenshot_fake.png
 
     def test_pipefail_preserves_install_failure(self):
         self.assertEqual(self.smoke(case='install-fail').returncode, 7)
+
+    def test_instrumentation_timeout_rejects_even_complete_ok_text(self):
+        result = self.smoke(case='instrument-timeout')
+        self.assertEqual(result.returncode, 124)
+        self.assertIn('OK (1 tests)', (self.root / 'smoke/platform-tests.txt').read_text())
+        self.assertFalse((self.root / 'smoke/instrumentation-result.json').exists())
+        self.assertFalse((self.root / 'smoke/start.txt').exists())
+        self.assertFalse((self.root / 'smoke/启动.png').exists())
 
     def test_pipefail_preserves_instrumentation_failure(self):
         self.assertEqual(self.smoke(case='instrument-fail').returncode, 9)

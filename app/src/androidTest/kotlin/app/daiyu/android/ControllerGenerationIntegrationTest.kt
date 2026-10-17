@@ -10,7 +10,6 @@ import app.daiyu.android.media.GenerationAssetOwner
 import app.daiyu.android.media.MessageGenerationAssets
 import app.daiyu.android.storage.*
 import java.io.File
-import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -176,8 +175,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
             endpoint = "https://generation.invalid/images/edits", model = "explicit-edit-model",
             apiKey = "synthetic-generation-test-key")), maxPolls = 0,
             downloadsEnabled = false, downloadHosts = emptySet()), null)
-        val bytes = Base64.getDecoder().decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kF9sAAAAASUVORK5CYII=")
+        val bytes = app.daiyu.android.validDeviceTestPng()
         val input = GenerationInputImport.read("content://synthetic/reference", { bytes.inputStream() },
             app.daiyu.android.media.AndroidImageInspector(), GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART,
             GenerationInputTarget.REFERENCE, null) { false }
@@ -417,8 +415,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
             if (kind == GenerationKind.IMAGE) GenerationProtocol.OPENAI_IMAGES_JSON else GenerationProtocol.OPENAI_VIDEO_MULTIPART)
         val attempts = SQLiteGenerationAttemptStore(resources::database, owner.binding)
         assertEquals(GenerationReservation.Started, attempts.reserve(attempt))
-        val png = if (kind == GenerationKind.IMAGE) Base64.getDecoder().decode(
-            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kF9sAAAAASUVORK5CYII=")
+        val png = if (kind == GenerationKind.IMAGE) app.daiyu.android.validDeviceTestPng()
         else {
             val video = File(fixture.application.cacheDir, "generation-fixture-${UUID.randomUUID()}.mp4")
             try { encodeOfflineBackupMp4(video); video.readBytes() } finally { video.delete() }

@@ -45,7 +45,8 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
         val db = ConversationDatabase(app)
         val alias = "app.daiyu.android.test.reconnect.$id"
         val settings = ModelSettingsStore(app, alias)
-        settings.save(ModelSettings("https://example.invalid", "fixture", "synthetic-key", false, protocol = protocol))
+        settings.save(ModelSettings("https://example.invalid", "fixture", "synthetic-key", false, protocol = protocol),
+            protocolChangeAuthorized = true)
         val controller = ChatController(app, db, settings, app.getSharedPreferences("conversation-ui", 0), factory)
         val fixture = Fixture(app, db, controller, settings, alias)
         fixtures.add(fixture)
@@ -141,7 +142,8 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
                 await(entered)
                 f.controller.reconnectSettings.save(ReconnectSettings(
                     if (initial == ReconnectDurationPreset.NONE) ReconnectDurationPreset.CONTINUOUS else ReconnectDurationPreset.NONE))
-                f.settings.save(ModelSettings("https://example.invalid", "new-provider", "synthetic-key", false))
+                f.settings.save(ModelSettings("https://example.invalid", "new-provider", "synthetic-rebound-key", false),
+                    protocolChangeAuthorized = true)
                 assemble.countDown(); await(done); await(session.entered)
                 // A late damaged global record cannot change or abort this already-frozen run.
                 f.app.getSharedPreferences("daiyu-model-reconnect", 0).edit()

@@ -23,6 +23,13 @@ internal interface InstallProbeSession : AutoCloseable {
     fun awaitTermination(timeoutMillis: Long): Boolean
 }
 
+internal fun installProbeUnknown(value: org.json.JSONObject, rootScoped: Boolean): Boolean {
+    val waitingForDrain = rootScoped && value.optString("state") == "unknown" &&
+        value.optBoolean("leader_exited") && value.has("wait_status") && !value.isNull("wait_status") &&
+        value.has("error") && value.isNull("error")
+    return !value.optBoolean("ok") || (value.optString("state") == "unknown" && !waitingForDrain)
+}
+
 /** Dedicated one-command PTY, NOT another TerminalUiOwner or a selected terminal session. */
 class AndroidLinuxInstallProbeRunner internal constructor(
     private val launch: (TerminalConfiguration) -> InstallProbeSession,
@@ -36,6 +43,8 @@ class AndroidLinuxInstallProbeRunner internal constructor(
         cancellation.check()
         val session = try { launch(configuration) }
         catch (failure: PtyStartupFailure) {
+            val confirmed = runCatching { failure.cleanup.awaitTermination(1000) }.getOrDefault(false)
+            if (confirmed) throw IllegalStateException("linux_install_probe_start_failed", failure)
             throw LinuxInstallProbeUnknown(failure.cleanup, failure)
         }
         val cancelHook = cancellation.register { session.close() }
@@ -82,16 +91,23 @@ class AndroidLinuxInstallProbeRunner internal constructor(
             val id = UUID.randomUUID().toString()
             val authorization = TaskAuthorization("linux-install-probe", id)
             val owner = PtyRunOwner(ConversationId("linux-install-probe"), authorization, "install-probe", id)
-            val session = AndroidPtyHost.open(context, owner, linux.shellArgv + listOf("-c", "id -u"),
-                linux.environment, requireNotNull(configuration.workingDirectory),
-                File(context.filesDir, "linux-install-probe-journal"), id)
+            val scope = linux.rootScope
+            val cwd = requireNotNull(configuration.workingDirectory)
+            val journal = File(context.filesDir, "linux-install-probe-journal")
+            val session = if (scope == null) AndroidPtyHost.open(context, owner,
+                linux.shellArgv + listOf("-c", "id -u"), linux.environment, cwd, journal, id)
+            else {
+                check(scope.identityProbe && linux.shellArgv == scope.guestArgv()) { "linux_install_probe_launch_mismatch" }
+                app.daiyu.android.terminal.PtyRunSession.openRootScope(owner, AndroidPtyHost.helper(context),
+                    scope, linux.environment, cwd, journal, id)
+            }
             return object : InstallProbeSession {
                 override fun snapshot(): InstallProbeSnapshot {
                     val value = session.read(authorization, 0, 4096)
                     return InstallProbeSnapshot(if (value.has("wait_status") && !value.isNull("wait_status"))
                         value.getInt("wait_status") else null, value.optString("stdout"),
                         value.optInt("total_bytes"), value.optBoolean("log_truncated"),
-                        !value.optBoolean("ok") || value.optString("state") == "unknown")
+                        installProbeUnknown(value, rootScoped = scope != null))
                 }
                 override fun awaitTermination(timeoutMillis: Long) = session.awaitTermination(timeoutMillis)
                 override fun close() = session.close()

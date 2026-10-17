@@ -6,26 +6,45 @@ import java.nio.file.Files
 import java.nio.file.attribute.BasicFileAttributes
 import java.security.MessageDigest
 
+enum class LinuxExecutionMode(val wire: String) {
+    PROOT("proot"), CHROOT("chroot");
+    companion object {
+        internal fun fromWire(value: String): LinuxExecutionMode =
+            entries.singleOrNull { it.wire == value } ?: error("linux_execution_mode")
+    }
+}
+
 /** Trusted installation metadata only: inspection never starts a shell or installs software. */
 data class LinuxInstallation(
     val distribution: String,
     val environmentId: String,
     val generation: String,
     val rootfs: File,
-    val proot: File,
-    val prootSha256: String,
-    val loader: File,
-    val loaderSha256: String,
+    val proot: File? = null,
+    val prootSha256: String = "",
+    val loader: File? = null,
+    val loaderSha256: String = "",
     val guestWorkingDirectory: String = "/",
-    val sharedMounts: Map<String, String> = emptyMap()
+    val sharedMounts: Map<String, String> = emptyMap(),
+    val executionMode: LinuxExecutionMode = LinuxExecutionMode.PROOT,
 )
+
+internal data class LinuxProotFiles(val executable: File, val loader: File)
+internal fun LinuxInstallation.requireProotFiles(): LinuxProotFiles {
+    check(executionMode == LinuxExecutionMode.PROOT) { "linux_not_proot" }
+    return LinuxProotFiles(requireNotNull(proot) { "linux_proot_missing" }, requireNotNull(loader) { "linux_loader_missing" })
+}
 
 data class LinuxGenerationRef(val environmentId: String, val generation: String)
 
 class LinuxEnvironmentStore internal constructor(private val directory: File,
     private val directorySync: (File) -> Unit,
-    private val fileKey: (java.nio.file.Path) -> Any? = ::strictLinuxFileKey) {
+    private val fileKey: (java.nio.file.Path) -> Any? = ::strictLinuxFileKey,
+    private val chrootRoot: File? = null) {
     constructor(directory: File) : this(directory, TerminalDurability::syncDirectory)
+    internal constructor(directory: File, directorySync: (File) -> Unit, fileKey: (java.nio.file.Path) -> Any?) :
+        this(directory, directorySync, fileKey, null)
+    constructor(directory: File, chrootRoot: File) : this(directory, TerminalDurability::syncDirectory, chrootRoot = chrootRoot)
     private val selection = File(directory, "selected-linux.json")
     private val shared = synchronized(stores) {
         stores[directory.canonicalPath] ?: run {
@@ -51,7 +70,7 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
     fun clearSelection() = synchronized(control) {
         check(shared.leases == 0) { "linux_environment_in_use" }
         // Persist an explicit empty choice rather than an un-fsynced unlink.
-        TerminalDurability.replace(selection, JSONObject().put("version", 1).toString().toByteArray(Charsets.UTF_8), directorySync = directorySync)
+        TerminalDurability.replace(selection, JSONObject().put("version", 2).toString().toByteArray(Charsets.UTF_8), directorySync = directorySync)
     }
 
     fun status(): JSONObject = synchronized(control) {
@@ -61,7 +80,10 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
             validate(installation)
             state("FILES_READY").put("distribution", installation.distribution)
                 .put("environment_id", installation.environmentId).put("generation", installation.generation)
-                .put("host_identity", "app").put("guest_uid", 0).put("tools_verified", false)
+                .put("execution_mode", installation.executionMode.wire)
+                .put("host_identity", if (installation.executionMode == LinuxExecutionMode.PROOT) "app" else "not_verified")
+                .put("host_root_required", installation.executionMode == LinuxExecutionMode.CHROOT).put("host_root_verified", false)
+                .put("guest_uid", 0).put("guest_uid_verified", false).put("tools_verified", false)
         } catch (_: Exception) { state("BROKEN").put("error", "linux_installation_unavailable") }
     }
 
@@ -82,25 +104,41 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
 
     inner class Lease internal constructor(private val installation: LinuxInstallation, private val identities: List<String>) : AutoCloseable {
         private var closed = false
+        val executionMode: LinuxExecutionMode get() = synchronized(control) {
+            check(!closed) { "linux_environment_lease_closed" }
+            installation.executionMode
+        }
+        internal fun assertMatches(expected: LinuxInstallation) = synchronized(control) {
+            check(!closed) { "linux_environment_lease_closed" }
+            check(installation == expected) { "linux_trusted_installation_mismatch" }
+            check(validate(installation) == identities) { "linux_installation_changed" }
+        }
         fun backend(tempDirectory: File): LinuxBackend = synchronized(control) {
             check(!closed) { "linux_environment_lease_closed" }
             check(validate(installation) == identities) { "linux_installation_changed" }
             require(tempDirectory.isAbsolute && tempDirectory.isDirectory && tempDirectory.canWrite())
-            val binds = installation.sharedMounts.entries.sortedBy { it.key }.flatMap { (host, guest) -> listOf("-b", "$host:$guest") }
-            // These exact bindings are also the reported mapping; metadata cannot diverge from argv.
-            LinuxBackend(
-                label = installation.distribution,
-                shellArgv = listOf(installation.proot.path, "-0", "-r", installation.rootfs.path,
-                    "-w", installation.guestWorkingDirectory) + binds + listOf("/bin/sh"),
-                identityArgv = emptyList(),
-                environment = mapOf("PROOT_LOADER" to installation.loader.path,
-                    "PROOT_TMP_DIR" to tempDirectory.canonicalPath, "HOME" to "/root",
-                    "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"),
-                expectedUid = 0,
-                environmentId = installation.environmentId + ":" + installation.generation,
-                guestWorkingDirectory = installation.guestWorkingDirectory,
-                sharedMounts = installation.sharedMounts.toMap()
-            )
+            val environment = mapOf("HOME" to "/root", "TMPDIR" to "/tmp", "TERM" to "xterm-256color",
+                "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+            if (installation.executionMode == LinuxExecutionMode.CHROOT) {
+                val launch = RootScopeLaunch(installation.rootfs, File("/system/bin/su"))
+                LinuxBackend(installation.distribution, launch.guestArgv(), identityArgv = emptyList(), environment = environment, expectedUid = 0,
+                    environmentId = "${installation.environmentId}:${installation.generation}", rootScope = launch)
+            } else {
+                val helpers = installation.requireProotFiles()
+                val binds = installation.sharedMounts.entries.sortedBy { it.key }.flatMap { (host, guest) -> listOf("-b", "$host:$guest") }
+                LinuxBackend(
+                    label = installation.distribution,
+                    shellArgv = listOf(helpers.executable.path, "-0", "-r", installation.rootfs.path,
+                        "-w", installation.guestWorkingDirectory) + binds + listOf("/bin/sh"),
+                    identityArgv = emptyList(),
+                    environment = environment - setOf("TMPDIR", "TERM") + mapOf("PROOT_LOADER" to helpers.loader.path,
+                        "PROOT_TMP_DIR" to tempDirectory.canonicalPath),
+                    expectedUid = 0,
+                    environmentId = installation.environmentId + ":" + installation.generation,
+                    guestWorkingDirectory = installation.guestWorkingDirectory,
+                    sharedMounts = installation.sharedMounts.toMap()
+                )
+            }
         }
         fun configuration(tempDirectory: File, hostWorkingDirectory: File): TerminalConfiguration {
             require(hostWorkingDirectory.isAbsolute && hostWorkingDirectory.isDirectory)
@@ -118,8 +156,23 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
         require(value.generation.matches(Regex("[A-Za-z0-9_-]{1,128}")))
         require(value.environmentId.length + 1 + value.generation.length <= 128) { "linux_environment_identity_limit" }
         require(value.rootfs.isAbsolute && value.rootfs.isDirectory && value.rootfs.canRead())
-        require(value.proot.isAbsolute && value.proot.isFile && value.proot.canExecute())
-        require(value.loader.isAbsolute && value.loader.isFile && value.loader.canRead())
+        val helperFiles = when (value.executionMode) {
+            LinuxExecutionMode.PROOT -> {
+                val helpers = value.requireProotFiles()
+                require(helpers.executable.isAbsolute && helpers.executable.isFile && helpers.executable.canExecute())
+                require(helpers.loader.isAbsolute && helpers.loader.isFile && helpers.loader.canRead())
+                require(value.prootSha256.matches(Regex("[a-f0-9]{64}")) && digest(helpers.executable) == value.prootSha256)
+                require(value.loaderSha256.matches(Regex("[a-f0-9]{64}")) && digest(helpers.loader) == value.loaderSha256)
+                listOf(helpers.executable, helpers.loader)
+            }
+            LinuxExecutionMode.CHROOT -> {
+                require(value.proot == null && value.loader == null && value.prootSha256.isEmpty() && value.loaderSha256.isEmpty()) {
+                    "linux_chroot_proot_configuration_not_supported"
+                }
+                require(value.guestWorkingDirectory == "/" && value.sharedMounts.isEmpty()) { "linux_chroot_mapping_not_supported" }
+                validateChrootRoot(value)
+            }
+        }
         LinuxPathSyntax.guest(value.guestWorkingDirectory)
         require(value.sharedMounts.size <= 32)
         value.sharedMounts.forEach { (host, guest) ->
@@ -131,14 +184,12 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
         require(targets.toSet().size == targets.size)
         for (i in targets.indices) for (j in 0 until i) require(
             !LinuxPathSyntax.contains(targets[i], targets[j]) && !LinuxPathSyntax.contains(targets[j], targets[i]))
-        require(value.prootSha256.matches(Regex("[a-f0-9]{64}")) && digest(value.proot) == value.prootSha256)
-        require(value.loaderSha256.matches(Regex("[a-f0-9]{64}")) && digest(value.loader) == value.loaderSha256)
         val root = value.rootfs.canonicalFile.toPath()
         val shell = File(value.rootfs, "bin/sh").canonicalFile
         require(shell.toPath().startsWith(root) && shell.isFile && shell.canRead())
         val protectedShellPaths = listOf(listOf("bin", "sh"), root.relativize(shell.toPath()).map { it.toString() })
         for (target in targets) require(protectedShellPaths.none { LinuxPathSyntax.contains(target, it) }) { "linux_bind_overrides_shell" }
-        return (listOf(value.rootfs, value.proot, value.loader, shell) + value.sharedMounts.keys.map(::File)).map { file ->
+        return (listOf(value.rootfs) + helperFiles + listOf(shell) + value.sharedMounts.keys.map(::File)).map { file ->
             val real = file.toPath().toRealPath()
             val key = fileKey(real)
             check(key != null) { "linux_path_identity_unavailable" }
@@ -146,24 +197,40 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
         }
     }
 
+    private fun validateChrootRoot(value: LinuxInstallation): List<File> {
+        val policy = checkNotNull(chrootRoot) { "linux_chroot_policy_not_configured" }
+        require(policy.isAbsolute && policy == policy.canonicalFile && !Files.isSymbolicLink(policy.toPath())) {
+            "linux_chroot_private_root_required"
+        }
+        val allowed = policy.toPath()
+        val root = value.rootfs.toPath()
+        require(value.rootfs == value.rootfs.canonicalFile && root.startsWith(allowed)) { "linux_chroot_private_root_required" }
+        val relative = allowed.relativize(root)
+        require(relative.nameCount == 3 && relative.getName(2).toString() == "rootfs" &&
+            (0..1).all { relative.getName(it).toString().matches(Regex("[A-Za-z0-9_-]{1,128}")) }) { "linux_chroot_private_root_required" }
+        val directories = mutableListOf<File>()
+        var path = root
+        while (true) {
+            require(!Files.isSymbolicLink(path) && Files.isDirectory(path)) { "linux_chroot_symlink" }
+            if (path != root) directories += path.toFile()
+            if (path == allowed) break
+            path = checkNotNull(path.parent)
+        }
+        val transport = RootScopeLaunch.requireTrustedTransport()
+        return directories + transport
+    }
+
     private fun load(): LinuxInstallation? {
         if (!selection.exists()) return null
         check(selection.length() <= 32768) { "linux_installation_metadata_limit" }
         val value = JSONObject(selection.readText(Charsets.UTF_8))
-        check(value.getInt("version") == 1)
+        val version = value.getInt("version")
+        check(version == 1 || version == 2) { "linux_installation_version" }
         if (!value.has("distribution")) return null
-        val mounts = value.getJSONObject("shared_mounts")
-        return LinuxInstallation(value.getString("distribution"), value.getString("environment_id"), value.getString("generation"),
-            File(value.getString("rootfs")), File(value.getString("proot")), value.getString("proot_sha256"),
-            File(value.getString("loader")), value.getString("loader_sha256"), value.getString("guest_cwd"),
-            mounts.keys().asSequence().associateWith { mounts.getString(it) })
+        return LinuxInstallationJson.decode(value, version)
     }
 
-    private fun encode(value: LinuxInstallation) = JSONObject().put("version", 1)
-        .put("distribution", value.distribution).put("environment_id", value.environmentId).put("generation", value.generation)
-        .put("rootfs", value.rootfs.path).put("proot", value.proot.path).put("proot_sha256", value.prootSha256)
-        .put("loader", value.loader.path).put("loader_sha256", value.loaderSha256)
-        .put("guest_cwd", value.guestWorkingDirectory).put("shared_mounts", JSONObject(value.sharedMounts.toMap()))
+    private fun encode(value: LinuxInstallation) = LinuxInstallationJson.encode(value).put("version", 2)
 
     private fun state(value: String) = JSONObject().put("ok", true).put("state", value)
         .put("installation_entry", "settings://terminal/linux").put("execution", "not_executed")

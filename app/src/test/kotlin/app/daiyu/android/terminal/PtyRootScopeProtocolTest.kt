@@ -33,14 +33,14 @@ class PtyRootScopeProtocolTest {
         override fun destroy() { destroys++ }
     }
 
-    private fun verify(bytes: ByteArray, drained: Boolean, state: String) {
+    private fun verify(bytes: ByteArray, drained: Boolean, state: String, scopeDrained: Boolean = drained) {
         val root = Files.createTempDirectory("pty-root-protocol-").toFile()
         val process = EndedProcess(bytes)
         val session = PtySession(process, hostJournal(root, "scope"), true)
         try {
             assertEquals(drained, session.awaitTermination(2_000))
             val result = session.read()
-            assertEquals(drained, result.getBoolean("scope_drain_confirmed"))
+            assertEquals(scopeDrained, result.getBoolean("scope_drain_confirmed"))
             assertEquals(state, result.getString("state"))
             session.close()
             assertEquals(0, process.destroys)
@@ -84,6 +84,14 @@ class PtyRootScopeProtocolTest {
     @Test fun outputAfterExecErrorDoesNotAuthenticateDrain() =
         verify(hello() + frame('E', byteArrayOf(0, 0, 0, 2)) + text('O', "late") + drain(), false, "unknown")
 
+    private fun noGuest() = text('F', "DROOT0 guest=0 scope_clean=1")
+    @Test fun preGuestFailureReleasesOnlyCleanupNotExecution() = verify(noGuest(), true, "unknown", false)
+    @Test fun repeatedPreGuestFailureNeverAuthenticatesCleanup() = verify(noGuest() + noGuest(), false, "unknown")
+    @Test fun scopeAfterPreGuestFailureNeverAuthenticatesCleanup() = verify(noGuest() + hello(), false, "unknown")
+    @Test fun outputAfterPreGuestFailureNeverAuthenticatesCleanup() = verify(noGuest() + text('O', "bad"), false, "unknown")
+    @Test fun partialFrameAfterPreGuestFailureNeverAuthenticatesCleanup() = verify(noGuest() + byteArrayOf('H'.code.toByte()), false, "unknown")
+    @Test fun invalidPreGuestReceiptNeverAuthenticatesCleanup() = verify(text('F', "DROOT0 guest=1 scope_clean=1"), false, "unknown")
+
     @Test fun rootLaunchRebuildsGuestEnvironmentAfterSuShell() {
         val root = Files.createTempDirectory("pty-root-env-").toFile()
         val helper = root.resolve("helper with ' quote").apply { writeText("helper"); setExecutable(true) }
@@ -102,7 +110,7 @@ class PtyRootScopeProtocolTest {
             val expected = listOf("/system/bin/env", "-i") +
                 environment.toSortedMap().map { (key, value) -> "$key=$value" } +
                 listOf(helper.path, "--root-scope", "24", "80", "--") + launch.guestArgv()
-            assertEquals(listOf(su.path, "-c", "exec " + expected.joinToString(" ") { quote(it) }),
+            assertEquals(listOf(launch.su.path, "-c", "exec " + expected.joinToString(" ") { quote(it) }),
                 checkNotNull(captured).command())
             assertEquals(environment, checkNotNull(captured).environment())
             assertTrue(session.awaitTermination(2_000))

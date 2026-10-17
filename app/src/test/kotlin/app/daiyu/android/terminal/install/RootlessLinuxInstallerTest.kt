@@ -1,5 +1,6 @@
 package app.daiyu.android.terminal.install
 
+import app.daiyu.android.terminal.LinuxExecutionMode
 import app.daiyu.android.terminal.LinuxInstallation
 import junit.framework.TestCase
 import java.io.File
@@ -35,7 +36,8 @@ class RootlessLinuxInstallerTest : TestCase() {
 
         fun installer(sync: (File) -> Unit = {},
                       move: ((File, File) -> Unit)? = null,
-                      managedRoot: File = privateRoot): RootlessLinuxInstaller = RootlessLinuxInstaller(
+                      managedRoot: File = privateRoot,
+                      mode: LinuxExecutionMode = LinuxExecutionMode.PROOT): RootlessLinuxInstaller = RootlessLinuxInstaller(
             managedRoot,
             LinuxRootfsExtraction { _, _, stage, token ->
                 extractions++
@@ -64,13 +66,46 @@ class RootlessLinuxInstallerTest : TestCase() {
             { from, to ->
                 moves++
                 if (move != null) move(from, to) else { Files.move(from.toPath(), to.toPath()); Unit }
-            }, fileOps = fileOps
+            }, fileOps = fileOps, executionMode = mode, requireChrootTransport = {}
         )
     }
 
     private fun fixture(block: (Fixture) -> Unit) {
         val root = Files.createTempDirectory("linux-install-test-").toFile()
         try { block(Fixture(root)) } finally { root.deleteRecursively() }
+    }
+
+    fun testChrootPreparationAndRecoveryNeverResolveOrPersistProotHelpers() = fixture { f ->
+        val installer = f.installer(mode = LinuxExecutionMode.CHROOT)
+        val configuration = f.installation.copy(proot = null, prootSha256 = "", loader = null, loaderSha256 = "",
+            executionMode = LinuxExecutionMode.CHROOT)
+        val prepared = installer.prepare(f.artifact, "primary", configuration)
+        assertEquals(0, f.requests); assertEquals(0, f.probes)
+        installer.rememberRequest(prepared)
+        val journal = File(f.privateRoot, ".install-request")
+        val before = journal.readBytes()
+        assertTrue(journal.readText().contains("execution_mode=chroot\n"))
+        assertFalse(journal.readText().contains("proot="))
+        assertFalse(journal.readText().contains("loader="))
+        val recovered = installer.recoverChrootRequest("arm64-v8a", listOf(f.artifact))!!
+        assertEquals(configuration, recovered.prepared.installation)
+        assertFalse(recovered.unknown)
+        assertTrue(before.contentEquals(journal.readBytes()))
+        assertEquals(0, f.requests); assertEquals(0, f.probes)
+        journal.writeText(journal.readText().replace("execution_mode=chroot", "execution_mode=proot"))
+        rejected { installer.recoverChrootRequest("arm64-v8a", listOf(f.artifact)) }
+        assertEquals(0, f.requests); assertEquals(0, f.probes)
+    }
+    fun testChrootPreparationRejectsMixedModeHelpersAndOutsideTarget() = fixture { f ->
+        val installer = f.installer(mode = LinuxExecutionMode.CHROOT)
+        val configuration = f.installation.copy(proot = null, prootSha256 = "", loader = null, loaderSha256 = "",
+            executionMode = LinuxExecutionMode.CHROOT)
+        for (bad in listOf(f.installation, configuration.copy(proot = f.proot),
+            configuration.copy(loaderSha256 = "b".repeat(64)), configuration.copy(rootfs = File(f.root, "outside")),
+            configuration.copy(sharedMounts = mapOf(f.root.path to "/host")))) {
+            rejected { installer.prepare(f.artifact, "primary", bad) }
+        }
+        assertFalse(f.privateRoot.exists()); assertEquals(0, f.requests)
     }
 
     fun testPreparationAndApprovalHaveZeroRequestsAndNoFilesystemEffects() = fixture { f ->

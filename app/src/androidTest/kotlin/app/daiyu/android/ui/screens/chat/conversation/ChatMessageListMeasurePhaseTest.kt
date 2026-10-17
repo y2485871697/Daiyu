@@ -41,7 +41,9 @@ class ChatMessageListMeasurePhaseTest : ComposeActivityTestCase() {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    BoxWithConstraints(Modifier.size(320.dp, 240.dp)) { content() }
+                    BoxWithConstraints(Modifier.size(320.dp, 240.dp)) {
+                        androidx.compose.foundation.layout.Box(Modifier.size(maxWidth, maxHeight)) { content() }
+                    }
                 }
             }
         }

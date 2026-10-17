@@ -27,8 +27,10 @@ class TrustedLinuxCatalog internal constructor(
     private val beforeApprovalGate: () -> Unit = {},
     private val symbolicLink: (java.nio.file.Path) -> Boolean = Files::isSymbolicLink,
     private val fileKey: (java.nio.file.Path) -> Any? = ::strictLinuxFileKey,
+    private val chrootRoot: File? = null,
 ) {
     constructor(directory: File) : this(directory, TerminalDurability::syncDirectory)
+    constructor(directory: File, chrootRoot: File) : this(directory, TerminalDurability::syncDirectory, chrootRoot = chrootRoot)
 
     private data class Record(val installation: LinuxInstallation, val active: Boolean)
     private val gate = synchronized(gates) {
@@ -132,7 +134,7 @@ class TrustedLinuxCatalog internal constructor(
         securePath(validationDirectory)
         securePath(File(validationDirectory, "selected-linux.json"))
         securePath(File(validationDirectory, "selected-linux.json.tmp"))
-        val store = validator ?: LinuxEnvironmentStore(validationDirectory, directorySync, fileKey).also { validator = it }
+        val store = validator ?: LinuxEnvironmentStore(validationDirectory, directorySync, fileKey, chrootRoot).also { validator = it }
         // select validates paths, readable shell containment, bind targets, known helper digests,
         // file identities and metadata limits. It does not execute any of these files.
         store.select(value)
@@ -146,26 +148,20 @@ class TrustedLinuxCatalog internal constructor(
         val bytes = file.inputStream().use { it.readBytesBounded() }
         val text = bytes.toString(Charsets.UTF_8)
         val root = JSONObject(text)
-        check(root.getInt("version") == 1) { "linux_catalog_version" }
+        val version = root.getInt("version")
+        check(version == 1 || version == 2) { "linux_catalog_version" }
         val entries = root.getJSONArray("records")
         check(entries.length() <= MAX_RECORDS) { "linux_catalog_limit" }
         val records = (0 until entries.length()).map { index ->
             val record = entries.getJSONObject(index)
-            val value = record.getJSONObject("installation")
-            val mounts = value.getJSONObject("shared_mounts")
-            val installation = freeze(LinuxInstallation(
-                value.getString("distribution"), value.getString("environment_id"), value.getString("generation"),
-                File(value.getString("rootfs")), File(value.getString("proot")), value.getString("proot_sha256"),
-                File(value.getString("loader")), value.getString("loader_sha256"), value.getString("guest_cwd"),
-                mounts.keys().asSequence().associateWith { mounts.getString(it) }
-            ))
+            val installation = freeze(LinuxInstallationJson.decode(record.getJSONObject("installation"), version))
             checkMetadata(installation)
             Record(installation, record.getBoolean("active"))
         }
         check(records.map { ref(it.installation) }.toSet().size == records.size) { "linux_catalog_duplicate_reference" }
         // Only our canonical, complete schema is accepted. Also rejects unknown fields, duplicate
         // object keys (including Android JSONObject's last-key-wins behavior), and coercions.
-        check(encode(records).contentEquals(bytes)) { "linux_catalog_noncanonical" }
+        check(encode(records, version).contentEquals(bytes)) { "linux_catalog_noncanonical" }
         return records
     }
 
@@ -181,19 +177,13 @@ class TrustedLinuxCatalog internal constructor(
         TerminalDurability.replace(file, bytes, directorySync = directorySync)
     }
 
-    private fun encode(records: List<Record>): ByteArray {
+    private fun encode(records: List<Record>, version: Int = 2): ByteArray {
         val array = JSONArray()
         records.forEach { record ->
-            val v = record.installation
-            val mounts = JSONObject()
-            v.sharedMounts.toSortedMap().forEach { (host, guest) -> mounts.put(host, guest) }
-            array.put(JSONObject().put("active", record.active).put("installation", JSONObject()
-                .put("distribution", v.distribution).put("environment_id", v.environmentId).put("generation", v.generation)
-                .put("rootfs", v.rootfs.path).put("proot", v.proot.path).put("proot_sha256", v.prootSha256)
-                .put("loader", v.loader.path).put("loader_sha256", v.loaderSha256)
-                .put("guest_cwd", v.guestWorkingDirectory).put("shared_mounts", mounts)))
+            array.put(JSONObject().put("active", record.active)
+                .put("installation", LinuxInstallationJson.encode(record.installation, version)))
         }
-        return JSONObject().put("version", 1).put("records", array).toString().toByteArray(Charsets.UTF_8)
+        return JSONObject().put("version", version).put("records", array).toString().toByteArray(Charsets.UTF_8)
     }
 
     private fun java.io.InputStream.readBytesBounded(): ByteArray {
@@ -233,8 +223,18 @@ class TrustedLinuxCatalog internal constructor(
             require(v.distribution.matches(Regex("[A-Za-z0-9_-]{1,64}")))
             require(id.matches(v.environmentId) && id.matches(v.generation))
             require(v.environmentId.length + 1 + v.generation.length <= 128)
-            require(hash.matches(v.prootSha256) && hash.matches(v.loaderSha256))
-            listOf(v.rootfs.path, v.proot.path, v.loader.path).forEach(::hostPath)
+            hostPath(v.rootfs.path)
+            when (v.executionMode) {
+                LinuxExecutionMode.PROOT -> {
+                    val helpers = v.requireProotFiles()
+                    require(hash.matches(v.prootSha256) && hash.matches(v.loaderSha256))
+                    listOf(helpers.executable.path, helpers.loader.path).forEach(::hostPath)
+                }
+                LinuxExecutionMode.CHROOT -> {
+                    require(v.proot == null && v.loader == null && v.prootSha256.isEmpty() && v.loaderSha256.isEmpty())
+                    require(v.guestWorkingDirectory == "/" && v.sharedMounts.isEmpty()) { "linux_chroot_mapping_not_supported" }
+                }
+            }
             guestPath(v.guestWorkingDirectory)
             require(v.sharedMounts.size <= 32)
             v.sharedMounts.forEach { (host, guest) -> hostPath(host); guestPath(guest) }

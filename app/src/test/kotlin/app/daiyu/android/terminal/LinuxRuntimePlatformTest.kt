@@ -18,4 +18,14 @@ class LinuxRuntimePlatformTest {
             catch (_: IllegalStateException) {}
         }
     }
+    @Test fun chrootHasIndependentApiGateButRequiresPackaged64BitAbi() {
+        for (sdk in listOf(26, 33, 34, 37)) {
+            assertEquals("arm64-v8a", LinuxRuntimePlatform.requireSupported(sdk, true, "aarch64", LinuxExecutionMode.CHROOT))
+            assertEquals("x86_64", LinuxRuntimePlatform.requireSupported(sdk, true, "x86_64", LinuxExecutionMode.CHROOT))
+        }
+        for ((sdk, bits, machine) in listOf(Triple(25, true, "aarch64"), Triple(35, false, "armv7l"), Triple(35, true, "unknown"))) {
+            assertTrue(runCatching { LinuxRuntimePlatform.requireSupported(sdk, bits, machine, LinuxExecutionMode.CHROOT) }.isFailure)
+        }
+    }
+
 }

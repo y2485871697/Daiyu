@@ -145,7 +145,7 @@ class TrustedLinuxCatalogTest : TestCase() {
         duplicate.getJSONArray("records").put(duplicate.getJSONArray("records").getJSONObject(0))
         val unknown = JSONObject(good).put("unexpected", true).toString()
         for (bad in listOf("not json", duplicate.toString(), unknown,
-            good.replace("\"version\":1", "\"version\":9"))) {
+            JSONObject(good).put("version", 9).toString())) {
             manifest(root).writeText(bad)
             rejected { catalog.load() }
             rejected { catalog.approve(catalog.freezeForApproval(spec)) }
@@ -159,14 +159,14 @@ class TrustedLinuxCatalogTest : TestCase() {
         rejected { catalog.approve(catalog.freezeForApproval(spec.copy(prootSha256 = "0".repeat(64)))) }
         assertTrue(before.contentEquals(manifest(root).readBytes()))
         assertEquals(original, catalog.load())
-        spec.loader.writeText("changed on disk")
+        requireNotNull(spec.loader).writeText("changed on disk")
         rejected { catalog.load() }
         rejected { catalog.approve(catalog.freezeForApproval(spec)) }
         assertTrue(before.contentEquals(manifest(root).readBytes()))
         // Removal of the broken generation remains possible and never deletes installed files.
         assertTrue(catalog.remove(reference(original.single())).isEmpty())
         assertTrue(spec.rootfs.isDirectory)
-        assertTrue(spec.proot.isFile)
+        assertTrue(requireNotNull(spec.proot).isFile)
     }
 
     fun testNewOrChangedConfigurationGetsNewImmutableGenerationAndTombstone() = fixture { root, spec, catalog ->

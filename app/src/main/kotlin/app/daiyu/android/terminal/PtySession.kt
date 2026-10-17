@@ -101,7 +101,7 @@ class PtySession internal constructor(
             })
             .put("leader_exited", waitStatus != null)
             .put("root_scope", nativeScope ?: JSONObject.NULL)
-            .put("scope_drain_confirmed", rootScoped && rootDrained && !protocolBroken && readerFinished.count == 0L)
+            .put("scope_drain_confirmed", rootScoped && nativeScope != null && rootDrained && !protocolBroken && readerFinished.count == 0L)
             .put("error", failure ?: JSONObject.NULL).put("wait_status", waitStatus ?: JSONObject.NULL)
             .put("pty", true).put("persistent_shell", true)
     }
@@ -164,6 +164,13 @@ class PtySession internal constructor(
                                 execErrorSeen = true
                             }
                             failure = "pty_exec_failed"
+                            ready.countDown()
+                        }
+                        'F' -> {
+                            check(rootScoped && nativeScope == null && !helloSeen && !execErrorSeen && waitStatus == null)
+                            check(bytes.contentEquals("DROOT0 guest=0 scope_clean=1".toByteArray(Charsets.US_ASCII)))
+                            rootDrained = true
+                            failure = "pty_root_scope_unavailable"
                             ready.countDown()
                         }
                         'D' -> {

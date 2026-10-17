@@ -123,6 +123,124 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
         assertEquals("中文标题", data.search("真正中文正文").first().conversationTitle)
     }
 
+    private fun segmented(conversation: Conversation, key: String, count: Int): Message =
+        turn(conversation, key, "ordinary user", answerTransform = { owner ->
+            owner.copy(historySegments = List(count) { index ->
+                MessageHistorySegment(owner.id, "assistant", listOf(MessageBlock.Text("part-$index", "paged needle $index")))
+            })
+        }).second
+
+    fun test201HitsContinueWithoutRepeatingSameOwnerSegments() = assertSegmentPages(201, listOf(200, 1))
+
+    fun test401HitsContinueAcrossThreePagesWithoutLossOrDuplicates() = assertSegmentPages(401, listOf(200, 200, 1))
+
+    private fun assertSegmentPages(count: Int, expectedPageSizes: List<Int>) {
+        val conversation = database.create("default")
+        val owner = segmented(conversation, "segments-$count", count)
+        val hits = mutableListOf<app.daiyu.android.ui.model.MessageSearchHit>()
+        val sizes = mutableListOf<Int>()
+        var cursor: app.daiyu.android.ui.model.MessageSearchCursor? = null
+        do {
+            val page = data.searchPage("paged needle", conversation.id.value, cursor)
+            sizes.add(page.results.size)
+            hits.addAll(page.results)
+            cursor = page.nextCursor
+        } while (cursor != null)
+        assertEquals(expectedPageSizes, sizes)
+        assertEquals((0 until count).toList(), hits.map { it.segmentIndex })
+        assertTrue(hits.all { it.messageId == owner.id.value && it.ownerMessageId == owner.id.value })
+        assertEquals(count, hits.map { Triple(it.conversationId, it.messageId, it.segmentIndex) }.toSet().size)
+    }
+
+    fun testSupplementExpansionAndRepeatedOwnerIdentityStraddlePageBoundary() {
+        val conversation = database.create("default")
+        val (_, owner) = turn(conversation, "cross-boundary", "paged needle standalone", answerTransform = { answer ->
+            answer.copy(historySegments = listOf(
+                MessageHistorySegment(answer.id, "assistant", listOf(MessageBlock.Text("before", "paged needle before"))),
+                // Refers to the separately persisted user row. Whole-history expansion must
+                // suppress that row, rather than yielding it twice after physical-row paging.
+                MessageHistorySegment(MessageId("user-cross-boundary"), "user",
+                    listOf(MessageBlock.Text("text-cross-boundary", "paged needle standalone"))),
+                MessageHistorySegment(answer.id, "assistant", listOf(MessageBlock.Text("after", "paged needle after"))),
+            ))
+        })
+        val first = data.searchPage("paged needle", conversation.id.value, pageSize = 2)
+        val second = data.searchPage("paged needle", conversation.id.value, first.nextCursor, pageSize = 2)
+        assertEquals(listOf(owner.id.value, "user-cross-boundary"), first.results.map { it.messageId })
+        assertEquals(1, second.results.size)
+        assertEquals(owner.id.value, second.results.single().ownerMessageId)
+        assertEquals(1, second.results.single().segmentIndex)
+        assertNull(second.nextCursor)
+    }
+
+    fun testContinuationCrossesPhysicalOwnersAndFrozenConversationOrder() {
+        val firstConversation = database.create("default")
+        val first = turn(firstConversation, "first-page", "paged needle first")
+        val secondConversation = database.create("default")
+        val second = turn(secondConversation, "second-page", "paged needle second")
+        database.organize(firstConversation.id, "", true)
+        val firstPage = data.searchPage("paged needle", pageSize = 3)
+        val secondPage = data.searchPage("paged needle", cursor = requireNotNull(firstPage.nextCursor), pageSize = 3)
+        assertEquals(listOf(first.first.id.value, first.second.id.value, second.first.id.value),
+            firstPage.results.map { it.messageId })
+        assertEquals(listOf(second.second.id.value), secondPage.results.map { it.messageId })
+        assertNull(secondPage.nextCursor)
+    }
+
+    private fun invalidated(read: () -> Unit) {
+        try { read(); fail("stale or differently scoped cursor accepted") }
+        catch (_: app.daiyu.android.ui.model.SearchCursorInvalidatedException) { }
+    }
+
+    fun testCursorFreezesQueryScopeOrderAndUnreadHistoryRevision() {
+        val firstConversation = database.create("default")
+        segmented(firstConversation, "revision", 201)
+        database.organize(firstConversation.id, "", true)
+        val secondConversation = database.create("default")
+        val unread = turn(secondConversation, "unread", "not a match").second
+        val first = data.searchPage("paged needle")
+        val cursor = requireNotNull(first.nextCursor)
+        invalidated { data.searchPage("other", cursor = cursor) }
+        invalidated { data.searchPage("paged needle", firstConversation.id.value, cursor) }
+        // Even a change after the currently scanned/result-bearing conversation invalidates.
+        database.save(unread.copy(blocks = listOf(MessageBlock.Text("changed", "still not a match"))))
+        invalidated { data.searchPage("paged needle", cursor = cursor) }
+        val nextCursor = requireNotNull(data.searchPage("paged needle").nextCursor)
+        database.organize(firstConversation.id, "", false)
+        database.organize(secondConversation.id, "", true)
+        invalidated { data.searchPage("paged needle", cursor = nextCursor) }
+    }
+
+    fun testScopedCursorIgnoresUnrelatedHistoryButRejectsOwnerChangesAndDeletion() {
+        val conversation = database.create("default")
+        val owner = segmented(conversation, "scoped-revision", 201)
+        val cursor = requireNotNull(data.searchPage("paged needle", conversation.id.value).nextCursor)
+        turn(database.create("default"), "unrelated", "paged needle unrelated")
+        assertEquals(1, data.searchPage("paged needle", conversation.id.value, cursor).results.size)
+        database.save(owner.copy(historySegments = owner.historySegments.dropLast(1)))
+        invalidated { data.searchPage("paged needle", conversation.id.value, cursor) }
+        val deletionCursor = requireNotNull(data.searchPage("paged needle", conversation.id.value, pageSize = 1).nextCursor)
+        database.delete(conversation.id)
+        invalidated { data.searchPage("paged needle", conversation.id.value, deletionCursor) }
+    }
+
+    fun testCancelledSearchAndChunkReaderReleaseTransactionAndConnection() {
+        val conversation = database.create("default")
+        val owner = turn(conversation, "cancelled", "needle " + "中文".repeat(40000)).first
+        val signal = android.os.CancellationSignal().also { it.cancel() }
+        try { data.searchPage("needle", cancellationSignal = signal); fail("cancelled search returned") }
+        catch (_: android.os.OperationCanceledException) { }
+        try {
+            app.daiyu.android.storage.SQLiteText.read(database.readableDatabase, "messages", "blocks", "id",
+                owner.id.value, cancellationSignal = signal)
+            fail("cancelled chunk read returned")
+        } catch (_: android.os.OperationCanceledException) { }
+        assertFalse(database.readableDatabase.inTransaction())
+        assertEquals(2, data.searchPage("needle", conversation.id.value).results.size)
+        // Multi-chunk UTF-8 must still be exact, not a 64KiB truncation.
+        assertEquals(owner.blocks, ContextService(scoped, database).displayHistory(conversation.id).first().blocks)
+    }
+
     fun testEmptyNoMatchInvalidAndDeletedScopesAreDistinctFromReadFailure() {
         val conversation = database.create("default")
         turn(conversation, "errors", "正文")

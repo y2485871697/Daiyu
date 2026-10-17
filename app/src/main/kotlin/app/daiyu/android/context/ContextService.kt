@@ -212,11 +212,19 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         }
         val prefix = original.take(index + 1)
         // Generation receipts are owner-bound, not transferable references. Never publish a
-        // seemingly successful branch which silently loses its registered originals.
+        // seemingly successful branch which silently loses its registered OR backup originals.
+        // Backup history is FK-owned by the physical message, not a live generation_outputs row.
+        // Its global source identity cannot simply be rebound to a second branch owner.
+        val hasBackupHistory = app.daiyu.android.backup.BackupHistoryRows.exists(db, "neutral_backup_history")
         prefix.forEach { m ->
             require(!db.rawQuery("SELECT 1 FROM generation_outputs WHERE conversation_id=? AND assistant_id=? LIMIT 1",
                 arrayOf(id.value, m.id.value)).use { it.moveToFirst() }) {
                 "生成资产尚无安全的分支重绑定契约；原会话保留"
+            }
+            require(!hasBackupHistory || !db.rawQuery(
+                "SELECT 1 FROM neutral_backup_history WHERE kind='generation_output' AND owner_message_id=? LIMIT 1",
+                arrayOf(m.id.value)).use { it.moveToFirst() }) {
+                "只读生成原件尚无安全的分支映射契约；原会话和原件保留"
             }
         }
         val hasImages = prefix.any { m -> (m.blocks + m.historySegments.flatMap { it.blocks }).any { it is MessageBlock.Image } }

@@ -27,6 +27,8 @@ internal class RetainedConversationData(private val database: ConversationDataba
                 timeLabel = date.format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT)),
                 updatedAtMillis = conversation.updatedAt, mode = ConversationModeUi.Chat,
                 isPinned = conversation.pinned, isActiveRun = active?.conversationId == conversation.id,
+                hasCompletionMarker = app.daiyu.android.storage.ConversationCompletionMarkers.read(
+                    database.readableDatabase, conversation.id) != null,
                 folderId = conversation.folder.takeIf { it.isNotEmpty() }, isToday = date.toLocalDate() == today,
             )
         }

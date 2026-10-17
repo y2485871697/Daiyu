@@ -35,7 +35,8 @@ internal class OfflineComposerHost(
         requestPermission = requestPermission, current = current, currentText = currentText, applyDraft = applyDraft,
     )
 
-    data class State(val listening: Boolean = false, val preview: String = "", val status: String = "")
+    data class State(val listening: Boolean = false, val preview: String = "", val status: String = "",
+        val target: DictationDraftTarget? = null)
     private val mutable = MutableStateFlow(State())
     val state = mutable.asStateFlow()
     private var active: DictationDraftTarget? = null
@@ -45,7 +46,7 @@ internal class OfflineComposerHost(
 
     fun start(target: DictationDraftTarget, text: String, selectionStart: Int, selectionEnd: Int) {
         if (closed) return
-        if (mutable.value.listening) { invalidate(); return }
+        if (active != null) { invalidate(); return }
         if (!current(target) || !enabled()) return
         invalidate()
         if (!permission()) {
@@ -57,10 +58,11 @@ internal class OfflineComposerHost(
         }
         val draft = SpeechDraft(text, selectionStart, selectionEnd)
         active = target
-        mutable.value = State(listening = true, status = "正在本机加载离线语音模型…")
+        mutable.value = State(target = target, status = "正在本机加载离线语音模型…")
         val callbacks = object : OfflineSpeechSession.Events {
             override fun listening() {
-                if (accepts(target)) mutable.value = mutable.value.copy(status = "离线听写中；再次点击可取消（不会发送）")
+                if (accepts(target)) mutable.value = mutable.value.copy(listening = true,
+                    status = "离线听写中；再次点击可取消（不会发送）")
             }
             override fun partial(text: String) {
                 if (accepts(target)) mutable.value = mutable.value.copy(preview = text)

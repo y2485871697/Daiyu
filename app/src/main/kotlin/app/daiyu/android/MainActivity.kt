@@ -1400,7 +1400,8 @@ class MainActivity : ComponentActivity() {
                     ) {
                         chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
                             Column(Modifier.fillMaxSize().imePadding()) {
-                                DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState), chatActions(), modifier = Modifier.weight(1f), turnExtras = { id ->
+                                DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
+                                    composer = projectedVoiceComposer()), chatActions(), modifier = Modifier.weight(1f), turnExtras = { id ->
                                     QuestionExtras(id)
                                     VoiceExtras(id)
                                 }, imageLoader = imageHost.historyLoader)
@@ -1579,6 +1580,7 @@ class MainActivity : ComponentActivity() {
                 }
             } })
         return ChatScreenActions(
+        onVisibleCompleted = completionReadAction(),
         onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
         onVoice = {
             if (editorMatches() && terminalEditor == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null && !videoSending &&
@@ -1688,6 +1690,65 @@ class MainActivity : ComponentActivity() {
             else -> pendingFeature()
         } } },
         )
+    }
+
+    @Composable private fun projectedVoiceComposer(): ComposerUi {
+        val system by dictationHost.state.collectAsStateWithLifecycle()
+        val offline by offlineHost.state.collectAsStateWithLifecycle()
+        val remote by remoteVoice.listeningTarget.collectAsStateWithLifecycle()
+        val universal by universalVoice.state.collectAsStateWithLifecycle()
+        return chatState.composer.copy(listening = composerListening(system, offline, remote, universal))
+    }
+
+    private fun composerListening(
+        system: app.daiyu.android.voice.ComposerDictationState,
+        offline: app.daiyu.android.voice.offline.OfflineComposerHost.State,
+        remote: DictationDraftTarget?,
+        universal: VoiceControlState,
+    ): Boolean {
+        if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible) return false
+        fun current(target: DictationDraftTarget?) = target != null && voiceEditorCurrent(target)
+        return (system.listening && dictationHost.state.value == system && current(system.target)) ||
+            (offline.listening && offlineHost.state.value == offline && current(offline.target)) ||
+            (remoteVoice.listeningTarget.value == remote && current(remote)) ||
+            (universalVoice.state.value == universal && universal.phase == VoiceControlPhase.LISTENING && universal.permitId != null &&
+                universalAdmissionSnapshot == VoiceAdmission.READY &&
+                universalEditor == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision))
+    }
+
+    private fun completionReadAction(): (Set<String>) -> Unit {
+        // Capture the exact event BEFORE the measured-frame callback. Never fetch a newer token there.
+        val receipt = if (completionPageReadable()) selected?.id?.let { id ->
+            app.daiyu.android.storage.ConversationCompletionMarkers.read(controller.database.readableDatabase, id)
+                ?.takeIf(::completionShown)
+        } else null
+        val generation = editorGeneration
+        val revision = controller.dataRevision
+        // An earlier segment of the same physical owner is not its newly completed final segment.
+        val finalKey = receipt?.let { expected -> chatState.turns.filterIsInstance<ChatTurnUi.Assistant>()
+            .lastOrNull { it.ownerMessageId == expected.messageId && it.status == RunStatus.COMPLETED }?.listKey }
+        return { visibleKeys ->
+            if (receipt != null && finalKey != null && finalKey in visibleKeys)
+                acknowledgeCompletion(receipt, generation, revision)
+        }
+    }
+    private fun completionPageReadable() = activityUsable() && voiceForeground && retainedPage == "chat" &&
+        !sidebarVisible && selectionReady && controller.ready && !controller.dataBusy &&
+        controller.problem?.startsWith("会话恢复失败") != true
+    private fun completionShown(receipt: app.daiyu.android.storage.ConversationCompletionMarkers.Receipt) =
+        selected?.id?.value == receipt.conversationId && shown.any { (_, message) ->
+            message.conversationId.value == receipt.conversationId && message.id.value == receipt.messageId &&
+                message.runId.value == receipt.runId && message.role == Message.ASSISTANT_ROLE &&
+                message.status == RunStatus.COMPLETED
+        }
+    private fun acknowledgeCompletion(receipt: app.daiyu.android.storage.ConversationCompletionMarkers.Receipt,
+        generation: Long, revision: Long) {
+        if (!completionPageReadable() || editorGeneration != generation || controller.dataRevision != revision ||
+            !completionShown(receipt)) return
+        guard {
+            if (app.daiyu.android.storage.ConversationCompletionMarkers.acknowledge(
+                    controller.database.writableDatabase, receipt)) updatePane()
+        }
     }
 
     @Composable private fun DictationComposerEntry() {
@@ -2813,6 +2874,7 @@ class MainActivity : ComponentActivity() {
         super.onResume(); voiceForeground = true; speechHost.setForeground(true)
         // Re-render fresh entry callbacks; none captured while backgrounded gains authority here.
         contextManagementEntryEpoch++
+        if (selectionReady) publishChat() // Re-arm foreground read confirmation; never acknowledge on background refresh.
         prepareMessageActionSnapshot()
         if (retainedPage == "platform-settings") platformSettingsRevision++
         controller.attachVideoUi(videoUi)
@@ -3492,7 +3554,7 @@ class MainActivity : ComponentActivity() {
             contentRevision = chatState.contentRevision + 1,
             turns = ChatTurnMapper.map(shown.map { it.second }, timestamp = { message ->
                 MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
-            }), canJumpToPreviousUser = shown.any { it.second.role == "user" },
+            }, confirmedToolError = app.daiyu.android.ui.RetainedToolOutcomes.reader(controller.database, shown.map { it.second })), canJumpToPreviousUser = shown.any { it.second.role == "user" },
             statusText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中";
                 pendingTextSend != null -> "正在准备上下文并核实发送结果"; imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,

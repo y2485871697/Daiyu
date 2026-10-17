@@ -97,7 +97,7 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
         val exact = turns.indexOfFirst { it.id == request.messageId && it.segmentIndex == request.segmentIndex }
         assertTrue(exact >= 0)
         assertEquals("shared needle after", (turns[exact] as app.daiyu.android.ui.screens.chat.conversation.ChatTurnUi.Assistant).finalText)
-        assertFalse(data.summaries(null).single().hasCompletionMarker)
+        assertTrue(data.summaries(null).single().hasCompletionMarker) // Search is not a read acknowledgement.
     }
 
     fun testChineseTitlesAndPreviewsDoNotSearchSerializedProtocolOrBlockMetadata() {

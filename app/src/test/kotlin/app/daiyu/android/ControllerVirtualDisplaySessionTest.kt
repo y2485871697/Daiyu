@@ -736,7 +736,12 @@ class ControllerVirtualDisplaySessionTest {
             JSONObject(success.toString()).put("handedOff", false),
             JSONObject(success.toString()).put("receiptOnly", true),
             JSONObject(success.toString()).put("mutationUncertain", true),
-            JSONObject(success.toString()).put("receipt", JSONObject().put("state", "UNKNOWN")))
+            JSONObject(success.toString()).put("receipt", JSONObject().put("state", "UNKNOWN")),
+            JSONObject().put("ok", false).put("error", "HANDOFF_UNCERTAIN")
+                .put("sideEffectsAttempted", true).put("retryable", false)
+                .put("handoffPhase", "remove-anchor")
+                .put("completedTaskIds", org.json.JSONArray().put(557))
+                .put("receipt", JSONObject().put("state", "UNKNOWN")))
         badBodies.forEach { body -> Fixture(includeRelease = true, includeHandoff = true).use { f ->
             val auth = f.initialized()
             f.endpoint.handoffBody = body

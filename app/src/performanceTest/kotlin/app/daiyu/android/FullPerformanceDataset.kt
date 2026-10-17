@@ -96,30 +96,32 @@ internal object FullPerformanceDataset {
             require(99L * SMALL_ASSET_BYTES + lastSize <= NeutralBackupService.MAX_BYTES)
             val bytes = binary(99, lastSize.toInt())
             replace(LAST_ASSET, bytes)
-            var text = backup.exportPackage()
-            val gap = PACKAGE_BYTES - utf8Size(text)
-            if (gap in 0L..(200 - LAST_ASSET.length).toLong()) {
-                if (gap != 0L) {
-                    replace(LAST_ASSET + "x".repeat(gap.toInt()), bytes)
-                    text = backup.exportPackage()
-                }
-                check(utf8Size(text) == PACKAGE_BYTES)
-                val inventory = backup.preflight(text)
-                check(inventory.conversations == 1000 && inventory.messages == 10000 && inventory.attachments == 100)
-                check(output.parentFile?.let { it.isDirectory || it.mkdirs() } == true)
-                val hash = MessageDigest.getInstance("SHA-256")
-                FileOutputStream(output).use { stream ->
-                    OutputStreamWriter(DigestOutputStream(stream, hash), Charsets.UTF_8).use { writer ->
-                        writeUtf8(writer, text); writer.flush(); stream.fd.sync()
+            var prepared = backup.prepareExport()
+            try {
+                val gap = PACKAGE_BYTES - prepared.file.length()
+                if (gap in 0L..(200 - LAST_ASSET.length).toLong()) {
+                    if (gap != 0L) {
+                        prepared.close()
+                        replace(LAST_ASSET + "x".repeat(gap.toInt()), bytes)
+                        prepared = backup.prepareExport()
                     }
+                    check(prepared.file.length() == PACKAGE_BYTES)
+                    val inventory = prepared.file.inputStream().use(backup::preflight)
+                    check(inventory.conversations == 1000 && inventory.messages == 10000 && inventory.attachments == 100)
+                    check(output.parentFile?.let { it.isDirectory || it.mkdirs() } == true)
+                    val hash = MessageDigest.getInstance("SHA-256")
+                    FileOutputStream(output).use { stream ->
+                        val counted = DigestOutputStream(stream, hash)
+                        prepared.writeTo(counted); counted.flush(); stream.fd.sync()
+                    }
+                    check(output.length() == PACKAGE_BYTES)
+                    return Package(output, hash.digest().joinToString("") {
+                        (it.toInt() and 255).toString(16).padStart(2, '0')
+                    })
                 }
-                check(output.length() == PACKAGE_BYTES)
-                return Package(output, hash.digest().joinToString("") {
-                    (it.toInt() and 255).toString(16).padStart(2, '0')
-                })
-            }
-            lastSize = if (gap > 0L) lastSize + maxOf(1L, (gap - 64L) * 3L / 4L)
-                else lastSize - maxOf(3L, ((-gap) * 3L + 3L) / 4L + 3L)
+                lastSize = if (gap > 0L) lastSize + maxOf(1L, (gap - 64L) * 3L / 4L)
+                    else lastSize - maxOf(3L, ((-gap) * 3L + 3L) / 4L + 3L)
+            } finally { prepared.close() }
         }
         error("exact_package_size_not_converged")
     }

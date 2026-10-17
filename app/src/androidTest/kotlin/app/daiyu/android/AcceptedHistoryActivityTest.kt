@@ -1,5 +1,10 @@
 package app.daiyu.android
 
+import android.os.Looper
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import androidx.compose.runtime.State
 import app.daiyu.android.domain.*
 import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
@@ -15,6 +20,114 @@ class AcceptedHistoryActivityTest : WiredActivityTestCase() {
     @Suppress("UNCHECKED_CAST")
     private fun shown() = (field("shown") as List<Pair<Long, Message>>).toList()
     private fun contentRevision() = ((field("chatState\$delegate") as State<*>).value as ChatScreenState).contentRevision
+
+    private fun setField(name: String, value: Any?) = MainActivity::class.java.getDeclaredField(name)
+        .apply { isAccessible = true }.set(activity, value)
+
+    private fun awaitShown(predicate: (List<Pair<Long, Message>>) -> Boolean) {
+        ui.waitUntil(timeoutMillis = 5_000) {
+            var matches = false
+            mainThread { matches = predicate(shown()) }
+            matches
+        }
+    }
+
+    private fun seedHistory(prefix: String, count: Int): Conversation {
+        val conversation = fixture.database.create("default")
+        repeat(count) { index ->
+            val run = RunId("$prefix-$index")
+            fixture.database.send(
+                Message(MessageId("$prefix-user-$index"), conversation.id, run, Message.USER_ROLE,
+                    listOf(MessageBlock.Text("body", "user $index")), RunStatus.COMPLETED),
+                Message(MessageId("$prefix-answer-$index"), conversation.id, run, Message.ASSISTANT_ROLE,
+                    listOf(MessageBlock.Text("body", "answer $index")), RunStatus.RUNNING))
+        }
+        return conversation
+    }
+
+    fun testRefreshReadsOffMainSingleFlightAndRetainsExpandedWindow() {
+        val conversation = seedHistory("refresh-window", 70)
+        mainThread { activity.select(conversation) }
+        @Suppress("UNCHECKED_CAST")
+        val original = field("loadedWindowReader") as (ConversationId, Long, Int) -> List<Pair<Long, Message>>
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val intercept = AtomicBoolean(true)
+        val onMain = AtomicBoolean(false)
+        val calls = AtomicInteger()
+        val reader: (ConversationId, Long, Int) -> List<Pair<Long, Message>> = { id, before, count ->
+            calls.incrementAndGet()
+            val snapshot = original(id, before, count)
+            if (intercept.compareAndSet(true, false)) {
+                onMain.set(Looper.myLooper() == Looper.getMainLooper())
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+            }
+            snapshot
+        }
+        try {
+            mainThread { setField("loadedWindowReader", reader); call("refresh") }
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertFalse(onMain.get())
+            var expanded = emptyList<MessageId>()
+            mainThread {
+                repeat(12) { call("refresh") }
+                retainedControls(activity).onMenuAction(ChatMenuAction.LOAD_EARLIER)
+                expanded = shown().map { it.second.id }
+            }
+            assertEquals("pending refreshes must not launch parallel readers", 1, calls.get())
+            val tail = fixture.database.messages(conversation.id).last().second
+            fixture.database.save(tail.copy(status = RunStatus.COMPLETED,
+                blocks = listOf(MessageBlock.Text("body", "refresh final"))))
+            release.countDown()
+            awaitShown { rows -> rows.map { it.second.id } == expanded && rows.last().second.status == RunStatus.COMPLETED &&
+                rows.last().second.blocks.filterIsInstance<MessageBlock.Text>().single().text == "refresh final" }
+        } finally {
+            release.countDown()
+            mainThread { setField("loadedWindowReader", original) }
+        }
+    }
+
+    fun testLateRefreshCannotOverwriteReselectedOrDifferentEditor() {
+        for (sameConversation in listOf(false, true)) {
+            val old = seedHistory("refresh-old-$sameConversation", 2)
+            val current = if (sameConversation) old else seedHistory("refresh-new", 2)
+            mainThread { activity.select(old) }
+            @Suppress("UNCHECKED_CAST")
+            val original = field("loadedWindowReader") as (ConversationId, Long, Int) -> List<Pair<Long, Message>>
+            val entered = CountDownLatch(1)
+            val release = CountDownLatch(1)
+            val intercept = AtomicBoolean(true)
+            val reader: (ConversationId, Long, Int) -> List<Pair<Long, Message>> = { id, before, count ->
+                val snapshot = original(id, before, count)
+                if (intercept.compareAndSet(true, false)) { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+                snapshot
+            }
+            try {
+                mainThread { setField("loadedWindowReader", reader); call("refresh") }
+                assertTrue(entered.await(5, TimeUnit.SECONDS))
+                mainThread {
+                    activity.select(current)
+                    retainedControls(activity).onTextChange("new editor text")
+                    call("refresh")
+                }
+                val finalText = "reselected final $sameConversation"
+                val tail = fixture.database.messages(current.id).last().second
+                fixture.database.save(tail.copy(status = RunStatus.COMPLETED,
+                    blocks = listOf(MessageBlock.Text("body", finalText))))
+                release.countDown()
+                awaitShown { rows -> rows.isNotEmpty() && rows.all { it.second.conversationId == current.id } &&
+                    rows.last().second.blocks.filterIsInstance<MessageBlock.Text>().single().text == finalText }
+                ui.waitUntil(timeoutMillis = 5_000) {
+                    var idle = false
+                    mainThread { idle = field("refreshHistoryLoading") == false && field("refreshHistoryPending") == false }
+                    idle
+                }
+                assertDraft("new editor text")
+                assertEquals(current.id.value, fixture.controller.preferences.getString("selected", null))
+            } finally { release.countDown(); mainThread { setField("loadedWindowReader", original) } }
+        }
+    }
 
     fun testSelectionOnlyChangeRetainsTurnsAndContentRevision() {
         val conversation = fixture.database.create("default")
@@ -94,7 +207,8 @@ class AcceptedHistoryActivityTest : WiredActivityTestCase() {
             content = contentRevision()
             retainedControls(activity).onMenuAction(ChatMenuAction.LOAD_EARLIER)
         }
-        val expanded = shown().map { it.second.id }
+        var expanded = emptyList<MessageId>()
+        mainThread { expanded = shown().map { it.second.id } }
         assertTrue(expanded.size > snapshot.size)
         val tail = fixture.database.messages(conversation.id).last().second
         fixture.database.save(tail.copy(status = RunStatus.COMPLETED,
@@ -103,9 +217,8 @@ class AcceptedHistoryActivityTest : WiredActivityTestCase() {
             call("refresh")
             call("applyAcceptedHistory", conversation, generation, request, content, snapshot)
         }
-        assertEquals(expanded, shown().map { it.second.id })
-        assertEquals(RunStatus.COMPLETED, shown().last().second.status)
-        assertEquals("new final answer", shown().last().second.blocks.filterIsInstance<MessageBlock.Text>().single().text)
+        awaitShown { rows -> rows.map { it.second.id } == expanded && rows.last().second.status == RunStatus.COMPLETED &&
+            rows.last().second.blocks.filterIsInstance<MessageBlock.Text>().single().text == "new final answer" }
     }
 
     fun testLateHistoryForAnotherEditorCannotReplaceCurrentConversation() {

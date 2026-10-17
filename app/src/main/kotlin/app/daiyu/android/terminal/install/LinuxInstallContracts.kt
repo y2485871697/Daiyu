@@ -131,3 +131,12 @@ internal data class RecoveredLinuxInstall(
 
 /** Files only. This receipt is NOT catalog approval, selection, or an execution lease. */
 data class LinuxInstallReceipt(val installation: LinuxInstallation, val directorySyncConfirmed: Boolean)
+
+/** Publication and cleanup are independent: preserve the receipt and the first failure. */
+internal class LinuxInstallCleanupPending(
+    val receipt: LinuxInstallReceipt?,
+    val originalFailure: Throwable?,
+    cleanupFailure: Throwable,
+) : IllegalStateException("linux_install_cleanup_pending", originalFailure ?: cleanupFailure) {
+    init { if (originalFailure != null && originalFailure !== cleanupFailure) addSuppressed(cleanupFailure) }
+}

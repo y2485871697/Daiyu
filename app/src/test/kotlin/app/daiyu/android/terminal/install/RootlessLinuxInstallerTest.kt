@@ -29,6 +29,7 @@ class RootlessLinuxInstallerTest : TestCase() {
         var probes = 0
         var moves = 0
         var downloadBytes = payload
+        var beforeDelete: ((java.nio.file.Path) -> Unit)? = null
         var beforeDownload: (() -> Unit)? = null
         var afterExtract: (() -> Unit)? = null
         val cancellation = LinuxInstallCancellation()
@@ -66,7 +67,12 @@ class RootlessLinuxInstallerTest : TestCase() {
             { from, to ->
                 moves++
                 if (move != null) move(from, to) else { Files.move(from.toPath(), to.toPath()); Unit }
-            }, fileOps = fileOps, executionMode = mode, requireChrootTransport = {}
+            }, fileOps = object : RootlessLinuxInstaller.FileOps by fileOps {
+                override fun deleteIfExists(path: java.nio.file.Path): Boolean {
+                    beforeDelete?.invoke(path)
+                    return Files.deleteIfExists(path)
+                }
+            }, executionMode = mode, requireChrootTransport = {}
         )
     }
 
@@ -136,6 +142,93 @@ class RootlessLinuxInstallerTest : TestCase() {
         assertFalse(File(f.root, "selected-linux.json").exists())
         assertFalse(File(f.root, "trusted-linux-catalog.json").exists())
         assertEquals(listOf("rootfs"), f.target.parentFile.list()!!.toList())
+    }
+
+    fun testArchiveCleanupFailurePreservesReceiptAndLeaseUntilExplicitRetry() = fixture { f ->
+        f.beforeDelete = { if (it.fileName.toString().endsWith(".archive")) throw IOException("archive cleanup") }
+        val installer = f.installer()
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        val failure = cleanupPending { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        assertTrue(failure.receipt!!.directorySyncConfirmed)
+        assertTrue(File(f.target.parentFile, ".install-lock").exists())
+        assertTrue(f.target.exists())
+        rejected { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        assertEquals(1, f.requests)
+        f.beforeDelete = null
+        assertEquals(failure.receipt, installer.retryCleanup(prepared))
+        assertEquals(listOf("rootfs"), f.target.parentFile.list()!!.toList())
+        assertEquals(1, f.probes)
+    }
+
+    fun testCleanupRetryRetainsFirstCleanupFailure() = fixture { f ->
+        val first = IOException("first cleanup")
+        val next = IOException("retry cleanup")
+        f.beforeDelete = { if (it.fileName.toString().endsWith(".archive")) throw first }
+        val installer = f.installer()
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        val failure = cleanupPending { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        assertSame(first, failure.cause)
+        f.beforeDelete = { if (it.fileName.toString().endsWith(".archive")) throw next }
+        val retry = cleanupPending { installer.retryCleanup(prepared) }
+        assertSame(first, retry.cause)
+        assertSame(next, retry.suppressed.single())
+        f.beforeDelete = null
+        assertNotNull(installer.retryCleanup(prepared))
+    }
+
+    fun testFailedInstallCleanupKeepsOriginalFailureAndDoesNotReleaseLease() = fixture { f ->
+        f.downloadBytes = ByteArray(f.payload.size)
+        f.beforeDelete = { if (it.fileName.toString().startsWith(".staging-")) throw IOException("staging cleanup") }
+        val installer = f.installer()
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        val failure = cleanupPending { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        assertNull(failure.receipt)
+        assertNotNull(failure.originalFailure)
+        assertSame(failure.originalFailure, failure.cause)
+        assertEquals("staging cleanup", failure.suppressed.single().message)
+        assertTrue(File(f.target.parentFile, ".install-lock").exists())
+        assertFalse(f.target.exists())
+        f.beforeDelete = null
+        assertNull(installer.retryCleanup(prepared))
+        assertTrue(f.target.parentFile.list()!!.isEmpty())
+        assertEquals(0, f.probes)
+    }
+
+    fun testLockReleaseSyncRetryNeverDeletesReplacementOwnerLock() = fixture { f ->
+        var fail = true
+        val lock = File(f.target.parentFile, ".install-lock")
+        val installer = f.installer(sync = { directory ->
+            if (directory == f.target.parentFile && f.target.exists() && !lock.exists() && fail) {
+                fail = false
+                assertTrue(lock.mkdir())
+                throw IOException("released but not synced")
+            }
+        })
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        val failure = cleanupPending { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        assertTrue(failure.receipt!!.directorySyncConfirmed)
+        assertNotNull(installer.retryCleanup(prepared))
+        assertTrue("replacement owner's lease must remain", lock.exists())
+        assertEquals(1, f.requests)
+    }
+
+    fun testDurabilityConfirmationReportsLeaseCleanupFailureWithoutReplayingProbe() = fixture { f ->
+        val installer = f.installer()
+        val prepared = installer.prepare(f.artifact, "primary", f.installation)
+        installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation)
+        f.beforeDelete = { if (it.fileName.toString() == ".install-lock") throw IOException("lock cleanup") }
+        val failure = cleanupPending { installer.confirmPublishedDurability(prepared) }
+        assertTrue(failure.receipt!!.directorySyncConfirmed)
+        assertTrue(File(f.target.parentFile, ".install-lock").exists())
+        f.beforeDelete = null
+        assertNotNull(installer.retryCleanup(prepared))
+        assertEquals(1, f.requests)
+        assertEquals(1, f.probes)
+    }
+
+    private fun cleanupPending(block: () -> Unit): LinuxInstallCleanupPending {
+        try { block() } catch (failure: LinuxInstallCleanupPending) { return failure }
+        error("expected cleanup pending")
     }
 
     fun testBadHashNeverExtractsProbesOrPublishes() = fixture { f ->
@@ -325,8 +418,12 @@ class RootlessLinuxInstallerTest : TestCase() {
     }
 
     fun testRenameThenDirectorySyncFailureReconcilesVisibleFiles() = fixture { f ->
+        var failPublicationSync = true
         val installer = f.installer(sync = { dir ->
-            if (dir == f.target.parentFile && f.target.exists()) throw IOException("injected directory sync")
+            if (dir == f.target.parentFile && f.target.exists() && failPublicationSync) {
+                failPublicationSync = false
+                throw IOException("injected directory sync")
+            }
         })
         val prepared = installer.prepare(f.artifact, "primary", f.installation)
         val receipt = installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation)

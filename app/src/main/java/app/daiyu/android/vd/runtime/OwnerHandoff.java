@@ -1,6 +1,7 @@
 package app.daiyu.android.vd.runtime;
 
 import android.content.Intent;
+import app.daiyu.android.BuildConfig;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.*;
@@ -11,7 +12,7 @@ import org.json.JSONObject;
 final class OwnerHandoff {
     // Host wiring only; the manifest must keep this cover in its own non-reparenting task.
     static final String ANCHOR_COMPONENT =
-            "app.daiyu.android/app.daiyu.android.vd.VirtualDisplayAnchorActivity";
+            BuildConfig.APPLICATION_ID + "/app.daiyu.android.vd.VirtualDisplayAnchorActivity";
     static final String ANCHOR_MARKER_PREFIX = "daiyu-vd-anchor://handoff/";
 
     /**

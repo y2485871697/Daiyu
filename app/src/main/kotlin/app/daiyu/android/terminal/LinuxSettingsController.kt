@@ -288,6 +288,8 @@ class LinuxSettingsPageOwner internal constructor(
     fun prepareInstall(distribution: String, mirrorId: String, mode: LinuxExecutionMode = LinuxExecutionMode.PROOT) = controller.installAction(this, mode, newRequest = true) { it.prepare(distribution, mirrorId) }
     fun discardInstall(mode: LinuxExecutionMode = LinuxExecutionMode.PROOT) = controller.installAction(this, mode) { it.discard() }
     fun recoverInstall(mode: LinuxExecutionMode = LinuxExecutionMode.PROOT) = controller.installAction(this, mode) { it.recover() }
+    fun retryInstallCleanup(prepared: app.daiyu.android.terminal.install.PreparedLinuxInstall) =
+        controller.installAction(this, prepared.installation.executionMode) { it.retryCleanup(prepared) }
     fun install(prepared: app.daiyu.android.terminal.install.PreparedLinuxInstall) =
         controller.installAction(this, prepared.installation.executionMode) { it.downloadAndInstall(prepared) }
     fun confirmPublishedDurability(prepared: app.daiyu.android.terminal.install.PreparedLinuxInstall) =

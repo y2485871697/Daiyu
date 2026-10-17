@@ -195,10 +195,10 @@ private fun LinuxInstallPanel(
     if (mode == LinuxExecutionMode.CHROOT) SettingsNote("chroot 需要 Android Root 授权及可用 cgroup2 清退能力。仅安装到应用私有目录，不使用 PRoot helper、不挂载共享目录，不自动切换既有环境。确认安装会启动一次真实 Root 的隔离 PTY 探针；仅在整棵子进程树已清退后发布。chroot 不是安全沙箱，rootfs 及其内容必须可信。")
     else
         SettingsNote("本批预编译 PRoot 仅支持 Android API 34+ 的 arm64 / x86_64 实际 64 位进程。API 26–33 明确不可用；不是已验证的运行支持。无运行时 helper 下载、不跟随 HTTP 重定向、不隐式挂载共享目录。下载后的 rootfs 会执行一次隔离 PTY 的 id -u 探测。")
-    state.notice?.let { SettingsNote(it, error = state.unknown || state.registrationPending || state.recoveryBlocked) }
+    state.notice?.let { SettingsNote(it, error = state.unknown || state.registrationPending || state.recoveryBlocked || state.cleanupPending) }
     state.unavailableReason?.let { SettingsNote("安装不可用 (Unavailable)：$it", error = true) }
-    val idle = enabled && !state.busy && !state.unknown && !state.recoveryBlocked && state.unavailableReason == null
-    if (state.recoveryBlocked) {
+    val idle = enabled && !state.busy && !state.unknown && !state.recoveryBlocked && !state.cleanupPending && state.unavailableReason == null
+    if (state.recoveryBlocked || state.unknown) {
         SettingsNote("原请求恢复未通过验证，禁止生成新 UUID 绕过。不会自动下载、重放探针、清理 UNKNOWN 锁或更换原 helper。", error = true)
         TextButton(enabled = enabled && !state.busy && state.unavailableReason == null,
             onClick = { page.recoverInstall(mode) }) { Text("仅重新读取并验证原安装请求（无授权）") }
@@ -216,6 +216,11 @@ private fun LinuxInstallPanel(
         }
     }
     state.prepared?.let { prepared ->
+        if (state.cleanupPending) {
+            TextButton(enabled = enabled && !state.busy && !state.unknown && state.unavailableReason == null,
+                modifier = Modifier.testTag("linux-install-${mode.wire}-cleanup"),
+                onClick = { page.retryInstallCleanup(prepared) }) { Text("显式重试原事务清理（不下载、不执行探针）") }
+        }
         SettingsNote("条目：${prepared.artifact.id}\n版本：${prepared.artifact.version}\nABI：${prepared.artifact.abi}\n归档：${prepared.artifact.archive}\n大小：${prepared.artifact.compressedBytes} bytes\n归档 SHA-256：${prepared.artifact.sha256}\n镜像：${prepared.mirror.id}\nURL：${prepared.mirror.uri}")
         LinuxSettingsConfiguration(prepared.installation)
         if (state.receipt == null && !state.registered) {

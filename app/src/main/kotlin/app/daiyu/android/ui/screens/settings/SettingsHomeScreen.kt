@@ -152,6 +152,9 @@ internal fun DaiyuSettingsScreen(
         }
         if (openedPage == SettingsLocalPage.TASK_SURFACE) {
             TaskSurfaceSettingsPanel(onBack = localBack, modifier = modifier)
+        } else if (openedPage == SettingsLocalPage.UPDATES) {
+            SettingsReleasePage(remember { app.daiyu.android.update.GithubReleaseChecker() },
+                currentVersion = app.daiyu.android.BuildConfig.VERSION_NAME, onBack = localBack, modifier = modifier)
         } else {
             SettingsSystemAccessPage(openedPage, onBack = localBack,
                 onOpenShizuku = {
@@ -177,6 +180,7 @@ internal fun DaiyuSettingsScreen(
             "haptics" -> onOpenHaptics?.invoke()
             "voice" -> onOpenVoice?.invoke()
             "source" -> openProjectSource(context)
+            "telegram", "qq", "relay_st", "relay_moyu" -> openRetainedSettingsLink(context, entry.id)
             "platform_tools", "permission_check" -> onOpenPlatformTools?.invoke()
             "relay" -> {
                 if (section != "about") { section = "about"; relayExpanded = true }

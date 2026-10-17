@@ -33,6 +33,6 @@ internal object HostLinuxIdentity {
         return if (old != null && old.created == created) old.token
             else Entry(created, java.util.UUID.randomUUID().toString()).also { entries[real] = it }.token
     }
-    @Synchronized fun replaced(path: java.nio.file.Path) { entries.remove(path.toAbsolutePath().normalize()) }
+    @Synchronized fun replaced(path: java.nio.file.Path) { entries.remove(path.toRealPath()) }
 }
 internal fun hostLinuxFileKey(path: java.nio.file.Path): Any? = HostLinuxIdentity.read(path)

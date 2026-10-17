@@ -109,7 +109,12 @@ class ChatController internal constructor(private val application:Application,
         ProductionContextPreparation::create,
     private val virtualDisplayFactory: ControllerVirtualDisplayFactory = ControllerVirtualDisplayFactory.REAL) {
     // Voice credentials remain independent from chat settings.
-    internal val voiceRuntime by lazy { ControllerVoiceRuntime(application) }
+    internal val voiceAccounts by lazy { app.daiyu.android.voice.account.VoiceAccountResources.forContext(application) }
+    internal val voiceRuntime by lazy {
+        ControllerVoiceRuntime(application) { config ->
+            voiceAccounts.voices.selected(config.voice, config.speech())
+        }
+    }
     private val contextService by lazy { ContextService(application, database) }
     private val contextPreparation by lazy { contextPreparationFactory(application, contextService) }
 

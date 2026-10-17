@@ -88,7 +88,7 @@ class VoiceProductionHostDeviceTest : InstrumentationTestCase() {
 
     fun testCascadeRequiresSameSendReceiptAndUsesOnlyAdmittedAssistantBody() = runBlocking {
         val runtime = ControllerVoiceRuntime(context)
-        runtime.save(VoiceConfiguration())
+        runtime.save(VoiceConfiguration(), VoicePlaybackProfile.CONVERSATION)
         val spoken = mutableListOf<String>()
         var stopped = 0
         val host = ActivityCascadeVoiceHost(context, runtime, gate = AudioOwnerGate(),
@@ -112,6 +112,10 @@ class VoiceProductionHostDeviceTest : InstrumentationTestCase() {
             MessageBlock.Text("answer", "Visible sentence.")), protocolItems = listOf("secret reasoning"))
         host.update(body.copy(runId = RunId("other-run")), emptyList(), "conversation")
         assertTrue(spoken.isEmpty())
+        // Active owner retirement revokes synchronously; an old snapshot cannot revive it.
+        host.update(body, emptyList(), "conversation")
+        assertTrue(spoken.isEmpty())
+        host.arm(); val nextTicket = Any(); host.reserve(nextTicket); host.accepted(nextTicket, assistant)
         host.update(body, emptyList(), "conversation")
         host.update(body.copy(status = RunStatus.COMPLETED), emptyList(), "conversation")
         assertEquals(listOf("Visible sentence."), spoken)
@@ -123,7 +127,7 @@ class VoiceProductionHostDeviceTest : InstrumentationTestCase() {
 
     fun testCascadeUnknownSendAndStopNeverStartOutput() = runBlocking {
         val runtime = ControllerVoiceRuntime(context)
-        runtime.save(VoiceConfiguration())
+        runtime.save(VoiceConfiguration(), VoicePlaybackProfile.CONVERSATION)
         var created = 0
         val host = ActivityCascadeVoiceHost(context, runtime, gate = AudioOwnerGate(),
             outputFactory = { _, _ -> created++; error("must not create output") }, admission = { true })

@@ -95,6 +95,8 @@ class AudioOwnerGate {
         return true
     }
     fun cancelAll() { val owner = synchronized(this) { lease?.owner }; if (owner != null) cancel(owner) }
+    /** Read-only health proof for strict parent mutation fences; never resets or acquires a lease. */
+    @Synchronized internal fun releaseHealthy(): Boolean = !releasing && !releaseFailed
 }
 
 /** Append deltas verbatim, including spaces. A final snapshot replaces, never appends. */

@@ -113,7 +113,9 @@ class PtyRootScopeProtocolTest {
                 listOf(helper.path, "--root-scope", "24", "80", "--") + launch.guestArgv()
             assertEquals(listOf(launch.su.path, "-c", "exec " + expected.joinToString(" ") { quote(it) }),
                 checkNotNull(captured).command())
-            assertEquals(environment, checkNotNull(captured).environment())
+            assertEquals(mapOf("PATH" to "/system/bin:/system/xbin", "HOME" to root.absolutePath,
+                "TMPDIR" to root.absolutePath), checkNotNull(captured).environment())
+            assertFalse(checkNotNull(captured).environment().containsKey("LANG"))
             assertTrue(session.awaitTermination(2_000))
         } finally { session.close(); root.deleteRecursively() }
     }

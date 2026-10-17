@@ -582,41 +582,44 @@ class ChatController internal constructor(private val application:Application,
                 synchronized(this) {
                     check(conversation.value !in generationConversationPublicationSeals)
                 }
-                val snapshot = GenerationSettingsStore(application).loadForEditing()
-                val retained = retainGenerationResources(snapshot.accountScope)
+                val scope = GenerationSettingsStore(application).readAccountScope()
+                    ?: return@runCatching emptyList<GenerationAssetDisplay>()
+                val retained = retainGenerationResources(scope)
                 val displays = mutableListOf<GenerationAssetDisplay>()
+                // Materialize scalars and CLOSE the SQL cursor before any owner/file gate read.
                 // Side table is authoritative, including registered outputs beside central UNKNOWN.
-                retained.database().rawQuery("SELECT operation_id,item_id,output_index,fingerprint,protocol," +
+                val selected = retained.database().rawQuery("SELECT operation_id,item_id,output_index,fingerprint,protocol," +
                     "assistant_id,run_id,tool_call_id,tool_name FROM generation_outputs " +
                     "WHERE account_scope=? AND conversation_id=? ORDER BY rowid DESC LIMIT 32",
-                    arrayOf(snapshot.accountScope, conversation.value)).use { rows ->
+                    arrayOf(scope, conversation.value)).use { rows ->
+                    val result = mutableListOf<Triple<GenerationAttemptBinding, GenerationAttempt, Int>>()
                     while (rows.moveToNext()) {
                         val binding = GenerationAttemptBinding(conversation.value, rows.getString(5),
                             rows.getString(6), rows.getString(7), rows.getString(8))
-                        val owner = GenerationAssetOwner(snapshot.accountScope, binding)
-                        val key = snapshot.accountScope + ":" + binding.operationId
-                        val reader = generationOutputReaders.getOrPut(key) { retained.openOutputs(owner) }
-                        generationOutputConversations[key] = conversation.value
                         val attempt = GenerationAttempt(GenerationIdentity(rows.getString(0), rows.getString(1)),
                             rows.getString(3), GenerationProtocol.valueOf(rows.getString(4)))
-                        val index = rows.getInt(2)
-                        val metadata = reader.metadata(attempt, index) ?: continue
-                        val thumbnail = if (metadata.kind == GenerationKind.IMAGE) {
-                            // Decode bounded display pixels, not a rewritten/published original.
-                            reader.openOriginal(attempt, index)?.use { stream ->
-                                android.graphics.BitmapFactory.decodeStream(stream, null,
-                                    android.graphics.BitmapFactory.Options().apply {
-                                        inSampleSize = Integer.highestOneBit(
-                                            (maxOf(metadata.width, metadata.height) / 512).coerceAtLeast(1))
-                                    })
-                            }
-                        } else {
-                            // Authenticate the real video descriptor too; external file/URL exposure is denied.
-                            reader.openOriginal(attempt, index)?.use { it.read() }
-                            null
-                        }
-                        displays.add(GenerationAssetDisplay(metadata, thumbnail))
+                        result.add(Triple(binding, attempt, rows.getInt(2)))
                     }
+                    result
+                }
+                selected.forEach { (binding, attempt, index) ->
+                    val reader = generationOutputReader(scope, binding)
+                    val metadata = reader.metadata(attempt, index) ?: return@forEach
+                    val thumbnail = if (metadata.kind == GenerationKind.IMAGE) {
+                        // Decode bounded display pixels, not a rewritten/published original.
+                        reader.openOriginal(attempt, index)?.use { stream ->
+                            android.graphics.BitmapFactory.decodeStream(stream, null,
+                                android.graphics.BitmapFactory.Options().apply {
+                                    inSampleSize = Integer.highestOneBit(
+                                        (maxOf(metadata.width, metadata.height) / 512).coerceAtLeast(1))
+                                })
+                        }
+                    } else {
+                        // Authenticate the real video descriptor too; external file/URL exposure is denied.
+                        reader.openOriginal(attempt, index)?.use { it.read() }
+                        null
+                    }
+                    displays.add(GenerationAssetDisplay(metadata, thumbnail))
                 }
                 displays.toList()
             }.getOrNull()
@@ -631,6 +634,91 @@ class ChatController internal constructor(private val application:Application,
             synchronized(this) { generationReaders-- }; return false
         }
         return true
+    }
+
+    /** Worker-only cache admission shared by history and complete backup. Both indexes are
+     * installed together; delete/close can therefore find every backup-created reader too.
+     * The monitor protects only the memory seal check, never openOutputs' gate/SQL validation.
+     */
+    private fun generationOutputReader(scope: String, binding: GenerationAttemptBinding): ControllerGenerationOutputReader {
+        check(Looper.myLooper() != Looper.getMainLooper())
+        synchronized(this) { check(binding.conversationId !in generationConversationPublicationSeals) }
+        val retained = retainGenerationResources(scope)
+        val key = scope + ":" + binding.operationId
+        val reader = generationOutputReaders.getOrPut(key) {
+            retained.openOutputs(GenerationAssetOwner(scope, binding))
+        }
+        generationOutputConversations[key] = binding.conversationId
+        return reader
+    }
+
+    private fun readGenerationBackup(reference: app.daiyu.android.storage.GenerationOutputReference): ByteArray {
+        check(Looper.myLooper() != Looper.getMainLooper())
+        // Current identity comes ONLY from validated local manifest metadata, never export rows
+        // or loadForEditing/loadSnapshot (both decrypt credentials).
+        val scope = checkNotNull(GenerationSettingsStore(application).readAccountScope())
+        check(scope == reference.accountScope) { "generation_account_changed" }
+        val binding = GenerationAttemptBinding(reference.conversationId, reference.assistantMessageId,
+            reference.runId, reference.toolCallId, reference.toolName)
+        check(binding.operationId == reference.identity.operationId)
+        return generationOutputReader(scope, binding).readBackup(reference)
+    }
+
+    internal data class HistoricalGenerationAssetDisplay(
+        val history: app.daiyu.android.backup.HistoricalGenerationOutput,
+        val thumbnail: android.graphics.Bitmap?,
+    )
+
+    /** Imported originals have a separate read-only path. No settings/vault, retained live
+     * Resources, output registration, reservation, download or restoration of authority.
+     */
+    internal fun loadHistoricalGenerationOutputs(conversation: ConversationId,
+        complete: (List<HistoricalGenerationAssetDisplay>?) -> Unit): Boolean {
+        synchronized(this) {
+            if (closed || !ready || dataBusy) return false
+            generationReaders++
+        }
+        try { executor.execute {
+            val result = runCatching {
+                synchronized(this) { check(conversation.value !in generationConversationPublicationSeals) }
+                // Display is explicitly capped like live history; complete export is not capped.
+                neutralBackup.historicalGenerationOutputs(conversation).take(32).map { history ->
+                    val bytes = neutralBackup.historicalGenerationOriginal(history)
+                    val thumbnail = if (history.kind == GenerationKind.IMAGE) {
+                        android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+                            android.graphics.BitmapFactory.Options().apply {
+                                inSampleSize = Integer.highestOneBit(
+                                    (maxOf(history.width, history.height) / 512).coerceAtLeast(1))
+                            })
+                    } else null
+                    HistoricalGenerationAssetDisplay(history, thumbnail)
+                }
+            }.getOrNull()
+            handler.post {
+                synchronized(this) {
+                    generationReaders--
+                    if (closed) closeStorageWhenIdle()
+                }
+                complete(result)
+            }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { generationReaders-- }; return false
+        }
+        return true
+    }
+
+    /** Explicit user-selected destination only. Revalidates the backup-owned reference and
+     * exact hash-addressed original; never exports a private path or an execution capability.
+     */
+    internal fun saveHistoricalGenerationOriginal(history: app.daiyu.android.backup.HistoricalGenerationOutput,
+        uri: Uri, resolver: android.content.ContentResolver = application.contentResolver) {
+        dataTask(failureNotice = "历史原件保存失败；目标可能不完整，未重发请求", work = {
+            synchronized(this) { check(history.conversationId !in generationConversationPublicationSeals) }
+            val bytes = neutralBackup.historicalGenerationOriginal(history)
+            resolver.openOutputStream(uri, "wt")?.use { it.write(bytes) }
+                ?: throw java.io.IOException("无法打开目标")
+            "历史生成原件已保存；仅历史文件，未恢复生成授权或重发请求"
+        })
     }
 
     /** Worker-only LOCAL reader cleanup. This is not a publication barrier or a history seal. */
@@ -2420,7 +2508,8 @@ class ChatController internal constructor(private val application:Application,
             app.daiyu.android.backup.MessageImageBackupAssets(messageImageAssets),
             app.daiyu.android.backup.BackupVideoIntegration(videoAssets,
                 exportText = { db, scope -> database.exportBackupForVideoAssets(db, scope, videoAssets) },
-                restoreSidecars = { db, sidecars -> database.restoreVideoBackupSidecars(db, sidecars) }))
+                restoreSidecars = { db, sidecars -> database.restoreVideoBackupSidecars(db, sidecars) }),
+            generationAssets = app.daiyu.android.backup.BackupGenerationAssets(::readGenerationBackup))
     }
     internal class ConfigurationRestorePreview internal constructor(
         val plan:NonSecretRestorePlan, internal val metadata:String

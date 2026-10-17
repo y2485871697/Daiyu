@@ -55,6 +55,33 @@ class GenerationSettingsStoreTest {
         assertEquals(0, reads); assertEquals(0, writes); assertTrue(prefs.all.isEmpty())
     }
 
+    @Test fun manifestOnlyScopeNeverReadsKeysOrWritesAndSurvivesUnavailableCredentialsAndSavingFence() {
+        assertNull(store(load = { error("credential read forbidden") }, save = { _, _ -> error("write forbidden") })
+            .readAccountScope())
+        assertTrue(prefs.all.isEmpty())
+        val first = store().save(values(), null)
+        keys.clear()
+        val before = prefs.all.toMap()
+        val readsBefore = reads; val writesBefore = writes
+        val metadataOnly = store(load = { error("credential read forbidden") }, save = { _, _ -> error("write forbidden") })
+        assertEquals(first.accountScope, metadataOnly.readAccountScope())
+        assertEquals(before, prefs.all)
+        assertEquals(readsBefore, reads); assertEquals(writesBefore, writes)
+        // A failed explicit save leaves durable saving + process fence. Identity is still
+        // observationally readable, but this API can never produce runnable settings.
+        rejects(GenerationSettingsFailure.SAVE_UNCONFIRMED) {
+            store(save = { _, _ -> error("synthetic vault failure") }).save(first.values, first.revision)
+        }
+        val saving = prefs.all.toMap()
+        assertEquals("saving", JSONObject(prefs.getString(GenerationSettingsStore.KEY, null)!!).getString("state"))
+        assertEquals(first.accountScope, metadataOnly.readAccountScope())
+        assertEquals(saving, prefs.all)
+        val corrupt = JSONObject(prefs.getString(GenerationSettingsStore.KEY, null)!!).put("scope", "invented-scope")
+        check(prefs.edit().putString(GenerationSettingsStore.KEY, corrupt.toString()).commit())
+        rejects(GenerationSettingsFailure.CORRUPT) { metadataOnly.readAccountScope() }
+        assertEquals(corrupt.toString(), prefs.getString(GenerationSettingsStore.KEY, null))
+    }
+
     @Test fun allProtocolsRoundTripDetachedWithStableIdentityAndExactValues() {
         val original = values(GenerationProtocol.entries.map(::profile), setOf("cdn.example"), true)
         val first = store().save(original, null)

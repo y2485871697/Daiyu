@@ -104,11 +104,16 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         val range = node("chat-draft").fetchSemanticsNode().config[SemanticsProperties.TextSelectionRange]
         assertEquals(start, range.start); assertEquals(end, range.end)
     }
-    // Retain the host capability, not Compose's ClickableNode sound/attachment wrapper.
-    // The UI invokes these same methods; detached nodes are not supported by Compose semantics.
+    // Retain host capabilities or app-owned semantics, not ClickableNode wrappers.
+    // Capture before navigation; never refetch a replacement callback after a visit changes.
     protected fun retainedClick(activity: MainActivity, tag: String): () -> Unit {
         node(tag).assertExists()
         return when (tag) {
+            "platform-action-confirm" -> {
+                val action = checkNotNull(node(tag).fetchSemanticsNode()
+                    .config[SemanticsActions.OnClick].action);
+                { assertTrue(action()) }
+            }
             "dialog-confirm" -> {
                 val prompt = invokeHost(activity, "getPrompt")!!;
                 { invokeHost(activity, "confirmPrompt", prompt); Unit }

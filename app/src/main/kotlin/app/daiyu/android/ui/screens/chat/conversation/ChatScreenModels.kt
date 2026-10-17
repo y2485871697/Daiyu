@@ -5,7 +5,8 @@ import app.daiyu.android.domain.RunStatus
 /** Presentation-only state: timestamps are already formatted by the caller. */
 data class ChatScreenState(
     val title: String,
-    val balanceText: String? = null,
+    val balanceState: app.daiyu.android.balance.BalanceState? = null,
+    val statusText: String? = null,
     val turns: List<ChatTurnUi> = emptyList(),
     val composer: ComposerUi = ComposerUi(),
     val canJumpToPreviousUser: Boolean = false,

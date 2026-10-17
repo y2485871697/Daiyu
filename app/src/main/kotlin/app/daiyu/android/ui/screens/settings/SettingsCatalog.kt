@@ -16,6 +16,7 @@ internal object SettingsCatalog {
     val groups = listOf(
         SettingsGroup("llm", "LLM 提供商", "服务商连接与默认推理", listOf(
             SettingsEntry("providers", "模型提供商", DaiyuIcons.Provider, SettingControl.PAGE, FeatureRoute.MODEL_SETTINGS),
+            SettingsEntry("balance", "供应商余额", DaiyuIcons.Balance, SettingControl.PAGE, FeatureRoute.BALANCE_SETTINGS),
             SettingsEntry("default_reasoning", "默认启用推理", DaiyuIcons.Reasoning, SettingControl.TOGGLE),
         )),
         SettingsGroup("models", "模型功能", "压缩、视觉、子代理与标题模型", listOf(

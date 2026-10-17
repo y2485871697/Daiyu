@@ -10,7 +10,9 @@ class SettingsPresentationTest {
     @Test
     fun retainedSettingsHaveUniqueIdsAndNineGroups() {
         val entries = SettingsCatalog.entries
-        assertEquals(37, entries.size)
+        // Current inventory includes independent generation/vision and the real P05 destination.
+        assertEquals(39, entries.size)
+        assertEquals(app.daiyu.android.ui.FeatureRoute.BALANCE_SETTINGS, SettingsCatalog.entry("balance").route)
         assertEquals(entries.size, entries.map { it.id }.toSet().size)
         assertEquals(9, SettingsCatalog.groups.size)
         assertEquals(listOf("workspace", "terminal", "browser", "linux", "task_surface"),

@@ -54,6 +54,11 @@ import java.util.concurrent.Executors
 
 class ChatApplication:Application() {
     companion object { internal const val OPEN_PET_SETTINGS = "app.daiyu.android.OPEN_PET_SETTINGS" }
+    // P05 process singleton. Deferred factory runs on IO; no credentials borrowed from controller.
+    internal var balanceHost = app.daiyu.android.balance.BalanceRuntimeHost(factory = {
+        app.daiyu.android.balance.BalanceRuntime(app.daiyu.android.balance.ProviderBalanceStore(
+            app.daiyu.android.balance.EncryptedBalancePersistence(applicationContext)))
+    })
     private val terminalProviderDelegate = lazy { app.daiyu.android.terminal.TerminalApplicationProvider(this) }
     internal val terminalProvider by terminalProviderDelegate
     internal val terminalOwner get() = checkNotNull(
@@ -93,6 +98,7 @@ class ChatApplication:Application() {
     }
     override fun onTerminate() {
         // Android normally kills the process without this callback; useful for hosted runtimes.
+        balanceHost.close()
         if (terminalProviderDelegate.isInitialized()) terminalProvider.close()
         pets.close() // Hosted-runtime cleanup; an Activity never closes the application host.
         touchHaptics?.close(); touchHaptics = null

@@ -2,6 +2,13 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -55,9 +62,17 @@ internal fun DaiyuChatScreen(
         modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
             .statusBarsPadding().navigationBarsPadding().imePadding(),
     ) {
-        ChatTopBar(state.title, state.balanceText, actions, assistantLabel = state.composer.assistantLabel,
+        ChatTopBar(state.title, state.balanceState, actions, assistantLabel = state.composer.assistantLabel,
             interactiveModeEnabled = state.interactiveModeEnabled,
             interactiveModeChangeEnabled = state.interactiveModeChangeEnabled)
+        state.statusText?.let { status ->
+            // Operational errors/recovery/preparation are not money and never enter the amount slot.
+            top.yukonga.miuix.kmp.basic.Text(status,
+                modifier = Modifier.testTag("chat-status").fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                style = MiuixTheme.textStyles.footnote1)
+        }
         androidx.compose.runtime.key(state.conversationKey) {
             ChatMessageList(state.turns, state.canJumpToPreviousUser, actions, Modifier.weight(1f), state.scrollRequest, turnExtras, imageLoader)
         }

@@ -11,8 +11,9 @@ internal object BackupChildTaskCodec {
         "task_group_id", "generation", "task_index", "assistant_message_id", "profile_id", "prompt", "status", "text", "detail",
         "control_revision", "source_task_id", "command_kind")
     private val commandColumns = listOf("call_id", "fingerprint", "source_id", "successor_id", "expected_revision", "acknowledged")
-    private val usageColumns = listOf("task_id", "request_id", "request_owner", "attempt_id", "operation", "checkpoint_revision",
+    private val legacyUsageColumns = listOf("task_id", "request_id", "request_owner", "attempt_id", "operation", "checkpoint_revision",
         "input_tokens", "output_tokens", "cached_tokens")
+    private val usageColumns = legacyUsageColumns + "usage_source"
     data class Validated(val tasks: List<JSONObject>, val commands: List<JSONObject>, val usage: List<JSONObject>)
     fun export(db: SQLiteDatabase, conversation: String?): JSONObject {
         require(listOf("child_tasks", "child_task_commands", "child_request_usage").all { BackupHistoryRows.exists(db, it) }) {
@@ -33,13 +34,22 @@ internal object BackupChildTaskCodec {
             if (conversation == null) "" else " WHERE source_id IN (SELECT task_id FROM child_tasks WHERE conversation_id=?)", args)
         val usage = BackupHistoryRows.read(db, "child_request_usage", usageColumns,
             if (conversation == null) "" else " WHERE task_id IN (SELECT task_id FROM child_tasks WHERE conversation_id=?)", args)
-        return JSONObject().put("version", 1).put("tasks", JSONArray(tasks)).put("commands", JSONArray(commands)).put("usage", JSONArray(usage))
+        return JSONObject().put("version", 2).put("tasks", JSONArray(tasks)).put("commands", JSONArray(commands)).put("usage", JSONArray(usage))
     }
     fun validate(value: JSONObject?, messages: JSONArray): Validated {
         if (value == null) return Validated(emptyList(), emptyList(), emptyList())
         with(BackupHistoryRows) {
-            fields(value, listOf("version", "tasks", "commands", "usage")); require(number(value, "version") == 1L)
-            val tasks = rows(value.getJSONArray("tasks")); val commands = rows(value.getJSONArray("commands")); val usage = rows(value.getJSONArray("usage"))
+            fields(value, listOf("version", "tasks", "commands", "usage")); val version = number(value, "version"); require(version in 1L..2L)
+            val tasks = rows(value.getJSONArray("tasks")); val commands = rows(value.getJSONArray("commands"))
+            val usage = rows(value.getJSONArray("usage")).map { row ->
+                fields(row, if (version == 1L) legacyUsageColumns else usageColumns)
+                // Copy values, not serialized JSON: numberToString could normalize 1.0 to
+                // an integer before the strict storage-type validator gets to inspect it.
+                JSONObject().apply {
+                    row.keys().forEach { key -> put(key, row.get(key)) }
+                    if (version == 1L) put("usage_source", "MAIN")
+                }
+            }
             val messagesById = messageMap(messages); val byId = linkedMapOf<String, ChildTaskRecord>(); val groups = mutableSetOf<Pair<String, Int>>()
             val groupOwners = mutableMapOf<String, List<String>>()
             tasks.forEach { row ->
@@ -77,7 +87,7 @@ internal object BackupChildTaskCodec {
             require(tasks.filter { !it.isNull("source_task_id") }.all { text(it, "task_id") in successors }) { "子任务来源缺少命令墓碑" }
             val requests = mutableSetOf<Pair<String, String>>()
             usage.forEach { row ->
-                fields(row, usageColumns)
+                fields(row, usageColumns); require(text(row, "usage_source") in setOf("MAIN", "SUMMARY"))
                 val task = id(row, "task_id"); require(task in byId && requests.add(task to id(row, "request_id")))
                 id(row, "request_owner"); id(row, "attempt_id"); require(text(row, "operation") in setOf("OPEN", "NEXT", "RESUME"))
                 require(number(row, "checkpoint_revision") > 0)
@@ -116,6 +126,6 @@ internal object BackupChildTaskCodec {
             BackupHistoryRows.verifyHistory(db, "child_task", row.getString("task_id"), row)
         }
         value.commands.forEach { BackupHistoryRows.verify(db, "child_task_commands", it) }
-        value.usage.forEach { BackupHistoryRows.verify(db, "child_request_usage", it) }
+        value.usage.forEach { BackupUsageCodec.verifyRow(db, "child_request_usage", it, listOf("task_id", "request_id")) }
     }
 }

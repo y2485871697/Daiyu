@@ -42,7 +42,9 @@ internal class OfflineComposerHost(
     private var active: DictationDraftTarget? = null
     private var attempt: OfflineSpeechAttempt? = null
     private var closed = false
-    private fun accepts(target: DictationDraftTarget) = !closed && active == target && current(target) && enabled()
+    private var attemptSerial = 0L
+    private fun owns(target: DictationDraftTarget, serial: Long) = !closed && active == target && attemptSerial == serial
+    private fun accepts(target: DictationDraftTarget, serial: Long) = owns(target, serial) && current(target) && enabled()
 
     fun start(target: DictationDraftTarget, text: String, selectionStart: Int, selectionEnd: Int) {
         if (closed) return
@@ -57,18 +59,25 @@ internal class OfflineComposerHost(
             return
         }
         val draft = SpeechDraft(text, selectionStart, selectionEnd)
+        val serial = attemptSerial
         active = target
         mutable.value = State(target = target, status = "正在本机加载离线语音模型…")
         val callbacks = object : OfflineSpeechSession.Events {
+            private var captureStopped = false
             override fun listening() {
-                if (accepts(target)) mutable.value = mutable.value.copy(listening = true,
+                if (accepts(target, serial) && !captureStopped) mutable.value = mutable.value.copy(listening = true,
                     status = "离线听写中；再次点击可取消（不会发送）")
             }
+            override fun captureStopped() {
+                if (!accepts(target, serial)) return
+                captureStopped = true
+                mutable.value = mutable.value.copy(listening = false, status = "收音已结束，正在完成离线识别…")
+            }
             override fun partial(text: String) {
-                if (accepts(target)) mutable.value = mutable.value.copy(preview = text)
+                if (accepts(target, serial)) mutable.value = mutable.value.copy(preview = text)
             }
             override fun complete(text: String) {
-                if (!accepts(target)) return
+                if (!accepts(target, serial)) return
                 if (text.isBlank()) {
                     invalidate()
                     mutable.value = State(status = "未识别到文本；草稿未更改")
@@ -84,12 +93,12 @@ internal class OfflineComposerHost(
                 } catch (_: Exception) { mutable.value = State(status = "离线草稿保存失败，请重试") }
             }
             override fun cancelled() {
-                if (active != target) return
+                if (!owns(target, serial)) return
                 invalidate()
                 mutable.value = State(status = "离线听写已停止；草稿未更改")
             }
             override fun failed() {
-                if (active != target) return
+                if (!owns(target, serial)) return
                 invalidate()
                 mutable.value = State(status = "离线识别或音频释放失败；草稿未更改。若音频不可用，请重启应用")
             }
@@ -106,6 +115,7 @@ internal class OfflineComposerHost(
     }
 
     fun invalidate() {
+        attemptSerial++ // Retire callbacks even if the next attempt captures the same draft target.
         active = null
         val old = attempt
         attempt = null

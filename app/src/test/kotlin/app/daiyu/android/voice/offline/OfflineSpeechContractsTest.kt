@@ -122,6 +122,7 @@ class OfflineSpeechContractsTest {
     private class Events : OfflineSpeechSession.Events {
         val values = mutableListOf<String>()
         override fun listening() { values += "listening" }
+        override fun captureStopped() { values += "captureStopped" }
         override fun partial(text: String) { values += "partial:$text" }
         override fun complete(text: String) { values += "complete:$text" }
         override fun cancelled() { values += "cancelled" }
@@ -142,6 +143,8 @@ class OfflineSpeechContractsTest {
         var failRelease = false
         var duringLoad: () -> Unit = {}
         var duringAccept: () -> Unit = {}
+        var duringFinish: () -> Unit = {}
+        var duringClose: () -> Unit = {}
         val accepted = mutableListOf<FloatArray>()
         override fun load(): OfflineSpeechDevice.Decoder {
             loads++
@@ -153,8 +156,8 @@ class OfflineSpeechContractsTest {
                 override fun decode() = Unit
                 override fun text() = transcript
                 override fun endpoint() = endpoint
-                override fun finish() { finished = true }
-                override fun close() { closes++ }
+                override fun finish() { finished = true; duringFinish() }
+                override fun close() { closes++; duringClose() }
             }
         }
         override fun microphone(): OfflineSpeechDevice.Microphone {
@@ -192,9 +195,149 @@ class OfflineSpeechContractsTest {
         assertEquals(1, device.closes)
         assertTrue(events.values.isEmpty())
         pending.forEach { it() }
-        assertEquals(listOf("complete:你好"), events.values)
+        assertEquals(listOf("captureStopped", "complete:你好"), events.values)
         val next = gate.acquire(owner("next")) {}
         assertTrue(gate.current(next))
+    }
+
+    @Test fun microphoneReleasedButDelayedDecoderStillRunningDoesNotKeepComposerListening() {
+        val pending = java.util.concurrent.ConcurrentLinkedQueue<() -> Unit>()
+        fun flush() { while (true) (pending.poll() ?: break).invoke() }
+        val captured = java.util.concurrent.CountDownLatch(1)
+        val endpointAllowed = java.util.concurrent.CountDownLatch(1)
+        val finishing = java.util.concurrent.CountDownLatch(1)
+        val finalAllowed = java.util.concurrent.CountDownLatch(1)
+        val device = Device()
+        device.duringAccept = {
+            if (device.accepted.last().size != 4800) {
+                captured.countDown()
+                check(endpointAllowed.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            }
+        }
+        device.duringFinish = {
+            finishing.countDown()
+            check(finalAllowed.await(5, java.util.concurrent.TimeUnit.SECONDS))
+        }
+        var worker: Thread? = null
+        var commits = 0
+        val target = DictationDraftTarget("chat", 0, 0)
+        val gate = AudioOwnerGate()
+        val host = OfflineComposerHost(
+            factory = { owner, events -> OfflineSpeechSession(gate, owner, { true }, device, events,
+                Executor { task -> worker = Thread(task, "delayed-decoder-test").also { it.start() } },
+                { pending.add(it); Unit }) },
+            enabled = { true }, permission = { true }, requestPermission = { fail("already granted") },
+            current = { it == target }, currentText = { "draft" }, applyDraft = { _, _, _ -> commits++ })
+        try {
+            host.start(target, "draft", 0, 5)
+            assertTrue(captured.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            flush()
+            assertTrue(host.state.value.listening)
+            endpointAllowed.countDown()
+            assertTrue(finishing.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            flush()
+            assertTrue(checkNotNull(worker).isAlive) // Native finish has not returned; not a final.
+            assertEquals(1, device.releases)
+            assertEquals(0, device.closes)
+            assertFalse(host.state.value.listening)
+            assertEquals(target, host.state.value.target) // Keep ownership until the real final.
+            assertEquals(0, commits)
+            finalAllowed.countDown()
+            checkNotNull(worker).join(5000)
+            assertFalse(checkNotNull(worker).isAlive)
+            flush()
+            assertEquals(1, commits)
+            assertFalse(host.state.value.listening)
+        } finally {
+            endpointAllowed.countDown(); finalAllowed.countDown()
+            worker?.join(5000)
+            host.close()
+        }
+    }
+
+    @Test fun decoderFailureStopsListeningBeforeSlowNativeCleanupWithoutCommittingFinal() {
+        val pending = java.util.concurrent.ConcurrentLinkedQueue<() -> Unit>()
+        fun flush() { while (true) (pending.poll() ?: break).invoke() }
+        val capturing = java.util.concurrent.CountDownLatch(1)
+        val failNow = java.util.concurrent.CountDownLatch(1)
+        val closing = java.util.concurrent.CountDownLatch(1)
+        val releaseClose = java.util.concurrent.CountDownLatch(1)
+        val device = Device().apply {
+            duringAccept = { capturing.countDown(); check(failNow.await(5, java.util.concurrent.TimeUnit.SECONDS)); error("decoder failure") }
+            duringClose = { closing.countDown(); check(releaseClose.await(5, java.util.concurrent.TimeUnit.SECONDS)) }
+        }
+        val events = Events()
+        var worker: Thread? = null
+        val session = OfflineSpeechSession(AudioOwnerGate(), owner(), { true }, device, events,
+            Executor { task -> worker = Thread(task).also { it.start() } }, { pending.add(it); Unit })
+        try {
+            session.start()
+            assertTrue(capturing.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            flush(); assertEquals(listOf("listening"), events.values)
+            failNow.countDown(); assertTrue(closing.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            flush()
+            assertEquals(1, device.releases)
+            assertEquals(listOf("listening", "captureStopped"), events.values)
+            assertTrue(checkNotNull(worker).isAlive)
+            releaseClose.countDown(); checkNotNull(worker).join(5000); flush()
+            assertFalse(checkNotNull(worker).isAlive)
+            assertEquals(listOf("listening", "captureStopped", "failed"), events.values)
+            assertFalse(device.finished)
+        } finally { failNow.countDown(); releaseClose.countDown(); worker?.join(5000); session.close() }
+    }
+
+    @Test fun queuedListeningCannotArriveAfterReleaseWhileDecoderStillHoldsLease() {
+        val device = Device()
+        val events = Events()
+        val pending = java.util.ArrayDeque<() -> Unit>()
+        fun flush() { while (pending.isNotEmpty()) pending.removeFirst().invoke() }
+        device.duringAccept = {
+            if (device.accepted.last().size == 4800) {
+                flush() // The UI was busy until tail began, but the gate is not retired yet.
+                assertFalse(events.values.contains("listening"))
+                assertEquals("captureStopped", events.values.last())
+                assertEquals(1, device.releases)
+                assertEquals(0, device.closes)
+                assertFalse(device.finished)
+            }
+        }
+        OfflineSpeechSession(AudioOwnerGate(), owner(), { true }, device, events, directExecutor,
+            { pending.addLast(it) }).start()
+        flush()
+        assertEquals("complete:你好", events.values.last())
+        assertFalse(events.values.contains("listening"))
+    }
+
+    @Test fun stoppedAndListeningCallbacksFromSameTargetOldAttemptCannotChangeNewOwner() {
+        val attempts = mutableListOf<Attempt>()
+        val target = DictationDraftTarget("chat", 0, 0)
+        var commits = 0
+        val host = OfflineComposerHost(
+            factory = { _, events -> Attempt(events).also { attempts += it } },
+            enabled = { true }, permission = { true }, requestPermission = { fail("already granted") },
+            current = { it == target }, currentText = { "draft" }, applyDraft = { _, _, _ -> commits++ })
+        host.start(target, "draft", 0, 5)
+        val old = attempts.single().events
+        old.listening()
+        host.invalidate()
+        host.start(target, "draft", 0, 5) // Deliberately reuse every target field.
+        val fresh = attempts.last().events
+        old.listening()
+        assertFalse(host.state.value.listening)
+        fresh.listening()
+        assertTrue(host.state.value.listening)
+        old.captureStopped(); old.cancelled(); old.failed(); old.complete("old"); old.partial("old")
+        assertTrue(host.state.value.listening)
+        assertEquals("", host.state.value.preview)
+        assertEquals(0, commits)
+        fresh.captureStopped()
+        fresh.partial("still waiting"); fresh.listening()
+        assertFalse(host.state.value.listening)
+        assertEquals("still waiting", host.state.value.preview)
+        assertEquals(target, host.state.value.target)
+        fresh.complete("new")
+        assertEquals(1, commits)
+        host.close()
     }
 
     @Test fun cancellationDuringNativeLoadNeverOpensMicrophoneAndDoesNotReleaseNextOwner() {
@@ -251,9 +394,11 @@ class OfflineSpeechContractsTest {
         val gate = AudioOwnerGate()
         val device = Device().apply { failRelease = true }
         val events = Events()
-        val session = OfflineSpeechSession(gate, owner(), { true }, device, events, directExecutor, { it() })
+        val pending = mutableListOf<() -> Unit>()
+        val session = OfflineSpeechSession(gate, owner(), { true }, device, events, directExecutor, { pending += it })
         session.start()
-        assertEquals(listOf("failed"), events.values)
+        pending.forEach { it() }
+        assertEquals(listOf("failed"), events.values) // Release failure must not claim captureStopped.
         assertEquals(1, device.releases)
         assertEquals(1, device.closes)
         repeat(2) {
@@ -281,6 +426,7 @@ class OfflineSpeechContractsTest {
             override fun recognize(turn: app.daiyu.android.voice.control.VoiceControlTurn, events: app.daiyu.android.voice.control.VoiceControlPorts.RecognitionEvents): app.daiyu.android.voice.control.VoiceControlRecognition {
                 val session = OfflineSpeechSession(gate, owner(), { true }, device, object : OfflineSpeechSession.Events {
                     override fun listening() = events.listening()
+                    override fun captureStopped() = events.captureStopped()
                     override fun partial(text: String) = events.partial(text)
                     override fun complete(text: String) = events.finalResult(text)
                     override fun cancelled() = events.failed()
@@ -311,6 +457,11 @@ class OfflineSpeechContractsTest {
         for ((text, expectedMs) in listOf("" to 8000L, "speech" to 60000L)) {
             val device = Device().apply { endpoint = false; transcript = text; tick = 1000 }
             val events = Events()
+            device.duringFinish = {
+                assertEquals(1, device.releases)
+                assertEquals("captureStopped", events.values.last())
+                assertFalse(events.values.any { it.startsWith("complete:") })
+            }
             OfflineSpeechSession(AudioOwnerGate(), owner(), { true }, device, events, directExecutor, { it() }).start()
             assertEquals(expectedMs, device.clock)
             assertTrue(device.finished)

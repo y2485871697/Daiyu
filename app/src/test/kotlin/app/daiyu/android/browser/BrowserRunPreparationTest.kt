@@ -105,7 +105,7 @@ class BrowserRunPreparationTest {
         }
     }
 
-    @Test fun cookieFetchUnsupportedAndChildActionsAreNotOffered() {
+    @Test fun cookiesUnsupportedFetchNeedsExactWriteAndMainEntryRejectsChild() {
         Fixture().use { f ->
             for (action in listOf("get_cookies", "set_cookies", "fetch", "download", "unknown")) {
                 rejected { prepare(f, setOf(action), emptyList()) }
@@ -121,6 +121,27 @@ class BrowserRunPreparationTest {
                 f.grant.copy(owner = BrowserOwner("run", BrowserOwnerKind.CHILD)), setOf("list_tabs")) }
             rejected { BrowserRunPreparation.prepare(identity, full,
                 f.grant.copy(owner = BrowserOwner("another-run", BrowserOwnerKind.MAIN)), setOf("list_tabs")) }
+        }
+    }
+
+    @Test fun fetchIsExactWriteWithoutCookieHistoryMountOrDestinationAuthority() {
+        Fixture().use { f ->
+            val fetch = """{"action":"fetch","tab_id":0,"url":"https://example.invalid/asset"}"""
+            val preparation = prepare(f, setOf("fetch"), listOf(fetch))
+            val token = preparation.confirm(preparation.preview)
+            val owner = owner()
+            val task = token.taskAuthorization(owner, identity.assistantId, f.session)
+            assertEquals(setOf(RunBrowserTools.writeEffect(f.grant, fetch)), task.allowedWrites)
+            token.checkInvocation(owner, identity.assistantId, f.session, RunBrowserTools.WRITE_TOOL_NAME, fetch)
+            rejected { token.checkInvocation(owner, identity.assistantId, f.session, RunBrowserTools.WRITE_TOOL_NAME,
+                fetch.replace("/asset", "/other")) }
+            for (extra in listOf("destination", "path", "headers", "cookies")) {
+                rejected { prepare(f, setOf("fetch"), listOf(fetch.dropLast(1) + ",\"$extra\":\"no\"}")) }
+            }
+            rejected { BrowserRunPreparation.prepare(identity, full, f.grant.copy(access = BrowserAccess.READ_ONLY),
+                setOf("fetch"), listOf(fetch)) }
+            assertEquals(0, f.lifecycleCalls)
+            assertEquals(0, f.portCalls)
         }
     }
 

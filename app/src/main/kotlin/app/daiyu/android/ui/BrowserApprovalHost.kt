@@ -37,6 +37,8 @@ internal fun BrowserApprovalHost(
     onCancel: (ControllerBrowserPreparation) -> Unit,
     modifier: Modifier = Modifier,
     problem: String? = null,
+    childApprovalReady: Boolean = true,
+    childApproval: (@Composable () -> Unit)? = null,
 ) {
     var enabled by remember { mutableStateOf(false) }
     var readActions by remember { mutableStateOf("") }
@@ -60,7 +62,7 @@ internal fun BrowserApprovalHost(
         }
         if (enabled) {
             Text("保存 FULL 只设置能力上限，不是本次批准。普通发送、模型文本和 ask_user 回复都不会授权。")
-            Text("当前上限：${settings.access.name}；历史 DENY，cookie／下载 fetch／子代理浏览器未授权。")
+            Text("当前上限：${settings.access.name}；history／cookie 继续拒绝。fetch 仅在本页列出完整精确参数并明确批准后获准；主运行批准不覆盖 child，child 须另行独立批准。")
             OutlinedTextField(value = readActions, onValueChange = { readActions = it },
                 enabled = preparation == null, modifier = Modifier.fillMaxWidth(),
                 label = { Text("明确选择读取动作（英文逗号分隔，无默认选择）") },
@@ -101,10 +103,11 @@ internal fun BrowserApprovalHost(
     }
     if (preparation != null) {
         val preview = preparation.preview
-        val canConfirm = state == ControllerBrowserPreparation.State.PREVIEW && matches
+        val previewReady = state == ControllerBrowserPreparation.State.PREVIEW && matches
+        val canConfirm = previewReady && childApprovalReady
         AlertDialog(
             onDismissRequest = { cancel(preparation) },
-            title = { Text(if (canConfirm) "确认本次浏览器访问" else "浏览器准备：${state?.name ?: "等待状态"}") },
+            title = { Text(if (previewReady) "确认本次浏览器访问" else "浏览器准备：${state?.name ?: "等待状态"}") },
             text = {
                 Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -134,7 +137,8 @@ internal fun BrowserApprovalHost(
                                 "\ntarget: ${write.effect.target}\nchange: ${write.effect.change}")
                         }
                     }
-                    Text("仅批准以上精确运行及参数；不授予 cookie、history、fetch 或 child 权限。" +
+                    childApproval?.invoke()
+                    Text("本按钮仅批准以上本次主运行的精确动作及参数（包括清单中的 exact fetch）；cookie、history 继续拒绝。child 必须通过独立批准页，本按钮不授予 child 权限。" +
                         "停止不撤销已发生副作用；UNKNOWN 保留资源及草稿，不自动重试。")
                     if (!matches) Text("编辑器／助手／设置已变更：此预览失效，不能批准。",
                         color = MaterialTheme.colorScheme.error)
@@ -146,7 +150,8 @@ internal fun BrowserApprovalHost(
                     if (!onConfirm(preparation, preview, currentDraft)) {
                         error = "预览或草稿版本已失效；未重复发送。"
                     }
-                }) { Text(if (canConfirm) "明确批准本次精确访问并发送" else "等待接受／清理回执") }
+                }) { Text(if (canConfirm) "明确批准本次精确访问并发送" else if (previewReady && !childApprovalReady)
+                    "请先独立批准子任务" else "等待接受／清理回执") }
             },
             dismissButton = {
                 TextButton(onClick = { cancel(preparation) }) {

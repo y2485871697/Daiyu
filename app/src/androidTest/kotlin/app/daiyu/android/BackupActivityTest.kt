@@ -184,7 +184,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
                 assertEquals("application/json",intent.type)
                 assertTrue(intent.hasCategory(Intent.CATEGORY_OPENABLE))
                 assertEquals(code,pending())
-                if(exporting) assertEquals(if(complete) "daiyu-complete-v1.json" else "daiyu-text-v1.json",intent.getStringExtra(Intent.EXTRA_TITLE))
+                if(exporting) assertEquals(if(complete) "daiyu-complete.json" else "daiyu-text.json",intent.getStringExtra(Intent.EXTRA_TITLE))
                 beforeReturn();observed.countDown()
                 return Instrumentation.ActivityResult(result,if(uri==null) Intent() else Intent().setData(uri))
             }
@@ -247,13 +247,39 @@ class BackupActivityTest:ComposeActivityTestCase() {
             assertTrue(text.contains("historical answer"))
             val envelope=org.json.JSONObject(text)
             assertEquals(if(code==104) "daiyu-neutral-complete" else "daiyu-neutral-text",envelope.getString("format"))
-            assertEquals(1,envelope.getInt("version"))
+            assertEquals(2,envelope.getInt("version"))
             if(code==104) NeutralBackupService(fixtureApp,controller.database).preflight(text)
             else assertEquals(controller.database.exportBackup(),text)
             controller.database.conversations().forEach {controller.database.delete(it.id)}
             // Reset only revision for the second independent UI route; format fixtures stay tiny.
             main {setField("dataRevision",0L)}
         }
+    }
+    fun testConversationExportPickerUsesVersionlessSuggestedName() {
+        val conversation=controller.database.create("default")
+        start();val before=controller.database.exportBackup()
+        val observed=CountDownLatch(1)
+        val monitor=object:Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent:Intent):Instrumentation.ActivityResult? {
+                assertEquals(Intent.ACTION_CREATE_DOCUMENT,intent.action)
+                assertEquals("application/json",intent.type)
+                assertTrue(intent.hasCategory(Intent.CATEGORY_OPENABLE))
+                assertEquals("daiyu-conversation.json",intent.getStringExtra(Intent.EXTRA_TITLE))
+                assertEquals(105,pending())
+                observed.countDown()
+                return Instrumentation.ActivityResult(Activity.RESULT_CANCELED,Intent())
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        try {
+            main {
+                MainActivity::class.java.getDeclaredMethod("pickConversationExport",String::class.java)
+                    .apply {isAccessible=true}.invoke(activity,conversation.id.value)
+            }
+            assertTrue(observed.await(5,TimeUnit.SECONDS));instrumentation.waitForIdleSync()
+            main {assertNull(pending())}
+            assertEquals(0,provider.opens.get());unchanged(before)
+        } finally {instrumentation.removeMonitor(monitor)}
     }
     fun testViewRequiresManualChoiceAndConfirmationAndAllowsRetryAfterCancel() {
         start(opened(completeUri));val before=controller.database.exportBackup()
@@ -285,7 +311,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
         val invalid=listOf(opened().setDataAndType(null,"application/json"),opened(grant=false),
             opened(Uri.parse("file:///ignored.json")),opened(mime="text/plain"),opened(mime="application/octet-stream"))
         for(intent in invalid) main {instrumentation.callActivityOnNewIntent(activity,intent);assertNull(dialog())}
-        for(state in listOf("active","busy","recovery","not-ready")) main {
+        for(state in listOf("active","busy","recovery")) main {
             gate(state);instrumentation.callActivityOnNewIntent(activity,opened());assertNull(dialog());gate(null)
         }
         assertEquals(0,provider.opens.get());unchanged(before)
@@ -302,6 +328,124 @@ class BackupActivityTest:ComposeActivityTestCase() {
         main {instrumentation.callActivityOnNewIntent(activity,opened(textUri))}
         instrumentation.waitForIdleSync();choose(1);press(DialogInterface.BUTTON_POSITIVE);awaitState {!controller.dataBusy}
         assertEquals(3,provider.opens.get());unchanged(before)
+    }
+    private fun deferred():Any?=MainActivity::class.java.getDeclaredField("deferredOpenedBackup").apply {isAccessible=true}.get(activity)
+    private fun publishGate(state:String?) {
+        main {
+            gate(state)
+            // Deliver the same production observer notification used by async recovery completion.
+            ChatController::class.java.getDeclaredMethod("notifyChanged").apply {isAccessible=true}.invoke(controller)
+        }
+        instrumentation.waitForIdleSync()
+    }
+    private fun implicitOpened(uri:Uri=textUri)=opened(uri).setComponent(null).setPackage(instrumentation.targetContext.packageName)
+    fun testImplicitViewDuringRecoveryDefersOneUriThenRequiresChoiceAndConfirmation() {
+        val implicit=implicitOpened()
+        assertNull(implicit.component)
+        val resolved=instrumentation.targetContext.packageManager.resolveActivity(implicit,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
+        assertEquals(MainActivity::class.java.name,resolved?.activityInfo?.name)
+        val before=controller.database.exportBackup()
+        main {gate("not-ready")}
+        start(implicit)
+        main {assertNotNull(deferred());assertNotNull(dialog())}
+        node("dialog-confirm").assertTextEquals("取消打开")
+        assertEquals(0,provider.opens.get());unchanged(before)
+        publishGate(null)
+        main {assertNull(deferred());assertNotNull(dialog())}
+        node("prompt-choice:1").assertExists()
+        val choice=dialog()
+        publishGate(null)
+        main {assertSame(choice,dialog())}
+        assertEquals(0,provider.opens.get());unchanged(before)
+        choose(1)
+        assertEquals(0,provider.opens.get());unchanged(before)
+        press(DialogInterface.BUTTON_POSITIVE)
+        awaitState {!controller.dataBusy && controller.dataRevision==1L}
+        assertEquals(1,provider.opens.get());assertEquals(1,controller.database.conversations().size)
+        assertEquals(0,modelCalls.get())
+    }
+    fun testRecoveryDeferredViewBothCancelActionsRevokeWithoutLateReplay() {
+        val before=controller.database.exportBackup()
+        main {gate("not-ready")};start(opened())
+        for(button in listOf(DialogInterface.BUTTON_NEGATIVE,DialogInterface.BUTTON_POSITIVE)) {
+            if(button==DialogInterface.BUTTON_POSITIVE) {
+                main {gate("not-ready");instrumentation.callActivityOnNewIntent(activity,opened())}
+                instrumentation.waitForIdleSync()
+            }
+            main {assertNotNull(deferred())}
+            press(button)
+            main {assertNull(deferred());assertNull(dialog())}
+            publishGate(null)
+            main {assertNull(dialog())}
+            assertEquals(0,provider.opens.get());unchanged(before)
+        }
+    }
+    fun testRecoveryDeferredViewReplacementKeepsOnlyNewestUri() {
+        main {gate("not-ready")};start(opened(textUri))
+        val first=deferred()
+        main {
+            instrumentation.callActivityOnNewIntent(activity,opened(completeUri))
+            assertNotNull(deferred());assertNotSame(first,deferred())
+        }
+        publishGate(null)
+        assertEquals(0,provider.opens.get())
+        choose(0);press(DialogInterface.BUTTON_POSITIVE)
+        awaitState {!controller.dataBusy && controller.dataRevision==1L}
+        assertEquals(1,provider.opens.get());assertEquals(1,controller.database.conversations().size)
+        assertEquals(0,modelCalls.get())
+    }
+    fun testRecoveryDeferredViewInvalidReplacementAndOversizedUriRevoke() {
+        val before=controller.database.exportBackup()
+        main {gate("not-ready")};start()
+        val invalid=listOf(opened(grant=false),opened(Uri.parse("file:///private.json")),
+            opened(mime="text/plain"),opened(Uri.parse("content://activity-backup/"+"x".repeat(8193))),
+            Intent(Intent.ACTION_MAIN).setClass(instrumentation.targetContext,MainActivity::class.java))
+        for(replacement in invalid) {
+            main {
+                instrumentation.callActivityOnNewIntent(activity,opened());assertNotNull(deferred())
+                instrumentation.callActivityOnNewIntent(activity,replacement)
+                assertNull(deferred());assertNull(dialog())
+            }
+        }
+        publishGate(null)
+        main {assertNull(dialog())}
+        assertEquals(0,provider.opens.get());unchanged(before)
+    }
+    fun testRecoveryDeferredViewRevokedProviderStillFailsOnlyAtExplicitImport() {
+        val before=controller.database.exportBackup()
+        main {gate("not-ready")};start(opened())
+        provider.deny=true
+        publishGate(null)
+        assertEquals(0,provider.opens.get())
+        choose(1)
+        assertEquals(0,provider.opens.get())
+        press(DialogInterface.BUTTON_POSITIVE)
+        awaitState {!controller.dataBusy}
+        assertEquals(1,provider.opens.get());unchanged(before)
+    }
+    fun testRecoveryDeferredViewRecreationDropsUriAndDoesNotReplayActivityIntent() {
+        val before=controller.database.exportBackup()
+        main {gate("not-ready")};start(opened())
+        main {assertNotNull(deferred())}
+        recreate()
+        main {assertNull(deferred());assertNull(dialog())}
+        publishGate(null)
+        main {assertNull(deferred());assertNull(dialog())}
+        assertEquals(0,provider.opens.get());unchanged(before)
+    }
+    fun testRecoveryDeferredViewFailureBusyActiveOrNavigationRevokesVisit() {
+        val before=controller.database.exportBackup()
+        main {gate("not-ready")};start()
+        for(state in listOf("recovery","busy","active",null)) {
+            main {gate("not-ready");instrumentation.callActivityOnNewIntent(activity,opened());assertNotNull(deferred())}
+            if(state==null) main {
+                MainActivity::class.java.getDeclaredMethod("returnToChat").apply {isAccessible=true}.invoke(activity)
+            } else publishGate(state)
+            main {assertNull(deferred());assertNull(dialog())}
+            publishGate(null)
+            main {assertNull(dialog())}
+            assertEquals(0,provider.opens.get());unchanged(before)
+        }
     }
     fun testRecreationDropsViewChoiceAndConfirmationWithoutReplay() {
         start(opened());val before=controller.database.exportBackup()
@@ -430,8 +574,11 @@ class BackupActivityTest:ComposeActivityTestCase() {
         val component=android.content.ComponentName(instrumentation.targetContext,MainActivity::class.java)
         assertEquals(android.content.pm.ActivityInfo.LAUNCH_SINGLE_TOP,pm.getActivityInfo(component,0).launchMode)
         fun resolves(uri:String,mime:String):Boolean {
-            val intent=Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(uri),mime).setPackage(component.packageName)
-            return pm.queryIntentActivities(intent,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY).any {it.activityInfo.name==component.className}
+            val intent=Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(uri),mime)
+            assertNull(intent.component);assertNull(intent.`package`)
+            return pm.queryIntentActivities(intent,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY).any {
+                it.activityInfo.packageName==component.packageName && it.activityInfo.name==component.className
+            }
         }
         assertTrue(resolves("content://activity-backup/text.json","application/json"))
         assertFalse(resolves("file:///text.json","application/json"))

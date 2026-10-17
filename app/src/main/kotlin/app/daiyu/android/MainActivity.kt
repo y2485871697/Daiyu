@@ -634,6 +634,7 @@ class MainActivity : ComponentActivity() {
         set(value) {
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
             if (value != retainedPageState && revokeContextManagementEntry()) editorGeneration++
+            if (value != retainedPageState) cancelDeferredOpenedBackup()
             if (value != "reconnect-settings") {
                 reconnectSettingsPageOwner?.revoke()
                 reconnectSettingsPageOwner = null
@@ -814,6 +815,10 @@ class MainActivity : ComponentActivity() {
         val destructive: Boolean = false, val action: () -> Unit, override val backup: Boolean = false) : Prompt
     private var prompt by mutableStateOf<Prompt?>(null)
     private var lastOpenedBackupUri: String? = null
+    // One validated, bounded URI only: never an Intent/ClipData, descriptor, saved state or grant.
+    // Recovery completion may offer the normal manual choice, but must not read/import a file.
+    private class DeferredOpenedBackup(val uri: Uri, val waitingPrompt: Prompt)
+    private var deferredOpenedBackup: DeferredOpenedBackup? = null
     private var pendingBackupRequest: Int? = null
     private var exportPickerPending by mutableStateOf(false)
     private var conversationExport = ConversationExportSelection()
@@ -2623,10 +2628,15 @@ class MainActivity : ComponentActivity() {
             is ChoicePrompt -> DaiyuChoiceSheet(current.title, current.options,
                 onSelect = { index -> if (valid()) { prompt = null; current.action(index) } }, onDismiss = { if (valid()) prompt = null })
             is ConfirmPrompt -> DaiyuConfirmDialog(current.title, current.message, current.confirm, current.destructive,
-                onConfirm = { confirmPrompt(current) }, onDismiss = { if (valid()) prompt = null })
+                onConfirm = { confirmPrompt(current) }, onDismiss = { if (valid()) dismissPrompt(current) })
         }
     }
 
+    private fun dismissPrompt(expected: Prompt) {
+        if (prompt !== expected) return
+        if (deferredOpenedBackup?.waitingPrompt === expected) cancelDeferredOpenedBackup()
+        prompt = null
+    }
     private fun confirmPrompt(expected: ConfirmPrompt) {
         if (activityUsable() && prompt === expected) { prompt = null; expected.action() }
     }
@@ -2676,6 +2686,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onSaveInstanceState(state: Bundle) {
+        cancelDeferredOpenedBackup() // A recreated visit must require a fresh external open.
         state.putBoolean("terminal-page", retainedPage == "terminal")
         state.putBoolean("balance-page", retainedPage == "balance-settings") // Route only, no balance credentials.
         state.putInt("pending-backup-request", pendingBackupRequest ?: 0)
@@ -2689,6 +2700,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent); setIntent(intent)
+        cancelDeferredOpenedBackup() // Replacement, including invalid VIEW/other actions, revokes.
         if (intent.action == ChatApplication.OPEN_PET_SETTINGS) {
             dismissSidebar(); retainedPage = "pet-settings"
         } else offerOpenedBackup(intent)
@@ -2756,6 +2768,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onDestroy() {
         if (revokeContextManagementEntry()) editorGeneration++
+        cancelDeferredOpenedBackup()
         invalidateMessageActionEditor()
         reconnectSettingsPageOwner?.revoke()
         reconnectSettingsPageOwner = null
@@ -3221,6 +3234,7 @@ class MainActivity : ComponentActivity() {
         (if (controlTouchActive) controlTouchOwner else controlOwner)?.takeIf { it.conversationId == selected?.id }
     private fun refresh() {
         if (!activityUsable()) return
+        offerDeferredOpenedBackup()
         settleGenerationReceipt()
         virtualDisplayCleanupVisit?.let { visit ->
             if (!cleanupVisitCurrent(visit)) closeVirtualDisplayCleanup(visit)
@@ -3607,17 +3621,51 @@ class MainActivity : ComponentActivity() {
         catch (failure: Exception) { toast(if (failure is IllegalStateException || failure is IllegalArgumentException)
             failure.message ?: "备份操作失败；原数据保留" else "备份操作失败；原数据保留，请重新选择文件") }
     }
+    private fun openedBackupUri(open: Intent): Uri {
+        val uri = open.data
+        require(uri != null && uri.scheme == "content" && !uri.authority.isNullOrBlank() &&
+            uri.toString().length <= 8192 && open.type == "application/json") { "请选择content类型的JSON备份文件（URI不超过8192字符）" }
+        require(open.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0) { "备份文件未授予读取权限；请重新选择文件" }
+        return uri
+    }
+    private fun showOpenedBackup(uri: Uri) {
+        if (lastOpenedBackupUri == uri.toString() && prompt?.backup == true) return
+        lastOpenedBackupUri = uri.toString(); retainedPage = "backup"
+        prompt = ChoicePrompt("打开备份", listOf("完整中立备份（推荐）", "纯文本兼容备份"),
+            { index -> backupGuard { confirmBackupImport(uri, index == 0) } }, backup = true)
+    }
+    private fun cancelDeferredOpenedBackup() {
+        val deferred = deferredOpenedBackup ?: return
+        deferredOpenedBackup = null
+        if (prompt === deferred.waitingPrompt) prompt = null
+    }
+    private fun offerDeferredOpenedBackup() {
+        val deferred = deferredOpenedBackup ?: return
+        if (controller.problem != null || controller.active != null || controller.dataBusy ||
+            retainedPage != "backup" || prompt !== deferred.waitingPrompt) {
+            cancelDeferredOpenedBackup(); return
+        }
+        if (!controller.ready) return
+        cancelDeferredOpenedBackup()
+        // Reuse the existing choice + second confirmation. No resolver/service call here.
+        backupGuard { showOpenedBackup(deferred.uri) }
+    }
     private fun offerOpenedBackup(open: Intent?) {
         if (open?.action != Intent.ACTION_VIEW) return
-        backupGuard {
-            val uri = open.data
-            require(uri != null && uri.scheme == "content" && open.type == "application/json") { "请选择content类型的JSON备份文件" }
-            require(open.flags and Intent.FLAG_GRANT_READ_URI_PERMISSION != 0) { "备份文件未授予读取权限；请重新选择文件" }
-            if (lastOpenedBackupUri == uri.toString() && prompt?.backup == true) return@backupGuard
-            lastOpenedBackupUri = uri.toString(); retainedPage = "backup"
-            prompt = ChoicePrompt("打开备份", listOf("完整中立备份（推荐）", "纯文本兼容备份"),
-                { index -> backupGuard { confirmBackupImport(uri, index == 0) } }, backup = true)
+        if (!controller.ready && controller.problem == null && controller.active == null && !controller.dataBusy) {
+            try {
+                requireActivityUsable()
+                val uri = openedBackupUri(open)
+                cancelDeferredOpenedBackup()
+                retainedPage = "backup"
+                val waiting = ConfirmPrompt("等待会话恢复", "恢复完成后再选择备份类型并确认导入；尚未读取文件。", "取消打开",
+                    action = { cancelDeferredOpenedBackup() }, backup = true)
+                deferredOpenedBackup = DeferredOpenedBackup(uri, waiting)
+                prompt = waiting
+            } catch (failure: Exception) { toast(failure.message ?: "文件打开失败；请重新选择") }
+            return
         }
+        backupGuard { showOpenedBackup(openedBackupUri(open)) }
     }
     private fun backupMenu() { checkBackupAvailable(); lastOpenedBackupUri = null; retainedPage = "backup" }
     private fun openConversationExport(id: String) {
@@ -3637,7 +3685,7 @@ class MainActivity : ComponentActivity() {
         try {
             startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE); type = "application/json"
-                putExtra(Intent.EXTRA_TITLE, "daiyu-conversation-v1.json")
+                putExtra(Intent.EXTRA_TITLE, "daiyu-conversation.json")
             }, 105)
         } catch (failure: Exception) {
             pendingBackupRequest = null; exportPickerPending = false; conversationExport.take(); throw failure
@@ -3650,7 +3698,7 @@ class MainActivity : ComponentActivity() {
         try {
             startActivityForResult(Intent(if (exporting) Intent.ACTION_CREATE_DOCUMENT else Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE); type = "application/json"
-                if (exporting) putExtra(Intent.EXTRA_TITLE, if (complete) "daiyu-complete-v1.json" else "daiyu-text-v1.json")
+                if (exporting) putExtra(Intent.EXTRA_TITLE, if (complete) "daiyu-complete.json" else "daiyu-text.json")
             }, code)
         } catch (failure: Exception) { pendingBackupRequest = null; throw failure }
     }

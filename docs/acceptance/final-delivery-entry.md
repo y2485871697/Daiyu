@@ -45,7 +45,7 @@ smoke 与 cloud 共用 `scripts/acceptance/instrumentation_result.py`，不再�
 2. build/checks 用 `scripts/acceptance/record_tool_tests.py` 执行原有 unittest discovery 的 verbose 形式：build 为 `python3 -B -m unittest discover -s tests -v`，跨平台 checks 为 `python -B -m unittest discover -s tests -v`。采集器用相同 argv 真正启动子进程，stdout+stderr 不过滤、不重写，原字节保存到 `tool-evidence/unittest.log`，随后原样回显。子进程返回后才写 `tool-evidence/receipt.json`，包含当前 `GITHUB_SHA`、`GITHUB_RUN_ID`、`GITHUB_RUN_ATTEMPT`、实际 command 与真实整数 exit_code；返回相同退出码。启动失败/中断不补 success receipt，调用前清除旧 receipt。
 
    两文件随当前 run 的 `代鱼测试报告`（build）/`代鱼检查报告-${os}`（checks）在 `if: always()` 下上传，失败也保留。边界校验和原有检查仍在 unittest 后执行，不把工具负测当业务证据。审阅时将该 artifact 内的两文件原样归置到 `$REVIEW/tool/receipt.json` 与 `$REVIEW/tool/unittest.log`，不能重新生成 receipt 或强改身份。此 receipt 不自行认证采集或执行全集。
-3. smoke-only 仍支持旧包补检，但每个选定 API job 都先对**当前 CHECK_SHA/CHECK_RUN/CHECK_ATTEMPT**采集工具原文，以 `代鱼工具证据-smoke-API${api}` 在 `always()` 下单独上传。BUILD 的工具 receipt 不能改标成 CHECK；旧 APK 的构建记录不变，祖先/白名单限制仍保持。仅选一个 API 的补检仍不满足双 API 最终入口。完整 build 的 smoke 复用同 run 的 build 工具证据，不重复执行工具套件。
+3. smoke-only 仍支持旧包补检，但每个选定 API job 都先对**当前 CHECK_SHA/CHECK_RUN/CHECK_ATTEMPT**采集工具原文，以 `代鱼工具证据-smoke-API${api}-分片${index}` 在 `always()` 下单独上传。BUILD 的工具 receipt 不能改标成 CHECK；旧 APK 的构建记录不变，祖先/白名单限制仍保持。仅选一个 API 的补检仍不满足双 API 最终入口。完整 build 的 smoke 复用同 run 的 build 工具证据，不重复执行工具套件。
 4. emulator action 的 script 仍调用现有 smoke，只额外保留外层真实返回码，供离线归一化使用：
 
    ```bash
@@ -74,7 +74,7 @@ gh api "repos/y2485871697/Daiyu/actions/runs/$CHECK_RUN/attempts/$CHECK_ATTEMPT"
 gh api "repos/y2485871697/Daiyu/actions/runs/$CHECK_RUN/attempts/$CHECK_ATTEMPT/jobs?per_page=100" > "$REVIEW/check/jobs.json"
 ```
 
-不在本文提供未经审查的 ZIP 解包命令。使用既有受控采集过程将开发包成员原样置于 `$REVIEW/delivery/`，两个 smoke artifact 原样分别置于 `$REVIEW/cloud/26/`、`$REVIEW/cloud/37.2/`。最终入口验证 ZIP digest = metadata.digest，artifact 的 run/SHA/branch，创建时间落在指定 attempt 的 build job 起止区间，ZIP 内成员与本地 APK/记录/签名/SHA256SUMS 散列逐一一致，且 APK sums 与身份吻合。ZIP 不解包执行，路径/symlink/重复成员/加密/过大成员均拒绝。APK/ZIP 使用有界流式哈希（每文件1GiB），不是把大型 APK 一次读入内存。签名原文沿用 `verify_signing.verify_certificate`，**不声称离线摘要代替重新执行 apksigner 或可信编译来源证明**。
+不在本文提供未经审查的 ZIP 解包命令。使用既有受控采集过程将开发包成员原样置于 `$REVIEW/delivery/`，八个 smoke artifact 原样分别置于 `$REVIEW/cloud/<api>/shard-<index>/`（api为26、37.2，index为0..3）。最终入口验证 ZIP digest = metadata.digest，artifact 的 run/SHA/branch，创建时间落在指定 attempt 的 build job 起止区间，ZIP 内成员与本地 APK/记录/签名/SHA256SUMS 散列逐一一致，且 APK sums 与身份吻合。ZIP 不解包执行，路径/symlink/重复成员/加密/过大成员均拒绝。APK/ZIP 使用有界流式哈希（每文件1GiB），不是把大型 APK 一次读入内存。签名原文沿用 `verify_signing.verify_certificate`，**不声称离线摘要代替重新执行 apksigner 或可信编译来源证明**。
 
 ### 主 APK 许可/源码归档字节门禁
 
@@ -86,7 +86,7 @@ gh api "repos/y2485871697/Daiyu/actions/runs/$CHECK_RUN/attempts/$CHECK_ATTEMPT/
 
 新增测试位于 `tests/test_license_bundle.py` 和 `tests/test_acceptance_final_delivery.py`，覆盖四份归档的仓内缺失/空/长度/hash、清单缺项/重复/非法记录，以及同一主 APK 即使重新 pin 全部外层摘要仍因归档缺失/重复/长度/hash 或许可不符而失败、非法 APK ZIP、仓内归档变更、同一已 hash 流调用、CLI 脱敏及 workflow 顺序。本次实现代理不能运行 shell、测试或真实 APK 构建，**测试已写但未运行，真实 APK 也未检查**，须由父集成另行执行并保存证据。
 
-### 生成现有 cloud 格式（不引入新成功解析规则）
+### 生成分片 cloud v2 格式（不引入新成功解析规则）
 
 下面仅把已收集的真实身份与文件引用整理成既有格式；成功仍由共享原文解析器判定。不手填 passed，不从 job success 猜 exit_code。run/jobs 必须由上节指定 attempt 的原始响应提供。
 
@@ -106,21 +106,24 @@ assert jobs['total_count'] == len(jobs['jobs'])
 keys = ('id','run_attempt','head_sha','repository','workflow_id','head_branch','status','conclusion')
 r = {k: run[k] for k in keys}
 r['repository'] = {'full_name': run['repository']['full_name']}
-out = dict(schema_version=1, run=r, jobs=[], reports=[])
+out = dict(schema_version=2, run=r, jobs=[], reports=[])
 for api in ('26','37.2'):
-    selected = [j for j in jobs['jobs'] if j['name'] == '启动验证 API '+api]
+  for index in range(4):
+    selected = [j for j in jobs['jobs'] if j['name'] == f'启动验证 API {api} 分片{index}']
     assert len(selected) == 1
     j = selected[0]
-    base = 'cloud/'+api+'/'
-    report = dict(schema_version=1, run_id=run['id'], run_attempt=run['run_attempt'],
-                  head_sha=run['head_sha'], job_id=j['id'], api=api,
+    base = f'cloud/{api}/shard-{index}/'
+    identity = dict(shard_index=index, shard_count=4)
+    report = dict(schema_version=2, run_id=run['id'], run_attempt=run['run_attempt'],
+                  head_sha=run['head_sha'], job_id=j['id'], api=api, **identity,
                   exit_code=int((root/(base+'exit-code.txt')).read_text()),
                   expected_tests=int((root/(base+'instrumentation-targets.txt')).read_text().splitlines()[0]),
+                  inventory=ref(base+'instrumentation-shards.json'),
                   instrumentation=ref(base+'platform-tests.txt'), logcat=ref(base+'logcat.txt'))
     rr = save(base+'report.json', report)
-    out['reports'].append(dict(api=api, job_id=j['id'], **rr))
+    out['reports'].append(dict(api=api, job_id=j['id'], **identity, **rr))
     out['jobs'].append(dict(id=j['id'], run_id=j['run_id'], run_attempt=j['run_attempt'],
-        head_sha=j['head_sha'], api=api, name=j['name'], status=j['status'],
+        head_sha=j['head_sha'], api=api, name=j['name'], status=j['status'], **identity,
         conclusion=j['conclusion'], report_sha256=rr['sha256']))
 save('cloud/snapshot.json', out)
 PY

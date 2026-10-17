@@ -220,11 +220,14 @@ def verify(manifest_path, manifest_sha256, repo_root, evidence_root,
     log_pins = []
     if doc["cloud"] is not None:
         snapshot = files.json(doc["cloud"])
+        require(isinstance(snapshot, dict) and type(snapshot.get("schema_version")) is int
+                and snapshot["schema_version"] == 2,
+                "sharded_cloud_required")
         cloud = cloud_report.verify(artifact_path(evidence_root, doc["cloud"]["path"]),
                                     doc["cloud"]["sha256"], check_sha, check_run, check_attempt, evidence_root)
         for ref in snapshot["reports"]:
             report = files.json({"path": ref["path"], "sha256": ref["sha256"]})
-            log_pins.append({"api": ref["api"], "instrumentation_sha256": report["instrumentation"]["sha256"],
+            log_pins.append({"api": ref["api"], "shard_index": ref["shard_index"], "job_id": ref["job_id"], "instrumentation_sha256": report["instrumentation"]["sha256"],
                              "logcat_sha256": report["logcat"]["sha256"]})
     # The single canonical 81-case specification is always used. No count or
     # alternate specification CLI escape hatch, no plan/coverage conversion.

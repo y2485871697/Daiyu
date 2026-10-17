@@ -501,5 +501,110 @@ class CloudReportTests(unittest.TestCase):
         self.assertFalse(report["business_satisfied"])
 
 
+@unittest.skipUnless(hasattr(os, "O_NOFOLLOW") and hasattr(os, "O_DIRECTORY")
+                     and os.open in os.supports_dir_fd, "safe POSIX I/O unavailable")
+class ShardedCloudTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = CloudReportTests()
+        self.fixture.setUp()
+        self.addCleanup(self.fixture.doCleanups)
+        self.root = self.fixture.root
+        self.snapshot = self.fixture.snapshot
+        self.snapshot.update(schema_version=2, jobs=[], reports=[])
+        self.reports = {}
+        classes = {f"fixture.Class{i}Test": 1 for i in range(4)}
+        groups = [dict(index=i, expected_tests=1, classes=[f"fixture.Class{i}Test"]) for i in range(4)]
+        for api in cloud.APIS:
+            for index in range(4):
+                base = f"{api}/shard-{index}/"
+                (self.root / base).mkdir()
+                def put(name, value):
+                    path = self.root / (base + name)
+                    path.write_bytes(value if isinstance(value, bytes) else json.dumps(value).encode())
+                    return self.fixture.text_ref(base + name)
+                identity = dict(shard_index=index, shard_count=4)
+                job_id = 101 + (0 if api == "26" else 4) + index
+                report = dict(schema_version=2, run_id=42, run_attempt=1, head_sha=SHA,
+                    job_id=job_id, api=api, exit_code=0, expected_tests=1, **identity,
+                    instrumentation=put("platform-tests.txt", b"OK (1 test)\nINSTRUMENTATION_CODE: -1\n"),
+                    logcat=put("logcat.txt", b"I/Runner: finished\n"),
+                    inventory=put("inventory.json", dict(schema_version=1, **identity,
+                        total_tests=4, all_classes=classes, shards=groups)))
+                self.reports[(api,index)] = report
+                self.snapshot["jobs"].append(dict(id=job_id, run_id=42, run_attempt=1, head_sha=SHA,
+                    api=api, name=f"启动验证 API {api} 分片{index}", status="completed", conclusion="success",
+                    report_sha256="0"*64, **identity))
+                self.snapshot["reports"].append(dict(api=api, job_id=job_id, path=base+"report.json",
+                    sha256="0"*64, **identity))
+        self.sync()
+
+    def sync(self):
+        for ref in self.snapshot["reports"]:
+            report = self.reports[(ref["api"], ref["shard_index"])]
+            raw = json.dumps(report).encode()
+            (self.root / ref["path"]).write_bytes(raw)
+            ref["sha256"] = digest(raw)
+            next(j for j in self.snapshot["jobs"] if j["id"] == ref["job_id"])["report_sha256"] = digest(raw)
+
+    def verify(self):
+        return self.fixture.verify()
+
+    def test_all_eight_and_missing_one_or_six_are_incomplete(self):
+        result = self.verify()
+        self.assertTrue(result["cloud_regression_satisfied"])
+        self.assertEqual(len(result["jobs"]), 8)
+        self.assertFalse(result["trusted_collection"])
+        self.snapshot["jobs"].pop()
+        self.snapshot["reports"].pop()
+        result = self.verify()
+        self.assertFalse(result["cloud_regression_satisfied"])
+        self.assertEqual(result["missing_shards"], [dict(api="37.2", shard_index=3)])
+        self.snapshot["jobs"] = [j for j in self.snapshot["jobs"] if j["shard_index"] == 0]
+        self.snapshot["reports"] = [r for r in self.snapshot["reports"] if r["shard_index"] == 0]
+        self.assertFalse(self.verify()["cloud_regression_satisfied"])
+
+    def test_invalid_shard_identity_or_any_failed_job_rejects(self):
+        job = self.snapshot["jobs"][0]
+        for bad in (True, "0", -1, 4, None):
+            job["shard_index"] = bad
+            with self.assertRaises(evidence.InvalidEvidence): self.verify()
+        job["shard_index"] = 0
+        for conclusion in ("failure", "cancelled", "skipped"):
+            job["conclusion"] = conclusion
+            with self.assertRaises(evidence.InvalidEvidence): self.verify()
+        job["conclusion"] = "success"
+        self.reports[("26",0)]["shard_index"] = 1
+        self.sync()
+        with self.assertRaises(evidence.InvalidEvidence): self.verify()
+
+    def test_overlap_omission_count_or_changed_inventory_rejects(self):
+        report = self.reports[("26",0)]
+        path = self.root / report["inventory"]["path"]
+        original = path.read_bytes()
+        for change in (lambda v: v["shards"][1]["classes"].__setitem__(0,"fixture.Class0Test"),
+                       lambda v: v["shards"][0]["classes"].clear(),
+                       lambda v: v["shards"][0].__setitem__("expected_tests",2),
+                       lambda v: v.__setitem__("total_tests",5),
+                       lambda v: v["shards"].reverse()):
+            value = json.loads(original)
+            change(value)
+            path.write_bytes(json.dumps(value).encode())
+            report["inventory"] = self.fixture.text_ref(str(path.relative_to(self.root)))
+            self.sync()
+            with self.assertRaises(evidence.InvalidEvidence): self.verify()
+        path.write_bytes(original)
+        report["inventory"] = self.fixture.text_ref(str(path.relative_to(self.root)))
+        self.sync()
+        self.assertTrue(self.verify()["cloud_regression_satisfied"])
+
+    def test_duplicate_keys_in_inventory_and_cross_piece_paths_reject(self):
+        report = self.reports[("26",0)]
+        path = self.root / report["inventory"]["path"]
+        path.write_text('{"schema_version":1,"schema_version":1}')
+        report["inventory"] = self.fixture.text_ref(str(path.relative_to(self.root)))
+        self.sync()
+        with self.assertRaises(evidence.InvalidEvidence): self.verify()
+
+
 if __name__ == "__main__":
     unittest.main()

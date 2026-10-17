@@ -194,7 +194,7 @@ private fun LinuxInstallPanel(
     SettingsSectionTitle("固定发行版 ${mode.wire} 安装（不自动注册）")
     if (mode == LinuxExecutionMode.CHROOT) SettingsNote("chroot 需要 Android Root 授权及可用 cgroup2 清退能力。仅安装到应用私有目录，不使用 PRoot helper、不挂载共享目录，不自动切换既有环境。确认安装会启动一次真实 Root 的隔离 PTY 探针；仅在整棵子进程树已清退后发布。chroot 不是安全沙箱，rootfs 及其内容必须可信。")
     else
-    SettingsNote("本批预编译 PRoot 仅支持 Android API 34+ 的 arm64 / x86_64 实际 64 位进程。API 26–33 明确不可用；不是已验证的运行支持。无运行时 helper 下载、不跟随 HTTP 重定向、不隐式挂载共享目录。下载后的 rootfs 会执行一次隔离 PTY 的 id -u 探测。")
+        SettingsNote("本批预编译 PRoot 仅支持 Android API 34+ 的 arm64 / x86_64 实际 64 位进程。API 26–33 明确不可用；不是已验证的运行支持。无运行时 helper 下载、不跟随 HTTP 重定向、不隐式挂载共享目录。下载后的 rootfs 会执行一次隔离 PTY 的 id -u 探测。")
     state.notice?.let { SettingsNote(it, error = state.unknown || state.registrationPending || state.recoveryBlocked) }
     state.unavailableReason?.let { SettingsNote("安装不可用 (Unavailable)：$it", error = true) }
     val idle = enabled && !state.busy && !state.unknown && !state.recoveryBlocked && state.unavailableReason == null

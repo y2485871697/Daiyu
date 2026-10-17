@@ -103,7 +103,7 @@ class LinuxProductionCompositionTest : TestCase() {
         val installed = second.state.value.prepared!!.installation
         assertEquals(LinuxExecutionMode.CHROOT, installed.executionMode)
         assertNull(installed.proot); assertNull(installed.loader)
-        assertTrue(installed.rootfs.path.startsWith("/private/chroot/"))
+        assertTrue(installed.rootfs.toPath().startsWith(File("/private/chroot").toPath()))
         val settingsWorker = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() +
             kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
         val controller = LinuxSettingsController(catalog, LinuxSettingsAdmission(emptySet()), settingsWorker,

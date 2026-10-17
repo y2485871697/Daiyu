@@ -6,6 +6,10 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Explicit single-action approval only; no exact-alarm, DND or media-control privilege. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" android:maxSdkVersion="28" />
     <!-- R06 app-identity reads only; dangerous grants are requested individually in settings. -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -24,6 +28,8 @@
     <!-- No all-packages/all-files permission or notification posting grant. Listener access below is separate explicit special access, never POST_NOTIFICATIONS. -->
     <!-- Android 11+ visibility for installed TTS and speech recognition services. -->
     <queries>
+        <intent><action android:name="android.intent.action.SET_ALARM" /></intent>
+        <intent><action android:name="android.intent.action.SET_TIMER" /></intent>
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>

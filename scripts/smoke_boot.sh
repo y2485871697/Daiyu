@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
+SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+# Keep stage receipts out of the unmodified instrumentation stdout/stderr.
+exec 3>&2
 # The pre-launch wrapper bounds action probes; smoke stages set their own budgets.
 export ADB_COMMAND_TIMEOUT=600
 adb_stage() {
   local phase=$1 limit=$2 code=0
   shift 2
-  printf '%s begin phase=%s budget=%ss\n' "$(date -u +%FT%TZ)" "$phase" "$limit" | tee -a smoke/stages.txt >&2
+  printf '%s begin phase=%s budget=%ss\n' "$(date -u +%FT%TZ)" "$phase" "$limit" | tee -a smoke/stages.txt >&3
   timeout --kill-after=5 "$limit" adb "$@" || code=$?
-  printf '%s end phase=%s exit=%s\n' "$(date -u +%FT%TZ)" "$phase" "$code" | tee -a smoke/stages.txt >&2
+  printf '%s end phase=%s exit=%s\n' "$(date -u +%FT%TZ)" "$phase" "$code" | tee -a smoke/stages.txt >&3
   return "$code"
 }
 APK=$(find delivery -maxdepth 1 -name '*.apk' -print -quit)
@@ -91,8 +94,9 @@ test_classes=${target_spec#*$'\n'}
 test "$expected" -gt 0
 printf '%s\n' "$target_spec" > smoke/instrumentation-targets.txt
 adb_stage instrumentation 600 shell am instrument -w -e class "$test_classes" app.daiyu.android.test/android.test.InstrumentationTestRunner 2>&1 | tee smoke/platform-tests.txt
-grep -q "OK ($expected tests)" smoke/platform-tests.txt
-if grep -q 'FAILURES!!!' smoke/platform-tests.txt; then exit 1; fi
+python3 "$SCRIPT_DIR/acceptance/instrumentation_result.py" \
+  --output smoke/platform-tests.txt --expected-tests "$expected" \
+  > smoke/instrumentation-result.json
 adb_stage settings-previews 30 pull /sdcard/Android/data/app.daiyu.android/files/settings-ui smoke/settings-ui
 adb_stage packages 20 shell pm list packages > smoke/packages.txt
 if grep -q 'package:io.github.mangi.eta$' smoke/packages.txt; then exit 1; fi

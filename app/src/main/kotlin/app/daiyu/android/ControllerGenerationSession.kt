@@ -32,7 +32,14 @@ internal class ControllerGenerationSession(
     val token: ConfirmedGenerationPreparation,
     private val parentStop: () -> Unit,
     private val parentDrain: (timeoutMillis: Long) -> GenerationToolsCloseResult,
+    private val originalEditor: GenerationEditorSnapshot,
 ) {
+    constructor(
+        token: ConfirmedGenerationPreparation,
+        parentStop: () -> Unit,
+        parentDrain: (timeoutMillis: Long) -> GenerationToolsCloseResult,
+    ) : this(token, parentStop, parentDrain, token.preview.editor)
+
     /** Keep both (token, drain) and token + trailing drain lambda source-compatible.
      * Parents with a Runner must supply parentStop; omission preserves the existing no-op.
      */
@@ -174,7 +181,8 @@ internal class ControllerGenerationSession(
         return accepted
     }
 
-    /** Match the original draft CAS separately from the approved form's revision namespace. */
+    /** Match the constructor-pinned original draft CAS, not caller-chosen revisions or the
+     * approved form's input IDs. Generation references/mask never become chat attachments. */
     @Synchronized fun consumeAcceptedForOriginalEditor(
         originalEditor: GenerationEditorSnapshot,
         currentEditor: GenerationEditorSnapshot,
@@ -182,9 +190,8 @@ internal class ControllerGenerationSession(
     ): GenerationPersistenceReceipt.Accepted? {
         val accepted = persistence as? GenerationPersistenceReceipt.Accepted ?: return null
         if (!ownerValidated || receiptConsumed || currentIdentity != identity ||
-            !originalEditor.matches(currentEditor) ||
-            originalEditor.text != token.preview.editor.text ||
-            originalEditor.attachmentIds != token.preview.editor.attachmentIds) return null
+            !this.originalEditor.matches(originalEditor) || !originalEditor.matches(currentEditor) ||
+            originalEditor.text != token.preview.editor.text) return null
         receiptConsumed = true
         return accepted
     }

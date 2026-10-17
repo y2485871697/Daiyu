@@ -169,6 +169,70 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
         assertEquals(GenerationToolsCloseResult.Drained, session.closeResult)
     }
 
+    fun testGenerationInputsAreAcceptedButOnlyOriginalChatDraftIsConsumedOnceAfterRealAdmission() {
+        configured = store.save(GenerationSettingsValues(listOf(GenerationProfileSettings(
+            label = "explicit edit profile", kind = GenerationKind.IMAGE,
+            protocol = GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART,
+            endpoint = "https://generation.invalid/images/edits", model = "explicit-edit-model",
+            apiKey = "synthetic-generation-test-key")), maxPolls = 0,
+            downloadsEnabled = false, downloadHosts = emptySet()), null)
+        val bytes = Base64.getDecoder().decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kF9sAAAAASUVORK5CYII=")
+        val input = GenerationInputImport.read("content://synthetic/reference", { bytes.inputStream() },
+            app.daiyu.android.media.AndroidImageInspector(), GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART,
+            GenerationInputTarget.REFERENCE, null) { false }
+        assertTrue(bytes.contentEquals(input.bytes))
+        val model = fixture.session(held = true)
+        val entry = prepare()
+        val formEditor = GenerationEditorSnapshot(48, editor.text, GenerationFormInputs.ids(listOf(input), input))
+        val preparation = ControllerGenerationPreparation.prepare(entry.identity, formEditor, entry.settings.profiles,
+            listOf(GenerationBatchSelection("batch", entry.settings.profiles.single().id, listOf(
+                GenerationRunConfig.Item("item", "exact edit prompt", listOf(input), input)))),
+            0, entry.settings.downloads)
+        controlMain {
+            assertTrue(entry.handoff.confirm(preparation, formEditor, entry.identity) {
+                controller.sendGeneration(entry, formEditor)
+            })
+        }
+        try {
+            assertTrue(model.entered.await(10, TimeUnit.SECONDS))
+            val session = checkNotNull(entry.session)
+            assertTrue(session.persistenceReceipt is GenerationPersistenceReceipt.Accepted)
+            assertEquals(1, fixture.opens.get())
+            val removals = AtomicInteger()
+            controlMain {
+                assertFalse(controller.consumeGenerationReceipt(entry, 17, formEditor) { removals.incrementAndGet() })
+                assertFalse(controller.consumeGenerationReceipt(entry, 17,
+                    GenerationEditorSnapshot(editor.revision + 1, editor.text)) { removals.incrementAndGet() })
+                assertTrue(controller.consumeGenerationReceipt(entry, 17, editor) { removals.incrementAndGet() })
+                assertFalse(controller.consumeGenerationReceipt(entry, 17, editor) { removals.incrementAndGet() })
+            }
+            assertEquals(1, removals.get())
+            assertFalse(session.canRetire)
+            assertSame(entry, controller.currentGenerationEntry())
+            assertSame(input, session.token.preview.config.batches.single().items.single().mask)
+            assertEquals("", fixture.database.draft())
+        } finally { model.release.countDown() }
+        awaitControl("input generation physical drain") { controller.currentGenerationEntry() == null }
+    }
+
+    fun testGenerationFormCannotSmuggleUnrelatedChatAttachmentIds() {
+        val entry = prepare()
+        val formEditor = GenerationEditorSnapshot(48, editor.text, listOf("ordinary-chat-attachment"))
+        val preparation = ControllerGenerationPreparation.prepare(entry.identity, formEditor, entry.settings.profiles,
+            listOf(GenerationBatchSelection("batch", entry.settings.profiles.single().id,
+                listOf(GenerationRunConfig.Item("item", "draw")))), 0, entry.settings.downloads)
+        controlMain {
+            assertFalse(entry.handoff.confirm(preparation, formEditor, entry.identity) {
+                controller.sendGeneration(entry, formEditor)
+            })
+        }
+        awaitControl("bad input identity cleanup") { controller.currentGenerationEntry() == null }
+        assertEquals(0, fixture.opens.get())
+        assertTrue(fixture.database.conversations().isEmpty())
+        assertEquals(editor.text, fixture.database.draft())
+    }
+
     /** Real production constructor -> Runner catalog -> Session -> token -> RunGenerationTools.
      * The model is held without tool events: inspect the real pair, never execute a network call.
      * This fails both if production forgets injection and if it still passes DENY_DOWNLOADS.

@@ -73,9 +73,8 @@ class ControllerGenerationSessionTest {
     @Test fun originalDraftAndApprovedFormHaveIndependentRevisionNamespaces() {
         val approved = GenerationEditorSnapshot(30, editor.text, editor.attachmentIds)
         val p = preparation(approved)
-        val s = ControllerGenerationSession(p.confirm(p.preview, approved, identity)) {
-            GenerationToolsCloseResult.Drained
-        }
+        val s = ControllerGenerationSession(p.confirm(p.preview, approved, identity), {},
+            { GenerationToolsCloseResult.Drained }, editor)
         s.bindOwner(owner(), approved, identity, "session")
         val receipt = GenerationPersistenceReceipt.Accepted(saved)
         s.recordPersistence(identity, receipt)
@@ -89,6 +88,35 @@ class ControllerGenerationSessionTest {
         assertSame(receipt, s.consumeAcceptedForOriginalEditor(editor, editor, identity))
         assertFalse(s.acknowledgeAccepted(identity, receipt))
         assertNull(s.consumeAcceptedForOriginalEditor(editor, editor, identity))
+    }
+
+    @Test fun originalChatDraftConsumesOnceIndependentlyOfGenerationInputsAndUnknownRetainsBytes() {
+        val original = GenerationEditorSnapshot(7, "original draft")
+        val bytes = byteArrayOf(1, 2, 3)
+        val input = GenerationInput(bytes, "image/png")
+        val approved = GenerationEditorSnapshot(40, original.text, GenerationFormInputs.ids(listOf(input), input))
+        val p = ControllerGenerationPreparation.prepare(identity, approved,
+            listOf(GenerationModelProfile("edit", "explicit edit", GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART,
+                "https://api.example/images/edits", "synthetic-key", "image-model")),
+            listOf(GenerationBatchSelection("batch", "edit", listOf(
+                GenerationRunConfig.Item("item", "draw", listOf(input), input)))), 0, GenerationDownloadHosts(emptySet()))
+        val s = ControllerGenerationSession(p.confirm(p.preview, approved, identity), {},
+            { GenerationToolsCloseResult.Unknown("not_drained") }, original)
+        bytes[0] = 9
+        s.bindOwner(owner(), approved, identity, "session")
+        val receipt = GenerationPersistenceReceipt.Accepted(saved)
+        s.recordPersistence(identity, receipt)
+        assertNull(s.consumeAcceptedForOriginalEditor(approved, approved, identity))
+        assertNull(s.consumeAcceptedForOriginalEditor(original,
+            GenerationEditorSnapshot(8, original.text), identity))
+        assertSame(receipt, s.consumeAcceptedForOriginalEditor(original, original, identity))
+        assertNull(s.consumeAcceptedForOriginalEditor(original, original, identity))
+        s.cleanupOnWorker(0)
+        assertFalse(s.canRetire)
+        assertTrue(s.closeResult is GenerationToolsCloseResult.Unknown)
+        val retained = s.token.preview.config.batches.single().items.single()
+        assertArrayEquals(byteArrayOf(1, 2, 3), retained.references.single().bytes)
+        assertSame(input, retained.mask)
     }
 
     @Test fun acknowledgementCannotOverrideUnknownOrMissingPersistenceOrDrain() {

@@ -14,6 +14,7 @@ import kotlinx.coroutines.CompletableDeferred
 import java.util.concurrent.atomic.AtomicInteger
 
 class UsagePresentationActivityTest : WiredActivityTestCase() {
+    private fun usagePage() = node("page:${activity.getString(R.string.stats_page_title)}")
     private fun empty(incomplete: Boolean = false): UsageStatsSnapshot {
         val summary = aggregateAttributedUsage(emptyList())
         return UsageStatsSnapshot(attributedUsage = AttributedUsageStats(summary, emptyList(),
@@ -39,13 +40,13 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText("private synthetic error details").assertDoesNotExist()
         node("usage-retry").performClick()
         ui.waitUntil(5_000) { calls.get() == 2 && ui.onAllNodesWithTag("usage-error").fetchSemanticsNodes().isEmpty() }
-        node("page:用量统计").performScrollToNode(hasText("暂无已报告用量"))
+        usagePage().performScrollToNode(hasText("暂无已报告用量"))
         ui.onNodeWithText("暂无已报告用量").assertExists()
         assertEquals(0, fixture.opens.get())
     }
     fun testIncompleteScanHasShortCoverageNoticeWithoutRawDiagnostics() {
         show { empty(incomplete = true) }
-        node("page:用量统计").performScrollToNode(hasText("部分记录尚未读取，仅显示已读取的用量。"))
+        usagePage().performScrollToNode(hasText("部分记录尚未读取，仅显示已读取的用量。"))
         ui.onNodeWithText("部分记录尚未读取，仅显示已读取的用量。").assertExists()
         ui.onNodeWithText("缺 checkpoint", substring = true).assertDoesNotExist()
         ui.onNodeWithText("预算延后", substring = true).assertDoesNotExist()

@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.onClick as semanticsClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.LocalView
 import app.daiyu.android.ui.haptics.TouchHaptics
 import androidx.compose.ui.res.stringResource
@@ -40,27 +42,39 @@ fun MiuixDialogActions(
     destructive: Boolean = false,
 ) {
     val view = LocalView.current
+    val cancelClick = {
+        if (cancelEnabled) {
+            TouchHaptics.click(view)
+            onCancel()
+        }
+        cancelEnabled
+    }
+    val confirmClick = {
+        if (confirmEnabled) {
+            TouchHaptics.click(view)
+            onConfirm()
+        }
+        confirmEnabled
+    }
     Row(
         modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         TextButton(
             text = cancelText ?: stringResource(R.string.action_cancel),
-            onClick = {
-                TouchHaptics.click(view)
-                onCancel()
-            },
+            onClick = { cancelClick() },
             enabled = cancelEnabled,
-            modifier = Modifier.testTag("dialog-cancel").weight(1f),
+            modifier = Modifier.testTag("dialog-cancel").weight(1f).semantics {
+                semanticsClick { cancelClick() }
+            },
         )
         TextButton(
             text = confirmText,
-            onClick = {
-                TouchHaptics.click(view)
-                onConfirm()
-            },
+            onClick = { confirmClick() },
             enabled = confirmEnabled,
-            modifier = Modifier.testTag("dialog-confirm").weight(1f),
+            modifier = Modifier.testTag("dialog-confirm").weight(1f).semantics {
+                semanticsClick { confirmClick() }
+            },
             colors = if (destructive) {
                 ButtonDefaults.textButtonColorsPrimary(
                     color = MiuixTheme.colorScheme.error,

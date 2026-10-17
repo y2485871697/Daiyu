@@ -54,8 +54,8 @@ class SecretVisibilityActivityTest : WiredActivityTestCase() {
         val binding = fixture.controller.independentModels.record(slot)
         openSettings(); node("settings-search").performTextReplacement("辅助视觉模型")
         reveal("settings-row:辅助视觉模型", "设置").performClick()
-        awaitControl("independent native secret field") {
-            activity.window.decorView.findViewWithTag<View>("independent-model-secret") != null
+        ui.waitUntil(5_000) {
+            ui.runOnIdle { activity.window.decorView.findViewWithTag<View>("independent-model-secret") != null }
         }
         mainThread {
             val key = checkNotNull(activity.window.decorView.findViewWithTag<EditText>("independent-model-secret"))

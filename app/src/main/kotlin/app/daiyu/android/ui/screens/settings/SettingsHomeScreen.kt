@@ -121,6 +121,7 @@ internal fun DaiyuSettingsScreen(
     diagnostics: app.daiyu.android.diagnostics.DiagnosticLogStore? = null,
 ) {
     val context = LocalContext.current
+    val focus = LocalFocusManager.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val visit = remember { SettingsHomeVisit() }
     DisposableEffect(visit) { onDispose { visit.active = false } }
@@ -132,7 +133,7 @@ internal fun DaiyuSettingsScreen(
     var choosingDefaultReasoning by remember { mutableStateOf(false) }
     val defaultReasoningToggle: ((Boolean) -> Unit)? = onDefaultReasoningChange?.let { change -> { enabled ->
         if (visit.active && localPage == null && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-            if (enabled) choosingDefaultReasoning = true else change(ReasoningEffort.DEFAULT)
+            if (enabled) { focus.clearFocus(); choosingDefaultReasoning = true } else change(ReasoningEffort.DEFAULT)
         }
     } }
     SubAgentThinkingEffortPickerDialog(show = choosingDefaultReasoning, effort = defaultReasoning,
@@ -149,7 +150,6 @@ internal fun DaiyuSettingsScreen(
     val groups = remember(query, catalogGroups) { filterSettingsGroups(query, catalogGroups) }
     val listState = rememberLazyListState()
     LaunchedEffect(section, query) { listState.scrollToItem(0) }
-    val focus = LocalFocusManager.current
     val openedPage = localPage
     if (openedPage != null) {
         val localBack: () -> Unit = {

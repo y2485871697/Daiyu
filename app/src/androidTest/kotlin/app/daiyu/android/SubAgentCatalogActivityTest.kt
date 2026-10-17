@@ -2,6 +2,8 @@ package app.daiyu.android
 
 import android.content.ContextWrapper
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsProperties
 import java.io.File
 import app.daiyu.android.delegation.*
 import java.util.UUID
@@ -28,6 +30,10 @@ class SubAgentCatalogActivityTest : WiredActivityTestCase() {
         }
     }
 
+    private fun awaitDirectory(description: String, condition: () -> Boolean) {
+        ui.waitUntil(5_000) { ui.runOnIdle(condition) }
+        assertTrue(description, ui.runOnIdle(condition))
+    }
     private fun source() = MainActivity::class.java.getDeclaredField("subAgentModelSource")
         .apply { isAccessible = true }.get(activity) as SavedCatalogSubAgentModelSource
     private fun repository() = ConversationSubAgentPreferences(activity.getSharedPreferences("subagent_configuration", 0))
@@ -35,12 +41,13 @@ class SubAgentCatalogActivityTest : WiredActivityTestCase() {
         openSettings()
         node("settings-search").performTextReplacement("子代理")
         reveal("settings-row:子代理", "设置").performClick()
-        awaitControl("saved directory published") { source().models.any { it.modelId == "run-control" } }
+        awaitDirectory("saved directory published") { source().models.any { it.modelId == "run-control" } }
     }
     private fun assertPickerContainsSavedModel() {
         ui.onNodeWithContentDescription("草稿模型").assertIsEnabled().performClick()
         ui.onNodeWithText("主模型服务商").assertExists()
-        ui.onNodeWithText("run-control").assertExists().performClick()
+        ui.onNode(hasText("run-control") and SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.RadioButton))
+            .assertExists().assertIsEnabled().performClick()
         ui.onNodeWithContentDescription("草稿模型").assertTextContains("run-control", substring = true)
     }
 
@@ -53,7 +60,7 @@ class SubAgentCatalogActivityTest : WiredActivityTestCase() {
         try {
             openSubAgents()
             realPauseResume(activity, atPause = { assertTrue(source().models.isEmpty()) })
-            awaitControl("directory restored on resume") { source().models.any { it.modelId == "run-control" } }
+            awaitDirectory("directory restored on resume") { source().models.any { it.modelId == "run-control" } }
             ui.onNodeWithContentDescription("编辑子代理组${preset.name}").assertIsEnabled().performClick()
             ui.onNode(hasText("添加子代理") and hasClickAction()).assertIsEnabled().performClick()
             assertPickerContainsSavedModel()
@@ -65,7 +72,7 @@ class SubAgentCatalogActivityTest : WiredActivityTestCase() {
             ui.waitForIdle()
             ui.onNodeWithText("添加子代理组").assertExists()
             backToChat(activity)
-            awaitControl("leaving clears directory") { source().models.isEmpty() }
+            awaitDirectory("leaving clears directory") { source().models.isEmpty() }
             assertDraft("catalog preset unsent")
         } finally { repo.removePreset(preset.id) }
     }
@@ -81,7 +88,7 @@ class SubAgentCatalogActivityTest : WiredActivityTestCase() {
         val before = fixture.database.exportBackup()
         menu("子代理状态")
         node("subagent-collaboration-card").assertExists()
-        awaitControl("conversation directory published") { source().models.any { it.modelId == "run-control" } }
+        awaitDirectory("conversation directory published") { source().models.any { it.modelId == "run-control" } }
         ui.onNodeWithText("使用当前配置").assertIsEnabled().performClick()
         ui.onNodeWithContentDescription("添加子代理").assertIsEnabled().performClick()
         assertPickerContainsSavedModel()
@@ -90,7 +97,7 @@ class SubAgentCatalogActivityTest : WiredActivityTestCase() {
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         ui.waitForIdle()
         ui.onNodeWithText("完成").assertIsEnabled().performClick()
-        awaitControl("closing conversation clears directory") { source().models.isEmpty() }
+        awaitDirectory("closing conversation clears directory") { source().models.isEmpty() }
         assertDraft("catalog conversation unsent")
     }
 
@@ -110,11 +117,11 @@ class SubAgentCatalogActivityTest : WiredActivityTestCase() {
             mainThread { fixture.controller.saveModelSettings(old.copy(model = "changed-local-model"), false, false) {
                 result.set(it); saved.countDown()
             } }
-            awaitControl("busy save invalidates directory") { source().models.isEmpty() }
+            awaitDirectory("busy save invalidates directory") { source().models.isEmpty() }
             release.countDown()
             assertTrue(saved.await(10, TimeUnit.SECONDS)); failure.get()?.let { throw it }
             assertEquals(true, result.get())
-            awaitControl("same route refreshes saved directory") { source().models.any { it.modelId == "changed-local-model" } }
+            awaitDirectory("same route refreshes saved directory") { source().models.any { it.modelId == "changed-local-model" } }
             assertEquals(before, fixture.database.exportBackup())
             assertEquals(0, fixture.opens.get())
         } finally { release.countDown(); holder.join(10_000) }

@@ -28,22 +28,33 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
                 }
             } catch (problem: Throwable) { failure.set(problem) }
         }.apply { start() }
+        var primary: Throwable? = null
         try {
             assertTrue(entered.await(5, TimeUnit.SECONDS))
             work { released.countDown() }
+        } catch (problem: Throwable) {
+            primary = problem
+            throw problem
         } finally {
-            released.countDown(); holder.join(10_000); assertFalse(holder.isAlive)
-            failure.get()?.let { throw it }
+            try {
+                released.countDown(); holder.join(10_000); assertFalse(holder.isAlive)
+                failure.get()?.let { throw it }
+            } catch (cleanup: Throwable) {
+                if (primary == null) throw cleanup else primary.addSuppressed(cleanup)
+            }
         }
     }
     fun testPausedQueuedSaveIsRejectedAndOnlyAnExplicitResumedSaveCanPersist() {
         val saved = fixture.settings.load(); setDraft("paused model save draft")
         openModels(); editModel("模型名", "resumed-explicit-model")
+        reveal("model-save").assertIsDisplayed().assertIsEnabled()
+        val save = retainedClick(activity, "model-save")
         withHeldCatalog { release ->
-            reveal("model-save").performClick()
-            awaitControl("save waiting for catalog") { fixture.controller.dataBusy }
-            realPauseResume(activity)
-            release()
+            controlMain { save(); assertTrue(fixture.controller.dataBusy) }
+            realPauseResume(activity, atPause = {
+                assertTrue(fixture.controller.dataBusy)
+                release()
+            })
             awaitControl("revoked save drained") { !fixture.controller.dataBusy }
         }
         assertEquals(saved, fixture.settings.load())
@@ -57,12 +68,14 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
     fun testLeavingPageRevokesAQueuedSaveWithoutChangingTheStoredConnection() {
         val saved = fixture.settings.load(); setDraft("departing model save draft")
         openModels(); editModel("模型名", "must-not-be-written")
+        reveal("model-save").assertIsDisplayed().assertIsEnabled()
+        val save = retainedClick(activity, "model-save")
         withHeldCatalog { release ->
-            reveal("model-save").performClick()
-            awaitControl("queued save") { fixture.controller.dataBusy }
-            backToChat(activity); release()
+            controlMain { save(); assertTrue(fixture.controller.dataBusy) }
+            controlMain { activity.onBackPressedDispatcher.onBackPressed(); release() }
             awaitControl("departed save drained") { !fixture.controller.dataBusy }
         }
+        awaitUniqueTag("chat-draft")
         assertEquals(saved, fixture.settings.load()); assertDraft("departing model save draft")
         assertEquals(0, fixture.opens.get())
     }

@@ -60,6 +60,9 @@ import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.assistants.AssistantSkill
 import app.daiyu.android.assistants.AssistantSelectionOwner
 import app.daiyu.android.context.ContextService
+import app.daiyu.android.context.ContextManagementOwner
+import app.daiyu.android.context.ContextManagementControllerAdapter
+import app.daiyu.android.ui.screens.chat.context.ContextManagementRoute
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceSettingsStore
 import app.daiyu.android.data.model.AppearanceThemeMode
@@ -607,14 +610,30 @@ class MainActivity : ComponentActivity() {
     private var sidebarVisible: Boolean
         get() = sidebarVisibleState
         set(value) {
+            // Opening revokes even without a visit; closing cannot revive clicks rendered behind it.
+            if (value != sidebarVisibleState) revokeContextManagementEntry()
             if (value && !sidebarVisibleState) { stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor() }
             sidebarVisibleState = value
         }
+    private class ContextManagementVisit(val owner: ContextManagementOwner,
+        val adapter: ContextManagementControllerAdapter)
+    private var contextManagementVisit by mutableStateOf<ContextManagementVisit?>(null)
+    // Entry authority is separate from the shared editor generation and is never restored/saved.
+    private var contextManagementEntryEpoch by mutableStateOf(0L)
+    // Revoke BEFORE navigation/lifecycle changes, including when no route has been opened yet.
+    private fun revokeContextManagementEntry(): Boolean {
+        contextManagementEntryEpoch++
+        val visit = contextManagementVisit ?: return false
+        controller.invalidateContextManagement(visit.adapter)
+        contextManagementVisit = null
+        return true
+    }
     private var retainedPageState by mutableStateOf("chat")
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
+            if (value != retainedPageState && revokeContextManagementEntry()) editorGeneration++
             if (value != "reconnect-settings") {
                 reconnectSettingsPageOwner?.revoke()
                 reconnectSettingsPageOwner = null
@@ -665,6 +684,10 @@ class MainActivity : ComponentActivity() {
     private var interactiveModeEnabled by mutableStateOf(false)
     private var interactiveModeObservation: AutoCloseable? = null
     private var selected: Conversation? = null
+        set(value) {
+            if (field?.id != value?.id && revokeContextManagementEntry()) editorGeneration++
+            field = value
+        }
     private var draft by mutableStateOf("")
     private var selectionStart = 0
     private var selectionEnd = 0
@@ -710,7 +733,7 @@ class MainActivity : ComponentActivity() {
     }
     private var editorGeneration = 0L
         set(value) {
-            if (field != value) { invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { revokeContextManagementEntry(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private var draftRevision = 0L
@@ -923,6 +946,17 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 when (retainedPage) {
+                    "context-management" -> {
+                        val visit = contextManagementVisit
+                        if (visit != null) key(visit) {
+                            ContextManagementRoute(visit.adapter, onClose = {
+                                if (contextManagementVisit === visit) returnToChat()
+                            })
+                        } else Column(Modifier.fillMaxSize().padding(16.dp)) {
+                            top.yukonga.miuix.kmp.basic.Text("上下文页面已失效；请返回原会话重新打开")
+                            top.yukonga.miuix.kmp.basic.TextButton(text = "返回", onClick = { returnToChat() })
+                        }
+                    }
                     "balance-settings" -> {
                         val runtime = balanceRuntime
                         if (runtime != null) app.daiyu.android.balance.ui.BalanceSettingsScreen(
@@ -1405,6 +1439,7 @@ class MainActivity : ComponentActivity() {
         val renderedOwner = controlOwner
         val renderedConversation = chatState.conversationKey
         val renderedEditorGeneration = editorGeneration
+        val renderedContextEntryEpoch = contextManagementEntryEpoch
         val renderedDraftRevision = draftRevision
         val renderedSpeechOwner = speechHost.owner
         fun editorMatches() = activityUsable() && selectionReady && pendingTextSend == null && controller.textSendState() == null &&
@@ -1472,7 +1507,21 @@ class MainActivity : ComponentActivity() {
                     }
                 }
             }
-        }, onContextClick = { pendingFeature() },
+        }, onContextClick = {
+            val conversation = selected
+            if (editorMatches() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+                renderedContextEntryEpoch == contextManagementEntryEpoch && conversation != null &&
+                !renderedConversation.isNullOrBlank() && conversation.id.value == renderedConversation &&
+                editorGeneration == renderedEditorGeneration) {
+                val owner = ContextManagementOwner(conversation.id, renderedEditorGeneration)
+                val adapter = controller.openContextManagement(owner)
+                if (adapter == null) toast("上下文页面未打开；当前正在准备、运行或执行任务，请稍后再试")
+                else {
+                    retainedPage = "context-management"
+                    contextManagementVisit = ContextManagementVisit(owner, adapter)
+                }
+            }
+        },
         onRegenerate = messageCallbacks.onRegenerate, onSpeak = { id ->
             if (editorMatches() && controller.ready && !controller.dataBusy &&
                 speechHost.owner == renderedSpeechOwner && selected?.id?.value == renderedConversation) {
@@ -2646,6 +2695,8 @@ class MainActivity : ComponentActivity() {
     }
     override fun onResume() {
         super.onResume(); voiceForeground = true; speechHost.setForeground(true)
+        // Re-render fresh entry callbacks; none captured while backgrounded gains authority here.
+        contextManagementEntryEpoch++
         prepareMessageActionSnapshot()
         if (retainedPage == "platform-settings") platformSettingsRevision++
         controller.attachVideoUi(videoUi)
@@ -2689,6 +2740,7 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
     override fun onStop() {
+        revokeContextManagementEntry()
         invalidateMessageActionEditor()
         gatewayOwner?.revoke()
         if (retainedPage == "session-gateway") retainedPage = "settings"
@@ -2703,6 +2755,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        if (revokeContextManagementEntry()) editorGeneration++
         invalidateMessageActionEditor()
         reconnectSettingsPageOwner?.revoke()
         reconnectSettingsPageOwner = null
@@ -2879,6 +2932,7 @@ class MainActivity : ComponentActivity() {
         controller.database.organize(conversation.id, conversation.folder, !conversation.pinned); updatePane()
     }
     private fun deleteRetainedConversation(id: String) {
+        if (selected?.id?.value == id && revokeContextManagementEntry()) editorGeneration++
         val conversation = retainedConversation(id)
         check(controller.active?.conversationId != conversation.id && !controller.hasLiveChildTasks(conversation.id)) {
             "请先停止此会话的运行和后台子任务"
@@ -2985,6 +3039,7 @@ class MainActivity : ComponentActivity() {
     }
     internal fun select(conversation: Conversation?) {
         requireActivityUsable()
+        if (revokeContextManagementEntry()) editorGeneration++
         fenceVideoRoute()
         check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null)) { "请等待本次发送结果" }
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)

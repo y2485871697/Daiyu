@@ -17,7 +17,12 @@ import java.util.UUID
 @Suppress("DEPRECATION")
 class NativeCompletionSettingsTest : InstrumentationTestCase() {
     private val alias = "app.daiyu.android.test.native-completion.${UUID.randomUUID()}"
-    private val context by lazy { testContext(instrumentation.targetContext, "$alias-") }
+    private val root by lazy { java.io.File(instrumentation.targetContext.cacheDir, alias).apply { check(mkdirs()) } }
+    private val context by lazy {
+        object : android.content.ContextWrapper(testContext(instrumentation.targetContext, "$alias-")) {
+            override fun getFilesDir() = root
+        }
+    }
     private val store get() = ModelSettingsStore(context, alias)
     private val protocols = listOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI)
     private fun settings(protocol: ProviderProtocol) = ModelSettings("https://provider.invalid", "fixture", "synthetic-${protocol.wireName}", false, protocol = protocol)
@@ -27,6 +32,7 @@ class NativeCompletionSettingsTest : InstrumentationTestCase() {
             val keys = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
             java.util.Collections.list(keys.aliases()).filter { it.startsWith("$alias.") }.forEach(keys::deleteEntry)
             context.getSharedPreferences("model-settings", 0).edit().clear().commit()
+            assertTrue(root.deleteRecursively())
         } finally { super.tearDown() }
     }
 
@@ -49,10 +55,11 @@ class NativeCompletionSettingsTest : InstrumentationTestCase() {
 
     fun testRestoreMetadataRequiresCredentialRebindAndDoesNotExecuteOrImportKey() {
         store.save(settings(ProviderProtocol.CHAT_COMPLETIONS), protocolChangeAuthorized = true)
-        val plan = store.prepareNonSecretRestore(JSONObject().put("protocol", "gemini").put("endpoint", "https://google.invalid/v1beta")
+        val restoringStore = store
+        val plan = restoringStore.prepareNonSecretRestore(JSONObject().put("protocol", "gemini").put("endpoint", "https://google.invalid/v1beta")
             .put("model", "models/gemini-fixture").put("responses-path", ""))
         assertTrue(plan.credentialRebindRequired)
-        store.applyNonSecretRestore(plan, authorized = true)
+        restoringStore.applyNonSecretRestore(plan, authorized = true)
         val editing = store.loadForEditing()
         assertEquals(ProviderProtocol.GEMINI, editing.settings.protocol)
         assertEquals("", editing.settings.apiKey); assertTrue(editing.credentialUnavailable)

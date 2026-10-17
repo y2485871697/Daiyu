@@ -26,19 +26,27 @@ class PlatformActionVisitActivityTest : WiredActivityTestCase() {
     }
     private fun sidebar() { host("setSidebarVisible", true); host("setSidebarVisible", false) }
     private fun route() { host("setRetainedPage", "settings"); host("setRetainedPage", "chat") }
-    private fun pause() { instrumentation.callActivityOnPause(activity); instrumentation.callActivityOnResume(activity) }
     private fun clickAction(tag: String) {
         node(tag).assertIsDisplayed().assertIsEnabled().performClick()
     }
     private fun preview(): ControllerPlatformActionPreparation {
         clickAction("platform-action-entry")
         clickAction("platform-action-media")
-        clickAction("platform-action-preview")
-        lateinit var pending: ControllerPlatformActionPreparation
-        mainThread {
-            pending = checkNotNull(fixture.controller.platformActionPreparation()) {
-                "production preview click did not create platform preparation"
+        var duringClick: ControllerPlatformActionPreparation? = null
+        node("platform-action-preview").assertIsDisplayed().assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick) { click ->
+                assertTrue(click())
+                duringClick = fixture.controller.platformActionPreparation()
             }
+        val pending = duringClick ?: run {
+            val errors = ui.onAllNodesWithTag("platform-action-preview-error")
+                .fetchSemanticsNodes(atLeastOneRootRequired = false)
+                .joinToString { it.config[androidx.compose.ui.semantics.SemanticsProperties.Text].joinToString() }
+            error("production preview callback did not create preparation; error=$errors")
+        }
+        mainThread {
+            assertSame("created preparation was revoked before confirmation", pending, fixture.controller.platformActionPreparation())
+            assertFalse(pending.cancelled)
         }
         ui.waitUntil(5_000) {
             ui.onAllNodesWithTag("platform-action-confirm")
@@ -55,11 +63,15 @@ class PlatformActionVisitActivityTest : WiredActivityTestCase() {
     }
     fun testRetainedApprovalCannotReviveAfterSidebarRouteOrPauseRoundTrip() {
         setDraft(text)
-        for (transition in listOf<() -> Unit>(::sidebar, ::route, ::pause)) {
+        val transitions: List<(() -> Unit) -> Unit> = listOf(
+            { check -> mainThread { sidebar(); check() } },
+            { check -> mainThread { route(); check() } },
+            { check -> realPauseResume(activity, atPause = check) },
+        )
+        for (transition in transitions) {
             val old = preview()
             val stale = retainedClick(activity, "platform-action-confirm")
-            mainThread {
-                transition()
+            transition {
                 assertTrue(old.cancelled)
                 stale()
                 assertFalse(old.submitted)
@@ -77,7 +89,7 @@ class PlatformActionVisitActivityTest : WiredActivityTestCase() {
         val old = preview()
         clickAction("platform-action-confirm")
         assertTrue(entered.await(5, TimeUnit.SECONDS))
-        mainThread { pause(); assertTrue(old.cancelled) }
+        realPauseResume(activity) { assertTrue(old.cancelled) }
         release.countDown()
         awaitControl("platform preparation drained") { ChatController::class.java.getDeclaredField("preparation").apply { isAccessible = true }.get(fixture.controller) == null }
         assertUnsent()

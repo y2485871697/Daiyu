@@ -167,13 +167,79 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         try { return method.apply { isAccessible = true }.invoke(activity, *arguments) }
         catch (failure: java.lang.reflect.InvocationTargetException) { throw failure.targetException }
     }
-    protected fun backToChat(activity: MainActivity) {
+    protected fun backToChat(activity: MainActivity) = backToPage(activity, "chat-draft")
+    protected fun backToPage(activity: MainActivity, expectedTag: String) {
         ui.waitForIdle()
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
         ui.waitForIdle()
         mainThread { assertFalse(activity.isFinishing); assertFalse(activity.isDestroyed) }
-        node("chat-draft").assertExists()
+        awaitUniqueTag(expectedTag)
     }
+    /** Real framework pause/resume, retaining this Activity without onStop or recreation. */
+    protected fun realPauseResume(original: MainActivity, beforePause: () -> Unit = {}, atPause: () -> Unit = {}) {
+        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper())
+        val app = original.application
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        var cover: android.app.Activity? = null
+        var paused = false
+        var resumed = false
+        var stopped = false
+        fun capture(action: () -> Unit) {
+            try { action() } catch (problem: Throwable) { failure.compareAndSet(null, problem) }
+        }
+        val before = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) capture(beforePause)
+        }
+        val callbacks = object : android.app.Application.ActivityLifecycleCallbacks {
+            override fun onActivityCreated(activity: android.app.Activity, state: Bundle?) {
+                if (activity.componentName.className == "app.daiyu.android.LifecycleCoverActivity") cover = activity
+            }
+            override fun onActivityPaused(activity: android.app.Activity) {
+                if (activity === original) {
+                    paused = true
+                    capture { assertFalse(stopped); atPause() }
+                }
+            }
+            override fun onActivityResumed(activity: android.app.Activity) { if (activity === original) resumed = true }
+            override fun onActivityStopped(activity: android.app.Activity) { if (activity === original) stopped = true }
+            override fun onActivityStarted(activity: android.app.Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: android.app.Activity, state: Bundle) = Unit
+            override fun onActivityDestroyed(activity: android.app.Activity) = Unit
+        }
+        mainThread {
+            assertEquals(androidx.lifecycle.Lifecycle.State.RESUMED, original.lifecycle.currentState)
+            app.registerActivityLifecycleCallbacks(callbacks)
+            original.lifecycle.addObserver(before)
+        }
+        var primary: Throwable? = null
+        try {
+            val started = instrumentation.startActivitySync(Intent().setComponent(android.content.ComponentName(
+                instrumentation.targetContext.packageName, "app.daiyu.android.LifecycleCoverActivity"))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            mainThread { assertSame(cover, started); assertEquals(original.taskId, started.taskId) }
+            awaitControl("original paused under transparent cover") { paused && !stopped }
+            failure.get()?.let { throw it }
+        } catch (problem: Throwable) {
+            primary = problem
+            throw problem
+        } finally {
+            try {
+                mainThread { cover?.let { if (!it.isDestroyed) it.finish() } }
+                awaitControl("same Activity fully resumed after cover") {
+                    (cover == null || cover!!.isDestroyed) && (!paused || resumed) &&
+                        !original.isDestroyed && !original.isFinishing && original.hasWindowFocus() &&
+                        original.lifecycle.currentState == androidx.lifecycle.Lifecycle.State.RESUMED
+                }
+                mainThread { assertFalse("pause-only cover must not stop original", stopped) }
+            } catch (cleanup: Throwable) {
+                if (primary == null) throw cleanup else primary.addSuppressed(cleanup)
+            } finally {
+                mainThread { original.lifecycle.removeObserver(before); app.unregisterActivityLifecycleCallbacks(callbacks) }
+            }
+        }
+        ui.waitForIdle()
+    }
+
     protected fun recreateActivity(activity: MainActivity): MainActivity {
         val monitor = instrumentation.addMonitor(MainActivity::class.java.name, null, false)
         try {

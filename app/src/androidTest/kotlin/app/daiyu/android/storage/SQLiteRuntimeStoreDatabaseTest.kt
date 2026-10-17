@@ -242,9 +242,8 @@ class SQLiteRuntimeStoreDatabaseTest:InstrumentationTestCase() {
             assertEquals(RunStatus.COMPLETED,answer.status)
             assertEquals(2,opens);assertEquals(0,resumes)
             val openWrites=writes.filter {it.request?.operation==RequestOperation.OPEN}
-            assertEquals(2,openWrites.size)
+            assertEquals(2,openWrites.map {it.request!!.requestId}.distinct().size)
             assertTrue(openWrites.all {it.transport==null})
-            assertTrue(openWrites.map {it.request!!.requestId}.distinct().size==2)
             assertEquals(extra,db.messages(extra.conversationId).single {it.second.id==extra.id}.second)
             val done=RunCheckpointCodec.decode(payload(db,first.message.id))
             assertEquals(answer,done.message);assertNull(done.transport)

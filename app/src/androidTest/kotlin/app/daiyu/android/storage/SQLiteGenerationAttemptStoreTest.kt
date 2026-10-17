@@ -120,16 +120,40 @@ class SQLiteGenerationAttemptStoreTest : InstrumentationTestCase() {
     }
 
     fun testCommitFailureDoesNotGrantExecutionAndWeakDurabilityFailsClosed() {
-        val f = fixture(); val db = f.db.writableDatabase
+        val f = fixture(); val db = f.db.writableDatabase; val store = f.store()
         db.execSQL("CREATE TABLE generation_commit_guard(owner TEXT REFERENCES conversations(id) DEFERRABLE INITIALLY DEFERRED)")
         db.execSQL("CREATE TRIGGER fail_generation_commit AFTER INSERT ON generation_attempts BEGIN INSERT INTO generation_commit_guard VALUES('missing'); END")
-        rejects { f.store().reserve(f.attempt) }
-        db.execSQL("DROP TRIGGER fail_generation_commit")
-        db.rawQuery("SELECT count(*) FROM generation_attempts", null).use { assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)) }
-        db.execSQL("PRAGMA synchronous=NORMAL")
-        rejects { f.store().reserve(f.attempt) }
-        db.execSQL("PRAGMA synchronous=FULL")
-        assertSame(GenerationReservation.Started, f.store().reserve(f.attempt))
+        rejects { store.reserve(f.attempt) }
+        assertFalse("production must quarantine the failed database object", db.isOpen)
+        val recovered = f.db.writableDatabase
+        assertNotSame(db, recovered)
+        assertSame(recovered, f.db.writableDatabase)
+        fun assertCounts(database: android.database.sqlite.SQLiteDatabase, attempts: Int) {
+            for ((table, expected) in listOf("generation_attempts" to attempts, "generation_commit_guard" to 0)) {
+                database.rawQuery("SELECT count(*) FROM $table", null).use {
+                    assertTrue(it.moveToFirst()); assertEquals(table, expected, it.getInt(0))
+                }
+            }
+        }
+        assertCounts(recovered, 0)
+        val observer = helper(f.context)
+        assertCounts(observer.readableDatabase, 0)
+        observer.close()
+        recovered.execSQL("DROP TRIGGER fail_generation_commit")
+        recovered.execSQL("PRAGMA synchronous=NORMAL")
+        rejects { store.reserve(f.attempt) }
+        assertTrue(recovered.isOpen)
+        assertSame(recovered, f.db.writableDatabase)
+        assertCounts(recovered, 0)
+        recovered.execSQL("PRAGMA synchronous=FULL")
+        assertSame(GenerationReservation.Started, store.reserve(f.attempt))
+        assertSame(recovered, f.db.writableDatabase)
+        assertCounts(recovered, 1)
+        assertTrue(store.reserve(f.attempt) is GenerationReservation.Existing)
+        f.db.close()
+        val reopened = helper(f.context)
+        assertCounts(reopened.readableDatabase, 1)
+        assertTrue(f.store(reopened).reserve(f.attempt) is GenerationReservation.Existing)
     }
 
     fun testRealOwnerRunToolAndHistoryAreRequired() {

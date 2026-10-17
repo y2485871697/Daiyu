@@ -45,6 +45,7 @@ class GenerationAttemptBinding(
 /**
  * Uses ONLY the injected application database, whose lifetime, private path, encryption/backup
  * policy and schema version belong to the host. [installSchema] must run in its migration.
+ * Transaction-end failure closes the borrowed database; recovery belongs to the host supplier.
  * No lazy database, network I/O, asset publication, logging, reset or automatic retry exists here.
  *
  * Tombstones deliberately have no cascading FK: deleting/recreating a message must not reopen
@@ -188,8 +189,12 @@ class SQLiteGenerationAttemptStore(
                 result = block(db)
                 db.setTransactionSuccessful()
             } finally {
-                // May throw on commit: Started is not returned until this succeeds.
-                db.endTransaction()
+                // Android can pop its transaction stack while a failed native COMMIT stays open.
+                // Quarantine that object; the host/helper must reopen on the next explicit call.
+                try { db.endTransaction() }
+                catch (failure: Exception) {
+                    try { db.close() } finally { throw failure }
+                }
             }
             return result
         } catch (_: Exception) {

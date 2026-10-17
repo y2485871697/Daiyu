@@ -150,7 +150,7 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
             found
         }
         mainThread { assertNotNull(current.window.decorView.findViewWithTag<android.view.View>("pet-settings-view")) }
-        backToChat(current) // Pet settings BackHandler returns to the actual SettingsHome.
+        backToPage(current, "page:设置") // Pet settings BackHandler returns to the actual SettingsHome.
         reveal("settings-row:模型功能", "设置").performClick()
         reveal("settings-row:辅助视觉模型", "模型功能").performClick()
         ui.waitUntil(timeoutMillis = 5_000) {

@@ -317,7 +317,9 @@ class PetApplicationHostTest : InstrumentationTestCase() {
         }
     }
 
-    fun testPausedMainIoRevocationFencesOldOpenReceiptAndEffectsWithoutCancellingNewOwner() {
+    fun testPausedMainIoRevocationFencesOldOpenReceiptAndEffectsWithoutCancellingNewOwner() = verifyPausedMainIoRevocationFencesOldOpenReceiptAndEffectsWithoutCancellingNewOwner()
+
+    private fun verifyPausedMainIoRevocationFencesOldOpenReceiptAndEffectsWithoutCancellingNewOwner() {
         val context = context()
         val oldTerminal = CountDownLatch(1); val releaseOld = CountDownLatch(1)
         val newEntered = CountDownLatch(1); val releaseNew = CountDownLatch(1)

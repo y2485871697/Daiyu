@@ -9,7 +9,9 @@ import kotlin.math.roundToInt
 
 @Suppress("DEPRECATION")
 class PetOverlayHostTest : InstrumentationTestCase() {
-    fun testOverlayChildWrapsInsteadOfFillingScreenAndRetainsDragRange() {
+    fun testOverlayChildWrapsInsteadOfFillingScreenAndRetainsDragRange() = verifyOverlayChildWrapsInsteadOfFillingScreenAndRetainsDragRange()
+
+    private fun verifyOverlayChildWrapsInsteadOfFillingScreenAndRetainsDragRange() {
         instrumentation.runOnMainSync {
             val context = instrumentation.targetContext
             val controller = PetController(InMemoryPetStore(), PetModelPort { _, _ -> PetCancel {} },

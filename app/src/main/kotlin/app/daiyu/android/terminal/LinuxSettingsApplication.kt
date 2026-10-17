@@ -56,7 +56,7 @@ class LinuxSettingsApplication private constructor(
     companion object {
         suspend fun android(
             context: Context,
-            catalog: TrustedLinuxCatalog = TrustedLinuxCatalog(File(context.filesDir, "trusted-linux-catalog"),
+            catalog: TrustedLinuxCatalog = TrustedLinuxCatalog(File(context.filesDir.canonicalFile, "trusted-linux-catalog"),
                 File(context.filesDir.canonicalFile, "linux-chroot-installations")),
         ): LinuxSettingsApplication {
             val snapshot = catalog.load()

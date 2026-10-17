@@ -120,16 +120,16 @@ class McpApprovalVisitActivityTest : WiredActivityTestCase() {
         host(activity, "setRetainedPage", "settings")
         host(activity, "setRetainedPage", "chat")
     }
-    private fun pauseResume() {
-        instrumentation.callActivityOnPause(activity)
-        instrumentation.callActivityOnResume(activity)
-    }
 
     fun testRetainedInputCannotResurrectAfterRouteSidebarOrPauseAndCannotReplaceANewVisit() {
-        val transitions: List<() -> Unit> = listOf(::routeRoundTrip, ::sidebarRoundTrip, ::pauseResume)
+        val transitions: List<(() -> Unit) -> Unit> = listOf(
+            { check -> mainThread { routeRoundTrip(); check() } },
+            { check -> mainThread { sidebarRoundTrip(); check() } },
+            { check -> realPauseResume(activity, atPause = check) },
+        )
         for (transition in transitions) {
             val stale = openInput()
-            mainThread { transition(); assertNull(visit()); stale(raw); assertNull(approval()); assertNull(host(activity, "getPrompt")) }
+            transition { assertNull(visit()); stale(raw); assertNull(approval()); assertNull(host(activity, "getPrompt")) }
             val fresh = openInput()
             mainThread {
                 val newVisit = visit(); val newInput = host(activity, "getPrompt")
@@ -158,12 +158,12 @@ class McpApprovalVisitActivityTest : WiredActivityTestCase() {
             assertUnsent()
         }
         val (fresh, freshVisit) = preview()
-        mainThread {
-            instrumentation.callActivityOnPause(activity)
+        realPauseResume(activity) {
             host(activity, "approveMcp", fresh, freshVisit)
             host(activity, "openMcpApproval")
             assertNull(approval()); assertNull(visit()); assertNull(host(activity, "getPrompt"))
-            instrumentation.callActivityOnResume(activity)
+        }
+        mainThread {
             host(activity, "approveMcp", fresh, freshVisit)
             assertNull(approval()); assertFalse(fresh.scope.isCurrent())
         }

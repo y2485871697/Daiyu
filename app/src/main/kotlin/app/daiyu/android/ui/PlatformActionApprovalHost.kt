@@ -93,7 +93,7 @@ import org.json.JSONObject
                 }
                 null -> Unit
             }
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("platform-action-preview-error")) }
             Button(enabled = editable && selected != null && text.isNotBlank() &&
                 !(selected == PlatformActionKind.WIFI && Build.VERSION.SDK_INT >= 29),
                 modifier = Modifier.testTag("platform-action-preview"), onClick = {

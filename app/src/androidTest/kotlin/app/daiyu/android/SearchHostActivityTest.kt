@@ -52,7 +52,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         awaitTag("search:conversation:${first.id.value}")
         node("search:conversation:${first.id.value}").assertTextContains("中文检索标题")
         assertEquals(before, fixture.database.exportBackup())
-        backToChat(activity)
+        backToPage(activity, "page:${text(R.string.history_page_title)}")
         page(R.string.history_page_title).assertExists()
         backToChat(activity)
         assertDraft("搜索前未发送草稿")
@@ -99,7 +99,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         node("search:query").performTextReplacement("没有这种记录")
         awaitTag("search:empty")
         node("search:error").assertDoesNotExist()
-        backToChat(activity)
+        backToPage(activity, "page:${text(R.string.history_page_title)}")
         page(R.string.history_page_title).assertExists()
         assertEquals(0, fixture.opens.get())
     }

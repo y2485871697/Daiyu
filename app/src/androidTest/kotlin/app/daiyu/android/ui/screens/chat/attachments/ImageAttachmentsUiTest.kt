@@ -105,11 +105,13 @@ class ImageAttachmentsUiTest : ComposeActivityTestCase() {
         val holder = ImageAttachmentsState(draft, listOf(image("kept")))
         val key = holder.state.value.ready.single().key
         val allowDecode = AtomicBoolean(false)
-        show(holder) { _, _ ->
-            if (!allowDecode.get()) throw IllegalStateException("test decode failure")
+        show(holder) { _, maxEdge ->
+            if (maxEdge == 2048 && !allowDecode.get()) throw IllegalStateException("test full-preview decode failure")
             ImageBitmap(8, 8)
         }
         node("image_attachments_thumbnail:${key.id}").performClick()
+        mainThread { assertEquals("thumbnail click must open the full preview", key, holder.state.value.preview) }
+        node("image_attachments_preview").assertIsDisplayed()
         val inDialog = androidx.compose.ui.test.hasAnyAncestor(androidx.compose.ui.test.hasTestTag("image_attachments_preview"))
         val failed = androidx.compose.ui.test.hasTestTag("image_attachments_preview_failed:${key.id}") and inDialog
         ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodes(failed).fetchSemanticsNodes().isNotEmpty() }

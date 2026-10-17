@@ -12,7 +12,7 @@ class TerminalActivityTest : WiredActivityTestCase() {
             val provider = (instrumentation.targetContext.applicationContext as ChatApplication).terminalProvider
             val pageOwner = MainActivity::class.java.getDeclaredField("terminalPageOwner")
                 .apply { isAccessible = true }.get(activity)
-            "provider=${provider.state.value.javaClass.simpleName} pageOwnerPresent=${pageOwner != null} " +
+            "provider=${provider.state.value.javaClass.simpleName} failure=${provider.initializationFailure} pageOwnerPresent=${pageOwner != null} " +
                 "finishing=${activity.isFinishing} destroyed=${activity.isDestroyed}"
         }
     }

@@ -218,19 +218,13 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         payload.put("inventory", inventoryJson(inventory))
         val raw = payload.toString()
         val result = JSONObject().put("format", "daiyu-neutral-complete").put("version", 5)
-            .put("sha256", PrivateBlobs.digest(raw.toByteArray(Charsets.UTF_8))).put("payload", raw).toString()
-        require(result.toByteArray(Charsets.UTF_8).size.toLong() <= MAX_PACKAGE)
+            .put("sha256", Utf8Payload.sha256(raw)).put("payload", raw).toString()
+        Utf8Payload.byteCount(result, MAX_PACKAGE)
         validate(result); return result
     }
     fun preflight(text: String): BackupInventory = validate(text).inventory
-    fun importPackage(source: InputStream): ImportResult {
-        // No ownership/close/mutation of the old source, and bounded reading before JSON allocation.
-        val bytes = java.io.ByteArrayOutputStream(); val buffer = ByteArray(8192)
-        while (true) { val n = source.read(buffer); if (n < 0) break
-            require(bytes.size().toLong() + n <= MAX_PACKAGE); bytes.write(buffer, 0, n) }
-        val decoder = Charsets.UTF_8.newDecoder().onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
-        return importPackage(decoder.decode(java.nio.ByteBuffer.wrap(bytes.toByteArray())).toString())
-    }
+    fun importPackage(source: InputStream): ImportResult =
+        importPackage(Utf8Payload.read(source, MAX_PACKAGE.toInt()))
     fun importPackage(text: String): ImportResult {
         val parsed = validate(text)
         val access = if (parsed.images.isEmpty()) null else requireNotNull(imageAssets) { "消息原图存储未接入；不能恢复图片引用" }
@@ -431,12 +425,12 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val version: Long, val columns: Map<String, List<String>>,
         val static: List<app.daiyu.android.storage.StaticGenerationOutput>)
     private fun validate(text: String): Parsed {
-        require(text.toByteArray(Charsets.UTF_8).size.toLong() <= MAX_PACKAGE)
+        Utf8Payload.byteCount(text, MAX_PACKAGE)
         val envelope = objectOf(text); fields(envelope, setOf("format", "version", "sha256", "payload"))
         val version = integer(envelope, "version")
         require(envelope.get("format") == "daiyu-neutral-complete" && version in 1L..5L)
         val schema = columnsFor(version)
-        val raw = string(envelope, "payload"); val id = PrivateBlobs.digest(raw.toByteArray(Charsets.UTF_8))
+        val raw = string(envelope, "payload"); val id = Utf8Payload.sha256(raw)
         require(id == string(envelope, "sha256")) { "备份摘要不匹配" }
         val payload = objectOf(raw)
         val payloadFields = setOf("text_backup", "tables", "config", "blobs", "excluded", "inventory")
@@ -447,7 +441,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         store.preflightBackup(string(payload, "text_backup"))
         val legacy = objectOf(string(payload, "text_backup"))
         require(legacy.getString("format") == "daiyu-neutral-text" && legacy.getInt("version") in 1..2)
-        val oldRaw = string(legacy, "payload"); require(PrivateBlobs.digest(oldRaw.toByteArray(Charsets.UTF_8)) == legacy.getString("sha256"))
+        val oldRaw = string(legacy, "payload"); require(Utf8Payload.sha256(oldRaw) == legacy.getString("sha256"))
         val old = objectOf(oldRaw); val conversations = old.getJSONArray("conversations"); val messages = old.getJSONArray("messages")
         require(conversations.length() <= 1000 && messages.length() <= 50000)
         require(legacy.getInt("conversation_count") == conversations.length() && legacy.getInt("message_count") == messages.length())
@@ -467,6 +461,8 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             val data = string(blob, "data"); require(data.length.toLong() <= (size + 2) / 3 * 4)
             val decoded = Base64.decode(data, Base64.NO_WRAP); require(decoded.size.toLong() == size && PrivateBlobs.digest(decoded) == hash)
             bytes[hash] = decoded
+            // This private parsed projection is never reserialized as the source package.
+            blob.remove("data")
         }
         val used = mutableSetOf<String>()
         val imageReferences = BackupImageManifest.References().apply { addRows(messages) }

@@ -4,6 +4,7 @@ import android.content.Context
 import app.daiyu.android.backup.NeutralBackupService
 import app.daiyu.android.context.DatabaseTransactions
 import app.daiyu.android.context.PrivateBlobs
+import app.daiyu.android.context.Utf8Payload
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ConversationDatabase
 import org.json.JSONArray
@@ -168,7 +169,7 @@ internal object FullPerformanceDataset {
             .put("mb_definition", "decimal_1000000_bytes").put("conversations", 1000).put("messages", messages)
             .put("text_bytes", textBytes).put("text_unit", "UTF-8 bytes of MessageBlock.Text.text")
             .put("tool_steps", tools).put("tool_step_definition", "completed_persisted_tool_block")
-            .put("text_backup_sha256", PrivateBlobs.digest(db.exportBackup().toByteArray(Charsets.UTF_8)))
+            .put("text_backup_sha256", Utf8Payload.sha256(db.exportBackup()))
             .put("blob_bytes", assets.sumOf { it.bytes }).put("attachments", encoded).toString()
         return Snapshot(PrivateBlobs.digest(manifest.toByteArray(Charsets.UTF_8)), manifest)
     }

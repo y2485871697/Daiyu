@@ -11,7 +11,6 @@ import java.nio.charset.CodingErrorAction
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.PosixFilePermissions
 import java.nio.file.attribute.UserPrincipal
@@ -39,9 +38,13 @@ import java.util.concurrent.locks.ReentrantLock
  */
 internal class R08PersistentJournal internal constructor(
     private val root: Path,
+    private val fs: R08PrivateFileSystem,
     private val fault: (WritePoint) -> Unit
 ) : R08VirtualDisplayJournal {
-    constructor(trustedPrivateRoot: Path) : this(trustedPrivateRoot, {})
+    constructor(trustedPrivateRoot: Path) : this(trustedPrivateRoot, StrictR08PrivateFileSystem, {})
+    internal constructor(trustedPrivateRoot: Path, fault: (WritePoint) -> Unit) :
+        this(trustedPrivateRoot, StrictR08PrivateFileSystem, fault)
+    internal constructor(trustedPrivateRoot: Path, fs: R08PrivateFileSystem) : this(trustedPrivateRoot, fs, {})
 
     internal enum class WritePoint {
         PENDING_CREATED, BEFORE_WRITE, BEFORE_FILE_SYNC, FILE_SYNCED,
@@ -56,7 +59,7 @@ internal class R08PersistentJournal internal constructor(
             if (!root.isAbsolute || root != root.normalize()) throw failure()
             checkAncestors(root)
             if (!Files.isDirectory(root, NOFOLLOW_LINKS) ||
-                Files.getPosixFilePermissions(root, NOFOLLOW_LINKS) != DIR_MODE) throw failure()
+                fs.permissions(root) != DIR_MODE) throw failure()
             Files.getOwner(root, NOFOLLOW_LINKS)
         } catch (_: Exception) {
             throw failure()
@@ -127,15 +130,14 @@ internal class R08PersistentJournal internal constructor(
             val lock = root.resolve(LOCK_NAME)
             val channel = if (!Files.exists(lock, NOFOLLOW_LINKS)) {
                 try {
-                    FileChannel.open(lock, setOf(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
-                        PosixFilePermissions.asFileAttribute(FILE_MODE))
+                    fs.openNew(lock, FILE_MODE)
                 } catch (_: java.nio.file.FileAlreadyExistsException) {
                     checkPrivate(lock, false)
-                    FileChannel.open(lock, StandardOpenOption.WRITE, NOFOLLOW_LINKS)
+                    fs.openExisting(lock, StandardOpenOption.WRITE, NOFOLLOW_LINKS)
                 }
             } else {
                 checkPrivate(lock, false)
-                FileChannel.open(lock, StandardOpenOption.WRITE, NOFOLLOW_LINKS)
+                fs.openExisting(lock, StandardOpenOption.WRITE, NOFOLLOW_LINKS)
             }
             channel.use {
                 checkPrivate(lock, false)
@@ -207,8 +209,7 @@ internal class R08PersistentJournal internal constructor(
         val pending = root.resolve(sequence(index) + ".pending")
         // No REPLACE_EXISTING. Under the lock neither name can legitimately exist.
         if (Files.exists(target, NOFOLLOW_LINKS) || Files.exists(pending, NOFOLLOW_LINKS)) throw failure()
-        FileChannel.open(pending, setOf(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
-            PosixFilePermissions.asFileAttribute(FILE_MODE)).use { channel ->
+        fs.openNew(pending, FILE_MODE).use { channel ->
             syncDirectory(root)
             fault(WritePoint.PENDING_CREATED)
             fault(WritePoint.BEFORE_WRITE)
@@ -219,7 +220,7 @@ internal class R08PersistentJournal internal constructor(
             fault(WritePoint.FILE_SYNCED)
         }
         fault(WritePoint.BEFORE_RENAME)
-        Files.move(pending, target, ATOMIC_MOVE)
+        fs.move(pending, target)
         fault(WritePoint.RENAMED)
         fault(WritePoint.BEFORE_DIRECTORY_SYNC)
         syncDirectory(root)
@@ -230,10 +231,10 @@ internal class R08PersistentJournal internal constructor(
         checkAncestors(path)
         if ((if (directory) !Files.isDirectory(path, NOFOLLOW_LINKS) else !Files.isRegularFile(path, NOFOLLOW_LINKS)) ||
             Files.getOwner(path, NOFOLLOW_LINKS) != owner ||
-            Files.getPosixFilePermissions(path, NOFOLLOW_LINKS) != (if (directory) DIR_MODE else FILE_MODE)) throw failure()
+            fs.permissions(path) != (if (directory) DIR_MODE else FILE_MODE)) throw failure()
     }
 
-    private fun readBounded(path: Path): ByteArray = FileChannel.open(path, StandardOpenOption.READ, NOFOLLOW_LINKS).use { channel ->
+    private fun readBounded(path: Path): ByteArray = fs.openExisting(path, StandardOpenOption.READ, NOFOLLOW_LINKS).use { channel ->
         val size = channel.size()
         if (size !in 40L..MAX_RECORD_BYTES.toLong()) throw failure()
         val buffer = ByteBuffer.allocate(size.toInt())
@@ -241,6 +242,15 @@ internal class R08PersistentJournal internal constructor(
         if (channel.read(ByteBuffer.allocate(1)) != -1) throw failure()
         buffer.array()
     }
+
+    private fun checkAncestors(path: Path) {
+        var cursor: Path? = path
+        while (cursor != null) {
+            if (fs.isSymbolicLink(cursor)) throw failure()
+            cursor = cursor.parent
+        }
+    }
+    private fun syncDirectory(path: Path) = fs.syncDirectory(path)
 
     companion object {
         private const val MAGIC = 0x52303831 // R081, format version 1
@@ -262,16 +272,6 @@ internal class R08PersistentJournal internal constructor(
 
         private fun failure() = IOException("R08 journal unavailable or conflicting")
         private fun sequence(value: Long) = value.toString().padStart(20, '0')
-        private fun checkAncestors(path: Path) {
-            var cursor: Path? = path
-            while (cursor != null) {
-                if (Files.isSymbolicLink(cursor)) throw failure()
-                cursor = cursor.parent
-            }
-        }
-        private fun syncDirectory(path: Path) {
-            FileChannel.open(path, StandardOpenOption.READ, NOFOLLOW_LINKS).use { it.force(true) }
-        }
         private fun utf8(value: String): ByteArray {
             // Reject malformed UTF-16 rather than silently persisting replacement characters.
             val buffer = Charsets.UTF_8.newEncoder().onMalformedInput(CodingErrorAction.REPORT)

@@ -12,8 +12,6 @@ import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
-import java.nio.file.StandardOpenOption
-import java.nio.file.attribute.PosixFilePermissions
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
@@ -45,6 +43,7 @@ class BrowserCookieBackend(
     private val envPath: (BrowserTabLease, Path) -> String,
     private val authorizeName: (BrowserTabLease, String, String) -> Boolean,
     private val io: Executor = defaultIo(),
+    private val envFileWriter: CookieEnvFileWriter = PosixCookieEnvFileWriter,
 ) : AsyncBrowserBackend, AutoCloseable {
     private val paths = BrowserPathMapper(privateRoot)
     private val lock = Any()
@@ -193,11 +192,11 @@ class BrowserCookieBackend(
                 val file = paths.privateFile("$id.env")
                 staging = part
                 target = file
-                Files.createFile(part, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")))
+                envFileWriter.create(part)
                 paths.recheckPrivate(part)
-                Files.newOutputStream(part, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS).use { it.write(bytes) }
+                envFileWriter.write(part, bytes)
                 live()
-                check(Files.getPosixFilePermissions(part, LinkOption.NOFOLLOW_LINKS) == PosixFilePermissions.fromString("rw-------"))
+                envFileWriter.verify(part)
                 paths.recheckPrivate(part)
                 paths.recheckPrivate(file)
                 Files.move(part, file, StandardCopyOption.ATOMIC_MOVE)

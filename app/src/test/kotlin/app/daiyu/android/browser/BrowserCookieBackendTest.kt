@@ -3,6 +3,8 @@ package app.daiyu.android.browser
 import app.daiyu.android.browser.bridge.BrowserCommand
 import app.daiyu.android.browser.cookie.BrowserCookieBackend
 import app.daiyu.android.browser.cookie.CookieStore
+import app.daiyu.android.browser.cookie.CookieEnvFileWriter
+import app.daiyu.android.browser.cookie.PosixCookieEnvFileWriter
 import app.daiyu.android.browser.runtime.UiDispatcher
 import app.daiyu.android.browser.session.*
 import org.junit.Assert.*
@@ -15,6 +17,16 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
 
 class BrowserCookieBackendTest {
+    // Bytes and cleanup only; Linux's default writer still verifies real POSIX 0600.
+    private object LifecycleFileWriter : CookieEnvFileWriter {
+        override fun create(part: Path) { Files.createFile(part) }
+        override fun write(part: Path, bytes: ByteArray) {
+            Files.newOutputStream(part, java.nio.file.StandardOpenOption.WRITE, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                .use { it.write(bytes) }
+        }
+        override fun verify(part: Path) { check(Files.isRegularFile(part, java.nio.file.LinkOption.NOFOLLOW_LINKS)) }
+    }
+
     private class Queue : Executor {
         val tasks = ArrayDeque<Runnable>()
         override fun execute(command: Runnable) { tasks.add(command) }
@@ -48,7 +60,8 @@ class BrowserCookieBackendTest {
             ui.drain()
         }
     }
-    private class Fixture(access: BrowserAccess = BrowserAccess.FULL) : AutoCloseable {
+    private class Fixture(access: BrowserAccess = BrowserAccess.FULL,
+        envFileWriter: CookieEnvFileWriter? = null) : AutoCloseable {
         val owner = BrowserOwner("cookie-main", BrowserOwnerKind.MAIN)
         val child = BrowserOwner("cookie-child", BrowserOwnerKind.CHILD)
         val sessions = BrowserSessionRegistry().apply {
@@ -63,13 +76,22 @@ class BrowserCookieBackendTest {
         var page: String? = "https://example.com/private?not-returned"
         var allowed: (BrowserTabLease, String) -> Boolean = { _, _ -> true }
         var duringMapping: (() -> Unit)? = null
+        val supportsPosix = Files.getFileStore(root).supportsFileAttributeView("posix")
         val backend = BrowserCookieBackend(sessions, ui, store, { page }, root,
-            { _, path -> duringMapping?.invoke(); path.toString() },
-            { lease, _, name -> allowed(lease, name) }, io)
+            { _, path -> duringMapping?.invoke(); "/workspace/cookie-test/${path.fileName}" },
+            { lease, _, name -> allowed(lease, name) }, io,
+            envFileWriter ?: if (supportsPosix) PosixCookieEnvFileWriter else LifecycleFileWriter)
         fun call(action: String = "get_cookies", args: Map<String, Any?> = emptyMap(), tab: BrowserTabLease = lease) =
             backend.execute(BrowserCommand(action, tab.tabId, args), tab)
         fun pump() { ui.drain(); io.drain(); ui.drain(); io.drain() }
         fun countFiles(): Long = Files.list(root).use { it.count() }
+        fun hostFile(mapped: String): Path {
+            val prefix = "/workspace/cookie-test/"
+            require(mapped.startsWith(prefix))
+            val name = mapped.removePrefix(prefix)
+            require(name.isNotEmpty() && name != "." && name != ".." && '/' !in name && '\\' !in name)
+            return root.resolve(name)
+        }
         override fun close() {
             backend.close(); pump()
             Files.list(root).use { paths -> paths.forEach { Files.deleteIfExists(it) } }
@@ -95,11 +117,28 @@ class BrowserCookieBackendTest {
             assertEquals(listOf("https://example.com/"), f.store.reads)
             assertTrue(receipt.text.contains("Names: sid"))
             assertFalse(receipt.text.contains("O'Brien")); assertFalse(receipt.text.contains("private?"))
-            val file = java.nio.file.Paths.get(receipt.filePath!!)
+            val file = f.hostFile(receipt.filePath!!)
             assertEquals("export BROWSER_COOKIE_0_NAME='sid'\nexport BROWSER_COOKIE_0_VALUE='O'\\''Brien'\n", Files.readString(file))
-            assertEquals(PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(file))
+            if (f.supportsPosix) {
+                assertEquals(PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(file))
+            } else {
+                assertTrue(Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            }
             f.backend.cancel(f.lease); f.io.drain()
             assertEquals(0L, f.countFiles())
+        }
+    }
+    @Test fun strictWriterRetainsPrivatePermissionsOrFailsClosedOnUnsupportedHost() {
+        Fixture(envFileWriter = PosixCookieEnvFileWriter).use { f ->
+            val result = f.call()
+            f.pump()
+            if (f.supportsPosix) {
+                val file = f.hostFile(result.join().filePath!!)
+                assertEquals(PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(file))
+            } else {
+                failed(result)
+                assertEquals(0L, f.countFiles())
+            }
         }
     }
     @Test fun keywordsAreStrictAndMatchOnlyAuthorizedNames() {
@@ -243,10 +282,10 @@ class BrowserCookieBackendTest {
         Fixture().use { f ->
             val seen = mutableListOf<Pair<String, String>>()
             val backend = BrowserCookieBackend(f.sessions, f.ui, f.store, { f.page }, f.root,
-                { _, path -> path.toString() }, { _, origin, name ->
+                { _, path -> "/workspace/cookie-test/${path.fileName}" }, { _, origin, name ->
                     seen.add(origin to name)
                     origin == "https://example.com/" && name == "sid"
-                }, f.io)
+                }, f.io, if (f.supportsPosix) PosixCookieEnvFileWriter else LifecycleFileWriter)
             try {
                 val result = backend.execute(BrowserCommand("get_cookies", f.lease.tabId), f.lease)
                 f.pump()
@@ -274,7 +313,7 @@ class BrowserCookieBackendTest {
     }
 
     @Test fun closeReceiptWaitsForPrivateFileDeletionAndForNativeCookieCallback() {
-        Fixture().use { f ->
+        Fixture(envFileWriter = LifecycleFileWriter).use { f ->
             val offload = f.call()
             f.pump()
             assertNotNull(offload.join().filePath)
@@ -298,7 +337,7 @@ class BrowserCookieBackendTest {
     }
 
     @Test fun closeFromInsideWriterCannotDrainBeforeWriterAndItsLatePublishReturn() {
-        Fixture().use { f ->
+        Fixture(envFileWriter = LifecycleFileWriter).use { f ->
             var inspected = false
             f.duringMapping = {
                 inspected = true
@@ -315,10 +354,10 @@ class BrowserCookieBackendTest {
     }
 
     @Test fun failedDeletionRetainsReceiptUntilExplicitCleanupRetryWithoutCookieReplay() {
-        Fixture().use { f ->
+        Fixture(envFileWriter = LifecycleFileWriter).use { f ->
             val result = f.call()
             f.pump()
-            val file = java.nio.file.Paths.get(result.join().filePath!!)
+            val file = f.hostFile(result.join().filePath!!)
             Files.delete(file)
             Files.createDirectory(file)
             val obstruction = Files.write(file.resolve("obstruction"), byteArrayOf(1))

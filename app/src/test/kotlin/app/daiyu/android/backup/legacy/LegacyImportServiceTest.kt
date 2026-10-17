@@ -17,7 +17,6 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import java.io.ByteArrayInputStream
 import java.io.File
-import java.util.UUID
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36])
@@ -26,7 +25,7 @@ class LegacyImportServiceTest {
     private lateinit var db: SQLiteDatabase
     private lateinit var service: LegacyImportService
     private lateinit var context: Context
-    private val prefix = "legacy-r12-test-${UUID.randomUUID()}-"
+    private val prefix = "li-" // The Robolectric dataDir already isolates each method.
 
     @Before fun setUp() {
         context = object : ContextWrapper(RuntimeEnvironment.getApplication()) {

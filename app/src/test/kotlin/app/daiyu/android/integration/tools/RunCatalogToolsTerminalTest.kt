@@ -15,12 +15,13 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Production parent dispatch/close path, real Runner-issued owner, fake transport only. */
 class RunCatalogToolsTerminalTest {
+    private val hostCwd = File(System.getProperty("java.io.tmpdir")).absoluteFile.toPath().normalize().toFile()
     private val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
 
     private fun plan() = TerminalPtyPlan(message.conversationId, "session", "run", "environment", "generation",
-        TerminalPtyLaunch.Android(listOf("/system/bin/sh"), emptyMap(), File("/tmp")),
-        File("/tmp/catalog-terminal-test"), "scope", listOf(
+        TerminalPtyLaunch.Android(listOf("/system/bin/sh"), emptyMap(), hostCwd),
+        File(hostCwd, "catalog-terminal-test"), "scope", listOf(
             TerminalPtyStep.Open("open"),
             TerminalPtyStep.Input("input", "host_input", 41, "approved\n".toByteArray()),
             TerminalPtyStep.Resize("resize", "host_resize", 90, 30, 100),

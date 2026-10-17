@@ -22,15 +22,16 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Host-only contracts: no Context, actual PTY, model, network, installation, or dispatcher. */
 class ControllerTerminalPreparationTest {
+    private val hostCwd = File(System.getProperty("java.io.tmpdir")).absoluteFile.toPath().normalize().toFile()
     private val conversation = Conversation(ConversationId("conversation"), "title", "", 0)
     private val draft = TerminalDraftSnapshot(TerminalDraftOwner(conversation.id, 2, 3), "exact draft")
     private val assistant = AssistantProfile("profile", "profile name", "frozen instructions")
     private val provider = ProviderSnapshot.capture(ModelSettings("https://example.invalid", "fixture-model", "synthetic-key", false))
     private fun plan(
-        launch: TerminalPtyLaunch = TerminalPtyLaunch.Android(listOf("/system/bin/sh"), mapOf("PATH" to "/system/bin"), File("/tmp")),
+        launch: TerminalPtyLaunch = TerminalPtyLaunch.Android(listOf("/system/bin/sh"), mapOf("PATH" to "/system/bin"), hostCwd),
         bytes: ByteArray = "printf approved\n".toByteArray(),
     ) = TerminalPtyPlan(conversation.id, "session", "run", "environment", "generation", launch,
-        File("/tmp/terminal-preparation-journal"), "scope", listOf(
+        File(hostCwd, "terminal-preparation-journal"), "scope", listOf(
             TerminalPtyStep.Open("open"), TerminalPtyStep.Input("input", "request", 17, bytes),
             TerminalPtyStep.Resize("resize", "resize_request", 4, 30, 100),
             TerminalPtyStep.Interrupt("interrupt", "interrupt_request", 5),
@@ -122,7 +123,7 @@ class ControllerTerminalPreparationTest {
         val environment = mutableMapOf("PATH" to "/system/bin", "SPECIAL" to "a\nb")
         val bytes = byteArrayOf(0, 13, 10, -1)
         val originalBytes = bytes.copyOf()
-        val frozenPlan = plan(TerminalPtyLaunch.Android(arguments, environment, File("/tmp")), bytes)
+        val frozenPlan = plan(TerminalPtyLaunch.Android(arguments, environment, hostCwd), bytes)
         val f = Fixture(frozenPlan, assistant.copy(enabledSkillIds = skills))
         val p = f.preparation
         skills.add("later")
@@ -163,8 +164,8 @@ class ControllerTerminalPreparationTest {
 
     @Test fun reusesFinitePlanValidationRatherThanBroadCommandGrant() {
         fun build(steps: List<TerminalPtyStep>) = TerminalPtyPlan(conversation.id, "session", "run",
-            "environment", "generation", TerminalPtyLaunch.Android(listOf("/system/bin/sh"), emptyMap(), File("/tmp")),
-            File("/tmp/journal"), "scope", steps)
+            "environment", "generation", TerminalPtyLaunch.Android(listOf("/system/bin/sh"), emptyMap(), hostCwd),
+            File(hostCwd, "journal"), "scope", steps)
         listOf(emptyList(), listOf(TerminalPtyStep.Input("input", "request", 0, byteArrayOf(1))),
             listOf(TerminalPtyStep.Open("open")) + (1..64).map { TerminalPtyStep.Interrupt("step_$it", "request_$it", it.toLong()) }
         ).forEach { steps ->
@@ -192,7 +193,7 @@ class ControllerTerminalPreparationTest {
         assertTrue(effectText.endsWith(f.plan.effects.getValue("input").change))
         val all = sections.joinToString("\n") { it.text }
         assertTrue(all.contains("argv[0]=\"/system/bin/sh\""))
-        assertTrue(all.contains("cwd=\"/tmp\""))
+        assertTrue(all.contains("cwd=${org.json.JSONObject.quote(hostCwd.path)}"))
         assertTrue(all.contains("\"PATH\"=\"/system/bin\""))
         assertTrue(all.contains("id=tail offset=16384 limit=21"))
         assertTrue(all.contains("inputSequence=17"))
@@ -206,7 +207,7 @@ class ControllerTerminalPreparationTest {
 
     @Test fun presentationPagesDoNotSplitUnicodeScalarsOrDropLongArgumentSuffixes() {
         val argument = "x".repeat(4086) + "\uD83D\uDE42".repeat(100) + "ARGUMENT-END"
-        val f = Fixture(plan(TerminalPtyLaunch.Android(listOf("/system/bin/sh", argument), emptyMap(), File("/tmp"))))
+        val f = Fixture(plan(TerminalPtyLaunch.Android(listOf("/system/bin/sh", argument), emptyMap(), hostCwd)))
         val pages = terminalApprovalSections(f.preparation).filter { it.id.startsWith("terminal-argv-1-") }
         assertTrue(pages.size > 1)
         assertEquals("argv[1]=${org.json.JSONObject.quote(argument)}", pages.joinToString("") { it.text })

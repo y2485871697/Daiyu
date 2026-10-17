@@ -34,6 +34,7 @@ class ControllerVirtualDisplayRuntimeTest {
     private class Fixture : AutoCloseable {
         val base: Path = Files.createTempDirectory("r08-runtime-").toRealPath()
         val root: Path = base.resolve("leases")
+        val fs = R08HostFileSystemFixture(base)
         val gate = Semaphore(1)
         val owner = runnerOwner(Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
@@ -42,10 +43,12 @@ class ControllerVirtualDisplayRuntimeTest {
             R08VirtualDisplayWrite("initialize", R08VirtualDisplayAction.Initialize))
         val executor = Executors.newSingleThreadExecutor()
         fun plan(generation: String) = R08VirtualDisplayPlan.prepare(owner, capabilities, generation, writes)
-        fun store(fault: (Mutation, WritePoint) -> Unit = { _, _ -> }) = LeaseStore({ root }, gate, fault)
+        fun store(fault: (Mutation, WritePoint) -> Unit = { _, _ -> }) = LeaseStore({ root }, gate, fs, fault)
         fun <T> work(block: () -> T): T = executor.submit<T> { block() }.get(10, TimeUnit.SECONDS)
         override fun close() {
             executor.shutdownNow()
+            check(executor.awaitTermination(10, TimeUnit.SECONDS))
+            fs.close()
             // Test-only deletion after references stop executing, never a production recovery path.
             Files.walk(base).use { paths -> paths.sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) } }
         }
@@ -105,13 +108,30 @@ class ControllerVirtualDisplayRuntimeTest {
     private fun normalWire() = Wire { if (it.getString("op") == "receipt") miss() else shutdownSuccess() }
     private fun files(root: Path): Map<String, List<Byte>> = if (!Files.exists(root)) emptyMap() else Files.walk(root).use { paths ->
         paths.filter { Files.isRegularFile(it) && it.fileName.toString() != "lease.lock" }.toList().associate {
-            root.relativize(it).toString() to Files.readAllBytes(it).toList()
+            root.relativize(it).joinToString("/") { part -> part.toString() } to Files.readAllBytes(it).toList()
         }
     }
     private fun rejected(block: () -> Unit) {
         val error = assertThrows(IOException::class.java) { block() }
         assertEquals("virtual_display_runtime_unknown", error.message)
         assertNull(error.cause)
+    }
+
+    @Test fun unavailablePrivateStoragePrimitivesFailClosedWithoutRetry() = Fixture().use { f ->
+        var calls = 0
+        val unsupported = object : R08PrivateFileSystem by f.fs {
+            override fun syncDirectory(path: Path) {
+                calls++
+                throw UnsupportedOperationException("no directory barrier")
+            }
+        }
+        val store = LeaseStore({ f.root }, f.gate, unsupported)
+        rejected { store.reserve(f::plan) }
+        assertEquals(1, calls)
+        assertEquals(0, f.gate.availablePermits())
+        rejected { store.reserve(f::plan) }
+        assertEquals(1, calls)
+        assertFalse(Files.exists(f.root.resolve("lease.lock")))
     }
 
     @Test fun leaseAndJournalAreDurableAndProcessGateRejectsBeforeAnyExecution() = Fixture().use { f ->
@@ -126,16 +146,16 @@ class ControllerVirtualDisplayRuntimeTest {
             WritePoint.PENDING_CREATED, WritePoint.FILE_SYNCED, WritePoint.PUBLISHED, WritePoint.DIRECTORY_SYNCED)
         assertEquals(completed, stages.filter { it in completed })
         assertEquals(0, f.gate.availablePermits())
-        assertEquals(PosixFilePermissions.fromString("rwx------"), Files.getPosixFilePermissions(f.root))
+        assertEquals(PosixFilePermissions.fromString("rwx------"), f.fs.permissions(f.root))
         val record = lease.directory.resolve("claim.event")
-        assertEquals(PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(record))
+        assertEquals(PosixFilePermissions.fromString("rw-------"), f.fs.permissions(record))
         assertFalse(Files.exists(lease.directory.resolve("claim.pending")))
         rejected { f.store().reserve(f::plan) }
         assertTrue(lease.durable) // same-process gate check only; OS exclusion is tested in a child JVM
         val intent = lease.plan.intent("actual-call", lease.plan.writes.first())
         assertEquals(R08VirtualDisplayPermit.EXECUTE_ONCE, lease.journal.claim(intent))
         assertEquals(R08VirtualDisplayPermit.LOOKUP_ONLY,
-            R08PersistentJournal(lease.directory.resolve("journal")).claim(intent))
+            R08PersistentJournal(lease.directory.resolve("journal"), f.fs).claim(intent))
         lease.releaseAfterDrain()
         assertFalse(lease.durable)
         assertEquals(1, f.gate.availablePermits())
@@ -261,11 +281,11 @@ class ControllerVirtualDisplayRuntimeTest {
     @Test fun symlinkRootIsNeverFollowedOrRepermissioned() = Fixture().use { f ->
         val victim = f.base.resolve("untouched")
         Files.createDirectory(victim)
-        val originalMode = Files.getPosixFilePermissions(victim)
-        Files.createSymbolicLink(f.root, victim)
+        val originalMode = f.fs.permissions(victim)
+        f.fs.createSymbolicLink(f.root, victim)
         rejected { f.store().reserve(f::plan) }
-        assertTrue(Files.isSymbolicLink(f.root))
-        assertEquals(originalMode, Files.getPosixFilePermissions(victim))
+        assertTrue(f.fs.isSymbolicLink(f.root))
+        assertEquals(originalMode, f.fs.permissions(victim))
         assertEquals(0L, Files.list(victim).use { it.count() })
     }
 
@@ -500,7 +520,7 @@ class ControllerVirtualDisplayRuntimeTest {
             val directory = f.root.resolve("generation-${approvedPlan.generation}")
             val before = files(directory)
             assertEquals(R08VirtualDisplayPermit.LOOKUP_ONLY,
-                R08PersistentJournal(directory.resolve("journal")).claim(intent))
+                R08PersistentJournal(directory.resolve("journal"), f.fs).claim(intent))
             assertEquals(before, files(directory))
             assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
                 f.work { session.releaseInitializedOnceOnWorker(cleanup, true) })

@@ -18,7 +18,6 @@ import java.nio.channels.FileLock
 import java.nio.file.Files
 import java.nio.file.LinkOption.NOFOLLOW_LINKS
 import java.nio.file.Path
-import java.nio.file.StandardCopyOption.ATOMIC_MOVE
 import java.nio.file.StandardOpenOption.*
 import java.nio.file.attribute.PosixFilePermissions
 import java.nio.file.attribute.UserPrincipal
@@ -223,6 +222,7 @@ internal object ControllerVirtualDisplayRuntime {
      */
     internal class LeaseStore(private val rootProvider: () -> Path,
                               private val processGate: Semaphore = productionGate,
+                              private val fs: R08PrivateFileSystem = StrictR08PrivateFileSystem,
                               private val fault: (Mutation, WritePoint) -> Unit = { _, _ -> }) {
         private var attempted = false
         private var root: Path? = null
@@ -240,10 +240,10 @@ internal object ControllerVirtualDisplayRuntime {
             fault(Mutation.RESERVE, WritePoint.BEFORE_RESERVE_IO)
             val base = rootProvider()
             check(base.isAbsolute && base.normalize() == base) { FAILURE }
-            checkAncestors(base.parent)
+            checkAncestors(base.parent, fs)
             owner = Files.getOwner(base.parent, NOFOLLOW_LINKS)
             if (!Files.exists(base, NOFOLLOW_LINKS)) {
-                Files.createDirectory(base, PosixFilePermissions.asFileAttribute(DIR_MODE))
+                fs.createDirectory(base, DIR_MODE)
                 sync(base.parent, Mutation.RESERVE)
             }
             root = base
@@ -251,10 +251,10 @@ internal object ControllerVirtualDisplayRuntime {
             val lockPath = base.resolve("lease.lock")
             fault(Mutation.RESERVE, WritePoint.BEFORE_LOCK_OPEN)
             channel = if (!Files.exists(lockPath, NOFOLLOW_LINKS))
-                FileChannel.open(lockPath, setOf(CREATE_NEW, WRITE), PosixFilePermissions.asFileAttribute(FILE_MODE))
+                fs.openNew(lockPath, FILE_MODE)
             else {
                 checkPrivate(lockPath, false)
-                FileChannel.open(lockPath, WRITE, NOFOLLOW_LINKS)
+                fs.openExisting(lockPath, WRITE, NOFOLLOW_LINKS)
             }
             checkPrivate(lockPath, false)
             fault(Mutation.RESERVE, WritePoint.BEFORE_LOCK)
@@ -267,15 +267,15 @@ internal object ControllerVirtualDisplayRuntime {
             val plan = prepare(generation)
             check(plan.generation == generation) { FAILURE }
             val directory = base.resolve("generation-$generation")
-            Files.createDirectory(directory, PosixFilePermissions.asFileAttribute(DIR_MODE))
+            fs.createDirectory(directory, DIR_MODE)
             sync(base, Mutation.RESERVE)
             fault(Mutation.RESERVE, WritePoint.DIRECTORY_CREATED)
             val journalRoot = directory.resolve("journal")
-            Files.createDirectory(journalRoot, PosixFilePermissions.asFileAttribute(DIR_MODE))
+            fs.createDirectory(journalRoot, DIR_MODE)
             sync(journalRoot, Mutation.RESERVE)
             sync(directory, Mutation.RESERVE)
             fault(Mutation.RESERVE, WritePoint.JOURNAL_CREATED)
-            val journal = R08PersistentJournal(journalRoot)
+            val journal = R08PersistentJournal(journalRoot, fs)
             val record = record(plan)
             publish(directory, "claim", record, Mutation.RESERVE)
             DurableLease(this, directory, record, plan, journal).also { current = it }
@@ -323,7 +323,7 @@ internal object ControllerVirtualDisplayRuntime {
             val pending = directory.resolve("$name.pending")
             val target = directory.resolve("$name.event")
             check(!Files.exists(target, NOFOLLOW_LINKS) && !Files.exists(pending, NOFOLLOW_LINKS)) { FAILURE }
-            FileChannel.open(pending, setOf(CREATE_NEW, WRITE), PosixFilePermissions.asFileAttribute(FILE_MODE)).use {
+            fs.openNew(pending, FILE_MODE).use {
                 sync(directory, mutation) // durable evidence exists even if the subsequent write is interrupted
                 fault(mutation, WritePoint.PENDING_CREATED)
                 val buffer = ByteBuffer.wrap(bytes)
@@ -332,7 +332,7 @@ internal object ControllerVirtualDisplayRuntime {
                 fault(mutation, WritePoint.FILE_SYNCED)
             }
             fault(mutation, WritePoint.BEFORE_ATOMIC_MOVE)
-            Files.move(pending, target, ATOMIC_MOVE) // same directory; NEVER replace/nonatomic fallback
+            fs.move(pending, target) // same directory; NEVER replace/nonatomic fallback
             fault(mutation, WritePoint.PUBLISHED)
             sync(directory, mutation)
             fault(mutation, WritePoint.DIRECTORY_SYNCED)
@@ -343,11 +343,11 @@ internal object ControllerVirtualDisplayRuntime {
         }
         private fun sync(path: Path, mutation: Mutation) {
             fault(mutation, WritePoint.BEFORE_DIRECTORY_FORCE)
-            FileChannel.open(path, READ, NOFOLLOW_LINKS).use { it.force(true) }
+            fs.syncDirectory(path)
         }
         private fun read(path: Path): ByteArray {
             checkPrivate(path, false)
-            return FileChannel.open(path, READ, NOFOLLOW_LINKS).use {
+            return fs.openExisting(path, READ, NOFOLLOW_LINKS).use {
                 check(it.size() in 1L..512L) { FAILURE }
                 val bytes = ByteBuffer.allocate(it.size().toInt())
                 while (bytes.hasRemaining()) check(it.read(bytes) > 0) { FAILURE }
@@ -356,11 +356,11 @@ internal object ControllerVirtualDisplayRuntime {
             }
         }
         private fun checkPrivate(path: Path, directory: Boolean) {
-            checkAncestors(path.parent)
-            check(!Files.isSymbolicLink(path) &&
+            checkAncestors(path.parent, fs)
+            check(!fs.isSymbolicLink(path) &&
                 (if (directory) Files.isDirectory(path, NOFOLLOW_LINKS) else Files.isRegularFile(path, NOFOLLOW_LINKS)) &&
                 Files.getOwner(path, NOFOLLOW_LINKS) == owner &&
-                Files.getPosixFilePermissions(path, NOFOLLOW_LINKS) == (if (directory) DIR_MODE else FILE_MODE)) { FAILURE }
+                fs.permissions(path) == (if (directory) DIR_MODE else FILE_MODE)) { FAILURE }
         }
         override fun toString() = "R08LeaseStore(private)"
     }
@@ -390,10 +390,10 @@ internal object ControllerVirtualDisplayRuntime {
         if (e is InterruptedException) Thread.currentThread().interrupt()
         throw IOException(FAILURE) // no path, owner identity, response, credential, or chained cause
     }
-    private fun checkAncestors(path: Path) {
+    private fun checkAncestors(path: Path, fs: R08PrivateFileSystem) {
         var next: Path? = path
         while (next != null) {
-            check(!Files.isSymbolicLink(next) && Files.isDirectory(next, NOFOLLOW_LINKS)) { FAILURE }
+            check(!fs.isSymbolicLink(next) && Files.isDirectory(next, NOFOLLOW_LINKS)) { FAILURE }
             next = next.parent
         }
     }

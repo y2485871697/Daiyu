@@ -29,6 +29,8 @@ internal class ControllerGenerationResources(
     private val accountDatabase: () -> SQLiteDatabase,
     private val currentAccountScope: () -> String?,
     private val privateMediaRoot: File,
+    // Explicit account-owner opt-in. Never inject a boolean/host policy without its transport.
+    private val downloadTransport: GenerationPublicNetworkHttp? = null,
 ) {
     init { require(accountScope.isNotBlank() && accountScope.length <= 200) }
     private val retainedAssets = mutableMapOf<GenerationAssetFence, MessageGenerationAssets>()
@@ -152,15 +154,19 @@ internal class ControllerGenerationResources(
         return ControllerGenerationOutputReader(::database, owner, assets(fence), fence)
     }
 
+    /** The leaf always receives a matched transport/policy pair. An extra parent policy may only
+     * narrow it; it cannot enable URL downloads when no secure transport was explicitly supplied.
+     * Owner, one-shot approval and reviewed exact hosts remain enforced by the original token.
+     */
+    fun generationNetwork(additional: GenerationDownloadAuthorization? = null): GenerationDownloadNetworkBinding {
+        val transport = downloadTransport ?: return GenerationDownloadNetworkBinding.denied()
+        return GenerationDownloadNetworkBinding.publicNetwork(transport, additional)
+    }
+
     companion object {
-        /** No real connect-time DNS-pinning download adapter exists at this integration boundary.
-         * Exact host allowlisting or InetAddress pre-resolution is NOT such an adapter. Thus URL
-         * downloads, INCLUDING authenticated video content URLs, are unavailable by default.
-         * Inline image bytes can still use the existing client. A future audited adapter must be
-         * paired with a transport enforcing resolved-address pinning and no redirects/retries.
-         */
+        /** Default remains fail-closed until the account owner injects the dedicated transport. */
         val DENY_DOWNLOADS = GenerationDownloadAuthorization { _, _ -> false }
-        const val DOWNLOAD_STATUS = "URL 下载（含视频内容 URL）未启用：尚无经过审计的连接级安全适配器。"
+        const val DOWNLOAD_STATUS = "URL 下载须显式接入专用公网连接适配器，并保留本次生成的 owner 与下载授权。"
     }
 }
 

@@ -3,6 +3,7 @@ package app.daiyu.android
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.*
+import app.daiyu.android.domain.tools.ToolDefinition
 import app.daiyu.android.integration.tools.*
 import app.daiyu.android.media.GenerationAssetOwner
 import app.daiyu.android.media.GenerationAssetFence

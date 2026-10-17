@@ -75,7 +75,6 @@ import app.daiyu.android.ui.actions.PausedSupplementDraft
 import app.daiyu.android.ui.actions.SupplementEditor
 import app.daiyu.android.ui.screens.conversation.ChildTaskRecordsScreen
 import app.daiyu.android.ui.screens.conversation.ConversationExportScreen
-import app.daiyu.android.model.ProviderRequestOptions
 import app.daiyu.android.storage.EditingSettings
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.ui.FeatureRoute
@@ -569,6 +568,11 @@ class MainActivity : ComponentActivity() {
                 reconnectSettingsPageOwner = null
             }
             if (value != retainedPageState) { stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationOutputs(); cancelVirtualDisplayEditor() }
+            if (value != "session-gateway") {
+                gatewayOwner?.revoke(); gatewayOwner = null
+                gatewayEditing = null; gatewayDraft = null
+                gatewayReplacementAuthorized = false; gatewayError = null
+            }
             if (value != "generation-settings") {
                 generationSettingsVisit?.active?.set(false)
                 generationSettingsVisit = null
@@ -728,6 +732,11 @@ class MainActivity : ComponentActivity() {
     private var modelError by mutableStateOf<String?>(null)
     private var editingCatalogIdentity by mutableStateOf<String?>(null)
     private var modelEditingOwner by mutableStateOf<Any?>(null)
+    private var gatewayOwner by mutableStateOf<ModelSettingsSaveOwner?>(null)
+    private var gatewayEditing: EditingSettings? = null
+    private var gatewayDraft by mutableStateOf<app.daiyu.android.model.sessiongateway.SessionGatewayRule?>(null)
+    private var gatewayError by mutableStateOf<String?>(null)
+    private var gatewayReplacementAuthorized by mutableStateOf(false)
     private var chatModelPicker by mutableStateOf<ChatModelPickerState?>(null)
     private var chatModelSettings: ModelSettings? = null
     private var chatModelSession: LocalCatalogChatModelPickerSession? = null
@@ -817,7 +826,7 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings" -> retainedPage = "settings"
+                        "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway" -> retainedPage = "settings"
                         "pet-model-settings" -> retainedPage = "pet-settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
@@ -995,7 +1004,31 @@ class MainActivity : ComponentActivity() {
                         isCurrent = { activityUsable() && voiceForeground && retainedPage == "voice-settings" },
                         invalidate = { invalidateConfiguredVoice(); speechHost.stop(speechHost.owner); dictationHost.invalidate() },
                         onBack = { if (activityUsable()) retainedPage = "settings" })
+                    "session-gateway" -> {
+                        val owner = gatewayOwner
+                        val value = gatewayDraft
+                        if (owner != null && value != null) key(owner) {
+                            SessionGatewaySettingsScreen(
+                                draft = value,
+                                onDraftChange = { if (gatewayCurrent(owner) && !controller.dataBusy) gatewayDraft = it },
+                                onSave = { saveSessionGateway(owner, it) },
+                                onBack = { if (gatewayCurrent(owner)) retainedPage = "settings" },
+                                errorText = gatewayError,
+                                enabled = controller.ready && controller.active == null && !controller.dataBusy,
+                                requestOptionsUnavailable = gatewayEditing?.requestOptionsUnavailable == true,
+                                replacementAuthorized = gatewayReplacementAuthorized,
+                                onReplacementAuthorization = {
+                                    if (gatewayCurrent(owner) && !controller.dataBusy) gatewayReplacementAuthorized = it
+                                },
+                            )
+                        } else Column {
+                            top.yukonga.miuix.kmp.basic.TextButton(text = "返回", onClick = { retainedPage = "settings" })
+                            top.yukonga.miuix.kmp.basic.Text(gatewayError ?: "正在加载会话网关设置")
+                        }
+                    }
                     "settings" -> Column(Modifier.fillMaxSize()) {
+                        top.yukonga.miuix.kmp.basic.TextButton(text = "保留会话网关",
+                            modifier = Modifier.testTag("open-session-gateway"), onClick = { guard { openSessionGateway() } })
                         top.yukonga.miuix.kmp.basic.TextButton(text = "语音设置 / 实时通话",
                             modifier = Modifier.testTag("open-voice-settings"), onClick = {
                                 if (activityUsable() && retainedPage == "settings") retainedPage = "voice-settings"
@@ -2330,6 +2363,8 @@ class MainActivity : ComponentActivity() {
     }
     override fun onStop() {
         invalidateMessageActionEditor()
+        gatewayOwner?.revoke()
+        if (retainedPage == "session-gateway") retainedPage = "settings"
         controller.invalidateVideo(videoUi)
         // Idempotent fallback as well as the earlier onPause cancellation.
         voiceForeground = false
@@ -2344,6 +2379,8 @@ class MainActivity : ComponentActivity() {
         invalidateMessageActionEditor()
         reconnectSettingsPageOwner?.revoke()
         reconnectSettingsPageOwner = null
+        gatewayOwner?.revoke(); gatewayOwner = null
+        gatewayEditing = null; gatewayDraft = null
         fenceVideoRoute()
         controller.detachVideoUi(videoUi)
         pendingTextSend?.let { controller.cancelTextSend(it.ticket) }
@@ -3032,6 +3069,56 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun gatewayCurrent(owner: ModelSettingsSaveOwner) = activityUsable() &&
+        retainedPage == "session-gateway" && gatewayOwner === owner
+
+    private fun openSessionGateway() {
+        requireActivityUsable()
+        check(controller.ready && controller.active == null && !controller.dataBusy)
+        gatewayOwner?.revoke()
+        val owner = ModelSettingsSaveOwner()
+        gatewayOwner = owner; gatewayEditing = null; gatewayDraft = null
+        gatewayReplacementAuthorized = false; gatewayError = null
+        retainedPage = "session-gateway"
+        lifecycleScope.launch {
+            val loaded = withContext(Dispatchers.IO) { runCatching { controller.settings.loadForEditing() } }
+            if (!gatewayCurrent(owner)) return@launch
+            loaded.fold(onSuccess = { editing ->
+                gatewayEditing = editing
+                gatewayDraft = editing.settings.requestOptions.sessionGateway
+                if (editing.credentialUnavailable && !editing.requestOptionsUnavailable ||
+                    editing.settings.protocol == app.daiyu.android.model.ProviderProtocol.UNKNOWN) {
+                    gatewayError = "凭据或协议不可用；请先到模型设置修复，未更改网关策略"
+                }
+            }, onFailure = { gatewayError = "设置无法读取；未更改配置，请返回后重试" })
+        }
+    }
+
+    private fun saveSessionGateway(owner: ModelSettingsSaveOwner,
+        value: app.daiyu.android.model.sessiongateway.SessionGatewayRule) {
+        try {
+            check(gatewayCurrent(owner) && gatewayDraft === value)
+            check(controller.ready && controller.active == null && !controller.dataBusy)
+            val editing = checkNotNull(gatewayEditing)
+            // This page cannot authorize a protocol/key rebind. The model editor owns that flow.
+            require(editing.settings.protocol != app.daiyu.android.model.ProviderProtocol.UNKNOWN)
+            require(!editing.credentialUnavailable || editing.requestOptionsUnavailable)
+            require(editing.settings.apiKey.isNotBlank())
+            require(!editing.requestOptionsUnavailable || gatewayReplacementAuthorized)
+            value.validate() // Unknown retention/keySource may be saved, but never executed.
+            val next = editing.settings.copy(requestOptions = editing.settings.requestOptions.copy(sessionGateway = value))
+            controller.saveModelSettings(next, false, gatewayReplacementAuthorized, editing, owner) { success ->
+                if (success && activityUsable()) imageHost.configurationChanged()
+                if (gatewayCurrent(owner)) {
+                    if (success) retainedPage = "settings"
+                    else gatewayError = "设置未保存；配置或页面可能已变化，请返回后重试"
+                }
+            }
+        } catch (_: Exception) {
+            if (gatewayCurrent(owner)) gatewayError = "设置未保存；请检查策略或先到模型设置修复凭据/协议"
+        }
+    }
+
     private fun modelSettings() {
         requireActivityUsable(); check(!controller.dataBusy)
         if (controller.active != null) { toast("当前运行使用冻结配置，请结束后修改"); return }
@@ -3060,7 +3147,8 @@ class MainActivity : ComponentActivity() {
     }
     private fun ModelSettingsDraftUi.toSettings(base: ModelSettings) = base.copy(endpoint = endpoint.trim(), model = model.trim(),
         apiKey = apiKey, protocol = protocol, responsesPath = responsesPath.trim(), batteryEnabled = batteryEnabled,
-        deviceStatusEnabled = deviceStatusEnabled, requestOptions = ProviderRequestOptions(customBody, speedMode, codex))
+        deviceStatusEnabled = deviceStatusEnabled, requestOptions = base.requestOptions.copy(
+            customBody = customBody, speedMode = speedMode, codex = codex))
     private fun saveModelSettings(value: ModelSettingsDraftUi) {
         try {
             requireActivityUsable(); check(retainedPage == "models" && modelDraft === value)

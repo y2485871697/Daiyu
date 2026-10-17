@@ -43,6 +43,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         override fun cancel() {}
     } }
     private fun fresh(legacy: (ModelSettings)->ModelPort = { error("legacy factory must not replace assistant factory") },
+        sessionFactory: ((ProviderSnapshot, AssistantRunContext, app.daiyu.android.model.sessiongateway.SessionGatewayContext)->ModelPort)? = null,
         factory: ((ProviderSnapshot, AssistantRunContext)->ModelPort)? = { _, _ -> port() }): Fixture {
         val id=UUID.randomUUID().toString()
         val app=App(testContext(instrumentation.targetContext,"assistant-controller-$id-"))
@@ -52,7 +53,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         settings.save(ModelSettings("https://example.invalid","fixture","key",false))
         val memory=MemoryProbe()
         val controller=ChatController(app,database,settings,app.getSharedPreferences("conversation-ui",0),legacy,
-            assistantModel=factory,assistantAssets=memory)
+            assistantModel=factory,assistantAssets=memory,sessionModel=sessionFactory)
         val fixture=Fixture(app,database,controller,memory,alias)
         fixtures.add(fixture)
         await(fixture) { controller.ready }
@@ -85,6 +86,54 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
             }
             f.app.getSharedPreferences("independent-model-bindings", 0).edit().clear().commit()
         } } finally { super.tearDown() }
+    }
+
+    fun testSessionFactoryGetsCommittedConversationAcrossFirstSendContinuationAndControllerRecreation() {
+        val owners = java.util.Collections.synchronizedList(mutableListOf<ConversationId>())
+        val frozen = java.util.Collections.synchronizedList(mutableListOf<AssistantRunContext>())
+        val sessionFactory: (ProviderSnapshot, AssistantRunContext, app.daiyu.android.model.sessiongateway.SessionGatewayContext) -> ModelPort =
+            { _, assistant, session ->
+                owners.add(session.conversationId); frozen.add(assistant)
+                assertNull(session.project)
+                port()
+            }
+        val f = fresh(sessionFactory = sessionFactory, factory = { _, _ -> error("old seam must not replace session factory") })
+        f.database.draft("first")
+        val accepted = checkNotNull(f.controller.send(null, "first"))
+        await(f) { f.controller.active == null }
+        assertEquals(listOf(accepted.id), owners)
+        val firstRows = f.database.messages(accepted.id).map { it.second }
+        assertTrue(firstRows.all { it.conversationId == owners.single() && it.runId.value != owners.single().value })
+        f.database.draft(accepted.id, "second")
+        assertNotNull(f.controller.send(accepted, "second")); await(f) { f.controller.active == null }
+        assertEquals(listOf(accepted.id, accepted.id), owners)
+        f.database.draft("other")
+        val other = checkNotNull(f.controller.send(null, "other")); await(f) { f.controller.active == null }
+        assertTrue(other.id != accepted.id)
+        assertEquals(listOf(accepted.id, accepted.id, other.id), owners)
+        assertTrue(frozen.all { it.assistantId == "default" })
+        f.controller.close()
+        val reopened = ConversationDatabase(f.app)
+        val restored = ChatController(f.app, reopened, ModelSettingsStore(f.app, f.alias),
+            f.app.getSharedPreferences("conversation-ui", 0), { error("legacy fallback") },
+            assistantAssets = f.memory, sessionModel = sessionFactory)
+        try {
+            awaitControl("restored controller ready") { restored.ready }
+            assertEquals(3, owners.size) // Recovery alone never starts historical network requests.
+            reopened.draft(accepted.id, "after restart")
+            assertNotNull(restored.send(accepted, "after restart"))
+            awaitControl("restored conversation send completed") { restored.active == null }
+            assertEquals(listOf(accepted.id, accepted.id, other.id, accepted.id), owners)
+        } finally { restored.close(); reopened.close() }
+    }
+
+    fun testSessionFactoryDoesNotBypassMissingAssistantAdmission() {
+        val calls = AtomicInteger()
+        val f = fresh(sessionFactory = { _, _, _ -> calls.incrementAndGet(); port() })
+        val unbound = f.database.create(); f.database.draft(unbound.id, "keep")
+        assertNull(f.controller.send(unbound, "keep")); assertEquals(0, calls.get())
+        assertTrue(f.database.messages(unbound.id).isEmpty())
+        assertEquals("keep", f.database.conversations().single().draft)
     }
 
     fun testNullAndDeletedBindingRejectWithoutFactoryOrMemoryAndKeepDraft() {

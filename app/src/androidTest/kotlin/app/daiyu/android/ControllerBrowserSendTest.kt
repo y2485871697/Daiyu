@@ -28,6 +28,7 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
     private lateinit var root: File
     private lateinit var browserSettings: BrowserSettingsStore
     private val modelFactories = AtomicInteger()
+    private val sessionOwners = java.util.Collections.synchronizedList(mutableListOf<app.daiyu.android.domain.ConversationId>())
     private val gates = mutableListOf<WorkerGate>()
     private val controller get() = fixture.controller
 
@@ -46,7 +47,9 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
             override fun getApplicationContext(): Context = this
             override fun getFilesDir(): File = root
         }
-        fixture = RunControlFixture(isolatedContext) { modelFactories.incrementAndGet() }
+        fixture = RunControlFixture(isolatedContext, onSession = { _, _, context ->
+            sessionOwners.add(context.conversationId); assertNull(context.project)
+        }) { modelFactories.incrementAndGet() }
         assertSame(isolatedContext, fixture.application.applicationContext)
         assertEquals(root, fixture.application.filesDir)
         awaitControl("controller ready") { controller.ready }
@@ -256,6 +259,28 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         assertFalse(File(root, "browser-runs").exists())
         controlMain { controller.acknowledgeTextSend(ticket) }
         awaitControl("ordinary text run completed") { controller.active == null }
+    }
+
+    fun testConfirmedBrowserSendPassesItsPersistentReceiptConversationToSessionFactory() {
+        val draft = draft()
+        val pending = prepare(draft)
+        val session = fixture.session(held = false)
+        val ticket = ChatController.TextSendTicket()
+        val done = CountDownLatch(1)
+        val result = AtomicReference<ChatController.TextSendResult>()
+        controlMain {
+            assertTrue(pending.confirm(pending.preview, draft))
+            assertTrue(controller.sendBrowser(pending, draft, ticket) { result.set(it); done.countDown() })
+        }
+        await(done); await(session.entered)
+        val accepted = result.get() as ChatController.TextSendResult.Accepted
+        assertEquals(pending.identity.conversationId, accepted.conversation.id)
+        assertEquals(listOf(accepted.conversation.id), sessionOwners)
+        val rows = fixture.database.messages(accepted.conversation.id).map { it.second }
+        assertTrue(rows.all { it.conversationId == accepted.conversation.id && it.runId == pending.identity.runId })
+        controlMain { controller.acknowledgeTextSend(ticket) }
+        awaitControl("browser run drained without opening tabs or requesting tools") { controller.active == null }
+        assertEquals(1, fixture.opens.get()); assertEquals(1, modelFactories.get())
     }
 
     fun testPreviewReservationBlocksOrdinaryAndSecondBrowserSendsAndStaleReject() {

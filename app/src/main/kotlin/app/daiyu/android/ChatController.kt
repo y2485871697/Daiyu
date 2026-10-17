@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.net.Uri
 import app.daiyu.android.assistants.*
 import app.daiyu.android.model.AssistantModelFactory
+import app.daiyu.android.model.sessiongateway.SessionGatewayContext
 import app.daiyu.android.backup.NeutralBackupService
 import app.daiyu.android.context.ContextService
 import app.daiyu.android.context.ContextPreparationCoordinator
@@ -107,7 +108,9 @@ class ChatController internal constructor(private val application:Application,
     val assistantAssets: AssistantAssets = FileAssistantAssets(application),
     private val contextPreparationFactory: (android.content.Context, ContextService) -> ContextPreparationCoordinator =
         ProductionContextPreparation::create,
-    private val virtualDisplayFactory: ControllerVirtualDisplayFactory = ControllerVirtualDisplayFactory.REAL) {
+    private val virtualDisplayFactory: ControllerVirtualDisplayFactory = ControllerVirtualDisplayFactory.REAL,
+    // Optional so existing injected one/two-argument factories remain genuine test seams.
+    private val sessionModel: ((ProviderSnapshot, AssistantRunContext, SessionGatewayContext)->ModelPort)? = null) {
     // Voice credentials remain independent from chat settings.
     internal val voiceAccounts by lazy { app.daiyu.android.voice.account.VoiceAccountResources.forContext(application) }
     internal val voiceRuntime by lazy {
@@ -139,7 +142,7 @@ class ChatController internal constructor(private val application:Application,
         data class Unknown(override val owner: TextSendOwner): TextSendResult
     }
     constructor(application:Application):this(application,ConversationDatabase(application),ModelSettingsStore(application),application.getSharedPreferences("conversation-ui",0),{ModelFactory.create(it)},
-        assistantModel=AssistantModelFactory::create)
+        assistantModel=AssistantModelFactory::create, sessionModel=AssistantModelFactory::create)
     val assistantStore: SqliteAssistantStore by lazy { SqliteAssistantStore(database) }
     internal val independentModels = IndependentModelSettings(application).also {
         it.onChanging = { independentConfigurationChanging() }
@@ -955,7 +958,8 @@ class ChatController internal constructor(private val application:Application,
                 val assistantContext = AssistantRunContext.capture(assistantStore, assistantId, assistantAssets)
                 check(assistantStore.read(assistantId) == profile) { "assistant_profile_changed" }
                 childBindings.freeze(key, childPreferences.snapshot(key)) { provider ->
-                    val delegate = assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
+                    val delegate = sessionModel?.invoke(provider, assistantContext, SessionGatewayContext(conversation))
+                        ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
                     messageImages.wrap(delegate, provider)
                 }
             } catch (_: Exception) { return ChildTaskCommandReceipt.Rejected("child_model_binding_unavailable") }
@@ -1798,7 +1802,8 @@ class ChatController internal constructor(private val application:Application,
         val childModels:Map<String,ChildModelDefinition> = if(!withChildren) emptyMap() else try {
             val key=SubAgentConfigKey.Conversation(checkNotNull(conversation).id.value)
             childBindings.freeze(key,childPreferences.snapshot(key)) { provider ->
-                val delegate=assistantModel?.invoke(provider,assistantContext) ?: model(provider.asModelSettings())
+                val delegate=sessionModel?.invoke(provider,assistantContext,SessionGatewayContext(checkNotNull(conversation).id))
+                    ?: assistantModel?.invoke(provider,assistantContext) ?: model(provider.asModelSettings())
                 messageImages.wrap(delegate,provider)
             }
         } catch (_:Exception) {
@@ -1961,7 +1966,8 @@ class ChatController internal constructor(private val application:Application,
                 preparationCancelled(token) || !auxiliaryCurrent() ||
                     imageAttempt?.handle?.isCancelled()==true || shizukuPreparation?.isCancelled()==true
             }
-            val delegate=assistantModel?.invoke(provider,assistantContext)
+            val delegate=sessionModel?.invoke(provider,assistantContext,SessionGatewayContext(conversationId))
+                ?: assistantModel?.invoke(provider,assistantContext)
                 ?: if(plan.hasImages && auxiliaryFrozen == null) imageModel(provider) else model(config)
             if (auxiliaryFrozen == null) messageImages.wrap(delegate,provider,conversationId)
             else {
@@ -2549,11 +2555,28 @@ class ChatController internal constructor(private val application:Application,
         })
     }
     internal fun saveModelSettings(value:ModelSettings,protocolChangeAuthorized:Boolean,
-        requestOptionsReplacementAuthorized:Boolean,completed:(Boolean)->Unit) {
+        requestOptionsReplacementAuthorized:Boolean,completed:(Boolean)->Unit) =
+        saveModelSettings(value, protocolChangeAuthorized, requestOptionsReplacementAuthorized, null, null, completed)
+
+    /** Same authorization/persistence protocol as the old entry, plus a worker-side visit and
+     * configuration fence. Never let an asynchronously loaded editor overwrite a newer provider.
+     */
+    internal fun saveModelSettings(value:ModelSettings,protocolChangeAuthorized:Boolean,
+        requestOptionsReplacementAuthorized:Boolean,expected:EditingSettings?,owner:ModelSettingsSaveOwner?,
+        completed:(Boolean)->Unit) {
         check(Looper.myLooper()==Looper.getMainLooper())
         invalidateVideoConfiguration()
         dataTask(failureNotice="模型设置未保存",completed=completed,work={
-            settings.save(value,protocolChangeAuthorized,requestOptionsReplacementAuthorized)
+            // Check the visit after waiting for the catalog lease, not before. Departure can
+            // revoke queued work; an already admitted persistence operation is never retried.
+            if (expected == null && owner == null) settings.save(value,protocolChangeAuthorized,requestOptionsReplacementAuthorized)
+            else settings.modelCatalog.configurationChange {
+                val save = {
+                    if (expected != null) check(settings.loadForEditing() == expected) { "模型配置已变化；请重新打开设置" }
+                    settings.save(value,protocolChangeAuthorized,requestOptionsReplacementAuthorized)
+                }
+                if (owner != null) owner.commit(save) else save()
+            }
             "模型设置已保存"
         })
     }

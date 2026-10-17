@@ -28,6 +28,7 @@ data class LinuxBackend(
 )
 
 /** Fixed host transport for an explicitly selected installation, never model argv. */
+@ConsistentCopyVisibility
 data class RootScopeLaunch internal constructor(val rootfs: File, val su: File, internal val identityProbe: Boolean = false) {
     init {
         require(rootfs.isAbsolute && rootfs == rootfs.canonicalFile && rootfs.isDirectory)

@@ -203,6 +203,7 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
             assertNull(invokeMain("getVirtualDisplayPlanVisit"))
             assertNull(fixture.controller.virtualDisplayEntry())
         }
+        assertDraft("old plan draft")
         ui.waitForIdle()
         ui.waitUntil(5_000) {
             ui.onAllNodes(hasTestTag("chat-draft") and isEnabled())
@@ -221,6 +222,8 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
             assertSame(newer, invokeMain("getVirtualDisplayPlanVisit"))
             assertNull(editor()); assertNull(fixture.controller.virtualDisplayEntry())
         }
+        node("r08-plan-freeze").assertExists()
+        node("chat-draft").assertIsNotEnabled()
         node("r08-plan-freeze").performClick()
         mainThread { assertEquals("new plan draft", editor()?.text) }
         assertDraft("new plan draft")

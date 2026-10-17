@@ -8,9 +8,35 @@ import java.nio.file.Files
 import java.util.Base64
 import java.util.UUID
 
-/** Pure files/JSON fixture: no Registry, Android runtime, Process, shell, journal or network. */
+/** Format/paging fixtures only: explicitly inject JVM file I/O, never fake an Android descriptor.
+ * Actual NOFOLLOW/NONBLOCK/fstat and path replacement coverage lives in the device test.
+ * No Registry, Android runtime, Process, shell, journal or network.
+ */
 class TerminalJobHistoryReaderTest {
     private val owner = "conversation-1"
+    private fun reader(files: File) = TerminalJobHistoryReader(files) { anchor ->
+        val root = File(anchor, "terminal-jobs").toPath()
+        if (!Files.exists(root, java.nio.file.LinkOption.NOFOLLOW_LINKS)) null else {
+            check(Files.isDirectory(root, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+            object : TerminalJobHistoryReader.Directory {
+                override fun names() = Files.newDirectoryStream(root)
+                override fun read(name: String, offset: Long, limit: Int, maxSize: Int): TerminalJobHistoryReader.Slice? {
+                    val path = root.resolve(name)
+                    if (!Files.exists(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return null
+                    check(Files.isRegularFile(path, java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                    return java.io.RandomAccessFile(path.toFile(), "r").use { input ->
+                        val size = input.length()
+                        require(size in 0..maxSize.toLong() && offset in 0..size)
+                        val bytes = ByteArray(minOf(limit.toLong(), size - offset).toInt())
+                        input.seek(offset)
+                        input.readFully(bytes)
+                        TerminalJobHistoryReader.Slice(bytes, size)
+                    }
+                }
+                override fun close() = Unit
+            }
+        }
+    }
     private fun fixture(test: (File, File) -> Unit) {
         val files = Files.createTempDirectory("terminal-history").toFile()
         try { test(files, File(files, "terminal-jobs")) } finally { files.deleteRecursively() }
@@ -32,8 +58,8 @@ class TerminalJobHistoryReaderTest {
         val id = record(directory)
         File(directory, "$id.log").writeText("original output")
         val before = snapshot(files)
-        val original = TerminalJobHistoryReader(files).list(owner).records.single()
-        val reopened = TerminalJobHistoryReader(files)
+        val original = reader(files).list(owner).records.single()
+        val reopened = reader(files)
         assertEquals(original, reopened.list(owner).records.single())
         val page = reopened.page(owner, original)
         assertTrue(page.getBoolean("ok"))
@@ -47,7 +73,7 @@ class TerminalJobHistoryReaderTest {
     }
 
     @Test fun absentHistoryDoesNotCreateDirectoryAndOwnerOrFilenameMismatchIsIsolated() = fixture { files, directory ->
-        assertTrue(TerminalJobHistoryReader(files).list(owner).records.isEmpty())
+        assertTrue(reader(files).list(owner).records.isEmpty())
         assertFalse(directory.exists())
         val good = record(directory)
         record(directory, owner = "different-conversation")
@@ -56,21 +82,21 @@ class TerminalJobHistoryReaderTest {
         record(directory) { it.put("scope", "../../outside") }
         record(directory) { it.put("session_id", "not-uuid") }
         File(directory, "not-a-uuid.json").writeText("{}")
-        val scan = TerminalJobHistoryReader(files).list(owner)
+        val scan = reader(files).list(owner)
         assertEquals(listOf(good), scan.records.map { it.jobId })
         assertEquals(5, scan.skipped)
         val original = scan.records.single()
-        try { TerminalJobHistoryReader(files).page("different-conversation", original); fail() }
+        try { reader(files).page("different-conversation", original); fail() }
         catch (_: IllegalArgumentException) { }
         File(directory, "$good.json").writeText(JSONObject(File(directory, "$good.json").readText())
             .put("owner", "different-conversation").toString())
-        assertFalse(TerminalJobHistoryReader(files).page(owner, original).getBoolean("ok"))
+        assertFalse(reader(files).page(owner, original).getBoolean("ok"))
     }
 
     @Test fun changingOriginalScopeOrSessionBetweenPagesIsRejected() = fixture { files, directory ->
         val id = record(directory)
         val metadata = File(directory, "$id.json")
-        val reader = TerminalJobHistoryReader(files)
+        val reader = reader(files)
         val original = reader.list(owner).records.single()
         metadata.writeText(JSONObject(metadata.readText()).put("session_id", UUID.randomUUID().toString()).toString())
         assertFalse(reader.page(owner, original).getBoolean("ok"))
@@ -83,7 +109,7 @@ class TerminalJobHistoryReaderTest {
         val good = record(directory)
         File(directory, "${UUID.randomUUID()}.json").writeText("{")
         File(directory, "${UUID.randomUUID()}.json").writeText("x".repeat(TerminalJobHistoryReader.MAX_METADATA_BYTES + 1))
-        val scan = TerminalJobHistoryReader(files).list(owner)
+        val scan = reader(files).list(owner)
         assertNull(scan.error); assertEquals(2, scan.skipped)
         assertEquals(good, scan.records.single().jobId)
     }
@@ -92,7 +118,7 @@ class TerminalJobHistoryReaderTest {
         val id = record(directory)
         val bytes = ByteArray(70003) { (it % 251).toByte() }
         val log = File(directory, "$id.log").apply { writeBytes(bytes) }
-        val reader = TerminalJobHistoryReader(files)
+        val reader = reader(files)
         val original = reader.list(owner).records.single()
         val collected = java.io.ByteArrayOutputStream()
         var offset = 0L
@@ -114,7 +140,7 @@ class TerminalJobHistoryReaderTest {
         assertFalse(reader.page(owner, original).getBoolean("ok"))
     }
 
-    @Test fun metadataLogAndRootSymlinksCannotEscapeFixedRoot() = fixture { files, directory ->
+    @Test fun injectedFormatFixtureRejectsStaticSymlinks_notDescriptorSecurityCoverage() = fixture { files, directory ->
         val outside = Files.createTempDirectory("terminal-history-outside").toFile()
         try {
             val good = record(directory)
@@ -122,7 +148,7 @@ class TerminalJobHistoryReaderTest {
             Files.createSymbolicLink(File(directory, "$escaped.json").toPath(), File(outside, "$escaped.json").toPath())
             File(outside, "secret").writeText("must not read")
             Files.createSymbolicLink(File(directory, "$good.log").toPath(), File(outside, "secret").toPath())
-            val reader = TerminalJobHistoryReader(files)
+            val reader = reader(files)
             val scan = reader.list(owner)
             assertEquals(1, scan.skipped); assertEquals(good, scan.records.single().jobId)
             assertFalse(reader.page(owner, scan.records.single()).getBoolean("ok"))
@@ -137,10 +163,29 @@ class TerminalJobHistoryReaderTest {
         } finally { outside.deleteRecursively() }
     }
 
+    @Test fun missingAndEmptyLogsRemainReadOnlyAndMissingLogCannotAcceptNonzeroOffset() = fixture { files, directory ->
+        val id = record(directory)
+        val reader = reader(files)
+        val original = reader.list(owner).records.single()
+        val before = snapshot(files)
+        val missing = reader.page(owner, original)
+        assertTrue(missing.getBoolean("ok"))
+        assertFalse(missing.getBoolean("log_available"))
+        assertEquals(0L, missing.getLong("total_bytes"))
+        assertEquals("", missing.getString("stdout_base64"))
+        assertFalse(reader.page(owner, original, 1).getBoolean("ok"))
+        assertEquals(before, snapshot(files))
+        File(directory, "$id.log").writeBytes(ByteArray(0))
+        val empty = reader.page(owner, original)
+        assertTrue(empty.getBoolean("ok"))
+        assertTrue(empty.getBoolean("log_available"))
+        assertFalse(empty.getBoolean("has_more"))
+    }
+
     @Test fun fileAndRecordQuotasFailClosedWithNoUnboundedResult() = fixture { files, directory ->
         record(directory)
         repeat(TerminalJobHistoryReader.MAX_FILES) { File(directory, "ignored-$it.tmp").writeText("") }
-        val reader = TerminalJobHistoryReader(files)
+        val reader = reader(files)
         assertEquals("job_directory_scan_limit", reader.list(owner).error)
         assertTrue(reader.list(owner).records.isEmpty())
         directory.deleteRecursively()

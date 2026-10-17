@@ -7,6 +7,7 @@ import app.daiyu.android.domain.*
 import app.daiyu.android.media.video.MessageVideoOwner
 import app.daiyu.android.media.video.MessageVideoReference
 import app.daiyu.android.storage.MessageHistoryCodec
+import app.daiyu.android.storage.MessageTimeCodec
 import app.daiyu.android.storage.MessageImageReferenceCodec
 import app.daiyu.android.storage.MessageVideoInputCodec
 import app.daiyu.android.storage.SQLiteText
@@ -147,7 +148,8 @@ internal object BackupVideoManifest {
             RunId(row.getString("run_id")), row.getString("role"), decoded,
             RunStatus.valueOf(row.getString("status")), if (row.isNull("error")) null else row.getString("error"),
             (0 until protocol.length()).map { protocol.getString(it) },
-            historySegments = if (row.has("history_segments")) MessageHistoryCodec.decode(row.getJSONArray("history_segments")) else emptyList())
+            historySegments = if (row.has("history_segments")) MessageHistoryCodec.decode(row.getJSONArray("history_segments")) else emptyList(),
+            createdAt = MessageTimeCodec.read(row))
     }
 
     private fun fields(value: JSONObject, keys: Set<String>) = require(value.keys().asSequence().toSet() == keys)

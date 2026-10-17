@@ -291,9 +291,12 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             rows.map { row ->
                 fun text(column:String)=SQLiteText.read(db,"messages",column,"id",row[0])
                 val p=JSONArray(requireNotNull(text("protocol")))
+                val createdAt = db.rawQuery("SELECT created_at FROM messages WHERE id=?", arrayOf(row[0])).use {
+                    check(it.moveToFirst()); if (it.isNull(0)) null else it.getLong(0)
+                }
                 Message(MessageId(row[0]),id,RunId(row[1]),row[2],ArchiveCodec.decodeBlocks(JSONArray(requireNotNull(text("blocks")))),
                     RunStatus.valueOf(row[3]),text("error"),(0 until p.length()).map {p.getString(it)},
-                    MessageHistoryCodec.decode(JSONArray(requireNotNull(text("history_segments"))))).also {
+                    MessageHistoryCodec.decode(JSONArray(requireNotNull(text("history_segments")))), createdAt = createdAt).also {
                         MessageHistoryCodec.validate(it)
                         app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it)
                     }
@@ -304,7 +307,8 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             return ContentValues().apply { put("id", m.id.value); put("conversation_id", m.conversationId.value)
                 put("run_id", m.runId.value); put("role", m.role); put("blocks", ArchiveCodec.blocks(m.blocks).toString()); put("status", m.status.name)
                 put("error", m.error); put("protocol", JSONArray(m.protocolItems).toString())
-                put("history_segments", MessageHistoryCodec.encode(m.historySegments).toString()) }
+                put("history_segments", MessageHistoryCodec.encode(m.historySegments).toString())
+                put("created_at", m.createdAt) }
         }
     }
 }

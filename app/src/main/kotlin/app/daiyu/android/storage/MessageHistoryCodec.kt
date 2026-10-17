@@ -12,8 +12,8 @@ import org.json.JSONObject
 
 /**
  * Stable v1 representation for the provider history attached to a message.
- * The four keys are intentionally closed: changing this shape would make an old
- * history silently lose protocol items or tool ordering.
+ * The original four keys remain closed except for optional created_at milliseconds.
+ * Unknown time is omitted so legacy histories retain their exact encoding.
  */
 object MessageHistoryCodec {
     fun encode(segments: List<MessageHistorySegment>): JSONArray {
@@ -24,7 +24,9 @@ object MessageHistoryCodec {
                     .put("message_id", segment.messageId.value)
                     .put("role", segment.role)
                     .put("blocks", encodeBlocks(segment.blocks))
-                    .put("protocol", JSONArray(segment.protocolItems)))
+                    .put("protocol", JSONArray(segment.protocolItems)).also {
+                        MessageTimeCodec.write(it, segment.createdAt)
+                    })
             }
         }
     }
@@ -32,7 +34,7 @@ object MessageHistoryCodec {
     fun decode(array: JSONArray): List<MessageHistorySegment> {
         val result = (0 until array.length()).map {
             val value = array.getJSONObject(it)
-            require(value.keys().asSequence().toSet() == setOf("message_id", "role", "blocks", "protocol"))
+            require(value.keys().asSequence().toSet() - MessageTimeCodec.FIELD == setOf("message_id", "role", "blocks", "protocol"))
             val id = text(value, "message_id")
             val role = text(value, "role")
             val blocks = value.getJSONArray("blocks")
@@ -40,7 +42,8 @@ object MessageHistoryCodec {
             validateBlocks(blocks)
             val protocolItems = (0 until protocol.length()).map { (protocol.get(it) as? String)
                 ?: error("历史协议项须为文本") }
-            MessageHistorySegment(MessageId(id), role, decodeBlocks(blocks), protocolItems)
+            MessageHistorySegment(MessageId(id), role, decodeBlocks(blocks), protocolItems,
+                createdAt = MessageTimeCodec.read(value))
         }
         result.forEach { validateSegment(it) }
         return result

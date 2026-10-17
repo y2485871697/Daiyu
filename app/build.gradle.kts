@@ -39,6 +39,12 @@ androidComponents.onVariants { variant ->
 val daiyuSyntheticApplication = providers.gradleProperty("daiyuSyntheticApplication").map {
     it.toBooleanStrictOrNull() ?: error("daiyuSyntheticApplication 必须是 true 或 false")
 }.getOrElse(false)
+val daiyuPhysicalPerformance = providers.gradleProperty("daiyuPhysicalPerformance").map {
+    it.toBooleanStrictOrNull() ?: error("daiyuPhysicalPerformance 必须是 true 或 false")
+}.getOrElse(false)
+check(!daiyuPhysicalPerformance || daiyuSyntheticApplication) {
+    "物理性能构建必须启用 daiyuSyntheticApplication=true"
+}
 
 android {
     buildFeatures { compose = true; aidl = true }
@@ -48,6 +54,7 @@ android {
     namespace = "app.daiyu.android"
     compileSdk { version = release(37) { minorApiLevel = 2 } }
     buildToolsVersion = "37.0.0"
+    if (daiyuPhysicalPerformance) testBuildType = "release"
     defaultConfig {
         applicationId = "app.daiyu.android"
         minSdk = 26
@@ -89,6 +96,14 @@ android {
             kotlin.directories.add(browserRoot.dir("adapter/src/main/kotlin").asFile.absolutePath)
         }
         getByName("test").kotlin.directories.add(browserRoot.dir("adapter/src/test/kotlin").asFile.absolutePath)
+        if (daiyuPhysicalPerformance) {
+            getByName("release").manifest.srcFile("src/performance/AndroidManifest.xml")
+            getByName("androidTest") {
+                setRoot("src/performanceTest")
+                kotlin.directories.clear()
+                kotlin.directories.add(layout.projectDirectory.dir("src/performanceTest/kotlin").asFile.absolutePath)
+            }
+        }
     }
     val signingValues = listOf(
         "DAIYU_RELEASE_STORE_FILE", "DAIYU_RELEASE_STORE_PASSWORD",
@@ -97,6 +112,7 @@ android {
     val fixedSigning = signingValues.all { it != null }
     check(signingValues.all { it == null } || fixedSigning) { "固定签名配置不完整" }
     check(System.getenv("DAIYU_REQUIRE_SIGNING") != "true" || fixedSigning) { "交付构建必须配置固定签名" }
+    check(!daiyuPhysicalPerformance || fixedSigning) { "物理性能构建必须配置固定签名" }
     if (fixedSigning) {
         signingConfigs.create("release") {
             storeFile = file(signingValues[0]!!)
@@ -114,6 +130,8 @@ android {
         }
         release {
             isMinifyEnabled = false
+            isDebuggable = false
+            if (daiyuSyntheticApplication) applicationIdSuffix = ".synthetic"
             if (fixedSigning) signingConfig = signingConfigs.getByName("release")
         }
     }

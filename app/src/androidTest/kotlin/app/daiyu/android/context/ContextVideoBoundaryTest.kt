@@ -72,13 +72,22 @@ class ContextVideoBoundaryTest : InstrumentationTestCase() {
         return listOf(user, reply)
     }
 
-    private fun addSidecar(physical: Message, userId: MessageId = physical.id) {
+    private fun injectHistoricalSidecar(physical: Message, userId: MessageId = physical.id) {
+        // Explicit out-of-band historical mutation, never a production sidecar update.
         DatabaseTransactions { db.writableDatabase }.run { sql ->
+            assertTrue(SQLiteMessageVideoStore.readVerified(sql, physical).isEmpty())
+            assertEquals(1, sql.delete("message_video_witnesses", "message_id=? AND reference_count=0",
+                arrayOf(physical.id.value)))
             SQLiteMessageVideoStore.insert(sql, physical, inputs(physical, userId))
         }
     }
 
-    private fun sidecar(physical: Message) = SQLiteMessageVideoStore.read(db.readableDatabase, physical)
+    private fun assertSidecar(physical: Message, userId: MessageId = physical.id) {
+        DatabaseTransactions { db.writableDatabase }.run { sql ->
+            assertEquals(MessageVideoInputCodec.encode(physical, inputs(physical, userId)),
+                MessageVideoInputCodec.encode(physical, SQLiteMessageVideoStore.readVerified(sql, physical)))
+        }
+    }
 
     // Historical owner/supplement shapes cannot be produced by the ordinary two-row send API.
     // Match ContextHistoryServiceTest's physical-row fixture and use the production codecs.
@@ -96,7 +105,10 @@ class ContextVideoBoundaryTest : InstrumentationTestCase() {
                 })
             }
             MessageHistory.expand(rows)
-            SQLiteMessageVideoStore.insert(sql, videoRow, inputs(videoRow, userId))
+            rows.forEach { message ->
+                SQLiteMessageVideoStore.insert(sql, message,
+                    if (message.id == videoRow.id) inputs(videoRow, userId) else emptyList())
+            }
         }
     }
 
@@ -163,7 +175,7 @@ class ContextVideoBoundaryTest : InstrumentationTestCase() {
         val owner = db.create("default").id
         val original = turn(owner, "first", video = true) +
             turn(owner, "second") + turn(owner, "third") + turn(owner, "fourth")
-        assertEquals(inputs(original.first()), sidecar(original.first()))
+        assertSidecar(original.first())
         val before = databaseState()
         var calls = 0
         val summarizer = ContextSummarizer { calls++; "must not summarize video history" }
@@ -178,7 +190,7 @@ class ContextVideoBoundaryTest : InstrumentationTestCase() {
         assertEquals(before, databaseState())
         reopen()
         assertRaw(owner, original)
-        assertEquals(inputs(original.first()), sidecar(original.first()))
+        assertSidecar(original.first())
         assertEquals(before, databaseState())
     }
 
@@ -197,10 +209,10 @@ class ContextVideoBoundaryTest : InstrumentationTestCase() {
         })!!
         assertEquals(1, calls)
         assertArchived(owner, original, prefix.size, archive)
-        assertEquals(inputs(video.first()), sidecar(video.first()))
+        assertSidecar(video.first())
         reopen()
         assertArchived(owner, original, prefix.size, archive)
-        assertEquals(inputs(video.first()), sidecar(video.first()))
+        assertSidecar(video.first())
     }
 
     private fun assertHistoricalVideoBoundary(standalone: Boolean) {
@@ -219,7 +231,7 @@ class ContextVideoBoundaryTest : InstrumentationTestCase() {
         insertHistoricalRows(history, videoRow, supplement.id)
         val original = prefix + history + turn(owner, "tail-one") + turn(owner, "tail-two")
         assertEquals(original, service.displayHistory(owner))
-        assertEquals(inputs(videoRow, supplement.id), sidecar(videoRow))
+        assertSidecar(videoRow, supplement.id)
         assertTrue(MessageHistory.expand(original).any { it.id == supplement.id })
         assertEquals(standalone, original.any { it.id == supplement.id })
         // The video-bearing row is after the initial user (and, for standalone, its owner).
@@ -237,7 +249,7 @@ class ContextVideoBoundaryTest : InstrumentationTestCase() {
         assertArchived(owner, original, prefix.size, archive)
         reopen()
         assertArchived(owner, original, prefix.size, archive)
-        assertEquals(inputs(videoRow, supplement.id), sidecar(videoRow))
+        assertSidecar(videoRow, supplement.id)
     }
 
     fun testAssistantSidecarForSegmentOnlyUserKeepsWholeRun() = assertHistoricalVideoBoundary(false)
@@ -251,7 +263,7 @@ class ContextVideoBoundaryTest : InstrumentationTestCase() {
             ContextSummarizer { "previous text summary" })!!
         assertArchived(owner, original, 4, archive)
         // Simulate a persisted pre-video archive: its text revision still matches exactly.
-        addSidecar(original.first())
+        injectHistoricalSidecar(original.first())
         val before = databaseState()
         val archives = archiveRows(owner)
         assertEquals("1", archives.single().last())
@@ -260,7 +272,7 @@ class ContextVideoBoundaryTest : InstrumentationTestCase() {
         assertEquals(before, databaseState())
         reopen()
         assertRaw(owner, original)
-        assertEquals(inputs(original.first()), sidecar(original.first()))
+        assertSidecar(original.first())
         assertEquals(before, databaseState())
     }
 
@@ -274,7 +286,7 @@ class ContextVideoBoundaryTest : InstrumentationTestCase() {
                 assertArchived(owner, original, 4, archive)
             }
             val target = original[4] // A retained tail row, not an archived-prefix row.
-            addSidecar(target)
+            injectHistoricalSidecar(target)
             val foreign = target.copy(conversationId = ConversationId("wrong-${owner.value}"))
             val badPayload = if (wrongOwner) MessageVideoInputCodec.encode(foreign, inputs(foreign)) else "{"
             assertEquals(1, db.writableDatabase.update("message_video_inputs", ContentValues().apply {
@@ -323,7 +335,7 @@ class ContextVideoBoundaryTest : InstrumentationTestCase() {
         reopen()
         assertEquals(before, databaseState())
         assertArchived(owner, original, 4, archive)
-        assertEquals(inputs(original[4]), sidecar(original[4]))
+        assertSidecar(original[4])
     }
 
     fun testSidecarAddedDuringSummaryRejectsPublicationAndKeepsPreviousArchiveActive() {
@@ -343,7 +355,7 @@ class ContextVideoBoundaryTest : InstrumentationTestCase() {
                 assertEquals(ContextRevision.digest(original.take(6)), input.revision)
                 // Sidecars are outside the text/history digest. Insert while the model is outside
                 // the transaction; only the commit-time video recheck can catch this race.
-                addSidecar(original[4])
+                injectHistoricalSidecar(original[4])
                 assertEquals(ContextRevision.digest(original), ContextRevision.digest(service.displayHistory(owner)))
                 afterSidecar = databaseState()
                 "new summary must not be published"
@@ -361,6 +373,6 @@ class ContextVideoBoundaryTest : InstrumentationTestCase() {
         assertEquals(afterSidecar, databaseState())
         assertEquals(archives, archiveRows(owner))
         assertArchived(owner, original, 4, oldArchive)
-        assertEquals(inputs(original[4]), sidecar(original[4]))
+        assertSidecar(original[4])
     }
 }

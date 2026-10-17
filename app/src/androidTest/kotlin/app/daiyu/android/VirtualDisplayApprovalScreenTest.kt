@@ -99,11 +99,14 @@ class VirtualDisplayApprovalScreenTest : ComposeActivityTestCase() {
         val first = request("first")
         val second = request("second")
         mainThread { visible.value = first }
+        ui.waitForIdle()
         mainThread { visible.value = second }
+        ui.waitForIdle()
         assertEquals(1, decisions.size)
         assertSame(first, decisions[0].first)
         assertFalse(decisions[0].second)
         mainThread { visible.value = null }
+        ui.waitForIdle()
         assertEquals(2, decisions.size)
         assertSame(second, decisions[1].first)
         assertFalse(decisions[1].second)

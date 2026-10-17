@@ -540,7 +540,8 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
             assertEquals(0, f.opens.get())
             assertEquals(0, f.factories.get())
             // Inspect durable rejection only after proving the ORIGINAL handle really closed.
-            ConversationDatabase(f.app).use { reopened ->
+            val reopened = ConversationDatabase(f.app)
+            try {
                 assertEquals(f.originalHistory, ContextService(f.app, reopened).displayHistory(entry.conversationId))
                 reopened.readableDatabase.rawQuery("SELECT draft FROM conversations WHERE id=?",
                     arrayOf(entry.conversationId.value)).use { assertTrue(it.moveToFirst()); assertEquals(f.draft, it.getString(0)) }
@@ -548,7 +549,7 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
                     "SELECT COUNT(*) FROM $table", null).use { assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)) }
                 reopened.readableDatabase.rawQuery("SELECT state FROM runtime_preparations WHERE message_id=?",
                     arrayOf(entry.assistantId.value)).use { assertTrue(it.moveToFirst()); assertEquals("TERMINAL", it.getString(0)) }
-            }
+            } finally { reopened.close() }
         } finally { f.dispose() }
     }
 

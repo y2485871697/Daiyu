@@ -43,3 +43,32 @@ class ApprovedPerformancePolicyTest(unittest.TestCase):
         self.assertEqual('not_run', p['measurement_status'])
         self.assertFalse(p['collection_authenticated'])
         self.assertFalse(p['business_acceptance'])
+
+
+class Candidate120HzPerformancePolicyTest(unittest.TestCase):
+    def test_candidate_tightens_only_smoothness_without_inheriting_approval(self):
+        base = json.loads((ROOT / 'docs/acceptance/performance-policy-v1.json').read_text())
+        candidate = json.loads((ROOT / 'docs/acceptance/performance-profile-120hz-candidate-v1.json').read_text())
+        self.assertEqual({"schema_version", "profile_id", "status", "approval", "base_policy_id",
+                          "inherit_constraints_only", "environment_overrides", "frame_budget_ms",
+                          "AC-072_overrides", "measurement_status", "collection_authenticated",
+                          "business_acceptance"}, set(candidate))
+        self.assertEqual(1, candidate['schema_version'])
+        self.assertEqual('vivo-v2419a-ac072-073-120hz-candidate-v1', candidate['profile_id'])
+        self.assertEqual('candidate', candidate['status'])
+        self.assertIsNone(candidate['approval'])
+        self.assertEqual(base['policy_id'], candidate['base_policy_id'])
+        self.assertIs(True, candidate['inherit_constraints_only'])
+        self.assertEqual(dict(refresh_rate_hz=120), candidate['environment_overrides'])
+        self.assertEqual(8.333, candidate['frame_budget_ms'])
+        limits = candidate['AC-072_overrides']
+        self.assertEqual(dict(input_feedback_p95_ms_max=50, stop_feedback_p95_ms_max=50,
+                              frame_over_8_333_ms_ratio_max=0.05, frame_over_16_7_ms_ratio_max=0.01,
+                              frame_over_50_ms_ratio_max=0.001, frame_duration_ms_max=100), limits)
+        for key in set(limits) & set(base['AC-072']):
+            self.assertLess(limits[key], base['AC-072'][key])
+        self.assertEqual('not_run', candidate['measurement_status'])
+        self.assertIs(False, candidate['collection_authenticated'])
+        self.assertIs(False, candidate['business_acceptance'])
+        self.assertEqual(60, base['environment']['refresh_rate_hz'])
+        self.assertEqual('approve_original_candidates', base['approval']['option_id'])

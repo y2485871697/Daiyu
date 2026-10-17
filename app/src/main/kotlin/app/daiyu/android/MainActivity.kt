@@ -1765,9 +1765,11 @@ class MainActivity : ComponentActivity() {
         onDeleteTurn = messageCallbacks.onDeleteTurn, onRetryStep = messageCallbacks.onRetryStep,
         onOpenSidebar = { openSidebar() }, onTextChange = { if (editorMatches()) updateDraft(it) },
         onSelectionChange = { start, end ->
-            if (editorMatches()) {
-                if (selectionStart != start || selectionEnd != end) offlineHost.invalidate()
-                selectionStart = start; selectionEnd = end; publishChat()
+            if (editorMatches() && (selectionStart != start || selectionEnd != end)) {
+                offlineHost.invalidate()
+                selectionStart = start; selectionEnd = end
+                chatState = chatState.copy(composer = chatState.composer.copy(
+                    selectionStart = start, selectionEnd = end))
             }
         },
         onSend = { text -> if (editorMatches() && terminalEditor == null && !mcpPreparing && mcpApproval == null && text == draft && pendingTextSend == null && !shizukuWritesBlocked) guard {

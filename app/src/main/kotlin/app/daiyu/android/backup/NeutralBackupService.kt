@@ -238,7 +238,16 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val db = transactions.database()
         check(!db.inTransaction()) { "完整备份原件阶段不能在外层SQL事务内" }
         val duplicateSnapshot = transactions.run { sql ->
-            sql.rawQuery("SELECT id FROM neutral_imports WHERE id=?", arrayOf(parsed.id)).use { it.moveToFirst() }
+            val duplicate = sql.rawQuery("SELECT id FROM neutral_imports WHERE id=?", arrayOf(parsed.id)).use { it.moveToFirst() }
+            if (!duplicate) {
+                val config = parsed.payload.getJSONObject("config")
+                config.keys().forEach { key ->
+                    val current = sql.rawQuery("SELECT value FROM neutral_config WHERE name=?", arrayOf(key))
+                        .use { if (it.moveToFirst()) it.getString(0) else null }
+                    require(current == null || current == config.get(key).toString()) { "非秘密配置冲突，未覆盖当前账户" }
+                }
+            }
+            duplicate
         }
         val static = if (parsed.static.isEmpty()) null else requireNotNull(staticAssets) { "静态原件存储未接入；不能恢复仅含引用的备份" }
         val leases = mutableListOf<app.daiyu.android.media.StaticGenerationAssets.Lease>()

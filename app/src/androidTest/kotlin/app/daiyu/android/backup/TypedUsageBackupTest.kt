@@ -72,7 +72,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
                 .put("parent_message_id", p.id.value).put("parent_owner_id", "parent-owner")
                 .put("task_group_id", "group").put("generation", 1).put("task_index", 0)
                 .put("assistant_message_id", "child-assistant").put("profile_id", "profile").put("prompt", "task")
-                .put("status", "RUNNING").put("text", "partial").put("detail", JSONObject.NULL)
+                .put("status", "RUNNING").put("text", "").put("detail", JSONObject.NULL)
                 .put("control_revision", 0).put("source_task_id", JSONObject.NULL).put("command_kind", JSONObject.NULL))
             listOf("MAIN", "SUMMARY").forEach { source ->
                 BackupHistoryRows.insert(db, "child_request_usage", JSONObject().put("task_id", "child")

@@ -1,5 +1,5 @@
 name: 代鱼构建
-run-name: ${{ inputs.mode == 'smoke' && format('代鱼双API补检 {0}', inputs.check_id) || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
+run-name: ${{ inputs.mode == 'smoke' && format('代鱼双API补检 {0}', inputs.check_id) || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || inputs.mode == 'performance' && format('代鱼性能包 {0}', inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
 on:
   workflow_dispatch:
     inputs:
@@ -11,6 +11,7 @@ on:
           - checks
           - smoke
           - synthetic
+          - performance
         default: build
         required: true
       smoke_api:
@@ -195,8 +196,8 @@ jobs:
           path: delivery/
           if-no-files-found: error
   synthetic:
-    name: 隔离合成测试包
-    if: inputs.mode == 'synthetic' && github.ref == 'refs/heads/main'
+    name: ${{ inputs.mode == 'performance' && '隔离 Release 性能包' || '隔离合成测试包' }}
+    if: (inputs.mode == 'synthetic' || inputs.mode == 'performance') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-26.04
     timeout-minutes: 25
     steps:
@@ -236,30 +237,56 @@ jobs:
           DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
           DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
         run: python3 scripts/prepare_signing.py
-      - name: 构建开发 APK
+      - name: 构建隔离 APK（性能模式仅 Release）
+        shell: bash
         env:
+          PHYSICAL_PERFORMANCE: ${{ inputs.mode == 'performance' }}
           DAIYU_REQUIRE_SIGNING: 'true'
           DAIYU_RELEASE_STORE_FILE: ${{ runner.temp }}/daiyu-release.p12
           DAIYU_RELEASE_KEY_ALIAS: ${{ secrets.DAIYU_RELEASE_KEY_ALIAS }}
           DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
           DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
-        run: ./gradlew --no-daemon -PdaiyuSyntheticApplication=true :app:assembleDebug :app:assembleDebugAndroidTest
+        run: |
+          if [[ "$PHYSICAL_PERFORMANCE" == "true" ]]; then
+            ./gradlew --no-daemon -PdaiyuSyntheticApplication=true -PdaiyuPhysicalPerformance=true :app:assembleRelease :app:assembleReleaseAndroidTest
+          else
+            ./gradlew --no-daemon -PdaiyuSyntheticApplication=true :app:assembleDebug :app:assembleDebugAndroidTest
+          fi
       - name: 清理临时签名文件
         if: always()
         run: rm -f -- "$RUNNER_TEMP/daiyu-release.p12"
-      - name: 核对独立包身份与签名
+      - name: 核对独立包身份、变体与签名
         shell: bash
+        env:
+          PHYSICAL_PERFORMANCE: ${{ inputs.mode == 'performance' }}
         run: |
-          mkdir -p synthetic-delivery/tests
-          cp app/build/outputs/apk/debug/app-debug.apk synthetic-delivery/app-synthetic.apk
-          cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk synthetic-delivery/tests/platform-test.apk
-          python3 scripts/verify_synthetic_package.py --directory synthetic-delivery --apkanalyzer "$ANDROID_HOME/cmdline-tools/16111833/bin/apkanalyzer" --apksigner "$ANDROID_HOME/build-tools/37.0.0/apksigner"
-          python3 scripts/verify_license_bundle.py --apk synthetic-delivery/app-synthetic.apk
+          if [[ "$PHYSICAL_PERFORMANCE" == "true" ]]; then
+            directory=performance-delivery
+            build_type=release
+            variant=release-synthetic
+          else
+            directory=synthetic-delivery
+            build_type=debug
+            variant=debug-synthetic
+          fi
+          mkdir -p "$directory/tests"
+          cp "app/build/outputs/apk/$build_type/app-$build_type.apk" "$directory/app-synthetic.apk"
+          cp "app/build/outputs/apk/androidTest/$build_type/app-$build_type-androidTest.apk" "$directory/tests/platform-test.apk"
+          python3 scripts/verify_synthetic_package.py --directory "$directory" --variant "$variant" --apkanalyzer "$ANDROID_HOME/cmdline-tools/16111833/bin/apkanalyzer" --apksigner "$ANDROID_HOME/build-tools/37.0.0/apksigner"
+          python3 scripts/verify_license_bundle.py --apk "$directory/app-synthetic.apk"
       - name: 上传隔离合成测试包
+        if: inputs.mode == 'synthetic'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: 代鱼合成测试包
           path: synthetic-delivery/
+          if-no-files-found: error
+      - name: 上传隔离 Release 性能包
+        if: inputs.mode == 'performance'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼Release性能测试包
+          path: performance-delivery/
           if-no-files-found: error
   smoke:
     name: 启动验证 API ${{ matrix.api }}

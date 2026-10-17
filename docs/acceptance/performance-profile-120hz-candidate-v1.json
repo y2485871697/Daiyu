@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "profile_id": "vivo-v2419a-ac072-073-120hz-candidate-v1",
+  "status": "candidate",
+  "approval": null,
+  "base_policy_id": "vivo-v2419a-ac072-073-v1",
+  "inherit_constraints_only": true,
+  "environment_overrides": {
+    "refresh_rate_hz": 120
+  },
+  "frame_budget_ms": 8.333,
+  "AC-072_overrides": {
+    "input_feedback_p95_ms_max": 50,
+    "stop_feedback_p95_ms_max": 50,
+    "frame_over_8_333_ms_ratio_max": 0.05,
+    "frame_over_16_7_ms_ratio_max": 0.01,
+    "frame_over_50_ms_ratio_max": 0.001,
+    "frame_duration_ms_max": 100
+  },
+  "measurement_status": "not_run",
+  "collection_authenticated": false,
+  "business_acceptance": false
+}

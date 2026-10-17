@@ -55,6 +55,58 @@ class SyntheticPackageTests(unittest.TestCase):
             with self.subTest(app=app, tests=tests), self.assertRaises(ValueError):
                 package.verify_manifests(app, tests)
 
+    def test_release_manifest_requires_non_debuggable_profileable_app(self):
+        release = APP.replace('<application ', '<application android:debuggable="false" ', 1).replace(
+            '</application>', '<profileable android:shell="true"/></application>')
+        package.verify_manifests(release, TEST, variant='release-synthetic')
+        for app in (APP, release.replace('debuggable="false"', 'debuggable="true"'),
+                    release.replace('shell="true"', 'shell="false"'),
+                    release.replace('<profileable android:shell="true"/>',
+                                    '<profileable android:shell="true"/><profileable android:shell="true"/>'),
+                    release.replace('package="app.daiyu.android.synthetic"', 'package="app.daiyu.android"'),
+                    release.replace('app.daiyu.android.synthetic.shizuku', 'app.daiyu.android.shizuku')):
+            with self.subTest(app=app), self.assertRaises(ValueError):
+                package.verify_manifests(app, TEST, variant='release-synthetic')
+        with self.assertRaisesRegex(ValueError, 'synthetic_variant_invalid'):
+            package.verify_manifests(release, TEST, variant='signed-debug-is-release')
+
+    def test_release_record_is_explicit_and_never_production_delivery(self):
+        release = APP.replace('</application>', '<profileable android:shell="true"/></application>')
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'tests').mkdir()
+            (root / 'app-synthetic.apk').write_bytes(b'release')
+            (root / 'tests/platform-test.apk').write_bytes(b'release-tests')
+            def run(argv, **kwargs):
+                text = SIGNATURE if argv[1] == 'verify' else (TEST if Path(argv[-1]).parent.name == 'tests' else release)
+                return SimpleNamespace(stdout=text)
+            record = package.verify_pair(root, 'apkanalyzer', 'apksigner',
+                dict(GITHUB_SHA='b' * 40, GITHUB_RUN_ID='124', GITHUB_RUN_ATTEMPT='1'),
+                run, variant='release-synthetic')
+            self.assertEqual('release-synthetic', record['variant'])
+            self.assertEqual('release', record['build_type'])
+            self.assertFalse(record['debuggable'])
+            self.assertTrue(record['profileable'])
+            self.assertFalse(record['production_delivery'])
+            self.assertFalse((root / '构建记录.json').exists())
+
+    def test_performance_build_is_isolated_and_uses_separate_test_sources(self):
+        gradle = (ROOT / 'app/build.gradle.kts').read_text()
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        synthetic = workflow.split('  synthetic:\n', 1)[1].split('  smoke:\n', 1)[0]
+        self.assertIn('check(!daiyuPhysicalPerformance || daiyuSyntheticApplication)', gradle)
+        self.assertIn('check(!daiyuPhysicalPerformance || fixedSigning)', gradle)
+        self.assertIn('if (daiyuPhysicalPerformance) testBuildType = "release"', gradle)
+        self.assertIn('setRoot("src/performanceTest")', gradle)
+        release = gradle.split('        release {', 1)[1].split('\n        }', 1)[0]
+        self.assertIn('isDebuggable = false', release)
+        self.assertIn('if (daiyuSyntheticApplication) applicationIdSuffix = ".synthetic"', release)
+        self.assertIn(':app:assembleRelease :app:assembleReleaseAndroidTest', synthetic)
+        self.assertIn('name: 代鱼Release性能测试包', synthetic)
+        self.assertIn('variant=release-synthetic', synthetic)
+        self.assertNotIn('verify_signing.py', synthetic)
+        self.assertNotIn(':app:connected', synthetic)
+
     def test_workflow_keeps_production_and_synthetic_artifacts_separate(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
         synthetic = workflow.split('  synthetic:\n', 1)[1].split('  smoke:\n', 1)[0]

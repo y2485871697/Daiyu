@@ -76,7 +76,7 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
         bad.forEach { rejected -> reject { importer.importPackage(rejected) }; assertEquals(before, target.exportBackup()) }
         assertFalse(File(databases.last().first.filesDir, "neutral-context-blobs").listFiles().orEmpty().any { it.isFile })
     }
-    fun testLateConfigurationConflictRollsBackTextTablesAndImportMarker() {
+    fun testExistingConfigurationConflictRejectsBeforeImport() {
         val (_, source, exporter) = fresh(); seed(source, 1)
         exporter.setNonSecretConfiguration(mapOf("model" to "incoming")); val text = exporter.exportPackage()
         val (_, target, importer) = fresh(); seed(target, 1); importer.setNonSecretConfiguration(mapOf("model" to "existing"))
@@ -84,6 +84,40 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
         assertEquals(before, target.exportBackup()); assertEquals("existing", importer.importedConfiguration().getString("model"))
         val count = target.readableDatabase.rawQuery("SELECT count(*) FROM neutral_imports", null).use { it.moveToFirst(); it.getInt(0) }
         assertEquals(0, count)
+    }
+    fun testConfigurationConflictAfterTextInsertRollsBackAndSurvivesReopen() {
+        val (_, source, exporter) = fresh(); seed(source, 1)
+        exporter.setNonSecretConfiguration(mapOf("model" to "incoming"))
+        val text = exporter.exportPackage()
+        val (context, target, importer) = fresh(); seed(target, 1)
+        importer.setNonSecretConfiguration(mapOf("model" to "incoming"))
+        val before = target.exportBackup()
+        target.writableDatabase.execSQL("""
+            CREATE TRIGGER conflict_after_text_insert AFTER INSERT ON messages
+            BEGIN
+                UPDATE neutral_config SET value='raced' WHERE name='model';
+            END
+        """.trimIndent())
+        try { importer.importPackage(text); fail("late configuration conflict must reject") }
+        catch (failure: IllegalArgumentException) {
+            assertEquals("非秘密配置冲突，未覆盖当前账户", failure.message)
+        }
+        fun unchanged(db: ConversationDatabase, backup: NeutralBackupService) {
+            assertEquals(before, db.exportBackup())
+            assertEquals("incoming", backup.importedConfiguration().getString("model"))
+            assertEquals(0, db.readableDatabase.rawQuery("SELECT count(*) FROM neutral_imports", null)
+                .use { it.moveToFirst(); it.getInt(0) })
+        }
+        unchanged(target, importer)
+        target.close()
+        val reopened = ConversationDatabase(context)
+        try {
+            val restored = NeutralBackupService(context, reopened)
+            unchanged(reopened, restored)
+            reopened.writableDatabase.execSQL("DROP TRIGGER conflict_after_text_insert")
+            assertFalse(restored.importPackage(text).alreadyImported)
+            assertTrue(restored.importPackage(text).alreadyImported)
+        } finally { reopened.close() }
     }
     fun testConfigurationCaptureReplacesSnapshotAndClearsRemovedPreferences() {
         val (context, db, backup) = fresh()

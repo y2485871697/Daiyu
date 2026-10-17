@@ -94,7 +94,6 @@ private fun OriginalSettingsRow(entry: SettingsEntry, defaultReasoning: Reasonin
     SettingsRow(entry.title, onClick = onClick,
         summary = when (entry.id) {
             "accessibility" -> "查看服务与授权边界；进入设置不向模型授权"
-            "accessibility_keep" -> "仅用户显式请求系统重绑，不保证连接或保活"
             "task_surface" -> "前台、后台或每次运行询问；不改变当前运行"
             else -> null
         }, leading = { SettingsIcon(entry.icon) })
@@ -181,7 +180,6 @@ internal fun DaiyuSettingsScreen(
             "voice" -> onOpenVoice?.invoke()
             "source" -> openProjectSource(context)
             "telegram", "qq", "relay_st", "relay_moyu" -> openRetainedSettingsLink(context, entry.id)
-            "platform_tools", "permission_check" -> onOpenPlatformTools?.invoke()
             "relay" -> {
                 if (section != "about") { section = "about"; relayExpanded = true }
                 else relayExpanded = !relayExpanded

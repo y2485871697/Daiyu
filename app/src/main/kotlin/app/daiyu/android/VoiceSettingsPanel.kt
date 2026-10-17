@@ -32,6 +32,7 @@ internal fun VoiceSettingsPanel(
     isCurrent: () -> Boolean,
     invalidate: () -> Unit,
     onBack: () -> Unit,
+    onOpenOfflineSpeech: () -> Unit,
 ) {
     var profile by remember { mutableStateOf(VoiceProfile.READ_ALOUD) }
     var accountPage by remember { mutableStateOf<VoiceConfiguration?>(null) }
@@ -93,6 +94,12 @@ internal fun VoiceSettingsPanel(
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         TextButton(text = "返回", onClick = { if (isCurrent()) { picker.close(); invalidate(); onBack() } })
         Text("语音设置与实时通话")
+        TextButton(text = "离线语音模型与听写", enabled = !busy,
+            modifier = Modifier.testTag("voice-offline-settings"), onClick = {
+                if (pageCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && !busy) {
+                    picker.close(); invalidate(); onOpenOfflineSpeech()
+                }
+            })
         Text("独立于聊天模型和密钥。保存不会启动麦克风、联网或收费；未配置的功能不会回退。系统语音由设备系统提供，不保证离线。")
         Text("当前独立 profile：${profile.name}（手动朗读 READ_ALOUD；级联 / 会话 CONVERSATION）")
         Text("两个 profile 的引擎、账户、密钥、模型与声音独立加密保存，不互相回退或自动复制。听写 / 双工读取 READ_ALOUD 中的独立字段。")

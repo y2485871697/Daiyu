@@ -2,6 +2,7 @@ package app.daiyu.android
 
 import androidx.compose.ui.test.*
 import app.daiyu.android.domain.*
+import app.daiyu.android.ui.screens.settings.SettingsCatalog
 import app.daiyu.android.voice.control.*
 import kotlinx.coroutines.runBlocking
 import java.util.concurrent.CopyOnWriteArrayList
@@ -50,7 +51,10 @@ class P32ProductionEntryActivityTest : WiredActivityTestCase() {
                 endpoint = "https://example.invalid", key = "synthetic-only", model = "seed-tts-2.0", voice = "ordinary"))
         }
         openSettings()
-        node("open-voice-settings").performClick()
+        node("open-voice-settings").assertDoesNotExist()
+        val title = SettingsCatalog.entry("voice").title
+        reveal("settings-search", "设置").performTextReplacement(title)
+        reveal("settings-row:$title", "设置").performClick()
         node("voice-settings").performScrollToNode(hasTestTag("voice-account-open"))
         node("voice-account-open").performClick()
         node("voice-account").assertExists()

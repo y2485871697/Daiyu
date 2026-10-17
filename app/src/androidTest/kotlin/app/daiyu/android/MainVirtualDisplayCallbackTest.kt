@@ -28,6 +28,9 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
     private val initializedOwner = AtomicBoolean()
     private val loseCleanupReply = AtomicBoolean()
     private val cleanupSends = AtomicInteger()
+    private val taskObservations = AtomicInteger()
+    private val handoffSends = AtomicInteger()
+    private var handedOffIds: List<Int> = emptyList()
     private val host = object : ControllerVirtualDisplayRuntime.Host {
         override var client: VirtualDisplayOwnerClient? = null
         override fun start(generation: String, binding: OwnerRunBinding): AndroidVirtualDisplayOwnerHost.Start {
@@ -57,8 +60,34 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
                             .put("displayId", 7).put("uniqueId", "virtual:main-test")
                         if (initialize) body.put("initialized", true)
                         else {
-                            receipt.put("result", org.json.JSONObject().put("ok", true).put("released", true))
-                            body.put("receiptOnly", false).put("released", true)
+                            receipt.put("result", org.json.JSONObject().put("ok", true).put("released", operation == "release"))
+                            body.put("receiptOnly", false)
+                            when (operation) {
+                                "status" -> {
+                                    taskObservations.incrementAndGet()
+                                    body.put("ready", true).put("name", "main-test").put("width", 640).put("height", 960)
+                                        .put("densityDpi", 240).put("flags", 0).put("ownerPackage", "app.daiyu.android")
+                                        .put("frameCount", 0).put("hasFrame", false).put("frameTimestampNs", 0L)
+                                        .put("session", "active").put("sourceState", "occupied").put("sourceEmpty", false)
+                                        .put("sourceTaskCount", 2).put("sourcePackages", org.json.JSONArray())
+                                        .put("retainedTaskIds", org.json.JSONArray(listOf(12, 23)))
+                                        .put("liveTaskIds", org.json.JSONArray(listOf(12, 23))).put("goneTaskIds", org.json.JSONArray())
+                                        .put("finishing", false).put("handoffComplete", false).put("releaseAttempted", false)
+                                        .put("mutationUncertain", false)
+                                        .put("supported", org.json.JSONArray(app.daiyu.android.vd.runtime.OwnerProtocol.SUPPORTED_OPS.toList()))
+                                        .put("missing", org.json.JSONArray())
+                                }
+                                "handoff" -> {
+                                    handoffSends.incrementAndGet()
+                                    val ids = request.getJSONObject("parameters").getJSONArray("taskIds")
+                                    handedOffIds = (0 until ids.length()).map { ids.getInt(it) }
+                                    body.put("handedOff", true).put("sourceEmpty", true).put("keptTaskIds", ids)
+                                        .put("removedTaskIds", org.json.JSONArray(listOf(12, 23).filter { it !in handedOffIds }))
+                                        .put("goneTaskIds", org.json.JSONArray()).put("cleanupOnly", handedOffIds.isEmpty())
+                                        .put("focusSamples", org.json.JSONArray())
+                                }
+                                "release" -> body.put("released", true)
+                            }
                         }
                         return body.toString()
                     }
@@ -375,6 +404,9 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
 
     private fun openInitializedCleanup(): app.daiyu.android.vdapproval.R08CleanupApprovalRequest {
         node("vd-cleanup-entry").assertIsEnabled().performClick()
+        node("r08-cleanup-confirm").assertDoesNotExist()
+        assertEquals(0, cleanupSends.get())
+        node("vd-cleanup-release-only").assertIsEnabled().performClick()
         var request: app.daiyu.android.vdapproval.R08CleanupApprovalRequest? = null
         awaitControl("Main worker result published to the original cleanup owner") {
             val visit = invokeMain("getVirtualDisplayCleanupVisit") ?: return@awaitControl false
@@ -384,6 +416,64 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         }
         node("r08-cleanup-confirm").assertExists()
         return checkNotNull(request)
+    }
+
+    private fun openDeliveryApproval(): app.daiyu.android.vdapproval.R08CleanupApprovalRequest {
+        node("vd-cleanup-entry").assertIsEnabled().performClick()
+        assertEquals(0, taskObservations.get())
+        assertEquals(0, handoffSends.get())
+        node("vd-cleanup-observe-tasks").assertIsEnabled().performClick()
+        awaitUniqueTag("vd-delivery-task-23")
+        node("vd-delivery-task-12").assertIsOff()
+        node("vd-delivery-task-23").assertIsOff()
+        node("vd-cleanup-freeze-delivery").assertIsNotEnabled()
+        node("vd-delivery-task-23").performClick()
+        node("vd-cleanup-freeze-delivery").assertIsEnabled().performClick()
+        awaitUniqueTag("r08-cleanup-confirm")
+        var request: app.daiyu.android.vdapproval.R08CleanupApprovalRequest? = null
+        mainThread {
+            val visit = checkNotNull(invokeMain("getVirtualDisplayCleanupVisit"))
+            request = visit.javaClass.getDeclaredMethod("getRequest").apply { isAccessible = true }.invoke(visit)
+                as app.daiyu.android.vdapproval.R08CleanupApprovalRequest
+        }
+        return checkNotNull(request)
+    }
+
+    fun testRealMainSelectsOneOwnedTaskAndOnlyExplicitApprovalSendsHandoffThenRelease() {
+        val (entry, original) = initializedCleanupEntry()
+        val beforeObserve = observations.get()
+        val messages = fixture.database.messages(entry.conversationId)
+        val request = openDeliveryApproval()
+        assertTrue(request.deliversTasks)
+        assertEquals(listOf(23), request.selectedTaskIds)
+        assertSame(original.plan.owner, request.review.plan.owner)
+        assertSame(original.plan.capabilities, request.review.plan.capabilities)
+        assertEquals(original.plan.generation, request.review.plan.generation)
+        assertEquals(1, taskObservations.get()); assertEquals(0, handoffSends.get()); assertEquals(0, cleanupSends.get())
+        node("r08-cleanup-confirm").performClick()
+        awaitControl("selected tasks and release confirmed without physical observation") {
+            val visit = invokeMain("getVirtualDisplayCleanupVisit") ?: return@awaitControl false
+            val status = visit.javaClass.getDeclaredMethod("getStatus").apply { isAccessible = true }.invoke(visit) as String
+            status.startsWith("所选非空任务已确认交付，Release 已确认")
+        }
+        assertEquals(listOf(23), handedOffIds)
+        assertEquals(1, handoffSends.get()); assertEquals(1, cleanupSends.get()); assertEquals(1, starts.get())
+        assertEquals(beforeObserve, observations.get()); assertEquals(0, gate.availablePermits())
+        assertSame(entry, fixture.controller.virtualDisplayEntry())
+        assertEquals(messages, fixture.database.messages(entry.conversationId))
+        physicalUnknown.set(false)
+        mainThread { assertTrue(fixture.controller.observeVirtualDisplayClose(entry)) }
+        awaitDrain()
+    }
+
+    fun testRealMainClosingFrozenDeliveryNeverSendsAndStaleConfirmationCannotGrant() {
+        val (entry, _) = initializedCleanupEntry()
+        val beforeObserve = observations.get()
+        val request = openDeliveryApproval()
+        node("vd-cleanup-close").performClick()
+        mainThread { assertFalse(checkNotNull(entry.session).answerCleanupFromUi(request, true)) }
+        assertEquals(1, taskObservations.get()); assertEquals(0, handoffSends.get()); assertEquals(0, cleanupSends.get())
+        assertEquals(beforeObserve, observations.get()); assertEquals(0, gate.availablePermits())
     }
 
     fun testRealMainExplicitCleanupApprovalUsesOriginalOwnerAndRetainsConfirmedUntilPhysicalObserve() =
@@ -407,7 +497,7 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         awaitControl("Main shows exact cleanup result without retry") {
             val visit = invokeMain("getVirtualDisplayCleanupVisit") ?: return@awaitControl false
             val status = visit.javaClass.getDeclaredMethod("getStatus").apply { isAccessible = true }.invoke(visit) as String
-            status.startsWith(if (unknown) "Release UNKNOWN" else "Release 已确认")
+            status.startsWith(if (unknown) "收尾 UNKNOWN" else "Release 已确认")
         }
         assertEquals(1, cleanupSends.get()); assertEquals(beforeObserve, observations.get())
         assertSame(session, entry.session); assertSame(authorization, entry.authorization)
@@ -415,10 +505,11 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         assertEquals(messages, fixture.database.messages(entry.conversationId))
         node("vd-cleanup-close").performClick()
         node("vd-cleanup-entry").performClick()
+        node("vd-cleanup-release-only").performClick()
         awaitControl("another visit cannot recreate an answered/attempted cleanup") {
             val visit = invokeMain("getVirtualDisplayCleanupVisit") ?: return@awaitControl false
             val status = visit.javaClass.getDeclaredMethod("getStatus").apply { isAccessible = true }.invoke(visit) as String
-            status.startsWith("暂不可收尾")
+            status.startsWith("暂不可释放")
         }
         assertEquals(1, cleanupSends.get()); assertEquals(1, starts.get())
         assertEquals(beforeObserve, observations.get()); assertEquals(0, gate.availablePermits())
@@ -448,11 +539,12 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         val beforeObserve = observations.get()
         var old: Any? = null
         node("vd-cleanup-entry").assertIsEnabled().performClick()
+        node("vd-cleanup-release-only").performClick()
         awaitControl("explicit cleanup unavailable without initialized evidence") {
             val visit = invokeMain("getVirtualDisplayCleanupVisit") ?: return@awaitControl false
             old = visit
             val status = visit.javaClass.getDeclaredMethod("getStatus").apply { isAccessible = true }.invoke(visit) as String
-            status.startsWith("暂不可收尾")
+            status.startsWith("暂不可释放")
         }
         mainThread {
             assertNull(editor()) // cleanup is not owned by the dead TextSendOwner/editor

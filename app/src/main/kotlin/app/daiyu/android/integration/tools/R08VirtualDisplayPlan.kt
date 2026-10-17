@@ -38,6 +38,14 @@ internal sealed interface R08VirtualDisplayAction {
     /** Explicit cleanup-only Handoff: keep no tasks; owner verifies/removes owned tasks.
      * No runtime task-ID discovery or arbitrary task/display selector. */
     data object Handoff : R08VirtualDisplayAction
+    class HandoffTasks(taskIds: List<Int>) : R08VirtualDisplayAction {
+        val taskIds: List<Int> = Collections.unmodifiableList(taskIds.toList())
+        init {
+            require(this.taskIds.size in 1..256 && this.taskIds.all { it > 0 } &&
+                this.taskIds.distinct().size == this.taskIds.size)
+        }
+        override fun toString() = "HandoffTasks(host-only)"
+    }
     data object Release : R08VirtualDisplayAction
 }
 internal data class R08VirtualDisplayWrite(val id: String, val action: R08VirtualDisplayAction)
@@ -80,8 +88,10 @@ internal class R08VirtualDisplayPlan private constructor(
         /** Handoff is terminal except for Release. Release-only plans remain valid for the
          * separately approved cleanup seam; they never implicitly add a Handoff. */
         fun validateExitSequence(actions: List<R08VirtualDisplayAction>) {
-            require(actions.count { it == R08VirtualDisplayAction.Handoff } <= 1) { "Handoff 至多一次" }
-            val handoff = actions.indexOf(R08VirtualDisplayAction.Handoff)
+            fun isHandoff(action: R08VirtualDisplayAction) =
+                action == R08VirtualDisplayAction.Handoff || action is R08VirtualDisplayAction.HandoffTasks
+            require(actions.count(::isHandoff) <= 1) { "Handoff 至多一次" }
+            val handoff = actions.indexOfFirst(::isHandoff)
             require(handoff < 0 || actions.drop(handoff + 1).all { it == R08VirtualDisplayAction.Release }) {
                 "Handoff 后仅允许 Release"
             }
@@ -131,6 +141,7 @@ internal class R08VirtualDisplayPlan private constructor(
                         "input" to JSONObject().put("kind", "key").put("keyCode", a.keyCode)
                     }
                     R08VirtualDisplayAction.Handoff -> "handoff" to JSONObject().put("taskIds", JSONArray())
+                    is R08VirtualDisplayAction.HandoffTasks -> "handoff" to JSONObject().put("taskIds", JSONArray(a.taskIds))
                     R08VirtualDisplayAction.Release -> "release" to JSONObject()
                 }
                 val parameters = if (op == "start" || op == "initialize") input else OwnerV2Contract.normalize(op, input)

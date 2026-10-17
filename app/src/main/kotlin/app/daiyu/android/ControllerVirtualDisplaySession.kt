@@ -111,6 +111,9 @@ internal class ControllerVirtualDisplaySession internal constructor(
     // Only the original authenticated business reply can prove Handoff. Central replay alone
     // is not authority to send an additional Release; final feedback may downgrade this evidence.
     private var handoffConfirmed = false
+    private var originalHandoffAttempted = false
+    private var tasksObservationAttempted = false
+    private var tasksObservation: RetainedTasks? = null
     private var cleanupRequest: R08CleanupApprovalRequest? = null
     private var cleanupApproval: VirtualDisplayApproval? = null
     private var cleanupDecision: Boolean? = null
@@ -170,6 +173,7 @@ internal class ControllerVirtualDisplaySession internal constructor(
                     // NOT permission to insert/retry Handoff or replace the frozen parameters.
                     if (operation == "release" && prepared.writes.any { it.operation == "handoff" } &&
                         !synchronized(lock) { handoffConfirmed }) return OwnerReply(OwnerReply.Outcome.UNKNOWN)
+                    if (operation == "handoff") synchronized(lock) { originalHandoffAttempted = true }
                     val reply = retained.endpoint.execute(id, operation, parameters)
                     if (operation == "handoff") {
                         val body = reply.payloadCopy()
@@ -277,9 +281,13 @@ internal class ControllerVirtualDisplaySession internal constructor(
             ticket.originalWholeBatch.zip(finalResults).forEach { (call, result) ->
                 val stepId = try { JSONObject(call.arguments).optString("step_id") } catch (_: Exception) { "" }
                 if (call.name == R08VirtualDisplayCatalogLeaf.WRITE_TOOL &&
-                    synchronized(lock) { plan?.writes?.any { it.id == stepId && it.operation == "handoff" } == true } &&
-                    (result.callId != call.id || result.outcome !is DispatchOutcome.Confirmed))
-                    synchronized(lock) { handoffConfirmed = false }
+                    synchronized(lock) { plan?.writes?.any { it.id == stepId && it.operation == "handoff" } == true }) {
+                    synchronized(lock) {
+                        if (result.callId == call.id && result.outcome is DispatchOutcome.Confirmed)
+                            originalHandoffAttempted = true
+                        else handoffConfirmed = false
+                    }
+                }
             }
         }
         catch (_: Exception) {
@@ -363,7 +371,89 @@ internal class ControllerVirtualDisplaySession internal constructor(
         finally { synchronized(lock) { shutdownBusy = false } }
     }
 
-    enum class CleanupResult { NOT_APPROVED, UNAVAILABLE, CONFIRMED, UNKNOWN }
+    enum class CleanupResult { NOT_APPROVED, UNAVAILABLE, CONFIRMED, UNKNOWN, DELIVERED_AND_RELEASED, DELIVERED_RETAINED }
+
+    internal class RetainedTasks internal constructor(val displayId: Int, candidateIds: List<Int>) {
+        val candidateTaskIds: List<Int> = java.util.Collections.unmodifiableList(candidateIds.toList())
+    }
+    sealed interface TasksResult {
+        data class Observed(val tasks: RetainedTasks) : TasksResult
+        data object Unavailable : TasksResult
+        data object Unknown : TasksResult
+    }
+
+    fun observeTasksOnceOnWorker(parentDrained: Boolean): TasksResult {
+        worker()
+        val target = synchronized(lock) {
+            if (cleanupDecision != null || cleanupAttempted || !taskHandoffAvailable(parentDrained))
+                return TasksResult.Unavailable
+            tasksObservation?.let { return TasksResult.Observed(it) }
+            if (tasksObservationAttempted) return TasksResult.Unavailable
+            tasksObservationAttempted = true
+            cleanupBusy = true
+            val original = checkNotNull(plan)
+            val statusPlan = R08VirtualDisplayPlan.prepare(original.owner, capabilities, original.generation,
+                emptyList(), listOf(R08VirtualDisplayRead("host_tasks_status")))
+            Triple(checkNotNull(lease).journal, checkNotNull(handle).endpoint,
+                statusPlan.intent("host-tasks-observe-v1", statusPlan.reads.single()))
+        }
+        var recorded = false
+        try {
+            val intent = target.third
+            if (target.first.claim(intent) != R08VirtualDisplayPermit.EXECUTE_ONCE) return TasksResult.Unknown
+            val reply = target.second.execute(intent.operationId, intent.operation, JSONObject(intent.canonicalParameters))
+            val body = reply.payloadCopy()
+            val tasks = if (reply.outcome == OwnerReply.Outcome.REPLIED && body != null &&
+                body.opt("ok") == true && body.opt("receiptOnly") != true &&
+                body.optJSONObject("receipt")?.optString("state") == "SUCCEEDED" && body.opt("ready") == true &&
+                body.opt("session") == "active" && body.opt("mutationUncertain") == false &&
+                body.opt("finishing") == false && body.opt("handoffComplete") == false &&
+                body.opt("releaseAttempted") == false && body.opt("sourceState") in setOf("empty", "occupied")) {
+                fun ids(key: String): List<Int> {
+                    val array = body.getJSONArray(key)
+                    require(array.length() <= 8192)
+                    return (0 until array.length()).map {
+                        val value = array.get(it)
+                        require((value is Int || value is Long) && (value as Number).toLong() in 1..Int.MAX_VALUE.toLong())
+                        (value as Number).toInt()
+                    }.also { require(it.distinct().size == it.size) }
+                }
+                val retained = ids("retainedTaskIds").toSet()
+                val live = ids("liveTaskIds")
+                val gone = ids("goneTaskIds").toSet()
+                require(live.toSet().intersect(gone).isEmpty() && live.toSet() + gone == retained)
+                val displayId = body.getInt("displayId"); require(displayId > 0)
+                RetainedTasks(displayId, live)
+            } else null
+            target.first.complete(intent, if (tasks == null) R08VirtualDisplayEvidence.UNKNOWN else R08VirtualDisplayEvidence.CONFIRMED)
+            recorded = true
+            if (tasks != null) {
+                synchronized(lock) { tasksObservation = tasks }
+                return TasksResult.Observed(tasks)
+            }
+        } catch (_: Exception) {
+            // Retain the original claim; no second observation or replacement ID.
+        } finally { synchronized(lock) { if (!recorded) uncertain = true; cleanupBusy = false } }
+        return TasksResult.Unknown
+    }
+
+    fun prepareTaskHandoffOnWorker(originalTasks: RetainedTasks, selectedTaskIds: List<Int>,
+        parentDrained: Boolean, admissionStillValid: () -> Boolean = { true }): R08CleanupApprovalRequest? {
+        worker()
+        val selected = selectedTaskIds.toList()
+        return synchronized(lock) {
+            if (tasksObservation !== originalTasks || cleanupDecision != null ||
+                cleanupAttempted || !taskHandoffAvailable(parentDrained) || !admissionStillValid()) return null
+            cleanupRequest?.let { return if (it.deliversTasks && it.selectedTaskIds == selected) it else null }
+            if (selected.isEmpty() || selected.distinct().size != selected.size ||
+                selected.size > 256 || selected.any { it !in originalTasks.candidateTaskIds }) return null
+            val original = checkNotNull(plan)
+            val prepared = R08VirtualDisplayPlan.prepare(original.owner, capabilities, original.generation,
+                listOf(R08VirtualDisplayWrite("host_handoff_tasks", R08VirtualDisplayAction.HandoffTasks(selected)),
+                    R08VirtualDisplayWrite("host_cleanup_release", R08VirtualDisplayAction.Release)))
+            R08CleanupApprovalRequest(prepared).also { cleanupRequest = it }
+        }
+    }
 
     /** Explicit host action AFTER Stop + parent drain, never called by close/observe/timers.
      * Freezes an additional Release-only request on the SAME owner, capabilities and durable
@@ -374,7 +464,8 @@ internal class ControllerVirtualDisplaySession internal constructor(
     fun prepareInitializedCleanupOnWorker(parentDrained: Boolean): R08CleanupApprovalRequest? {
         worker()
         return synchronized(lock) {
-            if (cleanupDecision != null || cleanupAttempted || !cleanupAvailable(parentDrained)) return null
+            if (cleanupDecision != null || cleanupAttempted || !cleanupAvailable(parentDrained) ||
+                cleanupRequest?.deliversTasks == true) return null
             cleanupRequest ?: run {
                 val original = checkNotNull(plan)
                 val releasePlan = R08VirtualDisplayPlan.prepare(original.owner, capabilities, original.generation,
@@ -411,7 +502,8 @@ internal class ControllerVirtualDisplaySession internal constructor(
             // Adapter supplies only an atomic UI-visit validity read here: no host locks or I/O.
             // Invalidation before this admission does not consume the journal/send attempt;
             // after admission the in-flight operation cannot be undone or safely replayed.
-            if (cleanupAttempted || !cleanupAvailable(parentDrained) || !admissionStillValid())
+            if (cleanupAttempted || !(if (original.deliversTasks) taskHandoffAvailable(parentDrained)
+                    else cleanupAvailable(parentDrained)) || !admissionStillValid())
                 return CleanupResult.UNAVAILABLE
             val prepared = original.review.plan
             val actual = checkNotNull(plan)
@@ -421,50 +513,77 @@ internal class ControllerVirtualDisplaySession internal constructor(
             cleanupBusy = true
             Triple(checkNotNull(lease).journal, checkNotNull(handle).endpoint, prepared)
         }
-        val intent = target.third.intent("host-cleanup-release-v1", target.third.writes.single())
-        var evidence = R08VirtualDisplayEvidence.UNKNOWN
         var outcomeRecorded = false
+        var delivered = false
+        var releaseClaimed = false
         try {
-            if (target.first.claim(intent) == R08VirtualDisplayPermit.EXECUTE_ONCE) {
-                val reply = target.second.execute(intent.operationId, intent.operation, JSONObject(intent.canonicalParameters))
-                val body = reply.payloadCopy()
-                if (reply.outcome == app.daiyu.android.vd.OwnerReply.Outcome.REPLIED && body != null &&
-                    body.opt("ok") == true && body.opt("receiptOnly") != true &&
-                    body.opt("mutationUncertain") != true && body.opt("released") == true &&
-                    body.optJSONObject("receipt")?.optString("state") == "SUCCEEDED")
-                    evidence = R08VirtualDisplayEvidence.CONFIRMED
+            for (step in target.third.writes) {
+                if (!admissionStillValid()) {
+                    outcomeRecorded = true
+                    return if (delivered) CleanupResult.DELIVERED_RETAINED else CleanupResult.UNAVAILABLE
+                }
+                val invocation = if (step.operation == "handoff") "host-handoff-tasks-v1" else "host-cleanup-release-v1"
+                val intent = target.third.intent(invocation, step)
+                outcomeRecorded = false
+                var confirmed = false
+                if (step.operation == "release") releaseClaimed = true
+                if (target.first.claim(intent) == R08VirtualDisplayPermit.EXECUTE_ONCE) {
+                    if (!admissionStillValid()) {
+                        target.first.complete(intent, R08VirtualDisplayEvidence.NOT_EXECUTED)
+                        outcomeRecorded = true
+                        return if (delivered) CleanupResult.DELIVERED_RETAINED else CleanupResult.UNAVAILABLE
+                    }
+                    val reply = target.second.execute(intent.operationId, intent.operation, JSONObject(intent.canonicalParameters))
+                    val body = reply.payloadCopy()
+                    val success = reply.outcome == OwnerReply.Outcome.REPLIED && body != null &&
+                        body.opt("ok") == true && body.opt("receiptOnly") != true &&
+                        body.opt("mutationUncertain") != true &&
+                        body.optJSONObject("receipt")?.optString("state") == "SUCCEEDED"
+                    confirmed = success && if (step.operation == "release") body!!.opt("released") == true
+                    else body!!.opt("handedOff") == true && body.opt("sourceEmpty") == true &&
+                        body.opt("cleanupOnly") == false &&
+                        body.optJSONArray("keptTaskIds")?.toString() == step.parameters().getJSONArray("taskIds").toString()
+                }
+                target.first.complete(intent, if (confirmed) R08VirtualDisplayEvidence.CONFIRMED else R08VirtualDisplayEvidence.UNKNOWN)
+                outcomeRecorded = true
+                if (!confirmed) return if (delivered) CleanupResult.DELIVERED_RETAINED else CleanupResult.UNKNOWN
+                if (step.operation == "handoff") {
+                    delivered = true
+                    synchronized(lock) { handoffConfirmed = true }
+                }
             }
-            // Maintenance evidence, NOT a fabricated central tool-ledger final result.
-            target.first.complete(intent, evidence)
-            outcomeRecorded = true
-            if (evidence == R08VirtualDisplayEvidence.CONFIRMED) return CleanupResult.CONFIRMED
+            return if (delivered) CleanupResult.DELIVERED_AND_RELEASED else CleanupResult.CONFIRMED
         } catch (_: Exception) {
-            // Never retry claim/send/completion. The original claim (or a failed append's
-            // pending evidence) remains durable; absence of completion is NOT success.
+            // A lost claim or completion is never replayed, even after a successful wire reply.
         } finally {
             synchronized(lock) {
-                // UNKNOWN is an operation result, not a denial of independent physical exit proof.
                 if (!outcomeRecorded) uncertain = true
+                if (delivered && !releaseClaimed && outcomeRecorded) {
+                    cleanupRequest = null
+                    cleanupApproval = null
+                    cleanupDecision = null
+                    cleanupAttempted = false
+                }
                 cleanupBusy = false
             }
         }
-        return CleanupResult.UNKNOWN
+        return if (delivered) CleanupResult.DELIVERED_RETAINED else CleanupResult.UNKNOWN
     }
 
-    // Caller holds lock. After close no new dispatch is admitted; final feedback and any earlier
-    // active operation must have drained too. Never use initialized=false as uninitialized proof.
-    private fun cleanupAvailable(parentDrained: Boolean): Boolean {
+    private fun maintenanceAvailable(parentDrained: Boolean): Boolean {
         if (!closed || !parentDrained || binding || uncertain || releasing || released || shutdownClaimed ||
             shutdownBusy || cleanupBusy || batchCallbacks != 0 || batchTickets.isNotEmpty() || lease == null ||
             handle == null || plan == null) return false
         val state = leaf?.heldState() ?: return false
-        // Additional cleanup is exactly the separately approved Release, never an implicit
-        // Handoff. If this plan could own tasks, require its original verified Handoff first.
-        if (plan!!.writes.any { it.operation == "launch" || it.operation == "handoff" } &&
-            !handoffConfirmed) return false
         return state.revoked && state.startAttempted && state.initialized && !state.uncertain &&
             !state.releaseAttempted && state.activeExecutions == 0 && state.pendingFinalOutcomes == 0
     }
+
+    private fun cleanupAvailable(parentDrained: Boolean): Boolean = maintenanceAvailable(parentDrained) &&
+        (plan!!.writes.none { it.operation == "launch" || it.operation == "handoff" } || handoffConfirmed)
+
+    private fun taskHandoffAvailable(parentDrained: Boolean): Boolean = maintenanceAvailable(parentDrained) &&
+        !originalHandoffAttempted && !handoffConfirmed
 
     private fun stopAcceptedOnce(actualOwner: RunExecutionOwner) {
         val stop = synchronized(lock) { if (stopClaimed) false else { stopClaimed = true; true } }

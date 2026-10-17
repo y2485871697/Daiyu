@@ -151,7 +151,7 @@ internal object FeatureDetails {
                 FeatureControl("late", "迟到结果与手动改名保护", FeatureControlKind.INFO),
             )),
             FeatureSection("actions", "操作", listOf(
-                FeatureControl("generate", "生成会话标题", FeatureControlKind.ACTION),
+                FeatureControl("open", "打开独立标题模型设置", FeatureControlKind.ACTION, FeatureRoute.TITLE_MODEL_SETTINGS),
             )),
         ),
         "P25" to listOf(

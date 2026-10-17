@@ -116,7 +116,11 @@ class ChatController internal constructor(private val application:Application,
         ProductionContextPreparation::create,
     private val virtualDisplayFactory: ControllerVirtualDisplayFactory = ControllerVirtualDisplayFactory.REAL,
     // Optional so existing injected one/two-argument factories remain genuine test seams.
-    private val sessionModel: ((ProviderSnapshot, AssistantRunContext, SessionGatewayContext)->ModelPort)? = null) {
+    private val sessionModel: ((ProviderSnapshot, AssistantRunContext, SessionGatewayContext)->ModelPort)? = null,
+    private val titleModelFactory: (ProviderSnapshot) -> ModelPort = {
+        ModelFactory.create(app.daiyu.android.title.TitleModelCoordinator.requestSnapshot(it),
+            app.daiyu.android.title.ConversationTitleModel.INSTRUCTIONS)
+    }, private val titleSettingsOverride: app.daiyu.android.title.TitleModelSettingsStore? = null) {
     // Voice credentials remain independent from chat settings.
     internal val voiceAccounts by lazy { app.daiyu.android.voice.account.VoiceAccountResources.forContext(application) }
     internal val voiceRuntime by lazy {
@@ -126,6 +130,59 @@ class ChatController internal constructor(private val application:Application,
     }
     // The Activity editor and run preparation share this exact independent store instance.
     internal val reconnectSettings = app.daiyu.android.model.reconnect.ReconnectSettingsStore(application)
+    internal val titleSettings by lazy { titleSettingsOverride ?: app.daiyu.android.title.TitleModelSettingsStore(application) }
+    private val titleCoordinatorDelegate = lazy {
+        app.daiyu.android.title.TitleModelCoordinator(titleSettings,
+            app.daiyu.android.title.SqliteTitleCommitAdapter({ database.writableDatabase },
+                app.daiyu.android.title.ParentTitleUsagePort { db, receipt ->
+                    check(db === database.writableDatabase && db.inTransaction())
+                    contextService.recordUsage(app.daiyu.android.domain.context.UsageRecord(
+                        receipt.requestId, receipt.parentRunId.value, receipt.conversationId.value,
+                        receipt.usage?.inputTokens, receipt.usage?.outputTokens, receipt.usage?.cachedTokens))
+                }), titleModelFactory)
+    }
+    private val titleCoordinator by titleCoordinatorDelegate
+    private val titleExecutor = Executors.newSingleThreadExecutor()
+    private var titleReaders = 0
+    internal var titleNotice: String? = null
+        private set
+    internal var titleRevision = 0L
+        private set
+    @Synchronized internal fun consumeTitleNotice(): String? = titleNotice.also { titleNotice = null }
+
+    /** Called from the Runner's post-persist publisher, not from a UI/cleanup replay. */
+    private fun afterTitleParentPersisted(message: Message, user: Message, expectedAssistant: Message,
+        pending: java.util.concurrent.atomic.AtomicReference<app.daiyu.android.title.TitleJob?>) {
+        if (message.id != expectedAssistant.id || message.role != Message.ASSISTANT_ROLE || message.runId != user.runId ||
+            message.conversationId != user.conversationId || message.status == RunStatus.RUNNING) return
+        val job = pending.getAndSet(null) ?: return
+        val admitted = synchronized(this) {
+            if (closed || message.status != RunStatus.COMPLETED) false else { titleReaders++; true }
+        }
+        if (!admitted) { titleCoordinator.revoke(job); return }
+        try { titleExecutor.execute {
+            val result = try {
+                titleCoordinator.generate(job, listOf(user, message))
+            } catch (_: Exception) {
+                // A failed usage/storage receipt is visible independently of the accepted chat.
+                null
+            }
+            handler.post { synchronized(this) {
+                titleReaders--
+                if (result == app.daiyu.android.title.TitleOutcome.SAVED) titleRevision++
+                titleNotice = when (result) {
+                    app.daiyu.android.title.TitleOutcome.SAVED -> "会话标题已保存"
+                    null -> "标题或用量保存未确认；聊天结果不受影响，未自动重试"
+                    else -> "标题未保存（${result.name}）；聊天结果不受影响"
+                }
+                if (closed) closeStorageWhenIdle() else notifyChanged()
+            } }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            titleCoordinator.revoke(job)
+            synchronized(this) { titleReaders--; if (closed) closeStorageWhenIdle() }
+        }
+    }
+
     private val contextService by lazy { ContextService(application, database) }
     private val contextPreparation by lazy { contextPreparationFactory(application, contextService) }
 
@@ -1950,6 +2007,7 @@ class ChatController internal constructor(private val application:Application,
         if(preparationCancelled(token)) return null
         var auxiliaryPort: ControllerAuxiliaryVision? = null
         val acceptedTitle = java.util.concurrent.atomic.AtomicReference<String?>()
+        val pendingTitle = java.util.concurrent.atomic.AtomicReference<app.daiyu.android.title.TitleJob?>()
         val preparedModel=try {
             if (video != null) messageVideos.wrap(provider, video.second, conversationId, assistant.id,
                 checkNotNull(videoPlan), assistantContext.systemPrompt, { video.first.isRevoked() },
@@ -2086,6 +2144,7 @@ class ChatController internal constructor(private val application:Application,
                 RunnerOptions(reconnect=frozenReconnect.runnerPolicy(),
                     runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools,
                     onReasoning={ event -> publishReasoning(assistant,event) })) {
+                afterTitleParentPersisted(it, user, assistant, pendingTitle)
                 synchronized(this) {
                     if(!closed && active?.id==assistant.id && active?.runId==run && active?.conversationId==conversationId &&
                         it.id==assistant.id && it.runId==run && it.conversationId==conversationId) {
@@ -2174,6 +2233,22 @@ class ChatController internal constructor(private val application:Application,
         }
         // database.send returns only after its real two-row transaction receipt succeeds.
         acceptedTitle.set(saved.title)
+        // Only THIS newly-created durable first run gets a job. Never inspect old/new-empty
+        // conversations, restoration, or a subsequent send for catch-up title generation.
+        // Title preparation failure cannot turn the accepted chat receipt into rejection.
+        if (conversation == null) {
+            try {
+                val coordinator = titleCoordinator
+                if (synchronized(this) { closed }) coordinator.close()
+                else {
+                    val preparedTitle = coordinator.prepare(saved.id, run)
+                    pendingTitle.set(preparedTitle.job)
+                    if (preparedTitle.outcome == app.daiyu.android.title.TitleOutcome.BINDING_UNAVAILABLE)
+                        synchronized(this) { titleNotice = "独立标题模型失绑定或配置不可用；聊天已保存，未使用主模型" }
+                    if (synchronized(this) { closed }) pendingTitle.getAndSet(null)?.let(coordinator::revoke)
+                }
+            } catch (_: Exception) { titleNotice = "独立标题配置不可用；聊天已保存" }
+        }
         imageAttempt?.accepted(saved)
         synchronized(this) { virtualDisplay?.accepted = true }
         video?.first?.accepted(user, videoPrepared?.inputs.orEmpty())
@@ -2200,6 +2275,7 @@ class ChatController internal constructor(private val application:Application,
             }
         }
         if(!installed) {
+            pendingTitle.getAndSet(null)?.let(titleCoordinator::revoke)
             // close won AFTER acceptance: receipt still wins, but no provider request is opened.
             auxiliaryPort?.close()
             closeUnacceptedTools(tools)
@@ -2384,7 +2460,7 @@ class ChatController internal constructor(private val application:Application,
     private fun closeStorageWhenIdle() {
         pruneBackgroundRuns()
         if(resources!=null || preparing || generationEntry!=null || virtualDisplayEntry!=null || generationReaders!=0 ||
-            unacceptedTools.isNotEmpty() || imageReaders!=0 || videoReaders!=0 || childCommandReaders!=0 || closingStorage) return
+            unacceptedTools.isNotEmpty() || imageReaders!=0 || videoReaders!=0 || childCommandReaders!=0 || titleReaders!=0 || closingStorage) return
         if(!childrenClosed) {
             if(!childrenClosing) {
                 childrenClosing=true
@@ -2406,7 +2482,7 @@ class ChatController internal constructor(private val application:Application,
         closingStorage=true
         executor.execute {
             try {closeGenerationOutputReaders();generationCleanup.close();questionStore?.close();database.close();runtimeStore?.close();runtimeStore=null}
-            finally {executor.shutdown();closeDone.countDown()}
+            finally {titleExecutor.shutdown();executor.shutdown();closeDone.countDown()}
         }
     }
     private val messageActionStore by lazy { MessageActionStore(database, contextService, messageImageAssets,
@@ -2805,6 +2881,8 @@ class ChatController internal constructor(private val application:Application,
             }
             resources?.also {fenceRun(it)}.also {runRevocationListeners.clear()}
         }
+        // Fence/cancel the independent title owner before storage drain. No UI join.
+        if (titleCoordinatorDelegate.isInitialized()) titleCoordinator.close()
         cancelPreparation()
         synchronized(this) {pendingImage}?.cancel()
         synchronized(this) {pendingShizuku}?.let(::rejectShizuku)

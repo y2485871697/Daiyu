@@ -33,6 +33,46 @@
       "sha256": "2ac512dac6ad59e9f77d32bc9d677a8df9c852a55f9dcbfa3e3bc8667716404f"
     },
     {
+      "path": "app/src/main/assets/licenses/maven/commons-codec-1.19.0/LICENSE.txt",
+      "bytes": 11359,
+      "sha256": "b1d2870f1a00e4d7f56576e5f0870cba109e041f8af66866cf5b499478e654e7"
+    },
+    {
+      "path": "app/src/main/assets/licenses/maven/commons-codec-1.19.0/NOTICE.txt",
+      "bytes": 175,
+      "sha256": "b64933ee1d36d14659156223a2604edadb60bffdd465d5368ff422d7689db5fb"
+    },
+    {
+      "path": "app/src/main/assets/licenses/maven/commons-compress-1.28.0/LICENSE.txt",
+      "bytes": 11358,
+      "sha256": "51b88fd3e9e24edcdce1dd145a4fca2dcd12911407f00b06dfa6ff600f9733c1"
+    },
+    {
+      "path": "app/src/main/assets/licenses/maven/commons-compress-1.28.0/NOTICE.txt",
+      "bytes": 178,
+      "sha256": "0d98967f0ab328af8d9d536aa9a5c684b5dd665657245f6ee6b5915affe811c0"
+    },
+    {
+      "path": "app/src/main/assets/licenses/maven/commons-io-2.20.0/LICENSE.txt",
+      "bytes": 11360,
+      "sha256": "c1d1a38c99c48ccad170890ade6066e2e240bb6ce59861d4eb7f672eddd2a4c6"
+    },
+    {
+      "path": "app/src/main/assets/licenses/maven/commons-io-2.20.0/NOTICE.txt",
+      "bytes": 172,
+      "sha256": "b54b0db6c617273efff79ba193bb01b05eadcddfff55c24063b38b2acef714c3"
+    },
+    {
+      "path": "app/src/main/assets/licenses/maven/commons-lang3-3.18.0/LICENSE.txt",
+      "bytes": 11359,
+      "sha256": "b1d2870f1a00e4d7f56576e5f0870cba109e041f8af66866cf5b499478e654e7"
+    },
+    {
+      "path": "app/src/main/assets/licenses/maven/commons-lang3-3.18.0/NOTICE.txt",
+      "bytes": 174,
+      "sha256": "64bc8696af3f6c770521412b85d3a733fa44b2ef5b0f4bd739e0c4d02eca492a"
+    },
+    {
       "path": "app/src/main/assets/licenses/openminis/NOTICE.md",
       "bytes": 1572,
       "sha256": "6467ae64081123ee1f223f2e8e0adbbbc6a925548d6a2df9f57613197d8d51db"
@@ -84,8 +124,8 @@
     },
     {
       "path": "app/src/main/assets/licenses/source-index.md",
-      "bytes": 13633,
-      "sha256": "4a9ebd6ada00ac2a9eb271ba73bb258ee316079f72035d392ff37bf8b4176df3"
+      "bytes": 14613,
+      "sha256": "50d86f0f449d48ace90b3f7f0712b0008a705c4bcab62ff45ec48498315091da"
     },
     {
       "path": "app/src/main/assets/licenses/talloc-2.4.3.txt",

@@ -1,0 +1,81 @@
+{
+  "kind": "declared-or-pom-candidate-artifacts-not-resolved-graph",
+  "artifacts": [
+    {
+      "coordinate": "org.apache.commons:commons-compress:1.28.0",
+      "url": "https://repo.maven.apache.org/maven2/org/apache/commons/commons-compress/1.28.0/commons-compress-1.28.0.jar",
+      "file": "commons-compress-1.28.0.jar",
+      "bytes": 1117221,
+      "sha256": "e1522945218456f3649a39bc4afd70ce4bd466221519dba7d378f2141a4642ca",
+      "license_entries": [
+        {
+          "entry": "META-INF/LICENSE.txt",
+          "bytes": 11358,
+          "sha256": "51b88fd3e9e24edcdce1dd145a4fca2dcd12911407f00b06dfa6ff600f9733c1"
+        },
+        {
+          "entry": "META-INF/NOTICE.txt",
+          "bytes": 178,
+          "sha256": "0d98967f0ab328af8d9d536aa9a5c684b5dd665657245f6ee6b5915affe811c0"
+        }
+      ]
+    },
+    {
+      "coordinate": "commons-codec:commons-codec:1.19.0",
+      "url": "https://repo.maven.apache.org/maven2/commons-codec/commons-codec/1.19.0/commons-codec-1.19.0.jar",
+      "file": "commons-codec-1.19.0.jar",
+      "bytes": 374716,
+      "sha256": "5c3881e4f556855e9c532927ee0c9dfde94cc66760d5805c031a59887070af5f",
+      "license_entries": [
+        {
+          "entry": "META-INF/LICENSE.txt",
+          "bytes": 11359,
+          "sha256": "b1d2870f1a00e4d7f56576e5f0870cba109e041f8af66866cf5b499478e654e7"
+        },
+        {
+          "entry": "META-INF/NOTICE.txt",
+          "bytes": 175,
+          "sha256": "b64933ee1d36d14659156223a2604edadb60bffdd465d5368ff422d7689db5fb"
+        }
+      ]
+    },
+    {
+      "coordinate": "commons-io:commons-io:2.20.0",
+      "url": "https://repo.maven.apache.org/maven2/commons-io/commons-io/2.20.0/commons-io-2.20.0.jar",
+      "file": "commons-io-2.20.0.jar",
+      "bytes": 563971,
+      "sha256": "df90bba0fe3cb586b7f164e78fe8f8f4da3f2dd5c27fa645f888100ccc25dd72",
+      "license_entries": [
+        {
+          "entry": "META-INF/LICENSE.txt",
+          "bytes": 11360,
+          "sha256": "c1d1a38c99c48ccad170890ade6066e2e240bb6ce59861d4eb7f672eddd2a4c6"
+        },
+        {
+          "entry": "META-INF/NOTICE.txt",
+          "bytes": 172,
+          "sha256": "b54b0db6c617273efff79ba193bb01b05eadcddfff55c24063b38b2acef714c3"
+        }
+      ]
+    },
+    {
+      "coordinate": "org.apache.commons:commons-lang3:3.18.0",
+      "url": "https://repo.maven.apache.org/maven2/org/apache/commons/commons-lang3/3.18.0/commons-lang3-3.18.0.jar",
+      "file": "commons-lang3-3.18.0.jar",
+      "bytes": 702952,
+      "sha256": "4eeeae8d20c078abb64b015ec158add383ac581571cddc45c68f0c9ae0230720",
+      "license_entries": [
+        {
+          "entry": "META-INF/LICENSE.txt",
+          "bytes": 11359,
+          "sha256": "b1d2870f1a00e4d7f56576e5f0870cba109e041f8af66866cf5b499478e654e7"
+        },
+        {
+          "entry": "META-INF/NOTICE.txt",
+          "bytes": 174,
+          "sha256": "64bc8696af3f6c770521412b85d3a733fa44b2ef5b0f4bd739e0c4d02eca492a"
+        }
+      ]
+    }
+  ]
+}

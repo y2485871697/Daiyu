@@ -90,6 +90,13 @@ class LicenseBundleContractTest(unittest.TestCase):
         self.assertIn("unresolved", inventory["image_upstream_binding"])
         self.assertEqual(self.records, BUNDLE.verify_tree(self.root))
 
+    def test_asf_maven_license_and_component_notices_are_required(self):
+        required = BUNDLE.required_paths()
+        for artifact in ("commons-compress-1.28.0", "commons-codec-1.19.0",
+                         "commons-io-2.20.0", "commons-lang3-3.18.0"):
+            for name in ("LICENSE.txt", "NOTICE.txt"):
+                self.assertIn(BUNDLE.BUNDLE + "maven/" + artifact + "/" + name, required)
+
     def test_read_only_verification_does_not_refresh_hashes_or_assets(self):
         before = {name: self.read(name) for name in self.records}
         with patch.object(BUNDLE, "ROOT", self.root), patch.object(BUNDLE, "stage", side_effect=AssertionError("no auto-fix")):

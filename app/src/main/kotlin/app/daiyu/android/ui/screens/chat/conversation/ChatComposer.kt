@@ -76,7 +76,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                 BasicTextField(
                     value = TextFieldValue(state.text, TextRange(state.selectionStart.coerceIn(0, state.text.length), state.selectionEnd.coerceIn(0, state.text.length))),
                     onValueChange = { value ->
-                        actions.onTextChange(value.text)
+                        if (value.text != state.text) actions.onTextChange(value.text)
                         actions.onSelectionChange(value.selection.start, value.selection.end)
                     },
                     enabled = state.enabled,

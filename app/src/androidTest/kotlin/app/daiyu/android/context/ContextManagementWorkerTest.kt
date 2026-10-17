@@ -219,7 +219,12 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         val lease = seed(); val id = lease.owner.conversationId
         val initial = worker.snapshot(lease)
         val last = initial.originals.last()
-        database.save(last.copy(blocks = listOf(MessageBlock.Text("changed", "retained tail changed"))))
+        DatabaseTransactions { database.writableDatabase }.run { sql ->
+            assertEquals(1, sql.update("messages", android.content.ContentValues().apply {
+                put("blocks", ArchiveCodec.blocks(listOf(MessageBlock.Text("changed", "retained tail changed"))).toString())
+            }, "id=? AND conversation_id=? AND run_id=? AND status='COMPLETED'",
+                arrayOf(last.id.value, last.conversationId.value, last.runId.value)))
+        }
         failure { worker.compress(lease, initial) }
         val changed = worker.snapshot(lease)
         priorArchive(lease)
@@ -278,7 +283,12 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         val snapshot = worker.snapshot(lease)
         onRequest = {
             val tail = snapshot.originals.last()
-            database.save(tail.copy(blocks = listOf(MessageBlock.Text("new", "tail changed during summary"))))
+            DatabaseTransactions { database.writableDatabase }.run { sql ->
+                assertEquals(1, sql.update("messages", android.content.ContentValues().apply {
+                    put("blocks", ArchiveCodec.blocks(listOf(MessageBlock.Text("new", "tail changed during summary"))).toString())
+                }, "id=? AND conversation_id=? AND run_id=? AND status='COMPLETED'",
+                    arrayOf(tail.id.value, tail.conversationId.value, tail.runId.value)))
+            }
         }
         failure { worker.compress(lease, snapshot) }
         assertEquals(1, requests)

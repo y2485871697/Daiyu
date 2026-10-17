@@ -1,5 +1,6 @@
 package app.daiyu.android.context
 
+import app.daiyu.android.storage.SQLiteMessageVideoStore
 import android.content.ContentValues
 import android.content.Context
 import android.content.ContextWrapper
@@ -35,13 +36,16 @@ class ContextHistoryServiceTest : InstrumentationTestCase() {
     }
     private fun text(value: String) = listOf(MessageBlock.Text("provider-text-item", value))
     private fun insert(m: Message) {
-        MessageHistoryCodec.validate(m)
-        db.writableDatabase.insertOrThrow("messages", null, ContentValues().apply {
-            put("id", m.id.value); put("conversation_id", m.conversationId.value); put("run_id", m.runId.value)
-            put("role", m.role); put("blocks", ArchiveCodec.blocks(m.blocks).toString()); put("status", m.status.name)
-            put("error", m.error); put("protocol", JSONArray(m.protocolItems).toString())
-            put("history_segments", MessageHistoryCodec.encode(m.historySegments).toString())
-        })
+        DatabaseTransactions { db.writableDatabase }.run { sql ->
+            MessageHistoryCodec.validate(m)
+            sql.insertOrThrow("messages", null, ContentValues().apply {
+                put("id", m.id.value); put("conversation_id", m.conversationId.value); put("run_id", m.runId.value)
+                put("role", m.role); put("blocks", ArchiveCodec.blocks(m.blocks).toString()); put("status", m.status.name)
+                put("error", m.error); put("protocol", JSONArray(m.protocolItems).toString())
+                put("history_segments", MessageHistoryCodec.encode(m.historySegments).toString())
+            })
+            SQLiteMessageVideoStore.insert(sql, m, emptyList())
+        }
     }
     private fun seed(): List<Message> {
         val id = db.create("default").id

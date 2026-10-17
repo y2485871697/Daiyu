@@ -94,7 +94,11 @@ class DictationActivityTest : WiredActivityTestCase() {
     private fun result(text: String) = Bundle().apply {
         putStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION, arrayListOf(text))
     }
-    private fun voice() { mainThread { retainedControls(activity).onVoice() } }
+    private fun voice() {
+        ui.onNode(hasContentDescription("语音输入") or hasContentDescription("停止语音输入"))
+            .assertIsDisplayed().assertIsEnabled().performClick()
+        ui.waitForIdle()
+    }
     private fun permissionResult(granted: Boolean) {
         mainThread {
             // Resolve the SYSTEM dictation launcher's actual

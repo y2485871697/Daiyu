@@ -26,6 +26,14 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
     private val transactions: DatabaseTransactions, private val videos: BackupVideoAssets?,
     private val generation: StaticGenerationBranch?, private val cancelled: () -> Boolean) {
     private fun checkCancelled() { if (cancelled() || Thread.currentThread().isInterrupted) throw CancellationException() }
+    private fun requireNoGenerationOriginals(sql: SQLiteDatabase, prefix: List<Message>) {
+        prefix.forEach { m ->
+            require(!sql.rawQuery("SELECT 1 FROM generation_outputs WHERE assistant_id=?", arrayOf(m.id.value)).use { it.moveToFirst() }) { "静态生成原件复制能力未接入" }
+            require(!BackupHistoryRows.exists(sql, "neutral_backup_history") || !sql.rawQuery(
+                "SELECT 1 FROM neutral_backup_history WHERE owner_message_id=? AND kind IN ('generation_output','generation_static_output')",
+                arrayOf(m.id.value)).use { it.moveToFirst() }) { "静态生成原件复制能力未接入" }
+        }
+    }
     fun branch(id: ConversationId, through: MessageId, authorize: (SQLiteDatabase) -> Unit,
         copyImages: (List<Message>, List<Message>) -> List<Message>): BranchLocator {
         val db = transactions.database()
@@ -59,12 +67,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                 runId = runs.getOrPut(m.runId) { RunId(UUID.randomUUID().toString()) },
                 historySegments = m.historySegments.map { it.copy(messageId = remap(m, it.messageId)) }) }
             val capture = generation?.capture(sql, prefix, mapped, checkNotNull(accountScope))
-            if (generation == null) prefix.forEach { m ->
-                require(!sql.rawQuery("SELECT 1 FROM generation_outputs WHERE assistant_id=?", arrayOf(m.id.value)).use { it.moveToFirst() })
-                require(!BackupHistoryRows.exists(sql, "neutral_backup_history") || !sql.rawQuery(
-                    "SELECT 1 FROM neutral_backup_history WHERE owner_message_id=? AND kind IN ('generation_output','generation_static_output')",
-                    arrayOf(m.id.value)).use { it.moveToFirst() }) { "静态生成原件复制能力未接入" }
-            }
+            if (generation == null) requireNoGenerationOriginals(sql, prefix)
             Snapshot(original, prefix, mapped, sourceValues(sql), attachments(sql), archives(sql),
                 original.map { SQLiteMessageVideoStore.readVerified(sql, it) }, capture)
         }
@@ -137,7 +140,8 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                         check(MessageVideoInputCodec.encode(message, SQLiteMessageVideoStore.readVerified(db, message)) ==
                             MessageVideoInputCodec.encode(message, snapshot.inputs[index])) { "来源视频或witness已变化" }
                     }
-                    snapshot.generation?.let { generation!!.verifySource(db, it) }
+                    if (generation == null) requireNoGenerationOriginals(db, snapshot.prefix)
+                    else snapshot.generation?.let { generation.verifySource(db, it) }
                 }
                 verifySource(); checkCancelled()
                 val source = snapshot.sourceValues.single()

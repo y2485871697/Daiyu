@@ -72,7 +72,7 @@ fun TerminalScreenContent(
     onBack: () -> Unit,
 ) {
     var input by remember { mutableStateOf("") } // Deliberately not persisted to saved instance state.
-    MiuixScaffoldPage(title = "终端", onBack = onBack, listModifier = Modifier.testTag("terminal-screen")) {
+    MiuixScaffoldPage(title = "终端", onBack = onBack, modifier = Modifier.testTag("terminal-screen")) {
         item(key = "identity") {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Android 应用身份 · UID ${Process.myUid()} · 非 Android root", modifier = Modifier.testTag("terminal-identity"))

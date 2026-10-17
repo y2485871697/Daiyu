@@ -1442,7 +1442,17 @@ class ChatController internal constructor(private val application:Application,
             if(current) try {listener()} catch (_:Exception) { /* One observer cannot suppress the others. */ }
         }
     }
-    private fun notifyChanged() {handler.post {dispatchChanged()} }
+    private var changedDispatchPending = false
+    private fun notifyChanged() {
+        synchronized(this) {
+            if (closed || changedDispatchPending) return
+            changedDispatchPending = true
+            handler.post {
+                synchronized(this) { changedDispatchPending = false }
+                dispatchChanged()
+            }
+        }
+    }
 
     /** Real accepted runner events only; no persistence, snapshot replay or model interception.
      * Capture registrations at emission, not delivery: a replacement Activity cannot receive an

@@ -205,7 +205,12 @@ class ContextPreparationCoordinatorTest : InstrumentationTestCase() {
             assertTrue(service.matchesHistoryRevision(transaction, owner, prepared.expectedHistoryRevision))
         }
         val firstReply = original.first { it.role == "assistant" }
-        db.save(firstReply.copy(error = "corrected old evidence"))
+        DatabaseTransactions { db.writableDatabase }.run { sql ->
+            assertEquals(1, sql.update("messages", android.content.ContentValues().apply {
+                put("error", "corrected old evidence")
+            }, "id=? AND conversation_id=? AND run_id=? AND status='COMPLETED'",
+                arrayOf(firstReply.id.value, firstReply.conversationId.value, firstReply.runId.value)))
+        }
         DatabaseTransactions { db.writableDatabase }.run { transaction ->
             assertFalse(service.matchesHistoryRevision(transaction, owner, prepared.expectedHistoryRevision))
         }

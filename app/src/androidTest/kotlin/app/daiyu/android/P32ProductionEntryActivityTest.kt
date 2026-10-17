@@ -35,7 +35,7 @@ class P32ProductionEntryActivityTest : WiredActivityTestCase() {
     }
 
     fun testExistingDraftRejectsExplicitUniversalEntryWithoutOverwritingOrPermission() {
-        val conversation = fixture.database.create()
+        val conversation = fixture.database.create("default")
         mainThread { activity.select(conversation) }
         setDraft("keep this draft")
         mainThread { call("startUniversalVoice", profile(), VoiceControlLimits()) }
@@ -59,7 +59,7 @@ class P32ProductionEntryActivityTest : WiredActivityTestCase() {
     }
 
     fun testOriginalSendDraftProducesSavedExactOwnerReceiptWithoutAnotherSender() {
-        val conversation = fixture.database.create()
+        val conversation = fixture.database.create("default")
         val session = fixture.session("answer", held = true)
         val rawReceipts = CopyOnWriteArrayList<VoiceControlReceipt>()
         val deliveries = CopyOnWriteArrayList<VoiceControlReceipt>()

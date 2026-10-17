@@ -2124,8 +2124,7 @@ class MainActivity : ComponentActivity() {
             }
             val editor = shizukuEditor
             if (editor != null && !hasImages) key(editor) {
-                Column(Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState())
-                    .testTag("shizuku-text-panel")) {
+                Column(Modifier.testTag("shizuku-text-panel")) {
                     ShizukuApprovalHost(controller, editor.conversation, editor.text,
                         onAccepted = { preview, saved -> acceptShizuku(editor, preview, saved) })
                     top.yukonga.miuix.kmp.basic.TextButton(text = "取消文本审批",
@@ -2137,7 +2136,7 @@ class MainActivity : ComponentActivity() {
 
     // AC037 isolated composer integration: compare the ORIGINAL owner/revision before approval
     // and before editor clearing. The database consumes that exact draft in sendPrepared's CAS.
-    @Volatile private var platformActionVisit = Any()
+    private var platformActionVisit by mutableStateOf(Any())
     private fun revokePlatformActionVisit() {
         platformActionVisit = Any()
         controller.platformActionPreparation()?.let(controller::rejectPlatformAction)
@@ -2207,8 +2206,7 @@ class MainActivity : ComponentActivity() {
             })
         val editor = terminalEditor ?: return
         key(editor) {
-            Column(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState())
-                .testTag("terminal-chat-editor")) {
+            Column(Modifier.fillMaxWidth().testTag("terminal-chat-editor")) {
                 androidx.compose.material3.Text(if (editor.jobMode == null)
                     "聊天草稿不是 shell。PTY仅发送下面独立输入区的 UTF-8 字节；不补回车。需要执行时请在输入中明确换行。准备和确认都不发送、不启动。"
                     else "固定命令 job：独立 shell 使用私有 stdin 脚本（末尾补换行），不保留跨命令变量或 cwd；聊天草稿不是命令。async 随 run 关闭请求停止；daemon 仅 Android 应用身份通过 setsid，在同 app 进程内独立于 run，不承诺跨重启、后代退出或长期存活。")
@@ -4181,6 +4179,7 @@ class MainActivity : ComponentActivity() {
     }
     private fun updateDraft(value: String) {
         if (!activityUsable() || sidebarVisible || controller.dataBusy || !controller.ready || controller.textSendState() != null || pendingTextSend != null || imageHost.sending || shizukuWritesBlocked) return
+        if (value == draft) return
         controller.invalidateVideo(videoUi)
         videoDialog?.dismiss(); videoDialog = null
         dictationHost.invalidate()
@@ -4528,6 +4527,7 @@ class MainActivity : ComponentActivity() {
             statusText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中";
                 pendingTextSend != null -> "正在准备上下文并核实发送结果"; imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,
+                editorGeneration = editorGeneration,
                 phase = phase, controlOwnerKey = controlOwner?.id?.value,
                 imageSendAvailable = imageHost.session.attachments.state.value.canSubmit && !imageHost.busy &&
                     videoHost.state.items.isEmpty() && !videoSending && controller.active == null,

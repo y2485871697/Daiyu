@@ -40,6 +40,22 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             }) interaction.performScrollTo()
         return interaction
     }
+    protected fun awaitUniqueTag(tag: String, hostState: () -> String = { "" }) {
+        try {
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithTag(tag).fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+            }
+        } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+            fun nodes(unmerged: Boolean) = ui.onAllNodesWithTag(tag, useUnmergedTree = unmerged)
+                .fetchSemanticsNodes(atLeastOneRootRequired = false)
+                .joinToString(prefix = "[", postfix = "]") { "${it.id}:${it.parent?.id}" }
+            var state = ""
+            instrumentation.runOnMainSync { state = hostState() }
+            throw AssertionError("tag=$tag merged=${nodes(false)} unmerged=${nodes(true)} $state", timeout)
+        }
+        node(tag).assertExists()
+    }
+
     protected fun reveal(tag: String, page: String = "模型设置"): SemanticsNodeInteraction {
         node("page:$page").performScrollToNode(hasTestTag(tag))
         return node(tag)
@@ -152,7 +168,11 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         catch (failure: java.lang.reflect.InvocationTargetException) { throw failure.targetException }
     }
     protected fun backToChat(activity: MainActivity) {
+        ui.waitForIdle()
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        ui.waitForIdle()
+        mainThread { assertFalse(activity.isFinishing); assertFalse(activity.isDestroyed) }
+        node("chat-draft").assertExists()
     }
     protected fun recreateActivity(activity: MainActivity): MainActivity {
         val monitor = instrumentation.addMonitor(MainActivity::class.java.name, null, false)

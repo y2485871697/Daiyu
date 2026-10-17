@@ -121,6 +121,7 @@ data class ComposerUi(
     val hasAssistantOutput: Boolean? = null,
     val morphLoadingIndicator: Boolean = true,
     val morphLoadingBeforeResponseOnly: Boolean = false,
+    val editorGeneration: Long = 0,
 )
 
 internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !imageSendBlocked && !supplementPending && when (phase) {

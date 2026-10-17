@@ -130,7 +130,14 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
         runBlocking { withTimeout(5000) { entered.await() } }
         mainThread { assertTrue(activity.moveTaskToBack(true)) }
         runBlocking { withTimeout(5000) { cancelled.await() } }
-        ui.waitUntil(timeoutMillis = 5000) { !runtime.state.value.refreshing }
+        ui.waitUntil(timeoutMillis = 5000) {
+            var stopped = false
+            instrumentation.runOnMainSync {
+                stopped = activity.lifecycle.currentState == Lifecycle.State.CREATED &&
+                    !activity.isFinishing && !activity.isDestroyed && !runtime.state.value.refreshing
+            }
+            stopped
+        }
         assertEquals("CNY 12.34", runtime.state.value.project().balanceText)
         assertFalse(runtime.isPolling)
         hold.set(false)

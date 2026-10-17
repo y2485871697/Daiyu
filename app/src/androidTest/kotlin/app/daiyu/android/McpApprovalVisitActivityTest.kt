@@ -58,10 +58,10 @@ class McpApprovalVisitActivityTest : WiredActivityTestCase() {
         token?.javaClass?.getDeclaredField("mcp")?.apply { isAccessible = true }?.get(token) as ControllerMcpPreparation?
     }
     private fun awaitTag(tag: String) {
-        ui.waitUntil(timeoutMillis = 5_000) {
-            ui.onAllNodesWithTag(tag).fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        awaitUniqueTag(tag) {
+            "promptPresent=${host(activity, "getPrompt") != null} visitPresent=${visit() != null} " +
+                "finishing=${activity.isFinishing} destroyed=${activity.isDestroyed}"
         }
-        node(tag).assertExists()
     }
     @Suppress("UNCHECKED_CAST")
     private fun openInput(): (String) -> Unit {
@@ -76,6 +76,22 @@ class McpApprovalVisitActivityTest : WiredActivityTestCase() {
         awaitTag("dialog-confirm")
         return action
     }
+    fun testIdenticalDraftCallbackPreservesOriginalInputVisitAndPrompt() {
+        val action = openInput()
+        mainThread {
+            val originalVisit = checkNotNull(visit())
+            val originalPrompt = checkNotNull(host(activity, "getPrompt"))
+            host(activity, "updateDraft", text)
+            assertSame(originalVisit, visit())
+            assertSame(originalPrompt, host(activity, "getPrompt"))
+            host(activity, "cancelMcpEditor")
+            action(raw)
+            assertNull(visit())
+            assertNull(approval())
+        }
+        assertUnsent()
+    }
+
     private fun preview(): Pair<ControllerMcpPreparation, Any> {
         val action = openInput()
         mainThread { host(activity, "setPrompt", null); action(raw) }

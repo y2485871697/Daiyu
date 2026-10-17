@@ -612,7 +612,7 @@ class MainActivity : ComponentActivity() {
         set(value) {
             // Opening revokes even without a visit; closing cannot revive clicks rendered behind it.
             if (value != sidebarVisibleState) revokeContextManagementEntry()
-            if (value && !sidebarVisibleState) { stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor() }
+            if (value && !sidebarVisibleState) { revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor() }
             sidebarVisibleState = value
         }
     private class ContextManagementVisit(val owner: ContextManagementOwner,
@@ -674,7 +674,7 @@ class MainActivity : ComponentActivity() {
                 browserSettingsPageOwner?.revoke()
                 browserSettingsPageOwner = null
             }
-            if (value != "chat") { dictationHost.invalidate(); offlineHost.invalidate(); cancelShizukuEditor(); cancelBrowserEditor() }
+            if (value != "chat") { revokeTerminalJobsVisit(); dictationHost.invalidate(); offlineHost.invalidate(); cancelShizukuEditor(); cancelBrowserEditor() }
             speechHost.setVisible(value == "chat" && !sidebarVisible)
             imageHost.setVisible(value == "chat" && !sidebarVisible, selected?.id?.value)
             retainedPageState = value
@@ -734,7 +734,7 @@ class MainActivity : ComponentActivity() {
     }
     private var editorGeneration = 0L
         set(value) {
-            if (field != value) { revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private var draftRevision = 0L
@@ -753,6 +753,8 @@ class MainActivity : ComponentActivity() {
         var choosing by mutableStateOf(false)
         var confirmed by mutableStateOf(false)
         var preparation by mutableStateOf<ControllerTerminalPreparation?>(null)
+        var jobMode by mutableStateOf<String?>(null) // null is existing PTY; never silently reroute it.
+        var jobPreparation by mutableStateOf<ControllerTerminalJobPreparation?>(null)
     }
     private var terminalEditor by mutableStateOf<TerminalEditor?>(null)
     private class VirtualDisplayPlanVisit(val conversation: Conversation?,
@@ -1972,16 +1974,18 @@ class MainActivity : ComponentActivity() {
         shizukuEditor == null && browserApproval == null && generationApproval == null
 
     private fun terminalInputEditable(editor: TerminalEditor) = terminalEditorCurrent(editor) &&
-        !editor.preparing && !editor.choosing && editor.preparation == null
+        !editor.preparing && !editor.choosing && editor.preparation == null && editor.jobPreparation == null
 
     private fun cancelTerminalEditor() {
         val editor = terminalEditor
         terminalEditor = null
         editor?.preparation?.let(controller::rejectTerminal)
+        editor?.jobPreparation?.let(controller::rejectTerminalJob)
         // A late prepare completion still belongs to this editor and rejects itself in finally.
     }
 
     @Composable private fun TerminalComposerEntry() {
+        TerminalJobsPanel()
         val appState by terminalProvider.state.collectAsStateWithLifecycle()
         val application = (appState as? app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application
         val canEnter = activityUsable() && retainedPage == "chat" && !sidebarVisible && selectionReady &&
@@ -2003,7 +2007,19 @@ class MainActivity : ComponentActivity() {
         key(editor) {
             Column(Modifier.fillMaxWidth().heightIn(max = 420.dp).verticalScroll(rememberScrollState())
                 .testTag("terminal-chat-editor")) {
-                androidx.compose.material3.Text("聊天草稿不是 shell。仅发送下面独立输入区的 UTF-8 字节；不补回车。需要执行时请在输入中明确换行。准备和确认都不发送、不启动。")
+                androidx.compose.material3.Text(if (editor.jobMode == null)
+                    "聊天草稿不是 shell。PTY仅发送下面独立输入区的 UTF-8 字节；不补回车。需要执行时请在输入中明确换行。准备和确认都不发送、不启动。"
+                    else "固定命令 job：独立 shell 使用私有 stdin 脚本（末尾补换行），不保留跨命令变量或 cwd；聊天草稿不是命令。async 随 run 关闭请求停止；daemon 仅 Android 应用身份通过 setsid，在同 app 进程内独立于 run，不承诺跨重启、后代退出或长期存活。")
+                Row {
+                    listOf(null to "PTY", "async" to "async job", "daemon" to "daemon job").forEach { (mode, label) ->
+                        androidx.compose.material3.TextButton(enabled = terminalInputEditable(editor) &&
+                            (mode != "daemon" || editor.linux == null), onClick = {
+                            if (terminalInputEditable(editor) && (mode != "daemon" || editor.linux == null)) editor.jobMode = mode
+                        }, modifier = Modifier.testTag("terminal-mode-${mode ?: "pty"}")) {
+                            androidx.compose.material3.Text("${if (editor.jobMode == mode) "已选 " else ""}$label")
+                        }
+                    }
+                }
                 androidx.compose.material3.OutlinedTextField(value = editor.command,
                     onValueChange = { if (terminalInputEditable(editor)) editor.command = it },
                     enabled = terminalInputEditable(editor),
@@ -2020,8 +2036,8 @@ class MainActivity : ComponentActivity() {
                     val status by host.state.collectAsStateWithLifecycle()
                     LaunchedEffect(application) { host.refreshLinux() }
                     status.linux.choices.forEach { choice ->
-                        androidx.compose.material3.TextButton(enabled = canChoose, onClick = {
-                            if (terminalInputEditable(editor)) {
+                        androidx.compose.material3.TextButton(enabled = canChoose && editor.jobMode != "daemon", onClick = {
+                            if (terminalInputEditable(editor) && editor.jobMode != "daemon") {
                                 // Explicit selection only; prepare itself never changes environment.
                                 editor.choosing = true
                                 host.selectLinux(choice.reference).whenComplete { result, failure ->
@@ -2040,7 +2056,10 @@ class MainActivity : ComponentActivity() {
                     if (status.linux.choices.isEmpty()) androidx.compose.material3.Text("无已安装可信 Linux；不会自动下载或安装。")
                 }
                 val pending = editor.preparation
-                if (pending == null) {
+                val jobPending = editor.jobPreparation
+                if (jobPending != null) {
+                    TerminalJobApproval(editor, jobPending)
+                } else if (pending == null) {
                     androidx.compose.material3.Button(enabled = terminalInputEditable(editor) && editor.command.isNotEmpty(),
                         modifier = Modifier.testTag("terminal-prepare"), onClick = { prepareTerminal(editor) }) {
                         androidx.compose.material3.Text(if (editor.preparing) "准备中（不启动）" else "准备终端审批（不启动）")
@@ -2074,8 +2093,134 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Composable private fun TerminalJobApproval(editor: TerminalEditor, pending: ControllerTerminalJobPreparation) {
+        val plan = pending.plan
+        val config = plan.configuration
+        val linux = config.linux
+        androidx.compose.material3.Text("冻结固定命令：${plan.mode}；启动时通过同一后端执行 id -u 身份探针，不自动提权。\nconversation=${plan.conversationId.value}\nrun=${plan.runId.value}\n" +
+            "backend=${config.backend} · Android host UID=${android.os.Process.myUid()} · host root=false\n" +
+            "guest UID=${linux?.expectedUid ?: "不适用"} · environment=${linux?.environmentId ?: "android-app"}\n" +
+            "host cwd=${config.workingDirectory}\nguest cwd=${linux?.guestWorkingDirectory ?: "不适用"}\n" +
+            "argv=${org.json.JSONArray(linux?.shellArgv ?: listOf("/system/bin/sh"))}\n" +
+            "env=${org.json.JSONObject(linux?.environment.orEmpty() + config.environment)}\n" +
+            "shared=${org.json.JSONObject(linux?.sharedMounts.orEmpty())}\n精确命令（脚本末尾另补换行）：\n${plan.command}")
+        if (!editor.confirmed) androidx.compose.material3.Button(modifier = Modifier.testTag("terminal-job-confirm"), onClick = {
+            if (terminalEditorCurrent(editor) && editor.jobPreparation === pending) {
+                if (controller.confirmTerminalJob(pending, terminalDraft())) editor.confirmed = true
+                else cancelTerminalEditor()
+            }
+        }) { androidx.compose.material3.Text("仅批准此固定命令，不启动") }
+        else androidx.compose.material3.Button(modifier = Modifier.testTag("terminal-job-send"), onClick = {
+            if (terminalEditorCurrent(editor) && editor.jobPreparation === pending) sendTerminalJob(editor, pending)
+        }) { androidx.compose.material3.Text("发送已批准 job") }
+    }
+    private fun prepareTerminalJob(editor: TerminalEditor) {
+        val mode = editor.jobMode ?: return
+        val command = editor.command
+        val linux = editor.linux
+        editor.preparing = true
+        lifecycleScope.launch {
+            var prepared: ControllerTerminalJobPreparation? = null
+            var retained = false
+            try {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                    prepared = controller.prepareTerminalJobSend(editor.conversation, editor.draft, command, mode, linux)
+                }
+                if (terminalEditorCurrent(editor) && editor.command == command && editor.linux == linux && editor.jobMode == mode) {
+                    editor.jobPreparation = prepared
+                    retained = prepared != null
+                    if (!retained) toast(controller.problem ?: "job 准备未受理；未启动")
+                }
+            } finally {
+                if (!retained) prepared?.let(controller::rejectTerminalJob)
+                editor.preparing = false
+            }
+        }
+    }
+    private fun sendTerminalJob(editor: TerminalEditor, pending: ControllerTerminalJobPreparation) {
+        if (!terminalEditorCurrent(editor) || editor.jobPreparation !== pending) return
+        val submitted = PendingTextSend(ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision), draft)
+        pendingTextSend = submitted
+        val queued = controller.sendTerminalJob(pending, terminalDraft(), submitted.ticket) { result ->
+            if (terminalEditor === editor) terminalEditor = null
+            completeTextSend(submitted, result)
+        }
+        if (!queued) { pendingTextSend = null; cancelTerminalEditor(); toast("job 发送未受理；不自动重发") }
+        publishChat()
+    }
+
+    private class TerminalJobsVisit(val conversation: ConversationId, val editorGeneration: Long,
+        val sessions: List<app.daiyu.android.integration.tools.TerminalJobSession>) {
+        var output by mutableStateOf("")
+        var busy by mutableStateOf(false)
+        var stop by mutableStateOf<app.daiyu.android.integration.tools.TerminalJobSession?>(null)
+        val revoked = java.util.concurrent.atomic.AtomicBoolean(false)
+    }
+    private var terminalJobsVisit by mutableStateOf<TerminalJobsVisit?>(null)
+    private fun revokeTerminalJobsVisit() {
+        terminalJobsVisit?.revoked?.set(true)
+        terminalJobsVisit = null
+    }
+    private fun terminalJobsCurrent(visit: TerminalJobsVisit) = activityUsable() && voiceForeground &&
+        retainedPage == "chat" && !sidebarVisible && terminalJobsVisit === visit && !visit.revoked.get() &&
+        selected?.id == visit.conversation && editorGeneration == visit.editorGeneration
+    @Composable private fun TerminalJobsPanel() {
+        val conversation = selected?.id ?: return
+        val generation = editorGeneration
+        androidx.compose.material3.TextButton(modifier = Modifier.testTag("terminal-jobs-entry"), onClick = {
+            if (activityUsable() && retainedPage == "chat" && selected?.id == conversation && editorGeneration == generation) {
+                revokeTerminalJobsVisit()
+                terminalJobsVisit = TerminalJobsVisit(conversation, generation, controller.terminalJobRuns(conversation))
+            }
+        }) { androidx.compose.material3.Text("本会话终端 jobs / 日志 / 停止") }
+        val visit = terminalJobsVisit?.takeIf { it.conversation == conversation && it.editorGeneration == generation } ?: return
+        Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())
+            .testTag("terminal-jobs-panel")) {
+            androidx.compose.material3.Text("仅本 app 进程保留的原 job；重启不恢复进程句柄或执行授权。停止只核验并作用于 owned shell，不保证后代退出。UNKNOWN 不自动重发。")
+            if (visit.sessions.isEmpty()) androidx.compose.material3.Text("本进程没有保留本会话的 job。")
+            visit.sessions.forEach { session ->
+                androidx.compose.material3.Text("${session.plan.mode} · run=${session.plan.runId.value} · job=${session.jobId ?: "未派发或未知"}")
+                androidx.compose.material3.TextButton(enabled = !visit.busy, onClick = {
+                    if (terminalJobsCurrent(visit) && !visit.busy) terminalJobAction(visit, session, false)
+                }) { androidx.compose.material3.Text("读取此 job 的真实状态和首个16KiB日志") }
+                androidx.compose.material3.TextButton(enabled = !visit.busy && session.jobId != null, onClick = {
+                    if (terminalJobsCurrent(visit) && !visit.busy) visit.stop = session
+                }) { androidx.compose.material3.Text("停止此 job…") }
+            }
+            val stopping = visit.stop
+            if (stopping != null) androidx.compose.material3.Button(enabled = !visit.busy,
+                modifier = Modifier.testTag("terminal-job-stop-confirm"), onClick = {
+                    if (terminalJobsCurrent(visit) && visit.stop === stopping && !visit.busy) {
+                        visit.stop = null; terminalJobAction(visit, stopping, true)
+                    }
+                }) { androidx.compose.material3.Text("确认停止原 job ${stopping.jobId}（仅 owned shell）") }
+            androidx.compose.material3.Text(visit.output, modifier = Modifier.testTag("terminal-job-result"))
+            androidx.compose.material3.TextButton(onClick = { if (terminalJobsVisit === visit) revokeTerminalJobsVisit() }) {
+                androidx.compose.material3.Text("关闭 jobs（不停止 daemon）")
+            }
+        }
+    }
+    private fun terminalJobAction(visit: TerminalJobsVisit,
+        session: app.daiyu.android.integration.tools.TerminalJobSession, stop: Boolean) {
+        if (!terminalJobsCurrent(visit) || visit.busy || session !in visit.sessions) return
+        visit.busy = true
+        lifecycleScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    // Recheck UI capability before worker admission; the original session/owner is immutable.
+                    if (stop) controller.stopTerminalJobOnWorker(visit.conversation, session) { !visit.revoked.get() }
+                    else controller.inspectTerminalJobOnWorker(visit.conversation, session)
+                }
+                if (terminalJobsCurrent(visit)) visit.output = result.toString(2)
+            } catch (_: Exception) {
+                if (terminalJobsCurrent(visit)) visit.output = "job 观察/停止未确认；保留原身份，不重发命令"
+            } finally { visit.busy = false }
+        }
+    }
+
     private fun prepareTerminal(editor: TerminalEditor) {
         if (!terminalInputEditable(editor)) return
+        if (editor.jobMode != null) return prepareTerminalJob(editor)
         val command = editor.command
         val linux = editor.linux
         editor.preparing = true
@@ -2929,6 +3074,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onStop() {
         revokeContextManagementEntry()
+        revokeTerminalJobsVisit()
         invalidateMessageActionEditor()
         gatewayOwner?.revoke()
         if (retainedPage == "session-gateway") retainedPage = "settings"
@@ -2945,6 +3091,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         if (revokeContextManagementEntry()) editorGeneration++
         cancelDeferredOpenedBackup()
+        revokeTerminalJobsVisit()
         invalidateMessageActionEditor()
         reconnectSettingsPageOwner?.revoke()
         reconnectSettingsPageOwner = null

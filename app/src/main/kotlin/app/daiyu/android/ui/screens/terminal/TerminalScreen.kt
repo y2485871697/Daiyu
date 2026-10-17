@@ -95,7 +95,7 @@ fun TerminalScreenContent(
         item(key = "linux") {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Linux：${state.linux.state}", modifier = Modifier.testTag("terminal-linux-state"))
-                Text("未提供安装器；不会自动下载，也不把文件就绪视为工具或 root 验证成功。Linux guest 的 UID 0 不改变 Android 应用身份。")
+                Text("安装与本地配置请到设置→工具→Linux 环境；须单独确认安装及注册，不会自动下载。当前随包 Linux 仅支持 API34+ 的64位进程；文件就绪不等于工具验证成功，Linux guest UID 0 不改变 Android 应用身份。")
                 state.linux.distribution?.let { Text("已选择：$it · ${state.linux.selected?.generation}") }
                 state.linux.error?.let { Text("检查：$it") }
                 state.linux.choices.forEach { choice ->

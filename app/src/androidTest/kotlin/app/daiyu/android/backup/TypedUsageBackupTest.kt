@@ -10,6 +10,11 @@ import app.daiyu.android.context.PrivateBlobs
 import app.daiyu.android.model.usage.SQLiteAdditionalUsageStore
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.storage.RecordedUsageReader
+import app.daiyu.android.storage.RecordedUsageBudget
+import app.daiyu.android.storage.RecordedUsageHistory
+import app.daiyu.android.storage.RunCheckpointCodec
+import app.daiyu.android.storage.SQLiteRuntimeStore
+import app.daiyu.android.storage.SQLiteText
 import app.daiyu.android.domain.usage.UsageOrigin
 import app.daiyu.android.testContext
 import org.json.JSONArray
@@ -17,7 +22,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-/** Real v19 helper and production additional-usage admission/observation; no network or checkpoint copies. */
+/** Real v20 helper and production additional-usage admission/observation; no network or checkpoint copies. */
 @Suppress("DEPRECATION")
 class TypedUsageBackupTest : InstrumentationTestCase() {
     private val fixtures = mutableListOf<Fixture>()
@@ -31,7 +36,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val base = testContext(instrumentation.targetContext, "typed-backup-${UUID.randomUUID()}-")
         val files = File(base.cacheDir, "typed-backup-${UUID.randomUUID()}").apply { check(mkdirs()) }
         val context = object : ContextWrapper(base) { override fun getFilesDir() = files }
-        return Fixture(context, ConversationDatabase(context)).also { fixtures.add(it); assertEquals(19, it.db.writableDatabase.version) }
+        return Fixture(context, ConversationDatabase(context)).also { fixtures.add(it); assertEquals(20, it.db.writableDatabase.version) }
     }
     override fun tearDown() {
         try { fixtures.forEach { it.db.close(); it.context.deleteDatabase("conversations.db"); it.context.filesDir.deleteRecursively() } }
@@ -108,10 +113,202 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
     private fun rejects(action: () -> Unit) { try { action() } catch (_: Exception) { return }; fail("must fail closed") }
     private fun physical(f: Fixture) = JSONArray(BackupHistoryRows.read(f.db.readableDatabase, "context_usage", BackupUsageCodec.columns, order = "request_id")).toString()
 
+    private fun request(id: String) = RequestCheckpoint(id, "attempt-$id", "owner-$id", RequestOperation.NEXT)
+    private fun checkpoint(f: Fixture, p: Message, reports: List<RequestUsageCheckpoint>, admitted: List<RequestCheckpoint>,
+        fallback: RequestCheckpoint? = null, large: Boolean = false) {
+        // Source-only executable fixture. The production decoder validates it; none of this payload is imported.
+        val history = if (large) listOf(p.copy(blocks = listOf(MessageBlock.Text("private", "RUNTIME_PRIVATE_HISTORY".repeat(110_000))))) else emptyList()
+        val saved = RunCheckpoint(p, history, ExecutionPhase.TERMINAL, owner = "checkpoint-owner", revision = 1,
+            request = fallback, usage = reports, usageRequests = admitted)
+        f.tx { db -> BackupHistoryRows.insert(db, "runtime_checkpoints", JSONObject().put("message_id", p.id.value)
+            .put("conversation_id", p.conversationId.value).put("run_id", p.runId.value).put("process_owner", "runtime-process")
+            .put("owner", saved.owner).put("revision", 1).put("phase", "TERMINAL").put("payload", RunCheckpointCodec.encode(saved))) }
+    }
+    private fun preparation(f: Fixture, p: Message, message: String, run: String, state: String, req: RequestCheckpoint,
+        presence: Boolean, usage: ModelEvent.Usage? = null) {
+        f.tx { db -> BackupHistoryRows.insert(db, "runtime_preparations", JSONObject().put("message_id", message)
+            .put("conversation_id", p.conversationId.value).put("run_id", run).put("owner", "preparation-owner")
+            .put("process_owner", "preparation-process").put("revision", 1).put("state", state)
+            .put("request_id", req.requestId).put("request_owner", req.owner).put("attempt_id", req.attemptId)
+            .put("has_usage", if (presence) 1 else 0).put("input_tokens", usage?.inputTokens ?: JSONObject.NULL)
+            .put("output_tokens", usage?.outputTokens ?: JSONObject.NULL).put("cached_tokens", usage?.cachedTokens ?: JSONObject.NULL)) }
+    }
+    private fun checkpointPayloads(f: Fixture): List<String?> = f.db.readableDatabase.rawQuery("SELECT message_id FROM runtime_checkpoints ORDER BY message_id", null)
+        .use { c -> buildList { while (c.moveToNext()) add(SQLiteText.read(f.db.readableDatabase, "runtime_checkpoints", "payload", "message_id", c.getString(0))) } }
+    private fun runtime(text: String) = payload(text).getJSONObject("runtime_usage_history")
+    private fun runtimeRows(text: String) = runtime(text).getJSONArray("requests")
+    private fun runtimeRow(text: String, id: String) = (0 until runtimeRows(text).length()).map { runtimeRows(text).getJSONObject(it) }
+        .single { it.getString("request_id") == id }
+    private fun runtimeSeed(f: Fixture): Pair<Message, Message> {
+        val p = parent(f); val q = parent(f)
+        checkpoint(f, p, listOf(RequestUsageCheckpoint(request("main-zero"), ModelEvent.Usage(0, 0, 0)),
+            RequestUsageCheckpoint(request("main-null"), ModelEvent.Usage(null, null, null)),
+            RequestUsageCheckpoint(request("summary-handed"), ModelEvent.Usage(11, 3, null), UsageRequestSource.SUMMARY)),
+            listOf(request("main-zero"), request("main-null"), request("main-missing")), large = true)
+        checkpoint(f, q, emptyList(), emptyList(), request("open").copy(operation = RequestOperation.OPEN))
+        preparation(f, p, p.id.value, p.runId.value, "HANDED", request("summary-handed"), true)
+        preparation(f, q, q.id.value, q.runId.value, "HANDED", request("summary-missing"), false)
+        preparation(f, p, "unsent-null", "unsent-run-null", "TERMINAL", request("summary-null"), true)
+        preparation(f, p, "unsent-missing", "unsent-run-missing", "ADMITTED", request("summary-unsent"), false)
+        preparation(f, p, "unsent-zero", "unsent-run-zero", "READY", request("summary-zero"), true, ModelEvent.Usage(0, 0, 0))
+        preparation(f, p, "deleted-parent", "deleted-run", "HANDED", request("summary-deleted"), true)
+        return p to q
+    }
+
+    fun testRuntimeOnlyUsageIsStaticCompleteStableAndNeverRestoresExecution() {
+        val source = fresh(); val (p, _) = runtimeSeed(source)
+        val physicalBefore = checkpointPayloads(source)
+        val exported = source.service().exportPackage()
+        assertEquals(4, JSONObject(exported).getInt("version")); assertFalse(exported.contains("RUNTIME_PRIVATE_HISTORY"))
+        assertEquals(2, runtime(exported).getJSONArray("checkpoints").length()); assertEquals(8, runtimeRows(exported).length())
+        assertEquals(0L, runtimeRow(exported, "main-missing").getLong("has_usage"))
+        assertEquals(1L, runtimeRow(exported, "main-null").getLong("has_usage"))
+        assertTrue(runtimeRow(exported, "main-null").isNull("input_tokens"))
+        assertTrue(runtimeRow(exported, "summary-null").isNull("parent_message_id"))
+        assertEquals("CHECKPOINT", runtimeRow(exported, "summary-handed").getString("kind"))
+        val target = fresh(); assertFalse(target.service().importPackage(exported).alreadyImported)
+        target.reopen(); SQLiteRuntimeStore.acquire(target.db).use { it.recoverPending() }
+        assertEquals(0, target.count("runtime_checkpoints")); assertEquals(0, target.count("runtime_preparations"))
+        assertTrue(target.service().importPackage(exported).alreadyImported)
+        assertEquals(runtime(exported).toString(), runtime(target.service().exportPackage()).toString())
+        val budget = RecordedUsageBudget(maxPayloadBytes = 4L * 1024 * 1024, maxTotalPayloadBytes = 16L * 1024 * 1024)
+        val before = DatabaseTransactions { source.db.writableDatabase }.run { RecordedUsageReader.readAttributed(it, budget = budget) }
+        val after = DatabaseTransactions { target.db.writableDatabase }.run { RecordedUsageReader.readAttributed(it, budget = budget) }
+        assertEquals(before.summary, after.summary); assertEquals(before.parentCoverage, after.parentCoverage)
+        assertEquals(1, after.parentCoverage.mainRequestsWithoutUsage); assertEquals(2, after.parentCoverage.preparationsWithoutUsage)
+        assertEquals(5, after.requests.size); assertEquals(11L, after.summary.main.input.reportedTokens)
+        assertEquals(4, after.parentCoverage.totalPreparations)
+        assertEquals(physicalBefore, checkpointPayloads(source))
+        assertEquals(7, runtimeRows(source.service().exportConversation(p.conversationId)).length())
+        // Same live host identity must not turn an imported observation into a second charge.
+        checkpoint(target, p, listOf(RequestUsageCheckpoint(request("main-zero"), ModelEvent.Usage(0, 0, 0))), listOf(request("main-zero")))
+        target.tx { db -> assertEquals(1, RecordedUsageReader.readAttributed(db).requests.count { it.request.requestId == "main-zero" }) }
+        target.db.writableDatabase.delete("messages", "id=?", arrayOf(p.id.value))
+        assertEquals(1, target.count("recorded_usage_checkpoints"))
+        assertEquals(0, target.db.readableDatabase.rawQuery("SELECT count(*) FROM recorded_usage_requests WHERE kind='CHECKPOINT' AND message_id=?", arrayOf(p.id.value))
+            .use { it.moveToFirst(); it.getInt(0) })
+        target.db.writableDatabase.delete("conversations", null, null)
+        assertEquals(0, target.count("recorded_usage_checkpoints")); assertEquals(0, target.count("recorded_usage_requests"))
+    }
+
+    fun testCompleteProjectionDoesNotUseReportRowLimit() {
+        val source = fresh(); val p = parent(source)
+        source.tx { db -> repeat(501) { index ->
+            BackupHistoryRows.insert(db, "runtime_preparations", JSONObject().put("message_id", "unsent-$index")
+                .put("conversation_id", p.conversationId.value).put("run_id", "unsent-run-$index")
+                .put("owner", "preparation-owner").put("process_owner", "preparation-process").put("revision", 1).put("state", "TERMINAL")
+                .put("request_id", "request-$index").put("request_owner", "owner-$index").put("attempt_id", "attempt-$index")
+                .put("has_usage", 0).put("input_tokens", JSONObject.NULL).put("output_tokens", JSONObject.NULL).put("cached_tokens", JSONObject.NULL))
+        } }
+        source.tx { db -> assertEquals(500, RecordedUsageReader.read(db).inspectedPreparations) }
+        val text = source.service().exportPackage(); assertEquals(501, runtimeRows(text).length())
+        val target = fresh(); target.service().importPackage(text)
+        assertEquals(501, target.count("recorded_usage_requests")); assertEquals(0, target.count("runtime_preparations"))
+        assertEquals(runtime(text).toString(), runtime(target.service().exportPackage()).toString())
+        target.tx { db -> val stats = RecordedUsageReader.read(db)
+            assertEquals(501, stats.totalPreparations); assertEquals(500, stats.inspectedPreparations); assertFalse(stats.scanComplete) }
+    }
+
+    fun testRuntimeProjectionTamperingBadRowsBoundsAndLateRollback() {
+        val source = fresh(); runtimeSeed(source); val text = source.service().exportPackage()
+        fun edit(change: (JSONObject) -> Unit) = mutate(text) { change(it.getJSONObject("runtime_usage_history").getJSONArray("requests").getJSONObject(0)) }
+        val invalid = listOf(edit { it.put("usage_source", "TITLE") }, edit { it.put("has_usage", 0.5) },
+            edit { it.put("input_tokens", -1) }, edit { it.put("attempt_id", JSONObject.NULL) },
+            edit { it.put("conversation_id", "foreign") }, edit { it.put("run_id", "foreign") },
+            edit { it.put("operation", "OPEN") }, edit { it.put("checkpoint", "forbidden") },
+            edit { it.put("input_tokens", 0).put("cached_tokens", 1) },
+            mutate(text) { it.getJSONObject("runtime_usage_history").getJSONArray("requests").put(runtimeRows(text).getJSONObject(0)) },
+            mutate(text) { it.getJSONObject("inventory").put("runtime_usage_requests", 0) },
+            edit { it.put("has_usage", 0).put("input_tokens", 0) })
+        val target = fresh(); val before = target.db.exportBackup()
+        invalid.forEach { bad -> rejects { target.service().preflight(bad) }; rejects { target.service().importPackage(bad) }
+            assertEquals(before, target.db.exportBackup()); assertEquals(0, target.count("recorded_usage_requests")) }
+        val over = mutate(text) { data -> val rows = data.getJSONObject("runtime_usage_history").getJSONArray("requests")
+            val template = rows.getJSONObject(0); repeat(50_001) { rows.put(template) } }
+        rejects { target.service().preflight(over) }
+        target.db.writableDatabase.execSQL("""CREATE TRIGGER corrupt_runtime_usage AFTER INSERT ON neutral_imports
+            BEGIN UPDATE recorded_usage_requests SET attempt_id='corrupted'; END""")
+        rejects { target.service().importPackage(text) }
+        assertEquals(before, target.db.exportBackup()); assertEquals(0, target.count("neutral_imports"))
+        assertEquals(0, target.count("recorded_usage_checkpoints")); assertEquals(0, target.count("recorded_usage_requests"))
+        target.db.writableDatabase.execSQL("DROP TRIGGER corrupt_runtime_usage")
+        target.service().importPackage(text)
+        target.db.writableDatabase.execSQL("UPDATE recorded_usage_requests SET input_tokens=0.5 WHERE request_id='main-zero'")
+        rejects { target.service().importPackage(text) }; rejects { target.service().exportPackage() }
+        source.db.writableDatabase.execSQL("UPDATE runtime_preparations SET has_usage=0.5 WHERE request_id='summary-unsent'")
+        rejects { source.service().exportPackage() }
+        source.db.writableDatabase.execSQL("UPDATE runtime_preparations SET has_usage=0 WHERE request_id='summary-unsent'")
+        source.db.writableDatabase.execSQL("UPDATE runtime_checkpoints SET payload='{}'")
+        rejects { source.service().exportPackage() }
+    }
+
+    fun testLateInsertedUsageRowsIncludingEmptySectionRollbackExactly() {
+        val source = fresh(); runtimeSeed(source)
+        val populated = source.service().exportPackage()
+        val emptySource = fresh(); parent(emptySource)
+        val empty = emptySource.service().exportPackage()
+        for (text in listOf(populated, empty)) {
+            val payload = JSONObject(JSONObject(text).getString("payload"))
+            val textEnvelope = JSONObject(payload.getString("text_backup"))
+            val rows = JSONObject(textEnvelope.getString("payload")).getJSONArray("messages")
+            val assistant = (0 until rows.length()).map { rows.getJSONObject(it) }
+                .first { it.getString("role") == "assistant" }
+            val conversation = assistant.getString("conversation_id")
+            val message = assistant.getString("id")
+            val run = assistant.getString("run_id")
+            val insertions = listOf(
+                "INSERT INTO recorded_usage_requests VALUES('PREPARATION','extra-message','$conversation','extra-run',NULL," +
+                    "'extra-owner','extra-request','extra-attempt','NEXT','SUMMARY',1,7,3,0);",
+                "INSERT INTO recorded_usage_requests VALUES('CHECKPOINT','$message','$conversation','$run','$message'," +
+                    "'extra-owner','extra-request','extra-attempt','NEXT','MAIN',1,7,3,0);",
+                "INSERT OR IGNORE INTO recorded_usage_checkpoints VALUES('$message','$conversation','$run');")
+            for ((index, insertion) in insertions.withIndex()) {
+                if (text == populated && index == 2) continue // Existing exact parent is not an extra row.
+                val target = fresh(); val before = target.db.exportBackup()
+                target.db.writableDatabase.execSQL("CREATE TRIGGER extra_usage AFTER INSERT ON neutral_imports BEGIN $insertion END")
+                rejects { target.service().importPackage(text) }
+                assertEquals(before, target.db.exportBackup())
+                assertEquals(0, target.count("neutral_imports"))
+                assertEquals(0, target.count("recorded_usage_checkpoints"))
+                assertEquals(0, target.count("recorded_usage_requests"))
+            }
+        }
+    }
+
+    fun testV19MigrationAndV3CompatibilityAndLegacyRequestFallback() {
+        val source = fresh(); val p = parent(source)
+        checkpoint(source, p, emptyList(), emptyList(), request("legacy-missing"))
+        source.db.writableDatabase.execSQL("UPDATE runtime_checkpoints SET payload=?", arrayOf(
+            JSONObject(source.db.readableDatabase.rawQuery("SELECT payload FROM runtime_checkpoints", null).use { it.moveToFirst(); it.getString(0) })
+                .put("version", 5).apply { remove("usage_requests") }.toString()))
+        val current = source.service().exportPackage()
+        val retained = checkpointPayloads(source)
+        source.db.writableDatabase.execSQL("DROP TABLE recorded_usage_requests")
+        source.db.writableDatabase.execSQL("DROP TABLE recorded_usage_checkpoints")
+        source.db.writableDatabase.version = 19; source.reopen()
+        assertEquals(20, source.db.writableDatabase.version); assertEquals(retained, checkpointPayloads(source))
+        assertEquals(runtime(current).toString(), runtime(source.service().exportPackage()).toString())
+        assertEquals(0L, runtimeRow(current, "legacy-missing").getLong("has_usage"))
+        val old = JSONObject(mutate(current) { data ->
+            data.remove("runtime_usage_history"); data.getJSONObject("inventory").remove("runtime_usage_checkpoints")
+            data.getJSONObject("inventory").remove("runtime_usage_requests")
+        }).put("version", 3).toString()
+        val target = fresh(); target.service().importPackage(old)
+        assertEquals(0, target.count("recorded_usage_checkpoints")); assertTrue(target.service().importPackage(old).alreadyImported)
+        target.db.writableDatabase.execSQL("DROP TABLE recorded_usage_requests")
+        target.db.writableDatabase.execSQL("DROP TABLE recorded_usage_checkpoints")
+        target.db.writableDatabase.version = 19; target.reopen()
+        assertEquals(20, target.db.writableDatabase.version)
+        assertEquals(0, target.count("recorded_usage_requests")); assertEquals(0, target.count("recorded_usage_checkpoints"))
+        assertTrue(target.service().importPackage(old).alreadyImported)
+        val imported = fresh(); imported.service().importPackage(current)
+        imported.tx { db -> assertEquals(1, RecordedUsageReader.read(db).mainRequestsWithoutUsage) }
+    }
+
     fun testTypedManualAndChildRoundTripIsClosedStableAndDoesNotMutateSource() {
         val source = fresh(); val p = seed(source); val original = physical(source)
         val exported = source.service().exportPackage()
-        assertEquals(3, JSONObject(exported).getInt("version")); assertEquals(original, physical(source))
+        assertEquals(4, JSONObject(exported).getInt("version")); assertEquals(original, physical(source))
         assertEquals(exported, source.service().exportPackage())
         assertEquals(2, payload(exported).getJSONObject("child_task_history").getInt("version"))
         assertEquals(0L, row(exported, "title-zero").getLong("input_tokens"))
@@ -156,6 +353,9 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
             if (version == 2) children(source, p)
             val current = source.service().exportPackage()
             val oldPayload = mutate(current) { data ->
+                data.remove("runtime_usage_history")
+                data.getJSONObject("inventory").remove("runtime_usage_checkpoints")
+                data.getJSONObject("inventory").remove("runtime_usage_requests")
                 val rows = data.getJSONObject("tables").getJSONArray("context_usage")
                 repeat(rows.length()) { val r = rows.getJSONObject(it); r.keys().asSequence().toList().filter { it !in BackupUsageCodec.legacyColumns }.forEach { r.remove(it) } }
                 if (version == 1) {

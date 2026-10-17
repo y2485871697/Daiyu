@@ -1217,6 +1217,11 @@ class MainActivity : ComponentActivity() {
                                 activityUsable() && browserSettingsPageOwner === page && retainedPage == "browser-settings"
                             }, saveOwner = page)
                     } }
+                    "gui-settings" -> app.daiyu.android.ui.screens.settings.GuiSettingsPanel(
+                        onBack = { if (activityUsable() && retainedPage == "gui-settings") retainedPage = "settings" },
+                        session = null,
+                        ownerCurrent = { activityUsable() && retainedPage == "gui-settings" },
+                    )
                     "skills" -> SkillManagementScreen(
                         managementFactory = { controller.skillManagement() },
                         onBack = { returnToChat() },
@@ -1875,7 +1880,13 @@ class MainActivity : ComponentActivity() {
                 onClick = ::openGuiPreparation)
             top.yukonga.miuix.kmp.basic.TextButton(text = "GUI 系统无障碍设置",
                 modifier = Modifier.testTag("gui-settings-entry").heightIn(min = 48.dp),
-                onClick = { if (activityUsable()) app.daiyu.android.gui.GuiSystemSettings.openFromUser(this@MainActivity) })
+                onClick = { if (activityUsable()) {
+                    when (val result = app.daiyu.android.gui.GuiSystemSettings.openFromUser(this@MainActivity)) {
+                        is app.daiyu.android.gui.GuiResult.Value -> Unit
+                        is app.daiyu.android.gui.GuiResult.Rejected -> toast("无法打开系统无障碍设置：${result.code}")
+                        is app.daiyu.android.gui.GuiResult.Unknown -> toast("系统设置结果未知，不会自动重试：${result.code}")
+                    }
+                } })
             guiEditor?.let { entry ->
                 androidx.compose.material3.Text(if (entry.submitted) "GUI 已交给本次任务；Unknown 不重试，资源释放前不可再次批准。"
                     else "请切换到目标应用，在无障碍浮层读取并确认唯一真实目标。返回聊天或取消可撤销。")
@@ -3229,6 +3240,7 @@ class MainActivity : ComponentActivity() {
             FeatureRoute.LINUX_SETTINGS -> openLinuxSettings()
             FeatureRoute.BROWSER_SETTINGS -> openBrowserSettings()
             FeatureRoute.RECONNECT_SETTINGS -> openReconnectSettings()
+            FeatureRoute.GUI_SETTINGS -> { requireActivityUsable(); retainedPage = "gui-settings" }
             FeatureRoute.TITLE_MODEL_SETTINGS -> {
                 requireActivityUsable()
                 titleSettingsPageOwner?.revoke()

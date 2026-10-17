@@ -35,7 +35,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     }
     fun testOriginalSettingsAppearOutsideExistingChatTreeWithoutStateLabels() {
         openHub()
-        assertEquals(38, entries.size)
+        assertEquals(40, entries.size)
         entries.forEach { item -> entry(item.id).assertIsEnabled().assertTextContains(item.title) }
         ui.onAllNodes(SemanticsMatcher("forbidden state marker") { semantics ->
             val texts = semantics.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text).orEmpty()
@@ -47,9 +47,9 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         setDraft("Gemini UI 草稿"); val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
         openHub()
-        val implemented = setOf("assistants", "subagents", "appearance", "haptics", "relay")
+        val implemented = setOf("assistants", "subagents", "appearance", "haptics", "relay", "platform_tools", "permission_check")
         val unwired = entries.filter { it.route == null && it.id !in implemented }
-        assertEquals(24, unwired.size)
+        assertEquals(17, unwired.size)
         fun assertUnchanged() {
             assertEquals(before, fixture.database.exportBackup()); assertEquals(settings, fixture.settings.loadForEditing().settings)
             assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())
@@ -124,7 +124,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
                 assertFalse(fixture.controller.runState(owner)!!.pauseRequested)
                 assertEquals(1L, session.cancelled.count); assertEquals(1, fixture.opens.get())
             }
-            for (id in listOf("default_reasoning", "logging", "accessibility_keep", "task_surface")) {
+            for (id in listOf("default_reasoning", "logging", "task_surface")) {
                 entry(id).performClick(); node("page:设置").assertExists()
                 assertEquals(owner.id, fixture.controller.active!!.id)
                 assertFalse(fixture.controller.runState(owner)!!.pauseRequested)

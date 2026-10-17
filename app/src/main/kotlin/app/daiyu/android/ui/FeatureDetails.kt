@@ -439,8 +439,11 @@ internal object FeatureDetails {
                 FeatureControl("accessibility", "无障碍观察", FeatureControlKind.INFO),
                 FeatureControl("snapshot", "UI 树快照", FeatureControlKind.INFO),
                 FeatureControl("actions", "GUI 动作", FeatureControlKind.INFO),
-                FeatureControl("protection", "保护与重绑", FeatureControlKind.INFO),
+                FeatureControl("protection", "用户显式请求系统重绑（不保证保活）", FeatureControlKind.INFO),
                 FeatureControl("lock", "屏幕锁与前后台权限", FeatureControlKind.INFO),
+            )),
+            FeatureSection("actions", "操作", listOf(
+                FeatureControl("open", "打开无障碍与 GUI 设置", FeatureControlKind.ACTION, FeatureRoute.GUI_SETTINGS),
             )),
         ),
         "R08" to listOf(

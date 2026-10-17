@@ -2,7 +2,10 @@
 
 This adapter links unmodified published libraries; no upstream implementation sources are copied
 into the application. Keep these notices and the complete license texts with distributions.
-The final dependency graph / packaged notice presentation is verified by the parent integration.
+The final resolved dependency graph and actual APK inclusion remain parent-integration checks;
+this document alone is not a verification result. The complete repository original is copied
+without abridgment to `assets/licenses/P32-voice-network-LICENSES.md`; byte inventory and the
+read-only APK check entry are documented in `THIRD_PARTY/license-bundle/source-index.md`.
 
 ## Java-WebSocket 1.6.0 — MIT
 

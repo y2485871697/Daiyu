@@ -15,7 +15,7 @@ class SkillCompatibilityCheckerTest {
             compatibility = "requires android-a11y-cli / android-open",
         )
         assertFalse(result.available)
-        assertEquals("依赖 MiniS 专属 Android CLI，Eta 无法运行", result.reason)
+        assertEquals("依赖 MiniS 专属 Android CLI，代鱼无法运行", result.reason)
     }
 
     @Test
@@ -57,10 +57,10 @@ class SkillCompatibilityCheckerTest {
             assertEquals(marker, "不支持 Apple 专属运行时", SkillCompatibilityChecker.evaluate("demo", description = marker).reason)
         }
         for (marker in listOf("android-a11y-cli", "MiniS Accessibility Service", "bundled android-a11y-cli", "android-open CLIs", "/usr/local/bin/android-open")) {
-            assertEquals(marker, "依赖 MiniS 专属 Android CLI，Eta 无法运行", SkillCompatibilityChecker.evaluate("demo", description = marker).reason)
+            assertEquals(marker, "依赖 MiniS 专属 Android CLI，代鱼无法运行", SkillCompatibilityChecker.evaluate("demo", description = marker).reason)
         }
         for (marker in listOf("codex-on-ish", "inside the MiniS/iSH", "iSH Alpine", "generative-ui-minis", "MiniS iOS render", "App Store Connect CLI")) {
-            assertEquals(marker, "依赖 MiniS / iSH 的 iOS 沙箱，Eta 无法运行", SkillCompatibilityChecker.evaluate("demo", description = marker).reason)
+            assertEquals(marker, "依赖 MiniS / iSH 的 iOS 沙箱，代鱼无法运行", SkillCompatibilityChecker.evaluate("demo", description = marker).reason)
         }
         assertEquals("不支持 Apple 专属运行时", SkillCompatibilityChecker.evaluate("demo", description = "HomeKit android-a11y-cli").reason)
         assertEquals("该 Skill 标注为 iOS 专属", SkillCompatibilityChecker.evaluate("demo", description = "For iPhone and iPad").reason)

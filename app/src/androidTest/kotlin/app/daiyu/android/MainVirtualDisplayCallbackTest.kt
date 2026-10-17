@@ -25,11 +25,46 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
     private val starts = AtomicInteger()
     private val physicalUnknown = AtomicBoolean()
     private val observations = AtomicInteger()
+    private val initializedOwner = AtomicBoolean()
+    private val loseCleanupReply = AtomicBoolean()
+    private val cleanupSends = AtomicInteger()
     private val host = object : ControllerVirtualDisplayRuntime.Host {
-        override val client: VirtualDisplayOwnerClient? = null
+        override var client: VirtualDisplayOwnerClient? = null
         override fun start(generation: String, binding: OwnerRunBinding): AndroidVirtualDisplayOwnerHost.Start {
             starts.incrementAndGet()
-            throw IOException("Main callback test must never launch an owner")
+            if (!initializedOwner.get()) throw IOException("Main callback test must never launch an owner")
+            client = VirtualDisplayOwnerClient(generation, binding,
+                app.daiyu.android.vd.OwnerCredential("0123456789abcdef0123456789abcdef"), object : app.daiyu.android.vd.OwnerTransport {
+                    override fun exchange(line: String): String {
+                        app.daiyu.android.vd.runtime.OwnerProtocol.parseWireRequest(line)
+                        val request = org.json.JSONObject(line)
+                        val operation = request.getString("op")
+                        val initialize = operation == "initialize"
+                        if (operation == "release") {
+                            cleanupSends.incrementAndGet()
+                            if (loseCleanupReply.get()) throw IOException("Main cleanup response lost")
+                        }
+                        val id = if (initialize) "" else request.getString("operationId")
+                        val contract = app.daiyu.android.vd.runtime.OwnerV2Contract
+                        val receipt = org.json.JSONObject().put("generation", generation).put("operationId", id)
+                            .put("operation", if (initialize) "" else operation).put("generationReceipt", initialize)
+                            .put("digest", if (initialize) contract.generationDigest(generation, binding.trusted)
+                                else contract.identity(generation, id, operation, binding.trusted, request.getJSONObject("parameters")))
+                            .put("bindingDigest", contract.bindingDigest(binding.trusted))
+                            .put("state", if (initialize) "STARTED" else "SUCCEEDED")
+                        val body = app.daiyu.android.vd.runtime.OwnerProtocol.ok(operation, null)
+                            .put("generation", generation).put("receipt", receipt)
+                            .put("displayId", 7).put("uniqueId", "virtual:main-test")
+                        if (initialize) body.put("initialized", true)
+                        else {
+                            receipt.put("result", org.json.JSONObject().put("ok", true).put("released", true))
+                            body.put("receiptOnly", false).put("released", true)
+                        }
+                        return body.toString()
+                    }
+                    override fun disconnect() = Unit
+                })
+            return AndroidVirtualDisplayOwnerHost.Start.READY
         }
         override fun observe(): AndroidVirtualDisplayOwnerHost.Observation {
             observations.incrementAndGet()
@@ -63,6 +98,8 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
     private fun prepare(text: String): ControllerVirtualDisplayEntry {
         setDraft(text)
         node("vd-prepare-entry").assertIsEnabled().performClick()
+        // Real R08 editor visit freezes inputs before the unchanged Controller prepare seam.
+        node("r08-plan-freeze").assertExists().performClick()
         node("vd-cancel").assertExists()
         var prepared: ControllerVirtualDisplayEntry? = null
         mainThread { prepared = editor() }
@@ -91,6 +128,71 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         assertSame(entry, fixture.controller.virtualDisplayEntry())
         assertSame(displayed, request())
         assertFalse("stale Main callback must not revoke B", entry.revoked)
+    }
+
+    fun testRealMainEditorParametersReachOriginalPrepareWithoutAcceptanceOrAuthorization() {
+        setDraft("edited finite plan")
+        node("vd-prepare-entry").performClick()
+        mainThread {
+            assertNull(editor()); assertNull(fixture.controller.virtualDisplayEntry())
+            assertEquals(1, gate.availablePermits())
+        }
+        ui.onNodeWithTag("r08-add-TAP").performScrollTo().performClick()
+        ui.onNodeWithTag("r08-plan-2-x").performScrollTo().performTextReplacement("31")
+        ui.onNodeWithTag("r08-plan-2-y").performScrollTo().performTextReplacement("47")
+        node("r08-plan-freeze").performClick()
+        mainThread {
+            val entry = checkNotNull(editor())
+            assertSame(entry, fixture.controller.virtualDisplayEntry())
+            assertEquals(app.daiyu.android.integration.tools.R08VirtualDisplayAction.Tap(31, 47), entry.writes.last().action)
+            assertFalse(entry.submitted); assertFalse(entry.accepted)
+            assertNull(entry.owner); assertNull(entry.authorization); assertNull(entry.session)
+            assertEquals(1, gate.availablePermits())
+        }
+        assertDraft("edited finite plan")
+        assertEquals(0, fixture.opens.get()); assertEquals(0, starts.get())
+        node("vd-cancel").performClick()
+    }
+
+    fun testOldFrozenAndCancelCallbacksCannotChangeNewPlanVisitOrDraft() {
+        setDraft("old plan draft")
+        node("vd-prepare-entry").performClick()
+        lateinit var old: Any
+        mainThread {
+            old = checkNotNull(invokeMain("getVirtualDisplayPlanVisit"))
+            invokeMain("cancelVirtualDisplayPlan", old)
+            assertNull(fixture.controller.virtualDisplayEntry())
+        }
+        setDraft("new plan draft")
+        node("vd-prepare-entry").performClick()
+        mainThread {
+            val newer = checkNotNull(invokeMain("getVirtualDisplayPlanVisit"))
+            assertNotSame(old, newer)
+            val frozen = app.daiyu.android.vdapproval.R08FrozenPlan.freeze(listOf(
+                app.daiyu.android.vdapproval.R08PlanEditorRow(app.daiyu.android.vdapproval.R08PlanAction.START),
+                app.daiyu.android.vdapproval.R08PlanEditorRow(app.daiyu.android.vdapproval.R08PlanAction.INITIALIZE)))
+            invokeMain("freezeVirtualDisplayPlan", old, frozen)
+            invokeMain("cancelVirtualDisplayPlan", old)
+            assertSame(newer, invokeMain("getVirtualDisplayPlanVisit"))
+            assertNull(editor()); assertNull(fixture.controller.virtualDisplayEntry())
+        }
+        node("r08-plan-freeze").performClick()
+        mainThread { assertEquals("new plan draft", editor()?.text) }
+        assertDraft("new plan draft")
+        assertEquals(0, fixture.opens.get()); assertEquals(0, starts.get())
+    }
+
+    fun testPlanNavigationCancellationNeverPreparesOrClearsDraft() {
+        setDraft("plan before navigation")
+        node("vd-prepare-entry").performClick()
+        mainThread { activity.select(null) }
+        node("r08-plan-freeze").assertDoesNotExist()
+        mainThread {
+            assertNull(invokeMain("getVirtualDisplayPlanVisit")); assertNull(editor())
+            assertNull(fixture.controller.virtualDisplayEntry())
+        }
+        assertDraft("plan before navigation")
+        assertEquals(0, fixture.opens.get()); assertEquals(0, starts.get())
     }
 
     fun testOldMainStopCallbackCannotCancelNewPreparedPendingOrApprovedRun() = staleMainAction(dialog = false)
@@ -194,6 +296,137 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         node("vd-observe-close").performClick()
         awaitDrain()
         assertEquals(0, starts.get())
+    }
+
+    private fun initializedCleanupEntry(): Pair<ControllerVirtualDisplayEntry, VirtualDisplayApprovalRequest> {
+        initializedOwner.set(true); physicalUnknown.set(true)
+        val entry = prepare("Main initialized original owner")
+        val original = submit(entry)
+        val model = fixture.session("initialized plan finished")
+        node("vd-approval-confirm").performClick()
+        assertTrue(model.entered.await(5, TimeUnit.SECONDS))
+        // Feed the retained model event sink while next() is deliberately held. The original
+        // Runner collects and dispatches this WHOLE batch, including its final ledger feedback;
+        // no direct Session/leaf execute or fake parentDrained=true is used here.
+        val sink = checkNotNull(model.sink.get())
+        entry.writes.forEachIndexed { index, write ->
+            sink(app.daiyu.android.domain.ModelEvent.ToolReady(app.daiyu.android.domain.ToolInvocation(
+                app.daiyu.android.domain.ToolCallId("main-step-$index"),
+                app.daiyu.android.integration.tools.R08VirtualDisplayCatalogLeaf.WRITE_TOOL,
+                org.json.JSONObject().put("step_id", write.id).toString())))
+        }
+        model.release.countDown()
+        awaitControl("initialized Runner returned and original catalog locally drained") {
+            entry.revoked && entry.catalog?.virtualDisplayCleanupLocallyDrained(checkNotNull(entry.session)) == true &&
+                fixture.controller.problem?.contains("UNKNOWN") == true
+        }
+        mainThread { invokeMain("cancelVirtualDisplayEditor", entry); assertNull(editor()) }
+        assertEquals(1, starts.get()); assertEquals(0, cleanupSends.get())
+        return entry to original
+    }
+
+    private fun openInitializedCleanup(): app.daiyu.android.vdapproval.R08CleanupApprovalRequest {
+        node("vd-cleanup-entry").assertIsEnabled().performClick()
+        var request: app.daiyu.android.vdapproval.R08CleanupApprovalRequest? = null
+        awaitControl("Main worker result published to the original cleanup owner") {
+            val visit = invokeMain("getVirtualDisplayCleanupVisit") ?: return@awaitControl false
+            request = visit.javaClass.getDeclaredMethod("getRequest").apply { isAccessible = true }.invoke(visit)
+                as app.daiyu.android.vdapproval.R08CleanupApprovalRequest?
+            request != null
+        }
+        node("r08-cleanup-confirm").assertExists()
+        return checkNotNull(request)
+    }
+
+    fun testRealMainExplicitCleanupApprovalUsesOriginalOwnerAndRetainsConfirmedUntilPhysicalObserve() =
+        mainCleanupRelease(unknown = false)
+
+    fun testRealMainCleanupUnknownNeverResendsAfterCloseOrAnotherExplicitVisit() = mainCleanupRelease(unknown = true)
+
+    private fun mainCleanupRelease(unknown: Boolean) {
+        loseCleanupReply.set(unknown)
+        val (entry, original) = initializedCleanupEntry()
+        val session = entry.session
+        val authorization = entry.authorization
+        val beforeObserve = observations.get()
+        val messages = fixture.database.messages(entry.conversationId)
+        val cleanup = openInitializedCleanup()
+        assertSame(original.plan.owner, cleanup.review.plan.owner)
+        assertSame(original.plan.capabilities, cleanup.review.plan.capabilities)
+        assertEquals(original.plan.generation, cleanup.review.plan.generation)
+        assertEquals(0, cleanupSends.get()) // opening/publishing grants nothing
+        node("r08-cleanup-confirm").performClick()
+        awaitControl("Main shows exact cleanup result without retry") {
+            val visit = invokeMain("getVirtualDisplayCleanupVisit") ?: return@awaitControl false
+            val status = visit.javaClass.getDeclaredMethod("getStatus").apply { isAccessible = true }.invoke(visit) as String
+            status.startsWith(if (unknown) "Release UNKNOWN" else "Release 已确认")
+        }
+        assertEquals(1, cleanupSends.get()); assertEquals(beforeObserve, observations.get())
+        assertSame(session, entry.session); assertSame(authorization, entry.authorization)
+        assertSame(entry, fixture.controller.virtualDisplayEntry()); assertEquals(0, gate.availablePermits())
+        assertEquals(messages, fixture.database.messages(entry.conversationId))
+        node("vd-cleanup-close").performClick()
+        node("vd-cleanup-entry").performClick()
+        awaitControl("another visit cannot recreate an answered/attempted cleanup") {
+            val visit = invokeMain("getVirtualDisplayCleanupVisit") ?: return@awaitControl false
+            val status = visit.javaClass.getDeclaredMethod("getStatus").apply { isAccessible = true }.invoke(visit) as String
+            status.startsWith("暂不可收尾")
+        }
+        assertEquals(1, cleanupSends.get()); assertEquals(1, starts.get())
+        assertEquals(beforeObserve, observations.get()); assertEquals(0, gate.availablePermits())
+    }
+
+    fun testRealMainCleanupRejectionOnlyDeniesOriginalRequestWithoutWriteOrLeaseRelease() {
+        val (entry, _) = initializedCleanupEntry()
+        val beforeObserve = observations.get()
+        val request = openInitializedCleanup()
+        node("r08-cleanup-reject").performClick()
+        mainThread {
+            assertNull(invokeMain("getVirtualDisplayCleanupVisit"))
+            assertFalse(checkNotNull(entry.session).answerCleanupFromUi(request, true))
+        }
+        assertEquals(0, cleanupSends.get()); assertEquals(beforeObserve, observations.get())
+        assertSame(entry, fixture.controller.virtualDisplayEntry()); assertEquals(0, gate.availablePermits())
+    }
+
+    fun testExplicitCleanupIsIndependentOfOldEditorAndStaleCloseCannotRetireReplacementVisit() {
+        val entry = closeIntoUnknown()
+        val beforeObserve = observations.get()
+        var old: Any? = null
+        node("vd-cleanup-entry").assertIsEnabled().performClick()
+        awaitControl("explicit cleanup unavailable without initialized evidence") {
+            val visit = invokeMain("getVirtualDisplayCleanupVisit") ?: return@awaitControl false
+            old = visit
+            val status = visit.javaClass.getDeclaredMethod("getStatus").apply { isAccessible = true }.invoke(visit) as String
+            status.startsWith("暂不可收尾")
+        }
+        mainThread {
+            assertNull(editor()) // cleanup is not owned by the dead TextSendOwner/editor
+            invokeMain("openVirtualDisplayCleanup", entry)
+            val newer = checkNotNull(invokeMain("getVirtualDisplayCleanupVisit"))
+            assertNotSame(old, newer)
+            invokeMain("closeVirtualDisplayCleanup", old)
+            assertSame(newer, invokeMain("getVirtualDisplayCleanupVisit"))
+            assertSame(entry, fixture.controller.virtualDisplayEntry())
+        }
+        assertEquals(beforeObserve, observations.get()) // no physical probe on prepare/replacement
+        node("vd-cleanup-close").performClick()
+        mainThread { assertNull(invokeMain("getVirtualDisplayCleanupVisit")) }
+        assertEquals(0, starts.get()); assertEquals(0, gate.availablePermits())
+        assertSame(entry, fixture.controller.virtualDisplayEntry())
+    }
+
+    fun testCleanupNavigationOnlyClosesUiVisitAndNeverSendsOrObserves() {
+        val entry = closeIntoUnknown()
+        val beforeObserve = observations.get()
+        node("vd-cleanup-entry").performClick()
+        mainThread { activity.select(entry.conversation ?: fixture.database.conversations().single()) }
+        mainThread {
+            assertNull(invokeMain("getVirtualDisplayCleanupVisit"))
+            assertSame(entry, fixture.controller.virtualDisplayEntry())
+        }
+        assertEquals(beforeObserve, observations.get())
+        assertEquals(0, starts.get()); assertEquals(0, gate.availablePermits())
     }
 
     fun testLaterDrainedClearsTheOriginalUnknownNotice() {

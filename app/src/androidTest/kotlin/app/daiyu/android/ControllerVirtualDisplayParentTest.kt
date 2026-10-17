@@ -7,6 +7,7 @@ import app.daiyu.android.domain.*
 import app.daiyu.android.integration.tools.*
 import app.daiyu.android.storage.*
 import app.daiyu.android.vd.*
+import app.daiyu.android.vd.runtime.OwnerV2Contract
 import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.*
@@ -21,26 +22,64 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
         init { attachBaseContext(base) }
         override fun getApplicationContext(): Context = this
     }
-    private class Host : ControllerVirtualDisplayRuntime.Host {
+    private class Host(val initializedCleanup: Boolean = false, val loseCleanupReply: Boolean = false) : ControllerVirtualDisplayRuntime.Host {
         val starts = AtomicInteger()
-        override val client: VirtualDisplayOwnerClient? = null
+        val observations = AtomicInteger()
+        val cleanupSends = AtomicInteger()
+        override var client: VirtualDisplayOwnerClient? = null
         override fun start(generation: String, binding: OwnerRunBinding): AndroidVirtualDisplayOwnerHost.Start {
             starts.incrementAndGet()
-            throw IOException("test ambiguous launch")
+            if (!initializedCleanup) throw IOException("test ambiguous launch")
+            // Scripted, authenticated original v2 client; no socket, root, or replacement endpoint.
+            client = VirtualDisplayOwnerClient(generation, binding,
+                OwnerCredential("0123456789abcdef0123456789abcdef"), object : OwnerTransport {
+                    override fun exchange(line: String): String {
+                        app.daiyu.android.vd.runtime.OwnerProtocol.parseWireRequest(line)
+                        val request = org.json.JSONObject(line)
+                        val operation = request.getString("op")
+                        val initialize = operation == "initialize"
+                        if (operation == "release") {
+                            cleanupSends.incrementAndGet()
+                            if (loseCleanupReply) throw IOException("test lost cleanup reply")
+                        }
+                        val id = if (initialize) "" else request.getString("operationId")
+                        val receipt = org.json.JSONObject().put("generation", generation).put("operationId", id)
+                            .put("operation", if (initialize) "" else operation).put("generationReceipt", initialize)
+                            .put("digest", if (initialize) OwnerV2Contract.generationDigest(generation, binding.trusted)
+                                else OwnerV2Contract.identity(generation, id, operation, binding.trusted, request.getJSONObject("parameters")))
+                            .put("bindingDigest", OwnerV2Contract.bindingDigest(binding.trusted))
+                            .put("state", if (initialize) "STARTED" else "SUCCEEDED")
+                        val body = app.daiyu.android.vd.runtime.OwnerProtocol.ok(operation, null)
+                            .put("generation", generation).put("receipt", receipt)
+                            .put("displayId", 7).put("uniqueId", "virtual:parent-test")
+                        if (initialize) body.put("initialized", true)
+                        else {
+                            receipt.put("result", org.json.JSONObject().put("ok", true).put("released", true))
+                            body.put("receiptOnly", false).put("released", true)
+                        }
+                        return body.toString()
+                    }
+                    override fun disconnect() = Unit
+                })
+            return AndroidVirtualDisplayOwnerHost.Start.READY
         }
-        override fun observe() = AndroidVirtualDisplayOwnerHost.Observation(
-            if (starts.get() == 0) AndroidVirtualDisplayOwnerHost.Lifecycle.NOT_STARTED
-            else AndroidVirtualDisplayOwnerHost.Lifecycle.UNKNOWN, false, null, null, false)
+        override fun observe(): AndroidVirtualDisplayOwnerHost.Observation {
+            observations.incrementAndGet()
+            return AndroidVirtualDisplayOwnerHost.Observation(
+                if (starts.get() == 0) AndroidVirtualDisplayOwnerHost.Lifecycle.NOT_STARTED
+                else AndroidVirtualDisplayOwnerHost.Lifecycle.UNKNOWN, false, null, null, false)
+        }
     }
     private inner class Fixture(val failRelease: Boolean = false, val late: Boolean = false,
                                 val executeStart: Boolean = false, val throwAfterRetain: Boolean = false,
-                                val askUser: Boolean = false) {
+                                val askUser: Boolean = false, val initializedCleanup: Boolean = false,
+                                val loseCleanupReply: Boolean = false, val holdRunnerOnCancel: Boolean = false) {
         val id = UUID.randomUUID().toString()
         val app = App(testContext(instrumentation.targetContext, "vd-parent-$id-"))
         val database = ConversationDatabase(app)
         val alias = "app.daiyu.android.test.vd.$id"
         val settings = ModelSettingsStore(app, alias)
-        val host = Host()
+        val host = Host(initializedCleanup, loseCleanupReply)
         val root = app.cacheDir.canonicalFile.toPath().resolve("vd-parent-leases-$id")
         val gate = Semaphore(1)
         val allocations = AtomicInteger()
@@ -48,6 +87,8 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
         val factoryEntered = CountDownLatch(1)
         val factoryRelease = CountDownLatch(if (late) 1 else 0)
         val modelEntered = CountDownLatch(1)
+        val initializedBatchReturned = CountDownLatch(1)
+        val cancellationEntered = CountDownLatch(1)
         val modelRelease = CountDownLatch(1)
         val opens = AtomicInteger()
         val ticket = ChatController.TextSendTicket()
@@ -65,17 +106,23 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
                         var round = 0
                         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                             modelEntered.countDown()
-                            if ((executeStart || askUser) && round++ == 0) {
+                            if ((executeStart || askUser || initializedCleanup) && round++ == 0) {
                                 sink(ModelEvent.ToolReady(if (askUser) ToolInvocation(ToolCallId("question-call"),
                                     "ask_user", """{"title":"Choose","question":"Which?","options":[{"id":"a","label":"A"},{"id":"b","label":"B"}]}""")
                                 else ToolInvocation(ToolCallId("start-call"),
                                     R08VirtualDisplayCatalogLeaf.WRITE_TOOL, """{"step_id":"start"}""")))
+                                if (initializedCleanup) sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("initialize-call"),
+                                    R08VirtualDisplayCatalogLeaf.WRITE_TOOL, """{"step_id":"initialize"}""")))
                             } else {
+                                if (initializedCleanup) initializedBatchReturned.countDown()
                                 check(modelRelease.await(10, TimeUnit.SECONDS))
                                 sink(ModelEvent.TextFinal("body", "done"))
                             }
                         }
-                        override fun cancel() { modelRelease.countDown() }
+                        override fun cancel() {
+                            cancellationEntered.countDown()
+                            if (!holdRunnerOnCancel) modelRelease.countDown()
+                        }
                     }
                 }
             }, virtualDisplayFactory = ControllerVirtualDisplayFactory { _, owner, caps, writes, reads, parent, retention ->
@@ -102,7 +149,9 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
                 database.draft("accepted virtual display message")
                 entry.set(checkNotNull(controller.prepareVirtualDisplaySend(null,
                     ChatController.TextSendOwner(null, 7, 11), "accepted virtual display message",
-                    listOf(R08VirtualDisplayWrite("start", R08VirtualDisplayAction.Start)),
+                    listOf(R08VirtualDisplayWrite("start", R08VirtualDisplayAction.Start)) +
+                        if (initializedCleanup) listOf(R08VirtualDisplayWrite("initialize", R08VirtualDisplayAction.Initialize))
+                        else emptyList(),
                     listOf(R08VirtualDisplayRead("status")))))
                 assertNull(entry.get().session)
                 assertEquals(0, allocations.get())
@@ -230,6 +279,123 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
             awaitControl("still retained") { f.controller.virtualDisplayEntry() === entry }
             assertEquals(1, f.releases.get())
         } finally { f.dispose() }
+    }
+
+    fun testProductionCleanupParentEntryUsesOriginalSessionAndNeverResendsUnknown() {
+        for (loseReply in listOf(false, true)) {
+            val f = Fixture(initializedCleanup = true, loseCleanupReply = loseReply, holdRunnerOnCancel = true)
+            val worker = Executors.newSingleThreadExecutor()
+            try {
+                val entry = f.submit()
+                val approval = f.approval(entry)
+                val owner = app.daiyu.android.vdapproval.R08CleanupUiOwner()
+                val current = AtomicReference(owner)
+                controlMain {
+                    assertNull(f.controller.openVirtualDisplayCleanup(entry, owner) { current.get() }) // not revoked
+                    assertTrue(f.controller.answerVirtualDisplay(entry, approval, true))
+                }
+                assertTrue(f.initializedBatchReturned.await(10, TimeUnit.SECONDS))
+                val session = checkNotNull(entry.session)
+                val authorization = entry.authorization
+                val catalog = checkNotNull(entry.catalog)
+                controlMain { assertTrue(f.controller.cancelVirtualDisplay(entry)) }
+                assertTrue(f.cancellationEntered.await(5, TimeUnit.SECONDS))
+                val premature = checkNotNull(f.controller.openVirtualDisplayCleanup(entry, owner) { current.get() })
+                assertNull(worker.submit<app.daiyu.android.vdapproval.R08CleanupApprovalRequest?> {
+                    premature.prepareOnWorker()
+                }.get(5, TimeUnit.SECONDS)) // revoked/Stop requested is NOT Runner returned/drained
+                assertEquals(0, f.host.cleanupSends.get())
+                premature.close()
+                val drainedOwner = app.daiyu.android.vdapproval.R08CleanupUiOwner()
+                current.set(drainedOwner)
+                f.modelRelease.countDown()
+                awaitControl("returned Runner and retained locally drained catalog") {
+                    catalog.virtualDisplayCleanupLocallyDrained(session) &&
+                        f.controller.problem?.contains("UNKNOWN") == true
+                }
+                val beforeObserve = f.host.observations.get()
+                lateinit var adapter: ControllerVirtualCleanupAdapter
+                controlMain {
+                    val foreign = ControllerVirtualDisplayEntry(entry.conversation, entry.editor, entry.text, entry.writes, entry.reads)
+                    foreign.revoked = true; foreign.catalog = catalog; foreign.session = session
+                    assertNull(f.controller.openVirtualDisplayCleanup(foreign, drainedOwner) { current.get() })
+                    adapter = checkNotNull(f.controller.openVirtualDisplayCleanup(entry, drainedOwner) { current.get() })
+                }
+                val request = checkNotNull(worker.submit<app.daiyu.android.vdapproval.R08CleanupApprovalRequest?> {
+                    adapter.prepareOnWorker()
+                }.get(5, TimeUnit.SECONDS))
+                assertSame(approval.plan.owner, request.review.plan.owner)
+                assertSame(approval.plan.capabilities, request.review.plan.capabilities)
+                assertEquals(approval.plan.generation, request.review.plan.generation)
+                assertEquals(0, f.host.cleanupSends.get())
+                controlMain {
+                    // Mutate retained pointers only as a test fault: callbacks must hold the
+                    // ORIGINAL catalog/session, not silently follow the entry's later pointers.
+                    synchronized(f.controller) {
+                        entry.catalog = null
+                        assertFalse(adapter.canPublish(request)); assertFalse(adapter.answerFromUi(request, true))
+                        entry.catalog = catalog
+                        entry.session = null
+                        assertFalse(adapter.canPublish(request)); assertFalse(adapter.answerFromUi(request, true))
+                        entry.session = session
+                    }
+                    assertTrue(adapter.canPublish(request))
+                    assertTrue(adapter.answerFromUi(request, true))
+                    assertFalse(f.controller.answerVirtualDisplay(entry, approval, true))
+                }
+                val expected = if (loseReply) ControllerVirtualDisplaySession.CleanupResult.UNKNOWN
+                    else ControllerVirtualDisplaySession.CleanupResult.CONFIRMED
+                assertEquals(expected, worker.submit<ControllerVirtualDisplaySession.CleanupResult> {
+                    adapter.releaseOnWorker(request)
+                }.get(5, TimeUnit.SECONDS))
+                repeat(2) {
+                    assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+                        worker.submit<ControllerVirtualDisplaySession.CleanupResult> { adapter.releaseOnWorker(request) }
+                            .get(5, TimeUnit.SECONDS))
+                    assertNull(worker.submit<app.daiyu.android.vdapproval.R08CleanupApprovalRequest?> {
+                        adapter.prepareOnWorker()
+                    }.get(5, TimeUnit.SECONDS))
+                }
+                adapter.close()
+                assertEquals(1, f.host.starts.get()); assertEquals(1, f.host.cleanupSends.get())
+                assertEquals(beforeObserve, f.host.observations.get()) // cleanup never probes physical drain
+                assertSame(entry, f.controller.virtualDisplayEntry()); assertSame(session, entry.session)
+                assertSame(catalog, entry.catalog); assertSame(authorization, entry.authorization)
+                assertEquals(0, f.releases.get()); assertEquals(0, f.gate.availablePermits())
+                assertEquals(2, f.database.messages(entry.conversationId).size) // SQLite Accepted, not a second send
+            } finally { worker.shutdownNow(); f.dispose() }
+        }
+    }
+
+    fun testProductionCleanupCancellationBeforeQueuedWorkerDoesNotClaimOrRelease() {
+        val f = Fixture(initializedCleanup = true)
+        val worker = Executors.newSingleThreadExecutor()
+        try {
+            val entry = f.submit()
+            val approval = f.approval(entry)
+            controlMain { assertTrue(f.controller.answerVirtualDisplay(entry, approval, true)) }
+            assertTrue(f.initializedBatchReturned.await(10, TimeUnit.SECONDS))
+            controlMain { f.controller.cancelVirtualDisplay(entry) }
+            awaitControl("cleanup parent drain") {
+                entry.catalog?.virtualDisplayCleanupLocallyDrained(checkNotNull(entry.session)) == true &&
+                    f.controller.problem?.contains("UNKNOWN") == true
+            }
+            val owner = app.daiyu.android.vdapproval.R08CleanupUiOwner()
+            val current = AtomicReference(owner)
+            val adapter = checkNotNull(f.controller.openVirtualDisplayCleanup(entry, owner) { current.get() })
+            val request = checkNotNull(worker.submit<app.daiyu.android.vdapproval.R08CleanupApprovalRequest?> {
+                adapter.prepareOnWorker()
+            }.get(5, TimeUnit.SECONDS))
+            controlMain { assertTrue(adapter.canPublish(request)); assertTrue(adapter.answerFromUi(request, true)) }
+            // Equivalent to navigation before the accepted worker runs, not an undo of admitted IPC.
+            adapter.close()
+            current.set(app.daiyu.android.vdapproval.R08CleanupUiOwner())
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+                worker.submit<ControllerVirtualDisplaySession.CleanupResult> { adapter.releaseOnWorker(request) }
+                    .get(5, TimeUnit.SECONDS))
+            assertEquals(0, f.host.cleanupSends.get()); assertEquals(0, f.releases.get())
+            assertSame(entry, f.controller.virtualDisplayEntry()); assertTrue(current.get().isActive)
+        } finally { worker.shutdownNow(); f.dispose() }
     }
 
     fun testLateThrowingFactoryAfterCancellationStillRetainsItsOriginalSession() {

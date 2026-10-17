@@ -1475,17 +1475,42 @@ class ChatController internal constructor(private val application:Application,
         return true // acknowledgement of this identity, not proof of drain or DB rejection
     }
 
+    /** Original physical-observation outer gate. Caller holds this Controller's monitor.
+     * This does NOT prove the catalog's local drain; cleanup independently rechecks that gate. */
+    private fun virtualDisplayParentDrainedLocked(entry: ControllerVirtualDisplayEntry,
+        catalog: RunCatalogTools): Boolean {
+        if (virtualDisplayEntry !== entry || !entry.revoked || entry.catalog !== catalog) return false
+        val lifetime = resources
+        return if (lifetime != null) {
+            lifetime.tools === catalog && !lifetime.busy && !lifetime.waiting &&
+                lifetime.result != null && lifetime.devicesClosing
+        } else preparation == null && catalog in unacceptedTools
+    }
+
+    /** Explicit cleanup visit, never a physical-observation probe or fallback session.
+     * Keep ORIGINAL entry/catalog/session even if later UI callbacks arrive after replacement. */
+    internal fun openVirtualDisplayCleanup(entry: ControllerVirtualDisplayEntry,
+        uiOwner: app.daiyu.android.vdapproval.R08CleanupUiOwner,
+        currentUiOwner: () -> app.daiyu.android.vdapproval.R08CleanupUiOwner?
+    ): ControllerVirtualCleanupAdapter? = synchronized(this) {
+        if (closed || virtualDisplayEntry !== entry || !entry.revoked) return@synchronized null
+        val originalCatalog = entry.catalog ?: return@synchronized null
+        val originalSession = entry.session ?: return@synchronized null
+        ControllerVirtualCleanupAdapter(originalCatalog, originalSession, uiOwner,
+            parentIsRetainedAndDrained = {
+                synchronized(this@ChatController) {
+                    !closed && entry.session === originalSession &&
+                        virtualDisplayParentDrainedLocked(entry, originalCatalog)
+                }
+            }, currentUiOwner = currentUiOwner)
+    }
+
     /** Explicit physical observation, never cancellation-as-exit or an automatic release write.
      * A pending/UNKNOWN result retains the entry and all handles; the user may observe again. */
     internal fun observeVirtualDisplayClose(entry: ControllerVirtualDisplayEntry): Boolean {
         val tools = synchronized(this) {
-            if (virtualDisplayEntry !== entry || !entry.revoked) return false
             val catalog = entry.catalog ?: return false
-            val lifetime = resources
-            if (lifetime != null) {
-                if (lifetime.tools !== catalog || lifetime.busy || lifetime.waiting ||
-                    lifetime.result == null || !lifetime.devicesClosing) return false
-            } else if (preparation != null || catalog !in unacceptedTools) return false
+            if (!virtualDisplayParentDrainedLocked(entry, catalog)) return false
             catalog
         }
         executor.execute {

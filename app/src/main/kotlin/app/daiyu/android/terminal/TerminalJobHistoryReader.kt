@@ -1,22 +1,43 @@
 package app.daiyu.android.terminal
 
 import android.content.Context
+import android.os.ParcelFileDescriptor
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
 import org.json.JSONObject
+import java.io.Closeable
 import java.io.File
-import java.nio.ByteBuffer
+import java.nio.file.DirectoryStream
 import java.nio.file.Files
-import java.nio.file.LinkOption.NOFOLLOW_LINKS
-import java.nio.file.StandardOpenOption.READ
+import java.nio.file.Path
+import java.nio.file.Paths
 import java.util.UUID
 
 /** Worker-only, read-only evidence, NOT a Registry/session/authorization factory.
  * The host supplies an already trusted conversation owner; disk metadata cannot select an owner,
  * executable, PID, storage root or a control operation. No directory creation, probes or journal I/O.
  */
-internal class TerminalJobHistoryReader(filesDir: File) {
+internal class TerminalJobHistoryReader(
+    filesDir: File,
+    // Explicit JVM format-fixture seam. Production always uses Android descriptors below.
+    private val directoryOpener: ((File) -> Directory?)? = null
+) {
     constructor(context: Context) : this(context.applicationContext.filesDir)
     private val files = filesDir.canonicalFile
-    private val root = File(files, "terminal-jobs").toPath()
+
+    /** Deterministic device-test boundaries, not a path/owner/authorization input. */
+    internal var afterFilesOpened: (() -> Unit)? = null
+    internal var afterRootOpened: (() -> Unit)? = null
+    internal var beforeLeafOpened: ((String) -> Unit)? = null
+    internal var afterLeafOpened: ((String) -> Unit)? = null
+
+    internal data class Slice(val bytes: ByteArray, val size: Long)
+    internal interface Directory : Closeable {
+        fun names(): DirectoryStream<Path>
+        /** null means ENOENT only; links, special files and all other errors must throw. */
+        fun read(name: String, offset: Long, limit: Int, maxSize: Int): Slice?
+    }
 
     data class Record(val jobId: String, val owner: String, val scope: String,
         val sessionId: String, val mode: String, val backend: String) {
@@ -28,27 +49,28 @@ internal class TerminalJobHistoryReader(filesDir: File) {
         requireOwner(owner)
         var skipped = 0
         return try {
-            if (!rootAvailable()) return Scan(emptyList())
-            val records = mutableListOf<Record>()
-            var scanned = 0
-            Files.newDirectoryStream(root).use { entries ->
-                for (entry in entries) {
-                    if (++scanned > MAX_FILES) return Scan(emptyList(), skipped, "job_directory_scan_limit")
-                    val name = entry.fileName.toString()
-                    if (!name.endsWith(".json")) continue
-                    try {
-                        val id = name.removeSuffix(".json")
-                        requireUuid(id)
-                        val record = readRecord(id, owner)
-                        if (record != null) {
-                            if (records.size >= MAX_JOBS) return Scan(emptyList(), skipped, "job_history_limit")
-                            records.add(record)
-                        }
-                    } catch (_: Exception) { skipped++ }
+            val directory = openDirectory() ?: return Scan(emptyList())
+            directory.use {
+                val records = mutableListOf<Record>()
+                var scanned = 0
+                directory.names().use { entries ->
+                    for (entry in entries) {
+                        if (++scanned > MAX_FILES) return Scan(emptyList(), skipped, "job_directory_scan_limit")
+                        val name = entry.fileName.toString()
+                        if (!name.endsWith(".json")) continue
+                        try {
+                            val id = name.removeSuffix(".json")
+                            requireUuid(id)
+                            val record = readRecord(directory, id, owner)
+                            if (record != null) {
+                                if (records.size >= MAX_JOBS) return Scan(emptyList(), skipped, "job_history_limit")
+                                records.add(record)
+                            }
+                        } catch (_: Exception) { skipped++ }
+                    }
                 }
+                Scan(records.sortedBy { it.jobId }, skipped)
             }
-            check(rootAvailable())
-            Scan(records.sortedBy { it.jobId }, skipped)
         } catch (_: Exception) { Scan(emptyList(), skipped, "job_history_unavailable") }
     }
 
@@ -60,67 +82,118 @@ internal class TerminalJobHistoryReader(filesDir: File) {
         requireUuid(original.jobId)
         require(offset >= 0 && limit in 1..MAX_PAGE_BYTES)
         return try {
-            check(rootAvailable())
-            check(readRecord(original.jobId, owner) == original)
-            val log = root.resolve("${original.jobId}.log")
-            val bytes: ByteArray
-            val size: Long
-            val available = Files.exists(log, NOFOLLOW_LINKS)
-            if (!available) {
-                require(offset == 0L)
-                bytes = ByteArray(0); size = 0
-            } else {
-                checkRegular(log)
-                Files.newByteChannel(log, setOf<java.nio.file.OpenOption>(READ, NOFOLLOW_LINKS)).use { input ->
-                    size = input.size()
-                    require(size in 0..MAX_LOG_BYTES.toLong() && offset <= size)
-                    input.position(offset)
-                    bytes = ByteArray(minOf(limit.toLong(), size - offset).toInt())
-                    val target = ByteBuffer.wrap(bytes)
-                    while (target.hasRemaining()) check(input.read(target) > 0)
-                }
-                checkRegular(log)
+            val directory = checkNotNull(openDirectory())
+            directory.use {
+                check(readRecord(directory, original.jobId, owner) == original)
+                val log = directory.read("${original.jobId}.log", offset, limit, MAX_LOG_BYTES)
+                if (log == null) require(offset == 0L)
+                val bytes = log?.bytes ?: ByteArray(0)
+                val size = log?.size ?: 0L
+                JSONObject().put("ok", true).put("job_id", original.jobId).put("backend", original.backend)
+                    .put("scope", original.scope).put("mode", original.mode).put("history_read_only", true)
+                    .put("state", original.state).put("execution", "unknown").put("exit_code", JSONObject.NULL)
+                    .put("stdout", String(bytes, Charsets.UTF_8))
+                    .put("stdout_base64", java.util.Base64.getEncoder().encodeToString(bytes))
+                    .put("offset", offset).put("next_offset", offset + bytes.size).put("has_more", offset + bytes.size < size)
+                    .put("total_bytes", size).put("log_available", log != null)
             }
-            check(rootAvailable())
-            JSONObject().put("ok", true).put("job_id", original.jobId).put("backend", original.backend)
-                .put("scope", original.scope).put("mode", original.mode).put("history_read_only", true)
-                .put("state", original.state).put("execution", "unknown").put("exit_code", JSONObject.NULL)
-                .put("stdout", String(bytes, Charsets.UTF_8))
-                .put("stdout_base64", java.util.Base64.getEncoder().encodeToString(bytes))
-                .put("offset", offset).put("next_offset", offset + bytes.size).put("has_more", offset + bytes.size < size)
-                .put("total_bytes", size).put("log_available", available)
         } catch (_: Exception) {
             JSONObject().put("ok", false).put("error", "job_history_unavailable")
                 .put("state", original.state).put("execution", "unknown").put("exit_code", JSONObject.NULL)
         }
     }
 
-    private fun rootAvailable(): Boolean {
-        if (!Files.exists(root, NOFOLLOW_LINKS)) return false
-        check(!Files.isSymbolicLink(root) && Files.isDirectory(root, NOFOLLOW_LINKS))
-        check(root.toRealPath() == root && root.parent.toFile() == files)
-        return true
-    }
-    private fun checkRegular(path: java.nio.file.Path) {
-        check(rootAvailable() && path.parent == root)
-        check(!Files.isSymbolicLink(path) && Files.isRegularFile(path, NOFOLLOW_LINKS))
-        check(path.toRealPath() == path)
-    }
-    private fun readRecord(id: String, owner: String): Record? {
-        requireUuid(id)
-        val path = root.resolve("$id.json")
-        checkRegular(path)
-        val text = Files.newByteChannel(path, setOf<java.nio.file.OpenOption>(READ, NOFOLLOW_LINKS)).use { input ->
-            val length = input.size()
-            require(length in 1..MAX_METADATA_BYTES.toLong())
-            val bytes = ByteArray(length.toInt())
-            val target = ByteBuffer.wrap(bytes)
-            while (target.hasRemaining()) check(input.read(target) > 0)
-            require(input.size() == length)
-            String(bytes, Charsets.UTF_8)
+    private fun openDirectory(): Directory? {
+        if (directoryOpener != null) return directoryOpener.invoke(files)
+        // filesDir is the host's trusted canonical anchor. Every untrusted child is opened relative
+        // to a held descriptor, never by reopening a checked pathname. Keep both directories pinned
+        // until the complete scan/page has finished (including metadata and log reads).
+        val anchor = openDescriptor(files.path, directory = true)
+        var root: ParcelFileDescriptor? = null
+        var transferred = false
+        try {
+            afterFilesOpened?.invoke()
+            root = try { openDescriptor("/proc/self/fd/${anchor.fd}/terminal-jobs", directory = true) }
+            catch (error: ErrnoException) {
+                if (error.errno == OsConstants.ENOENT) return null
+                throw error
+            }
+            afterRootOpened?.invoke()
+            val result = PinnedDirectory(anchor, checkNotNull(root))
+            transferred = true
+            return result
+        } finally {
+            if (!transferred) { try { root?.close() } finally { anchor.close() } }
         }
-        checkRegular(path)
-        val json = JSONObject(text)
+    }
+
+    private inner class PinnedDirectory(
+        private val anchor: ParcelFileDescriptor,
+        private val root: ParcelFileDescriptor
+    ) : Directory {
+        private val path: Path get() = Paths.get("/proc/self/fd/${root.fd}")
+        override fun names(): DirectoryStream<Path> = Files.newDirectoryStream(path)
+        override fun read(name: String, offset: Long, limit: Int, maxSize: Int): Slice? {
+            require(name.isNotEmpty() && name != "." && name != ".." && '/' !in name && '\u0000' !in name)
+            beforeLeafOpened?.invoke(name)
+            val leaf = try { openDescriptor("$path/$name", directory = false) }
+            catch (error: ErrnoException) {
+                if (error.errno == OsConstants.ENOENT) return null
+                throw error
+            }
+            leaf.use {
+                afterLeafOpened?.invoke(name)
+                val fd = leaf.fileDescriptor
+                val size = Os.fstat(fd).st_size
+                require(size in 0..maxSize.toLong() && offset in 0..size)
+                val bytes = ByteArray(minOf(limit.toLong(), size - offset).toInt())
+                Os.lseek(fd, offset, OsConstants.SEEK_SET)
+                var consumed = 0
+                while (consumed < bytes.size) {
+                    val count = Os.read(fd, bytes, consumed, bytes.size - consumed)
+                    check(count > 0)
+                    consumed += count
+                }
+                check(Os.fstat(fd).st_size == size)
+                return Slice(bytes, size)
+            }
+        }
+        override fun close() { try { root.close() } finally { anchor.close() } }
+    }
+
+    /** Same descriptor admission pattern as TerminalPaths.openDescriptor. NONBLOCK is essential:
+     * a FIFO substituted immediately before open must be rejected by fstat, not block in open.
+     * /proc/self/fd is only used to address our held parent; NOFOLLOW applies to each child.
+     */
+    private fun openDescriptor(path: String, directory: Boolean): ParcelFileDescriptor {
+        val flags = OsConstants.O_RDONLY or LINUX_O_CLOEXEC or OsConstants.O_NOFOLLOW or
+            OsConstants.O_NONBLOCK or (if (directory) OsConstants.O_DIRECTORY else 0)
+        val raw = Os.open(path, flags, 0)
+        var adopted: ParcelFileDescriptor? = null
+        try {
+            val stat = Os.fstat(raw)
+            check(if (directory) OsConstants.S_ISDIR(stat.st_mode) else OsConstants.S_ISREG(stat.st_mode))
+            val duplicate = if (android.os.Build.VERSION.SDK_INT >= 30) {
+                Os.fcntlInt(raw, LINUX_F_DUPFD_CLOEXEC, 0)
+            } else {
+                Os::class.java.getMethod("fcntlInt", java.io.FileDescriptor::class.java,
+                    Int::class.javaPrimitiveType, Int::class.javaPrimitiveType)
+                    .invoke(null, raw, LINUX_F_DUPFD_CLOEXEC, 0) as Int
+            }
+            return ParcelFileDescriptor.adoptFd(duplicate).also { adopted = it }
+        } finally {
+            try { Os.close(raw) } catch (failure: Exception) {
+                try { adopted?.close() } catch (close: Exception) { failure.addSuppressed(close) }
+                throw failure
+            }
+        }
+    }
+
+    private fun readRecord(directory: Directory, id: String, owner: String): Record? {
+        requireUuid(id)
+        val data = checkNotNull(directory.read("$id.json", 0, MAX_METADATA_BYTES, MAX_METADATA_BYTES))
+        require(data.size in 1..MAX_METADATA_BYTES.toLong() && data.bytes.size.toLong() == data.size)
+        val json = JSONObject(String(data.bytes, Charsets.UTF_8))
         fun field(key: String): String = (json.get(key) as? String) ?: error("invalid_history_field")
         require(field("job_id") == id)
         val recordedOwner = field("owner")
@@ -137,6 +210,8 @@ internal class TerminalJobHistoryReader(filesDir: File) {
     private fun requireUuid(id: String) { require(UUID.fromString(id).toString() == id) }
 
     companion object {
+        private const val LINUX_O_CLOEXEC = 0x80000
+        private const val LINUX_F_DUPFD_CLOEXEC = 1030
         const val MAX_FILES = 256
         const val MAX_JOBS = 64
         const val MAX_METADATA_BYTES = 16384

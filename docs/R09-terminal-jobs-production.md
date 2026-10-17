@@ -115,3 +115,37 @@ PackagedProotHelperProvider 复用它，所有既有精确 hash/长度/安装位
 PID/starttime 拒绝/复用、真正 input/output pump 取消、PRoot API34+ ABI/SELinux、
 已有手工 catalog 的 API26 拒绝及撤销可用、同 Linux generation 退出前不可换选。
 没有 native/实机/跨重启/断电证据；不据本增量将 R09 整项标完成。
+
+## 历史 reader 的 descriptor 定向修复（随本次源码提交；未运行）
+
+本增量只修已有 `TerminalJobHistoryReader` 的历史文件读取边界，不重做此前历史
+Controller/Main 接线。任务提供基线 `9a090b0b` 和只读审查 `9d4944bf`；本代理不能
+运行 Git，未独立核对 SHA，但独立读取源码确认了 pathname 前后检查无法排除临时
+父目录 symlink、仅最终分量 NOFOLLOW 及 FIFO 打开可能阻塞的问题。
+
+- 每次 scan/page 从宿主可信 canonical filesDir 打开目录 FD，再通过
+  `/proc/self/fd/<held-parent>/terminal-jobs` 固定 root；保留 filesDir/root 两个 FD
+  到整次操作结束。扫描使用固定 root FD，metadata 与日志都相对该 FD 打开。
+- 沿用 `TerminalPaths.openDescriptor` 的 Android Os/PFD 与 API26 兼容复制方式：
+  每次打开均带 `O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK`，目录另带 `O_DIRECTORY`；
+  打开后用 `fstat` 只接纳目录/regular file，读取、seek、大小上限及前后 size 校验都用
+  同一叶子 FD。拒绝 FIFO/其它特殊文件，不以易变 pathname 的检查结果授权读取。
+- root 在固定前变成 symlink 时拒绝；固定后 pathname 临时换成 symlink 再恢复时，
+  仍只读取已固定的原 root/叶子，不读取 symlink 目标。成功/缺失/异常/超限均关闭已获 FD。
+  这不是持久化跨重启 root 身份，也不授予任何执行或句柄恢复能力。
+- 原 Registry UUID `.json/.log` 格式、精确 owner、每页原 Record 复核、UNKNOWN 只读、
+  256 扫描/64 记录、16KiB metadata/256KiB log/64KiB 页上限及坏条隔离保持不变。
+  不创建目录/Registry/journal，不运行 probe/命令，不恢复 PID/控制授权。
+
+验证源码分工：`TerminalJobHistoryReaderTest` 的 8 项 JVM 测试显式注入普通 JVM
+文件夹具，只验证 JSON/owner/配额/byte 分页/缺失与空日志，不把它们称为 Android FD
+安全证据；新的 `TerminalJobHistoryReaderDeviceTest` 有 8 项实际 Android Os/PFD 测试，
+使用一次性确定性 hooks 验证 filesDir 替换、root 固定前拒绝、root 临时 symlink 并在
+叶子打开后恢复、叶子打开后替换仍读原 FD、metadata/log 变 FIFO 及时拒绝及异常 FD
+清理。FIFO 用 `Os.mkfifo` 创建，无写端，Future 限时 3 秒；回归超时后以非阻塞读写 FD
+解除可能阻塞的 open，清理等待另限 2 秒，无无界竞态重试或 shell。
+
+本次仅 reader、其 JVM/新设备测试及本文件/唯一清单共 5 路径；不修改 Controller/Main。
+只完成 workspace 源码定向检查，**未编译、未运行任何 JVM/设备测试、Lint 或构建**，
+未创建分支、推送、触发 CI 或操作设备。父代理负责独立审查、真实 API26/37.2 Os/PFD
+运行与统一集成；不能凭新增测试源码或先前 9 文件产物记录声明本修复已通过运行验证。

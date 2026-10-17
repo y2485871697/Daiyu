@@ -75,31 +75,34 @@ internal fun ModelSettingsScreen(
     catalogEnabled: Boolean = true,
     enabled: Boolean = true,
     engineeringUi: Boolean = false,
+    testConnection: ModelConnectionTester? = null,
 ) {
+    val connection = rememberSettingsConnectionTest(draft, enabled, testConnection)
+    val changeDraft: (ModelSettingsDraftUi) -> Unit = { connection.cancel(); onDraftChange(it) }
     var bodyExpanded by remember { mutableStateOf(false) }
     val catalogIsCurrent = catalogForDraft?.let {
         it.endpoint == draft.endpoint && it.responsesPath == draft.responsesPath &&
             it.protocol == draft.protocol && it.apiKey == draft.apiKey && it.model == draft.model
     } == true
-    MiuixScaffoldPage(title = "模型设置", onBack = onBack, modifier = modifier) {
+    MiuixScaffoldPage(title = "模型设置", onBack = { connection.cancel(); onBack() }, modifier = modifier) {
         item(key = "model_protocol") {
             SettingsSectionTitle("服务协议")
             SettingsCard {
                 SettingsRadioRow("OpenAI Responses", draft.protocol == ProviderProtocol.RESPONSES, enabled = enabled) {
-                    onDraftChange(draft.selectProtocol(ProviderProtocol.RESPONSES))
+                    changeDraft(draft.selectProtocol(ProviderProtocol.RESPONSES))
                 }
                 SettingsRadioRow("Anthropic Messages", draft.protocol == ProviderProtocol.MESSAGES, enabled = enabled) {
-                    onDraftChange(draft.selectProtocol(ProviderProtocol.MESSAGES))
+                    changeDraft(draft.selectProtocol(ProviderProtocol.MESSAGES))
                 }
                 SettingsRadioRow("OpenAI Chat Completions", draft.protocol == ProviderProtocol.CHAT_COMPLETIONS, enabled = enabled) {
-                    onDraftChange(draft.selectProtocol(ProviderProtocol.CHAT_COMPLETIONS))
+                    changeDraft(draft.selectProtocol(ProviderProtocol.CHAT_COMPLETIONS))
                 }
                 SettingsRadioRow("Google Gemini", draft.protocol == ProviderProtocol.GEMINI, enabled = enabled) {
-                    onDraftChange(draft.selectProtocol(ProviderProtocol.GEMINI))
+                    changeDraft(draft.selectProtocol(ProviderProtocol.GEMINI))
                 }
                 if (draft.protocol != draft.savedProtocol) {
                     SettingsSwitchRow("重输密钥并绑定", draft.protocolChangeAuthorized, enabled = enabled) {
-                        onDraftChange(draft.copy(protocolChangeAuthorized = it))
+                        changeDraft(draft.copy(protocolChangeAuthorized = it))
                     }
                 }
             }
@@ -109,18 +112,18 @@ internal fun ModelSettingsScreen(
         item(key = "model_connection") {
             SettingsSectionTitle("连接与模型")
             SettingsCard {
-                SettingsTextField("Base URL", draft.endpoint, { onDraftChange(draft.copy(endpoint = it)) }, enabled = enabled)
-                SettingsTextField("Responses 路径", draft.responsesPath, { onDraftChange(draft.copy(responsesPath = it)) },
+                SettingsTextField("Base URL", draft.endpoint, { changeDraft(draft.copy(endpoint = it)) }, enabled = enabled)
+                SettingsTextField("Responses 路径", draft.responsesPath, { changeDraft(draft.copy(responsesPath = it)) },
                     hint = "/responses", enabled = enabled && draft.protocol == ProviderProtocol.RESPONSES)
-                SettingsTextField("模型名", draft.model, { onDraftChange(draft.copy(model = it)) }, enabled = enabled)
-                SettingsTextField("API Key", draft.apiKey, { onDraftChange(draft.copy(apiKey = it)) }, password = true, enabled = enabled)
+                SettingsTextField("模型名", draft.model, { changeDraft(draft.copy(model = it)) }, enabled = enabled)
+                SettingsTextField("API Key", draft.apiKey, { changeDraft(draft.copy(apiKey = it)) }, password = true, enabled = enabled)
             }
         }
         if (engineeringUi) item(key = "model_device_tools") {
             SettingsSectionTitle("设备工具")
             SettingsCard {
-                SettingsSwitchRow("电量查询", draft.batteryEnabled, enabled = enabled) { onDraftChange(draft.copy(batteryEnabled = it)) }
-                SettingsSwitchRow("设备状态查询", draft.deviceStatusEnabled, enabled = enabled) { onDraftChange(draft.copy(deviceStatusEnabled = it)) }
+                SettingsSwitchRow("电量查询", draft.batteryEnabled, enabled = enabled) { changeDraft(draft.copy(batteryEnabled = it)) }
+                SettingsSwitchRow("设备状态查询", draft.deviceStatusEnabled, enabled = enabled) { changeDraft(draft.copy(deviceStatusEnabled = it)) }
             }
         }
         item(key = "model_advanced") {
@@ -129,7 +132,7 @@ internal fun ModelSettingsScreen(
                     summary = if (draft.customBody.isBlank()) "未设置" else "已设置",
                     onClick = if (enabled) ({ bodyExpanded = !bodyExpanded }) else null)
                 if (engineeringUi || bodyExpanded) SettingsTextField("自定义请求体", draft.customBody,
-                    { onDraftChange(draft.copy(customBody = it)) }, multiline = true, enabled = enabled)
+                    { changeDraft(draft.copy(customBody = it)) }, multiline = true, enabled = enabled)
             }
         }
         if (!engineeringUi && draft.protocol != ProviderProtocol.RESPONSES &&
@@ -137,7 +140,7 @@ internal fun ModelSettingsScreen(
             SettingsCard {
                 SettingsRow("清除不兼容的请求档位", tag = "model-clear-incompatible-options",
                     summary = "原请求档位仅适用于 Responses，清除后可保存当前协议",
-                    onClick = if (enabled) ({ onDraftChange(draft.copy(speedMode = null, codex = false)) }) else null)
+                    onClick = if (enabled) ({ changeDraft(draft.copy(speedMode = null, codex = false)) }) else null)
             }
         }
         if (engineeringUi || requestOptionsUnavailable) item(key = "model_speed") {
@@ -149,23 +152,31 @@ internal fun ModelSettingsScreen(
                     GptSpeedMode.FAST to "快速",
                     GptSpeedMode.ULTRA_FAST to "超快速",
                 ).forEach { (mode, title) ->
-                    SettingsRadioRow(title, draft.speedMode == mode, enabled = enabled) { onDraftChange(draft.copy(speedMode = mode)) }
+                    SettingsRadioRow(title, draft.speedMode == mode, enabled = enabled) { changeDraft(draft.copy(speedMode = mode)) }
                 }
-                if (engineeringUi) SettingsSwitchRow("Codex 档位", draft.codex, enabled = enabled) { onDraftChange(draft.copy(codex = it)) }
+                if (engineeringUi) SettingsSwitchRow("Codex 档位", draft.codex, enabled = enabled) { changeDraft(draft.copy(codex = it)) }
                 if (requestOptionsUnavailable) {
                     SettingsSwitchRow("授权替换策略", draft.requestOptionsReplacementAuthorized, enabled = enabled) {
-                        onDraftChange(draft.copy(requestOptionsReplacementAuthorized = it))
+                        changeDraft(draft.copy(requestOptionsReplacementAuthorized = it))
                     }
                 }
             }
             if (requestOptionsUnavailable) SettingsNote("原策略不可用", error = true)
+        }
+        if (testConnection != null) item(key = "model_connection_test") {
+            SettingsCard {
+                TextButton(text = if (connection.running) "正在测试连接" else "测试连接",
+                    enabled = enabled && !connection.running, onClick = connection.start,
+                    modifier = Modifier.testTag("model-connection-test").fillMaxWidth().padding(12.dp))
+                connection.status?.let { SettingsNote(it) }
+            }
         }
         item(key = "model_catalog") {
             SettingsSectionTitle("远端模型目录")
             SettingsCard {
                 TextButton(
                     text = if (isFetchingCatalog) "获取中" else "获取模型",
-                    onClick = { onFetchCatalog(draft) },
+                    onClick = { connection.cancel(); onFetchCatalog(draft) },
                     enabled = enabled && catalogEnabled && !isFetchingCatalog,
                     modifier = Modifier.testTag("model-catalog-fetch").fillMaxWidth().padding(12.dp),
                 )
@@ -180,7 +191,7 @@ internal fun ModelSettingsScreen(
                         SettingsRow(
                             title = entry.displayName,
                             summary = entry.id.takeIf { it != entry.displayName },
-                            onClick = { onDraftChange(draft.copy(model = entry.id)) },
+                            onClick = { changeDraft(draft.copy(model = entry.id)) },
                             leading = {
                                 DaiyuIcon(DaiyuIcons.Model, contentDescription = null,
                                     tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
@@ -194,7 +205,7 @@ internal fun ModelSettingsScreen(
             if (!errorText.isNullOrBlank()) SettingsNote(errorText, error = true)
             TextButton(
                 text = "保存",
-                onClick = { onSave(draft) },
+                onClick = { connection.cancel(); onSave(draft) },
                 enabled = enabled,
                 modifier = Modifier.testTag("model-save").fillMaxWidth().padding(horizontal = 12.dp, vertical = 24.dp),
             )

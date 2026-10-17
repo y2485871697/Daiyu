@@ -21,6 +21,15 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import top.yukonga.miuix.kmp.basic.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -143,9 +152,24 @@ internal fun SettingsTextField(
     multiline: Boolean = false,
     enabled: Boolean = true,
 ) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var secretVisible by remember(password) { mutableStateOf(false) }
+    if (password) DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) secretVisible = false
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(label, style = MiuixTheme.textStyles.body2,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(label, style = MiuixTheme.textStyles.body2,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
+            if (password) TextButton(text = if (secretVisible) "隐藏密钥" else "显示密钥",
+                enabled = enabled, modifier = Modifier.testTag("settings-secret-visibility:$label"), onClick = {
+                    if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) secretVisible = !secretVisible
+                })
+        }
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
@@ -155,7 +179,7 @@ internal fun SettingsTextField(
             maxLines = if (multiline) 8 else 1,
             textStyle = MiuixTheme.textStyles.body1.copy(color = MiuixTheme.colorScheme.onSurface),
             cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
-            visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
+            visualTransformation = if (password && !secretVisible) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else KeyboardType.Text),
             modifier = Modifier.testTag("settings-field:$label").fillMaxWidth().clip(RoundedCornerShape(12.dp))
                 .background(MiuixTheme.colorScheme.surfaceVariant).padding(14.dp)

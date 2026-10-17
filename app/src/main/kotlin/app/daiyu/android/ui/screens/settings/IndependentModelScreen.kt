@@ -1,6 +1,10 @@
 package app.daiyu.android.ui.screens.settings
 
 import android.text.InputType
+import android.text.method.PasswordTransformationMethod
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import android.widget.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -16,12 +20,27 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private class IndependentSecretVisibility { var conceal: (() -> Unit)? = null }
+
 /** Explicit independent credentials and persistent registry IDs. No 'copy main model' action. */
 @Composable
 internal fun IndependentModelScreen(store: IndependentModelSettings, slot: IndependentModelSettings.Slot,
     assistants: List<AssistantProfile>, pets: PetApplicationHost, onBack: () -> Unit,
     modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val secretVisibility = remember(slot) { IndependentSecretVisibility() }
+    DisposableEffect(lifecycle, secretVisibility) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE) secretVisibility.conceal?.invoke()
+        }
+        lifecycle.addObserver(observer)
+        onDispose {
+            lifecycle.removeObserver(observer)
+            secretVisibility.conceal?.invoke()
+            secretVisibility.conceal = null
+        }
+    }
     var loaded by remember(slot) { mutableStateOf<Pair<IndependentModelSettings.Record, ModelSettings>?>(null) }
     var problem by remember(slot) { mutableStateOf<String?>(null) }
     var saving by remember(slot) { mutableStateOf(false) }
@@ -75,18 +94,40 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
         column.addView(enabled)
         val endpoint = field("HTTPS 服务商地址", settings.endpoint)
         val model = field("模型 API 名（不是记录 ID）", settings.model)
-        val key = field("API 密钥（独立加密保存）", settings.apiKey, true)
+        val key = field("API 密钥（独立加密保存）", settings.apiKey, true).apply {
+            tag = "independent-model-secret"; isSaveEnabled = false
+        }
+        var changingKeyVisibility = false
+        var keyVisible = false
+        val keyToggle = Button(context).apply { text = "显示密钥"; tag = "independent-model-secret-visibility" }
+        fun showKey(visible: Boolean) {
+            changingKeyVisibility = true
+            try {
+                val start = key.selectionStart; val end = key.selectionEnd
+                key.transformationMethod = if (visible) null else PasswordTransformationMethod.getInstance()
+                if (start >= 0 && end >= 0) key.setSelection(start, end)
+                keyVisible = visible; keyToggle.text = if (visible) "隐藏密钥" else "显示密钥"
+            } finally { changingKeyVisibility = false }
+        }
+        keyToggle.setOnClickListener {
+            if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) showKey(!keyVisible)
+        }
+        secretVisibility.conceal = { showKey(false) }
+        column.addView(keyToggle)
         label("协议（保存即明确确认该协议及凭据）")
         val supported = listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES)
         val protocol = choices(listOf("请选择支持的协议（此功能仅支持 Responses/Messages）", "Responses", "Messages"), supported.indexOf(settings.protocol) + 1)
         val path = field("Responses 自定义路径（Messages 请留空）", settings.responsesPath)
         label("图片能力声明（未知拒绝图片，不按名称猜测）")
         val images = choices(listOf("未知", "已确认支持图片", "不支持图片"), when(record.imageInput) { true -> 1; false -> 2; null -> 0 })
+        images.tag = "independent-model-image-capability"
         // A declaration belongs to the complete exact connection, not the model's display name.
         // Editing even back to the old value requires a fresh explicit image-capability choice.
         val resetCapability = object : android.text.TextWatcher {
             override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { images.setSelection(0) }
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                if (!changingKeyVisibility) images.setSelection(0)
+            }
             override fun afterTextChanged(s: android.text.Editable?) {}
         }
         listOf(endpoint, model, key, path).forEach { it.addTextChangedListener(resetCapability) }

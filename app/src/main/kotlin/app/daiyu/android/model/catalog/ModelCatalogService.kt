@@ -54,6 +54,20 @@ class ModelCatalogService(
         return fetchDraft(settings, isCancelled)
     }
 
+    internal fun testDraft(settings: ModelSettings, isCancelled: () -> Boolean): ModelConnectionResult = try {
+        ModelConnectionResult.Connected(fetchDraft(settings, isCancelled).size)
+    } catch (_: InterruptedException) {
+        ModelConnectionResult.Failed(RemoteModelFailure.CANCELLED)
+    } catch (_: CancellationException) {
+        ModelConnectionResult.Failed(RemoteModelFailure.CANCELLED)
+    } catch (failure: RemoteModelException) {
+        ModelConnectionResult.Failed(if (isCancelled() || Thread.currentThread().isInterrupted)
+            RemoteModelFailure.CANCELLED else failure.failure)
+    } catch (_: Exception) {
+        ModelConnectionResult.Failed(if (isCancelled() || Thread.currentThread().isInterrupted)
+            RemoteModelFailure.CANCELLED else RemoteModelFailure.REQUEST)
+    }
+
     fun fetchDraft(settings: ModelSettings, isCancelled: () -> Boolean = { false }): List<RemoteModel> {
         if (Thread.currentThread().isInterrupted || isCancelled()) throw InterruptedException()
         val request = catalogRequest(settings)

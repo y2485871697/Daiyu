@@ -708,6 +708,7 @@ class MainActivity : ComponentActivity() {
                 reconnectSettingsPageOwner = null
             }
             if (value != retainedPageState) { stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationOutputs(); cancelVirtualDisplayEditor(); cancelGuiEditor() }
+            if (value != "models") { modelSaveOwner?.revoke(); modelSaveOwner = null }
             if (value != "session-gateway") {
                 gatewayOwner?.revoke(); gatewayOwner = null
                 gatewayEditing = null; gatewayDraft = null
@@ -1051,6 +1052,7 @@ class MainActivity : ComponentActivity() {
     private var modelError by mutableStateOf<String?>(null)
     private var editingCatalogIdentity by mutableStateOf<String?>(null)
     private var modelEditingOwner by mutableStateOf<Any?>(null)
+    private var modelSaveOwner: ModelSettingsSaveOwner? = null
     private var gatewayOwner by mutableStateOf<ModelSettingsSaveOwner?>(null)
     private var gatewayEditing: EditingSettings? = null
     private var gatewayDraft by mutableStateOf<app.daiyu.android.model.sessiongateway.SessionGatewayRule?>(null)
@@ -1470,9 +1472,13 @@ class MainActivity : ComponentActivity() {
                         } }
                     }
                     "models" -> modelDraft?.let { value ->
+                        val connectionTest: app.daiyu.android.ui.screens.settings.ModelConnectionTester? = modelEditingOwner?.let { owner ->
+                            { draft, cancelled, deliver -> requestModelConnectionTest(owner, draft, cancelled, deliver) }
+                        }
                         val identity = editingCatalogIdentity
                         if (identity == null) ModelSettingsScreen(
                             engineeringUi = engineeringUi,
+                            testConnection = connectionTest,
                             draft = value, onDraftChange = { changeModelDraft(it) },
                             onSave = { saveModelSettings(it) }, onFetchCatalog = {},
                             onBack = { returnToChat() }, errorText = modelError,
@@ -1481,6 +1487,7 @@ class MainActivity : ComponentActivity() {
                             catalogEnabled = false, enabled = !controller.dataBusy,
                         ) else key(modelEditingOwner) { ProviderCatalogSettingsScreen(
                             engineeringUi = engineeringUi,
+                            testConnection = connectionTest,
                             draft = value, onDraftChange = { changeModelDraft(it) },
                             onSave = { saveModelSettings(it) }, onBack = { returnToChat() },
                             providerIdentity = identity, persistence = controller.settings.modelCatalog,
@@ -3945,6 +3952,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        modelSaveOwner?.revoke(); modelSaveOwner = null
         subAgentModelSource.clear()
         revokePlatformActionVisit()
         // Pending location UI cannot survive backgrounding. An already handed-off external GUI
@@ -4016,6 +4024,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        modelSaveOwner?.revoke(); modelSaveOwner = null
         paneRefreshClosed = true
         paneRefreshSerial++
         paneRefreshPending = false
@@ -4881,6 +4890,7 @@ class MainActivity : ComponentActivity() {
         requireActivityUsable(); check(!controller.dataBusy)
         if (controller.active != null) { toast("当前运行使用冻结配置，请结束后修改"); return }
         editingCatalogIdentity = null
+        modelSaveOwner?.revoke(); modelSaveOwner = ModelSettingsSaveOwner()
         val owner = Any(); modelEditingOwner = owner
         val editing = controller.settings.loadForEditing(); editingSettings = editing
         val saved = editing.settings
@@ -4916,8 +4926,9 @@ class MainActivity : ComponentActivity() {
             require(value.protocol == editing.settings.protocol || value.protocolChangeAuthorized)
             require(!editing.requestOptionsUnavailable || value.requestOptionsReplacementAuthorized)
             val owner = checkNotNull(modelEditingOwner)
+            val saveOwner = modelSaveOwner ?: ModelSettingsSaveOwner().also { modelSaveOwner = it }
             controller.saveModelSettings(value.toSettings(editing.settings), value.protocolChangeAuthorized,
-                value.requestOptionsReplacementAuthorized) { success ->
+                value.requestOptionsReplacementAuthorized, editing, saveOwner) { success ->
                 if (activityUsable()) {
                     if (success) imageHost.configurationChanged()
                     if (retainedPage == "models" && modelEditingOwner === owner && editingSettings === editing) {
@@ -4927,6 +4938,17 @@ class MainActivity : ComponentActivity() {
             }
         } catch (_: Exception) { modelError = "设置未保存" }
     }
+    private fun requestModelConnectionTest(owner: Any, value: ModelSettingsDraftUi, cancelled: () -> Boolean,
+        deliver: (app.daiyu.android.model.catalog.ModelConnectionResult) -> Unit): Boolean {
+        if (!activityUsable() || retainedPage != "models" || modelEditingOwner !== owner ||
+            modelDraft != value || cancelled()) return false
+        val editing = editingSettings ?: return false
+        return controller.testModelConnection(value.toSettings(editing.settings), cancelled) { result ->
+            if (activityUsable() && retainedPage == "models" && modelEditingOwner === owner &&
+                editingSettings === editing && modelDraft == value && !cancelled()) deliver(result)
+        }
+    }
+
     private fun requestSettingsCatalog(
         value: ModelSettingsDraftUi,
         cancelled: () -> Boolean,

@@ -176,17 +176,27 @@ dependencies {
 val hostPty=layout.buildDirectory.file("host-pty/daiyu_pty")
 val compileHostPty=tasks.register<Exec>("compileHostPty") {
     val source=layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/daiyu_pty.c")
-    inputs.file(source)
+    inputs.files(source, layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/daiyu_root_scope.h"))
     outputs.file(hostPty)
     doFirst {hostPty.get().asFile.parentFile.mkdirs()}
     commandLine("cc","-std=c11","-Wall","-Wextra","-Werror","-O2",source.asFile.absolutePath,
         "-o",hostPty.get().asFile.absolutePath)
 }
+val hostRootScopeFaults=layout.buildDirectory.file("host-pty/root_scope_faults")
+val compileHostRootScopeFaults=tasks.register<Exec>("compileHostRootScopeFaults") {
+    val source=layout.projectDirectory.file("src/test/native/root_scope_faults.c")
+    inputs.files(source, layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/daiyu_pty.c"),
+        layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/daiyu_root_scope.h"))
+    outputs.file(hostRootScopeFaults)
+    doFirst {hostRootScopeFaults.get().asFile.parentFile.mkdirs()}
+    commandLine("cc","-std=c11","-Wall","-Wextra","-Werror","-O2",source.asFile.absolutePath,
+        "-o",hostRootScopeFaults.get().asFile.absolutePath)
+}
 val verifyHostPty=tasks.register<Exec>("verifyHostPty") {
     val verifier=layout.projectDirectory.file("src/main/kotlin/app/daiyu/android/terminal/native/verify_host.py")
     val report=layout.buildDirectory.dir("reports/host-pty")
-    dependsOn(compileHostPty)
-    inputs.files(verifier,hostPty)
+    dependsOn(compileHostPty,compileHostRootScopeFaults)
+    inputs.files(verifier,hostPty,hostRootScopeFaults)
     outputs.dir(report)
     commandLine("python3",verifier.asFile.absolutePath,hostPty.get().asFile.absolutePath,
         report.get().asFile.absolutePath)

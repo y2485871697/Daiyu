@@ -223,8 +223,15 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val target = fresh(); val before = target.db.exportBackup()
         invalid.forEach { bad -> rejects { target.service().preflight(bad) }; rejects { target.service().importPackage(bad) }
             assertEquals(before, target.db.exportBackup()); assertEquals(0, target.count("recorded_usage_requests")) }
-        val over = mutate(text) { data -> val rows = data.getJSONObject("runtime_usage_history").getJSONArray("requests")
-            val template = rows.getJSONObject(0); repeat(50_001) { rows.put(template) } }
+        val over = mutate(text) { data ->
+            val rows = JSONArray()
+            val placeholder = JSONObject()
+            repeat(BackupHistoryRows.MAX_ROWS + 1) { rows.put(placeholder) }
+            assertTrue(rows.toString().toByteArray(Charsets.UTF_8).size < BackupHistoryRows.MAX_METADATA_BYTES)
+            rejects { BackupHistoryRows.rows(rows) }
+            data.getJSONObject("runtime_usage_history").put("requests", rows)
+            data.getJSONObject("inventory").put("runtime_usage_requests", rows.length())
+        }
         rejects { target.service().preflight(over) }
         target.db.writableDatabase.execSQL("""CREATE TRIGGER corrupt_runtime_usage AFTER INSERT ON neutral_imports
             BEGIN UPDATE recorded_usage_requests SET attempt_id='corrupted'; END""")

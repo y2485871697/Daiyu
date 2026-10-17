@@ -68,9 +68,14 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         }
         override fun observe(): AndroidVirtualDisplayOwnerHost.Observation {
             observations.incrementAndGet()
-            return AndroidVirtualDisplayOwnerHost.Observation(
-                if (physicalUnknown.get()) AndroidVirtualDisplayOwnerHost.Lifecycle.UNKNOWN
-                else AndroidVirtualDisplayOwnerHost.Lifecycle.NOT_STARTED, false, null, null, false)
+            return when {
+                physicalUnknown.get() -> AndroidVirtualDisplayOwnerHost.Observation(
+                    AndroidVirtualDisplayOwnerHost.Lifecycle.UNKNOWN, false, null, null, false)
+                starts.get() == 0 -> AndroidVirtualDisplayOwnerHost.Observation(
+                    AndroidVirtualDisplayOwnerHost.Lifecycle.NOT_STARTED, false, null, null, false)
+                else -> AndroidVirtualDisplayOwnerHost.Observation(
+                    AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED, true, 0, 4242, true)
+            }
         }
     }
 
@@ -88,11 +93,20 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
             val entry = fixture.controller.virtualDisplayEntry()
             if (entry != null) {
                 mainThread { fixture.controller.cancelVirtualDisplay(entry) }
-                awaitControl("fixture original run stopped") { fixture.controller.active == null }
-                mainThread { fixture.controller.observeVirtualDisplayClose(entry) }
-                awaitControl("fixture original display cleanup drained") {
-                    fixture.controller.virtualDisplayEntry() == null
+                awaitControl("fixture original catalog locally drained") {
+                    fixture.controller.virtualDisplayEntry() == null ||
+                        entry.session?.let { session ->
+                            entry.catalog?.virtualDisplayCleanupLocallyDrained(session) == true
+                        } == true
                 }
+                mainThread {
+                    if (fixture.controller.virtualDisplayEntry() === entry)
+                        assertTrue(fixture.controller.observeVirtualDisplayClose(entry))
+                }
+                awaitControl("fixture original run and display cleanup drained") {
+                    fixture.controller.virtualDisplayEntry() == null && fixture.controller.active == null
+                }
+                assertEquals(1, gate.availablePermits())
             }
         } finally { super.tearDown() }
     }
@@ -186,7 +200,13 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         mainThread {
             old = checkNotNull(invokeMain("getVirtualDisplayPlanVisit"))
             invokeMain("cancelVirtualDisplayPlan", old)
+            assertNull(invokeMain("getVirtualDisplayPlanVisit"))
             assertNull(fixture.controller.virtualDisplayEntry())
+        }
+        ui.waitForIdle()
+        ui.waitUntil(5_000) {
+            ui.onAllNodes(hasTestTag("chat-draft") and isEnabled())
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
         }
         setDraft("new plan draft")
         node("vd-prepare-entry").performClick()
@@ -399,6 +419,12 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         }
         assertEquals(1, cleanupSends.get()); assertEquals(1, starts.get())
         assertEquals(beforeObserve, observations.get()); assertEquals(0, gate.availablePermits())
+        physicalUnknown.set(false)
+        mainThread { assertTrue(fixture.controller.observeVirtualDisplayClose(entry)) }
+        awaitDrain()
+        assertEquals(1, gate.availablePermits())
+        assertEquals(1, cleanupSends.get())
+        assertEquals(messages, fixture.database.messages(entry.conversationId))
     }
 
     fun testRealMainCleanupRejectionOnlyDeniesOriginalRequestWithoutWriteOrLeaseRelease() {

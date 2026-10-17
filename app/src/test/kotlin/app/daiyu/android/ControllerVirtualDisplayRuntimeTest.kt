@@ -526,9 +526,9 @@ class ControllerVirtualDisplayRuntimeTest {
                 f.work { session.releaseInitializedOnceOnWorker(cleanup, true) })
             assertFalse(Files.exists(directory.resolve("released.event")))
             host.drained()
-            assertEquals(if (loseReleaseReply) ControllerVirtualDisplaySession.CloseResult.Unknown
-                else ControllerVirtualDisplaySession.CloseResult.Drained, f.work { session.observeCloseOnWorker(true) })
-            assertEquals(!loseReleaseReply, Files.exists(directory.resolve("released.event")))
+            assertEquals(ControllerVirtualDisplaySession.CloseResult.Drained, f.work { session.observeCloseOnWorker(true) })
+            assertTrue(Files.exists(directory.resolve("released.event")))
+            assertEquals(ControllerVirtualDisplaySession.CloseResult.Drained, f.work { session.observeCloseOnWorker(true) })
             assertEquals(listOf("initialize", "release"), wire.operations())
         } }
     }

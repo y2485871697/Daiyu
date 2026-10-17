@@ -193,7 +193,9 @@ class Task17IconAppearanceTest : InstrumentationTestCase() {
             failure.get() is IllegalStateException)
     }
 
-    fun testMainThreadRefreshReceipt() {
+    fun testMainThreadRefreshReceipt() = verifyMainThreadRefreshReceipt()
+
+    private fun verifyMainThreadRefreshReceipt() {
         instrumentation.runOnMainSync {
             var called = false
             MainThreadIconNotifications { called = true }.refresh(Task17IconCatalog.defaultEntry)

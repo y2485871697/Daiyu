@@ -10,7 +10,19 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
 /** Trusted host entrypoint; helpers must be packaged executables, never model-supplied paths. */
-class PtySession internal constructor(private val process: Process, private val journal: OperationJournal) : AutoCloseable {
+class PtySession internal constructor(
+    private val process: Process,
+    private val journal: OperationJournal,
+    private val rootScoped: Boolean,
+) : AutoCloseable {
+    internal constructor(process: Process, journal: OperationJournal) : this(process, journal, false)
+    private val readerFinished = CountDownLatch(1)
+    private var helloSeen = false
+    private var execErrorSeen = false
+    private var truncationSeen = false
+    @Volatile private var nativeScope: String? = null
+    @Volatile private var rootDrained = false
+    @Volatile private var protocolBroken = false
     private val lock = Any()
     private val ready = CountDownLatch(1)
     private val output = ByteArray(262144)
@@ -48,10 +60,10 @@ class PtySession internal constructor(private val process: Process, private val 
 
     /** Input delivery is not shell command completion. Never infer exit codes from output. */
     private fun control(type: Char, bytes: ByteArray): JSONObject {
-        if (!started || closed || failure != null || !process.isAlive) return OperationJournal.failure("pty_session_unavailable")
+        if (!started || closed || failure != null || waitStatus != null || rootDrained || !process.isAlive) return OperationJournal.failure("pty_session_unavailable")
         val future = try {
             writer.submit<JSONObject> {
-                if (closed || failure != null || !started || !process.isAlive) return@submit OperationJournal.failure("pty_session_unavailable")
+                if (closed || failure != null || !started || waitStatus != null || rootDrained || !process.isAlive) return@submit OperationJournal.failure("pty_session_unavailable")
                 try {
                     val stream = DataOutputStream(process.outputStream)
                     stream.writeByte(type.code); stream.writeInt(bytes.size); stream.write(bytes); stream.flush()
@@ -78,40 +90,114 @@ class PtySession internal constructor(private val process: Process, private val 
         JSONObject().put("ok", true).put("stdout_base64", java.util.Base64.getEncoder().encodeToString(bytes))
             .put("stdout", String(bytes, Charsets.UTF_8)).put("offset", offset).put("next_offset", offset + bytes.size)
             .put("total_bytes", retained).put("has_more", offset + bytes.size < retained).put("log_truncated", truncated)
-            .put("state", when { failure != null -> "unknown"; waitStatus != null -> "exited"; closed -> "closed"; started -> "running"; else -> "starting" })
+            .put("state", when {
+                failure != null -> "unknown"
+                rootScoped && rootDrained && !protocolBroken && !process.isAlive && readerFinished.count == 0L -> "exited"
+                rootScoped && waitStatus != null -> "unknown"
+                waitStatus != null -> "exited"
+                closed -> "closed"
+                started -> "running"
+                else -> "starting"
+            })
+            .put("leader_exited", waitStatus != null)
+            .put("root_scope", nativeScope ?: JSONObject.NULL)
+            .put("scope_drain_confirmed", rootScoped && rootDrained && !protocolBroken && readerFinished.count == 0L)
             .put("error", failure ?: JSONObject.NULL).put("wait_status", waitStatus ?: JSONObject.NULL)
             .put("pty", true).put("persistent_shell", true)
     }
 
     private fun pump() {
+        fun publishReady() {
+            if (helloSeen && (!rootScoped || nativeScope != null) && failure == null) {
+                started = true
+                ready.countDown()
+            }
+        }
         try {
             DataInputStream(process.inputStream).use { input ->
                 while (true) {
-                    val type = input.readUnsignedByte()
+                    val type = input.read()
+                    if (type < 0) break
+                    check(!rootDrained) { "Frame after root drain" }
                     val length = input.readInt()
                     check(length in 0..65536) { "Invalid PTY frame length" }
-                    val bytes = ByteArray(length); input.readFully(bytes)
+                    val bytes = ByteArray(length)
+                    input.readFully(bytes)
                     when (type.toChar()) {
-                        'H' -> { check(!started && String(bytes, Charsets.US_ASCII) == "DPTY1"); started = true; ready.countDown() }
-                        'O' -> { check(started && waitStatus == null); synchronized(lock) {
-                            val keep = minOf(bytes.size, output.size - retained)
-                            bytes.copyInto(output, retained, 0, keep); retained += keep
-                            if (keep < bytes.size) truncated = true
-                        } }
-                        'T' -> { check(started && length == 0); synchronized(lock) { truncated = true } }
-                        'X' -> { check(started && length == 4 && waitStatus == null); waitStatus = java.nio.ByteBuffer.wrap(bytes).int }
-                        'E' -> { failure = "pty_exec_failed"; ready.countDown() }
+                        'H' -> {
+                            check(!helloSeen && (!rootScoped || (nativeScope != null && !execErrorSeen)))
+                            check(String(bytes, Charsets.US_ASCII) == if (rootScoped) "DPTY2" else "DPTY1")
+                            helloSeen = true
+                            publishReady()
+                        }
+                        'S' -> {
+                            check(rootScoped && nativeScope == null && !helloSeen && !execErrorSeen)
+                            val value = String(bytes, Charsets.US_ASCII)
+                            check(value.matches(Regex("daiyu-[a-f0-9]{32}")))
+                            nativeScope = value
+                            publishReady()
+                        }
+                        'O' -> {
+                            check(started && waitStatus == null && (!rootScoped || !execErrorSeen))
+                            synchronized(lock) {
+                                val keep = minOf(bytes.size, output.size - retained)
+                                bytes.copyInto(output, retained, 0, keep)
+                                retained += keep
+                                if (keep < bytes.size) truncated = true
+                            }
+                        }
+                        'T' -> {
+                            check(started && length == 0)
+                            if (rootScoped) {
+                                check(!truncationSeen && !execErrorSeen && waitStatus == null)
+                                truncationSeen = true
+                            }
+                            synchronized(lock) { truncated = true }
+                        }
+                        'X' -> {
+                            check(started && length == 4 && waitStatus == null && (!rootScoped || !execErrorSeen))
+                            waitStatus = java.nio.ByteBuffer.wrap(bytes).int
+                        }
+                        'E' -> {
+                            if (rootScoped) {
+                                check(length == 4 && nativeScope != null && !execErrorSeen)
+                                execErrorSeen = true
+                            }
+                            failure = "pty_exec_failed"
+                            ready.countDown()
+                        }
+                        'D' -> {
+                            check(rootScoped && (helloSeen || failure == "pty_exec_failed"))
+                            val scope = checkNotNull(nativeScope)
+                            val expected = "DROOT1 scope=$scope kill=1 populated=0 reaped=1 removed=1"
+                            check(bytes.contentEquals(expected.toByteArray(Charsets.US_ASCII)))
+                            rootDrained = true
+                        }
                         else -> error("Invalid PTY frame")
                     }
                 }
             }
+            if (rootScoped) {
+                if (!rootDrained && failure == null) failure = "pty_root_scope_drain_unknown"
+            } else if (waitStatus == null && !closed && failure == null) {
+                failure = "pty_helper_exit_unknown"
+            }
         } catch (_: java.io.EOFException) {
-            if (waitStatus == null && !closed && failure == null) failure = "pty_helper_exit_unknown"
-        } catch (_: Exception) { failure = "pty_protocol_unknown"; process.destroy() }
-        finally {
+            if (rootScoped) {
+                protocolBroken = true
+                failure = "pty_protocol_unknown"
+            } else if (waitStatus == null && !closed && failure == null) {
+                failure = "pty_helper_exit_unknown"
+            }
+        } catch (_: Exception) {
+            protocolBroken = true
+            failure = "pty_protocol_unknown"
+            if (!rootScoped) runCatching { process.destroy() }
+        } finally {
             ready.countDown()
             writer.shutdownNow()
             try { process.outputStream.close() } catch (_: Exception) { }
+            readerFinished.countDown()
         }
     }
 
@@ -120,7 +206,7 @@ class PtySession internal constructor(private val process: Process, private val 
         writer.shutdownNow()
         // Keep retrying the owned Process after a failed close; closed only fences new input.
         var failure: Exception? = null
-        try { process.destroy() } catch (close: Exception) { failure = close }
+        try { if (!rootScoped) process.destroy() } catch (close: Exception) { failure = close }
         try { process.outputStream.close() } catch (close: Exception) {
             if (failure == null) failure = close else if (failure !== close) failure.addSuppressed(close)
         }
@@ -130,7 +216,13 @@ class PtySession internal constructor(private val process: Process, private val 
     /** Worker-only join. close is non-waiting; a Linux lease cannot be released before true. */
     fun awaitTermination(timeoutMillis: Long): Boolean {
         require(timeoutMillis in 1..30_000)
-        return process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
+        if (!rootScoped) return process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
+        if (!process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)) return false
+        val remaining = deadline - System.nanoTime()
+        if (readerFinished.count != 0L &&
+            (remaining <= 0 || !readerFinished.await(remaining, TimeUnit.NANOSECONDS))) return false
+        return rootDrained && !protocolBroken
     }
 
     companion object {
@@ -141,10 +233,10 @@ class PtySession internal constructor(private val process: Process, private val 
         internal fun openBound(helper: File, argv: List<String>, environment: Map<String, String>, cwd: File,
                  journalDirectory: File, sessionScope: String, rows: Int, columns: Int, binding: JSONObject?,
                  startProcess: (ProcessBuilder) -> Process = { it.start() },
-                 createSession: (Process, OperationJournal) -> PtySession = ::PtySession,
+                 createSession: ((Process, OperationJournal) -> PtySession)? = null,
                  createJournal: (File, String, JSONObject?) -> OperationJournal = { directory, scope, metadata ->
                      OperationJournal(directory, scope, binding = metadata)
-                 }): PtySession {
+                 }, rootScope: RootScopeLaunch? = null): PtySession {
             val frozenArgv = argv.toList()
             val frozenEnvironment = environment.toMap()
             require(helper.isAbsolute && helper.isFile && helper.canExecute()) { "pty_native_unavailable" }
@@ -153,6 +245,12 @@ class PtySession internal constructor(private val process: Process, private val 
             require(cwd.isAbsolute && cwd.isDirectory && rows in 1..1000 && columns in 1..1000)
             require(frozenEnvironment.size <= 128 && frozenEnvironment.all { (key, value) ->
                 key.matches(Regex("[A-Za-z_][A-Za-z0-9_]{0,127}")) && value.length <= 8192 && '\u0000' !in value })
+            if (rootScope != null) {
+                require(frozenArgv == rootScope.guestArgv()) { "pty_root_command_not_supported" }
+                require(frozenEnvironment.keys.all {
+                    it in setOf("PATH", "HOME", "TMPDIR", "TERM", "LANG", "LC_ALL", "TZ")
+                }) { "pty_root_environment_not_supported" }
+            }
             val journal = createJournal(journalDirectory, sessionScope, binding)
             var created: PtySession? = null
             var cleanup: PtyStartupCleanup? = null
@@ -165,19 +263,37 @@ class PtySession internal constructor(private val process: Process, private val 
             }
             val args = JSONObject().put("helper", helper.canonicalPath).put("argv", org.json.JSONArray(frozenArgv))
                 .put("cwd", cwd.canonicalPath).put("environment", JSONObject(frozenEnvironment)).put("rows", rows).put("columns", columns)
+            if (rootScope != null) {
+                args.put("protocol", "DPTY2").put("root_scope", true)
+                    .put("rootfs", rootScope.rootfs.path).put("su", rootScope.su.path)
+            }
             val result = try { journal.once("open", "pty_open", args) {
                 try {
-                    val builder = ProcessBuilder(listOf(helper.path, rows.toString(), columns.toString(), "--") + frozenArgv)
+                    fun quote(value: String) = "'" + value.replace("'", "'\"'\"'") + "'"
+                    val helperArgv = if (rootScope == null) {
+                        listOf(helper.path, rows.toString(), columns.toString(), "--") + frozenArgv
+                    } else {
+                        listOf(helper.path, "--root-scope", rows.toString(), columns.toString(), "--") + rootScope.guestArgv()
+                    }
+                    val command = if (rootScope == null) helperArgv else
+                        listOf(rootScope.su.path, "-c", "exec " +
+                            (listOf("/system/bin/env", "-i") + frozenEnvironment.toSortedMap().map { (key, value) -> "$key=$value" } +
+                                helperArgv).joinToString(" ") { quote(it) })
+                    val builder = ProcessBuilder(command)
                         .directory(cwd).redirectError(File("/dev/null")).apply {
                             environment().clear(); environment().putAll(frozenEnvironment)
                         }
                     val process = startProcess(builder)
-                    cleanup = PtyStartupCleanup(process) {
+                    cleanup = PtyStartupCleanup(process, request = {
                         val session = created
-                        if (session == null) process.destroy() else session.close()
-                    }
-                    val session = createSession(process, journal)
+                        if (session != null) session.close() else if (rootScope == null) process.destroy()
+                    }, awaitOwned = if (rootScope == null) null else { timeout ->
+                        val session = created
+                        if (session != null && session.rootScoped) session.awaitTermination(timeout) else false
+                    })
+                    val session = createSession?.invoke(process, journal) ?: PtySession(process, journal, rootScope != null)
                     created = session
+                    check(session.rootScoped == (rootScope != null)) { "pty_protocol_mode_mismatch" }
                     if (!session.ready.await(3, TimeUnit.SECONDS) || !session.started || session.failure != null) {
                         JSONObject().put("ok", false).put("execution", "unknown").put("error", "pty_startup_unknown_not_replayed")
                     } else JSONObject().put("ok", true).put("execution", "executed").put("session_scope", sessionScope)

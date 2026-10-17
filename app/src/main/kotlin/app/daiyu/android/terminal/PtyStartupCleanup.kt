@@ -13,7 +13,9 @@ class PtyStartupFailure internal constructor(
 class PtyStartupCleanup internal constructor(
     private val process: Process,
     private val request: () -> Unit,
+    private val awaitOwned: ((Long) -> Boolean)?,
 ) {
+    internal constructor(process: Process, request: () -> Unit) : this(process, request, null)
     fun requestClose() {
         var failure: Exception? = null
         try { request() } catch (close: Exception) { failure = close }
@@ -27,6 +29,6 @@ class PtyStartupCleanup internal constructor(
     /** Worker-only. Retain the Linux generation lease until this returns true. */
     fun awaitTermination(timeoutMillis: Long): Boolean {
         require(timeoutMillis in 1..30_000)
-        return process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
+        return awaitOwned?.invoke(timeoutMillis) ?: process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
     }
 }

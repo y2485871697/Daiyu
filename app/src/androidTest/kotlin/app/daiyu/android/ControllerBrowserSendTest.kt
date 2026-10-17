@@ -54,7 +54,7 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
             }, beforeOpen = { history -> beforeOpen.get()?.invoke(history) }) {
             modelFactories.incrementAndGet()
         }
-        assertSame(isolatedContext, fixture.application.applicationContext)
+        assertSame(fixture.application, fixture.application.applicationContext)
         assertEquals(root, fixture.application.filesDir)
         awaitControl("controller ready") { controller.ready }
         assertNull(controller.problem)
@@ -66,8 +66,8 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         try {
             gates.forEach { it.release.countDown() }
             if (::fixture.isInitialized) fixture.close()
-            if (::isolatedContext.isInitialized) {
-                isolatedContext.getSharedPreferences("browser-settings", 0).edit().clear().commit()
+            if (::fixture.isInitialized) {
+                fixture.application.getSharedPreferences("browser-settings", 0).edit().clear().commit()
             }
             if (::root.isInitialized) root.deleteRecursively()
         } finally { super.tearDown() }

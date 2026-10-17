@@ -60,6 +60,12 @@ class PtyRunSession internal constructor(private val owner: PtyRunOwner, private
     fun awaitTermination(timeoutMillis: Long): Boolean = session.awaitTermination(timeoutMillis)
 
     companion object {
+        internal fun openRootScope(owner: PtyRunOwner, helper: File, launch: RootScopeLaunch,
+            environment: Map<String, String>, cwd: File, journalDirectory: File,
+            sessionScope: String, rows: Int = 24, columns: Int = 80): PtyRunSession =
+            PtyRunSession(owner, PtySession.openBound(helper, launch.guestArgv(), environment, cwd,
+                journalDirectory, sessionScope, rows, columns, owner.binding(journalDirectory), rootScope = launch))
+
         /** Call on worker after freezing launch/selection and obtaining central authorization. */
         fun open(owner: PtyRunOwner, helper: File, argv: List<String>, environment: Map<String, String>, cwd: File,
                  journalDirectory: File, sessionScope: String, rows: Int = 24, columns: Int = 80): PtyRunSession =

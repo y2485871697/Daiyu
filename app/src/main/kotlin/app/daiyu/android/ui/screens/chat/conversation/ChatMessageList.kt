@@ -74,6 +74,8 @@ internal fun ChatMessageList(
         scrollRequest?.takeIf { it.serial != consumedScrollSerial }?.let { request ->
             followBottom = request.followBottom && request.messageId == null && request.listKey == null
             wasDragged = false
+            // Subcomposition may start this effect during measurement.
+            withFrameNanos { }
             if (request.messageId != null || request.listKey != null) {
                 val index = request.targetIndex(turns)
                 if (index >= 0) {

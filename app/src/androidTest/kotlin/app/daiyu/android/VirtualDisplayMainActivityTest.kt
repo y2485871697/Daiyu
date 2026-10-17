@@ -81,7 +81,11 @@ class VirtualDisplayMainActivityTest : WiredActivityTestCase() {
             assertTrue(entry.revoked)
             assertNull(fixture.controller.virtualDisplayEntry())
         }
-        backToChat(activity)
+        ui.waitForIdle()
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        ui.waitForIdle()
+        assertFalse(activity.isFinishing)
+        assertFalse(activity.isDestroyed)
         assertDraft(text)
         assertEquals(text, fixture.database.draft())
     }

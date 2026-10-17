@@ -55,7 +55,13 @@ static int positive(const char *s) {
     char *end; long n=strtol(s,&end,10);
     return *s && !*end && n>0 && n<=1000 ? (int)n : -1;
 }
+#include "daiyu_root_scope.h"
 int main(int argc, char **argv) {
+    root_mode=argc>1 && strcmp(argv[1],"--root-scope")==0;
+    if(root_mode) {
+        if(getuid()!=0 || geteuid()!=0) return 77;
+        --argc; ++argv;
+    }
     if(argc<5 || strcmp(argv[3],"--") || argv[4][0]!='/') return 64;
     int rows=positive(argv[1]), cols=positive(argv[2]);
     if(rows<0 || cols<0) return 64;
@@ -73,11 +79,23 @@ int main(int argc, char **argv) {
     if(pipe2(exec_error,O_CLOEXEC)<0) return 70;
     struct winsize size={(unsigned short)rows,(unsigned short)cols,0,0};
     if(ioctl(master,TIOCSWINSZ,&size)<0) return 70;
+    if(root_mode) {
+        if(root_create()<0) return 70;
+        if(frame('S',root_scope.name,strlen(root_scope.name))<0 || root_flush(500)<0 || interrupted)
+            return root_start_failed(-1,master,70,interrupted ? ECANCELED : errno);
+    }
+    pid_t supervisor=getpid();
     pid_t child=fork();
-    if(child<0) return 70;
+    if(child<0) return root_mode ? root_start_failed(-1,master,70,errno) : 70;
     if(child==0) {
         close(exec_error[0]); close(master);
         int saved=0;
+        if(root_mode) {
+            signal(SIGTERM,SIG_DFL); signal(SIGHUP,SIG_DFL); signal(SIGINT,SIG_DFL);
+            if(prctl(PR_SET_PDEATHSIG,SIGKILL)<0) goto child_error;
+            if(getppid()!=supervisor || interrupted) { errno=ECANCELED; goto child_error; }
+            if(root_enter()<0) goto child_error;
+        }
         if(setsid()<0) goto child_error;
         int slave=open(slave_name,O_RDWR|O_NOCTTY);
         if(slave<0 || ioctl(slave,TIOCSCTTY,0)<0) goto child_error;
@@ -92,17 +110,26 @@ child_error:
     }
     close(exec_error[1]);
     int start_error=0; ssize_t err_bytes;
-    do { err_bytes=read(exec_error[0],&start_error,sizeof(start_error)); } while(err_bytes<0 && errno==EINTR && !interrupted);
+    if(root_mode) {
+        err_bytes=root_exec_result(exec_error[0],&start_error);
+        if(err_bytes<0 && !start_error) start_error=errno;
+    } else {
+        do { err_bytes=read(exec_error[0],&start_error,sizeof(start_error)); } while(err_bytes<0 && errno==EINTR && !interrupted);
+    }
     close(exec_error[0]);
     if(err_bytes!=0) {
+        if(root_mode) {
+            return root_start_failed(child,master,71,start_error);
+        }
         stop_child(child,master); waitpid(child,NULL,0); close(master);
         unsigned char error_frame[9]={'E',0,0,0,4}; put32(error_frame+5,(uint32_t)(start_error ? start_error : EIO));
         (void)!write(STDOUT_FILENO,error_frame,sizeof(error_frame)); return 71;
     }
     if(fcntl(STDIN_FILENO,F_SETFL,O_NONBLOCK)<0 || fcntl(STDOUT_FILENO,F_SETFL,O_NONBLOCK)<0) {
+        if(root_mode) return root_start_failed(child,master,70,errno);
         stop_child(child,master); waitpid(child,NULL,0); close(master); return 70;
     }
-    frame('H',"DPTY1",5);
+    frame('H',root_mode ? "DPTY2" : "DPTY1",5);
     unsigned char pending[QUEUE_MAX]; size_t pending_at=0,pending_len=0;
     int64_t drain_deadline=0;
     int child_status=0,child_done=0,eof=0,exit_sent=0,failed=0;
@@ -117,7 +144,7 @@ child_error:
                 child_done=1;
                 child_status=info.si_code==CLD_EXITED ? info.si_status<<8 : info.si_status | (info.si_code==CLD_DUMPED ? 128 : 0);
                 // Keep the leader unreaped until cleanup; never signal a recycled child PID.
-                stop_child(child,master);
+                if(root_mode) root_stop(child); else stop_child(child,master);
                 drain_deadline=millis()+250;
                 pending_at=pending_len=0;
             }
@@ -130,6 +157,7 @@ child_error:
             frame('X',status,4); exit_sent=1;
         }
         if(exit_sent && out_len==0) break;
+        if(root_mode && child_done && millis()>=drain_deadline+1000) break;
         struct pollfd fds[3]={
             {STDIN_FILENO, (short)((!child_done && in_len<sizeof(incoming)) ? POLLIN : 0),0},
             {master,(short)((!eof && out_len+8197<=QUEUE_MAX ? POLLIN : 0) | (pending_at<pending_len ? POLLOUT : 0)),0},
@@ -155,6 +183,7 @@ child_error:
             else if(n==0 || (n<0 && errno==EIO)) eof=1;
             else if(errno!=EAGAIN && errno!=EINTR) { failed=1; break; }
         }
+        if(!child_done && fds[0].revents&POLLNVAL) { failed=1; break; }
         if(!child_done && fds[0].revents&(POLLIN|POLLHUP|POLLERR)) {
             ssize_t n=read(STDIN_FILENO,incoming+in_len,sizeof(incoming)-in_len);
             if(n==0) { failed=1; break; }
@@ -182,6 +211,7 @@ child_error:
             memmove(incoming,incoming+n+5,in_len-n-5); in_len-=n+5;
         }
     }
+    if(root_mode) return root_finish(child,master,failed ? 74 : 0);
     if(failed || !child_done) stop_child(child,master);
     close(master);
     while(waitpid(child,NULL,0)<0 && errno==EINTR) {}

@@ -15,6 +15,7 @@ import java.util.concurrent.TimeUnit
 
 /** Navigation-only coverage. Never enables the service, captures a screen or grants a run. */
 class GuiSettingsActivityTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     private val page = "无障碍与屏幕授权"
     private fun enterFromPermissions(id: String = "accessibility") {
         openSettings()

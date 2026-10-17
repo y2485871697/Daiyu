@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 @Suppress("DEPRECATION")
 class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
+    override val engineeringUi = true
     private lateinit var fixture: RunControlFixture
     private lateinit var original: ChatController
     private lateinit var directory: File

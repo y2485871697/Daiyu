@@ -42,6 +42,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     fetchCatalog: (ModelSettingsDraftUi, () -> Boolean, (List<RemoteModel>?) -> Unit) -> Boolean,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    engineeringUi: Boolean = false,
     errorText: String? = null,
     credentialUnavailable: Boolean = false,
     requestOptionsUnavailable: Boolean = false,
@@ -54,6 +55,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
         onDispose { session.invalidate() }
     }
     ModelSettingsScreen(
+        engineeringUi = engineeringUi,
         draft = draft,
         onDraftChange = { session.invalidate(); onDraftChange(it) },
         onSave = { session.invalidate(); onSave(it) },

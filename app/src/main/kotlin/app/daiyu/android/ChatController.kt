@@ -62,6 +62,7 @@ import java.util.UUID
 import java.util.concurrent.Executors
 
 class ChatApplication:Application() {
+    internal var engineeringUiForTests: Boolean = false
     companion object { internal const val OPEN_PET_SETTINGS = "app.daiyu.android.OPEN_PET_SETTINGS" }
     // P05 process singleton. Deferred factory runs on IO; no credentials borrowed from controller.
     internal var balanceHost = app.daiyu.android.balance.BalanceRuntimeHost(factory = {
@@ -141,7 +142,10 @@ class ChatController internal constructor(private val application:Application,
         app.daiyu.android.platform.actions.AndroidPlatformActionBackend(application),
     private val mcpTransport: (app.daiyu.android.mcp.McpServer) -> app.daiyu.android.mcp.McpHttpSession = {
         app.daiyu.android.mcp.McpHttpSession(it)
-    }, private val taskSurfaceStore: TaskSurfaceStore = AndroidTaskSurfaceStore.get(application)) {
+    }, private val taskSurfaceStore: TaskSurfaceStore = AndroidTaskSurfaceStore.get(application),
+    internal var platformSettings: PlatformToolSettings = PlatformToolSettings(application.getSharedPreferences("platform-read-settings", 0)),
+    internal var browserSettings: app.daiyu.android.browser.BrowserSettingsStore =
+        app.daiyu.android.browser.BrowserSettingsStore(application.getSharedPreferences("browser-settings", 0))) {
     // Voice credentials remain independent from chat settings.
     internal val voiceAccounts by lazy { app.daiyu.android.voice.account.VoiceAccountResources.forContext(application) }
     internal val voiceRuntime by lazy {
@@ -235,7 +239,9 @@ class ChatController internal constructor(private val application:Application,
         data class Unknown(override val owner: TextSendOwner): TextSendResult
     }
     constructor(application:Application):this(application,ConversationDatabase(application),ModelSettingsStore(application),application.getSharedPreferences("conversation-ui",0),{ModelFactory.create(it)},
-        assistantModel=AssistantModelFactory::create, sessionModel=AssistantModelFactory::create)
+        assistantModel=AssistantModelFactory::create, sessionModel=AssistantModelFactory::create,
+        platformSettings=PlatformToolSettings(application),
+        browserSettings=app.daiyu.android.browser.BrowserSettingsStore(application))
     val assistantStore: SqliteAssistantStore by lazy { SqliteAssistantStore(database) }
     internal val independentModels = IndependentModelSettings(application).also {
         it.onChanging = { independentConfigurationChanging() }
@@ -255,7 +261,6 @@ class ChatController internal constructor(private val application:Application,
         val lifetime = synchronized(this) { resources?.takeIf { it.auxiliary != null } }
         lifetime?.let { stop(it.initial) }
     }
-    internal val platformSettings = PlatformToolSettings(application)
     internal val interactiveMode = app.daiyu.android.config.InteractiveModePreference(preferences)
     private val executor=Executors.newSingleThreadExecutor()
     private val handler=Handler(Looper.getMainLooper())
@@ -2506,7 +2511,7 @@ class ChatController internal constructor(private val application:Application,
             val context = AssistantRunContext.capture(assistantStore, profile.id, assistantAssets)
             check(assistantStore.read(profile.id) == profile) { "assistant_profile_changed" }
             val config = settings.load().also { it.validate() }
-            val browserSettings = app.daiyu.android.browser.BrowserSettingsStore(application).snapshot()
+            val browserSettings = browserSettings.snapshot()
             val run = RunId(UUID.randomUUID().toString())
             val grant = app.daiyu.android.browser.session.BrowserGrant(
                 app.daiyu.android.browser.session.BrowserOwner(run.value,
@@ -2995,7 +3000,7 @@ class ChatController internal constructor(private val application:Application,
             preparingDevices = devices
             val registry = AndroidToolRegistry.create(devices, contextTools, enableUserBarrier=interactiveSnapshot.enabled && gui == null)
             val capabilities = SessionCapabilities(gui?.sessionId ?: terminalJobPreparation?.identity?.sessionId ?: terminalRun?.preview?.identity?.sessionId ?: run.value,
-                (if (virtualDisplay == null) AndroidToolRegistry.capabilitiesFor(config.enabledTools(),
+                (if (virtualDisplay == null) AndroidToolRegistry.capabilitiesFor(if (platformSnapshot.allDeviceTools) ReadOnlyTool.entries.toSet() else config.enabledTools(),
                     platformAllowed = platformSnapshot.platformAllowed) else emptySet()) + contextTools.map { it.definition.capability } +
                     setOf(SkillRunSession.READ, SkillRunSession.RESOURCE) +
                     (if (assistantContext.memoryReadPort == null) emptySet() else setOf(ScopedAssistantMemoryTools.READ)) +
@@ -3697,24 +3702,53 @@ class ChatController internal constructor(private val application:Application,
     }
     internal fun importUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver) {
         dataTask(importing=true,work={
-            if(complete) {
-                val result=neutralBackup.importPackageFrom {
-                    resolver.openInputStream(uri) ?: throw java.io.IOException("无法打开备份")
-                }
-                val inventory=result.inventory
-                val summary=if(result.alreadyImported) "此完整备份已导入过；未重复追加，未执行历史请求"
-                else "已导入${inventory.conversations}个会话、${inventory.messages}条消息、"+
-                    "${inventory.branches}个分支、${inventory.archives}个归档、${inventory.attachments}个附件；"+
-                    "非秘密配置仅保存为备份元数据，未执行历史请求"
-                result.cleanupProblem?.let { "$summary；$it" } ?: summary
-            } else {
-                val text=(resolver.openInputStream(uri) ?: throw java.io.IOException("无法打开备份")).use {
-                    readBackupText(it,16L*1024*1024)
-                }
-                val counts=database.importBackup(text)
-                "已导入${counts.first}个会话、${counts.second}条消息；未执行历史请求"
-            }
+            importUserBackupContent(complete, { resolver.openInputStream(uri) ?: throw java.io.IOException("无法打开备份") }).first
         })
+    }
+    internal data class BackupImportOutcome(val kind: app.daiyu.android.backup.BackupImportSource.Kind,
+        val hasConfiguration: Boolean = false)
+    internal fun importUserBackupAuto(uri: Uri,
+        resolver: android.content.ContentResolver = application.contentResolver,
+        completed: (BackupImportOutcome?) -> Unit = {}) {
+        var outcome: BackupImportOutcome? = null
+        dataTask(importing = true, completed = { success -> completed(outcome.takeIf { success }) }, work = {
+            val source = app.daiyu.android.backup.BackupImportSource.prepare(application.cacheDir) {
+                resolver.openInputStream(uri) ?: throw java.io.IOException("无法打开备份")
+            }
+            var notice: String? = null
+            var primaryFailure: Throwable? = null
+            try {
+                if (source.kind == app.daiyu.android.backup.BackupImportSource.Kind.LEGACY) {
+                    outcome = BackupImportOutcome(source.kind)
+                    notice = "已识别旧版备份；请在资料库预览并确认导入"
+                } else {
+                    val result = importUserBackupContent(source.kind == app.daiyu.android.backup.BackupImportSource.Kind.COMPLETE, source::open)
+                    notice = result.first
+                    outcome = BackupImportOutcome(source.kind, result.second)
+                }
+            } catch (failure: Throwable) {
+                primaryFailure = failure; throw failure
+            } finally {
+                if (!source.delete()) {
+                    val cleanup = IllegalStateException("备份临时文件清理失败")
+                    if (primaryFailure != null) primaryFailure.addSuppressed(cleanup)
+                    else notice = "${checkNotNull(notice)}；临时文件清理未完成"
+                }
+            }
+            checkNotNull(notice)
+        })
+    }
+    private fun importUserBackupContent(complete: Boolean, open: () -> java.io.InputStream): Pair<String, Boolean> {
+        if (complete) {
+            val result = neutralBackup.importPackageFrom(open)
+            val inventory = result.inventory
+            val summary = if (result.alreadyImported) "此备份已导入过，未重复添加"
+            else "已导入${inventory.conversations}个会话、${inventory.messages}条消息、${inventory.attachments}个附件"
+            return (result.cleanupProblem?.let { "$summary；$it" } ?: summary) to (inventory.configEntries > 0)
+        }
+        val text = open().use { readBackupText(it, 16L * 1024 * 1024) }
+        val counts = database.importBackup(text)
+        return "已导入${counts.first}个会话、${counts.second}条消息" to false
     }
     internal fun readBackupText(stream:java.io.InputStream,limit:Long):String {
         require(limit in 1..Int.MAX_VALUE.toLong())

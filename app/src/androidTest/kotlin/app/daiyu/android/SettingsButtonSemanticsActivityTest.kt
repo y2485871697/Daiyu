@@ -35,12 +35,19 @@ class SettingsButtonSemanticsActivityTest : WiredActivityTestCase() {
         backToPage(activity, "page:设置"); backToChat(activity)
         assertDraft("paused offline settings unsent")
     }
-    fun testLowUtilityDuplicateAndUnimplementedEntriesAreNotShown() {
+    fun testDuplicateEntriesAreHiddenAndGesturePreferencesRemain() {
         assertFalse(SettingsCatalog.entries.any { it.id in setOf("permission_check", "accessibility_keep") })
         openSettings(); entry("appearance")
         node("page:外观与主题").performScrollToNode(hasText("界面与效果"))
         for (title in listOf("横移返回手势", "预测性返回手势")) {
-            node("settings-row:$title").assertDoesNotExist()
+            node("page:外观与主题").performScrollToNode(hasTestTag("settings-switch:$title"))
+            val toggle = node("settings-switch:$title").assertExists().assertIsEnabled()
+            val wasOn = toggle.fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.ToggleableState] ==
+                androidx.compose.ui.state.ToggleableState.On
+            toggle.performClick()
+            if (wasOn) toggle.assertIsOff() else toggle.assertIsOn()
+            toggle.performClick()
+            if (wasOn) toggle.assertIsOn() else toggle.assertIsOff()
         }
         if (android.os.Build.VERSION.SDK_INT < 33) {
             for (title in listOf("模糊效果", "顶栏模糊样式")) {

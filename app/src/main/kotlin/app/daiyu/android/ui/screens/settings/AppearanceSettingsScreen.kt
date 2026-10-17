@@ -166,6 +166,12 @@ internal fun AppearanceSettingsScreen(
                         SettingsRow("顶栏模糊样式", summary = blurStyles[state.topBarBlurStyle.ordinal], onClick = { choice = "blur" })
                     }
                 }
+                SettingsSwitchRow("横移返回手势", state.swipeDismissEnabled) {
+                    onChange(state.copy(swipeDismissEnabled = it))
+                }
+                SettingsSwitchRow("预测性返回手势", state.predictiveBackEnabled) {
+                    onChange(state.copy(predictiveBackEnabled = it))
+                }
                 SettingsSwitchRow("圆形加载指示器", state.morphLoadingIndicator) {
                     onChange(state.copy(morphLoadingIndicator = it))
                 }

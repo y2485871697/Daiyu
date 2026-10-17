@@ -16,6 +16,25 @@ class VoiceSessionCoreTest {
         override fun close() { closes++ }
     }
 
+    @Test fun inactiveDeltaGuardsPrecedeLengthValidationAndActiveErrorsReleaseLock() {
+        val output = Output(); val states = mutableListOf<VoiceState>()
+        val chain = VoiceChain(AudioOwnerGate(), output, states::add)
+        chain.begin(a)
+        val oversized = "x".repeat(100_001)
+        chain.delta(b, oversized)
+        assertThrows(IllegalArgumentException::class.java) { chain.delta(a, oversized) }
+        chain.delta(a, "valid。")
+        chain.done(a)
+        val before = states.toList()
+        chain.delta(a, oversized)
+        assertEquals(before, states)
+        assertEquals(listOf("valid。"), output.texts)
+        chain.stop(a)
+        chain.delta(a, oversized)
+        assertEquals(listOf("valid。"), output.texts)
+        chain.close()
+    }
+
     @Test fun completeSentencesPreserveSpacesAndSerialRejectsLateEvents() {
         val o = Output(); val states = mutableListOf<VoiceState>()
         val c = VoiceChain(AudioOwnerGate(), o, states::add)

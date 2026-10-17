@@ -147,6 +147,10 @@ class ActivityTest : WiredActivityTestCase() {
             assertEquals(mode, activity.window.attributes.preferredDisplayModeId)
             resume.invoke(activity)
             val external = activity.window.attributes; external.preferredRefreshRate = 17f; activity.window.attributes = external
+            val retry = MainActivity::class.java.getDeclaredField("refreshRateRequest").apply { isAccessible = true }
+                .get(activity) as Runnable
+            retry.run(); assertEquals(17f, activity.window.attributes.preferredRefreshRate, 0f)
+            retry.run(); assertEquals(17f, activity.window.attributes.preferredRefreshRate, 0f)
             pause.invoke(activity); assertEquals(17f, activity.window.attributes.preferredRefreshRate, 0f)
             resume.invoke(activity); pause.invoke(activity); assertEquals(17f, activity.window.attributes.preferredRefreshRate, 0f)
             resume.invoke(activity)

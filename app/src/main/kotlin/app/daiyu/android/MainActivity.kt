@@ -989,6 +989,7 @@ class MainActivity : ComponentActivity() {
     private val listener: () -> Unit = { refresh() }
     @Volatile private var activityCallbacksAllowed = false
     private var refreshRateWindowResumed = false
+    private var refreshRateRequestRelinquished = false
     private var previousPreferredRefreshRate: Float? = null
     private var requestedPreferredRefreshRate: Float? = null
     private val refreshRateRequest = Runnable { applyPreferredRefreshRate() }
@@ -3662,15 +3663,22 @@ class MainActivity : ComponentActivity() {
         controller.recoverVideos { if (activityUsable()) publishChat() }
         (application as ChatApplication).petSettingsNavigator = openPetSettings
         pets.refreshOverlayPermission()
-        refreshRateWindowResumed = true; applyPreferredRefreshRate()
+        refreshRateWindowResumed = true; refreshRateRequestRelinquished = false; applyPreferredRefreshRate()
         window.decorView.post(refreshRateRequest)
     }
     private fun applyPreferredRefreshRate() {
-        if (!refreshRateWindowResumed || isFinishing || isDestroyed) return
+        if (!refreshRateWindowResumed || refreshRateRequestRelinquished || isFinishing || isDestroyed) return
+        val attributes = window.attributes
+        if (requestedPreferredRefreshRate != null && attributes.preferredRefreshRate != requestedPreferredRefreshRate) {
+            refreshRateRequestRelinquished = true
+            return
+        }
         val rate = highestSupportedRefreshRate(window.decorView.display?.supportedModes?.map { it.refreshRate }.orEmpty())
         if (rate <= 0f) return
-        val attributes = window.attributes
-        if (attributes.preferredRefreshRate == rate) return
+        if (attributes.preferredRefreshRate == rate) {
+            requestedPreferredRefreshRate = rate
+            return
+        }
         if (previousPreferredRefreshRate == null) previousPreferredRefreshRate = attributes.preferredRefreshRate
         requestedPreferredRefreshRate = rate; attributes.preferredRefreshRate = rate; window.attributes = attributes
     }

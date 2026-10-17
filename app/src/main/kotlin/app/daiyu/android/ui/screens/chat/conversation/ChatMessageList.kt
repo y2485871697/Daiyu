@@ -24,6 +24,9 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +69,7 @@ internal fun ChatMessageList(
     var consumedScrollSerial by rememberSaveable { mutableStateOf<Long?>(null) }
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
+    val readyTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
     val currentReadAction by rememberUpdatedState(actions.onVisibleCompleted)
     val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
     val scope = rememberCoroutineScope()
@@ -134,13 +138,11 @@ internal fun ChatMessageList(
                 it.size > 0 && it.offset < layout.viewportEndOffset &&
                     it.offset + it.size in (layout.viewportStartOffset + 1)..layout.viewportEndOffset
             }.map { it.key }.toSet()
-            Triple(currentTurns, visibleKeys, currentReadAction)
-        }.collectLatest { (rendered, visibleKeys, confirm) ->
-            val completed = rendered.filterIsInstance<ChatTurnUi.Assistant>()
-                .filter { it.status == RunStatus.COMPLETED && it.listKey in visibleKeys }.map { it.listKey }.toSet()
+            currentTurns.filterIsInstance<ChatTurnUi.Assistant>()
+                .filter { it.status == RunStatus.COMPLETED && it.listKey in visibleKeys && readyTurns[it.listKey] == it }
+        }.collectLatest { completed ->
             if (completed.isNotEmpty()) {
-                // A turns update can arrive before that frame's measurement. Allow a full frame
-                // to apply/measure the terminal content, then inspect the measured tail again.
+                // Wait for the formatted terminal body, not a shorter raw-text placeholder.
                 withFrameNanos { }
                 withFrameNanos { }
                 val layout = listState.layoutInfo
@@ -148,8 +150,10 @@ internal fun ChatMessageList(
                     it.size > 0 && it.offset < layout.viewportEndOffset &&
                     it.offset + it.size in (layout.viewportStartOffset + 1)..layout.viewportEndOffset
                 }.map { it.key }.toSet()
-                if (currentTurns == rendered && currentReadAction === confirm)
-                    confirm(completed.filter { it in stillVisible }.toSet())
+                val current = currentTurns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey }
+                currentReadAction(completed.filter {
+                    it.listKey in stillVisible && current[it.listKey] == it && readyTurns[it.listKey] == it
+                }.map { it.listKey }.toSet())
             }
         }
     }
@@ -171,7 +175,9 @@ internal fun ChatMessageList(
                     when (turn) {
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
                         is ChatTurnUi.Assistant -> Column {
-                            AssistantTurn(turn, actions, imageLoader)
+                            AssistantTurn(turn, actions, imageLoader) { ready ->
+                                if (ready) readyTurns[turn.listKey] = turn else readyTurns.remove(turn.listKey)
+                            }
                             turnExtras(turn.id)
                         }
                     }
@@ -215,14 +221,28 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
 }
 
 @Composable
-internal fun AssistantTurn(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, imageLoader: MessageImageLoader? = null) {
+internal fun AssistantTurn(
+    turn: ChatTurnUi.Assistant,
+    actions: ChatScreenActions,
+    imageLoader: MessageImageLoader? = null,
+    onContentReady: (Boolean) -> Unit = {},
+) {
+    val sources = remember(turn.content, turn.finalText) {
+        if (turn.content.isEmpty()) listOf(turn.finalText)
+        else turn.content.filterIsInstance<MessageContentUi.Text>().map { it.text }
+    }
+    val projection = rememberMarkdownProjection(sources)
+    SideEffect { onContentReady(projection != null) }
+    DisposableEffect(turn.listKey) { onDispose { onContentReady(false) } }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         ReportedReasoningCard(turn.listKey, turn.reportedReasoning)
         if (turn.content.isNotEmpty()) {
             // Splitting these blocks into a work card and a final answer would reorder images.
-            MessageContent(turn.content, actions, imageLoader, markdown = true)
+            MessageContent(turn.content, actions, imageLoader, markdown = true) { text, modifier ->
+                ParsedMessageMarkdown(text, projection?.blocks?.get(text), modifier)
+            }
         } else {
-            AssistantTextContent(turn, actions)
+            AssistantTextContent(turn, actions, projection)
         }
         if (!turn.error.isNullOrBlank()) {
             Text(turn.error, color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.body2,
@@ -241,10 +261,10 @@ internal fun AssistantTurn(turn: ChatTurnUi.Assistant, actions: ChatScreenAction
 }
 
 @Composable
-private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions) {
+private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?) {
     turn.workProcess?.let { WorkProcessCard(it, actions.onRetryStep) }
     if (turn.finalText.isNotBlank()) {
-        MessageMarkdown(turn.finalText)
+        ParsedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText))
     } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {
         Text("正在思考…", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, style = MiuixTheme.textStyles.body2)
     }

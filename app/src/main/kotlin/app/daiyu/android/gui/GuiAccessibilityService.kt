@@ -17,6 +17,9 @@ import android.view.accessibility.AccessibilityNodeInfo
 import java.io.ByteArrayOutputStream
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
+import java.util.concurrent.Executors
+import androidx.annotation.WorkerThread
 
 /** System-bound only. No root, shell, Shizuku, polling, hidden APIs, or automatic gestures. */
 class GuiAccessibilityService : AccessibilityService() {
@@ -67,8 +70,69 @@ class GuiAccessibilityService : AccessibilityService() {
 
 internal data class GuiScreenshot(val observationId: String, val width: Int, val height: Int, val png: ByteArray)
 
-/** All Android access and all lease transitions run on main. Worker adapters post cancellable work. */
+/** Narrow platform seam: admission and bounded traversal remain in the runtime. */
+internal interface GuiRuntimeAccess {
+    fun enabled(current: GuiAccessibilityService): Boolean = GuiSystemSettings.enabledBySystem(current)
+    fun unlocked(current: GuiAccessibilityService): Boolean =
+        !current.getSystemService(KeyguardManager::class.java).isKeyguardLocked &&
+            current.getSystemService(PowerManager::class.java).isInteractive
+    fun root(current: GuiAccessibilityService): AccessibilityNodeInfo? = current.rootInActiveWindow
+    @androidx.annotation.RequiresApi(30)
+    fun capture(current: GuiAccessibilityService, success: (GuiCaptureFrame) -> Unit, failure: (Int) -> Unit)
+}
+
+/** A frame owns its resources until disposal is confirmed, including time queued for encoding. */
+internal interface GuiCaptureFrame {
+    @WorkerThread fun encode(observationId: String): GuiResult<GuiScreenshot>
+    fun dispose(request: GuiCaptureRequest<GuiScreenshot>)
+}
+
+private object AndroidGuiRuntimeAccess : GuiRuntimeAccess {
+    @androidx.annotation.RequiresApi(30)
+    override fun capture(current: GuiAccessibilityService, success: (GuiCaptureFrame) -> Unit, failure: (Int) -> Unit) {
+        current.takeScreenshot(Display.DEFAULT_DISPLAY, current.mainExecutor, object : AccessibilityService.TakeScreenshotCallback {
+            override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) { success(AndroidGuiCaptureFrame(screenshot)) }
+            override fun onFailure(errorCode: Int) { failure(errorCode) }
+        })
+    }
+}
+
+/** Encoding has no service, lease, or mutable runtime-state access. */
+@androidx.annotation.RequiresApi(30)
+private class AndroidGuiCaptureFrame(screenshot: AccessibilityService.ScreenshotResult) : GuiCaptureFrame {
+    private val buffer = screenshot.hardwareBuffer
+    private val colorSpace = screenshot.colorSpace
+    private var hardware: Bitmap? = null
+    private var software: Bitmap? = null
+    @WorkerThread override fun encode(observationId: String): GuiResult<GuiScreenshot> {
+        if (buffer.width > 2048 || buffer.height > 4096 || buffer.width.toLong() * buffer.height > 8_388_608)
+            return GuiResult.Rejected("SCREENSHOT_DIMENSIONS_EXCEED_LIMIT")
+        hardware = Bitmap.wrapHardwareBuffer(buffer, colorSpace)
+        software = hardware?.copy(Bitmap.Config.ARGB_8888, false)
+        val image = software ?: return GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE")
+        val bytes = object : ByteArrayOutputStream() {
+            override fun write(b: ByteArray, off: Int, len: Int) {
+                check(count.toLong() + len <= 2_097_152) { "screenshot_size_limit" }; super.write(b, off, len)
+            }
+            override fun write(b: Int) { check(count < 2_097_152); super.write(b) }
+        }
+        if (!image.compress(Bitmap.CompressFormat.PNG, 100, bytes))
+            return GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE")
+        return GuiResult.Value(GuiScreenshot(observationId, image.width, image.height, bytes.toByteArray()))
+    }
+    override fun dispose(request: GuiCaptureRequest<GuiScreenshot>) {
+        request.disposeSuccessResources(
+            software = { software?.recycle(); Unit }, hardware = { hardware?.recycle(); Unit }, buffer = { buffer.close() })
+    }
+}
+
+/** All tree access and lease transitions run on main; only bounded image encoding runs on worker. */
 internal object GuiRuntime {
+    internal var access: GuiRuntimeAccess = AndroidGuiRuntimeAccess
+    // Other workers belong to controllers/audio/model lifecycles; none is a reusable GUI encoder.
+    internal var encoder: Executor = Executors.newSingleThreadExecutor { task ->
+        Thread(task, "daiyu-gui-png").apply { isDaemon = true }
+    }
     val main = Handler(Looper.getMainLooper())
     private val gate = GuiLeaseGate(SystemClock::elapsedRealtime)
     private var service: GuiAccessibilityService? = null
@@ -116,18 +180,25 @@ internal object GuiRuntime {
         }
     }
     fun changed(value: GuiAccessibilityService) { onMain(); if (service === value) { generation++; clearNodes() } }
+    private data class NodeContext(val packageName: String, val windowId: Int, val children: Int, val visible: Boolean)
+    private data class TreeSample(val packageName: String, val windowId: Int, val nodes: List<GuiNode>,
+        val contexts: List<NodeContext>, val truncated: Boolean) {
+        // Redacted passwords and incomplete traversals cannot prove tree equality.
+        val verifiable: Boolean get() = !truncated && nodes.none { it.password }
+    }
+    private var screenshotBinding: Pair<String, TreeSample>? = null
     @Suppress("DEPRECATION") private fun clearNodes() {
+        screenshotBinding = null
         retained.values.forEach { it.recycle() }; retained.clear(); identities.clear()
     }
     private fun screenRejection(): GuiResult.Rejected? {
         val current = service ?: return GuiResult.Rejected("SERVICE_DISCONNECTED_NOT_EXECUTED")
-        val enabled = try { GuiSystemSettings.enabledBySystem(current) } catch (_: Exception) { false }
+        val enabled = try { access.enabled(current) } catch (_: Exception) { false }
         if (!enabled) {
             disconnected(current)
             return GuiResult.Rejected("SERVICE_PERMISSION_REVOKED_NOT_EXECUTED")
         }
-        if (current.getSystemService(KeyguardManager::class.java).isKeyguardLocked ||
-            !current.getSystemService(PowerManager::class.java).isInteractive)
+        if (!(try { access.unlocked(current) } catch (_: Exception) { false }))
             return GuiResult.Rejected("SCREEN_LOCKED_NOT_EXECUTED")
         return null
     }
@@ -176,7 +247,7 @@ internal object GuiRuntime {
     /** Accessibility overlays and our Activity are never a valid external target. */
     @Suppress("DEPRECATION")
     private fun externalRoot(current: GuiAccessibilityService): GuiResult<AccessibilityNodeInfo> {
-        val root = try { current.rootInActiveWindow } catch (_: Exception) { null }
+        val root = try { access.root(current) } catch (_: Exception) { null }
             ?: return GuiResult.Rejected("NO_ACTIVE_EXTERNAL_WINDOW")
         val valid = try {
             val window = root.window
@@ -238,17 +309,15 @@ internal object GuiRuntime {
         } catch (_: Exception) { GuiResult.Rejected("TARGET_UNAVAILABLE_RECONFIRM_NOT_EXECUTED") }
     }
 
+    /** Same admission, node/depth/child/text bounds for publishing and private verification.
+     * Verification never retains nodes, consumes a read, publishes an ID, or changes approvals. */
     @Suppress("DEPRECATION")
-    internal fun observe(lease: GuiLeaseGate.Lease): GuiResult<GuiObservation> {
-        onMain(); gate.rejection(lease)?.let { return it }; screenRejection()?.let { return it }
-        val permit = gate.consumeRead(lease, screenshot = false)
-        if (permit !is GuiResult.Value) return permit as GuiResult.Rejected
-        clearNodes()
+    private fun sampleTree(retain: Boolean): GuiResult<TreeSample> {
         val fetched = externalRoot(service!!)
         if (fetched !is GuiResult.Value) return fetched as GuiResult.Rejected
         val source = fetched.value
-        val startGeneration = generation
         val result = mutableListOf<GuiNode>()
+        val contexts = mutableListOf<NodeContext>()
         var truncated = false
         var textBudget = 16_384
         fun bounded(value: CharSequence?): String {
@@ -261,39 +330,68 @@ internal object GuiRuntime {
         fun visit(node: AccessibilityNodeInfo, parent: Int?, depth: Int) {
             if (result.size >= 128 || depth > 16) { truncated = true; node.recycle(); return }
             val id = result.size
-            retained[id] = node
-            identities[id] = if (node.isPassword) null else identity(node)
-            val rect = Rect(); node.getBoundsInScreen(rect)
-            result += GuiNode(id, parent, GuiBounds(rect.left, rect.top, rect.right, rect.bottom),
-                if (node.isPassword) "" else bounded(node.text), if (node.isPassword) "" else bounded(node.contentDescription),
-                bounded(node.className), bounded(node.viewIdResourceName), node.isClickable, node.isLongClickable,
-                node.isScrollable, node.isEditable, node.isEnabled, node.isPassword)
-            val count = node.childCount
-            if (count > 64) truncated = true
-            for (index in 0 until minOf(count, 64)) {
-                if (result.size >= 128) { truncated = true; break }
-                node.getChild(index)?.let { visit(it, id, depth + 1) }
+            if (retain) {
+                retained[id] = node
+                identities[id] = if (node.isPassword) null else identity(node)
             }
-        }
-        return try {
-            if (Build.VERSION.SDK_INT >= 30) {
-                val windowInfo = source.window
-                val displayId = windowInfo?.displayId
-                windowInfo?.recycle()
-                if (displayId != Display.DEFAULT_DISPLAY) {
-                    source.recycle()
-                    return GuiResult.Rejected("NON_DEFAULT_DISPLAY_REFUSED")
+            try {
+                val rect = Rect(); node.getBoundsInScreen(rect)
+                result += GuiNode(id, parent, GuiBounds(rect.left, rect.top, rect.right, rect.bottom),
+                    if (node.isPassword) "" else bounded(node.text), if (node.isPassword) "" else bounded(node.contentDescription),
+                    bounded(node.className), bounded(node.viewIdResourceName), node.isClickable, node.isLongClickable,
+                    node.isScrollable, node.isEditable, node.isEnabled, node.isPassword)
+                val count = node.childCount
+                val pkg = node.packageName
+                if ((pkg?.length ?: 0) > 256) truncated = true
+                contexts += NodeContext(pkg?.take(256)?.toString().orEmpty(), node.windowId, count, node.isVisibleToUser)
+                if (count > 64) truncated = true
+                for (index in 0 until minOf(count, 64)) {
+                    if (result.size >= 128) { truncated = true; break }
+                    val child = node.getChild(index)
+                    if (child == null) truncated = true else visit(child, id, depth + 1)
                 }
-            }
-            val pkg = source.packageName?.take(256)?.toString().orEmpty()
-            val window = source.windowId
-            visit(source, null, 0)
-            val observation = GuiObservation(UUID.randomUUID().toString(), pkg, window, startGeneration,
-                SystemClock.elapsedRealtime(), result, truncated)
-            gate.publish(lease, observation)
-        } catch (_: Exception) {
-            clearNodes(); GuiResult.Rejected("OBSERVATION_UNAVAILABLE")
+            } finally { if (!retain) node.recycle() }
         }
+        // Read root metadata inside visit's disposal scope as well.
+        return try {
+            visit(source, null, 0)
+            val root = contexts.first()
+            GuiResult.Value(TreeSample(root.packageName, root.windowId, result, contexts, truncated))
+        } catch (_: Exception) { GuiResult.Rejected("OBSERVATION_UNAVAILABLE") }
+    }
+
+    internal fun observe(lease: GuiLeaseGate.Lease): GuiResult<GuiObservation> {
+        onMain(); gate.rejection(lease)?.let { return it }
+        gate.retireObservation(lease); clearNodes()
+        screenRejection()?.let { return it }
+        val permit = gate.consumeRead(lease, screenshot = false)
+        if (permit !is GuiResult.Value) return permit as GuiResult.Rejected
+        val startGeneration = generation
+        val sampled = sampleTree(retain = true)
+        if (sampled !is GuiResult.Value) { clearNodes(); return sampled as GuiResult.Rejected }
+        val tree = sampled.value
+        val observation = GuiObservation(UUID.randomUUID().toString(), tree.packageName, tree.windowId, startGeneration,
+            SystemClock.elapsedRealtime(), tree.nodes, tree.truncated)
+        val published = gate.publish(lease, observation)
+        if (published is GuiResult.Value) screenshotBinding = observation.observationId to tree else clearNodes()
+        return published
+    }
+
+    /** Logical stability only, not physical atomicity of a platform frame and accessibility tree. */
+    private fun validateScreenshot(lease: GuiLeaseGate.Lease, observationId: String): GuiResult.Rejected? {
+        onMain(); gate.validateObservation(lease, observationId, generation)?.let { return it }
+        screenRejection()?.let { return it }
+        val binding = screenshotBinding?.takeIf { it.first == observationId }?.second
+            ?: return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
+        if (!binding.verifiable) return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
+        val sampled = sampleTree(retain = false)
+        if (sampled !is GuiResult.Value) return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
+        val actual = sampled.value
+        if (!actual.verifiable) return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
+        if (actual.packageName != binding.packageName || actual.windowId != binding.windowId)
+            return GuiResult.Rejected("SCREENSHOT_WINDOW_CHANGED")
+        if (actual != binding) return GuiResult.Rejected("SCREENSHOT_TREE_CHANGED")
+        return null
     }
 
     @Suppress("DEPRECATION")
@@ -356,51 +454,56 @@ internal object GuiRuntime {
         gate.rejection(lease)?.let { return rejected(it.code) }; screenRejection()?.let { return rejected(it.code) }
         gate.validateObservation(lease, observationId, generation)?.let { return rejected(it.code) }
         if (Build.VERSION.SDK_INT < 30) return rejected("SCREENSHOT_UNSUPPORTED_API")
+        validateScreenshot(lease, observationId)?.let { return rejected(it.code) }
         val permit = gate.consumeRead(lease, screenshot = true)
         if (permit is GuiResult.Rejected) return rejected(permit.code)
         val current = service ?: return rejected("SERVICE_DISCONNECTED_NOT_EXECUTED")
         captures[lease] = (captures[lease] ?: 0) + 1
-        val request = GuiCaptureRequest<GuiScreenshot> { captureFinished(lease) }
+        val request = GuiCaptureRequest<GuiScreenshot> {
+            if (Looper.myLooper() === Looper.getMainLooper()) captureFinished(lease)
+            else main.post { captureFinished(lease) } // no main receipt means no manufactured slot release
+        }
         val future = request.future
         request.submit {
-            current.takeScreenshot(Display.DEFAULT_DISPLAY, current.mainExecutor, object : AccessibilityService.TakeScreenshotCallback {
-                override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
-                    val buffer = screenshot.hardwareBuffer
-                    var hardware: Bitmap? = null
-                    var software: Bitmap? = null
-                    try {
-                        gate.validateObservation(lease, observationId, generation)?.let { future.complete(it); return }
-                        screenRejection()?.let { future.complete(it); return }
-                        if (buffer.width > 2048 || buffer.height > 4096 || buffer.width.toLong() * buffer.height > 8_388_608) {
-                            future.complete(GuiResult.Rejected("SCREENSHOT_DIMENSIONS_EXCEED_LIMIT")); return
-                        }
-                        hardware = Bitmap.wrapHardwareBuffer(buffer, screenshot.colorSpace)
-                        software = hardware?.copy(Bitmap.Config.ARGB_8888, false)
-                        val image = software ?: run { future.complete(GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE")); return }
-                        val bytes = object : ByteArrayOutputStream() {
-                            override fun write(b: ByteArray, off: Int, len: Int) {
-                                check(count.toLong() + len <= 2_097_152) { "screenshot_size_limit" }; super.write(b, off, len)
-                            }
-                            override fun write(b: Int) { check(count < 2_097_152); super.write(b) }
-                        }
-                        if (!image.compress(Bitmap.CompressFormat.PNG, 100, bytes)) {
-                            future.complete(GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE")); return
-                        }
-                        future.complete(GuiResult.Value(GuiScreenshot(observationId, image.width, image.height, bytes.toByteArray())))
-                    } catch (_: Exception) { future.complete(GuiResult.Rejected("SCREENSHOT_UNAVAILABLE")) }
-                    finally {
-                        // Attempt every disposal even if another one throws. A failed disposal
-                        // must retain the slot: callback arrival alone is not a resource receipt.
-                        request.disposeSuccessResources(
-                            software = { software?.recycle(); Unit },
-                            hardware = { hardware?.recycle(); Unit },
-                            buffer = { buffer.close() },
-                        )
+            access.capture(current, success = success@ { frame ->
+                onMain()
+                fun dispose() {
+                    // Unconfirmed disposal must NOT manufacture a drain receipt.
+                    try { frame.dispose(request) } catch (_: Exception) { /* reservation retained */ }
+                }
+                try {
+                    val rejection = gate.validateObservation(lease, observationId, generation) ?: screenRejection()
+                    if (future.isDone || rejection != null) {
+                        if (rejection != null) future.complete(rejection)
+                        dispose(); return@success
                     }
+                    encoder.execute {
+                        // No lease/tree/service access on this worker. Cancellation does not release resources.
+                        val encoded = try {
+                            if (future.isDone) GuiResult.Rejected("SCREENSHOT_CANCELLED") else frame.encode(observationId)
+                        } catch (_: Exception) { GuiResult.Rejected("SCREENSHOT_UNAVAILABLE") }
+                        val posted = try {
+                            main.post {
+                                try {
+                                    if (!future.isDone) {
+                                        val invalid = validateScreenshot(lease, observationId)
+                                        future.complete(invalid ?: encoded)
+                                    }
+                                } catch (_: Exception) { future.complete(GuiResult.Rejected("SCREENSHOT_UNAVAILABLE")) }
+                                finally { dispose() }
+                            }
+                        } catch (_: Exception) { false }
+                        if (!posted) {
+                            future.complete(GuiResult.Rejected("SCREENSHOT_RESULT_UNAVAILABLE"))
+                            dispose() // free the frame even if main can no longer acknowledge drain
+                        }
+                    }
+                } catch (_: Exception) {
+                    future.complete(GuiResult.Rejected("SCREENSHOT_ENCODING_UNAVAILABLE"))
+                    dispose()
                 }
-                override fun onFailure(errorCode: Int) {
-                    request.callbackFailure("SCREENSHOT_PLATFORM_ERROR_$errorCode")
-                }
+            }, failure = { code ->
+                onMain(); request.callbackFailure("SCREENSHOT_PLATFORM_ERROR_$code")
             })
         }
         return future

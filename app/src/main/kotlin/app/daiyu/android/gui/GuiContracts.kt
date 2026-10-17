@@ -93,6 +93,12 @@ internal class GuiLeaseGate(private val now: () -> Long) {
         }
         return GuiResult.Value(Unit)
     }
+    /** A replacement attempt retires the old snapshot even when the new read fails. */
+    fun retireObservation(lease: Lease) {
+        if (rejection(lease) != null) return
+        lease.observation = null
+        lease.actions.clear()
+    }
     fun publish(lease: Lease, observation: GuiObservation): GuiResult<GuiObservation> {
         rejection(lease)?.let { return it }
         lease.actions.clear()

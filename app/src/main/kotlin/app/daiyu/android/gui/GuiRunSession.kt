@@ -23,9 +23,10 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
     fun prepareExactActionFromUser(operation: GuiOperation, text: String? = null,
         ownerCurrent: () -> Boolean,
         onNotExecuted: (String) -> Unit = {},
+        onRevoked: () -> Unit = {},
         onConfirmed: (GuiConfirmedDelivery) -> Boolean): GuiResult<Unit> {
         editable()
-        return GuiRuntime.showConfirmation(this, operation, text, ownerCurrent, onNotExecuted, onConfirmed)
+        return GuiRuntime.showConfirmation(this, operation, text, ownerCurrent, onNotExecuted, onRevoked, onConfirmed)
     }
     fun validateExactActionFromUser(action: GuiAction): GuiResult<Unit> {
         editable(); return GuiRuntime.validateExactTarget(lease, action)
@@ -128,8 +129,12 @@ internal class GuiRunSession internal constructor(internal val lease: GuiLeaseGa
     override fun close() {
         ioFence.close()
         closed.set(true)
-        val cleanup = Runnable { GuiRuntime.close(lease) { released.set(true) } }
+        val cleanup = Runnable {
+            try { GuiRuntime.close(lease) { released.set(true) } }
+            catch (_: Exception) { /* keep retention; cleanup failure is never a release receipt */ }
+        }
         if (Looper.myLooper() === Looper.getMainLooper()) cleanup.run()
-        else GuiRuntime.main.post(cleanup) // false/exception is NOT a drain receipt
+        else try { GuiRuntime.main.post(cleanup) }
+        catch (_: Exception) { /* false/exception is NOT a drain receipt */ }
     }
 }

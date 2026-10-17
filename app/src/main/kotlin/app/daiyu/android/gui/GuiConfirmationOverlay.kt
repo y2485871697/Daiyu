@@ -21,6 +21,7 @@ internal class GuiConfirmationOverlay(
     private val input: String?,
     private val ownerCurrent: () -> Boolean,
     private val onNotExecuted: (String) -> Unit,
+    private val onRevoked: () -> Unit,
     private val deliver: (GuiConfirmedDelivery) -> Boolean,
 ) {
     private val windows = service.getSystemService(WindowManager::class.java)
@@ -35,6 +36,7 @@ internal class GuiConfirmationOverlay(
     private var disposed = false
     private var delivered = false
     private var reportedNotExecuted = false
+    private var reportedRevoked = false
     private var closeCode = "CONFIRMATION_CLOSED_NOT_EXECUTED"
     private fun active(): Boolean = !disposed && session.preparationAvailable() && try { ownerCurrent() } catch (_: Exception) { false }
     private val watchdog = object : Runnable {
@@ -142,8 +144,16 @@ internal class GuiConfirmationOverlay(
             // No view changes, navigation, dismissal, or observe between final capture and dispatch.
             delivered = true
             GuiRuntime.main.removeCallbacks(watchdog)
-            val accepted = try { deliver(GuiConfirmedDelivery(session, observation, action, writes)) } catch (_: Exception) { false }
-            if (!accepted) revoke()
+            val accepted = try { deliver(GuiConfirmedDelivery(session, observation, action, writes)) }
+            catch (_: Exception) {
+                // A throwing parent may already have queued the task: revoke, never assert not-executed.
+                revoke("CONFIRMATION_TRANSFER_UNCONFIRMED")
+                return@button
+            }
+            if (!accepted) {
+                delivered = false // explicit refusal proves there was no parent handoff
+                revoke("CONFIRMATION_TRANSFER_REJECTED_NOT_EXECUTED")
+            }
         }
         cancelButton(epoch)
         // Render first; queued window/content events are NOT filtered. Any late event makes this stale.
@@ -188,7 +198,14 @@ internal class GuiConfirmationOverlay(
     }
     fun revoke(code: String = "CONFIRMATION_CANCELLED_OR_SERVICE_LOST_NOT_EXECUTED") {
         closeCode = code
-        session.close()
+        try { session.close() } finally {
+            // Explicit overlay cancellation/service loss must reach the ORIGINAL parent even
+            // after delivery. This is revocation, never a claim that an action did not execute.
+            if (!reportedRevoked) {
+                reportedRevoked = true
+                try { onRevoked() } catch (_: Exception) { /* admission is already fenced */ }
+            }
+        }
     }
     fun dispose(): Boolean {
         disposed = true; ticket.close(); GuiRuntime.main.removeCallbacks(watchdog)

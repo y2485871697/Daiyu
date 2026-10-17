@@ -86,6 +86,20 @@ class GuiLeaseGateTest {
         assertEquals(1, frozen.size)
         assertEquals(2, gate.approvedActions(lease).size)
     }
+    @Test fun revokedLeaseStillOwnsCleanupSlotButNeverAdmissionAndCannotClearNewOwner() {
+        val gate = gate()
+        val old = lease(gate)
+        old.valid = false // overlay disposal failed after synchronous revocation
+        assertTrue(gate.ownsSlot(old))
+        assertEquals("GUI_AUTHORIZATION_REVOKED", code(gate.consumeRead(old, false)))
+        assertEquals("FOREGROUND_BUSY", code(gate.acquire(owner)))
+        gate.close(old)
+        val next = lease(gate)
+        assertFalse(gate.ownsSlot(old))
+        assertTrue(gate.ownsSlot(next))
+        gate.close(old)
+        assertNull(gate.rejection(next))
+    }
     @Test fun effectIdentityIncludesOwnerObservationNodeAndCompleteText() {
         val action = GuiAction("obs", GuiOperation.INPUT, 0, "approved")
         assertNotEquals(action.effect(owner), action.copy(text = "different").effect(owner))

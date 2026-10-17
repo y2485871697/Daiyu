@@ -126,5 +126,7 @@ internal class GuiLeaseGate(private val now: () -> Long) {
     }
     fun approvedActions(lease: Lease): Set<GuiAction> = if (rejection(lease) == null)
         Collections.unmodifiableSet(lease.actions.toSet()) else emptySet()
+    /** Cleanup identity only; never an admission check or a way to resurrect a revoked lease. */
+    fun ownsSlot(lease: Lease): Boolean = current === lease
     fun close(lease: Lease) { lease.valid = false; if (current === lease) current = null }
 }

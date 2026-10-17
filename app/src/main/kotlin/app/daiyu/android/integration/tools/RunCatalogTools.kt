@@ -2,6 +2,8 @@ package app.daiyu.android.integration.tools
 
 import app.daiyu.android.ControllerVirtualDisplaySession
 import app.daiyu.android.vdapproval.R08CleanupApprovalRequest
+import app.daiyu.android.gui.GuiRunSession
+import app.daiyu.android.gui.GuiScreenToolFactory
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.ReceiptBatchToolExecutor
 import app.daiyu.android.domain.runtime.RunExecutionOwner
@@ -62,6 +64,8 @@ internal class RunCatalogTools(
     // Explicit trusted child admission only. Runs at worker schema setup, NOT in bindOwner,
     // and only after the parent Runner's durable admission. Text-only tools are unchanged.
     private val onCatalogReady: ((RunExecutionOwner, SessionCapabilities, TaskAuthorization) -> Unit)? = null,
+    private val gui: GuiRunSession? = null,
+    private val observeGuiClose: (GuiRunSession, (RunCatalogCloseResult) -> Unit) -> Unit = ::observeGuiDrain,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
     // No temporary owner or authorization for generation. Legacy read-only callers retain
@@ -75,6 +79,7 @@ internal class RunCatalogTools(
         require(shizuku == null) { "shizuku_task_authorization_required" }
         require(terminal == null) { "terminal_task_authorization_required" }
         require(browser == null) { "browser_task_authorization_required" }
+        require(gui == null) { "gui_task_authorization_required" }
         require(generationFactory == null) { "generation_task_authorization_required" }
         require(virtualDisplayFactory == null) { "virtual_display_task_authorization_required" }
         TaskAuthorization(capabilities.sessionId, runId.value)
@@ -160,6 +165,7 @@ internal class RunCatalogTools(
             validateAuthorization(authorization)
             require(initialAuthorization == null || authorization === initialAuthorization) { "tool_run_authorization_mismatch" }
             check(!closed.get()) { "run_closed" }
+            gui?.bind(owner, authorization)
             deviceResources?.bind(owner, authorization, capabilities)
             children?.bind(owner, capabilities, authorization)
             shizuku?.commands?.bind(owner, capabilities, authorization)
@@ -237,10 +243,18 @@ internal class RunCatalogTools(
                 shizuku?.let { registry.register(it.commands.tool()) }
                 terminalLeaf?.registeredTools?.forEach { registry.register(it) }
                 browserTools.forEach { registry.register(it) }
+                gui?.let { GuiScreenToolFactory.create(it).forEach { tool -> registry.register(tool) } }
                 generation?.registeredTools?.forEach { registry.register(it) }
                 virtualDisplay?.registeredTools?.forEach { registry.register(it) }
                 retainedVirtualDisplaySession?.registeredTools(bound, capabilities, authorization)?.forEach { registry.register(it) }
-                val result = CatalogModelBridge(registry.snapshot(), capabilities, ledger, conversationId, runId, authorization)
+                val snapshot = registry.snapshot()
+                // Exact, short-lived screen confirmations never suspend through a user barrier.
+                // A suspended receipt completes outside this catalog's final-result boundary.
+                // Fail closed instead of allowing that completion to bypass the GUI Unknown fence.
+                require(gui == null || snapshot.available(capabilities).none { it.effect == ToolEffect.USER_BARRIER }) {
+                    "gui_user_barrier_not_supported"
+                }
+                val result = CatalogModelBridge(snapshot, capabilities, ledger, conversationId, runId, authorization)
                 result.bindOwner(bound)
                 synchronized(closeLock) {
                     check(!closed.get()) { "run_closed" }
@@ -341,6 +355,7 @@ internal class RunCatalogTools(
             }
         }
         fun unconfirmed() {
+            gui?.onCentralUnknown() // missing final central feedback also fails closed, with no retry
             if (leaf != null || session != null) synchronized(closeLock) { recordCloseFailure("virtual_display_batch_unconfirmed") }
             // Do not invent results or finish a ticket when no final central result exists.
         }
@@ -348,8 +363,10 @@ internal class RunCatalogTools(
     private fun observeOutcomes(results: List<ToolDispatchResult>) {
         // Includes ledger reservation conflicts and persistence failure AFTER a confirmed adapter reply.
         // Use the entire central result, never a second leaf dispatcher or adapter-only receipts.
+        val unknown = results.firstNotNullOfOrNull { it.outcome as? DispatchOutcome.Unknown }
+        if (unknown != null) gui?.onCentralUnknown() // before any external feedback can throw
         terminalLeaf?.observeOutcomes(results)
-        results.firstNotNullOfOrNull { it.outcome as? DispatchOutcome.Unknown }?.let {
+        unknown?.let {
             shizuku?.session?.markOutcomeUnknown(it.code.ifBlank { "dispatcher_outcome_unknown" })
         }
     }
@@ -368,7 +385,7 @@ internal class RunCatalogTools(
             generation?.revokeAdmission()
             // Fence the terminal before stopping other resources; join is observed separately.
             // R08 close is revocation only. Never synthesize a release/shutdown operation.
-            claimStops(listOfNotNull(browser, generation, virtualDisplay, retainedVirtualDisplaySession, terminalLeaf, shizuku, background, children, deviceResources, skills))
+            claimStops(listOfNotNull(gui, browser, generation, virtualDisplay, retainedVirtualDisplaySession, terminalLeaf, shizuku, background, children, deviceResources, skills))
         }
         browser?.revoke()
         stopClaimed(resources)
@@ -489,12 +506,16 @@ internal class RunCatalogTools(
             else {
                 observationsStarted = true
                 registeringObservations = true
-                remainingObservations = 7
+                remainingObservations = 8
                 true
             }
         }
         if (begin) {
             // Independent registrations: one broken resource must not suppress another's drain.
+            observeResourceClose(gui) { done ->
+                if (gui == null) done(RunCatalogCloseResult.Drained)
+                else observeGuiClose(gui, done)
+            }
             observeResourceClose(children) { done ->
                 if (children == null) done(RunCatalogCloseResult.Drained)
                 else children.closeWhenIdle { done(RunCatalogCloseResult.Drained) }
@@ -576,6 +597,25 @@ internal class RunCatalogTools(
         // No lifecycle/setup lock is held; reentrant close/observation is safe.
         notification.second.forEach { callback -> runCatching { callback(notification.first) } }
     }
+}
+
+/** A close request or consumer timeout is not a GUI release receipt. Pending captures and
+ * attached overlays retain the real lease. Unknown keeps the parent's retention record pinned. */
+private fun observeGuiDrain(session: GuiRunSession, complete: (RunCatalogCloseResult) -> Unit) {
+    val deadline = android.os.SystemClock.uptimeMillis() + 30_000L
+    val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    val observe = object : Runnable {
+        override fun run() {
+            when {
+                session.releaseConfirmed -> complete(RunCatalogCloseResult.Drained)
+                android.os.SystemClock.uptimeMillis() >= deadline ->
+                    complete(RunCatalogCloseResult.Unknown("gui_close_unconfirmed"))
+                !handler.postDelayed(this, 50L) ->
+                    complete(RunCatalogCloseResult.Unknown("gui_close_observation_unavailable"))
+            }
+        }
+    }
+    observe.run()
 }
 
 /** Native browser close is nonblocking; retain its owner until observed, not merely requested. */

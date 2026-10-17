@@ -67,6 +67,21 @@ class R08PersistentJournalTest {
         assertEquals(intents.map { it.operation }, events(root).map { decode(it).fields[4] })
     }
 
+    @Test fun explicitCleanupReleaseKeepsDeterministicIntentAndEvidenceAcrossReopen() = fixture { root, _ ->
+        val cleanup = intent(invocation = "host-cleanup-release-v1").copy(operation = "release", canonicalParameters = "{}")
+        val journal = R08PersistentJournal(root)
+        assertEquals(execute, journal.claim(cleanup))
+        journal.complete(cleanup, R08VirtualDisplayEvidence.UNKNOWN)
+        val before = events(root).map { Files.readAllBytes(it).toList() }
+        val reopened = R08PersistentJournal(root)
+        assertEquals(lookup, reopened.claim(cleanup))
+        assertEquals(before, events(root).map { Files.readAllBytes(it).toList() })
+        assertEquals(unknown, reopened.claim(cleanup.copy(generation = "different_generation")))
+        assertEquals(unknown, reopened.claim(cleanup.copy(operation = "input")))
+        assertEquals(listOf(1, 2), events(root).map { decode(it).kind })
+        assertEquals(cleanup.invocationId, decode(events(root).last()).fields[2])
+    }
+
     @Test fun manyThreadsAndInstancesProduceExactlyOnePermission() = fixture { root, _ ->
         val pool = Executors.newFixedThreadPool(12)
         val ready = CountDownLatch(12)

@@ -102,6 +102,13 @@ import app.daiyu.android.ui.screens.settings.*
 import app.daiyu.android.ui.screens.search.ConversationSearchScreen
 import app.daiyu.android.ui.screens.search.MessageSearchScreen
 import app.daiyu.android.ui.screens.stats.UsageStatsScreen
+import app.daiyu.android.vdapproval.R08PlanEditorHost
+import app.daiyu.android.vdapproval.R08PlanEditor
+import app.daiyu.android.vdapproval.R08FrozenPlan
+import app.daiyu.android.vdapproval.R08CleanupUiOwner
+import app.daiyu.android.vdapproval.R08CleanupApprovalRequest
+import app.daiyu.android.vdapproval.R08CleanupApprovalScreen
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.atomic.AtomicBoolean
 import androidx.compose.ui.graphics.asImageBitmap
 
@@ -314,7 +321,7 @@ class MainActivity : ComponentActivity() {
             !selectionReady || !controller.ready || controller.dataBusy || !exactActive ||
             expected != ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) ||
             imageHost.hasAttachments || imageHost.sending || videoSending || videoHost.state.items.isNotEmpty() ||
-            shizukuWritesBlocked || terminalEditor != null || virtualDisplayEditor != null ||
+            shizukuWritesBlocked || terminalEditor != null || (virtualDisplayEditor != null || virtualDisplayPlanVisit != null) ||
             browserApproval != null || browserPreparing || generationApproval != null ||
             (pending != null && !universalTickets.containsKey(pending.ticket)) ||
             (controllerTicket != null && !universalTickets.containsKey(controllerTicket))
@@ -351,7 +358,7 @@ class MainActivity : ComponentActivity() {
         activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
             selectionReady && controller.ready && !controller.dataBusy &&
             !imageHost.sending && !shizukuWritesBlocked && terminalEditor == null &&
-            virtualDisplayEditor == null && !videoSending && pendingTextSend == null &&
+            virtualDisplayEditor == null && virtualDisplayPlanVisit == null && !videoSending && pendingTextSend == null &&
             controller.textSendState() == null &&
             target.conversationId == selected?.id?.value &&
             target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
@@ -432,7 +439,7 @@ class MainActivity : ComponentActivity() {
                 activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
                     selectionReady && controller.ready && !controller.dataBusy &&
                     !imageHost.sending && !shizukuWritesBlocked && terminalEditor == null &&
-                    virtualDisplayEditor == null && !videoSending && pendingTextSend == null &&
+                    virtualDisplayEditor == null && virtualDisplayPlanVisit == null && !videoSending && pendingTextSend == null &&
                     controller.textSendState() == null &&
                     target.conversationId == selected?.id?.value &&
                     target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
@@ -455,7 +462,7 @@ class MainActivity : ComponentActivity() {
                 activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
                     selectionReady && controller.ready && !controller.dataBusy && pendingTextSend == null &&
                     controller.textSendState() == null && !imageHost.sending && !shizukuWritesBlocked &&
-                    terminalEditor == null && virtualDisplayEditor == null && !videoSending &&
+                    terminalEditor == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null && !videoSending &&
                     target.conversationId == selected?.id?.value &&
                     target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
             },
@@ -516,7 +523,7 @@ class MainActivity : ComponentActivity() {
         videoDialog?.dismiss(); videoDialog = null
         if (controller.ownsVideoUi(videoUi)) videoHost.detach()
     }
-    private fun videoComposerAvailable() = terminalEditor == null && virtualDisplayEditor == null &&
+    private fun videoComposerAvailable() = terminalEditor == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null &&
         shizukuEditor == null && browserApproval == null && generationApproval == null &&
         pendingTextSend == null && controller.textSendState() == null &&
         !imageHost.hasAttachments && !imageHost.busy && !shizukuWritesBlocked
@@ -592,7 +599,7 @@ class MainActivity : ComponentActivity() {
     private var shizukuInFlight by mutableStateOf<ControllerShizukuPreparation?>(null)
     private val shizukuWritesBlocked: Boolean get() = shizukuInFlight != null ||
         controller.shizukuPreparation()?.isSubmitted() == true || controller.generationSubmissionPending() ||
-        controller.virtualDisplayEntry() != null
+        controller.virtualDisplayEntry() != null || virtualDisplayPlanVisit != null
     private val imagePicker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         imageHost.picked(uris)
     }
@@ -724,6 +731,20 @@ class MainActivity : ComponentActivity() {
         var preparation by mutableStateOf<ControllerTerminalPreparation?>(null)
     }
     private var terminalEditor by mutableStateOf<TerminalEditor?>(null)
+    private class VirtualDisplayPlanVisit(val conversation: Conversation?,
+        val editor: ChatController.TextSendOwner, val text: String) {
+        val host = R08PlanEditorHost()
+    }
+    private var virtualDisplayPlanVisit by mutableStateOf<VirtualDisplayPlanVisit?>(null)
+    private class VirtualDisplayCleanupVisit(val entry: ControllerVirtualDisplayEntry,
+        val owner: R08CleanupUiOwner, val adapter: ControllerVirtualCleanupAdapter) {
+        var request by mutableStateOf<R08CleanupApprovalRequest?>(null)
+        var decided by mutableStateOf(false)
+        var status by mutableStateOf("正在检查原运行排空状态；不观察物理退出、不发送 Release。")
+    }
+    // Workers read only this atomic owner, never Compose state or the current text editor.
+    private val currentCleanupOwner = AtomicReference<R08CleanupUiOwner?>(null)
+    private var virtualDisplayCleanupVisit by mutableStateOf<VirtualDisplayCleanupVisit?>(null)
     private var virtualDisplayEditor by mutableStateOf<ControllerVirtualDisplayEntry?>(null)
     private var virtualDisplayRequest by mutableStateOf<app.daiyu.android.vdapproval.VirtualDisplayApprovalRequest?>(null)
     private var browserApproval by mutableStateOf<ControllerBrowserPreparation?>(null)
@@ -1277,6 +1298,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 PromptSurface()
+                VirtualDisplayR08Surfaces()
                 val vdEntry = virtualDisplayEditor
                 val vdRequest = virtualDisplayRequest
                 if (vdEntry != null && vdRequest != null) {
@@ -1433,7 +1455,7 @@ class MainActivity : ComponentActivity() {
         return ChatScreenActions(
         onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
         onVoice = {
-            if (editorMatches() && terminalEditor == null && virtualDisplayEditor == null && !videoSending &&
+            if (editorMatches() && terminalEditor == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null && !videoSending &&
                 draftRevision == renderedDraftRevision && voiceForeground &&
                 retainedPage == "chat" && !sidebarVisible &&
                 controller.ready && !controller.dataBusy && !imageHost.sending && !shizukuWritesBlocked) {
@@ -1645,12 +1667,12 @@ class MainActivity : ComponentActivity() {
                 modifier = Modifier.testTag("generation-approval-entry").heightIn(min = 48.dp),
                 onClick = ::openGenerationApproval)
             top.yukonga.miuix.kmp.basic.TextButton(text = "副屏运行准备（需单独批准）",
-                enabled = available && pendingTextSend == null && virtualDisplayEditor == null &&
+                enabled = available && pendingTextSend == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null &&
                     controller.virtualDisplayEntry() == null,
                 modifier = Modifier.testTag("vd-prepare-entry").heightIn(min = 48.dp),
                 onClick = ::openVirtualDisplayPreparation)
             virtualDisplayEditor?.let { entry ->
-                androidx.compose.material3.Text("仅批准启动、初始化、状态/截图和释放；准备与批准均不会启动 owner。")
+                androidx.compose.material3.Text("已冻结 ${entry.writes.size} 项写步骤、${entry.reads.size} 项读取；消息受理后仍须审阅完整副屏授权。")
                 top.yukonga.miuix.kmp.basic.TextButton(text = "接受消息并审阅完整副屏授权",
                     enabled = !entry.submitted,
                     modifier = Modifier.testTag("vd-submit"),
@@ -1658,11 +1680,14 @@ class MainActivity : ComponentActivity() {
                 top.yukonga.miuix.kmp.basic.TextButton(text = "停止副屏运行 / 取消准备",
                     modifier = Modifier.testTag("vd-cancel"), onClick = virtualDisplayCancelAction(entry, null))
             }
-            if (controller.virtualDisplayEntry() != null) {
+            controller.virtualDisplayEntry()?.let { originalEntry ->
+                top.yukonga.miuix.kmp.basic.TextButton(text = "为原副屏申请额外 Release 收尾",
+                    enabled = originalEntry.revoked && selected?.id == originalEntry.conversationId,
+                    modifier = Modifier.testTag("vd-cleanup-entry"),
+                    onClick = { openVirtualDisplayCleanup(originalEntry) })
                 top.yukonga.miuix.kmp.basic.TextButton(text = "核实副屏停止（UNKNOWN 继续保留）",
-                    modifier = Modifier.testTag("vd-observe-close"), onClick = {
-                        controller.virtualDisplayEntry()?.let(controller::observeVirtualDisplayClose)
-                    })
+                    modifier = Modifier.testTag("vd-observe-close"),
+                    onClick = { controller.observeVirtualDisplayClose(originalEntry) })
             }
             top.yukonga.miuix.kmp.basic.TextButton(text = "读取本会话生成资产",
                 modifier = Modifier.testTag("generation-output-entry").heightIn(min = 48.dp),
@@ -2075,16 +2100,126 @@ class MainActivity : ComponentActivity() {
     private fun openVirtualDisplayPreparation() {
         if (videoHost.state.items.isNotEmpty() || videoSending) return
         if (!activityUsable() || retainedPage != "chat" || sidebarVisible || !selectionReady ||
+            !controller.ready || controller.dataBusy || controller.active != null ||
+            controller.virtualDisplayEntry() != null || controller.textSendState() != null ||
             pendingTextSend != null || imageHost.busy || imageHost.hasAttachments || draft.isBlank()) return
         cancelBrowserEditor(); cancelShizukuEditor()
-        val owner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
-        virtualDisplayEditor = controller.prepareVirtualDisplaySend(selected, owner, draft, listOf(
-            app.daiyu.android.integration.tools.R08VirtualDisplayWrite("start", app.daiyu.android.integration.tools.R08VirtualDisplayAction.Start),
-            app.daiyu.android.integration.tools.R08VirtualDisplayWrite("initialize", app.daiyu.android.integration.tools.R08VirtualDisplayAction.Initialize),
-            app.daiyu.android.integration.tools.R08VirtualDisplayWrite("release", app.daiyu.android.integration.tools.R08VirtualDisplayAction.Release)), listOf(
-            app.daiyu.android.integration.tools.R08VirtualDisplayRead("status"),
-            app.daiyu.android.integration.tools.R08VirtualDisplayRead("snapshot", snapshot = true)))
+        virtualDisplayPlanVisit = VirtualDisplayPlanVisit(selected,
+            ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision), draft)
         publishChat()
+    }
+
+    private fun cancelVirtualDisplayPlan(original: VirtualDisplayPlanVisit) {
+        original.host.cancel()
+        if (virtualDisplayPlanVisit === original) virtualDisplayPlanVisit = null
+    }
+
+    private fun freezeVirtualDisplayPlan(original: VirtualDisplayPlanVisit, frozen: R08FrozenPlan) {
+        val current = activityUsable() && virtualDisplayPlanVisit === original && retainedPage == "chat" &&
+            !sidebarVisible && selectionReady && selected === original.conversation &&
+            original.editor == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) &&
+            draft == original.text && !imageHost.busy && !imageHost.hasAttachments &&
+            videoHost.state.items.isEmpty() && !videoSending && pendingTextSend == null &&
+            controller.textSendState() == null && controller.ready && !controller.dataBusy &&
+            controller.active == null && controller.virtualDisplayEntry() == null && virtualDisplayEditor == null
+        if (!current) { cancelVirtualDisplayPlan(original); return }
+        // Freeze is not acceptance or authorization. Reuse the original prepare/submit/SQLite gate.
+        virtualDisplayEditor = controller.prepareVirtualDisplaySend(original.conversation, original.editor,
+            original.text, frozen.writes, frozen.reads)
+        virtualDisplayPlanVisit = null
+        if (virtualDisplayEditor == null) toast("副屏计划未受理；保留草稿，不自动重发")
+        publishChat()
+    }
+
+    private fun cleanupVisitCurrent(original: VirtualDisplayCleanupVisit): Boolean = activityUsable() &&
+        virtualDisplayCleanupVisit === original && currentCleanupOwner.get() === original.owner &&
+        original.owner.isActive && retainedPage == "chat" && !sidebarVisible &&
+        selected?.id == original.entry.conversationId && controller.virtualDisplayEntry() === original.entry
+
+    private fun closeVirtualDisplayCleanup(original: VirtualDisplayCleanupVisit) {
+        // MUST finish denial of the old published request before any new owner is visible.
+        // A lone owner.close() is only an admission fence, not a synchronous adapter close.
+        original.adapter.close()
+        currentCleanupOwner.compareAndSet(original.owner, null)
+        if (virtualDisplayCleanupVisit === original) virtualDisplayCleanupVisit = null
+    }
+
+    private fun openVirtualDisplayCleanup(originalEntry: ControllerVirtualDisplayEntry) {
+        if (!activityUsable() || retainedPage != "chat" || sidebarVisible ||
+            selected?.id != originalEntry.conversationId || controller.virtualDisplayEntry() !== originalEntry) return
+        virtualDisplayCleanupVisit?.let(::closeVirtualDisplayCleanup)
+        val owner = R08CleanupUiOwner()
+        currentCleanupOwner.set(owner)
+        val adapter = controller.openVirtualDisplayCleanup(originalEntry, owner) { currentCleanupOwner.get() }
+            ?: run { owner.close(); currentCleanupOwner.compareAndSet(owner, null); return }
+        val visit = VirtualDisplayCleanupVisit(originalEntry, owner, adapter)
+        virtualDisplayCleanupVisit = visit
+        lifecycleScope.launch {
+            val request = withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { adapter.prepareOnWorker() }
+            if (cleanupVisitCurrent(visit) && request != null && adapter.canPublish(request)) {
+                visit.request = request
+                visit.status = "请核对原 owner 的独立一次 Release 授权；不是原文本权限恢复。"
+            } else if (cleanupVisitCurrent(visit)) {
+                visit.status = "暂不可收尾：排空未完成、请求已回答或结果 UNKNOWN。未发送，不自动重试。"
+            } else closeVirtualDisplayCleanup(visit)
+        }
+    }
+
+    private fun answerVirtualDisplayCleanup(visit: VirtualDisplayCleanupVisit,
+        request: R08CleanupApprovalRequest, accepted: Boolean): Boolean {
+        if (!cleanupVisitCurrent(visit) || visit.request !== request || visit.decided) return false
+        val answered = visit.adapter.answerFromUi(request, accepted)
+        if (!accepted) { closeVirtualDisplayCleanup(visit); return answered }
+        if (!answered) return false
+        visit.decided = true
+        visit.status = "已显式批准；排队 worker 将再次检查原父记录、本地 drain 和 UI admission。"
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                visit.adapter.releaseOnWorker(request)
+            }
+            if (cleanupVisitCurrent(visit)) visit.status = when (result) {
+                ControllerVirtualDisplaySession.CleanupResult.CONFIRMED ->
+                    "Release 已确认；不是物理退出证明。保留原记录，请单独核实停止。"
+                ControllerVirtualDisplaySession.CleanupResult.UNKNOWN ->
+                    "Release UNKNOWN；保留原身份、journal 和 lease，不重发、不重连。"
+                ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+                ControllerVirtualDisplaySession.CleanupResult.NOT_APPROVED ->
+                    "Release 未发送或已处理；不自动重试，保留原记录。"
+            }
+        }
+        return true
+    }
+
+    @Composable private fun VirtualDisplayR08Surfaces() {
+        virtualDisplayPlanVisit?.let { visit -> key(visit.host) {
+            androidx.compose.ui.window.Dialog(onDismissRequest = { cancelVirtualDisplayPlan(visit) },
+                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+                androidx.compose.material3.Surface {
+                    R08PlanEditor(visit.host, onFrozen = { freezeVirtualDisplayPlan(visit, it) },
+                        onCancel = { cancelVirtualDisplayPlan(visit) })
+                }
+            }
+        } }
+        virtualDisplayCleanupVisit?.let { visit -> key(visit.owner) {
+            DisposableEffect(visit.adapter) { onDispose { visit.adapter.close() } }
+            androidx.compose.ui.window.Dialog(onDismissRequest = { closeVirtualDisplayCleanup(visit) },
+                properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+                androidx.compose.material3.Surface {
+                    Column(Modifier.fillMaxSize().padding(16.dp)) {
+                        visit.request?.let { request ->
+                            R08CleanupApprovalScreen(request,
+                                onDecision = { req, accepted -> answerVirtualDisplayCleanup(visit, req, accepted) },
+                                modifier = Modifier.weight(1f))
+                        }
+                        androidx.compose.material3.Text(visit.status, Modifier.testTag("vd-cleanup-status"))
+                        androidx.compose.material3.TextButton(onClick = { closeVirtualDisplayCleanup(visit) },
+                            modifier = Modifier.testTag("vd-cleanup-close")) {
+                            androidx.compose.material3.Text("关闭此次收尾访问（不释放资源）")
+                        }
+                    }
+                }
+            }
+        } }
     }
 
     private fun submitVirtualDisplay(entry: ControllerVirtualDisplayEntry) {
@@ -2123,6 +2258,8 @@ class MainActivity : ComponentActivity() {
 
     // Navigation intentionally cancels the current editor rather than a retained UI capability.
     private fun cancelVirtualDisplayEditor() {
+        virtualDisplayPlanVisit?.let(::cancelVirtualDisplayPlan)
+        virtualDisplayCleanupVisit?.let(::closeVirtualDisplayCleanup)
         val original = virtualDisplayEditor
         if (original != null) cancelVirtualDisplayEditor(original)
         else virtualDisplayRequest = null
@@ -2951,6 +3088,9 @@ class MainActivity : ComponentActivity() {
     private fun refresh() {
         if (!activityUsable()) return
         settleGenerationReceipt()
+        virtualDisplayCleanupVisit?.let { visit ->
+            if (!cleanupVisitCurrent(visit)) closeVirtualDisplayCleanup(visit)
+        }
         virtualDisplayEditor?.let { entry ->
             if (controller.virtualDisplayEntry() !== entry) {
                 virtualDisplayEditor = null; virtualDisplayRequest = null

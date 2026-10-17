@@ -27,7 +27,12 @@ class ControllerVirtualDisplaySessionTest {
             require(old == null || old == intent)
             return if (old == null) R08VirtualDisplayPermit.EXECUTE_ONCE else R08VirtualDisplayPermit.LOOKUP_ONLY
         }
-        override fun complete(intent: R08VirtualDisplayIntent, evidence: R08VirtualDisplayEvidence) = Unit
+        var failCleanupComplete = false
+        val evidence = mutableListOf<Pair<R08VirtualDisplayIntent, R08VirtualDisplayEvidence>>()
+        override fun complete(intent: R08VirtualDisplayIntent, evidence: R08VirtualDisplayEvidence) {
+            if (failCleanupComplete && intent.invocationId == "host-cleanup-release-v1") throw IOException("lost completion")
+            this.evidence += intent to evidence
+        }
         override fun finalOutcome(bindingKey: String, generation: String, invocationId: String,
                                   evidence: R08VirtualDisplayEvidence) = Unit
     }
@@ -56,9 +61,27 @@ class ControllerVirtualDisplaySessionTest {
                 AndroidVirtualDisplayOwnerHost.Lifecycle.UNKNOWN, false, null, 77, false)
             return !failStart
         }
-        override fun initialize(): OwnerReply { initializations++; return OwnerReply(OwnerReply.Outcome.UNKNOWN) }
+        var confirmInitialize = false
+        var confirmRelease = false
+        var releaseEntered: CountDownLatch? = null
+        var releaseContinue: CountDownLatch? = null
+        val releaseIds = mutableListOf<String>()
+        override fun initialize(): OwnerReply {
+            initializations++
+            return if (confirmInitialize) OwnerReply(OwnerReply.Outcome.REPLIED, JSONObject()
+                .put("ok", true).put("initialized", true).put("displayId", 7)
+                .put("receipt", JSONObject().put("state", "STARTED"))) else OwnerReply(OwnerReply.Outcome.UNKNOWN)
+        }
         override fun execute(id: String, operation: String, parameters: JSONObject): OwnerReply {
-            writes++; return OwnerReply(OwnerReply.Outcome.UNKNOWN)
+            writes++
+            if (operation == "release") {
+                releaseIds += id
+                releaseEntered?.countDown()
+                releaseContinue?.await(5, TimeUnit.SECONDS)
+                if (confirmRelease) return OwnerReply(OwnerReply.Outcome.REPLIED, JSONObject()
+                    .put("ok", true).put("released", true).put("receipt", JSONObject().put("state", "SUCCEEDED")))
+            }
+            return OwnerReply(OwnerReply.Outcome.UNKNOWN)
         }
         override fun lookup(id: String, operation: String, parameters: JSONObject) = OwnerReply(OwnerReply.Outcome.UNKNOWN)
         override fun lookupGeneration() = OwnerReply(OwnerReply.Outcome.UNKNOWN)
@@ -111,7 +134,7 @@ class ControllerVirtualDisplaySessionTest {
             }
         }
     }
-    private class Fixture : AutoCloseable {
+    private class Fixture(includeRelease: Boolean = false) : AutoCloseable {
         val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
         val owner = runnerOwner(message)
@@ -123,7 +146,9 @@ class ControllerVirtualDisplaySessionTest {
         val executor = Executors.newSingleThreadExecutor()
         val mutableWrites = mutableListOf(R08VirtualDisplayWrite("start", R08VirtualDisplayAction.Start),
             R08VirtualDisplayWrite("initialize", R08VirtualDisplayAction.Initialize),
-            R08VirtualDisplayWrite("tap", R08VirtualDisplayAction.Tap(12, 34)))
+            R08VirtualDisplayWrite("tap", R08VirtualDisplayAction.Tap(12, 34))).apply {
+                if (includeRelease) add(R08VirtualDisplayWrite("release", R08VirtualDisplayAction.Release))
+            }
         val session = ControllerVirtualDisplaySession(capabilities, mutableWrites,
             listOf(R08VirtualDisplayRead("status")), parent) {
             constructions.incrementAndGet()
@@ -149,6 +174,22 @@ class ControllerVirtualDisplaySessionTest {
             val results = dispatcher.dispatchOwned(auth, batch, owner)
             if (forward) session.finishBatch(ticket, results)
             batch to results
+        }
+        fun steps(auth: TaskAuthorization, vararg ids: String, forward: Boolean = true): List<ToolDispatchResult> = work {
+            val registry = ToolRegistry()
+            session.registeredTools(owner, capabilities, auth).forEach { registry.register(it) }
+            val dispatcher = ToolDispatcher(registry.snapshot(), capabilities, ToolLedger(InMemoryToolLedgerStore()))
+            val batch = ids.map { id -> ToolInvocation(ToolCallId("$id-call"), R08VirtualDisplayCatalogLeaf.WRITE_TOOL,
+                JSONObject().put("step_id", id).toString()) }
+            val ticket = session.beginBatch(batch)
+            lastTicket = ticket
+            dispatcher.dispatchOwned(auth, batch, owner).also { if (forward) session.finishBatch(ticket, it) }
+        }
+        fun initialized(): TaskAuthorization {
+            endpoint.confirmInitialize = true
+            val auth = approve()
+            assertTrue(steps(auth, "start", "initialize").all { it.outcome is DispatchOutcome.Confirmed })
+            return auth
         }
         fun observe(parentDrained: Boolean = true) = work { session.observeCloseOnWorker(parentDrained) }
         override fun close() { session.close(); executor.shutdownNow() }
@@ -324,6 +365,168 @@ class ControllerVirtualDisplaySessionTest {
         assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
         assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
         assertEquals(1, f.parent.lease.releases.get())
+    }
+
+    @Test fun stoppedInitializedOwnerNeedsSeparateExactApprovalAndKnownReleaseDoesNotDrainLease() = Fixture().use { f ->
+        val auth = f.initialized()
+        assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) }) // no Stop yet
+        f.session.close()
+        repeat(2) { assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe()) }
+        assertEquals(0, f.endpoint.writes)
+        assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(false) })
+        val request = checkNotNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+        assertSame(request, f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+        assertSame(f.owner, request.review.plan.owner)
+        assertSame(f.capabilities, request.review.plan.capabilities)
+        assertEquals(f.parent.lease.generation, request.review.plan.generation)
+        assertEquals(listOf("release"), request.review.rows.map { it.operation })
+        assertEquals("{}", request.review.rows.single().effectiveParameters)
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.NOT_APPROVED,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+        assertTrue(f.session.answerCleanupFromUi(request, true))
+        assertFalse(f.session.answerCleanupFromUi(request, false))
+        assertEquals(0, f.endpoint.writes) // approval itself does not send
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, false) })
+        f.endpoint.confirmRelease = true
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.CONFIRMED,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+        assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+        assertEquals(1, f.endpoint.releaseIds.size)
+        val (intent, evidence) = f.parent.lease.journal.evidence.last()
+        assertEquals("host-cleanup-release-v1", intent.invocationId)
+        assertEquals(intent.operationId, f.endpoint.releaseIds.single())
+        assertEquals(R08VirtualDisplayEvidence.CONFIRMED, evidence)
+        assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
+        assertEquals(0, f.parent.lease.releases.get())
+        try { f.session.registeredTools(f.owner, f.capabilities, auth); fail("old authority revived") }
+        catch (_: IllegalStateException) { }
+        f.endpoint.drained()
+        assertEquals(ControllerVirtualDisplaySession.CloseResult.Drained, f.observe())
+        assertEquals(1, f.parent.lease.releases.get())
+        assertEquals(1, f.endpoint.starts)
+        assertEquals(1, f.endpoint.initializations)
+        assertEquals(0, f.shutdown.shutdowns)
+    }
+
+    @Test fun cleanupDenialAndForeignRequestNeverAuthorizeAnotherRetainedSession() {
+        Fixture().use { first -> Fixture().use { second ->
+            first.initialized(); second.initialized(); first.session.close(); second.session.close()
+            val a = checkNotNull(first.work { first.session.prepareInitializedCleanupOnWorker(true) })
+            val b = checkNotNull(second.work { second.session.prepareInitializedCleanupOnWorker(true) })
+            assertFalse(second.session.answerCleanupFromUi(a, true))
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.NOT_APPROVED,
+                second.work { second.session.releaseInitializedOnceOnWorker(a, true) })
+            assertTrue(first.session.answerCleanupFromUi(a, false))
+            assertFalse(first.session.answerCleanupFromUi(a, true))
+            assertNull(first.work { first.session.prepareInitializedCleanupOnWorker(true) })
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.NOT_APPROVED,
+                first.work { first.session.releaseInitializedOnceOnWorker(a, true) })
+            assertTrue(second.session.answerCleanupFromUi(b, false))
+            assertEquals(0, first.endpoint.writes + second.endpoint.writes)
+        } }
+    }
+
+    @Test fun cleanupUnknownAndLostCompletionAreRetainedWithoutAnyReplayEvenAfterPhysicalExit() {
+        listOf(false, true).forEach { lostCompletion -> Fixture().use { f ->
+            f.initialized(); f.session.close()
+            val request = checkNotNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            f.session.answerCleanupFromUi(request, true)
+            f.endpoint.confirmRelease = lostCompletion
+            f.parent.lease.journal.failCleanupComplete = lostCompletion
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNKNOWN,
+                f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+            f.endpoint.confirmRelease = true
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+                f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+            f.endpoint.drained()
+            assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
+            assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            assertEquals(1, f.endpoint.releaseIds.size)
+            assertEquals(0, f.parent.lease.releases.get())
+        } }
+    }
+
+    @Test fun preexistingCleanupClaimIsLookupOnlyNeverReplayedWithNewOperationId() = Fixture().use { f ->
+        f.initialized(); f.session.close()
+        val request = checkNotNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+        f.session.answerCleanupFromUi(request, true)
+        val plan = request.review.plan
+        val intent = plan.intent("host-cleanup-release-v1", plan.writes.single())
+        assertEquals(R08VirtualDisplayPermit.EXECUTE_ONCE, f.parent.lease.journal.claim(intent))
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNKNOWN,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+        assertEquals(0, f.endpoint.releaseIds.size)
+        assertEquals(R08VirtualDisplayEvidence.UNKNOWN, f.parent.lease.journal.evidence.last().second)
+        f.endpoint.drained()
+        assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
+        assertEquals(0, f.parent.lease.releases.get())
+    }
+
+    @Test fun originalReleaseResultAndPendingFinalFeedbackFenceCleanup() {
+        Fixture(includeRelease = true).use { f ->
+            val auth = f.initialized()
+            f.endpoint.confirmRelease = true
+            assertTrue(f.steps(auth, "release").single().outcome is DispatchOutcome.Confirmed)
+            f.session.close()
+            assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            assertEquals(1, f.endpoint.releaseIds.size)
+        }
+        Fixture(includeRelease = true).use { f ->
+            val auth = f.initialized()
+            assertTrue(f.steps(auth, "release").single().outcome is DispatchOutcome.Unknown)
+            f.session.close()
+            assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            assertEquals(1, f.endpoint.releaseIds.size)
+        }
+        Fixture().use { f ->
+            f.endpoint.confirmInitialize = true
+            f.steps(f.approve(), "start", "initialize", forward = false)
+            f.session.close()
+            assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            assertEquals(0, f.endpoint.writes)
+        }
+    }
+
+    @Test fun centrallyReplayedOriginalReleaseCannotBeReplacedByCleanup() = Fixture(includeRelease = true).use { f ->
+        f.initialized()
+        f.work {
+            val call = ToolInvocation(ToolCallId("replayed-release"), R08VirtualDisplayCatalogLeaf.WRITE_TOOL,
+                "{\"step_id\":\"release\"}")
+            val ticket = f.session.beginBatch(listOf(call))
+            // Actual central-ledger replay feedback: no local adapter execute callback.
+            f.session.finishBatch(ticket, listOf(ToolDispatchResult(call.id,
+                DispatchOutcome.Confirmed("{\"ok\":true}", false, replayed = true))))
+        }
+        f.session.close()
+        assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+        assertEquals(0, f.endpoint.releaseIds.size)
+    }
+
+    @Test fun cleanupInFlightFencesConcurrentObservationAndDuplicateExecution() = Fixture().use { f ->
+        f.initialized(); f.session.close()
+        val request = checkNotNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+        f.session.answerCleanupFromUi(request, true)
+        f.endpoint.confirmRelease = true
+        f.endpoint.releaseEntered = CountDownLatch(1)
+        f.endpoint.releaseContinue = CountDownLatch(1)
+        val extra = Executors.newSingleThreadExecutor()
+        try {
+            val sending = extra.submit<ControllerVirtualDisplaySession.CleanupResult> {
+                f.session.releaseInitializedOnceOnWorker(request, true)
+            }
+            assertTrue(f.endpoint.releaseEntered!!.await(5, TimeUnit.SECONDS))
+            f.endpoint.drained()
+            assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+                f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+            assertEquals(0, f.parent.lease.releases.get())
+            f.endpoint.releaseContinue!!.countDown()
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.CONFIRMED, sending.get(5, TimeUnit.SECONDS))
+        } finally { f.endpoint.releaseContinue!!.countDown(); extra.shutdownNow() }
+        assertEquals(1, f.endpoint.releaseIds.size)
     }
 
     @Test fun explicitUninitializedShutdownIsLookupGatedOnceAndNotDrainEvidence() = Fixture().use { f ->

@@ -1,6 +1,14 @@
 package app.daiyu.android.integration.tools
 
 import app.daiyu.android.ControllerVirtualDisplaySession
+import app.daiyu.android.ControllerVirtualCleanupAdapter
+import app.daiyu.android.assistants.AssistantProfile
+import app.daiyu.android.browser.*
+import app.daiyu.android.browser.host.*
+import app.daiyu.android.browser.session.*
+import app.daiyu.android.browser.bridge.*
+import app.daiyu.android.browser.network.BrowserCloseResult
+import app.daiyu.android.vdapproval.R08CleanupUiOwner
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.RunExecutionOwner
 import app.daiyu.android.domain.tools.*
@@ -64,8 +72,16 @@ class RunCatalogVirtualDisplaySessionTest {
                 AndroidVirtualDisplayOwnerHost.Lifecycle.UNKNOWN, false, null, 71, false)
             return true
         }
-        override fun initialize() = error("not expected")
-        override fun execute(id: String, operation: String, parameters: JSONObject) = error("not expected")
+        val cleanupSends = AtomicInteger()
+        override fun initialize() = OwnerReply(OwnerReply.Outcome.REPLIED, JSONObject()
+            .put("ok", true).put("initialized", true).put("displayId", 7)
+            .put("receipt", JSONObject().put("state", "STARTED")))
+        override fun execute(id: String, operation: String, parameters: JSONObject): OwnerReply {
+            check(operation == "release")
+            cleanupSends.incrementAndGet()
+            return OwnerReply(OwnerReply.Outcome.REPLIED, JSONObject().put("ok", true).put("released", true)
+                .put("receipt", JSONObject().put("state", "SUCCEEDED")))
+        }
         override fun lookup(id: String, operation: String, parameters: JSONObject) = OwnerReply(OwnerReply.Outcome.UNKNOWN)
         override fun lookupGeneration() = OwnerReply(OwnerReply.Outcome.UNKNOWN)
         override fun observe() = physical.lifecycle
@@ -78,11 +94,35 @@ class RunCatalogVirtualDisplaySessionTest {
         store: ToolLedgerStore = InMemoryToolLedgerStore(),
         direct: Boolean = false,
         val factoryGate: CountDownLatch? = null,
-        val captureGate: CountDownLatch? = null
+        val captureGate: CountDownLatch? = null,
+        initializedPlan: Boolean = false,
+        otherObservation: Boolean = false,
+        closeResource: (AutoCloseable) -> Unit = { it.close() }
     ) : AutoCloseable {
         val pool = Executors.newCachedThreadPool()
         val owner = runnerOwner(message)
-        val caps = SessionCapabilities("session", setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY, "audit", AskUserPlanTool.CAPABILITY))
+        val caps = SessionCapabilities(if (otherObservation) "run" else "session",
+            setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY, "audit", AskUserPlanTool.CAPABILITY,
+                RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY))
+        val otherDone = AtomicReference<((RunCatalogCloseResult) -> Unit)?>()
+        val browser = if (!otherObservation) null else {
+            val identity = BrowserRunIdentity(message.conversationId, message.runId, "profile", message.id)
+            val grant = BrowserGrant(BrowserOwner("run", BrowserOwnerKind.MAIN), BrowserAccess.READ_ONLY)
+            val preparation = BrowserRunPreparation.prepare(identity, BrowserSettings(BrowserAccess.READ_ONLY),
+                grant, setOf("list_tabs"))
+            val host = object : CatalogBrowserBinding.Host {
+                override val session = BrowserToolSession(grant, BrowserSessionRegistry(), object : BrowserTabLifecycle {
+                    override fun create(lease: BrowserTabLease) {}
+                    override fun close(lease: BrowserTabLease) {}
+                }, object : BrowserExecutionPort {
+                    override fun execute(command: BrowserCommand, lease: BrowserTabLease) = BrowserExecutionResult("test")
+                })
+                override fun closeWithResult(): BrowserCloseResult { session.close(); return BrowserCloseResult(true) }
+                override fun closeStatus() = BrowserCloseResult(true)
+            }
+            CatalogBrowserBinding.create(AssistantProfile("profile", "Test", ""),
+                preparation.confirm(preparation.preview)) { host }
+        }
         val lease = Lease()
         val endpoint = Endpoint()
         val constructions = AtomicInteger()
@@ -104,7 +144,9 @@ class RunCatalogVirtualDisplaySessionTest {
         val retained = mutableListOf<ControllerVirtualDisplaySession>()
         lateinit var leaf: R08VirtualDisplayCatalogLeaf
         val session: ControllerVirtualDisplaySession = ControllerVirtualDisplaySession(caps,
-            listOf(R08VirtualDisplayWrite("start", R08VirtualDisplayAction.Start)), emptyList(),
+            listOf(R08VirtualDisplayWrite("start", R08VirtualDisplayAction.Start)) +
+                if (initializedPlan) listOf(R08VirtualDisplayWrite("initialize", R08VirtualDisplayAction.Initialize))
+                else emptyList(), emptyList(),
             object : ControllerVirtualDisplaySession.Parent {
                 override fun reserve(owner: RunExecutionOwner, capabilities: SessionCapabilities): ControllerVirtualDisplaySession.Lease {
                     assertSame(this@Fixture.owner, owner); assertSame(caps, capabilities)
@@ -150,6 +192,8 @@ class RunCatalogVirtualDisplaySessionTest {
             }
         })
         val tools = RunCatalogTools(registry, caps, ToolLedger(store), message.conversationId, message.runId,
+            browser = browser, observeBrowserClose = { _, done -> check(otherDone.compareAndSet(null, done)) },
+            closeResource = closeResource,
             virtualDisplaySession = if (direct) session else null,
             virtualDisplaySessionFactory = if (direct) null else { actual, actualCaps ->
                 assertSame(owner, actual); assertSame(caps, actualCaps)
@@ -169,6 +213,14 @@ class RunCatalogVirtualDisplaySessionTest {
         fun prepare() = work { tools.bindOwner(owner); tools.definitions }
         fun step(id: String = "start-call") = ToolInvocation(ToolCallId(id), R08VirtualDisplayCatalogLeaf.WRITE_TOOL, "{\"step_id\":\"start\"}")
         fun audit() = ToolInvocation(ToolCallId("audit-call"), "audit", "{}")
+        fun initialize() {
+            prepare()
+            assertTrue(dispatch(listOf(step())).single().outcome is DispatchOutcome.Confirmed)
+            val call = ToolInvocation(ToolCallId("initialize-call"), R08VirtualDisplayCatalogLeaf.WRITE_TOOL,
+                """{"step_id":"initialize"}""")
+            assertTrue(dispatch(listOf(call)).single().outcome is DispatchOutcome.Confirmed)
+        }
+        fun cleanupClaims() = lease.journal.claims.values.count { it.invocationId == "host-cleanup-release-v1" }
         fun dispatch(calls: List<ToolInvocation>, start: Boolean = false, cancelled: () -> Boolean = { false }) = work {
             if (start) (tools.start(message, calls, cancelled) as ReceiptBatchStart.Completed).receipts
             else tools.execute(message, calls, cancelled)
@@ -382,6 +434,236 @@ class RunCatalogVirtualDisplaySessionTest {
         assertEquals(RunCatalogCloseResult.Drained, f.observe())
         assertEquals(RunCatalogCloseResult.Drained, closed.get())
         assertEquals(0, f.factories.get()); assertEquals(0, f.reserves.get()); assertEquals(0, f.constructions.get())
+    }
+
+    private fun assertCleanupPending(f: Fixture, request: app.daiyu.android.vdapproval.R08CleanupApprovalRequest,
+        approve: Boolean = true) {
+        assertFalse(f.tools.virtualDisplayCleanupLocallyDrained(f.session))
+        assertNull(f.work { f.tools.prepareVirtualDisplayCleanupOnWorker(f.session, parentDrained = true) })
+        if (approve) assertTrue(f.session.answerCleanupFromUi(request, true))
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+            f.work { f.tools.releaseVirtualDisplayCleanupOnWorker(f.session, request, parentDrained = true) })
+        assertEquals(0, f.cleanupClaims()); assertEquals(0, f.endpoint.cleanupSends.get())
+        assertEquals(0, f.endpoint.observations.get()); assertEquals(0, f.lease.releases.get())
+    }
+
+    @Test fun runnerReturnedButCatalogStopStillRunningRejectsBothCleanupStagesWithoutPhysicalProbe() {
+        val stopEntered = CountDownLatch(1)
+        val stopContinue = CountDownLatch(1)
+        Fixture(initializedPlan = true, closeResource = {
+            stopEntered.countDown(); check(stopContinue.await(5, TimeUnit.SECONDS)); it.close()
+        }).use { f ->
+            f.initialize()
+            // Simulate an already approved request from the old direct-session seam. Even this
+            // cannot bypass the catalog send gate while its other stop actions are unfinished.
+            f.session.close()
+            val request = checkNotNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            val closed = AtomicReference<RunCatalogCloseResult?>()
+            val closing = f.async { f.tools.closeWithResult { closed.set(it) } }
+            try {
+                assertTrue(stopEntered.await(5, TimeUnit.SECONDS))
+                // runnerOwner's real Runner has returned; parentDrained=true is not sufficient.
+                assertCleanupPending(f, request)
+                assertNull(closed.get())
+            } finally { stopContinue.countDown() }
+            closing.get(5, TimeUnit.SECONDS)
+            assertTrue(f.tools.virtualDisplayCleanupLocallyDrained(f.session))
+            // Approval already consumed preparation; no second request is manufactured.
+            assertNull(f.work { f.tools.prepareVirtualDisplayCleanupOnWorker(f.session, true) })
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.CONFIRMED,
+                f.work { f.tools.releaseVirtualDisplayCleanupOnWorker(f.session, request, true) })
+            assertEquals(1, f.cleanupClaims()); assertEquals(1, f.endpoint.cleanupSends.get())
+            assertNull(closed.get()) // Do NOT wait for this final callback to authorize cleanup.
+            assertEquals(0, f.endpoint.observations.get()); assertEquals(0, f.lease.releases.get())
+        }
+    }
+
+    @Test fun runnerReturnedButOtherResourceObservationPendingRejectsBothStagesThenAllowsCleanupBeforeFinalDrain() =
+        Fixture(initializedPlan = true, otherObservation = true).use { f ->
+            f.initialize(); f.session.close()
+            val request = checkNotNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            val closed = AtomicReference<RunCatalogCloseResult?>()
+            f.tools.closeWithResult { closed.set(it) }
+            assertNotNull(f.otherDone.get()); assertCleanupPending(f, request)
+            f.otherDone.get()!!.invoke(RunCatalogCloseResult.Drained)
+            assertTrue(f.tools.virtualDisplayCleanupLocallyDrained(f.session))
+            // Approval already consumed preparation; no second request is manufactured.
+            assertNull(f.work { f.tools.prepareVirtualDisplayCleanupOnWorker(f.session, true) })
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.CONFIRMED,
+                f.work { f.tools.releaseVirtualDisplayCleanupOnWorker(f.session, request, true) })
+            assertEquals(1, f.endpoint.cleanupSends.get()); assertNull(closed.get())
+            assertEquals(0, f.endpoint.observations.get()); assertEquals(0, f.lease.releases.get())
+        }
+
+    @Test fun stopFailureOrOtherObservationUnknownPermanentlyRejectsCleanupDespiteRunnerReturn() {
+        for (failedStop in listOf(false, true)) Fixture(initializedPlan = true,
+            otherObservation = !failedStop, closeResource = {
+                it.close(); if (failedStop) throw IOException("test stop failure")
+            }).use { f ->
+            f.initialize(); f.session.close()
+            val request = checkNotNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            val closed = AtomicReference<RunCatalogCloseResult?>()
+            f.tools.closeWithResult { closed.set(it) }
+            if (!failedStop) f.otherDone.get()!!.invoke(RunCatalogCloseResult.Unknown("test_observe_failed"))
+            assertTrue(closed.get() is RunCatalogCloseResult.Unknown)
+            repeat(2) { assertCleanupPending(f, request, approve = it == 0) }
+            assertSame(f.session, f.tools.virtualDisplaySessionForRetention())
+        }
+    }
+
+    @Test fun adapterRechecksParentAtPublicationAnswerAndQueuedSendWithoutConsumingAttempt() =
+        Fixture(initializedPlan = true).use { f ->
+            f.initialize(); f.tools.closeWithResult { }
+            val owner = R08CleanupUiOwner()
+            val parentReady = java.util.concurrent.atomic.AtomicBoolean(true)
+            val adapter = ControllerVirtualCleanupAdapter(f.tools, f.session, owner,
+                { parentReady.get() }, { owner })
+            val request = checkNotNull(f.work { adapter.prepareOnWorker() })
+            assertSame(f.owner, request.review.plan.owner)
+            assertSame(f.caps, request.review.plan.capabilities)
+            assertEquals(f.lease.generation, request.review.plan.generation)
+            parentReady.set(false)
+            assertFalse(adapter.canPublish(request)); assertFalse(adapter.answerFromUi(request, true))
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+                f.work { adapter.releaseOnWorker(request) })
+            parentReady.set(true)
+            assertTrue(adapter.canPublish(request)); assertTrue(adapter.answerFromUi(request, true))
+            parentReady.set(false)
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+                f.work { adapter.releaseOnWorker(request) })
+            assertEquals(0, f.cleanupClaims()); assertEquals(0, f.endpoint.cleanupSends.get())
+            parentReady.set(true)
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.CONFIRMED,
+                f.work { adapter.releaseOnWorker(request) })
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+                f.work { adapter.releaseOnWorker(request) })
+            assertEquals(1, f.endpoint.cleanupSends.get()); assertEquals(0, f.endpoint.observations.get())
+            adapter.close()
+        }
+
+    @Test fun oldUiOwnerAndQueuedWorkerCannotPublishAnswerOrSendIntoReplacementVisit() {
+        for (accepted in listOf(false, true)) Fixture(initializedPlan = true).use { f ->
+            f.initialize(); f.tools.closeWithResult { }
+            val oldOwner = R08CleanupUiOwner()
+            val current = AtomicReference(oldOwner)
+            val adapter = ControllerVirtualCleanupAdapter(f.tools, f.session, oldOwner, { true }, { current.get() })
+            val request = checkNotNull(f.work { adapter.prepareOnWorker() })
+            if (accepted) assertTrue(adapter.answerFromUi(request, true))
+            val queued = CountDownLatch(1)
+            val resume = CountDownLatch(1)
+            val worker = f.async {
+                queued.countDown(); check(resume.await(5, TimeUnit.SECONDS))
+                adapter.releaseOnWorker(request)
+            }
+            try {
+                assertTrue(queued.await(5, TimeUnit.SECONDS))
+                // This owner is independent of text/editor identity; do not clear a draft/run.
+                oldOwner.close(); current.set(R08CleanupUiOwner())
+                assertFalse(adapter.canPublish(request)); assertFalse(adapter.answerFromUi(request, true))
+                assertNull(f.work { adapter.prepareOnWorker() })
+            } finally { resume.countDown() }
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE, worker.get(5, TimeUnit.SECONDS))
+            assertEquals(0, f.cleanupClaims()); assertEquals(0, f.endpoint.cleanupSends.get())
+            assertEquals(0, f.endpoint.observations.get()); assertEquals(0, f.lease.releases.get())
+            assertTrue(current.get().isActive)
+            adapter.close(); assertTrue(current.get().isActive)
+        }
+    }
+
+    @Test fun stalePreparationCompletionCannotDenyTheNewVisitOrPublishItsRequest() = Fixture(initializedPlan = true).use { f ->
+        f.initialize(); f.tools.closeWithResult { }
+        val oldOwner = R08CleanupUiOwner()
+        val current = AtomicReference(oldOwner)
+        val afterFreeze = CountDownLatch(1)
+        val finishOld = CountDownLatch(1)
+        val probes = AtomicInteger()
+        val old = ControllerVirtualCleanupAdapter(f.tools, f.session, oldOwner, {
+            // Test-only timing injection after Session froze the request; production predicates
+            // are pure nonblocking snapshots. No catalog/session/adapter lock is held here.
+            if (probes.incrementAndGet() == 2) {
+                afterFreeze.countDown(); check(finishOld.await(5, TimeUnit.SECONDS))
+            }
+            true
+        }, { current.get() })
+        val preparing = f.async { old.prepareOnWorker() }
+        try {
+            assertTrue(afterFreeze.await(5, TimeUnit.SECONDS))
+            old.close() // no published request yet; must neither block nor decide on worker's behalf
+            val newOwner = R08CleanupUiOwner()
+            current.set(newOwner)
+            val newer = ControllerVirtualCleanupAdapter(f.tools, f.session, newOwner, { true }, { current.get() })
+            val request = checkNotNull(f.work { newer.prepareOnWorker() })
+            assertTrue(newer.canPublish(request)); assertTrue(newer.answerFromUi(request, true))
+            finishOld.countDown()
+            assertNull(preparing.get(5, TimeUnit.SECONDS))
+            assertFalse(old.answerFromUi(request, false))
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.CONFIRMED,
+                f.work { newer.releaseOnWorker(request) })
+            assertEquals(1, f.cleanupClaims()); assertEquals(1, f.endpoint.cleanupSends.get())
+            newer.close()
+        } finally { finishOld.countDown() }
+    }
+
+    @Test fun repeatedCloseMustWaitForDelayedOriginalDenialBeforePublishingReplacementOwner() = Fixture(initializedPlan = true).use { f ->
+        f.initialize(); f.tools.closeWithResult { }
+        val oldOwner = R08CleanupUiOwner()
+        val current = AtomicReference(oldOwner)
+        val old = ControllerVirtualCleanupAdapter(f.tools, f.session, oldOwner, { true }, { current.get() })
+        val request = checkNotNull(f.work { old.prepareOnWorker() }) // published, still unanswered
+        val sessionLock = ControllerVirtualDisplaySession::class.java.getDeclaredField("lock")
+            .apply { isAccessible = true }.get(f.session)
+        val locked = CountDownLatch(1)
+        val resumeDenial = CountDownLatch(1)
+        val blocker = f.async {
+            synchronized(sessionLock) {
+                locked.countDown(); check(resumeDenial.await(5, TimeUnit.SECONDS))
+            }
+        }
+        assertTrue(locked.await(5, TimeUnit.SECONDS))
+        val firstClose = f.async { old.close() }
+        val replacementPublished = CountDownLatch(1)
+        val replacementOwner = R08CleanupUiOwner()
+        try {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (oldOwner.isActive && System.nanoTime() < deadline) Thread.yield()
+            assertFalse(oldOwner.isActive)
+            // A disposal close is already stalled on the Session's answer lock. Main's explicit
+            // replacement close MUST still wait, not return early just because closed=true.
+            val secondCloseStarted = CountDownLatch(1)
+            val replacing = f.async {
+                secondCloseStarted.countDown()
+                old.close()
+                current.set(replacementOwner)
+                replacementPublished.countDown()
+                val newer = ControllerVirtualCleanupAdapter(f.tools, f.session, replacementOwner, { true }, { current.get() })
+                newer.prepareOnWorker()
+            }
+            assertTrue(secondCloseStarted.await(5, TimeUnit.SECONDS))
+            assertFalse("new owner must not publish before old denial completes",
+                replacementPublished.await(150, TimeUnit.MILLISECONDS))
+            assertSame(oldOwner, current.get())
+            resumeDenial.countDown()
+            blocker.get(5, TimeUnit.SECONDS); firstClose.get(5, TimeUnit.SECONDS)
+            // Published old request was denied synchronously; it cannot be inherited then
+            // unexpectedly rejected by a delayed old close after the new page has shown it.
+            assertNull(replacing.get(5, TimeUnit.SECONDS))
+            assertSame(replacementOwner, current.get()); assertTrue(replacementOwner.isActive)
+            assertFalse(f.session.answerCleanupFromUi(request, true))
+            assertEquals(0, f.cleanupClaims()); assertEquals(0, f.endpoint.cleanupSends.get())
+            assertEquals(0, f.endpoint.observations.get()); assertEquals(0, f.lease.releases.get())
+        } finally { resumeDenial.countDown() }
+    }
+
+    @Test fun invalidatedUiAtSessionAdmissionDoesNotConsumeTheFixedJournalIntent() = Fixture(initializedPlan = true).use { f ->
+        f.initialize(); f.tools.closeWithResult { }
+        val request = checkNotNull(f.work { f.tools.prepareVirtualDisplayCleanupOnWorker(f.session, true) })
+        assertTrue(f.session.answerCleanupFromUi(request, true))
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+            f.work { f.tools.releaseVirtualDisplayCleanupOnWorker(f.session, request, true) { false } })
+        assertEquals(0, f.cleanupClaims())
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.CONFIRMED,
+            f.work { f.tools.releaseVirtualDisplayCleanupOnWorker(f.session, request, true) { true } })
+        assertEquals(1, f.cleanupClaims()); assertEquals(1, f.endpoint.cleanupSends.get())
     }
 
     @Test fun releaseFailureIsUnknownRetainedAndNeverRetried() = Fixture().use { f ->

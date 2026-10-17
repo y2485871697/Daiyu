@@ -52,6 +52,9 @@ import app.daiyu.android.R
 import app.daiyu.android.data.repository.ModelUsageModelUi
 import app.daiyu.android.data.repository.ModelUsageSnapshot
 import app.daiyu.android.data.repository.UsageStatsSnapshot
+import app.daiyu.android.data.repository.RecordedUsageProjection
+import app.daiyu.android.data.repository.formatReportedUsage
+import app.daiyu.android.domain.usage.RecordedUsageSummary
 import app.daiyu.android.data.repository.formatStatCount
 import app.daiyu.android.data.repository.formatTokenCount
 import app.daiyu.android.data.repository.heatmapAlpha
@@ -114,9 +117,9 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
             }
         } else if (selectedTab == UsageStatsTab.Models) {
             item(key = "model-usage") {
-                ModelUsagePane(
-                    usage = stats.modelUsage,
-                    accountingAvailable = stats.tokenAccountingAvailable,
+                RecordedUsagePane(
+                    projection = stats.recordedProjection,
+                    modelView = true,
                     modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp),
                 )
             }
@@ -785,6 +788,72 @@ private fun HeatmapCell(alpha: Float, sizeDp: Int, unknown: Boolean = false) {
 
 @Composable
 private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatCard(modifier = Modifier.weight(1f), icon = Icons.Rounded.Forum,
+                label = "当前保留会话",
+                value = if (stats.currentDataAvailable) formatStatCount(stats.currentConversations.toLong()) else "—")
+            StatCard(modifier = Modifier.weight(1f), icon = Icons.Rounded.ChatBubbleOutline,
+                label = "当前保留消息",
+                value = if (stats.currentDataAvailable) formatStatCount(stats.currentMessages.toLong()) else "—")
+        }
+        RecordedUsagePane(stats.recordedProjection, modelView = false,
+            modifier = Modifier.padding(bottom = 12.dp))
+    }
+}
+
+@Composable
+private fun RecordedUsagePane(
+    projection: RecordedUsageProjection?,
+    modelView: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(if (modelView) "历史提供方 / 模型未知" else "当前保留记录 · 实测用量",
+                    style = MiuixTheme.textStyles.headline1)
+                Text(if (projection == null) "统计读取不可用；— 不表示零用量。" else
+                    "仅计已持久化的每 request 最新 Usage 快照，不是终身统计或账单。" +
+                        "输入包含缓存读取，缓存不再加到总量；缺失不填零。",
+                    style = MiuixTheme.textStyles.body2)
+                if (modelView) Text("记录未保存历史提供方、模型及用量时间；不使用当前设置或子任务 profile 反推，不提供日期筛选。",
+                    style = MiuixTheme.textStyles.body2)
+                projection?.let { Text(it.coverageDescription, style = MiuixTheme.textStyles.body2) }
+            }
+        }
+        if (projection != null) {
+            // Unknown historical model is one explicitly unattributed bucket, not today's model.
+            if (modelView) RecordedSummaryCard("未归属历史模型 · 主请求 + 子任务", projection.combined)
+            else {
+                RecordedSummaryCard("主请求", projection.main)
+                RecordedSummaryCard("子任务（归父）", projection.child)
+                RecordedSummaryCard("合计（不重复计缓存）", projection.combined)
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecordedSummaryCard(title: String, summary: RecordedUsageSummary) {
+    Card {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(title, style = MiuixTheme.textStyles.headline1)
+            ModelMetricRow("已记录 request 快照", formatStatCount(summary.requestSnapshotCount))
+            // Values include per-field report coverage; independent partial fields cannot safely
+            // produce a fresh-input, cache-hit-rate, total, average or cache-creation value.
+            Text("输入（含缓存）：${formatReportedUsage(summary.input)}", style = MiuixTheme.textStyles.body2)
+            Text("输出：${formatReportedUsage(summary.output)}", style = MiuixTheme.textStyles.body2)
+            Text("缓存读取：${formatReportedUsage(summary.cached)}", style = MiuixTheme.textStyles.body2)
+            Text("缓存写入 / 独立推理 / 费用：—（未记录）", style = MiuixTheme.textStyles.body2)
+        }
+    }
+}
+
+// Retain the previous projection/UI algorithm for an explicitly attributed future source.
+// Production must not consume its zero-default fields as historical provider observations.
+@Composable
+private fun LegacyStatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),

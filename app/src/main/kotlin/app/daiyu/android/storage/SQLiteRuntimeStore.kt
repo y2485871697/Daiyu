@@ -19,9 +19,23 @@ import java.util.UUID
 internal class SQLiteRuntimeStore private constructor(
     private val database: ConversationDatabase, private val path: String,
     private val file: RandomAccessFile, private val lock: FileLock
-) : AtomicSupplementRuntimeStore, AutoCloseable {
+) : AtomicSupplementRuntimeStore, PreparationRuntimeStore, AutoCloseable {
     private val processOwner = UUID.randomUUID().toString()
     private val transactions = DatabaseTransactions { database.writableDatabase }
+    private val preparations = app.daiyu.android.context.SQLitePreparationRuntime(transactions, processOwner)
+
+    /** No DB write until the bound summary port claims its one actual request. */
+    @Synchronized internal fun summaryPreparation(conversation: ConversationId, run: RunId, message: MessageId,
+        cancellation: app.daiyu.android.context.ContextPreparationCancellation): app.daiyu.android.context.RuntimeSummaryPreparation {
+        available(); check(recovered)
+        return preparations.create(conversation, run, message, cancellation) { work ->
+            synchronized(this) { available(); check(recovered); work() }
+        }
+    }
+    @Synchronized override fun preparationUsage(initial: Message): List<RequestUsageCheckpoint> {
+        available(); check(recovered)
+        return transactions.run { db -> preparations.seed(db, initial) }
+    }
     private var recovered = false
     private var closed = false
     private fun available() { check(!closed && lock.isValid) { "运行存储所有权已释放" } }
@@ -53,6 +67,7 @@ internal class SQLiteRuntimeStore private constructor(
         transactions.run { db ->
             check(recoverable(db) == priors) { "恢复准备后检查点已变化" }
             priors.forEach { reconcile(db, it) }
+            preparations.recover(db)
             database.recoverUncheckpointed(db)
             SQLiteChildTaskStore.recoverPending(db)
         }
@@ -77,7 +92,10 @@ internal class SQLiteRuntimeStore private constructor(
                     c.getString(4) == m.conversationId.value && c.getString(5) == m.runId.value) { "拒绝过期或异主检查点" }
                 c.getLong(1)
             } }
-            if (prior == null) check(checkpoint.revision == 1L) { "首个检查点版本必须为1" }
+            if (prior == null) {
+                check(checkpoint.revision == 1L) { "首个检查点版本必须为1" }
+                preparations.transfer(db, checkpoint)
+            } else preparations.preserve(requireNotNull(read(db, m.id.value)).value, checkpoint)
             val persisted = database.runtimeMessage(db, m)
             check(persisted.status == RunStatus.RUNNING) { "消息已终结，不允许接管运行" }
             if (supplement != null) database.insertRuntimeSupplement(db, m, supplement)

@@ -23,6 +23,6 @@ fun childRequestUsage(task: ChildTaskRecord, checkpoint: RunCheckpoint): List<At
         require(usage.request.owner == checkpoint.owner && usage.request.operation != RequestOperation.OPEN)
         AttributedRequestUsage(task.owner.conversationId, task.owner.parentRunId, task.parentMessageId,
             task.owner.childRunId, task.owner.assistantMessageId,
-            UsageOrigin.Child(task.owner.childRunId, task.profileId, task.owner.taskGroupId), usage.request, usage.snapshot)
+            UsageOrigin.Child(task.owner.childRunId, task.profileId, task.owner.taskGroupId), usage.request, usage.snapshot, usage.source)
     }
 }

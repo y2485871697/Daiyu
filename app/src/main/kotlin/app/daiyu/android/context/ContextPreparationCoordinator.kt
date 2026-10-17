@@ -22,6 +22,11 @@ fun interface CompressionPolicyResolver {
  * Null means unavailable, never "use the main chat model". Resolution must not open network I/O. */
 fun interface SummaryModelResolver {
     fun resolve(binding: SummaryModelBinding): BoundSummaryModel?
+    /** Production must implement this overload; legacy fake resolvers may ignore an unused port. */
+    fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?): BoundSummaryModel? {
+        check(usage == null) { "summary_resolver_has_no_durable_usage_binding" }
+        return resolve(binding)
+    }
 }
 
 /** Parent-owned one-way cancellation, including active summary I/O (not merely a polling flag). */
@@ -99,7 +104,8 @@ class ContextPreparationCoordinator(
         this(service, settings::snapshot, policies, models)
 
     fun freeze(conversationId: ConversationId, pendingMessages: List<Message>,
-        cancellation: ContextPreparationCancellation = ContextPreparationCancellation()): FrozenContextPreparation {
+        cancellation: ContextPreparationCancellation = ContextPreparationCancellation(),
+        summaryUsage: BoundSummaryUsagePort? = null): FrozenContextPreparation {
         cancellation.check()
         val pending = freezeContextMessages(pendingMessages)
         require(pending.all { it.conversationId == conversationId }) { "待发送消息不属于当前会话" }
@@ -110,7 +116,7 @@ class ContextPreparationCoordinator(
         require(policy.enabled == settings.automaticWithKnownWindow)
         require(policy.contextTokens == settings.contextWindowTokens && policy.reserveTokens == settings.reserveTokens)
         val binding = settings.summaryModel
-        val bound = if (policy.enabled && binding != null) models.resolve(binding) else null
+        val bound = if (policy.enabled && binding != null) models.resolve(binding, summaryUsage) else null
         require(bound == null || bound.binding == binding) { "摘要模型绑定已变化；未回退主模型" }
         cancellation.check()
         return FrozenContextPreparation(this, conversationId, settings, policy, pending,

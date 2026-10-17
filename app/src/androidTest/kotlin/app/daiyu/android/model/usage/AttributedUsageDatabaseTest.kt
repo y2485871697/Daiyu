@@ -90,6 +90,18 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
         assertEquals(10L, read().summary.child.input.reportedTokens); assertEquals(1L, read().summary.child.input.unknownRequestCount)
         rejects { runtime.childUsage.record(child, first) }
     }
+    fun testChildSummaryPurposeIsExplicitDurableAndCannotBeRelabelledByRequestPrefix() {
+        val owner = parent(); val child = task(owner)
+        val base = checkpoint(child)
+        val summary = base.copy(usage = base.usage.map { it.copy(source = UsageRequestSource.SUMMARY) })
+        runtime.childUsage.record(child, summary)
+        val row = read(owner.conversationId).requests.single()
+        assertEquals(UsageRequestSource.SUMMARY, row.source)
+        assertEquals(owner.runId.value, row.parentRunId)
+        assertTrue(row.origin is app.daiyu.android.domain.usage.UsageOrigin.Child)
+        rejects { runtime.childUsage.record(child, base.copy(revision = 2)) }
+        assertEquals(UsageRequestSource.SUMMARY, read().requests.single().source)
+    }
     fun testWholeSnapshotRollsBackOnSecondRequestWriteFailure() {
         val child = task(parent()); val first = checkpoint(child); val second = first.request!!.copy(requestId = "second")
         database.writableDatabase.execSQL("CREATE TRIGGER usage_insert_failure BEFORE INSERT ON child_request_usage" +
@@ -147,7 +159,7 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
         app.daiyu.android.removeAssistantSchemaForLegacyFixture(database.writableDatabase)
         database.writableDatabase.version = 8; database.close()
         runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
-        assertEquals(14, database.readableDatabase.version)
+        assertEquals(16, database.readableDatabase.version)
         assertEquals(1, read().childCoverage.tasksWithoutReportedUsage)
         assertNull(read().summary.child.input.reportedTokens)
     }

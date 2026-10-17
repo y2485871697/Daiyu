@@ -83,10 +83,14 @@ class ContextServiceTest : InstrumentationTestCase() {
         val row = UsageRecord("receipt", "task", owner.value, 100, 20, 30, 4)
         service.recordUsage(row); service.recordUsage(row)
         reject { service.recordUsage(row.copy(branchId = other.value)) }
-        assertEquals(120L, service.usage(owner.value, "task").totalTokens)
-        assertEquals(0L, service.usage(other.value).totalTokens)
+        // Legacy receipt durability remains tested; it neither authorizes a run nor supplies
+        // authoritative counters to the production query.
+        reject { service.usage(owner.value, "task") }
+        assertEquals(0L, service.usage(owner.value).requests)
+        assertNull(service.usage(owner.value).totalTokens)
+        assertNull(service.usage(other.value).totalTokens)
         service.recordUsage(UsageRecord("unknown", "task", owner.value, null, null))
-        assertTrue(service.usage(owner.value, "task").incomplete)
+        assertTrue(service.usage(owner.value).incomplete)
     }
 
     fun testKnownOversizeContextIsRejectedEvenWithoutAutomaticCompression() {

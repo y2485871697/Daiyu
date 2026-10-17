@@ -55,14 +55,20 @@ class ProviderSummaryModelResolver internal constructor(
     private val lookup: (SummaryModelBinding) -> SummaryProviderConfiguration?,
     private val connect: (URL) -> HttpsURLConnection,
     private val deadlines: SummaryDeadlineScheduler,
+    private val usagePort: BoundSummaryUsagePort? = null,
 ) : SummaryModelResolver {
     constructor(lookup: (SummaryModelBinding) -> SummaryProviderConfiguration?) : this(
         lookup, { it.openConnection() as HttpsURLConnection }, SystemSummaryDeadlines)
+    constructor(lookup: (SummaryModelBinding) -> SummaryProviderConfiguration?,
+        usagePort: BoundSummaryUsagePort) : this(
+        lookup, { it.openConnection() as HttpsURLConnection }, SystemSummaryDeadlines, usagePort)
 
-    override fun resolve(binding: SummaryModelBinding): BoundSummaryModel? {
+    override fun resolve(binding: SummaryModelBinding): BoundSummaryModel? = resolve(binding, usagePort)
+
+    override fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?): BoundSummaryModel? {
         val configuration = lookup(binding) ?: return null
         require(configuration.binding == binding) { "摘要模型绑定不匹配；未回退主模型" }
-        val adapter = ProviderSummaryModelPort(configuration, connect, deadlines)
+        val adapter = ProviderSummaryModelPort(configuration, connect, deadlines, usage)
         return BoundSummaryModel(binding, adapter, configuration.contextWindowTokens, configuration.inputBudgetTokens) {
             SummaryRequestDeadline(configuration.deadlineMillis, deadlines::nanoTime)
         }
@@ -96,6 +102,7 @@ internal class ProviderSummaryModelPort(
     private val configuration: SummaryProviderConfiguration,
     private val connect: (URL) -> HttpsURLConnection,
     private val deadlines: SummaryDeadlineScheduler,
+    private val usagePort: BoundSummaryUsagePort? = null,
 ) : ModelPort, SummaryModelTransport {
     // Legacy direct callers still get a deadline before any adapter preparation.
     override fun open(history: List<Message>): ModelSession = openWithoutTools(history,
@@ -118,6 +125,12 @@ internal class ProviderSummaryModelPort(
         deadline.check()
         val frozen = freezeContextMessages(history)
         deadline.check()
+        usagePort?.let { port ->
+            require(frozen.all { it.conversationId.value == port.parent.conversationId }) {
+                "summary_usage_parent_conversation_mismatch"
+            }
+            port.claim() // A bound host request/attempt cannot silently open another POST.
+        }
         val provider = SummaryProviderFactory.create(configuration.provider, configuration.maxOutputTokens,
             INSTRUCTIONS) { url ->
             // Provider serialization also consumes preparation time. Never connect after it expires,
@@ -131,7 +144,7 @@ internal class ProviderSummaryModelPort(
         val session = provider.open(frozen, emptyList<ToolDefinition>())
         try {
             deadline.check()
-            return TerminalSession(session, configuration.provider.protocol, deadline, deadlines)
+            return TerminalSession(session, configuration.provider.protocol, deadline, deadlines, usagePort)
         } catch (failure: Exception) {
             runCatching { session.cancel() }
             throw failure
@@ -152,6 +165,7 @@ private class TerminalSession(
     private val protocol: ProviderProtocol,
     private val deadline: SummaryRequestDeadline,
     private val deadlines: SummaryDeadlineScheduler,
+    private val usagePort: BoundSummaryUsagePort?,
 ) : ModelSession {
     private val started = AtomicBoolean(false)
     private val cancelled = AtomicBoolean(false)
@@ -184,6 +198,9 @@ private class TerminalSession(
                 when (event) {
                     is ModelEvent.ToolReady -> error("摘要模型请求了工具；未执行，保留原文")
                     is ModelEvent.ProtocolOutput -> terminal = event.items.toList()
+                    // Usage is not summary prose. An explicitly host-bound port can persist it
+                    // under the admitted parent request/attempt, including corrections to null.
+                    is ModelEvent.Usage -> usagePort?.observe(event)
                     else -> Unit
                 }
             }

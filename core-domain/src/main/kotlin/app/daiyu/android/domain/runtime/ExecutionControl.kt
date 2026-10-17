@@ -21,7 +21,17 @@ data class RequestCheckpoint(val requestId: String, val attemptId: String,
 
 /** Latest cumulative snapshot received for one host request, not a billing receipt.
  * Resume replaces this same request's entire snapshot, including unknown fields. */
-data class RequestUsageCheckpoint(val request: RequestCheckpoint, val snapshot: ModelEvent.Usage)
+enum class UsageRequestSource { MAIN, SUMMARY }
+
+data class RequestUsageCheckpoint(val request: RequestCheckpoint, val snapshot: ModelEvent.Usage,
+    val source: UsageRequestSource = UsageRequestSource.MAIN)
+
+/** A send-preparation reservation is not an execution owner or a fabricated checkpoint.
+ * Read its sealed usage before the first real checkpoint. The same store must atomically
+ * transfer it on revision 1, and reject cancelled/unsealed reservations. No network/recovery. */
+interface PreparationRuntimeStore : AtomicRuntimeStore {
+    fun preparationUsage(initial: Message): List<RequestUsageCheckpoint>
+}
 
 /** Immutable, platform-serializable checkpoint. No credentials or transport objects belong here. */
 data class RunCheckpoint(

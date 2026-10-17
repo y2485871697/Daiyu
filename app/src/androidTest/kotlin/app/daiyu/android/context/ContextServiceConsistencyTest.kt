@@ -38,6 +38,13 @@ class ContextServiceConsistencyTest : InstrumentationTestCase() {
     private fun rows(): Long = db.readableDatabase.rawQuery("SELECT count(*) FROM context_usage", null).use {
         it.moveToFirst(); it.getLong(0)
     }
+    private fun legacyRows(): List<UsageRecord> = db.readableDatabase.rawQuery(
+        "SELECT request_id,run_id,branch_id,input_tokens,output_tokens,cached_tokens,reasoning_tokens FROM context_usage ORDER BY rowid", null).use { c ->
+        buildList { while (c.moveToNext()) {
+            fun n(i: Int): Long? = if (c.isNull(i)) null else c.getLong(i)
+            add(UsageRecord(c.getString(0), c.getString(1), c.getString(2), n(3), n(4), n(5), n(6)))
+        } }
+    }
     private fun reopen() {
         db.close()
         db = ConversationDatabase(context)
@@ -65,12 +72,13 @@ class ContextServiceConsistencyTest : InstrumentationTestCase() {
         assertEquals(-1L, service.recordUsage(row))
         reopen()
         assertEquals(1L, rows())
-        val totals = service.usage(row.branchId, row.runId)
-        assertEquals(1L, totals.requests)
-        assertEquals(1L, totals.reportedRequests)
-        assertEquals(120L, totals.totalTokens)
-        assertEquals(30L, totals.cachedTokens)
-        assertEquals(4L, totals.reasoningTokens)
+        // Receipt-only runs are no longer production ownership evidence.
+        assertTrue(reject { service.usage(row.branchId, row.runId) } is IllegalArgumentException)
+        val totals = service.usage(row.branchId)
+        assertEquals(0L, totals.requests)
+        assertEquals(0L, totals.reportedRequests)
+        assertNull(totals.totalTokens); assertNull(totals.cachedTokens); assertNull(totals.reasoningTokens)
+        assertEquals(row, legacyRows().single())
     }
 
     fun testWriteFailureRollsBackEnclosingOwnerTransaction() {
@@ -125,13 +133,12 @@ class ContextServiceConsistencyTest : InstrumentationTestCase() {
             it.moveToFirst(); it.getLong(0)
         }
         assertEquals(0L, attempts)
-        val totals = service.usage(known.branchId, known.runId)
-        assertEquals(2L, rows())
-        assertEquals(2L, totals.requests)
-        assertEquals(1L, totals.reportedRequests)
-        assertEquals(120L, totals.totalTokens)
-        assertTrue(totals.incomplete)
-        assertEquals(0L, service.usage(known.branchId, "unrelated-task").requests)
+        val totals = service.usage(known.branchId)
+        assertEquals(2L, rows()); assertEquals(listOf(known, unknown), legacyRows())
+        assertEquals(0L, totals.requests); assertEquals(0L, totals.reportedRequests)
+        assertNull(totals.totalTokens); assertTrue(totals.incomplete)
+        assertTrue(reject { service.usage(known.branchId, known.runId) } is IllegalArgumentException)
+        assertTrue(reject { service.usage(known.branchId, "unrelated-task") } is IllegalArgumentException)
     }
 
     fun testReplayIdentityOrValueConflictNeverChangesPersistedReceipt() {

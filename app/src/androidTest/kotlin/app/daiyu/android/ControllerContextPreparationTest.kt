@@ -55,7 +55,22 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
                     // Explicit fixture policy, not a production message-to-turns conversion.
                     CompressionPolicy(snapshot.automaticWithKnownWindow,snapshot.contextWindowTokens,
                         snapshot.triggerPercent,snapshot.reserveTokens,2)
-                },summary)
+                }, object : SummaryModelResolver {
+                    override fun resolve(binding: SummaryModelBinding) = summary.resolve(binding)
+                    override fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?): BoundSummaryModel? {
+                        val bound = summary.resolve(binding) ?: return null
+                        return bound.copy(transport = SummaryModelTransport { history, deadline ->
+                            usage?.claim()
+                            val delegate = bound.transport.openWithoutTools(history, deadline)
+                            object : ModelSession {
+                                override fun cancel() = delegate.cancel()
+                                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) = delegate.next(outputs) { event ->
+                                    if (event is ModelEvent.Usage) usage?.observe(event) else sink(event)
+                                }
+                            }
+                        })
+                    }
+                })
             })
         val f = Fixture(app,db,controller,alias);fixtures.add(f)
         val ready = CountDownLatch(1)
@@ -113,6 +128,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         val history = AtomicReference<List<Message>>()
         val summary = BoundSummaryModel(binding,SummaryModelTransport { _, _ -> object : ModelSession {
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                sink(ModelEvent.Usage(10, 20, 5))
                 sink(ModelEvent.TextFinal("summary","已确认事实"))
             }
             override fun cancel() {}
@@ -130,6 +146,9 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         assertNotNull(service.prepareSend(owner.id).archiveId)
         // Seed originals remain intact; only the new user/assistant pair was appended.
         assertEquals(14,service.displayHistory(owner.id).size)
+        val usage = service.usage(owner.id.value)
+        assertEquals(10L, usage.inputTokens); assertEquals(20L, usage.outputTokens)
+        assertEquals(1, usage.toJson().getJSONObject("request_sources").getInt("summary"))
     }
 
     fun testNewConversationCannotBypassKnownBudget() {

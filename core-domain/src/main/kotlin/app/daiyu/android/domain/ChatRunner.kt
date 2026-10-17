@@ -234,7 +234,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var round = 0
         var requestUnconfirmed = false
         var request: RequestCheckpoint? = null
-        var usage: List<RequestUsageCheckpoint> = emptyList()
+        var usage: List<RequestUsageCheckpoint> =
+            (options.runtimeStore as? PreparationRuntimeStore)?.preparationUsage(initial).orEmpty()
         val executionOwner = RunExecutionOwner.issue(initial)
         val owner = executionOwner.ownerId
         var ownerBound = false

@@ -25,7 +25,9 @@ internal data class UsageStatsSnapshot(
     val launchCount: Int = 0,
     val modelUsage: ModelUsageSnapshot = ModelUsageSnapshot(),
     val recordedUsage: RecordedUsageStats? = null,
+    val attributedUsage: app.daiyu.android.model.usage.AttributedUsageStats? = null,
 ) {
+    val recordedProjection: RecordedUsageProjection? get() = attributedUsage?.let(::RecordedUsageProjection)
     val totalConversations: Int get() = currentConversations
     val totalMessages: Int get() = currentMessages
     val totalInputTokens: Long get() = lifetimeInputTokens

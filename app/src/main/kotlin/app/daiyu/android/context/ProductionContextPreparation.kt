@@ -16,9 +16,17 @@ internal object ProductionContextPreparation {
                 ProductionCompressionSettingsStore(app).snapshot().coordinatorSettings()
             },
             policies = ProductionCompressionPolicyResolver,
-            models = ProviderSummaryModelResolver { binding ->
-                requireWorker()
-                SummaryProfileStore(app).configuration(binding)
+            models = object : SummaryModelResolver {
+                private val provider = ProviderSummaryModelResolver { binding ->
+                    requireWorker()
+                    SummaryProfileStore(app).configuration(binding)
+                }
+                override fun resolve(binding: SummaryModelBinding): BoundSummaryModel? = resolve(binding, null)
+                override fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?): BoundSummaryModel? {
+                    val bound = provider.resolve(binding, usage) ?: return null
+                    check(usage != null) { "production_summary_requires_runtime_preparation" }
+                    return bound
+                }
             },
         )
     }

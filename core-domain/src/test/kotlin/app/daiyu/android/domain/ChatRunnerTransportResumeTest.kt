@@ -24,7 +24,7 @@ class ChatRunnerTransportResumeTest {
         @Volatile var disconnect: (() -> Unit)? = null
         val pauses = java.util.Collections.synchronizedList(mutableListOf<Boolean>())
         override fun check() { checks++; if (deadline) throw TransportReconnectDeadlineException() }
-        override fun setPaused(paused: Boolean) { pauses.add(paused); if (paused) disconnect?.invoke() }
+        override fun setPaused(paused: Boolean, revision: Long) { pauses.add(paused); if (paused) disconnect?.invoke() }
         override fun attach(disconnect: () -> Unit): AutoCloseable {
             this.disconnect = disconnect
             return AutoCloseable { this.disconnect = null }
@@ -49,6 +49,61 @@ class ChatRunnerTransportResumeTest {
                        opens: () -> Unit = {}): ChatRunner = ChatRunner(ModelPort { opens(); session },
         object : ConversationStore { override fun save(message: Message) = error("atomic only") }, BatteryTool { error("no tools") },
         RunnerOptions(runtimeStore = runtime,reconnect = ReconnectPolicy(budgetFactory = TransportReconnectBudgetFactory { _, _ -> budget }))) {}
+
+    @Test fun staleWorkerPauseSnapshotCannotOverrideCompletedUiPause() {
+        val workerSnapshot = CountDownLatch(1); val releaseSnapshot = CountDownLatch(1)
+        val runtime = Runtime(); val failure = AtomicReference<Throwable>()
+        val result = AtomicReference<Message>()
+        var opens = 0; var resumes = 0
+        val budget = object : TransportReconnectBudget {
+            private val lock = Any()
+            private var revision = -1L
+            var paused = false
+                private set
+            override fun check() {}
+            override fun setPaused(paused: Boolean, revision: Long) {
+                if (revision == 0L) {
+                    workerSnapshot.countDown()
+                    check(releaseSnapshot.await(3, TimeUnit.SECONDS))
+                }
+                synchronized(lock) {
+                    if (revision > this.revision) { this.revision = revision; this.paused = paused }
+                }
+            }
+            fun isPaused() = synchronized(lock) { paused }
+            override fun attach(disconnect: () -> Unit) = AutoCloseable {}
+            override fun finish(status: String) {}
+        }
+        val session = object : Session() {
+            override fun resumeAcknowledged(sink: (ModelEventBatch) -> ModelDeliveryAck) {
+                resumes++
+                assertEquals(ModelDeliveryAck.ACCEPTED, sink(batch(1, listOf(ModelEvent.TextFinal("m", "ok")))))
+            }
+        }
+        val runner = runner(session, runtime, budget) { opens++ }
+        val worker = thread(isDaemon = true) {
+            try { result.set(runner.run(initial(), emptyList())) }
+            catch (error: Throwable) { failure.set(error) }
+        }
+        try {
+            assertTrue(workerSnapshot.await(3, TimeUnit.SECONDS))
+            assertTrue(runner.pause())
+            assertTrue(budget.isPaused())
+            releaseSnapshot.countDown()
+            assertTrue(runtime.paused.await(3, TimeUnit.SECONDS))
+            assertTrue(budget.isPaused())
+            assertEquals(0, resumes)
+            assertTrue(runner.resume())
+            worker.join(3_000)
+            assertFalse(worker.isAlive)
+            failure.get()?.let { throw AssertionError(it) }
+            assertEquals(RunStatus.COMPLETED, result.get().status)
+            assertEquals(1, opens); assertEquals(1, resumes)
+        } finally {
+            releaseSnapshot.countDown()
+            runner.stop(); worker.join(3_000)
+        }
+    }
 
     @Test fun continuousUsesOneFirstFailureBudgetBeyondTwentyAndOneUsageRequest() {
         var resumes = 0

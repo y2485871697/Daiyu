@@ -50,6 +50,11 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     @Volatile private var transportInterruption: (() -> Unit)? = null
     private var attemptDelivery: ProviderEventDeliveryGate? = null
     @Volatile private var pauseEpoch = 0L
+    private var pauseRevision = 0L
+    private fun syncReconnectPause() {
+        val snapshot = synchronized(terminalLock) { Triple(reconnectBudget, pauseRequested, pauseRevision) }
+        snapshot.first?.setPaused(snapshot.second, snapshot.third)
+    }
     private fun retainsTransportOnPause(): Boolean =
         session is CheckpointedResumableModelSession && options.reconnect.budgetFactory != null
     @Volatile private var identity: Message? = null
@@ -140,6 +145,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         val captured = synchronized(terminalLock) {
             if (terminal || terminalReserved || stopped.get()) return false
             pauseRequested = true
+            pauseRevision++
             pauseEpoch++
             // Control-only invalidation is synchronous: a quick resume cannot revive this gate.
             attemptDelivery?.expire()
@@ -152,7 +158,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         captured.second?.let { LockSupport.unpark(it) }
         val resumable = captured.first as? CheckpointedResumableModelSession
         if (resumable != null && options.reconnect.budgetFactory != null) {
-            reconnectBudget?.setPaused(true)
+            syncReconnectPause()
             captured.third?.invoke() ?: resumable.disconnectTransport()
         } else cancelSession(captured.first)
         return true
@@ -162,10 +168,11 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         val waiter = synchronized(terminalLock) {
             if (terminal || terminalReserved || stopped.get() || !pauseRequested) return false
             pauseRequested = false
+            pauseRevision++
             execution = execution.copy(pauseRequested = false)
             boundaryWaiter
         }
-        reconnectBudget?.setPaused(false)
+        syncReconnectPause()
         waiter?.let { LockSupport.unpark(it) }
         return true
     }
@@ -743,7 +750,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 if (reconnectBudget == null) reconnectBudget = factory.create(round, checkNotNull(classified))
                                 val budget = checkNotNull(reconnectBudget)
                                 budget.updateReason(checkNotNull(classified))
-                                budget.setPaused(pauseRequested)
+                                syncReconnectPause()
                                 budget.check()
                                 if (pauseRequested) awaitPause()
                                 budget.check()

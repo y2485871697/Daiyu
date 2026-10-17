@@ -26,6 +26,7 @@ class TrustedLinuxCatalog internal constructor(
     private val directorySync: (File) -> Unit,
     private val beforeApprovalGate: () -> Unit = {},
     private val symbolicLink: (java.nio.file.Path) -> Boolean = Files::isSymbolicLink,
+    private val fileKey: (java.nio.file.Path) -> Any? = ::strictLinuxFileKey,
 ) {
     constructor(directory: File) : this(directory, TerminalDurability::syncDirectory)
 
@@ -131,7 +132,7 @@ class TrustedLinuxCatalog internal constructor(
         securePath(validationDirectory)
         securePath(File(validationDirectory, "selected-linux.json"))
         securePath(File(validationDirectory, "selected-linux.json.tmp"))
-        val store = validator ?: LinuxEnvironmentStore(validationDirectory, directorySync).also { validator = it }
+        val store = validator ?: LinuxEnvironmentStore(validationDirectory, directorySync, fileKey).also { validator = it }
         // select validates paths, readable shell containment, bind targets, known helper digests,
         // file identities and metadata limits. It does not execute any of these files.
         store.select(value)

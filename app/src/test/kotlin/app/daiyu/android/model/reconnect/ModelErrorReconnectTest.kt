@@ -48,6 +48,32 @@ class ModelErrorReconnectTest {
     private fun state(clock: Clock, events: MutableList<ReconnectChanged>, window: Long? = 30_000L) =
         ModelErrorReconnect(1, window, clock, events::add, ModelFailure.NETWORK)
 
+    @Test fun stalePauseRevisionCannotRestartBudgetOrCancelNewTransport() {
+        val clock = Clock(); val events = mutableListOf<ReconnectChanged>()
+        val reconnect = state(clock, events, 1_000L)
+        reconnect.start()
+        reconnect.setPaused(false, 0)
+        clock.advance(200)
+        reconnect.setPaused(true, 1)
+        reconnect.setPaused(false, 0)
+        clock.advance(5_000)
+        reconnect.check()
+        assertEquals(800L, reconnect.remainingMs())
+        reconnect.setPaused(false, 2)
+        var cancelled = 0
+        val scope = ReconnectTransportScope { cancelled++ }
+        reconnect.attach(scope)
+        reconnect.setPaused(true, 1)
+        reconnect.setPaused(true, 2)
+        assertEquals(0, cancelled)
+        clock.advance(799)
+        reconnect.check()
+        assertEquals(1L, reconnect.remainingMs())
+        clock.advance(1)
+        assertTrue(reconnect.expired)
+        assertEquals(1, cancelled)
+    }
+
     @Test fun pauseFreezesTotalBudgetAndResumeUsesNewSegmentAndRejectsStaleTick() {
         val clock = Clock(); val control = Control(); val events = mutableListOf<ReconnectChanged>()
         val reconnect = state(clock, events)

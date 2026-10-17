@@ -130,8 +130,17 @@ class TarLinuxRootfsExtractionTest : TestCase() {
         val unsafe = listOf("../outside", "a/../outside", "/absolute", "C:/absolute", "a\\b",
             ".daiyu-rootfs-install", ".daiyu-rootfs-install/child", "x/".repeat(129) + "file")
         for (name in unsafe) fixture { f ->
-            rejected { f.extract(compressed(tar(Item(name, "bad")), RootfsArchive.TAR_GZIP)) }
+            val rawName = name.toByteArray(Charsets.UTF_8)
+            val archive = if (rawName.size <= 100) tar(Item("placeholder", "bad")).also {
+                it.fill(0.toByte(), 0, 100)
+                rawName.copyInto(it)
+                fixHeaderChecksum(it)
+                assertTrue(rawName.contentEquals(it.copyOfRange(0, rawName.size)))
+            } else tar(Item(name, "bad"))
+            val payload = compressed(archive, RootfsArchive.TAR_GZIP)
+            rejected { f.extract(payload) }
             assertFalse(File(f.root, "outside").exists())
+            assertFalse(File(f.stage, "a/b").exists())
         }
         fixture { f ->
             rejected { f.extract(compressed(tar(Item("a//b", "one"), Item("./a/b", "two")), RootfsArchive.TAR_GZIP)) }

@@ -16,6 +16,21 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 class AndroidPetModelPortTest {
+    @Test fun closeSnapshotToleratesConcurrentSingleEntryRemoval() {
+        val backing = ConcurrentHashMap<String, String>()
+        backing["request"] = "job"
+        val shrinking = object : AbstractCollection<String>() {
+            override val size: Int get() = backing.size
+            override fun iterator(): Iterator<String> {
+                backing.clear()
+                return backing.values.iterator()
+            }
+        }
+        assertEquals(emptyList<String>(), snapshotForDrain(shrinking))
+        assertEquals(listOf("retained"), snapshotForDrain(listOf("retained")))
+        assertEquals(listOf("a", "b"), snapshotForDrain(listOf("a", "b")))
+    }
+
     private val selection = PetModelSelection("pet-assistant", "provider-record", "model-record")
     private fun settings() = ModelSettings("https://example.invalid", "api-model", "not-a-real-key", true,
         deviceStatusEnabled = true, protocol = ProviderProtocol.RESPONSES,

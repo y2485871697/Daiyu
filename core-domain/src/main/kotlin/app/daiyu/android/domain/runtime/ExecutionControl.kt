@@ -124,7 +124,7 @@ interface ToolExecutionJournal {
 interface TransportReconnectBudget {
     fun updateReason(reason: ModelFailure) {}
     fun check()
-    fun setPaused(paused: Boolean)
+    fun setPaused(paused: Boolean, revision: Long)
     fun attach(disconnect: () -> Unit): AutoCloseable
     fun finish(status: String)
 }

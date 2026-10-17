@@ -1,12 +1,14 @@
 package app.daiyu.android.terminal
 
 import java.util.concurrent.TimeUnit
+import org.json.JSONObject
 
 /** Failure after launch transfers cleanup ownership; it is not proof that the helper stopped. */
 class PtyStartupFailure internal constructor(
     message: String,
     val cleanup: PtyStartupCleanup,
     cause: Throwable? = null,
+    val diagnostics: JSONObject? = null,
 ) : IllegalStateException(message, cause)
 
 /** Retains the original Process, including when session construction or journal commit failed. */

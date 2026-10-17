@@ -57,6 +57,13 @@ static int positive(const char *s) {
 }
 #include "daiyu_root_scope.h"
 int main(int argc, char **argv) {
+    /* Read the actual inherited slave, without requiring a platform stty applet. */
+    if(argc==2 && !strcmp(argv[1],"--probe-tty")) {
+        struct winsize observed;
+        if(!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO) || !isatty(STDERR_FILENO)) return 69;
+        if(ioctl(STDIN_FILENO,TIOCGWINSZ,&observed)<0) return 70;
+        return printf("%u %u\n",(unsigned int)observed.ws_row,(unsigned int)observed.ws_col)<0 ? 74 : 0;
+    }
     root_mode=argc>1 && strcmp(argv[1],"--root-scope")==0;
     if(root_mode) {
         if(getuid()!=0 || geteuid()!=0) return 77;

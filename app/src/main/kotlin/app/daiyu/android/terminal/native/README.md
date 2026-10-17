@@ -17,6 +17,13 @@ master/control transport stays in the helper. stdin/stdout framing is binary:
 - Output `H`: ASCII `DPTY1` after exec-error pipe confirms exec; `O`: raw PTY
   bytes; `T`: zero-length drain-truncated notification; `X`: 4-byte raw wait status; `E`: 4-byte startup errno.
 
+`daiyu_pty --probe-tty` is a read-only inherited-stdio probe: it requires all
+three descriptors to be TTYs, reads the stdin slave's `TIOCGWINSZ`, prints rows
+and columns, and exits without allocating a PTY, forking or creating a root
+scope. The device regression uses the installed helper for this observation
+instead of assuming a `stty` applet is shipped on every supported Android API.
+It is not a protocol reply or trusted command-completion marker.
+
 Neither a prompt nor terminal output is trusted command completion metadata.
 A write receipt only acknowledges transport to the helper. Use the `X` frame
 for shell exit; it does not say every submitted command succeeded. Output and

@@ -117,6 +117,7 @@ class MainActivity : ComponentActivity() {
     private var linuxSettingsPageOwner by mutableStateOf<app.daiyu.android.terminal.LinuxSettingsPageOwner?>(null)
     private var terminalPageOwner: Any? = null
     private val browserSettings by lazy { app.daiyu.android.browser.BrowserSettingsStore(applicationContext) }
+    private var titleSettingsPageOwner: app.daiyu.android.title.TitleModelSettingsEditor? = null
     private var compressionSettingsPageOwner: app.daiyu.android.context.CompressionSettingsEditor? = null
     private class GenerationSettingsVisit(val editor: GenerationSettingsEditor) {
         val active = AtomicBoolean(true)
@@ -579,6 +580,10 @@ class MainActivity : ComponentActivity() {
                 generationSettingsVisit?.active?.set(false)
                 generationSettingsVisit = null
             }
+            if (value != "title-model-settings") {
+                titleSettingsPageOwner?.revoke()
+                titleSettingsPageOwner = null
+            }
             if (value != "compression-settings") {
                 compressionSettingsPageOwner?.revoke()
                 compressionSettingsPageOwner = null
@@ -690,6 +695,7 @@ class MainActivity : ComponentActivity() {
     private data class QuestionRowUi(val message: Message,
         val projections: List<ChatController.QuestionProjection>, val retryCleanup: Boolean)
     private var questionRows by mutableStateOf<Map<String, QuestionRowUi>>(emptyMap())
+    private var titleRevision = -1L
     private var dataRevision = -1L
     private var scrollSerial = 0L
     private var historyRequestSerial = 0L
@@ -837,7 +843,7 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings" -> retainedPage = "settings"
+                        "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings" -> retainedPage = "settings"
                         "pet-model-settings" -> retainedPage = "pet-settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
@@ -984,6 +990,11 @@ class MainActivity : ComponentActivity() {
                                     retainedPage = "settings"
                             },
                         )
+                    } }
+                    "title-model-settings" -> titleSettingsPageOwner?.let { page -> key(page) {
+                        app.daiyu.android.title.TitleModelSettingsScreen(page, ownerCurrent = {
+                            activityUsable() && titleSettingsPageOwner === page && retainedPage == "title-model-settings"
+                        }, onBack = { retainedPage = "settings" })
                     } }
                     "compression-settings" -> compressionSettingsPageOwner?.let { page -> key(page) {
                         CompressionSettingsScreen(page, onBack = {
@@ -2412,6 +2423,8 @@ class MainActivity : ComponentActivity() {
         linuxSettingsPageOwner = null
         generationSettingsVisit?.active?.set(false)
         generationSettingsVisit = null
+        titleSettingsPageOwner?.revoke()
+        titleSettingsPageOwner = null
         compressionSettingsPageOwner?.revoke()
         compressionSettingsPageOwner = null
         browserSettingsPageOwner?.revoke()
@@ -2531,6 +2544,12 @@ class MainActivity : ComponentActivity() {
             FeatureRoute.LINUX_SETTINGS -> openLinuxSettings()
             FeatureRoute.BROWSER_SETTINGS -> openBrowserSettings()
             FeatureRoute.RECONNECT_SETTINGS -> openReconnectSettings()
+            FeatureRoute.TITLE_MODEL_SETTINGS -> {
+                requireActivityUsable()
+                titleSettingsPageOwner?.revoke()
+                titleSettingsPageOwner = app.daiyu.android.title.TitleModelSettingsEditor { controller.titleSettings }
+                retainedPage = "title-model-settings"
+            }
             FeatureRoute.COMPRESSION_SETTINGS -> openCompressionSettings()
             FeatureRoute.GENERATION_SETTINGS -> openGenerationSettings()
             FeatureRoute.PET_SETTINGS -> retainedPage = "pet-settings"
@@ -2895,6 +2914,16 @@ class MainActivity : ComponentActivity() {
                 draft = latest?.draft ?: controller.database.draft()
                 selectionStart = selectionStart.coerceIn(0, draft.length); selectionEnd = selectionEnd.coerceIn(0, draft.length)
             }
+            if (titleRevision != controller.titleRevision) {
+                titleRevision = controller.titleRevision
+                // Title-only refresh must not replace a live draft or revoke its editor owner.
+                selected?.let { current ->
+                    controller.database.readableDatabase.rawQuery("SELECT title FROM conversations WHERE id=?",
+                        arrayOf(current.id.value)).use { row ->
+                        if (row.moveToFirst()) selected = current.copy(title = row.getString(0))
+                    }
+                }
+            }
             val beforeVideoReceipt = editorGeneration
             settleRetainedVideoReceipt()
             if (editorGeneration != beforeVideoReceipt) return@guard
@@ -2918,6 +2947,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             controller.consumeDataNotice()?.let { toast(it) }
+            controller.consumeTitleNotice()?.let { toast(it) }
             selected?.let { conversation ->
                 if (shown.isEmpty()) shown = controller.database.messages(conversation.id).toMutableList()
                 else {

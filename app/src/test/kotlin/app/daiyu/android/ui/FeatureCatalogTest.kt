@@ -45,6 +45,7 @@ class FeatureCatalogTest {
             "R09" to FeatureRoute.TERMINAL,
             "P34" to FeatureRoute.BROWSER_SETTINGS,
             "P09" to FeatureRoute.COMPRESSION_SETTINGS,
+            "P08" to FeatureRoute.TITLE_MODEL_SETTINGS,
             "P24" to FeatureRoute.PET_SETTINGS,
             "P25" to FeatureRoute.AUXILIARY_VISION_SETTINGS,
             "P26" to FeatureRoute.RECONNECT_SETTINGS,
@@ -90,7 +91,7 @@ class FeatureCatalogTest {
             "SIDEBAR" to "P07", "MANAGE_CHATS" to "P22", "USAGE_STATS" to "P21",
             "CONVERSATION_SEARCH" to "P28", "FOLDERS" to "P28.folders",
             "MODEL_SETTINGS" to "R03 P02 P04 P06", "CHAT" to "P11 P12 P13 P23",
-            "SKILLS" to "P33", "TERMINAL" to "R09", "BROWSER_SETTINGS" to "P34", "COMPRESSION_SETTINGS" to "P09", "BACKUP" to "P38.files R12", "USER_MESSAGE" to "P41"
+            "SKILLS" to "P33", "TERMINAL" to "R09", "BROWSER_SETTINGS" to "P34", "COMPRESSION_SETTINGS" to "P09", "TITLE_MODEL_SETTINGS" to "P08", "BACKUP" to "P38.files R12", "USER_MESSAGE" to "P41"
         ).flatMap { (route, ids) -> ids.split(' ').map { "$it:open" to FeatureRoute.valueOf(route) } }.toMap()
         val actual = FeatureDetails.pages.flatMap { (id, sections) -> sections.flatMap { it.controls }.mapNotNull {
             control -> control.route?.let { "$id:${control.id}" to it }

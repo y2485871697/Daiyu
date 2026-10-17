@@ -7,7 +7,8 @@ internal object SQLiteText {
     fun read(db: SQLiteDatabase, table: String, column: String, key: String, id: String, maxBytes: Long = 64L * 1024 * 1024): String? {
         require(table == "messages" && key == "id" && column in setOf("blocks", "protocol", "history_segments", "error") ||
             table == "runtime_checkpoints" && key == "message_id" && column == "payload" ||
-            table == "message_video_inputs" && key == "message_id" && column == "payload")
+            table == "message_video_inputs" && key == "message_id" && column == "payload" ||
+            table in setOf("composer", "conversations") && key == "id" && column == "draft")
         require(maxBytes in 1..(64L * 1024 * 1024))
         val length=db.rawQuery("SELECT length(CAST($column AS BLOB)) FROM $table WHERE $key=?", arrayOf(id)).use {
             check(it.moveToFirst()); if(it.isNull(0)) null else it.getLong(0)

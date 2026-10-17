@@ -405,9 +405,7 @@ class ControllerVideoSendingTest {
 
     @Test fun historicalImagesAndVideosShareOneResponsesPayloadWithoutLosingInstructions() {
         val conversation = db.create("default")
-        val bitmap = android.graphics.Bitmap.createBitmap(2, 2, android.graphics.Bitmap.Config.ARGB_8888)
-        val png = ByteArrayOutputStream().also { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
-        bitmap.recycle()
+        val png = java.util.Base64.getDecoder().decode("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGP4z8DwH4QZYAwAR8oH+WdZbrcAAAAASUVORK5CYII=")
         val drafts = app.daiyu.android.media.ImageAttachmentStore(File(root, "image-drafts"), app.daiyu.android.media.AndroidImageInspector())
         val owner = app.daiyu.android.media.ImageAttachmentOwner(conversation.id.value, "image-draft")
         val image = drafts.import(owner, png.inputStream())

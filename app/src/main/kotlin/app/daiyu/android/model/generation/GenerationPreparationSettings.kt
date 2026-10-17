@@ -57,7 +57,8 @@ class GenerationDownloadHosts(hosts: Set<String>) {
         val uri = URI(url)
         uri.scheme == "https" && uri.host in hosts && uri.rawUserInfo == null &&
             uri.rawFragment == null && (uri.port == -1 || uri.port == 443) &&
-            uri.normalize() == uri && '%' !in uri.rawAuthority
+            uri.normalize() == uri && uri.path.orEmpty().split('/').none { it == "." || it == ".." } &&
+            '%' !in uri.rawAuthority
     }.getOrDefault(false)
 
     override fun toString() = "GenerationDownloadHosts(<reviewed authorities>)"

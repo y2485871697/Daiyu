@@ -47,7 +47,12 @@ fun interface PersonalVoiceReference {
     fun reference(id: String, providerId: String): String
 }
 
-class VoiceProviderException(message: String) : IllegalStateException(message)
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+class VoiceProviderException(message: String) : IllegalStateException(message),
+    kotlinx.coroutines.CopyableThrowable<VoiceProviderException> {
+    // Keep sanitized failures cause-free across coroutine stack recovery.
+    override fun createCopy(): VoiceProviderException? = null
+}
 internal fun speechCheck(value: Boolean, message: () -> String) {
     if (!value) throw VoiceProviderException(message())
 }

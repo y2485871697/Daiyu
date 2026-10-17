@@ -22,6 +22,7 @@ import java.util.concurrent.Executor
 class CompressionSettingsEditorTest {
     private lateinit var compressionPrefs: SharedPreferences
     private lateinit var profilePrefs: SharedPreferences
+    private lateinit var profileNamespace: String
     private var storedModel: ModelSettings? = null
     private var modelReads = 0
     private var modelWrites = 0
@@ -38,7 +39,8 @@ class CompressionSettingsEditorTest {
     @Before fun setUp() {
         val context = RuntimeEnvironment.getApplication()
         compressionPrefs = context.getSharedPreferences("editor-compression-${UUID.randomUUID()}", Context.MODE_PRIVATE)
-        profilePrefs = context.getSharedPreferences("editor-profile-${UUID.randomUUID()}", Context.MODE_PRIVATE)
+        profileNamespace = "editor-profile-${UUID.randomUUID()}"
+        profilePrefs = context.getSharedPreferences(profileNamespace, Context.MODE_PRIVATE)
         storedModel = null
         modelReads = 0; modelWrites = 0; compressionOpens = 0; profileOpens = 0
         authorizations = mutableListOf()
@@ -51,6 +53,7 @@ class CompressionSettingsEditorTest {
         SummaryProfileBudgets(32000, 27000, 2000, 1000, 2000, 30000))
 
     private fun profiles() = SummaryProfileStore(profilePrefs,
+        metadataNamespace = profileNamespace,
         loadModel = {
             modelReads++
             checkNotNull(storedModel).also { afterModelLoad() }

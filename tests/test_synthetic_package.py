@@ -20,6 +20,18 @@ SIGNATURE = ('Number of signers: 1\nVerified using v2 scheme (APK Signature Sche
 
 
 class SyntheticPackageTests(unittest.TestCase):
+    def test_performance_setup_activity_stays_outside_measurement_and_guards_teardown(self):
+        source = (ROOT / 'app/src/performanceTest/kotlin/app/daiyu/android/ReleaseSyntheticPerformanceTest.kt').read_text()
+        self.assertLess(source.index('setupActivity = instrumentation.startActivitySync'),
+                        source.index('FullPerformanceDataset.seed('))
+        self.assertLess(source.index('finishActivity(checkNotNull(setupActivity))'),
+                        source.index('application.controller = activeFixture.controller'))
+        self.assertLess(source.index('application.controller = activeFixture.controller'),
+                        source.index('SyntheticFrameCollector(instrumentation, launched.window)'))
+        self.assertIn('if (activitiesDestroyed) {', source)
+        self.assertIn('if (controllerRestored) cleanup {', source)
+        self.assertIn('"fixture_resources_retained"', source)
+
     def test_exact_pair_and_disposable_record(self):
         package.verify_manifests(APP, TEST)
         with tempfile.TemporaryDirectory() as temp:

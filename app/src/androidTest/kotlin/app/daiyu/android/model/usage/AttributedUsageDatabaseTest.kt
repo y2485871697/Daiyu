@@ -159,7 +159,7 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
         app.daiyu.android.removeAssistantSchemaForLegacyFixture(database.writableDatabase)
         database.writableDatabase.version = 8; database.close()
         runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
-        assertEquals(19, database.readableDatabase.version)
+        assertEquals(20, database.readableDatabase.version)
         assertEquals(1, read().childCoverage.tasksWithoutReportedUsage)
         assertNull(read().summary.child.input.reportedTokens)
     }

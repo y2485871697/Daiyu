@@ -47,9 +47,9 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         setDraft("Gemini UI 草稿"); val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
         openHub()
-        val implemented = setOf("assistants", "subagents", "appearance", "haptics", "voice", "source", "relay", "platform_tools", "permission_check")
+        val implemented = setOf("assistants", "subagents", "appearance", "haptics", "voice", "source", "default_reasoning", "relay", "platform_tools", "permission_check")
         val unwired = entries.filter { it.route == null && it.localPage == null && it.id !in implemented }
-        assertEquals(11, unwired.size)
+        assertEquals(10, unwired.size)
         fun assertUnchanged() {
             assertEquals(before, fixture.database.exportBackup()); assertEquals(settings, fixture.settings.loadForEditing().settings)
             assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())
@@ -148,7 +148,14 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
                 assertEquals(1L, session.cancelled.count); assertEquals(1, fixture.opens.get())
             }
             for (id in listOf("default_reasoning", "logging")) {
-                entry(id).performClick(); node("page:设置").assertExists()
+                entry(id).performClick()
+                if (id == "default_reasoning") {
+                    ui.onNodeWithText(activity.getString(R.string.subagent_reasoning_picker_title)).assertExists()
+                    instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+                    ui.waitForIdle()
+                    ui.onNodeWithText(activity.getString(R.string.subagent_reasoning_picker_title)).assertDoesNotExist()
+                }
+                node("page:设置").assertExists()
                 assertEquals(owner.id, fixture.controller.active!!.id)
                 assertFalse(fixture.controller.runState(owner)!!.pauseRequested)
                 assertEquals(1L, session.cancelled.count); assertEquals(1, fixture.opens.get())

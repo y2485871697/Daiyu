@@ -4,6 +4,9 @@ import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.width
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -44,6 +47,17 @@ class MessageMarkdownTest : ComposeActivityTestCase() {
     private val reference = MessageImageReference(owner, "00000000-0000-0000-0000-000000000001",
         "image/png", 10, "b".repeat(64), 2, 2)
     private val image = MessageImageUi(owner, reference)
+
+    fun testDepthFallbackHasNoComposeLinkAnnotations() {
+        for (closed in listOf(true, false)) {
+            val literal = "~~~\n[x](https://code.test)" + if (closed) "\n~~~" else ""
+            val source = literal.lines().joinToString("\n") { "> ".repeat(24) + it }
+            val result = annotateMessageMarkdown(source, androidx.compose.ui.graphics.Color.Blue) { opened += it }
+            assertEquals(literal, result.text)
+            assertTrue(result.getLinkAnnotations(0, result.length).isEmpty())
+            assertTrue(opened.isEmpty())
+        }
+    }
 
     override fun setUp() {
         super.setUp()
@@ -208,6 +222,81 @@ class MessageMarkdownTest : ComposeActivityTestCase() {
         val unsafeNode = body("unsafe", unsafe)
         assertTrue(annotation(unsafeNode).getLinkAnnotations(0, unsafe.length).isEmpty())
         clickCharacter(unsafeNode, 1)
+        assertTrue(opened.isEmpty())
+    }
+
+    fun testStructuredBlocksAndTableUseSelectableStyledTextAndExplicitLinks() {
+        val code = "| a | b |\n| --- | --- |\n| [fake](https://code.test) | **literal** |\n"
+        show {
+            Column(Modifier.width(300.dp).testTag("structured")) {
+                MessageMarkdown("## Heading\n\n> quote **bold**\n\n- [x] done\n- pending\n\n" +
+                    "| Name | Value |\n| :--- | ---: |\n| ~~old~~ | [**site**](https://example.test) |\n\n" +
+                    "~~~md\n${code}~~~\n\n<div>raw</div> [x](javascript:alert)")
+            }
+        }
+        val heading = ui.onNodeWithText("Heading", useUnmergedTree = true)
+        val layouts = mutableListOf<TextLayoutResult>()
+        heading.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+        assertEquals(24.sp, layouts.single().layoutInput.style.fontSize)
+        assertEquals(FontWeight.Bold, layouts.single().layoutInput.style.fontWeight)
+        val quote = annotation(ui.onNodeWithText("quote bold", useUnmergedTree = true))
+        assertEquals(6, quote.spanStyles.single { it.item.fontWeight == FontWeight.Bold }.start)
+        ui.onNodeWithText("☑", useUnmergedTree = true).assertExists()
+        ui.onNodeWithText("•", useUnmergedTree = true).assertExists()
+        val strike = annotation(ui.onNodeWithText("old", useUnmergedTree = true))
+        assertTrue(strike.spanStyles.any { it.item.textDecoration == androidx.compose.ui.text.style.TextDecoration.LineThrough })
+        val site = ui.onNodeWithText("site", useUnmergedTree = true)
+        val siteText = annotation(site)
+        assertTrue(siteText.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+        assertEquals(1, siteText.getLinkAnnotations(0, siteText.length).size)
+        val codeNode = ui.onNodeWithText(code, useUnmergedTree = true)
+        assertTrue(annotation(codeNode).getLinkAnnotations(0, code.length).isEmpty())
+        val unsafe = "<div>raw</div> [x](javascript:alert)"
+        val unsafeText = annotation(ui.onNodeWithText(unsafe, useUnmergedTree = true))
+        assertTrue(unsafeText.getLinkAnnotations(0, unsafeText.length).isEmpty())
+        assertTrue("rendering must not open links", opened.isEmpty())
+        clickCharacter(site, 0)
+        assertEquals(listOf("https://example.test"), opened.toList())
+    }
+
+    fun testLongTableHasBoundedScrollableViewportAndDoesNotTruncateCellText() {
+        val header = (0..5).joinToString(" | ") { "H$it" }
+        val delimiter = (0..5).joinToString(" | ") { "---" }
+        val long = "long-cell-".repeat(120)
+        val row = (0..5).joinToString(" | ") { if (it == 0) long else "cell$it" }
+        show {
+            Column(Modifier.width(260.dp).testTag("table-host")) { MessageMarkdown("$header\n$delimiter\n$row") }
+        }
+        val horizontal = SemanticsMatcher("horizontal table viewport") {
+            it.config.contains(SemanticsProperties.HorizontalScrollAxisRange)
+        }
+        val viewport = ui.onNode(horizontal, useUnmergedTree = true)
+        val scroll = viewport.fetchSemanticsNode().config[SemanticsProperties.HorizontalScrollAxisRange]
+        assertTrue("wide grid must have a scrollable remainder", scroll.maxValue() > 0f)
+        val hostWidth = ui.onNodeWithTag("table-host").fetchSemanticsNode().boundsInRoot.width
+        assertTrue(viewport.fetchSemanticsNode().boundsInRoot.width <= hostWidth + 1f)
+        val longNode = ui.onNodeWithText(long, useUnmergedTree = true)
+        assertEquals(long, annotation(longNode).text)
+        val layouts = mutableListOf<TextLayoutResult>()
+        longNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+        assertTrue("long cell must wrap within its column", layouts.single().lineCount > 1)
+        viewport.performSemanticsAction(SemanticsActions.ScrollBy) { it(10_000f, 0f) }
+        ui.waitForIdle()
+        ui.onNodeWithText("H5", useUnmergedTree = true).assertIsDisplayed()
+        assertTrue(opened.isEmpty())
+    }
+
+    fun testPathologicallyWideTableIsGroupedWithoutDroppingColumns() {
+        val header = (0..39).joinToString(" | ") { "header-$it" }
+        val delimiter = (0..39).joinToString(" | ") { "---" }
+        val row = (0..39).joinToString(" | ") { "value-$it" }
+        show { Column(Modifier.width(260.dp)) { MessageMarkdown("$header\n$delimiter\n$row") } }
+        val horizontal = SemanticsMatcher("horizontal table viewport") {
+            it.config.contains(SemanticsProperties.HorizontalScrollAxisRange)
+        }
+        ui.onAllNodes(horizontal, useUnmergedTree = true).assertCountEquals(2)
+        ui.onNodeWithText("header-39", useUnmergedTree = true).assertExists()
+        ui.onNodeWithText("value-39", useUnmergedTree = true).assertExists()
         assertTrue(opened.isEmpty())
     }
 

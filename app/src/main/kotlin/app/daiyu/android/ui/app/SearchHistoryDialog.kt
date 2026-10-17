@@ -8,7 +8,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -87,10 +87,10 @@ internal fun SearchHistoryDialog(
                 }
                 else -> {
                     LazyColumn(modifier = Modifier.heightIn(max = 360.dp)) {
-                        items(
+                        itemsIndexed(
                             items = results,
-                            key = { "${it.conversationId}:${it.messageId}" },
-                        ) { hit ->
+                            key = { index, hit -> "${hit.conversationId.length}:${hit.conversationId}:${hit.messageId.length}:${hit.messageId}:${hit.segmentIndex}:$index" },
+                        ) { _, hit ->
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()

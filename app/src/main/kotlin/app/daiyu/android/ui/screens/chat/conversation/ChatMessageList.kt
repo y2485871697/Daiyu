@@ -66,17 +66,22 @@ internal fun ChatMessageList(
     var consumedScrollSerial by rememberSaveable { mutableStateOf<Long?>(null) }
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
+    val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
     val scope = rememberCoroutineScope()
-    LaunchedEffect(scrollRequest, touchEpoch) {
+    val requestedIndex = scrollRequest?.targetIndex(turns) ?: -1
+    LaunchedEffect(scrollRequest, requestedIndex, turns.size, touchEpoch) {
         scrollRequest?.takeIf { it.serial != consumedScrollSerial }?.let { request ->
-            consumedScrollSerial = request.serial
-            followBottom = request.followBottom
+            followBottom = request.followBottom && request.messageId == null && request.listKey == null
             wasDragged = false
-            if (request.messageId != null) {
-                val index = turns.indexOfFirst { it.id == request.messageId }
-                if (index >= 0) listState.animateScrollToItem(index)
+            if (request.messageId != null || request.listKey != null) {
+                val index = request.targetIndex(turns)
+                if (index >= 0) {
+                    listState.animateScrollToItem(index)
+                    consumedScrollSerial = request.serial
+                }
             } else if (request.followBottom && turns.isNotEmpty()) {
                 listState.scrollToItem(turns.lastIndex)
+                consumedScrollSerial = request.serial
             }
         }
     }
@@ -112,7 +117,9 @@ internal fun ChatMessageList(
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
                 // A down over a child action also cancels follow and an in-flight user-message jump.
-                followBottom = false; wasDragged = false; touchEpoch++
+                followBottom = false; wasDragged = false
+                consumedScrollSerial = currentScrollSerial
+                touchEpoch++
                 do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
             }
         },

@@ -76,6 +76,30 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
             arrayOf(hit.conversationId, hit.ownerMessageId)).use { assertTrue(it.moveToFirst()) }
     }
 
+    fun testLaterSameOwnerAssistantSegmentsRemainSeparateExactHits() {
+        val conversation = database.create("default")
+        val (_, answer) = turn(conversation, "exact-segment", "ordinary user", answerTransform = { owner ->
+            owner.copy(historySegments = listOf(
+                MessageHistorySegment(owner.id, "assistant", listOf(MessageBlock.Text("first", "shared needle before"))),
+                MessageHistorySegment(MessageId("middle-supplement"), "user", listOf(MessageBlock.Text("middle", "middle question"))),
+                MessageHistorySegment(owner.id, "assistant", listOf(MessageBlock.Text("later", "shared needle after"))),
+            ))
+        })
+        val hits = data.searchCurrentConversation("shared needle", conversation.id.value)
+        assertEquals(2, hits.size)
+        assertEquals(listOf(0, 1), hits.map { it.segmentIndex })
+        assertTrue(hits.all { it.messageId == answer.id.value && it.ownerMessageId == answer.id.value })
+        val turns = app.daiyu.android.ui.screens.chat.conversation.ChatTurnMapper.map(
+            ContextService(scoped, database).displayHistory(conversation.id))
+        val hit = hits.last()
+        val request = app.daiyu.android.ui.screens.chat.conversation.ChatScrollRequest(
+            1, hit.messageId, false, hit.segmentIndex)
+        val exact = turns.indexOfFirst { it.id == request.messageId && it.segmentIndex == request.segmentIndex }
+        assertTrue(exact >= 0)
+        assertEquals("shared needle after", (turns[exact] as app.daiyu.android.ui.screens.chat.conversation.ChatTurnUi.Assistant).finalText)
+        assertFalse(data.summaries(null).single().hasCompletionMarker)
+    }
+
     fun testChineseTitlesAndPreviewsDoNotSearchSerializedProtocolOrBlockMetadata() {
         val conversation = database.create("default")
         turn(conversation, "metadata", "真正中文正文", userTransform = { user ->

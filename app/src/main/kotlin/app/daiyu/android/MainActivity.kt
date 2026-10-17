@@ -3506,6 +3506,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        revokeTerminalJobsVisit()
         val preserveLegacy = legacyPickerHop && retainedPage == "legacy-library" &&
             pendingLegacy != null
         legacyPickerHop = false

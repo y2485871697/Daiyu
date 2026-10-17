@@ -99,4 +99,22 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         node("terminal-job-history").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
+
+    @Suppress("UNCHECKED_CAST")
+    fun testPauseWithoutStopPermanentlyRevokesQueuedHistoryVisit() {
+        val (conversation, _) = seedHistory("paused history must not publish")
+        val old = open(conversation)
+        val record = (property(old, "getHistory") as List<TerminalJobHistoryReader.Record>).single()
+        mainThread {
+            invoke("terminalHistoryPage", old, record, 0L)
+            instrumentation.callActivityOnPause(activity)
+            instrumentation.callActivityOnResume(activity)
+        }
+        awaitControl("paused history worker returned") { property(old, "getBusy") == false }
+        assertEquals("", property(old, "getOutput"))
+        assertNull(invoke("getTerminalJobsVisit"))
+        node("terminal-job-history").assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+
 }

@@ -1,6 +1,7 @@
 package app.daiyu.android.integration.tools
 
 import app.daiyu.android.ControllerVirtualDisplaySession
+import app.daiyu.android.vdapproval.R08CleanupApprovalRequest
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.ReceiptBatchToolExecutor
 import app.daiyu.android.domain.runtime.RunExecutionOwner
@@ -402,6 +403,43 @@ internal class RunCatalogTools(
      * Do not clear that record on close, cancellation, Unknown or a Runner stop request. */
     internal fun virtualDisplaySessionForRetention(): ControllerVirtualDisplaySession? = retainedVirtualDisplaySession
 
+    /** Caller holds closeLock. This is LOCAL drain, not physical owner exit and not the final
+     * catalog Drained callback (which deliberately waits for this session). Never observe the
+     * session to probe this gate: cleanup must be possible while its initialized owner is alive.
+     * Closed admission + zero creations/dispatches includes final whole-batch forwarding.
+     */
+    private fun localDrainReadyLocked(): Boolean =
+        closed.get() && observingClose && observationsStarted && !registeringObservations &&
+            activeCreations == 0 && activeDispatches == 0 && pendingStops == 0 &&
+            remainingObservations == 0 && closeFailure == null
+
+    /** Pure identity/local-state check. Parent Runner/retention/UI evidence is ADDITIONAL;
+     * passing that evidence never bypasses the catalog's private lifecycle accounting. */
+    internal fun virtualDisplayCleanupLocallyDrained(original: ControllerVirtualDisplaySession): Boolean =
+        synchronized(closeLock) { retainedVirtualDisplaySession === original && localDrainReadyLocked() }
+
+    /** Explicit non-releasing preparation. No observe, lease release or owner I/O. */
+    internal fun prepareVirtualDisplayCleanupOnWorker(original: ControllerVirtualDisplaySession,
+        parentDrained: Boolean): R08CleanupApprovalRequest? {
+        check(android.os.Looper.getMainLooper()?.thread !== Thread.currentThread()) { "virtual_display_worker_required" }
+        if (!parentDrained || !virtualDisplayCleanupLocallyDrained(original)) return null
+        return original.prepareInitializedCleanupOnWorker(parentDrained = true)
+    }
+
+    /** Recheck the SAME gate at send admission; an earlier preparation/approval is not drain
+     * evidence. The session still owns approval, fixed journal intent and one-attempt semantics.
+     * No external/session code runs under closeLock. Closed local admission cannot reopen.
+     */
+    internal fun releaseVirtualDisplayCleanupOnWorker(original: ControllerVirtualDisplaySession,
+        request: R08CleanupApprovalRequest, parentDrained: Boolean,
+        admissionStillValid: () -> Boolean = { true }): ControllerVirtualDisplaySession.CleanupResult {
+        check(android.os.Looper.getMainLooper()?.thread !== Thread.currentThread()) { "virtual_display_worker_required" }
+        if (!parentDrained || !virtualDisplayCleanupLocallyDrained(original))
+            return ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE
+        return original.releaseInitializedOnceOnWorker(request, parentDrained = true,
+            admissionStillValid = admissionStillValid)
+    }
+
     /** Explicit WORKER maintenance after closeWithResult has begun and the parent's Runner has
      * actually returned/joined. A stop request is not parentDrained. Local creation, dispatch,
      * final forwarding, stop actions and other resource observations must also have finished.
@@ -412,9 +450,7 @@ internal class RunCatalogTools(
     internal fun observeVirtualDisplayCloseOnWorker(parentDrained: Boolean): RunCatalogCloseResult {
         check(android.os.Looper.getMainLooper()?.thread !== Thread.currentThread()) { "virtual_display_worker_required" }
         val session = synchronized(closeLock) {
-            if (!parentDrained || !closed.get() || !observingClose || !observationsStarted || registeringObservations ||
-                activeCreations != 0 || activeDispatches != 0 || pendingStops != 0 ||
-                remainingObservations != 0 || closeFailure != null)
+            if (!parentDrained || !localDrainReadyLocked())
                 return RunCatalogCloseResult.Unknown("virtual_display_parent_pending")
             // Read the retained handle atomically with creation-drain evidence: a late factory
             // must not be mistaken for the never-created case.

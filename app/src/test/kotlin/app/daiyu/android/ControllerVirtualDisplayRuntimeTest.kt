@@ -440,6 +440,79 @@ class ControllerVirtualDisplayRuntimeTest {
         assertEquals(AndroidVirtualDisplayOwnerHost.Lifecycle.UNKNOWN, adapter.observe())
     } }
 
+    @Test fun explicitInitializedCleanupUsesProductionLeaseJournalAndSameAuthenticatedClientOnce() {
+        listOf(false, true).forEach { loseReleaseReply -> Fixture().use { f ->
+            lateinit var approvedPlan: R08VirtualDisplayPlan
+            val wire = Wire { request ->
+                val operation = request.getString("op")
+                if (operation == "release" && loseReleaseReply) throw IOException("lost release response")
+                val generationReceipt = operation == "initialize"
+                val id = if (generationReceipt) "" else request.getString("operationId")
+                val receipt = JSONObject().put("generation", approvedPlan.generation).put("operationId", id)
+                    .put("operation", if (generationReceipt) "" else operation).put("generationReceipt", generationReceipt)
+                    .put("digest", if (generationReceipt) OwnerV2Contract.generationDigest(approvedPlan.generation, approvedPlan.binding.trusted)
+                        else OwnerV2Contract.identity(approvedPlan.generation, id, operation, approvedPlan.binding.trusted,
+                            request.getJSONObject("parameters")))
+                    .put("bindingDigest", approvedPlan.bindingKey).put("state", if (generationReceipt) "STARTED" else "SUCCEEDED")
+                val body = OwnerProtocol.ok(operation, null).put("generation", approvedPlan.generation).put("receipt", receipt)
+                if (generationReceipt) body.put("initialized", true).put("displayId", 7).put("uniqueId", "virtual:test")
+                else {
+                    receipt.put("result", JSONObject().put("ok", true).put("released", true))
+                    body.put("receiptOnly", false).put("released", true).put("displayId", 7).put("uniqueId", "virtual:test")
+                }
+                body.toString()
+            }
+            val host = Host(wire)
+            val parent = Parent()
+            val retained = mutableListOf<ControllerVirtualDisplaySession>()
+            val session = ControllerVirtualDisplayRuntime.assemble(f.owner, f.capabilities, f.writes, emptyList(),
+                parent, ControllerVirtualDisplayRuntime.Retention { retained += it }, f.store()) { host }
+            val waiting = f.executor.submit<TaskAuthorization> { session.authorizationFactory(f.owner) }
+            val request = checkNotNull(parent.shown.poll(5, TimeUnit.SECONDS))
+            approvedPlan = request.plan
+            assertTrue(session.answerFromUi(request, true))
+            val auth = waiting.get(5, TimeUnit.SECONDS)
+            assertSame(session, retained.single())
+            f.work {
+                val registry = ToolRegistry()
+                session.registeredTools(f.owner, f.capabilities, auth).forEach { registry.register(it) }
+                val dispatcher = ToolDispatcher(registry.snapshot(), f.capabilities, ToolLedger(InMemoryToolLedgerStore()))
+                val calls = listOf("start", "initialize").map { step -> ToolInvocation(ToolCallId("$step-call"),
+                    R08VirtualDisplayCatalogLeaf.WRITE_TOOL, JSONObject().put("step_id", step).toString()) }
+                val ticket = session.beginBatch(calls)
+                val results = dispatcher.dispatchOwned(auth, calls, f.owner)
+                session.finishBatch(ticket, results)
+                assertTrue(results.all { it.outcome is DispatchOutcome.Confirmed })
+            }
+            session.close()
+            val cleanup = checkNotNull(f.work { session.prepareInitializedCleanupOnWorker(true) })
+            assertEquals(listOf("initialize"), wire.operations()) // Start is host launcher only
+            assertTrue(session.answerCleanupFromUi(cleanup, true))
+            val expected = if (loseReleaseReply) ControllerVirtualDisplaySession.CleanupResult.UNKNOWN
+                else ControllerVirtualDisplaySession.CleanupResult.CONFIRMED
+            assertEquals(expected, f.work { session.releaseInitializedOnceOnWorker(cleanup, true) })
+            assertEquals(listOf("initialize", "release"), wire.operations())
+            assertEquals(1, host.starts)
+            val sent = wire.sent.last()
+            assertEquals(approvedPlan.generation, sent.getString("generation"))
+            val intent = cleanup.review.plan.intent("host-cleanup-release-v1", cleanup.review.plan.writes.single())
+            assertEquals(intent.operationId, sent.getString("operationId"))
+            val directory = f.root.resolve("generation-${approvedPlan.generation}")
+            val before = files(directory)
+            assertEquals(R08VirtualDisplayPermit.LOOKUP_ONLY,
+                R08PersistentJournal(directory.resolve("journal")).claim(intent))
+            assertEquals(before, files(directory))
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+                f.work { session.releaseInitializedOnceOnWorker(cleanup, true) })
+            assertFalse(Files.exists(directory.resolve("released.event")))
+            host.drained()
+            assertEquals(if (loseReleaseReply) ControllerVirtualDisplaySession.CloseResult.Unknown
+                else ControllerVirtualDisplaySession.CloseResult.Drained, f.work { session.observeCloseOnWorker(true) })
+            assertEquals(!loseReleaseReply, Files.exists(directory.resolve("released.event")))
+            assertEquals(listOf("initialize", "release"), wire.operations())
+        } }
+    }
+
     @Test fun authenticatedLookupIsOneShotBoundAndSendsOnlyReceiptBeforeShutdown() = Fixture().use { f -> f.work {
         val plan = f.plan("generation")
         val host = Host(normalWire())
@@ -521,7 +594,7 @@ class ControllerVirtualDisplayRuntimeTest {
             .put("operation", "").put("generationReceipt", true).put("state", "STARTED")
             .put("digest", OwnerV2Contract.generationDigest(plan.generation, plan.binding.trusted))
             .put("bindingDigest", plan.bindingKey)
-        val host = Host(Wire { OwnerProtocol.ok("receipt", plan.generation).put("receiptOnly", true)
+        val host = Host(Wire { OwnerProtocol.ok("receipt", null).put("generation", plan.generation).put("receiptOnly", true)
             .put("executed", false).put("found", true).put("receipt", receipt).toString() })
         val adapter = OwnerAdapter(host, plan.generation, plan.bindingKey)
         adapter.start(plan.generation, plan.binding)

@@ -10,7 +10,9 @@ import app.daiyu.android.vd.AndroidVirtualDisplayOwnerHost
 import app.daiyu.android.vd.OwnerRunBinding
 import app.daiyu.android.vdapproval.VirtualDisplayApproval
 import app.daiyu.android.vdapproval.VirtualDisplayApprovalRequest
+import app.daiyu.android.vdapproval.R08CleanupApprovalRequest
 import java.util.concurrent.CountDownLatch
+import org.json.JSONObject
 
 /** Parent-owned integration seam, not a Runner, dispatcher, database or automatic cleanup service.
  * Create ONLY for an already durably accepted send. Keep in the parent's retention record until
@@ -104,6 +106,11 @@ internal class ControllerVirtualDisplaySession internal constructor(
     private var released = false
     private var shutdownClaimed = false
     private var shutdownBusy = false
+    private var cleanupRequest: R08CleanupApprovalRequest? = null
+    private var cleanupApproval: VirtualDisplayApproval? = null
+    private var cleanupDecision: Boolean? = null
+    private var cleanupAttempted = false
+    private var cleanupBusy = false
     private var batchCallbacks = 0
     private val batchTickets = java.util.Collections.newSetFromMap(
         java.util.IdentityHashMap<BatchTicket, Boolean>())
@@ -261,7 +268,7 @@ internal class ControllerVirtualDisplaySession internal constructor(
         worker()
         val snapshot = synchronized(lock) {
             if (released) return CloseResult.Drained
-            if (!closed || binding || shutdownBusy || uncertain || releasing || batchCallbacks != 0 ||
+            if (!closed || binding || shutdownBusy || cleanupBusy || uncertain || releasing || batchCallbacks != 0 ||
                 batchTickets.isNotEmpty() || !parentDrained)
                 return CloseResult.Unknown
             Triple(lease, handle, leaf)
@@ -279,7 +286,7 @@ internal class ControllerVirtualDisplaySession internal constructor(
         }
         if (!drained) return CloseResult.Unknown
         synchronized(lock) {
-            if (uncertain || releasing || shutdownBusy) return CloseResult.Unknown
+            if (uncertain || releasing || shutdownBusy || cleanupBusy) return CloseResult.Unknown
             if (released) return CloseResult.Drained
             releasing = true
         }
@@ -301,7 +308,7 @@ internal class ControllerVirtualDisplaySession internal constructor(
     fun shutdownUninitializedOnceOnWorker(): Boolean {
         worker()
         val target = synchronized(lock) {
-            if (!closed || binding || releasing || released || shutdownClaimed || batchCallbacks != 0 ||
+            if (!closed || binding || releasing || released || shutdownClaimed || cleanupBusy || batchCallbacks != 0 ||
                 batchTickets.isNotEmpty()) return false
             val current = handle ?: return false
             val prepared = plan ?: return false
@@ -319,6 +326,103 @@ internal class ControllerVirtualDisplaySession internal constructor(
             else { target.second.shutdownOnce(target.first.generation, target.first.binding); true }
         } catch (_: Exception) { false }
         finally { synchronized(lock) { shutdownBusy = false } }
+    }
+
+    enum class CleanupResult { NOT_APPROVED, UNAVAILABLE, CONFIRMED, UNKNOWN }
+
+    /** Explicit host action AFTER Stop + parent drain, never called by close/observe/timers.
+     * Freezes an additional Release-only request on the SAME owner, capabilities and durable
+     * generation. A previous Release (successful or uncertain) is never replaced by maintenance.
+     * No store, IPC, reserve, catalog registration or combined tool authorization happens here.
+     */
+    fun prepareInitializedCleanupOnWorker(parentDrained: Boolean): R08CleanupApprovalRequest? {
+        worker()
+        return synchronized(lock) {
+            if (cleanupDecision != null || cleanupAttempted || !cleanupAvailable(parentDrained)) return null
+            cleanupRequest ?: run {
+                val original = checkNotNull(plan)
+                val releasePlan = R08VirtualDisplayPlan.prepare(original.owner, capabilities, original.generation,
+                    listOf(R08VirtualDisplayWrite("host_cleanup_release", R08VirtualDisplayAction.Release)))
+                R08CleanupApprovalRequest(releasePlan).also { cleanupRequest = it }
+            }
+        }
+    }
+
+    /** Identity-bound, first answer wins. Back/disposal deny this request only; neither grants
+     * nor executes a Release. The original revoked approval remains revoked forever.
+     */
+    fun answerCleanupFromUi(original: R08CleanupApprovalRequest, accepted: Boolean): Boolean = synchronized(lock) {
+        if (cleanupRequest !== original || cleanupDecision != null || cleanupAttempted || released) false
+        else {
+            original.review.answerFromUi(accepted) { cleanupApproval = it }
+            cleanupDecision = accepted
+            true
+        }
+    }
+
+    /** One explicitly requested worker action, not a Runner/tool dispatcher or automatic cleanup.
+     * Claims the deterministic host intent in the EXISTING durable journal BEFORE sending on the
+     * retained endpoint. Any existing claim/exception/ambiguous business result is UNKNOWN, never
+     * grounds for a new ID or retry. This path does not release the lease or clear prior UNKNOWN.
+     */
+    fun releaseInitializedOnceOnWorker(original: R08CleanupApprovalRequest,
+                                       parentDrained: Boolean,
+                                       admissionStillValid: () -> Boolean = { true }): CleanupResult {
+        worker()
+        val target = synchronized(lock) {
+            if (cleanupRequest !== original || cleanupDecision != true || cleanupApproval == null)
+                return CleanupResult.NOT_APPROVED
+            // Adapter supplies only an atomic UI-visit validity read here: no host locks or I/O.
+            // Invalidation before this admission does not consume the journal/send attempt;
+            // after admission the in-flight operation cannot be undone or safely replayed.
+            if (cleanupAttempted || !cleanupAvailable(parentDrained) || !admissionStillValid())
+                return CleanupResult.UNAVAILABLE
+            val prepared = original.review.plan
+            val actual = checkNotNull(plan)
+            check(prepared.owner === actual.owner && prepared.capabilities === capabilities &&
+                prepared.generation == actual.generation && prepared.bindingKey == actual.bindingKey)
+            cleanupAttempted = true // consumed BEFORE claim/storage/IPC, even if the receipt is lost
+            cleanupBusy = true
+            Triple(checkNotNull(lease).journal, checkNotNull(handle).endpoint, prepared)
+        }
+        val intent = target.third.intent("host-cleanup-release-v1", target.third.writes.single())
+        var evidence = R08VirtualDisplayEvidence.UNKNOWN
+        var persistedConfirmation = false
+        try {
+            if (target.first.claim(intent) == R08VirtualDisplayPermit.EXECUTE_ONCE) {
+                val reply = target.second.execute(intent.operationId, intent.operation, JSONObject(intent.canonicalParameters))
+                val body = reply.payloadCopy()
+                if (reply.outcome == app.daiyu.android.vd.OwnerReply.Outcome.REPLIED && body != null &&
+                    body.opt("ok") == true && body.opt("receiptOnly") != true &&
+                    body.opt("mutationUncertain") != true && body.opt("released") == true &&
+                    body.optJSONObject("receipt")?.optString("state") == "SUCCEEDED")
+                    evidence = R08VirtualDisplayEvidence.CONFIRMED
+            }
+            // Maintenance evidence, NOT a fabricated central tool-ledger final result.
+            target.first.complete(intent, evidence)
+            persistedConfirmation = evidence == R08VirtualDisplayEvidence.CONFIRMED
+            if (persistedConfirmation) return CleanupResult.CONFIRMED
+        } catch (_: Exception) {
+            // Never retry claim/send/completion. The original claim (or a failed append's
+            // pending evidence) remains durable; absence of completion is NOT success.
+        } finally {
+            synchronized(lock) {
+                if (!persistedConfirmation) uncertain = true
+                cleanupBusy = false
+            }
+        }
+        return CleanupResult.UNKNOWN
+    }
+
+    // Caller holds lock. After close no new dispatch is admitted; final feedback and any earlier
+    // active operation must have drained too. Never use initialized=false as uninitialized proof.
+    private fun cleanupAvailable(parentDrained: Boolean): Boolean {
+        if (!closed || !parentDrained || binding || uncertain || releasing || released || shutdownClaimed ||
+            shutdownBusy || cleanupBusy || batchCallbacks != 0 || batchTickets.isNotEmpty() || lease == null ||
+            handle == null || plan == null) return false
+        val state = leaf?.heldState() ?: return false
+        return state.revoked && state.startAttempted && state.initialized && !state.uncertain &&
+            !state.releaseAttempted && state.activeExecutions == 0 && state.pendingFinalOutcomes == 0
     }
 
     private fun stopAcceptedOnce(actualOwner: RunExecutionOwner) {

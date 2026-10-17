@@ -16,6 +16,7 @@ class VirtualDisplayMainActivityTest : WiredActivityTestCase() {
     private fun prepare(): ControllerVirtualDisplayEntry {
         setDraft(text)
         node("vd-prepare-entry").performScrollTo().performClick()
+        node("r08-plan-freeze").performClick()
         return checkNotNull(fixture.controller.virtualDisplayEntry())
     }
 

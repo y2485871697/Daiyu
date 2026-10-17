@@ -35,7 +35,8 @@ internal sealed interface R08VirtualDisplayCloseResult {
     data class Unknown(val code: String = "virtual_display_owner_retained") : R08VirtualDisplayCloseResult
 }
 internal data class R08VirtualDisplayHeldState(val revoked: Boolean, val activeExecutions: Int,
-    val pendingFinalOutcomes: Int, val startAttempted: Boolean, val initialized: Boolean, val uncertain: Boolean)
+    val pendingFinalOutcomes: Int, val startAttempted: Boolean, val initialized: Boolean, val uncertain: Boolean,
+    val releaseAttempted: Boolean = false)
 
 /** Leaf registration only. Parent owns the one ToolRegistry/ToolDispatcher/ToolLedger and must
  * beginBatch BEFORE dispatch and finishBatch with FINAL outcomes, including ledger short-circuits.
@@ -81,6 +82,9 @@ internal class R08VirtualDisplayCatalogLeaf internal constructor(
     private var startAttempted = false
     private var transportReady = false
     private var initialized = false
+    // Once an original Release crosses claim admission, maintenance must never replace it with
+    // a different invocation/UUID, including after a known result or a lost completion receipt.
+    private var releaseAttempted = false
     private var uncertain = false
 
     /** Exact object identity, not equivalent reconstructed owner/authorization/capabilities. */
@@ -176,6 +180,7 @@ internal class R08VirtualDisplayCatalogLeaf internal constructor(
                 if (synchronized(stateLock) { uncertain })
                     return@synchronized finish(intent, ExecutionReceipt.Unknown("virtual_display_owner_uncertain"))
                 if (context.cancelled()) return@synchronized finish(intent, ExecutionReceipt.NotExecuted("cancelled_before_execution"))
+                if (operation.operation == "release") synchronized(stateLock) { releaseAttempted = true }
                 val result = try {
                     if (permit == R08VirtualDisplayPermit.LOOKUP_ONLY) {
                         // Never replay start or initialize. Existing receipts are evidence only.
@@ -282,6 +287,13 @@ internal class R08VirtualDisplayCatalogLeaf internal constructor(
                     is DispatchOutcome.Confirmed -> R08VirtualDisplayEvidence.CONFIRMED
                 }
                 if (evidence == R08VirtualDisplayEvidence.UNKNOWN) unknown("virtual_display_central_ledger_unknown")
+                // A central semantic replay may confirm Release without entering this adapter.
+                // That known result must also fence a maintenance Release with a fresh identity.
+                if (evidence == R08VirtualDisplayEvidence.CONFIRMED && call.name == WRITE_TOOL) {
+                    val stepId = try { JSONObject(call.arguments).optString("step_id") } catch (_: Exception) { "" }
+                    if (plan.writes.any { it.id == stepId && it.operation == "release" })
+                        synchronized(stateLock) { releaseAttempted = true }
+                }
                 journal.finalOutcome(plan.bindingKey, plan.generation, result.callId.value, evidence)
             }
             completed = true
@@ -302,7 +314,8 @@ internal class R08VirtualDisplayCatalogLeaf internal constructor(
     fun heldState(): R08VirtualDisplayHeldState = synchronized(stateLock) {
         val registeredIds = batches.values.flatMap { it.relevant }.map { it.id.value }.toSet()
         val pending = batches.values.sumOf { it.relevant.size } + pendingFinal.count { it !in registeredIds }
-        R08VirtualDisplayHeldState(revoked || !approval.isActive, active, pending, startAttempted, initialized, uncertain)
+        R08VirtualDisplayHeldState(revoked || !approval.isActive, active, pending, startAttempted, initialized, uncertain,
+            releaseAttempted)
     }
 
     /** Pure revocation only: no socket close, wait/join, release, handoff, reconnect or kill. */

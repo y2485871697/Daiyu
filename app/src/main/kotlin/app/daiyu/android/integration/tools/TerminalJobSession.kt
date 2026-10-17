@@ -1,0 +1,248 @@
+package app.daiyu.android.integration.tools
+
+import android.content.Context
+import app.daiyu.android.domain.*
+import app.daiyu.android.domain.runtime.RunExecutionOwner
+import app.daiyu.android.domain.tools.*
+import app.daiyu.android.terminal.*
+import org.json.JSONObject
+import java.security.MessageDigest
+
+/** Separate from PTY. A finite, host-authored fixed-command job, never model-authored shell JSON. */
+internal class TerminalJobPlan(
+    val conversationId: ConversationId,
+    val runId: RunId,
+    val launch: TerminalPtyLaunch,
+    val command: String,
+    val mode: String,
+) {
+    val sessionId = runId.value
+    private var claimed = false
+    @Synchronized fun claim() {
+        check(!claimed) { "terminal_job_plan_already_claimed" }
+        claimed = true
+        (launch as? TerminalPtyLaunch.Linux)?.claim()
+    }
+    val configuration: TerminalConfiguration = when (launch) {
+        is TerminalPtyLaunch.Android -> {
+            require(launch.argv == listOf("/system/bin/sh")) { "terminal_job_android_app_shell_only" }
+            TerminalConfiguration(workingDirectory = launch.cwd, environment = launch.environment)
+        }
+        is TerminalPtyLaunch.Linux -> launch.commandConfiguration()
+    }
+    val effect: WriteEffect
+    init {
+        require(mode in setOf("async", "daemon"))
+        require(command.isNotBlank() && command.length <= 32768 && '\u0000' !in command)
+        require(String(command.toByteArray(Charsets.UTF_8), Charsets.UTF_8) == command)
+        require(!configuration.root)
+        require(mode != "daemon" || launch is TerminalPtyLaunch.Android) { "linux_daemon_not_supported" }
+        val backend = configuration.linux
+        val description = JSONObject().put("conversation", conversationId.value).put("run", runId.value)
+            .put("backend", configuration.backend).put("cwd", configuration.workingDirectory?.path)
+            .put("environment", JSONObject(configuration.environment.toSortedMap()))
+            .put("argv", org.json.JSONArray(backend?.shellArgv ?: listOf("/system/bin/sh")))
+            .put("linux_environment", JSONObject(backend?.environment?.toSortedMap().orEmpty()))
+            .put("guest_cwd", backend?.guestWorkingDirectory)
+            .put("mounts", JSONObject(backend?.sharedMounts?.toSortedMap().orEmpty()))
+        val target = MessageDigest.getInstance("SHA-256").digest(description.toString().toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        effect = WriteEffect("terminal.job", "start", target, "$mode:" +
+            java.util.Base64.getEncoder().encodeToString(command.toByteArray(Charsets.UTF_8)))
+    }
+}
+
+/** Narrow injectable backend. No second dispatcher, no caller-selected executable or PID. */
+internal interface TerminalJobTransport : AutoCloseable {
+    fun execute(name: String, arguments: JSONObject): JSONObject
+    fun inspect(id: String): JSONObject
+    fun stop(id: String): JSONObject
+    fun awaitOrdinaryTermination(timeoutMillis: Long): Boolean
+}
+
+/** Retained by Controller even after catalog drain: Android daemon belongs to conversation, not run.
+ * No restoration of live handles/authority across app restart. All blocking work is worker-only. */
+internal class TerminalJobSession private constructor(
+    val plan: TerminalJobPlan,
+    val authorization: TaskAuthorization,
+    private val create: () -> TerminalJobTransport,
+) : AutoCloseable {
+    private val lock = Any()
+    private var owner: RunExecutionOwner? = null
+    private var backend: TerminalJobTransport? = null
+    private var closed = false
+    private var active = false
+    private var attempted = false
+    private var unknown = false
+    private var creationUnconfirmed = false
+    private var stopPending = 0
+    private var stopThread: Thread? = null
+    private var stopFailed = false
+    private var drained = false
+    private var joining = false
+    private var job: String? = null
+    val jobId: String? get() = synchronized(lock) { job }
+
+    fun bind(owner: RunExecutionOwner, capabilities: SessionCapabilities, token: TaskAuthorization) = synchronized(lock) {
+        require(token === authorization && owner.conversationId == plan.conversationId && owner.runId == plan.runId &&
+            capabilities.sessionId == plan.sessionId) { "tool_run_owner_mismatch" }
+        check(!closed && (this.owner == null || this.owner === owner)) { "terminal_job_owner_closed_or_replaced" }
+        this.owner = owner
+    }
+
+    private fun denied(context: ToolExecutionContext): ExecutionReceipt.NotExecuted? = when {
+        closed -> ExecutionReceipt.NotExecuted("terminal_job_run_closed")
+        context.owner !== owner || owner == null -> ExecutionReceipt.NotExecuted("tool_run_owner_mismatch")
+        context.authorization !== authorization -> ExecutionReceipt.NotExecuted("tool_run_authorization_mismatch")
+        else -> null
+    }
+
+    fun tools(capabilities: SessionCapabilities): List<RegisteredTool> {
+        if (CAPABILITY !in capabilities.enabled) return emptyList()
+        val schema = ToolSchema(emptyList())
+        fun tool(name: String, write: Boolean) = object : RegisteredTool {
+            override val definition = app.daiyu.android.domain.tools.ToolDefinition(name, 1,
+                if (write) "启动本次精确批准的固定命令job；async/daemon派发后UNKNOWN不重发，凭原job查询。daemon仅Android应用身份、setsid、同app进程。"
+                else "读取原job首个16KiB日志及真实状态，不执行、不重放、不猜测退出。",
+                CAPABILITY, if (write) ToolEffect.WRITE else ToolEffect.READ_ONLY, schema)
+            override fun prepare(arguments: ToolArguments): PreparedTool = PreparedTool.contextual(
+                if (write) plan.effect else null,
+                admit = { context -> synchronized(lock) {
+                    denied(context) ?: if (context.invocation.name != name ||
+                        runCatching { schema.parse(context.invocation.arguments).canonicalJson() }.getOrNull() != arguments.canonicalJson())
+                        ExecutionReceipt.NotExecuted("tool_invocation_mismatch") else null
+                } },
+                execute = { context -> if (write) start(context) else read(context) })
+        }
+        return listOf(tool(START, true), tool(READ, false))
+    }
+
+    private fun start(context: ToolExecutionContext): ExecutionReceipt {
+        // External cancellation never runs under our monitor. Recheck identity/close at claim.
+        val cancelled = context.cancelled()
+        synchronized(lock) {
+            denied(context)?.let { return it }
+            if (cancelled) return ExecutionReceipt.NotExecuted("terminal_job_cancelled")
+            if (unknown || attempted) return ExecutionReceipt.Unknown("terminal_job_no_resend")
+            if (plan.effect !in authorization.allowedWrites) return ExecutionReceipt.NotExecuted("task_write_not_authorized")
+            attempted = true; active = true
+        }
+        var factoryEntered = false
+        try {
+            (plan.launch as? TerminalPtyLaunch.Linux)?.revalidate()
+            factoryEntered = true
+            val transport = create()
+            val late = synchronized(lock) { backend = transport; closed }
+            if (late) { stopTransport(transport); return ExecutionReceipt.NotExecuted("terminal_job_cancelled_before_open") }
+            val opened = transport.execute("terminal_open", JSONObject().put("request_id", "open"))
+            if (!opened.optBoolean("ok")) return receipt(opened)
+            val raw = transport.execute("terminal_exec", JSONObject().put("request_id", "command")
+                .put("session_id", opened.getString("session_id")).put("command", plan.command).put("mode", plan.mode))
+            synchronized(lock) { job = raw.optString("job_id").takeIf { it.matches(Regex("[a-f0-9-]{36}")) } }
+            return receipt(raw)
+        } catch (failure: Exception) {
+            if (failure is InterruptedException) Thread.currentThread().interrupt()
+            synchronized(lock) { if (factoryEntered && backend == null) creationUnconfirmed = true }
+            markUnknown()
+            return ExecutionReceipt.Unknown("terminal_job_start_unconfirmed_no_resend")
+        } finally { synchronized(lock) { active = false } }
+    }
+    private fun receipt(raw: JSONObject): ExecutionReceipt {
+        if (raw.optString("execution") == "not_executed")
+            return ExecutionReceipt.NotExecuted(raw.optString("error", "terminal_job_not_dispatched"))
+        markUnknown()
+        return ExecutionReceipt.Unknown("terminal_job_dispatched_or_unconfirmed:${jobId ?: "no_handle"}")
+    }
+    private fun read(context: ToolExecutionContext): ExecutionReceipt {
+        val cancelled = context.cancelled()
+        synchronized(lock) { denied(context)?.let { return it } }
+        if (cancelled) return ExecutionReceipt.NotExecuted("terminal_job_cancelled")
+        return ExecutionReceipt.Confirmed(inspectOnWorker().toString())
+    }
+    fun observeOutcomes(results: List<ToolDispatchResult>) {
+        if (results.any { it.outcome is DispatchOutcome.Unknown }) markUnknown()
+    }
+    private fun markUnknown() = synchronized(lock) { unknown = true }
+
+    /** Original retained object only. These are UI diagnostics, not new model/run authorization. */
+    fun inspectOnWorker(): JSONObject {
+        val pair = synchronized(lock) { backend to job }
+        return if (pair.first != null && pair.second != null) pair.first!!.inspect(pair.second!!)
+        else JSONObject().put("ok", false).put("execution", "unknown").put("error", "terminal_job_not_dispatched_or_unconfirmed")
+    }
+    fun stopOnWorker(): JSONObject {
+        val pair = synchronized(lock) { backend to job }
+        return if (pair.first != null && pair.second != null) pair.first!!.stop(pair.second!!)
+        else JSONObject().put("ok", false).put("execution", "unknown").put("error", "terminal_job_handle_unavailable")
+    }
+    override fun close() {
+        synchronized(lock) {
+            if (closed) return
+            closed = true
+            val owned = backend ?: return
+            stopPending++
+            // Only thread publication/start under the monitor, never Registry/Process I/O.
+            stopThread = Thread({
+                try { owned.close() } catch (_: Exception) { synchronized(lock) { stopFailed = true } }
+                finally { synchronized(lock) { stopPending-- } }
+            }, "terminal-job-stop").apply { isDaemon = true; start() }
+        }
+    }
+    private fun stopTransport(transport: TerminalJobTransport) {
+        try { transport.close() } catch (_: Exception) { synchronized(lock) { stopFailed = true } }
+    }
+    fun awaitCloseOnWorker(timeoutMillis: Long): Boolean {
+        require(timeoutMillis in 1..30000)
+        val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
+        val stopping = synchronized(lock) { stopThread }
+        if (stopping != null && stopping !== Thread.currentThread()) stopping.join(timeoutMillis)
+        val owned = synchronized(lock) {
+            if (drained) return true
+            if (!closed || active || stopPending != 0 || stopFailed || creationUnconfirmed || joining) return false
+            joining = true
+            backend
+        }
+        var complete = false
+        try {
+            if (owned != null) {
+                val remaining = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
+                if (remaining <= 0 || !owned.awaitOrdinaryTermination(remaining.coerceAtMost(30000))) return false
+            }
+            (plan.launch as? TerminalPtyLaunch.Linux)?.release()
+            complete = true
+            return true
+        } finally { synchronized(lock) { joining = false; if (complete) drained = true } }
+    }
+    fun observeClose(done: (RunCatalogCloseResult) -> Unit) {
+        Thread({
+            val complete = try { awaitCloseOnWorker(30_000) } catch (_: Exception) { false }
+            done(if (complete) RunCatalogCloseResult.Drained else RunCatalogCloseResult.Unknown("terminal_job_drain_unconfirmed"))
+        }, "terminal-job-drain").apply { isDaemon = true; start() }
+    }
+    companion object {
+        const val CAPABILITY = "terminal.job.approved_command"
+        const val START = "terminal_job_start"
+        const val READ = "terminal_job_read"
+        fun approve(context: Context, plan: TerminalJobPlan, authorization: TaskAuthorization): TerminalJobSession =
+            approved(plan, authorization) {
+                val registry = TerminalRegistry(context)
+                // retain even if configure throws: no command has been started yet.
+                try { registry.configure(plan.sessionId, plan.configuration, plan.conversationId.value) }
+                catch (failure: Throwable) { registry.close(); throw failure }
+                object : TerminalJobTransport {
+                    override fun execute(name: String, arguments: JSONObject) = registry.execute(name, arguments)
+                    override fun inspect(id: String) = registry.inspectJob(id)
+                    override fun stop(id: String) = registry.stopOwnedJob(id)
+                    override fun close() = registry.close()
+                    override fun awaitOrdinaryTermination(timeoutMillis: Long) = registry.awaitOrdinaryTermination(timeoutMillis)
+                }
+            }
+        internal fun approved(plan: TerminalJobPlan, authorization: TaskAuthorization,
+            create: () -> TerminalJobTransport): TerminalJobSession {
+            require(authorization.sessionId == plan.sessionId && authorization.taskId == plan.runId.value &&
+                plan.effect in authorization.allowedWrites) { "terminal_job_exact_approval_required" }
+            plan.claim()
+            return TerminalJobSession(plan, authorization, create)
+        }
+    }
+}

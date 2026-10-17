@@ -271,6 +271,8 @@ class ChatController internal constructor(private val application:Application,
         var persistenceUnconfirmed = false
         var browser: ControllerBrowserPreparation? = null
         var terminal: ControllerTerminalPreparation? = null
+        var terminalJob: ControllerTerminalJobPreparation? = null
+        var terminalJobRun: TerminalJobSession? = null
         var terminalLaunch: TerminalPtyLaunch? = null
         var terminalRun: TerminalConfirmedRun? = null
         var terminalCatalog: RunCatalogTools? = null
@@ -412,7 +414,7 @@ class ChatController internal constructor(private val application:Application,
         }
         token?.cancellation?.cancel()
         token?.browser?.cancel()
-        if (token != null && !token.submitted && (token.browser != null || token.terminal != null ||
+        if (token != null && !token.submitted && (token.browser != null || token.terminal != null || token.terminalJob != null ||
             synchronized(this) { virtualDisplayEntry?.submitted == false || guiEntry?.submitted == false })) finishPreparation(token)
     }
     internal fun bindConversationAssistant(owner: ConversationId, expected: String?, replacement: String): Boolean {
@@ -1531,6 +1533,20 @@ class ChatController internal constructor(private val application:Application,
             token.video?.revoke()
             if (videoSession === token.video) videoSession = null
         }
+        val job = token.terminalJob
+        if (job != null && token.terminalCatalog == null) {
+            val start = synchronized(this) {
+                if (token.terminalCleanupStarted) false else { token.terminalCleanupStarted = true; true }
+            }
+            if (start) Thread({
+                val drained = try { job.cleanupOnWorker() } catch (_: Exception) { false }
+                if (drained) releasePreparation(token) else synchronized(this) {
+                    problem = "固定命令 job 清理 UNKNOWN；保留原资源，不自动重发"
+                    notifyChanged()
+                }
+            }, "terminal-job-preparation-drain").apply { isDaemon = true; start() }
+            return
+        }
         val terminal = token.terminal
         if (token.terminalCatalog == null && ((terminal != null && terminal.state != ControllerTerminalPreparation.State.DRAINED) ||
                 (terminal == null && token.terminalLaunch is TerminalPtyLaunch.Linux))) {
@@ -1864,6 +1880,116 @@ class ChatController internal constructor(private val application:Application,
     @Synchronized internal fun browserPreparation(): ControllerBrowserPreparation? = preparation?.browser
 
     @Synchronized internal fun terminalPreparation(): ControllerTerminalPreparation? = preparation?.terminal
+    @Synchronized internal fun terminalJobPreparation(): ControllerTerminalJobPreparation? = preparation?.terminalJob
+
+    // Kept after catalog/run drain: daemon lifetime is independent of run, not of app process.
+    // Bounded fail-closed retention; never evict UNKNOWN evidence to create dispatch capacity.
+    private val retainedTerminalJobs = mutableListOf<TerminalJobSession>()
+    @Synchronized internal fun terminalJobRuns(conversation: ConversationId): List<TerminalJobSession> =
+        retainedTerminalJobs.filter { it.plan.conversationId == conversation }.toList()
+    internal fun inspectTerminalJobOnWorker(conversation: ConversationId, original: TerminalJobSession): org.json.JSONObject {
+        check(Looper.myLooper() != Looper.getMainLooper())
+        check(synchronized(this) { original in retainedTerminalJobs && original.plan.conversationId == conversation })
+        return original.inspectOnWorker()
+    }
+    internal fun stopTerminalJobOnWorker(conversation: ConversationId, original: TerminalJobSession,
+        admit: () -> Boolean = { false }): org.json.JSONObject {
+        check(Looper.myLooper() != Looper.getMainLooper())
+        check(admit()) // Pure one-shot page admission; never invoke caller code under Controller monitor.
+        check(synchronized(this) { !closed && original in retainedTerminalJobs && original.plan.conversationId == conversation })
+        return original.stopOnWorker()
+    }
+
+    internal fun prepareTerminalJobSend(conversation: Conversation?, draft: TerminalDraftSnapshot,
+        command: String, mode: String, linux: app.daiyu.android.terminal.LinuxGenerationRef?): ControllerTerminalJobPreparation? {
+        check(Looper.myLooper() != Looper.getMainLooper())
+        val token = synchronized(this) {
+            if (!idleAvailable() || pendingTextState != null || draft.text.isBlank() ||
+                draft.owner.conversationId != conversation?.id || retainedTerminalJobs.size >= 64) return null
+            reservePreparation()
+        }
+        try {
+            require(mode in setOf("async", "daemon"))
+            require(mode != "daemon" || linux == null) { "linux_daemon_not_supported" }
+            val (profile, provider) = terminalConfiguration(conversation)
+            val context = AssistantRunContext.capture(assistantStore, profile.id, assistantAssets)
+            check(assistantStore.read(profile.id) == profile)
+            val launch = if (linux == null) TerminalPtyLaunch.Android(listOf("/system/bin/sh"),
+                mapOf("HOME" to application.filesDir.path, "TMPDIR" to application.cacheDir.path,
+                    "PATH" to "/system/bin:/system/xbin"), application.filesDir)
+            else checkNotNull(((application as? ChatApplication)?.terminalProvider?.state?.value as?
+                app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application)
+                .freezeTerminalLaunchOnWorker(linux, application.cacheDir, application.filesDir)
+            token.terminalLaunch = launch
+            val plan = TerminalJobPlan(conversation?.id ?: ConversationId(UUID.randomUUID().toString()),
+                RunId(UUID.randomUUID().toString()), launch, command, mode)
+            val pending = ControllerTerminalJobPreparation(application, conversation, draft, profile, provider, plan)
+            synchronized(this) {
+                token.terminalJob = pending
+                token.browserContext = context
+                check(preparation === token && !token.revoked && !closed)
+            }
+            notifyChanged()
+            return pending
+        } catch (_: Exception) {
+            problem = "固定命令 job 准备失败或后端不支持；未启动，草稿保留"
+            finishPreparation(token); notifyChanged(); return null
+        }
+    }
+    internal fun rejectTerminalJob(pending: ControllerTerminalJobPreparation) {
+        val token = synchronized(this) {
+            preparation?.takeIf { it.terminalJob === pending }?.also { it.revoked = true }
+        } ?: return
+        token.cancellation.cancel()
+        if (!token.submitted) finishPreparation(token)
+    }
+    internal fun confirmTerminalJob(pending: ControllerTerminalJobPreparation, current: TerminalDraftSnapshot): Boolean {
+        val actual = runCatching { terminalConfiguration(pending.conversation) }.getOrNull()
+        if (actual != (pending.assistant to pending.provider) || current != pending.draft) {
+            rejectTerminalJob(pending); return false
+        }
+        return synchronized(this) {
+            val token = preparation ?: return false
+            token.terminalJob === pending && !token.revoked && !token.submitted && !closed &&
+                pending.confirm(current, pending.assistant, pending.provider)
+        }
+    }
+    internal fun sendTerminalJob(pending: ControllerTerminalJobPreparation, current: TerminalDraftSnapshot,
+        ticket: TextSendTicket, complete: (TextSendResult) -> Unit): Boolean {
+        val actual = runCatching { terminalConfiguration(pending.conversation) }.getOrNull()
+        if (actual != (pending.assistant to pending.provider) || current != pending.draft) {
+            rejectTerminalJob(pending); return false
+        }
+        val owner = TextSendOwner(current.owner.conversationId, current.owner.editorGeneration, current.owner.draftRevision)
+        val token = synchronized(this) {
+            val candidate = preparation ?: return false
+            if (candidate.terminalJob !== pending || candidate.revoked || candidate.submitted || closed || pendingTextState != null) return false
+            val transferred = pending.transfer(current, pending.assistant, pending.provider) ?: return false
+            retainedTerminalJobs.add(transferred)
+            candidate.terminalJobRun = transferred
+            candidate.submitted = true
+            candidate.textTicket = ticket
+            pendingTextState = TextSendState(ticket, owner, current.text)
+            candidate
+        }
+        try { executor.execute {
+            val saved = try { sendPrepared(token, pending.conversation, current.text,
+                expectedDraftText = current.text, terminalJobPreparation = pending, terminalJobRun = token.terminalJobRun) }
+                catch (_: Exception) { null }
+            val result = when {
+                saved != null -> TextSendResult.Accepted(owner, saved)
+                token.persistenceUnconfirmed -> TextSendResult.Unknown(owner)
+                else -> TextSendResult.Rejected(owner)
+            }
+            synchronized(this) { if (pendingTextState?.ticket === ticket) pendingTextState = pendingTextState?.copy(result = result) }
+            finishPreparation(token)
+            handler.post { try { complete(result) } catch (_: Exception) { } }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { if (pendingTextState?.ticket === ticket) pendingTextState = null }
+            finishPreparation(token); return false
+        }
+        return true
+    }
 
     /** Snapshot outside the admission monitor: SQLite/settings reads are never under it. */
     internal fun terminalConfiguration(conversation: Conversation?): Pair<AssistantProfile, ProviderSnapshot> {
@@ -2168,14 +2294,23 @@ class ChatController internal constructor(private val application:Application,
         generation:GenerationEntry?=null,
         terminalPreparation:ControllerTerminalPreparation?=null,
         terminalRun:TerminalConfirmedRun?=null,
+        terminalJobPreparation:ControllerTerminalJobPreparation?=null,
+        terminalJobRun:TerminalJobSession?=null,
         virtualDisplay:ControllerVirtualDisplayEntry?=null,
         gui:ControllerGuiEntry?=null,
         videoAttempt:ControllerVideoAttempt?=null):Conversation? {
         require(gui == null || (virtualDisplay == null && generation == null && shizukuPreparation == null &&
             shizukuAuthorization == null && browserPreparation == null && browserBinding == null &&
-            imageAttempt == null && terminalRun == null && videoAttempt == null && !withChildren &&
+            imageAttempt == null && terminalRun == null && terminalJobRun == null && videoAttempt == null && !withChildren &&
             gui.session != null && gui.delivery?.session === gui.session && !gui.revoked))
         require((terminalPreparation == null) == (terminalRun == null))
+        require((terminalJobPreparation == null) == (terminalJobRun == null))
+        require(terminalJobRun == null || (terminalRun == null && imageAttempt == null &&
+            shizukuPreparation == null && shizukuAuthorization == null && browserPreparation == null &&
+            browserBinding == null && generation == null && virtualDisplay == null && gui == null && videoAttempt == null && !withChildren &&
+            terminalJobRun.plan === terminalJobPreparation?.plan))
+        if (terminalJobPreparation != null && runCatching { terminalConfiguration(conversation) }.getOrNull() !=
+            (terminalJobPreparation.assistant to terminalJobPreparation.provider)) return null
         require(terminalRun == null || (imageAttempt == null && shizukuPreparation == null &&
             browserPreparation == null && generation == null && virtualDisplay == null && videoAttempt == null && !withChildren &&
             terminalRun.preview === terminalPreparation?.preview &&
@@ -2183,7 +2318,7 @@ class ChatController internal constructor(private val application:Application,
         if (terminalPreparation != null && runCatching { terminalConfiguration(conversation) }.getOrNull() !=
             (terminalPreparation.assistant to terminalPreparation.provider)) return null
         require(virtualDisplay == null || (generation == null && shizukuPreparation == null &&
-            browserBinding == null && imageAttempt == null && terminalRun == null && videoAttempt == null && !withChildren))
+            browserBinding == null && imageAttempt == null && terminalRun == null && terminalJobRun == null && videoAttempt == null && !withChildren))
         require(videoAttempt == null || (generation == null && shizukuPreparation == null && shizukuAuthorization == null &&
             browserPreparation == null && browserBinding == null && imageAttempt == null &&
             terminalRun == null && virtualDisplay == null && !withChildren))
@@ -2224,11 +2359,11 @@ class ChatController internal constructor(private val application:Application,
             problem="子模型配置未绑定、已变更或不支持；草稿保留，未切换到主模型";notifyChanged();return null
         }
         val interactiveSnapshot = interactiveMode.snapshot()
-        val config=try {(terminalPreparation?.provider?.asModelSettings() ?: browserPreparation?.provider?.asModelSettings() ?: settings.load()).also {it.validate()}} catch (_:CredentialUnavailableException) {
+        val config=try {(terminalJobPreparation?.provider?.asModelSettings() ?: terminalPreparation?.provider?.asModelSettings() ?: browserPreparation?.provider?.asModelSettings() ?: settings.load()).also {it.validate()}} catch (_:CredentialUnavailableException) {
             problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
         } catch (_:Exception) {problem="请在模型设置里配置Responses地址、模型与密钥";notifyChanged();return null}
         val provider=try {
-            val selected=terminalPreparation?.provider ?: browserPreparation?.provider ?: imageAttempt?.provider ?: synchronized(this) {imageProvider}
+            val selected=terminalJobPreparation?.provider ?: terminalPreparation?.provider ?: browserPreparation?.provider ?: imageAttempt?.provider ?: synchronized(this) {imageProvider}
             if(imageAttempt!=null) require(selected?.asModelSettings()==config) {"stale_image_provider"}
             selected?.takeIf {it.asModelSettings()==config} ?: ProviderSnapshot.capture(config)
         } catch (_:Exception) {problem="图片模型配置已变化；草稿保留，未发起网络请求";notifyChanged();return null}
@@ -2251,9 +2386,9 @@ class ChatController internal constructor(private val application:Application,
             problem="错误重连配置无效或写入未确认；请重新保存，草稿保留，未启动聊天模型请求"
             notifyChanged(); return null
         }
-        val conversationId=gui?.conversationId ?: virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
+        val conversationId=gui?.conversationId ?: terminalJobPreparation?.identity?.conversationId ?: virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
-        val run=gui?.runId ?: virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
+        val run=gui?.runId ?: terminalJobPreparation?.identity?.runId ?: virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
         if (conversation == null) try { reasoningPreference.retainAccepted(conversationId.value, frozenReasoning) }
         catch (_: Exception) { problem="会话思考偏好保存未确认；草稿保留，未发起请求";notifyChanged();return null }
         // One acceptance candidate, including its media reconstruction and all run owners.
@@ -2262,13 +2397,13 @@ class ChatController internal constructor(private val application:Application,
         var user=try {imageAttempt?.prepare(imageAttachments.store,messageImageAssets,acceptedAt) ?:
             Message(videoAttempt?.userId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED,createdAt=acceptedAt)
         } catch (_:Exception) {problem="图片冻结失败或模型不支持；草稿保留，未发起网络请求";notifyChanged();return null}
-        val assistant=Message(gui?.assistantId ?: virtualDisplay?.assistantId ?: terminalRun?.preview?.identity?.assistantMessageId ?: videoAttempt?.assistantId ?: generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING,createdAt=acceptedAt)
+        val assistant=Message(gui?.assistantId ?: terminalJobPreparation?.identity?.assistantMessageId ?: virtualDisplay?.assistantId ?: terminalRun?.preview?.identity?.assistantMessageId ?: videoAttempt?.assistantId ?: generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING,createdAt=acceptedAt)
         val physicalVideoHistory = try { ControllerVideoHistory(database).capture(conversationId) }
         catch (_: Exception) {
             problem="原视频来源无法确认；草稿保留，未启动模型请求";notifyChanged();return null
         }
         if (physicalVideoHistory.inputs.isNotEmpty() && (withChildren || imageAttempt != null ||
-                generation != null || terminalRun != null || virtualDisplay != null || gui != null ||
+                generation != null || terminalRun != null || terminalJobRun != null || virtualDisplay != null || gui != null ||
                 shizukuPreparation != null || shizukuAuthorization != null ||
                 browserPreparation != null || browserBinding != null)) {
             problem="当前专用批准不能与原视频历史混合发送；保留草稿，请使用原视频文本发送入口"
@@ -2445,7 +2580,7 @@ class ChatController internal constructor(private val application:Application,
             val devices = RunDeviceResources(application, resultPolicy = platformSnapshot.resultPolicy)
             preparingDevices = devices
             val registry = AndroidToolRegistry.create(devices, contextTools, enableUserBarrier=interactiveSnapshot.enabled && gui == null)
-            val capabilities = SessionCapabilities(gui?.sessionId ?: terminalRun?.preview?.identity?.sessionId ?: run.value,
+            val capabilities = SessionCapabilities(gui?.sessionId ?: terminalJobPreparation?.identity?.sessionId ?: terminalRun?.preview?.identity?.sessionId ?: run.value,
                 (if (virtualDisplay == null) AndroidToolRegistry.capabilitiesFor(config.enabledTools(),
                     platformAllowed = platformSnapshot.platformAllowed) else emptySet()) + contextTools.map { it.definition.capability } +
                     setOf(SkillRunSession.READ, SkillRunSession.RESOURCE) +
@@ -2456,6 +2591,7 @@ class ChatController internal constructor(private val application:Application,
                     (if (browserBinding == null) emptySet() else setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY)) +
                     (if (generation == null) emptySet() else setOf(RunGenerationTools.CAPABILITY)) +
                     (if (terminalRun == null) emptySet() else setOf(RunTerminalTools.CAPABILITY)) +
+                    (if (terminalJobRun == null) emptySet() else setOf(TerminalJobSession.CAPABILITY)) +
                     (if (virtualDisplay == null) emptySet() else setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY)) +
                     (if (gui == null) emptySet() else setOf(app.daiyu.android.gui.GuiScreenToolFactory.CAPABILITY)))
             val backgroundFactory: ((app.daiyu.android.domain.runtime.RunExecutionOwner, SessionCapabilities,
@@ -2481,12 +2617,12 @@ class ChatController internal constructor(private val application:Application,
                             ?: assistantModel?.invoke(provider, assistantContext) ?: model(config) },
                         onChanged = ::browserChildrenChanged)
                 } },
-                authorization=terminalRun?.authorization ?: shizukuAuthorization ?: gui?.let {
+                authorization=terminalJobRun?.authorization ?: terminalRun?.authorization ?: shizukuAuthorization ?: gui?.let {
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value,
                         checkNotNull(it.delivery).writes)
                 } ?: browserPreparation?.childPlan?.parentAuthorization ?: browserBinding?.let {
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value, it.requiredWrites)
-                }, shizuku=shizuku, browser=browserBinding, terminal=terminalRun?.binding, gui=gui?.session,
+                }, shizuku=shizuku, browser=browserBinding, terminal=terminalRun?.binding, gui=gui?.session, terminalJobs=terminalJobRun,
                 authorizationFactory = if (video != null) { realOwner ->
                     video.first.bindOwner(realOwner)
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value,
@@ -2523,7 +2659,7 @@ class ChatController internal constructor(private val application:Application,
                     selection = assistantContext.enabledSkillIds.toSet())
             }
             preparingTools = tools
-            if (terminalRun != null) token.terminalCatalog = tools
+            if (terminalRun != null || terminalJobRun != null) token.terminalCatalog = tools
             synchronized(this) { virtualDisplay?.catalog = tools; gui?.catalog = tools }
             generation?.catalog = tools
             val runModel = if (gui == null) observedModel else app.daiyu.android.gui.GuiConfirmedModelPort(
@@ -2559,6 +2695,11 @@ class ChatController internal constructor(private val application:Application,
         // beginCommit must never encompass SQLite or provider/model I/O.
         if (terminalPreparation != null && runCatching { terminalConfiguration(conversation) }.getOrNull() !=
             (terminalPreparation.assistant to terminalPreparation.provider)) {
+            closeUnacceptedTools(tools)
+            return null
+        }
+        if (terminalJobPreparation != null && runCatching { terminalConfiguration(conversation) }.getOrNull() !=
+            (terminalJobPreparation.assistant to terminalJobPreparation.provider)) {
             closeUnacceptedTools(tools)
             return null
         }

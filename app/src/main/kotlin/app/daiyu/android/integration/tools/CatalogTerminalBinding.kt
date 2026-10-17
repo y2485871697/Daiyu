@@ -39,8 +39,9 @@ internal sealed interface TerminalPtyLaunch {
         @Synchronized internal fun claim() { check(!claimed && !released) { "terminal_launch_already_claimed" }; claimed = true }
         @Synchronized override fun close() { check(!claimed) { "terminal_launch_owned_by_binding" }; release() }
         @Synchronized internal fun release() { if (!released) { lease.close(); released = true } }
+        internal fun commandConfiguration(): TerminalConfiguration = lease.configuration(tempDirectory, hostWorkingDirectory)
         internal fun revalidate() {
-            val current = lease.configuration(tempDirectory, hostWorkingDirectory)
+            val current = commandConfiguration()
             val backend = checkNotNull(current.linux)
             check(backend.shellArgv == argv && backend.environment + current.environment == environment) { "terminal_launch_changed" }
         }

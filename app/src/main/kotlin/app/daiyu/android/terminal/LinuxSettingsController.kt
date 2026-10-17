@@ -58,12 +58,21 @@ internal interface LinuxSettingsCatalogAccess {
     suspend fun remove(reference: LinuxGenerationRef): List<LinuxInstallation>
 }
 
-internal class LinuxSettingsCatalogAdapter(private val catalog: TrustedLinuxCatalog) : LinuxSettingsCatalogAccess {
-    override fun freeze(configuration: LinuxInstallation) = catalog.freezeForApproval(configuration)
+internal class LinuxSettingsCatalogAdapter(private val catalog: TrustedLinuxCatalog,
+    private val requireRuntime: () -> Unit = {}) : LinuxSettingsCatalogAccess {
+    override fun freeze(configuration: LinuxInstallation): FrozenLinuxApproval {
+        requireRuntime()
+        return catalog.freezeForApproval(configuration)
+    }
     override suspend fun load() = catalog.load()
-    override suspend fun approve(approval: FrozenLinuxApproval) = catalog.approve(approval)
-    override suspend fun approveInstallation(approval: FrozenLinuxApproval, admit: () -> Boolean) =
-        catalog.approveInstallation(approval, admit)
+    override suspend fun approve(approval: FrozenLinuxApproval): List<LinuxInstallation> {
+        requireRuntime()
+        return catalog.approve(approval)
+    }
+    override suspend fun approveInstallation(approval: FrozenLinuxApproval, admit: () -> Boolean): List<LinuxInstallation> {
+        requireRuntime()
+        return catalog.approveInstallation(approval, admit)
+    }
     override suspend fun registrationRecorded(approval: FrozenLinuxApproval) = catalog.registrationRecorded(approval)
     override suspend fun remove(reference: LinuxGenerationRef) = catalog.remove(reference)
 }

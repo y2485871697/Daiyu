@@ -127,14 +127,14 @@ internal class ControllerImageAttempt(
         return null
     }
 
-    fun prepare(store: ImageAttachmentStore, assets: MessageImageAssetStore): Message {
+    fun prepare(store: ImageAttachmentStore, assets: MessageImageAssetStore, createdAt: Long? = null): Message {
         val frozen = store.freeze(owner, images, imageRoute.imageInputSupported == true, handle::isCancelled)
         val refs = assets.prepare(app.daiyu.android.media.MessageImageOwner(owner.conversationId, userId.value),
             owner, frozen, handle::isCancelled)
-        return user(refs.associateBy { it.id })
+        return user(refs.associateBy { it.id }, createdAt)
     }
 
-    private fun user(refs: Map<String, app.daiyu.android.media.MessageImageReference>): Message =
+    private fun user(refs: Map<String, app.daiyu.android.media.MessageImageReference>, createdAt: Long?): Message =
         Message(userId, ConversationId(owner.conversationId), runId, Message.USER_ROLE,
             parts.mapIndexed { index, part -> when (part) {
                 is ImageSendPart.Text -> MessageBlock.Text("user-$index", part.text)
@@ -142,18 +142,20 @@ internal class ControllerImageAttempt(
                     MessageBlock.Image(MessageImageReference(MessageImageOwner(ref.owner.conversationId,
                         ref.owner.messageId), ref.id, ref.mime, ref.bytes, ref.sha256, ref.width, ref.height))
                 }
-            } }, RunStatus.COMPLETED)
+            } }, RunStatus.COMPLETED, createdAt = createdAt)
 
-    private fun expectedUser(): Message = user(images.associate { image -> image.id to
+    private fun expectedUser(createdAt: Long?): Message = user(images.associate { image -> image.id to
         app.daiyu.android.media.MessageImageReference(
             app.daiyu.android.media.MessageImageOwner(owner.conversationId, userId.value), image.id,
-            image.mime, image.bytes, image.sha256, image.width, image.height) })
+            image.mime, image.bytes, image.sha256, image.width, image.height) }, createdAt)
 
     private fun reconcile(database: ConversationDatabase): ImageSendResult = try {
         DatabaseTransactions { database.readableDatabase }.run { db ->
             val user = database.storedMessage(db, ConversationId(owner.conversationId), userId.value)
             val assistant = database.storedMessage(db, user.conversationId, assistantId.value)
-            check(user == expectedUser() && assistant.runId == runId && assistant.role == Message.ASSISTANT_ROLE)
+            // Journals predate message times. The original row is the authority on replay,
+            // including a legacy null; never turn an uncertain receipt into a fresh send.
+            check(user == expectedUser(user.createdAt) && assistant.runId == runId && assistant.role == Message.ASSISTANT_ROLE)
             val conversation = db.rawQuery("SELECT title,draft,updated,folder,pinned FROM conversations WHERE id=?",
                 arrayOf(owner.conversationId)).use {
                 check(it.moveToFirst())

@@ -72,11 +72,11 @@ class ControllerVideoSendingTest {
     }
     private data class Ready(val attempt: ControllerVideoAttempt, val snapshot: ControllerVideoHistorySnapshot,
         val prepared: PreparedControllerVideoSend, val plan: ControllerVideoModelPlan)
-    private fun ready(request: VideoDraftRequest): Ready {
+    private fun ready(request: VideoDraftRequest, createdAt: Long? = null): Ready {
         val attempt = ControllerVideoAttempt(request, journal)
         assertNull(attempt.reserve(db))
         val snapshot = adapter.history.capture(attempt.conversationId)
-        val prepared = attempt.prepare(assets, provider, permission) { false }
+        val prepared = attempt.prepare(assets, provider, permission, createdAt) { false }
         val plan = adapter.preflight(snapshot, provider, permission, prepared) { false }
         return Ready(attempt, snapshot, prepared, plan)
     }
@@ -92,6 +92,49 @@ class ControllerVideoSendingTest {
             ControllerVideoManifestWitness.insert(sql, user, emptyList())
             ControllerVideoManifestWitness.insert(sql, assistant, emptyList())
         }
+    }
+
+    @Test fun frozenMessageTimeSurvivesFullEqualityCommitAndReceiptRecoveryIncludingLegacyNullAndEpoch() {
+        for (time in listOf<Long?>(null, 0L, 123456789L)) {
+            val request = request(); db.draft(request.text)
+            val ready = ready(request, time)
+            assertEquals(time, ready.prepared.user.createdAt)
+            assertEquals(time, ready.prepared.assistant.createdAt)
+            assertEquals(ready.prepared.user, ready.plan.history.last())
+            assertEquals(VideoDraftOutcome.ACCEPTED, commit(ready).outcome)
+            assertEquals(listOf(ready.prepared.user, ready.prepared.assistant),
+                db.messages(ready.attempt.conversationId).map { it.second })
+            db.save(ready.prepared.assistant.copy(status = RunStatus.COMPLETED))
+            // A receipt has no time field: original DB rows, not a newly captured clock, win.
+            assertFalse(checkNotNull(journal.read(request)).has("created_at"))
+            assertEquals(VideoDraftOutcome.ACCEPTED, journal.recover(request, db).outcome)
+            val replay = ControllerVideoAttempt(request, journal)
+            assertEquals(VideoDraftOutcome.ACCEPTED, replay.reserve(db)?.outcome)
+            rejected { replay.prepare(assets, provider, permission, 999999999L) { false } }
+            assertEquals(listOf(time, time), db.messages(ready.attempt.conversationId).map { it.second.createdAt })
+        }
+    }
+
+    @Test fun changingEitherPreparedMessageTimeFailsFullEqualityBeforeDatabaseEntry() {
+        for (changeUser in listOf(false, true)) {
+            val request = request(); db.draft(request.text)
+            val ready = ready(request, 500L)
+            val changed = PreparedControllerVideoSend(
+                if (changeUser) ready.prepared.user.copy(createdAt = 501L) else ready.prepared.user,
+                if (changeUser) ready.prepared.assistant else ready.prepared.assistant.copy(createdAt = 501L),
+                ready.prepared.inputs)
+            assertEquals(VideoDraftOutcome.REJECTED, commit(ready.copy(prepared = changed)).outcome)
+            assertTrue(db.messages(ready.attempt.conversationId).isEmpty())
+            assertEquals(request.text, db.draft())
+        }
+    }
+
+    @Test fun alreadyFrozenVideoCandidateCannotBePreparedWithADifferentTime() {
+        val request = request()
+        val ready = ready(request, 0L)
+        rejected { ready.attempt.prepare(assets, provider, permission, 1L) { false } }
+        assertEquals(0L, ready.prepared.user.createdAt)
+        assertEquals(0L, ready.prepared.assistant.createdAt)
     }
 
     @Test fun durableNullSlotIdentityPrecedesAssetPreparationAndDbEntry() {

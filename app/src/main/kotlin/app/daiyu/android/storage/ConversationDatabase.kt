@@ -6,6 +6,7 @@ import app.daiyu.android.ControllerVideoManifestWitness
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import app.daiyu.android.domain.*
+import app.daiyu.android.context.Utf8Payload
 import app.daiyu.android.context.ContextStorage
 import app.daiyu.android.model.MessagesRequest
 import org.json.JSONArray
@@ -435,7 +436,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             require(rawBytes<=16*1024*1024) {"备份超过16MiB上限"}
             var encodedBytes=0L
             fun reserve(value:JSONObject) {
-                encodedBytes+=value.toString().toByteArray(Charsets.UTF_8).size+1
+                encodedBytes+=Utf8Payload.byteCount(value.toString(), 16L*1024*1024)+1
                 require(encodedBytes<=16*1024*1024) {"备份超过16MiB上限"}
             }
             val conversations=JSONArray()
@@ -468,12 +469,12 @@ class ConversationDatabase internal constructor(context: Context, private val af
             val payload=JSONObject().put("conversations",conversations).put("messages",messages).put("draft",draft).toString()
             result=JSONObject().put("format","daiyu-neutral-text").put("version",2).put("conversation_count",conversations.length()).put("message_count",messages.length()).put("sha256",backupDigest(payload)).put("payload",payload).toString()
         }
-        require(result.toByteArray(Charsets.UTF_8).size<=16*1024*1024) {"备份超过16MiB上限"}
+        Utf8Payload.byteCount(result, 16L*1024*1024)
         parseBackup(result)
         return result
     }
     private fun parseBackup(text:String):Triple<List<Conversation>,List<Message>,String> {
-        require(text.toByteArray(Charsets.UTF_8).size<=16*1024*1024)
+        Utf8Payload.byteCount(text, 16L*1024*1024)
         val envelope=backupObject(text)
         require(envelope.keys().asSequence().toSet()==setOf("format","version","conversation_count","message_count","sha256","payload"))
         val version=integer(envelope,"version")
@@ -687,7 +688,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             }
         }
     }
-    private fun backupDigest(value:String)=java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8)).joinToString("") {"%02x".format(it.toInt() and 255)}
+    private fun backupDigest(value:String)=Utf8Payload.sha256(value)
     private fun values(message:Message)=ContentValues().apply {
         MessageHistoryCodec.validate(message)
         MessageImages.validate(message)

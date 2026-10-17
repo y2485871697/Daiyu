@@ -57,12 +57,13 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
         } finally { super.tearDown() }
     }
 
-    private fun saveSettings(): GenerationSettingsSnapshot = configured ?: store.save(GenerationSettingsValues(
+    private fun saveSettings(downloadsEnabled: Boolean = false): GenerationSettingsSnapshot = configured ?: store.save(GenerationSettingsValues(
         listOf(GenerationProfileSettings(label = "explicit image profile", kind = GenerationKind.IMAGE,
             protocol = GenerationProtocol.OPENAI_IMAGES_JSON,
             endpoint = "https://generation.invalid/images/generations", model = "explicit-image-model",
             apiKey = "synthetic-generation-test-key")), maxPolls = 0,
-        downloadsEnabled = false, downloadHosts = emptySet()), null).also { configured = it }
+        downloadsEnabled = downloadsEnabled,
+        downloadHosts = if (downloadsEnabled) setOf("cdn.example") else emptySet()), null).also { configured = it }
 
     private fun prepare(): ChatController.GenerationEntry {
         saveSettings()
@@ -153,6 +154,58 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
         model.release.countDown()
         awaitControl("real runner and generation cleanup retire") { controller.currentGenerationEntry() == null }
         assertEquals(GenerationToolsCloseResult.Drained, session.closeResult)
+    }
+
+    /** Real production constructor -> Runner catalog -> Session -> token -> RunGenerationTools.
+     * The model is held without tool events: inspect the real pair, never execute a network call.
+     * This fails both if production forgets injection and if it still passes DENY_DOWNLOADS.
+     */
+    fun testProductionRetainedResourcePairsSamePublicTransportAndKeepsReviewedHostOwnerGate() {
+        saveSettings(downloadsEnabled = true)
+        val model = fixture.session(held = true)
+        val entry = prepare()
+        confirm(entry)
+        try {
+            assertTrue(model.entered.await(10, TimeUnit.SECONDS))
+            val session = checkNotNull(entry.session)
+            val catalog = checkNotNull(entry.catalog)
+            val retained = field(controller, "generationResources") as ControllerGenerationResources
+            val http = field(retained, "downloadTransport") as GenerationPublicNetworkHttp
+            val catalogLeaf = checkNotNull(field(catalog, "generation"))
+            val leaf = field(catalogLeaf, "tools") as RunGenerationTools
+            assertSame(retained, field(session, "resources"))
+            assertSame(leaf, field(session, "leaf"))
+            assertSame(leaf, field(session.token, "leaf"))
+            assertSame(http, field(leaf, "http"))
+            assertSame(http, retained.generationNetwork().http)
+            assertSame(field(catalog, "owner"), field(leaf, "owner"))
+            assertSame(field(catalog, "boundAuthorization"), field(leaf, "authorization"))
+            val authorization = field(leaf, "downloadAuthorization") as
+                app.daiyu.android.integration.tools.GenerationDownloadAuthorization
+            val binding = GenerationAttemptBinding(entry.identity.conversationId.value,
+                entry.identity.assistantMessageId.value, entry.identity.runId.value,
+                "not-yet-persisted-call", RunGenerationTools.IMAGE_TOOL)
+            val assetOwner = GenerationAssetOwner(entry.identity.accountScope, binding)
+            val url = "https://cdn.example/image.png?signature=synthetic-only"
+            assertTrue(authorization.allows(assetOwner, url))
+            assertFalse(authorization.allows(assetOwner, "https://sub.cdn.example/image.png"))
+            assertFalse(authorization.allows(assetOwner, "https://other.example/image.png"))
+            assertFalse(authorization.allows(assetOwner, "https://127.0.0.1/image.png"))
+            assertFalse(authorization.allows(GenerationAssetOwner("foreign-account", binding), url))
+            // Host admission is NOT persisted tool ownership: no tool event was emitted.
+            assertFalse(retained.validateOwner(assetOwner))
+            assertTrue(leaf.outcomes().isEmpty())
+            controlMain {
+                assertTrue(controller.consumeGenerationReceipt(entry, 17, editor) {})
+                controller.stop()
+            }
+            assertFalse(authorization.allows(assetOwner, url))
+            assertTrue(model.cancelled.await(5, TimeUnit.SECONDS))
+            awaitControl("production generation cleanup") { controller.currentGenerationEntry() == null }
+            assertSame(retained, field(controller, "generationResources"))
+            assertSame(http, retained.generationNetwork().http)
+            assertEquals(1, fixture.opens.get())
+        } finally { model.release.countDown() }
     }
 
     fun testExplicitReceiptRecoveryPreservesReplacementDraftAndWaitsForRunningWorker() {

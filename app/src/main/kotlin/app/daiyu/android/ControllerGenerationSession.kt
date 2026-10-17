@@ -131,16 +131,18 @@ internal class ControllerGenerationSession(
         task: TaskAuthorization,
         retainedResources: ControllerGenerationResources,
         isCurrentOwner: () -> Boolean,
-        networkPolicy: GenerationDownloadAuthorization = ControllerGenerationResources.DENY_DOWNLOADS,
+        networkPolicy: GenerationDownloadAuthorization? = null,
     ): RunGenerationTools {
         check(!stopped && leaf == null && cleanupResult == null) { "generation_session_stopped_or_opened" }
         require(owner === realOwner && authorization === task && capabilities.sessionId == task.sessionId &&
             retainedResources.accountScope == identity.accountScope) { "generation_binding_mismatch" }
         check(resources == null) { "generation_resources_already_bound" }
         resources = retainedResources
+        val network = retainedResources.generationNetwork(networkPolicy)
         return token.openLeaf(realOwner, task, retainedResources::database,
-            retainedResources::assets, retainedResources::validateOwner, networkPolicy, isCurrentOwner,
-            fenceFactory = retainedResources::createFence)
+            retainedResources::assets, retainedResources::validateOwner,
+            network.authorization, isCurrentOwner,
+            http = network.http, fenceFactory = retainedResources::createFence)
             .also { leaf = it }
     }
 

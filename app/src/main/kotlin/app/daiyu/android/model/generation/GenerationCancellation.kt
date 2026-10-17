@@ -84,6 +84,10 @@ class GenerationCancellation {
             override fun run() = connection.disconnect()
         }
 
+        class TransportAbort(private val abort: () -> Unit) : CleanupAction() {
+            override fun run() = abort()
+        }
+
         class StreamClose(private val stream: Closeable) : CleanupAction() {
             override fun run() = stream.close()
         }
@@ -93,7 +97,7 @@ class GenerationCancellation {
         // cancel() claims resources across ALL executions under lock. Order that entire batch,
         // not each execution separately: A's blocking close must not delay B's disconnect.
         // No cleanup runs under the state lock; pendingCleanup already counts both phases.
-        val ordered = resources.filterIsInstance<CleanupAction.ConnectionAbort>() +
+        val ordered = resources.filter { it !is CleanupAction.StreamClose } +
             resources.filterIsInstance<CleanupAction.StreamClose>()
         var firstFailure: Exception? = null
         ordered.forEach { action ->
@@ -109,19 +113,22 @@ class GenerationCancellation {
 
     internal inner class Execution internal constructor() {
         private val resources = linkedMapOf<Any, CleanupAction>()
-        private var connection: HttpURLConnection? = null
+        // Retain abort identities after cancel claims resources, so late streams retry abort first.
+        private val abortResources = linkedMapOf<Any, CleanupAction>()
 
         fun register(connection: HttpURLConnection) = register(connection, CleanupAction.ConnectionAbort(connection))
         fun register(stream: Closeable) = register(stream, CleanupAction.StreamClose(stream))
+        /** Transport-neutral sticky abort; register BEFORE any connect/DNS/execute operation. */
+        fun registerAbort(abort: () -> Unit) = register(Any(), CleanupAction.TransportAbort(abort))
 
         private fun register(resource: Any, action: CleanupAction) {
             val abort = synchronized(lock) {
-                if (action is CleanupAction.ConnectionAbort) connection = action.connection
+                if (action !is CleanupAction.StreamClose) abortResources[resource] = action
                 if (requested) {
-                    // Retry disconnect when a racing getter returns, then close its late stream.
-                    // This cannot guarantee that a getter still in flight has been aborted.
+                    // Retry all transport aborts before closing a late stream. This cannot
+                    // guarantee that a noninterruptible platform getter/DNS has returned.
                     val actions = mutableListOf<CleanupAction>()
-                    if (resource !== connection) connection?.let { actions.add(CleanupAction.ConnectionAbort(it)) }
+                    if (action is CleanupAction.StreamClose) actions.addAll(abortResources.values)
                     actions.add(action)
                     pendingCleanup += actions.size
                     actions

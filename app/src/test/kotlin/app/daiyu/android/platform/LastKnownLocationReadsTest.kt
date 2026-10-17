@@ -1,30 +1,68 @@
 package app.daiyu.android.platform
 
 import android.Manifest
+import android.app.AppOpsManager
 import android.app.Application
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
+import android.os.Build
+import android.os.Process
 import org.json.JSONObject
 import org.junit.Assert.*
+import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
 
 /** Synthetic cache/permission fixtures only; no real providers, permission prompts or device data. */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36], application = Application::class, manifest = Config.NONE)
+@Config(sdk = [36], application = Application::class, manifest = Config.NONE,
+    shadows = [LastKnownLocationReadsTest.RecordingAppOps::class])
 class LastKnownLocationReadsTest {
+    /** Exercise the real adapter's overload dispatch, without any real location or AppOps service. */
+    @Implements(AppOpsManager::class)
+    class RecordingAppOps {
+        data class Note(val op: String, val uid: Int, val packageName: String,
+            val arity: Int, val attributionTag: String? = null, val message: String? = null)
+        companion object {
+            var mode = AppOpsManager.MODE_ALLOWED
+            var exception: RuntimeException? = null
+            val notes = mutableListOf<Note>()
+        }
+        @Implementation(minSdk = 19, maxSdk = 29)
+        protected fun noteOpNoThrow(op: String, uid: Int, packageName: String): Int =
+            note(Note(op, uid, packageName, 3))
+        @Implementation(minSdk = 30)
+        protected fun noteOpNoThrow(op: String, uid: Int, packageName: String,
+            attributionTag: String?, message: String?): Int =
+            note(Note(op, uid, packageName, 5, attributionTag, message))
+        private fun note(call: Note): Int {
+            notes += call
+            exception?.let { throw it }
+            return mode
+        }
+    }
+    @Before fun resetAppOps() {
+        RecordingAppOps.mode = AppOpsManager.MODE_ALLOWED
+        RecordingAppOps.exception = null
+        RecordingAppOps.notes.clear()
+    }
     private val tool = PlatformReadTool.LAST_KNOWN_LOCATION
     private val now = 20_000_000_000L
     private class AccessContext : ContextWrapper(RuntimeEnvironment.getApplication()) {
         var coarse = true
         var fine = true
         var serviceReads = 0
+        var appOpsServiceReads = 0
+        var missingAppOps = false
+        var appOpsServiceException: RuntimeException? = null
         override fun getApplicationContext(): Context = this
         override fun checkSelfPermission(permission: String): Int = if (when (permission) {
             Manifest.permission.ACCESS_COARSE_LOCATION -> coarse
@@ -32,8 +70,13 @@ class LastKnownLocationReadsTest {
             else -> false
         }) PackageManager.PERMISSION_GRANTED else PackageManager.PERMISSION_DENIED
         override fun getSystemService(name: String): Any? {
+            if (name == Context.APP_OPS_SERVICE) {
+                appOpsServiceReads++
+                appOpsServiceException?.let { throw it }
+                return if (missingAppOps) null else super.getSystemService(name)
+            }
             serviceReads++
-            throw AssertionError("No Android service may be read by synthetic fixtures")
+            throw AssertionError("No location or other Android service may be read by synthetic fixtures")
         }
     }
     private fun sample(seconds: Long, wallTime: Long = seconds * 1000) = Location("synthetic").apply {
@@ -61,6 +104,7 @@ class LastKnownLocationReadsTest {
         assertEquals("permission_denied", denied.getString("error"))
         assertEquals(2, denied.getJSONArray("required_permissions").length())
         assertFalse(denied.has("data")); assertEquals(0, reads); assertEquals(0, context.serviceReads)
+        assertEquals(0, context.appOpsServiceReads); assertTrue(RecordingAppOps.notes.isEmpty())
     }
 
     @Test fun newestAccessibleRecordUsesMonotonicTimeAndReturnsSampleAgeAndSource() {
@@ -112,6 +156,8 @@ class LastKnownLocationReadsTest {
         assertEquals(listOf("network", "passive"), calls)
         assertEquals("network", result.getJSONObject("data").getString("provider"))
         assertEquals("coarse", result.getJSONObject("data").getString("permission_precision"))
+        assertTrue(RecordingAppOps.notes.isNotEmpty())
+        assertTrue(RecordingAppOps.notes.all { it.op == AppOpsManager.OPSTR_COARSE_LOCATION })
     }
 
     @Test fun noDataIsExplicitAndNoAttemptsToAcquireNewFixArePossible() {
@@ -150,6 +196,90 @@ class LastKnownLocationReadsTest {
         val after = JSONObject(backend.read(tool, tool.schema.parse("{}")) { cancelled })
         assertEquals("cancelled", after.getString("error")); assertEquals(1, reads)
         assertFalse(after.has("data")); assertEquals(0, context.serviceReads)
+    }
+
+    @Test fun explicitAppOpsDenialRejectsBeforeAnyCacheReadEvenWithRuntimeGrants() {
+        val context = AccessContext()
+        for (mode in listOf(AppOpsManager.MODE_IGNORED, AppOpsManager.MODE_ERRORED)) {
+            RecordingAppOps.mode = mode
+            var reads = 0
+            val result = read(context, LastKnownLocationSource { reads++; null })
+            assertEquals("permission_denied", result.getString("error"))
+            assertEquals(0, reads); assertFalse(result.has("data"))
+        }
+        RecordingAppOps.exception = SecurityException("synthetic AppOps denial")
+        val denied = read(context, LastKnownLocationSource { error("must not read") })
+        assertEquals("permission_denied", denied.getString("error"))
+    }
+
+    @Test fun unconfirmedAppOpsEligibilityIsUnavailableNotAnEmptyCache() {
+        val context = AccessContext()
+        // Even an unexpected raw foreground mode is not evidence of effective admission.
+        for (mode in listOf(AppOpsManager.MODE_DEFAULT, AppOpsManager.MODE_FOREGROUND, -100)) {
+            RecordingAppOps.mode = mode
+            val result = read(context, LastKnownLocationSource { error("must not read") })
+            assertEquals("unavailable", result.getString("error")); assertFalse(result.has("data"))
+        }
+        RecordingAppOps.mode = AppOpsManager.MODE_ALLOWED
+        context.missingAppOps = true
+        val missing = read(context, LastKnownLocationSource { error("must not read") })
+        assertEquals("unavailable", missing.getString("error"))
+        context.missingAppOps = false
+        RecordingAppOps.exception = IllegalStateException("synthetic AppOps failure")
+        val failed = read(context, LastKnownLocationSource { error("must not read") })
+        assertEquals("unavailable", failed.getString("error"))
+        RecordingAppOps.exception = null
+        context.appOpsServiceException = IllegalStateException("synthetic service failure")
+        val serviceFailed = read(context, LastKnownLocationSource { error("must not read") })
+        assertEquals("unavailable", serviceFailed.getString("error"))
+    }
+
+    @Test fun appOpsChangesDuringReadDiscardBothCoordinatesAndNullResults() {
+        for (hasRecord in listOf(false, true)) {
+            for ((mode, error) in listOf(AppOpsManager.MODE_IGNORED to "permission_denied",
+                AppOpsManager.MODE_ERRORED to "permission_denied", AppOpsManager.MODE_DEFAULT to "unavailable")) {
+                val context = AccessContext()
+                RecordingAppOps.mode = AppOpsManager.MODE_ALLOWED
+                var reads = 0
+                val result = read(context, LastKnownLocationSource {
+                    reads++
+                    RecordingAppOps.mode = mode
+                    if (hasRecord) sample(10) else null
+                })
+                assertEquals(error, result.getString("error"))
+                assertFalse(result.has("data")); assertEquals(1, reads)
+            }
+        }
+    }
+
+    @Test @Config(sdk = [26, 27, 28, 29, 30, 36])
+    fun appOpsUsesSupportedOverloadAndOwnIdentityOnEverySupportedApiRange() {
+        val context = AccessContext()
+        var reads = 0
+        val result = read(context, LastKnownLocationSource { reads++; null })
+        assertEquals("no_cached_location", result.getString("error")); assertEquals(3, reads)
+        // A note before and after each provider plus a final admission check.
+        assertTrue(RecordingAppOps.notes.size >= reads * 2 + 1)
+        for (note in RecordingAppOps.notes) {
+            assertEquals(if (Build.VERSION.SDK_INT >= 30) 5 else 3, note.arity)
+            assertEquals(AppOpsManager.OPSTR_FINE_LOCATION, note.op)
+            assertEquals(Process.myUid(), note.uid); assertEquals(context.packageName, note.packageName)
+            assertNull(note.attributionTag); assertNull(note.message)
+        }
+    }
+
+    @Test fun coarseAppOpsDenialAndUnknownNeverProbeGpsOrOtherCaches() {
+        val context = AccessContext().apply { fine = false }
+        for ((mode, error) in listOf(AppOpsManager.MODE_IGNORED to "permission_denied",
+            AppOpsManager.MODE_DEFAULT to "unavailable")) {
+            RecordingAppOps.notes.clear()
+            RecordingAppOps.mode = mode
+            var reads = 0
+            val result = read(context, LastKnownLocationSource { reads++; kotlin.error("must not read") })
+            assertEquals(error, result.getString("error")); assertEquals(0, reads)
+            assertTrue(RecordingAppOps.notes.isNotEmpty())
+            assertTrue(RecordingAppOps.notes.all { it.op == AppOpsManager.OPSTR_COARSE_LOCATION })
+        }
     }
 
     @Test fun bothDestinationProjectionsIndependentlyWithholdLocation() {

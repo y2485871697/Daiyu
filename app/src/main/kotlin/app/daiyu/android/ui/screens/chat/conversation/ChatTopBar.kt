@@ -33,7 +33,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun ChatTopBar(title: String, balanceText: String?, actions: ChatScreenActions, modifier: Modifier = Modifier, assistantLabel: String = "助手",
+internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.BalanceState?, actions: ChatScreenActions, modifier: Modifier = Modifier, assistantLabel: String = "助手",
     interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true) {
     var expanded by remember { mutableStateOf(false) }
     Row(modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -47,11 +47,12 @@ internal fun ChatTopBar(title: String, balanceText: String?, actions: ChatScreen
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (!balanceText.isNullOrBlank()) {
-            Text(balanceText, Modifier.widthIn(max = 76.dp).padding(horizontal = 8.dp, vertical = 5.dp),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary, style = MiuixTheme.textStyles.footnote1,
-                maxLines = 1)
-        }
+        app.daiyu.android.balance.ui.ProviderBalanceIndicator(
+            state = balanceState,
+            modifier = Modifier.testTag("chat-provider-balance").widthIn(max = 116.dp)
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            animateChanges = true,
+        )
         InteractiveModeToggle(enabled = interactiveModeChangeEnabled, checked = interactiveModeEnabled,
             onCheckedChange = actions.onInteractiveModeChange)
         ChatIconButton(DaiyuIcons.NewChat, "新建会话", { actions.onMenuAction(ChatMenuAction.NEW_CHAT) }, tint = daiyuIconColor(DaiyuIcons.NewChat))

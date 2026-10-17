@@ -106,6 +106,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 
 class MainActivity : ComponentActivity() {
     private val controller get() = (application as ChatApplication).controller
+    private var balanceRuntime by mutableStateOf<app.daiyu.android.balance.BalanceRuntime?>(null)
+    private var balanceLifecycle: app.daiyu.android.balance.BalanceLifecycleBinding? = null
     private val pets get() = (application as ChatApplication).pets
     private val openPetSettings: () -> Unit = {
         if (activityUsable()) { dismissSidebar(); retainedPage = "pet-settings" }
@@ -776,6 +778,14 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        lifecycleScope.launch {
+            // Application-retained deferred: first Keystore/disk read runs on IO, once per process.
+            val runtime = (application as ChatApplication).balanceHost.get()
+            balanceRuntime = runtime
+            balanceLifecycle = app.daiyu.android.balance.BalanceLifecycleBinding(
+                lifecycle, lifecycleScope, runtime, poll = true)
+        }
+        if (state?.getBoolean("balance-page", false) == true) retainedPageState = "balance-settings"
         // An Activity mount never inherits an approval capability from an older mount.
         controller.virtualDisplayEntry()?.let(controller::cancelVirtualDisplay)
         app.daiyu.android.voice.offline.OfflineSpeechPack.initialize(applicationContext)
@@ -808,6 +818,7 @@ class MainActivity : ComponentActivity() {
             AgentAppTheme(appearance, applyInterfaceScale = true, onResolvedDarkModeChange = ::updateSystemBars) {
                 val iconCoordinator = rememberIconAppearanceCoordinator(iconNotifications, ::reportAutomaticIconSync)
                 val focus = LocalFocusManager.current
+                val balanceState = balanceRuntime?.state?.collectAsStateWithLifecycle()?.value
                 val chatPageState = rememberSaveableStateHolder()
                 val assistantProfiles by assistantStore.assistants.collectAsState()
                 val activeAssistant by assistantStore.selectedId.collectAsState()
@@ -826,7 +837,7 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway" -> retainedPage = "settings"
+                        "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings" -> retainedPage = "settings"
                         "pet-model-settings" -> retainedPage = "pet-settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
@@ -834,6 +845,16 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 when (retainedPage) {
+                    "balance-settings" -> {
+                        val runtime = balanceRuntime
+                        if (runtime != null) app.daiyu.android.balance.ui.BalanceSettingsScreen(
+                            runtime = runtime, onBack = { retainedPage = "settings" },
+                            modifier = Modifier.fillMaxSize())
+                        else Column(Modifier.fillMaxSize().padding(16.dp)) {
+                            top.yukonga.miuix.kmp.basic.TextButton(text = "返回", onClick = { retainedPage = "settings" })
+                            top.yukonga.miuix.kmp.basic.Text("正在读取独立余额配置")
+                        }
+                    }
                     "pet-settings" -> Column(Modifier.fillMaxSize()) {
                         top.yukonga.miuix.kmp.basic.TextButton(text = "返回", onClick = { retainedPage = "settings" })
                         top.yukonga.miuix.kmp.basic.TextButton(text = "配置独立助手 / 服务商 / 模型", onClick = { retainedPage = "pet-model-settings" })
@@ -1159,7 +1180,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
                             Column(Modifier.fillMaxSize().imePadding()) {
-                                DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled), chatActions(), modifier = Modifier.weight(1f), turnExtras = { id ->
+                                DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState), chatActions(), modifier = Modifier.weight(1f), turnExtras = { id ->
                                     QuestionExtras(id)
                                     VoiceExtras(id)
                                 }, imageLoader = imageHost.historyLoader)
@@ -2303,6 +2324,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(state: Bundle) {
         state.putBoolean("terminal-page", retainedPage == "terminal")
+        state.putBoolean("balance-page", retainedPage == "balance-settings") // Route only, no balance credentials.
         state.putInt("pending-backup-request", pendingBackupRequest ?: 0)
         state.putString("pending-conversation-export", conversationExport.pendingConversationId)
         if (retainedPage == "conversation-export") {
@@ -2381,6 +2403,7 @@ class MainActivity : ComponentActivity() {
         reconnectSettingsPageOwner = null
         gatewayOwner?.revoke(); gatewayOwner = null
         gatewayEditing = null; gatewayDraft = null
+        balanceLifecycle?.close(); balanceLifecycle = null
         fenceVideoRoute()
         controller.detachVideoUi(videoUi)
         pendingTextSend?.let { controller.cancelTextSend(it.ticket) }
@@ -2495,6 +2518,7 @@ class MainActivity : ComponentActivity() {
     private fun openSettingsRoute(route: FeatureRoute) {
         when (route) {
             FeatureRoute.MODEL_SETTINGS -> modelSettings()
+            FeatureRoute.BALANCE_SETTINGS -> retainedPage = "balance-settings"
             FeatureRoute.BACKUP -> backupMenu()
             FeatureRoute.SIDEBAR -> { returnToChat(); openSidebar() }
             FeatureRoute.MANAGE_CHATS -> { updatePane(); retainedPage = "manage" }
@@ -2952,7 +2976,7 @@ class MainActivity : ComponentActivity() {
             turns = ChatTurnMapper.map(shown.map { it.second }, timestamp = { message ->
                 MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
             }), canJumpToPreviousUser = shown.any { it.second.role == "user" },
-            balanceText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中";
+            statusText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中";
                 pendingTextSend != null -> "正在准备上下文并核实发送结果"; imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,
                 phase = phase, controlOwnerKey = controlOwner?.id?.value, modelLabel = if (controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),

@@ -47,10 +47,10 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         setDraft("Gemini UI 草稿"); val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
         openHub()
-        val implemented = setOf("assistants", "subagents", "appearance", "haptics", "voice", "source", "default_reasoning", "telegram", "qq", "relay_st", "relay_moyu", "relay", "platform_tools")
+        val implemented = setOf("assistants", "subagents", "appearance", "haptics", "voice", "source", "default_reasoning", "telegram", "qq", "relay_st", "relay_moyu", "relay", "platform_tools", "logging", "export_logs", "clear_logs")
         val placeholder = entries.single { it.id == "donate" }
         val unwired = entries.filter { it.route == null && it.localPage == null && it.id !in implemented && it != placeholder }
-        assertEquals(4, unwired.size)
+        assertEquals(1, unwired.size)
         fun assertUnchanged() {
             assertEquals(before, fixture.database.exportBackup()); assertEquals(settings, fixture.settings.loadForEditing().settings)
             assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())
@@ -149,7 +149,9 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
                 assertEquals(1L, session.cancelled.count); assertEquals(1, fixture.opens.get())
             }
             for (id in listOf("default_reasoning", "logging")) {
-                entry(id).performClick()
+                val row = entry(id)
+                if (id == "logging") awaitControl("diagnostic store loaded") { fixture.diagnostics.state.value.loaded }
+                row.performClick()
                 if (id == "default_reasoning") {
                     ui.onNodeWithText(activity.getString(R.string.subagent_reasoning_picker_title)).assertExists()
                     instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)

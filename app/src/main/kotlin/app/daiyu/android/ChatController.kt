@@ -8,6 +8,14 @@ import app.daiyu.android.model.AssistantModelFactory
 import app.daiyu.android.model.sessiongateway.SessionGatewayContext
 import app.daiyu.android.backup.NeutralBackupService
 import app.daiyu.android.context.ContextService
+import app.daiyu.android.context.ContextManagementOwner
+import app.daiyu.android.context.ContextManagementControllerAdapter
+import app.daiyu.android.context.ControlledContextManagementAdapter
+import app.daiyu.android.context.ContextManagementAdmission
+import app.daiyu.android.context.ContextManagementLease
+import app.daiyu.android.context.ContextManagementBackend
+import app.daiyu.android.context.ContextManagementSnapshot
+import app.daiyu.android.context.ContextManagementWorker
 import app.daiyu.android.context.ContextPreparationCoordinator
 import app.daiyu.android.context.ContextPreparationCancellation
 import app.daiyu.android.context.DatabaseTransactions
@@ -120,7 +128,9 @@ class ChatController internal constructor(private val application:Application,
     private val titleModelFactory: (ProviderSnapshot) -> ModelPort = {
         ModelFactory.create(app.daiyu.android.title.TitleModelCoordinator.requestSnapshot(it),
             app.daiyu.android.title.ConversationTitleModel.INSTRUCTIONS)
-    }, private val titleSettingsOverride: app.daiyu.android.title.TitleModelSettingsStore? = null) {
+    }, private val titleSettingsOverride: app.daiyu.android.title.TitleModelSettingsStore? = null,
+    private val contextManagementFactory: (android.content.Context, ContextService) -> ContextManagementBackend =
+        { context, service -> ContextManagementWorker.production(context, service) }) {
     // Voice credentials remain independent from chat settings.
     internal val voiceAccounts by lazy { app.daiyu.android.voice.account.VoiceAccountResources.forContext(application) }
     internal val voiceRuntime by lazy {
@@ -259,6 +269,97 @@ class ChatController internal constructor(private val application:Application,
         var video: ControllerVideoSession? = null
     }
     private var preparation: Preparation? = null
+
+    // A visit is a capability, including for A -> away -> A. Never identify it by ID alone.
+    private class ContextVisit(val owner: ContextManagementOwner) {
+        lateinit var adapter: ContextManagementControllerAdapter
+        var token: Preparation? = null
+    }
+    private var contextVisit: ContextVisit? = null
+
+    internal fun openContextManagement(owner: ContextManagementOwner): ContextManagementControllerAdapter? {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        return synchronized(this) {
+            if (contextVisit != null || !idleAvailable() || hasLiveChildTasks(owner.conversationId)) return null
+            val visit = ContextVisit(owner)
+            fun current(candidate: ContextManagementOwner): Boolean =
+                !closed && contextVisit === visit && visit.owner == candidate &&
+                    contextVisit?.adapter === visit.adapter
+            val admission = object : ContextManagementAdmission {
+                override fun isCurrent(owner: ContextManagementOwner) = synchronized(this@ChatController) {
+                    current(owner)
+                }
+                override fun tryReserve(owner: ContextManagementOwner): ContextManagementLease? =
+                    synchronized(this@ChatController) reservation@ {
+                        if (!current(owner) || !idleAvailable() || hasLiveChildTasks(owner.conversationId)) return@reservation null
+                        val token = reservePreparation()
+                        visit.token = token
+                        object : ContextManagementLease {
+                            override val owner = visit.owner
+                            override val cancellation = token.cancellation
+                            private val finished = java.util.concurrent.atomic.AtomicBoolean(false)
+                            override fun checkCurrent() {
+                                synchronized(this@ChatController) {
+                                    if (!current(this.owner) || preparation !== token || token.revoked ||
+                                        preparationCancelled(token)) throw java.util.concurrent.CancellationException("context_visit_revoked")
+                                }
+                            }
+                            override fun finish() {
+                                if (!finished.compareAndSet(false, true)) return
+                                // Called only by adapter worker finally (or pre-start rejection).
+                                // Token identity in finishPreparation cannot release a newer owner.
+                                try { finishPreparation(token) } catch (_: Exception) {
+                                    // Fail closed if parent cleanup cannot complete; never clear its slot here.
+                                } finally {
+                                    synchronized(this@ChatController) { if (visit.token === token) visit.token = null }
+                                }
+                            }
+                        }
+                    }
+            }
+            // Construction is memory-only. Even the shared service's first mkdir must wait for
+            // an admitted task on the existing executor, never this monitor/UI call.
+            val backend = object : ContextManagementBackend {
+                private val delegate by lazy {
+                    check(Looper.myLooper() != Looper.getMainLooper())
+                    contextManagementFactory(application, contextService)
+                }
+                override fun snapshot(lease: ContextManagementLease): ContextManagementSnapshot {
+                    lease.checkCurrent()
+                    return delegate.snapshot(lease)
+                }
+                override fun archive(lease: ContextManagementLease, snapshot: ContextManagementSnapshot, offset: Int) =
+                    run { lease.checkCurrent(); delegate.archive(lease, snapshot, offset) }
+                override fun compress(lease: ContextManagementLease, expected: ContextManagementSnapshot) =
+                    run { lease.checkCurrent(); delegate.compress(lease, expected) }
+            }
+            visit.adapter = ControlledContextManagementAdapter(owner, admission, backend, executor,
+                java.util.concurrent.Executor { command -> handler.post(command); Unit })
+            contextVisit = visit
+            visit.adapter
+        }
+    }
+
+    internal fun invalidateContextManagement(expected: ContextManagementControllerAdapter) {
+        val token = synchronized(this) {
+            val visit = contextVisit?.takeIf { it.adapter === expected } ?: return
+            contextVisit = null
+            visit.token?.also { it.revoked = true }
+        }
+        // Transport callbacks and adapter cancellation are deliberately outside the monitor.
+        try { token?.cancellation?.cancel() } finally {
+            // Main navigation closes synchronously. Hosted stop/close may originate on a worker;
+            // keep adapter commands UI-confined, after the synchronous registration/token fence.
+            if (Looper.myLooper() == Looper.getMainLooper()) expected.close()
+            else handler.post { expected.close() }
+        }
+        // Do NOT finish here: queued/running worker retains the original Preparation until exit.
+    }
+
+    private fun invalidateCurrentContextManagement() {
+        val expected = synchronized(this) { contextVisit?.adapter } ?: return
+        invalidateContextManagement(expected)
+    }
     // Explicit tool-enabled child resources are retained independently of model worker exit.
     // Unknown cleanup remains here and keeps its permit; no text-only batch is upgraded.
     private val browserChildCapacity = java.util.concurrent.Semaphore(1, true)
@@ -3074,6 +3175,7 @@ class ChatController internal constructor(private val application:Application,
         return true
     }
     fun stop() {
+        invalidateCurrentContextManagement()
         stopBrowserChildren()
         synchronized(this) { generationEntry }?.let { entry ->
             if (!entry.submitted) abandonGeneration(entry) else entry.session?.revokeAdmission()
@@ -3100,6 +3202,7 @@ class ChatController internal constructor(private val application:Application,
             }
             resources?.also {fenceRun(it)}.also {runRevocationListeners.clear()}
         }
+        invalidateCurrentContextManagement()
         // Fence/cancel the independent title owner before storage drain. No UI join.
         if (titleCoordinatorDelegate.isInitialized()) titleCoordinator.close()
         cancelPreparation()

@@ -1,6 +1,11 @@
 # P10 / P22 / R11 用户侧上下文：真实组件与待接入边界
 
-## 交付状态（不要写成生产闭环）
+> **后续接线源码记录**：任务给定 `a9072ab` 后的 Main / Controller 入口增量见
+> [R11-context-entry-handoff.md](R11-context-entry-handoff.md)。本页以下是先前组件交付与
+> 接线合同的历史记录，其中“Main pending / Controller 未实现”描述的是当时状态。
+> 新增量已修改对应入口源码，但未在本叶子环境构建或运行测试，不代表生产验收。
+
+## 原组件交付状态（历史记录，不要写成生产闭环）
 
 本增量提供可渲染的独立 `ContextManagementPanel` / `ContextManagementRoute`、
 受控 `ContextManagementControllerAdapter`、真实本地读取/手动压缩 worker 和定向测试源码。

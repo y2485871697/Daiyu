@@ -1,0 +1,291 @@
+package app.daiyu.android
+
+import androidx.compose.ui.test.*
+import app.daiyu.android.context.CompressionSettings
+import app.daiyu.android.context.ContextManagementControllerAdapter
+import app.daiyu.android.context.ContextManagementState
+import app.daiyu.android.context.SummaryModelBinding
+import app.daiyu.android.context.SummaryProfileDescriptor
+import kotlinx.coroutines.flow.MutableStateFlow
+import app.daiyu.android.domain.*
+
+/** Real Main chat action/route and real read-only production worker, with isolated fixture DB.
+ * No real provider, credentials, paid request, or manual-compression transport is exercised here. */
+@Suppress("DEPRECATION")
+class ContextManagementEntryActivityTest : WiredActivityTestCase() {
+    private fun seedAndSelect(): Conversation {
+        val conversation = fixture.database.create("default")
+        val user = Message(MessageId("context-user"), conversation.id, RunId("context-history"), "user",
+            listOf(MessageBlock.Text("body", "context entry literal evidence")), RunStatus.COMPLETED)
+        val assistant = user.copy(id = MessageId("context-assistant"), role = "assistant", status = RunStatus.RUNNING)
+        fixture.database.send(user, assistant)
+        fixture.database.save(assistant.copy(status = RunStatus.COMPLETED))
+        fixture.database.draft(conversation.id, "retained unsent draft")
+        mainThread { activity.select(conversation) }
+        return conversation
+    }
+    private fun adapter(): ContextManagementControllerAdapter {
+        val getter = MainActivity::class.java.declaredMethods.single { it.name == "getContextManagementVisit" }
+        val visit = checkNotNull(getter.apply { isAccessible = true }.invoke(activity))
+        return visit.javaClass.getDeclaredMethod("getAdapter").apply { isAccessible = true }
+            .invoke(visit) as ContextManagementControllerAdapter
+    }
+    private fun page(value: String) {
+        MainActivity::class.java.declaredMethods.single { it.name == "setRetainedPage" }
+            .apply { isAccessible = true }.invoke(activity, value)
+    }
+    private fun editorGeneration(): Long = MainActivity::class.java.getDeclaredField("editorGeneration")
+        .apply { isAccessible = true }.getLong(activity)
+    private fun assertNoVisit() {
+        val getter = MainActivity::class.java.declaredMethods.single { it.name == "getContextManagementVisit" }
+        assertNull(getter.apply { isAccessible = true }.invoke(activity))
+    }
+    private fun stopped(block: () -> Unit) {
+        try {
+            mainThread {
+                instrumentation.callActivityOnPause(activity)
+                instrumentation.callActivityOnStop(activity)
+                // Assert before Compose disposal, not just after an idle frame removes the route.
+                block()
+            }
+        } finally {
+            mainThread {
+                instrumentation.callActivityOnRestart(activity)
+                instrumentation.callActivityOnStart(activity)
+                instrumentation.callActivityOnResume(activity)
+            }
+        }
+        ui.waitForIdle()
+    }
+    @Suppress("UNCHECKED_CAST")
+    private fun offerConfirmationMetadata(adapter: ContextManagementControllerAdapter) {
+        // Test-only presentation probe: retain the REAL production read/owner/adapter, but supply
+        // non-secret, unsaved target metadata so the REAL Panel can arm its confirmation callback.
+        // No profile/settings/credentials are read or saved here. This is NOT a summary I/O test.
+        val mutable = adapter.javaClass.getDeclaredField("mutable").apply { isAccessible = true }
+            .get(adapter) as MutableStateFlow<ContextManagementState>
+        val binding = SummaryModelBinding("entry-stop-fixture", "entry-stop-model")
+        val state = mutable.value
+        mutable.value = state.copy(snapshot = checkNotNull(state.snapshot).copy(
+            configuration = CompressionSettings(automatic = false, contextWindowTokens = 10000,
+                reserveTokens = 1000, keepTurns = 1, summaryModel = binding),
+            summaryTarget = SummaryProfileDescriptor(binding, "entry-stop-revision",
+                "https://entry-stop.invalid/v1/responses", "entry-stop-api-model")))
+    }
+    private fun awaitLocalReaders() {
+        awaitControl("chat local readers idle") { !fixture.controller.dataBusy }
+    }
+    private fun openAndAwait(): ContextManagementControllerAdapter {
+        awaitLocalReaders()
+        node("chat-context").performClick()
+        node("context-management").assertExists()
+        lateinit var result: ContextManagementControllerAdapter
+        mainThread { result = adapter() }
+        awaitControl("context route production read") {
+            result.state.value.operation == null && result.state.value.snapshot != null
+        }
+        return result
+    }
+    fun testRealClickReadsOriginalConversationWithoutSendingOrChangingDraftAndBackFencesOldClick() {
+        val conversation = seedAndSelect()
+        val before = fixture.database.exportBackup()
+        lateinit var oldClick: () -> Unit
+        mainThread { oldClick = retainedControls(activity).onContextClick }
+        val old = openAndAwait()
+        assertEquals(conversation.id, old.state.value.owner.conversationId)
+        assertEquals(2, old.state.value.snapshot!!.originals.size)
+        assertEquals(before, fixture.database.exportBackup())
+        backToChat(activity)
+        node("context-management").assertDoesNotExist()
+        assertDraft("retained unsent draft")
+        mainThread { oldClick() }
+        node("context-management").assertDoesNotExist()
+        assertNull(old.state.value.snapshot)
+        val next = openAndAwait()
+        assertNotSame(old, next)
+        assertTrue(next.state.value.owner.generation > old.state.value.owner.generation)
+        assertEquals(conversation.id, next.state.value.owner.conversationId)
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testSelectionAndPageChangesRevokeBeforeOldCommandsAndSameIdGetsNewVisit() {
+        val conversation = seedAndSelect()
+        val old = openAndAwait()
+        mainThread {
+            activity.select(null)
+            old.refresh(); old.requestCompression(); old.confirmCompression()
+        }
+        assertNull(old.state.value.snapshot)
+        backToChat(activity)
+        mainThread { activity.select(conversation) }
+        val next = openAndAwait()
+        assertTrue(next.state.value.owner.generation > old.state.value.owner.generation)
+        // Re-enter ordinary settings through the real page setter, not Compose disposal alone.
+        mainThread {
+            val setter = MainActivity::class.java.declaredMethods.single { it.name == "setRetainedPage" }
+            setter.apply { isAccessible = true }.invoke(activity, "settings")
+            next.refresh(); next.confirmCompression()
+        }
+        assertNull(next.state.value.snapshot)
+        node("context-management").assertDoesNotExist()
+        assertEquals("retained unsent draft", fixture.database.conversations().single().draft)
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testActivityRecreationDoesNotRestoreContextVisitOrOldClickAuthority() {
+        val conversation = seedAndSelect()
+        lateinit var oldClick: () -> Unit
+        mainThread { oldClick = retainedControls(activity).onContextClick }
+        val old = openAndAwait()
+        activity = recreateActivity(activity)
+        node("context-management").assertDoesNotExist()
+        mainThread { oldClick(); old.refresh(); old.confirmCompression() }
+        assertNull(old.state.value.snapshot)
+        node("context-management").assertDoesNotExist()
+        val next = openAndAwait()
+        assertNotSame(old, next)
+        assertEquals(conversation.id, next.state.value.owner.conversationId)
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testSidebarRevokesEntryWithoutVisitAndClosingDoesNotReviveOldClicks() {
+        seedAndSelect()
+        awaitLocalReaders()
+        val before = fixture.database.exportBackup()
+        lateinit var oldClick: () -> Unit
+        lateinit var behindSidebarClick: () -> Unit
+        var generation = -1L
+        mainThread {
+            generation = editorGeneration()
+            oldClick = retainedControls(activity).onContextClick
+            retainedControls(activity).onOpenSidebar()
+            oldClick()
+            behindSidebarClick = retainedControls(activity).onContextClick
+            behindSidebarClick()
+            assertNoVisit()
+        }
+        node("context-management").assertDoesNotExist()
+        backToChat(activity) // Dismiss the actual sidebar, without selecting the conversation again.
+        assertDraft("retained unsent draft")
+        awaitLocalReaders()
+        mainThread {
+            oldClick(); behindSidebarClick()
+            assertNoVisit()
+            assertEquals(generation, editorGeneration())
+        }
+        node("context-management").assertDoesNotExist()
+        lateinit var sidebarClick: () -> Unit
+        mainThread { sidebarClick = retainedControls(activity).onOpenSidebar }
+        val visit = openAndAwait() // Only the newly rendered chat entry can open a visit.
+        mainThread {
+            // A retained sidebar action also synchronously revokes an already-open context visit.
+            sidebarClick()
+            assertNoVisit()
+            assertNull(visit.state.value.snapshot)
+            visit.refresh(); visit.confirmCompression()
+            assertNull(visit.state.value.operation)
+        }
+        node("context-management").assertDoesNotExist()
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testSettingsRoundTripWithoutReselectionCannotRestoreOldEntry() {
+        seedAndSelect()
+        awaitLocalReaders()
+        val before = fixture.database.exportBackup()
+        lateinit var oldClick: () -> Unit
+        lateinit var settingsClick: () -> Unit
+        var generation = -1L
+        mainThread {
+            generation = editorGeneration()
+            oldClick = retainedControls(activity).onContextClick
+            // Isolate the real page setter from sidebar and selection-generation fences.
+            page("settings")
+            oldClick()
+            settingsClick = retainedControls(activity).onContextClick
+            settingsClick()
+            assertNoVisit()
+        }
+        node("page:设置").assertExists()
+        backToChat(activity)
+        awaitLocalReaders()
+        mainThread {
+            oldClick(); settingsClick()
+            assertNoVisit()
+            assertEquals(generation, editorGeneration())
+        }
+        node("context-management").assertDoesNotExist()
+        assertDraft("retained unsent draft")
+        openAndAwait()
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testStopRevokesUnopenedEntryAndOpenAdapterConsentAndResumeNeedsFreshClick() {
+        val conversation = seedAndSelect()
+        awaitLocalReaders()
+        val before = fixture.database.exportBackup()
+        lateinit var oldClick: () -> Unit
+        lateinit var backgroundClick: () -> Unit
+        var generation = -1L
+        mainThread {
+            generation = editorGeneration()
+            oldClick = retainedControls(activity).onContextClick
+        }
+        stopped {
+            oldClick()
+            backgroundClick = retainedControls(activity).onContextClick
+            backgroundClick()
+            assertNoVisit() // onStop must revoke even when no visit existed.
+        }
+        awaitLocalReaders()
+        mainThread {
+            oldClick(); backgroundClick()
+            assertNoVisit()
+            assertEquals(generation, editorGeneration())
+        }
+        node("context-management").assertDoesNotExist()
+        val old = openAndAwait()
+        mainThread { offerConfirmationMetadata(old) }
+        node("context-management").performScrollToNode(hasTestTag("context-compress"))
+        node("context-compress").performClick()
+        mainThread { assertTrue(old.state.value.confirmingCompression) }
+        // This is the same adapter method retained by the actual Panel's confirmation button.
+        val oldConfirm: () -> Unit = old::confirmCompression
+        stopped {
+            assertNoVisit()
+            assertNull(old.state.value.snapshot)
+            assertFalse(old.state.value.confirmingCompression)
+            old.refresh(); old.requestCompression(); oldConfirm(); oldClick()
+            assertNull(old.state.value.operation)
+            assertNoVisit()
+        }
+        mainThread {
+            old.refresh(); old.requestCompression(); oldConfirm(); oldClick(); backgroundClick()
+            assertNull(old.state.value.snapshot)
+            assertFalse(old.state.value.confirmingCompression)
+            assertNoVisit()
+        }
+        node("context-management").assertDoesNotExist()
+        backToChat(activity) // The stopped visit stays invalid; it is not reopened on resume.
+        mainThread { oldClick(); backgroundClick(); oldConfirm(); assertNoVisit() }
+        val next = openAndAwait()
+        assertNotSame(old, next)
+        assertEquals(conversation.id, next.state.value.owner.conversationId)
+        mainThread {
+            old.refresh(); oldConfirm(); oldClick(); backgroundClick()
+            assertSame(next, adapter())
+            assertNotNull(next.state.value.snapshot)
+        }
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testStaleChatClickCannotOpenContextFromAnotherPageOrNewEditor() {
+        val conversation = seedAndSelect()
+        lateinit var oldClick: () -> Unit
+        mainThread { oldClick = retainedControls(activity).onContextClick }
+        openSettings()
+        mainThread { oldClick() }
+        node("context-management").assertDoesNotExist()
+        backToChat(activity)
+        mainThread { activity.select(conversation); oldClick() }
+        node("context-management").assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+}

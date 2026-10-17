@@ -29,7 +29,7 @@ class PlatformPermissionBoundaryTest : InstrumentationTestCase() {
     fun testMissingPermissionsRejectBeforeAnyServiceOrProviderRead() {
         val context = DenyingContext(instrumentation.targetContext)
         val backend = AndroidPlatformReads(context)
-        val cases = listOf(PlatformReadTool.NETWORK to "{}", PlatformReadTool.MEDIA to """{"kind":"image"}""",
+        val cases = listOf(PlatformReadTool.LAST_KNOWN_LOCATION to "{}", PlatformReadTool.NETWORK to "{}", PlatformReadTool.MEDIA to """{"kind":"image"}""",
             PlatformReadTool.CALENDAR to """{"start_ms":1,"end_ms":2}""", PlatformReadTool.CONTACTS to """{"query":"fixture"}""")
         for ((tool, args) in cases) {
             val result = JSONObject(backend.read(tool, tool.schema.parse(args)) { false })
@@ -72,7 +72,7 @@ class PlatformPermissionBoundaryTest : InstrumentationTestCase() {
 
     fun testDefaultPolicyDoesNotReadPrivateDataEvenWhenSystemGrantsExist() {
         val backend = AndroidPlatformReads(DenyingContext(instrumentation.targetContext, runtimeGranted = true, uriGranted = true))
-        val cases = listOf(PlatformReadTool.APPS to "{}", PlatformReadTool.MEDIA to """{"kind":"image"}""",
+        val cases = listOf(PlatformReadTool.LAST_KNOWN_LOCATION to "{}", PlatformReadTool.APPS to "{}", PlatformReadTool.MEDIA to """{"kind":"image"}""",
             PlatformReadTool.CALENDAR to """{"start_ms":1,"end_ms":2}""", PlatformReadTool.CONTACTS to """{"query":"fixture"}""",
             PlatformReadTool.NOTIFICATIONS to "{}", PlatformReadTool.FILES to """{"tree_uri":"content://fixture/tree/1"}""",
             PlatformReadTool.FILE_METADATA to """{"uri":"content://fixture/document/1"}""",

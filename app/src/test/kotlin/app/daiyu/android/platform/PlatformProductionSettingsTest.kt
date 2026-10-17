@@ -59,9 +59,9 @@ class PlatformProductionSettingsTest {
         try { (both.platformAllowed as MutableSet<PlatformReadTool>).clear(); fail("mutable run selection") } catch (_: UnsupportedOperationException) { }
     }
 
-    @Test fun allThirteenSelectionsRoundTripWithoutGrantingAnySiblingOrDestination() {
+    @Test fun allSelectionsRoundTripWithoutGrantingAnySiblingOrDestination() {
         val store = PlatformToolSettings(preferences)
-        assertEquals(13, PlatformReadTool.entries.size)
+        assertEquals(14, PlatformReadTool.entries.size)
         for (tool in PlatformReadTool.entries) {
             store.select(tool, true)
             val frozen = PlatformToolSettings(preferences).freeze()
@@ -70,6 +70,41 @@ class PlatformProductionSettingsTest {
             assertEquals(setOf(tool.capability), AndroidToolRegistry.capabilitiesFor(emptySet(), frozen.platformAllowed))
             store.select(tool, false)
             assertTrue(store.freeze().platformAllowed.isEmpty())
+        }
+    }
+
+    @Test fun cachedLocationHasIndependentFrozenSelectionAndBothDestinations() {
+        val store = PlatformToolSettings(preferences)
+        val location = PlatformReadTool.LAST_KNOWN_LOCATION
+        store.select(PlatformReadTool.NETWORK, true)
+        store.consentModel(location, true); store.consentHistory(location, true)
+        val consentOnly = store.freeze()
+        assertFalse(location in consentOnly.platformAllowed)
+        assertFalse(location.capability in AndroidToolRegistry.capabilitiesFor(emptySet(), consentOnly.platformAllowed))
+        store.select(location, true)
+        val selected = store.freeze()
+        store.select(location, false); store.consentModel(location, false); store.consentHistory(location, false)
+        assertEquals(setOf(PlatformReadTool.NETWORK, location), selected.platformAllowed)
+        assertTrue(selected.resultPolicy.allowsShared(location.toolName))
+        assertFalse(store.freeze().resultPolicy.allowsShared(location.toolName))
+        assertEquals(setOf(PlatformReadTool.NETWORK), store.freeze().platformAllowed)
+    }
+
+    @Test fun locationRequestsOnlyExplicitForegroundGrantsAndNeverAddsLocationToNetwork() {
+        val location = PlatformReadTool.LAST_KNOWN_LOCATION
+        for (api in listOf(26, 30, 31, 34, 36)) {
+            assertEquals(listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION),
+                PlatformSettingsAccess.runtimePermissions(location, api))
+            assertArrayEquals(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION),
+                PlatformSettingsAccess.permissionRequest(location, Manifest.permission.ACCESS_COARSE_LOCATION, api))
+            assertArrayEquals(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION),
+                PlatformSettingsAccess.permissionRequest(location, Manifest.permission.ACCESS_FINE_LOCATION, api))
+            assertFalse(PlatformSettingsAccess.runtimePermissions(PlatformReadTool.NETWORK, api)
+                .any { it.contains("LOCATION") })
+            try { PlatformSettingsAccess.permissionRequest(location, "android.permission.ACCESS_BACKGROUND_LOCATION", api); fail() }
+            catch (_: IllegalArgumentException) { }
+            try { PlatformSettingsAccess.permissionRequest(PlatformReadTool.NETWORK, Manifest.permission.ACCESS_FINE_LOCATION, api); fail() }
+            catch (_: IllegalArgumentException) { }
         }
     }
 

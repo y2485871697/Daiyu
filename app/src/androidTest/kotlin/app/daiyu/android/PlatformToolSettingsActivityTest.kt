@@ -25,6 +25,37 @@ class PlatformToolSettingsActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertEquals(listOf("platform", "platform"), events) }
     }
 
+    fun testLocationPermissionClicksNeverSelectToolOrGrantOutboundConsentAndStaleVisitIsInert() {
+        val preferences = activity.getSharedPreferences("location-page-test-${UUID.randomUUID()}", 0)
+        val settings = PlatformToolSettings(preferences)
+        val events = mutableListOf<String>()
+        var current = true
+        val tool = PlatformReadTool.LAST_KNOWN_LOCATION
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), false) {
+                PlatformToolSettingsScreen(activity, settings, 0, grants = { emptyList() },
+                    ownerCurrent = { current }, onBack = {},
+                    onPermission = { selected, permission -> events.add("${selected.toolName}:$permission") },
+                    onPick = {}, onCopy = {}, onRevoke = {})
+            } } }
+            ui.waitForIdle()
+            ui.runOnIdle { assertTrue(events.isEmpty()); assertTrue(settings.freeze().platformAllowed.isEmpty()) }
+            val page = "平台只读工具与私密出站"
+            reveal("settings-row:请求 android.permission.ACCESS_COARSE_LOCATION", page).performClick()
+            reveal("settings-row:请求 android.permission.ACCESS_FINE_LOCATION", page).performClick()
+            ui.runOnIdle {
+                assertEquals(listOf("last_known_location:android.permission.ACCESS_COARSE_LOCATION",
+                    "last_known_location:android.permission.ACCESS_FINE_LOCATION"), events)
+                assertTrue(settings.freeze().platformAllowed.isEmpty())
+                assertFalse(settings.freeze().modelConsent(tool)); assertFalse(settings.freeze().historyConsent(tool))
+                current = false
+            }
+            reveal("settings-row:请求 android.permission.ACCESS_FINE_LOCATION", page).performClick()
+            reveal("settings-switch:选择 ${tool.toolName}", page).performClick()
+            ui.runOnIdle { assertEquals(2, events.size); assertTrue(settings.freeze().platformAllowed.isEmpty()) }
+        } finally { mainThread { preferences.edit().clear().commit() } }
+    }
+
     fun testSelectionConsentsAndPermissionActionAreIndependentAndStalePageCannotSave() {
         val preferences = activity.getSharedPreferences("platform-page-test-${UUID.randomUUID()}", 0)
         val settings = PlatformToolSettings(preferences)

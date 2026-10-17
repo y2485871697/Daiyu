@@ -120,9 +120,8 @@ internal object DeviceQueries {
                 scanned++
                 val name = it.getString(1)
                 if (args.queryText().isNotEmpty() && !name.orEmpty().contains(args.queryText(), true)) continue
-                val documentUri = DocumentsContract.buildDocumentUriUsingTree(tree, it.getString(0)).toString()
-                // Never truncate an identifier into a different valid-looking URI.
-                if (documentUri.length > 4096) return failure("unavailable", "document_uri_too_large")
+                val documentUri = documentUri(tree, it.getString(0))
+                    ?: return failure("unavailable", "document_uri_too_large")
                 fieldsTruncated = fieldsTruncated || clippedText(name) || clippedText(it.getString(2))
                 items.put(JSONObject().put("uri", documentUri).put("name", boundedText(name)).put("mime_type", boundedText(it.getString(2)))
                     .put("size_bytes", if (it.isNull(3)) JSONObject.NULL else it.getLong(3))
@@ -133,6 +132,10 @@ internal object DeviceQueries {
             .put("truncated", scanned == 500 || items.length() == args.queryLimit() || fieldsTruncated)
             .put("fields_truncated", fieldsTruncated).put("scope", "granted_tree_direct_children"))
     }
+
+    /** Match the platform URI schemas and settings grants; never truncate a URI into another identifier. */
+    internal fun documentUri(tree: Uri, documentId: String): String? =
+        DocumentsContract.buildDocumentUriUsingTree(tree, documentId).toString().takeIf { it.length <= 2048 }
 
     internal fun rows(resolver: ContentResolver, uri: Uri, projection: Array<String>, selection: String?,
         selectionArgs: Array<String>?, order: String?, limit: Int, cancelled: () -> Boolean, row: (Cursor) -> JSONObject): JSONObject {

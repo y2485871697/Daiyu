@@ -11,6 +11,7 @@ import android.provider.DocumentsContract
 internal object PlatformSettingsAccess {
     fun runtimePermissions(tool: PlatformReadTool, api: Int = Build.VERSION.SDK_INT): List<String> = when (tool) {
         PlatformReadTool.NETWORK -> if (api >= 31) listOf(Manifest.permission.BLUETOOTH_CONNECT) else emptyList()
+        PlatformReadTool.LAST_KNOWN_LOCATION -> listOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
         PlatformReadTool.CONTACTS -> listOf(Manifest.permission.READ_CONTACTS)
         PlatformReadTool.CALENDAR -> listOf(Manifest.permission.READ_CALENDAR)
         PlatformReadTool.MEDIA -> if (api >= 33) buildList {
@@ -24,12 +25,23 @@ internal object PlatformSettingsAccess {
 
     fun permissionRequest(tool: PlatformReadTool, permission: String, api: Int = Build.VERSION.SDK_INT): Array<String> {
         require(permission in runtimePermissions(tool, api))
+        // Android 12+ fine requests must include coarse; the user's approximate choice remains valid.
+        if (tool == PlatformReadTool.LAST_KNOWN_LOCATION && permission == Manifest.permission.ACCESS_FINE_LOCATION)
+            return arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION, Manifest.permission.ACCESS_FINE_LOCATION)
         // Android 14 lets the system present selected-only visual access, never treats it as full access.
         return if (api >= 34 && permission in listOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO))
             arrayOf(permission, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED) else arrayOf(permission)
     }
 
     fun status(context: Context, tool: PlatformReadTool): String = when (tool) {
+        PlatformReadTool.LAST_KNOWN_LOCATION -> {
+            val precision = when {
+                hasPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) -> "精确"
+                hasPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) -> "大致"
+                else -> "未授权，调用将拒绝"
+            }
+            "前台位置权限：$precision；只读最多3个固定来源的已有缓存，可能无记录或已陈旧；不请求更新、不唤醒GPS、不后台定位、不读取SSID"
+        }
         PlatformReadTool.NETWORK -> {
             val bluetooth = if (Build.VERSION.SDK_INT >= 31) Manifest.permission.BLUETOOTH_CONNECT else Manifest.permission.BLUETOOTH
             val missing = listOf(Manifest.permission.ACCESS_NETWORK_STATE, Manifest.permission.ACCESS_WIFI_STATE, bluetooth)

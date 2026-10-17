@@ -15,7 +15,9 @@ import java.util.concurrent.atomic.AtomicInteger
 @Suppress("DEPRECATION")
 class ControllerChildModelsTest : InstrumentationTestCase() {
     private class FixtureApplication(base: Context) : Application() { init { attachBaseContext(base) } }
-    private class Fixture(base: Context, val held: Boolean = false, val background: Boolean = false) {
+    private class Fixture(base: Context, val held: Boolean = false, val background: Boolean = false,
+        val sessionAware: Boolean = false) {
+        val sessionOwners = java.util.Collections.synchronizedList(mutableListOf<Pair<String, ConversationId>>())
         val id = UUID.randomUUID().toString()
         val app = FixtureApplication(testContext(base, "controller-child-$id-"))
         val database = ConversationDatabase(app)
@@ -32,7 +34,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         lateinit var conversation: Conversation
         init {
             settings.save(ModelSettings("https://example.invalid", "parent-api", "synthetic-key", false))
-            controller = ChatController(app, database, settings, app.getSharedPreferences("conversation-ui", 0), { config ->
+            val factory: (ModelSettings) -> ModelPort = { config ->
                 object : ModelPort {
                     override fun open(history: List<Message>): ModelSession = error("explicit definitions required")
                     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
@@ -55,7 +57,13 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
                         }
                     }
                 }
-            })
+            }
+            controller = ChatController(app, database, settings, app.getSharedPreferences("conversation-ui", 0),
+                if (sessionAware) { _ -> error("session-aware path must not fall back") } else factory,
+                sessionModel = if (!sessionAware) null else { p, _, session ->
+                    sessionOwners.add(p.model to session.conversationId)
+                    factory(p.asModelSettings())
+                })
         }
         fun prepare() {
             conversation = database.create("default"); database.draft(conversation.id, "preserve draft")
@@ -74,10 +82,43 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         }
     }
     private val fixtures = mutableListOf<Fixture>()
-    private fun fresh(held: Boolean = false, background: Boolean = false) = Fixture(instrumentation.targetContext, held, background).also {
+    private fun fresh(held: Boolean = false, background: Boolean = false, sessionAware: Boolean = false) =
+        Fixture(instrumentation.targetContext, held, background, sessionAware).also {
         fixtures.add(it); awaitControl("recovery ready") { it.controller.ready }; it.prepare()
     }
     override fun tearDown() { try { fixtures.forEach { it.close() } } finally { super.tearDown() } }
+
+    fun testSessionAwareChildAndParentToolContinuationUseTheDurableParentConversation() {
+        val f = fresh(sessionAware = true)
+        controlMain { assertTrue(f.controller.bindChildSavedModel(f.conversation.id, f.profile.id, f.child.modelId, f.provider)) }
+        assertNotNull(f.controller.sendWithChildren(f.conversation, "session parent"))
+        awaitControl("parent tool continuation completed") { f.controller.active == null }
+        assertNull(f.controller.problem)
+        assertEquals(1, f.parentOpened.get()); assertEquals(1, f.childOpened.get())
+        assertEquals(setOf("parent-api", "child-api"), f.sessionOwners.map { it.first }.toSet())
+        assertTrue(f.sessionOwners.all { it.second == f.conversation.id })
+        val task = f.controller.childTasks(f.conversation.id).single()
+        assertEquals(f.conversation.id.value, task.owner.conversationId)
+        assertFalse(task.owner.childRunId == f.conversation.id.value)
+        val assistant = f.database.messages(f.conversation.id).map { it.second }.single { it.role == Message.ASSISTANT_ROLE }
+        assertTrue(assistant.blocks.filterIsInstance<MessageBlock.Tool>().single().result!!.contains("independent answer"))
+        val command = app.daiyu.android.domain.delegation.ChildTaskCommand("gateway-append-${f.id}", task,
+            app.daiyu.android.domain.delegation.ChildTaskCommandKind.APPEND, f.profile.id, "additional constraint")
+        val accepted = f.controller.directChildTask(command)
+        assertTrue(accepted is app.daiyu.android.domain.delegation.ChildTaskCommandReceipt.Accepted)
+        awaitControl("direct child append drained") { !f.controller.hasLiveChildTasks() }
+        assertEquals(2, f.childOpened.get()); assertEquals(1, f.parentOpened.get())
+        assertTrue(f.sessionOwners.all { it.second == f.conversation.id })
+        assertEquals(3, f.sessionOwners.size)
+    }
+
+    fun testSessionAwareUnboundChildStillRejectsWithoutAnyFactory() {
+        val f = fresh(sessionAware = true)
+        assertNull(f.controller.sendWithChildren(f.conversation, "not bound"))
+        assertTrue(f.sessionOwners.isEmpty()); assertEquals(0, f.parentOpened.get()); assertEquals(0, f.childOpened.get())
+        assertTrue(f.database.messages(f.conversation.id).isEmpty())
+        assertEquals("preserve draft", f.database.conversations().single { it.id == f.conversation.id }.draft)
+    }
 
     fun testExplicitBindingRunsChildAndPersistsParentReceiptAndTaskRecord() {
         val f = fresh()

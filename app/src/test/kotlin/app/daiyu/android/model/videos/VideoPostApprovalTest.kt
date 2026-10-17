@@ -70,6 +70,84 @@ class VideoPostApprovalTest {
             "data: $terminal\n\n"
     }
 
+    @Test fun explicitConversationHeadersDoNotBypassFreshVideoApproval() {
+        val context = app.daiyu.android.model.sessiongateway.SessionGatewayContext(row.conversationId)
+        var approvals = 0
+        val target = ResponsesModel(settings, {
+            connections++
+            Connection(done).also(sent::add)
+        }, null, videoInputCapability = capability, videoPostApprovalProvider = VideoPostApprovalProvider { request ->
+            approvals++
+            assertEquals(0, connections)
+            request.bindPermitConsumption {}
+        }, sessionContext = context).open(history, emptyList(), plan)
+        target.next(emptyList()) {}
+        assertEquals(1, approvals)
+        assertEquals(1, connections)
+        assertEquals("c", sent.single().getRequestProperty("session-id"))
+        assertEquals("c", sent.single().getRequestProperty("thread-id"))
+        // The default gpt model rule does not match this video model; no new extension is allowed.
+        assertFalse(JSONObject(sent.single().sent.toString("UTF-8")).has("prompt_cache_key"))
+    }
+
+    @Test fun explicitContextToolContinuationStillNeedsFreshApprovalForEachFinalPayload() {
+        var approvals = 0
+        val digests = mutableListOf<String>()
+        val target = ResponsesModel(settings, {
+            connections++
+            Connection(if (connections == 1) toolTerminal() else done).also(sent::add)
+        }, null, videoInputCapability = capability, videoPostApprovalProvider = VideoPostApprovalProvider { request ->
+            approvals++
+            assertEquals(approvals - 1, connections)
+            assertEquals(approvals, request.postNumber)
+            digests.add(request.requestSha256)
+            request.bindPermitConsumption {}
+        }, sessionContext = app.daiyu.android.model.sessiongateway.SessionGatewayContext(row.conversationId))
+            .open(history, emptyList(), plan)
+        target.next(emptyList()) {}
+        target.next(listOf(ToolOutput(ToolCallId("call"), "ok"))) {}
+        assertEquals(2, approvals); assertEquals(2, connections)
+        sent.forEachIndexed { index, connection ->
+            assertEquals("c", connection.getRequestProperty("session-id"))
+            assertEquals("c", connection.getRequestProperty("thread-id"))
+            val digest = java.security.MessageDigest.getInstance("SHA-256").digest(connection.sent.toByteArray())
+                .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            assertEquals(digests[index], digest)
+            assertFalse(JSONObject(connection.sent.toString("UTF-8")).has("prompt_cache_key"))
+        }
+        assertNotEquals(digests[0], digests[1])
+    }
+
+    @Test fun unknownGatewaySemanticsNeverReachVideoApprovalOrConnection() {
+        var approvals = 0
+        for (rule in listOf(app.daiyu.android.model.sessiongateway.SessionGatewayRule(retention = "24h"),
+            app.daiyu.android.model.sessiongateway.SessionGatewayRule(keySource = "project"))) {
+            rejected {
+                ResponsesModel(settings.copy(requestOptions = ProviderRequestOptions(sessionGateway = rule)),
+                    { connections++; Connection(done) }, null, videoInputCapability = capability,
+                    videoPostApprovalProvider = VideoPostApprovalProvider { approvals++; it.bindPermitConsumption {} },
+                    sessionContext = app.daiyu.android.model.sessiongateway.SessionGatewayContext(row.conversationId))
+                    .open(history, emptyList(), plan).next(emptyList()) {}
+            }
+        }
+        assertEquals(0, approvals); assertEquals(0, connections)
+    }
+
+    @Test fun matchedGatewayExtensionFailsVideoAllowlistBeforeApprovalOrConnection() {
+        val options = ProviderRequestOptions(sessionGateway = app.daiyu.android.model.sessiongateway.SessionGatewayRule(
+            modelPattern = ".*", pathPattern = ".*"))
+        var approvals = 0
+        rejected {
+            ResponsesModel(settings.copy(requestOptions = options), { connections++; Connection(done) }, null,
+                videoInputCapability = capability, videoPostApprovalProvider = VideoPostApprovalProvider {
+                    approvals++; it.bindPermitConsumption {}
+                }, sessionContext = app.daiyu.android.model.sessiongateway.SessionGatewayContext(row.conversationId))
+                .open(history, emptyList(), plan).next(emptyList()) {}
+        }
+        assertEquals(0, approvals)
+        assertEquals(0, connections)
+    }
+
     @Test fun missingDeniedAndFailedPermitNeverAcquireConnection() {
         rejected { session().next(emptyList()) {} }
         rejected { session(VideoPostApprovalProvider { null }).next(emptyList()) {} }

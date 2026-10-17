@@ -16,12 +16,15 @@ import java.util.concurrent.atomic.AtomicReference
 class ControllerTerminalSendTest : InstrumentationTestCase() {
     private lateinit var fixture: RunControlFixture
     private val factories = AtomicInteger()
+    private val sessionOwners = java.util.Collections.synchronizedList(mutableListOf<app.daiyu.android.domain.ConversationId>())
     private val releases = mutableListOf<CountDownLatch>()
     private val controller get() = fixture.controller
 
     override fun setUp() {
         super.setUp()
-        fixture = RunControlFixture(instrumentation.targetContext) { factories.incrementAndGet() }
+        fixture = RunControlFixture(instrumentation.targetContext, onSession = { _, _, context ->
+            sessionOwners.add(context.conversationId); assertNull(context.project)
+        }) { factories.incrementAndGet() }
         awaitControl("ready") { controller.ready }
     }
     override fun tearDown() {
@@ -92,6 +95,7 @@ class ControllerTerminalSendTest : InstrumentationTestCase() {
         waitFor(done); waitFor(session.entered)
         val accepted = result.get() as ChatController.TextSendResult.Accepted
         assertEquals(p.identity.conversationId, accepted.conversation.id)
+        assertEquals(listOf(accepted.conversation.id), sessionOwners)
         val rows = fixture.database.messages(accepted.conversation.id).map { it.second }
         assertEquals(2, rows.size)
         assertEquals(p.identity.assistantMessageId, rows.single { it.role == "assistant" }.id)

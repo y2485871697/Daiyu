@@ -81,6 +81,21 @@ class ControllerVideoPostApprovalWrapTest : InstrumentationTestCase() {
                 override fun cancelRun() {}
             }
             val approval = ControllerVideoPostApproval(host, authority())
+            // Exercise the DEFAULT four-argument factory without ever calling next/network.
+            // Inspect only the constructed immutable model session; transport tests below retain
+            // their original four-argument seam and approval checks.
+            val defaultPort = videos.wrap(provider, capability, conversation, assistant.id, baseline,
+                "frozen assistant instructions", { false }, postApproval = approval)
+            val defaultSession = defaultPort.open(modelRows)
+            val delegate = defaultSession.javaClass.declaredFields.single {
+                ModelSession::class.java.isAssignableFrom(it.type)
+            }.apply { isAccessible = true }.get(defaultSession)
+            val capturedContext = delegate.javaClass.getDeclaredField("sessionContext").apply { isAccessible = true }
+                .get(delegate) as app.daiyu.android.model.sessiongateway.SessionGatewayContext
+            assertEquals(conversation, capturedContext.conversationId); assertNull(capturedContext.project)
+            assertEquals("frozen assistant instructions", delegate.javaClass.getDeclaredField("assistantInstructions")
+                .apply { isAccessible = true }.get(delegate))
+            defaultSession.cancel()
             // A preflight identity has not been registered and cannot authorize transport.
             val premature = VideoPostRequest(settings, checkNotNull(baseline.videos), baseline.history, Any(), 1, byteArrayOf(1))
             assertNull(runBlocking { approval.approve(premature) })

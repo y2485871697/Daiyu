@@ -14,6 +14,8 @@ import java.util.concurrent.atomic.AtomicReference
 @Suppress("DEPRECATION")
 internal class RunControlFixture(base:Context,
     virtualDisplayFactory: ControllerVirtualDisplayFactory = ControllerVirtualDisplayFactory.REAL,
+    onSession: ((app.daiyu.android.model.ProviderSnapshot, app.daiyu.android.assistants.AssistantRunContext,
+        app.daiyu.android.model.sessiongateway.SessionGatewayContext) -> Unit)? = null,
     beforeModel: () -> Unit = {}) : AutoCloseable {
     private class FixtureApplication(base:Context):Application() {init {attachBaseContext(base)}}
     val application:Application=FixtureApplication(testContext(base,"run-control-${UUID.randomUUID()}-"))
@@ -27,14 +29,19 @@ internal class RunControlFixture(base:Context,
     val controller:ChatController
     init {
         settings.save(ModelSettings("https://example.invalid","run-control","synthetic-key",false))
-        controller=ChatController(application,database,settings,application.getSharedPreferences("conversation-ui",0),{
+        val factory: (ModelSettings) -> ModelPort = {
             // Test-only gate in real preparation, before the SQLite receipt or model open.
             beforeModel()
             ModelPort {history ->
                 opens.incrementAndGet()
                 synchronized(queued) {histories.add(history);checkNotNull(queued.pollFirst())}
             }
-        }, virtualDisplayFactory = virtualDisplayFactory)
+        }
+        controller=ChatController(application,database,settings,application.getSharedPreferences("conversation-ui",0),factory,
+            virtualDisplayFactory = virtualDisplayFactory,
+            sessionModel = if (onSession == null) null else { provider, assistant, session ->
+                onSession(provider, assistant, session); factory(provider.asModelSettings())
+            })
     }
     class Session(val text:String,held:Boolean,private val holdSeconds:Long=10,
         private val releaseOnCancel:Boolean=true) : ModelSession {

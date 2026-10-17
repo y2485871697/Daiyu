@@ -2,6 +2,7 @@ package app.daiyu.android.model
 
 import app.daiyu.android.domain.ModelPort
 import app.daiyu.android.storage.ModelSettings
+import app.daiyu.android.model.sessiongateway.SessionGatewayContext
 
 object ModelFactory {
     fun snapshot(settings: ModelSettings): ProviderSnapshot = ProviderSnapshot.capture(settings)
@@ -17,6 +18,15 @@ object ModelFactory {
             ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(snapshot.protocol.wireName)
         }
     }
+
+    /** Production path: the controller has already committed/resolved the conversation. */
+    fun create(snapshot: ProviderSnapshot, session: SessionGatewayContext): ModelPort = when (snapshot.protocol) {
+        ProviderProtocol.RESPONSES -> ResponsesModel(snapshot, sessionContext = session)
+        ProviderProtocol.MESSAGES -> MessagesModel(snapshot, sessionContext = session)
+        ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(snapshot.protocol.wireName)
+    }
+
+    fun create(settings: ModelSettings, session: SessionGatewayContext): ModelPort = create(snapshot(settings), session)
 
     fun create(settings: ModelSettings, protocol: ProviderProtocol): ModelPort =
         create(ProviderSnapshot.capture(settings, protocol))

@@ -17,6 +17,7 @@ class ContextRegistryScopeTest : InstrumentationTestCase() {
     private lateinit var db: ConversationDatabase
     private lateinit var service: ContextService
     private lateinit var registry: ContextRegistry
+    private lateinit var runtime: app.daiyu.android.storage.SQLiteRuntimeStore
 
     override fun setUp() {
         super.setUp()
@@ -24,11 +25,12 @@ class ContextRegistryScopeTest : InstrumentationTestCase() {
         val files = File(base.cacheDir, "registry-scope-${UUID.randomUUID()}").apply { mkdirs() }
         context = object : ContextWrapper(base) { override fun getFilesDir(): File = files }
         db = ConversationDatabase(context)
+        runtime = app.daiyu.android.storage.SQLiteRuntimeStore.acquire(db).also { it.recoverPending() }
         service = ContextService(context, db)
         registry = ContextRegistry(service)
     }
     override fun tearDown() {
-        db.close(); context.deleteDatabase("conversations.db"); context.filesDir.deleteRecursively(); super.tearDown()
+        runtime.close(); db.close(); context.deleteDatabase("conversations.db"); context.filesDir.deleteRecursively(); super.tearDown()
     }
 
     private data class Fixture(val owner: ConversationId, val runs: List<RunId>, val archive: String, val originals: List<Message>)
@@ -44,7 +46,14 @@ class ContextRegistryScopeTest : InstrumentationTestCase() {
                     "{\"ok\":false,\"error\":\"not_executed\"}")), RunStatus.RUNNING,
                 protocolItems = listOf("{\"type\":\"function_call\",\"call_id\":\"call-$n-${owner.value}\"}",
                     "{\"type\":\"function_call_output\",\"output\":\"not_executed\"}"))
-            db.send(user, reply); db.save(reply.copy(status = RunStatus.COMPLETED))
+            db.send(user, reply)
+            if (n == 0) {
+                val request = app.daiyu.android.domain.runtime.RequestCheckpoint("request", "attempt", "fixture-owner-${owner.value}",
+                    app.daiyu.android.domain.runtime.RequestOperation.NEXT)
+                runtime.commitCheckpoint(app.daiyu.android.domain.runtime.RunCheckpoint(reply.copy(status = RunStatus.COMPLETED),
+                    emptyList(), app.daiyu.android.domain.runtime.ExecutionPhase.TERMINAL, owner = request.owner, revision = 1,
+                    request = request, usage = listOf(app.daiyu.android.domain.runtime.RequestUsageCheckpoint(request, ModelEvent.Usage(100, 20, 30)))))
+            } else db.save(reply.copy(status = RunStatus.COMPLETED))
         }
         val original = service.displayHistory(owner)
         val archive = service.compress(owner, CompressionPolicy(keepTurns = 1), ContextSummarizer { "简短事实摘要" })!!
@@ -144,8 +153,9 @@ class ContextRegistryScopeTest : InstrumentationTestCase() {
             assertTrue(totals.getBoolean("ok")); assertEquals(1L, totals.getLong("requests"))
             assertEquals(1L, totals.getLong("reported_requests")); assertEquals(100L, totals.getLong("input_tokens"))
             assertEquals(20L, totals.getLong("output_tokens")); assertEquals(30L, totals.getLong("cached_tokens"))
-            assertEquals(4L, totals.getLong("reasoning_tokens")); assertEquals(120L, totals.getLong("total_tokens"))
-            assertEquals("provider_reported", totals.getString("source")); assertFalse(totals.getBoolean("incomplete"))
+            assertTrue(totals.isNull("reasoning_tokens")); assertEquals(120L, totals.getLong("total_tokens"))
+            assertEquals("provider_reported", totals.getString("source")); assertTrue(totals.getBoolean("incomplete"))
+            assertFalse(totals.getJSONObject("coverage").getBoolean("counts_available"))
         }
         val beyond = model.execute("context_archive_page", archive(a.archive, 100))
         assertEquals(0, beyond.getJSONArray("messages").length()); assertTrue(beyond.isNull("next_offset"))
@@ -160,12 +170,22 @@ class ContextRegistryScopeTest : InstrumentationTestCase() {
         val task = RunId("summary-task")
         service.recordUsage(UsageRecord("summary-receipt", task.value, a.owner.value, null, null))
         val model = registry.forModel(ContextRegistryScope(a.owner, authorizedRuns = setOf(ContextRunOwner(a.owner, task))))
-        val totals = model.execute("context_usage", usage(a.owner, task))
-        assertTrue(totals.getBoolean("ok")); assertTrue(totals.getBoolean("incomplete"))
-        assertEquals(0L, totals.getLong("total_tokens"))
+        denied(model.execute("context_usage", usage(a.owner, task))) // receipt-only grant is not ownership
+        val conversation = registry.forModel(ContextRegistryScope(a.owner)).execute("context_usage", usage(a.owner))
+        assertEquals(120L, conversation.getLong("total_tokens")) // only authoritative first-run usage
+        assertTrue(conversation.isNull("reasoning_tokens"))
         service.recordUsage(UsageRecord("ambiguous-receipt", task.value, b.owner.value, 10, 2))
         denied(model.execute("context_usage", usage(a.owner, task)))
-        db.close(); db = ConversationDatabase(context); service = ContextService(context, db); registry = ContextRegistry(service)
+        // Unlike receipts, actual conflicting message owners do make the run ambiguous.
+        for (owner in listOf(a.owner, b.owner)) {
+            val user = Message(MessageId("ambiguous-u-${owner.value}"), owner, task, "user", emptyList(), RunStatus.COMPLETED)
+            val assistant = user.copy(id = MessageId("ambiguous-a-${owner.value}"), role = "assistant", status = RunStatus.RUNNING)
+            db.send(user, assistant); db.save(assistant.copy(status = RunStatus.COMPLETED))
+        }
+        denied(model.execute("context_usage", usage(a.owner, task)))
+        runtime.close(); db.close(); db = ConversationDatabase(context)
+        runtime = app.daiyu.android.storage.SQLiteRuntimeStore.acquire(db).also { it.recoverPending() }
+        service = ContextService(context, db); registry = ContextRegistry(service)
         assertEquals(a.owner, service.archiveOwner(a.archive))
         val reopened = registry.forModel(ContextRegistryScope(a.owner))
         assertTrue(reopened.execute("context_archive_page", archive(a.archive)).getBoolean("ok"))

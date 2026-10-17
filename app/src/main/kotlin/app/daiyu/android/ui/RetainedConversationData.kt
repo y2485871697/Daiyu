@@ -89,8 +89,9 @@ internal class RetainedConversationData(private val database: ConversationDataba
     fun stats(): UsageStatsSnapshot = DatabaseTransactions { database.readableDatabase }.run { db ->
         val conversations = db.rawQuery("SELECT COUNT(*) FROM conversations", null).use { it.moveToFirst(); it.getInt(0) }
         val messages = db.rawQuery("SELECT COUNT(*) FROM messages", null).use { it.moveToFirst(); it.getInt(0) }
+        val usage = RecordedUsageReader.readAttributed(db)
         UsageStatsSnapshot(currentDataAvailable = true, currentConversations = conversations,
-            currentMessages = messages, recordedUsage = RecordedUsageReader.read(db))
+            currentMessages = messages, recordedUsage = usage.parentCoverage, attributedUsage = usage)
     }
 
     fun folders(): List<ConversationFolderUi> {

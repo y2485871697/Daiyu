@@ -73,11 +73,15 @@ internal object RecordedUsageReader {
                 saved.usage.forEach { usage ->
                     snapshots.add(AttributedRequestUsage(saved.message.conversationId.value, saved.message.runId.value,
                         saved.message.id.value, saved.message.runId.value, saved.message.id.value,
-                        UsageOrigin.Main, usage.request, usage.snapshot))
+                        UsageOrigin.Main, usage.request, usage.snapshot, usage.source))
                 }
             }
         }
+        val preparing = app.daiyu.android.context.SQLitePreparationRuntime.readUsage(db, conversationId,
+            minOf(budget.maxMessages, budget.maxUsageRecords - snapshots.size))
+        snapshots.addAll(preparing.requests)
         return RecordedUsageStats(aggregateRecordedUsage(snapshots.asSequence().map { it.snapshot }), total, inspected,
-            absent, empty, unreadable, deferred) to snapshots.toList()
+            absent, empty, unreadable, deferred, preparing.total, preparing.inspected, preparing.missingUsage,
+            preparing.unreadable) to snapshots.toList()
     }
 }

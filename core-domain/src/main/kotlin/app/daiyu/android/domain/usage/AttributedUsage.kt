@@ -20,6 +20,8 @@ data class AttributedRequestUsage(
     val origin: UsageOrigin,
     val request: RequestCheckpoint,
     val snapshot: ModelEvent.Usage,
+    /** Explicit durable purpose, independent of parent/child attribution and request ID spelling. */
+    val source: app.daiyu.android.domain.runtime.UsageRequestSource = app.daiyu.android.domain.runtime.UsageRequestSource.MAIN,
 ) {
     init {
         require(listOf(conversationId, parentRunId, parentMessageId, runId, messageId)

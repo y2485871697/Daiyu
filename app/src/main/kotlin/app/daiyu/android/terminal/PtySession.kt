@@ -299,7 +299,12 @@ class PtySession internal constructor(
                                 listOf("/system/bin/sh", "-c", "exec \"$@\"", "daiyu-root-pty") + helperArgv).joinToString(" ") { quote(it) })
                     val builder = ProcessBuilder(command)
                         .directory(cwd).redirectError(File("/dev/null")).apply {
-                            environment().clear(); environment().putAll(frozenEnvironment)
+                            environment().clear()
+                            environment().putAll(if (rootScope == null) frozenEnvironment else mapOf(
+                                "PATH" to "/system/bin:/system/xbin",
+                                "HOME" to cwd.absolutePath,
+                                "TMPDIR" to cwd.absolutePath,
+                            ))
                         }
                     val process = startProcess(builder)
                     cleanup = PtyStartupCleanup(process, request = {

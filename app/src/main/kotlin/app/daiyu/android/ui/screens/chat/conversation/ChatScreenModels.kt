@@ -17,13 +17,33 @@ data class ChatScreenState(
 )
 
 /** A new serial consumes a host navigation request, never a model execution state. */
-data class ChatScrollRequest(val serial: Long, val messageId: String? = null, val followBottom: Boolean = true)
+data class ChatScrollRequest(
+    val serial: Long,
+    val messageId: String? = null,
+    val followBottom: Boolean = true,
+    /** Exact occurrence of messageId. Null retains legacy first-message navigation. */
+    val segmentIndex: Int? = null,
+    /** Optional exact projected key; never substitute a database owner id for messageId. */
+    val listKey: String? = null,
+)
+
+/** A missing exact target stays pending; it must never fall back to the owner's first segment. */
+internal fun ChatScrollRequest.targetIndex(turns: List<ChatTurnUi>): Int = when {
+    listKey != null -> turns.indexOfFirst { it.listKey == listKey }
+    messageId != null -> turns.indexOfFirst {
+        it.id == messageId && (segmentIndex == null || it.segmentIndex == segmentIndex)
+    }
+    else -> -1
+}
 
 sealed interface ChatTurnUi {
     val id: String
     val timestamp: String
     /** Separate from the action/message id: an owner may have several history segments. */
     val listKey: String get() = id
+    /** Database window identity only; actions and navigation still use id. */
+    val ownerMessageId: String get() = id
+    val segmentIndex: Int get() = 0
 
     data class User(
         override val id: String,
@@ -31,6 +51,8 @@ sealed interface ChatTurnUi {
         override val timestamp: String = "",
         val content: List<MessageContentUi> = emptyList(),
         override val listKey: String = id,
+        override val ownerMessageId: String = id,
+        override val segmentIndex: Int = 0,
     ) : ChatTurnUi
 
     data class Assistant(
@@ -42,6 +64,8 @@ sealed interface ChatTurnUi {
         val error: String? = null,
         val content: List<MessageContentUi> = emptyList(),
         override val listKey: String = id,
+        override val ownerMessageId: String = id,
+        override val segmentIndex: Int = 0,
     ) : ChatTurnUi
 }
 
@@ -85,6 +109,12 @@ data class ComposerUi(
     val controlOwnerKey: String? = null,
     val supplementAvailable: Boolean = false,
     val supplementPending: Boolean = false,
+    /** Actual runtime evidence, independent of pause-request/control-button projection. */
+    val executionPhase: app.daiyu.android.domain.runtime.ExecutionPhase? = null,
+    /** Null means the current owner's output is not available; never guess from RUNNING. */
+    val hasAssistantOutput: Boolean? = null,
+    val morphLoadingIndicator: Boolean = true,
+    val morphLoadingBeforeResponseOnly: Boolean = false,
 )
 
 internal fun ComposerUi.textActionEnabled(): Boolean = enabled && text.isNotBlank() && !supplementPending &&

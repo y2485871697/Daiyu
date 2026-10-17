@@ -6,7 +6,7 @@ import app.daiyu.android.domain.MessageHistory
 import app.daiyu.android.domain.MessageImageOwner
 import app.daiyu.android.domain.RunStatus
 
-/** No clock, Android APIs or mutable state. Message has no timestamp; the caller supplies one. */
+/** No clock, Android APIs or mutable state. Timestamp formatting belongs to the caller. */
 object ChatTurnMapper {
     fun map(
         messages: List<Message>,
@@ -15,6 +15,9 @@ object ChatTurnMapper {
         // The host can pass either persisted owners or already-expanded history. Expansion
         // retains the segment's message id (especially supplemental user image ownership).
         val history = if (messages.any { it.historySegments.isNotEmpty() }) MessageHistory.expand(messages) else messages
+        val databaseOwners = messages.flatMap { owner -> owner.historySegments.map { segment ->
+            TurnOwner(owner.conversationId.value, owner.runId.value, segment.messageId.value) to owner.id.value
+        } }.toMap()
         val nextSegment = mutableMapOf<TurnOwner, Int>()
         return history.mapNotNull { message ->
             if (message.role != Message.USER_ROLE && message.role != Message.ASSISTANT_ROLE) return@mapNotNull null
@@ -29,8 +32,14 @@ object ChatTurnMapper {
                     timestamp = timestamp(message),
                     content = mixedContent(message),
                     listKey = listKey,
+                    ownerMessageId = databaseOwners[owner] ?: message.id.value,
+                    segmentIndex = segment,
                 )
-                Message.ASSISTANT_ROLE -> mapAssistant(message, timestamp(message)).copy(listKey = listKey)
+                Message.ASSISTANT_ROLE -> mapAssistant(message, timestamp(message)).copy(
+                    listKey = listKey,
+                    ownerMessageId = databaseOwners[owner] ?: message.id.value,
+                    segmentIndex = segment,
+                )
                 else -> null
             }
         }

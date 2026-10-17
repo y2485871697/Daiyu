@@ -131,7 +131,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                     }
                     Box {
                         SpeechMorphButton(
-                            generating = state.phase == ComposerPhase.RUNNING,
+                            generating = state.showGenerationLoading(),
                             listening = state.listening,
                             enabled = state.enabled,
                             onClick = actions.onVoice,

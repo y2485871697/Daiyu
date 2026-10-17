@@ -169,8 +169,12 @@ internal fun AppearanceSettingsScreen(
                     SettingsRow("模糊效果", onClick = {})
                     SettingsRow("顶栏模糊样式", onClick = {})
                 }
-                SettingsRow("圆形加载指示器", onClick = {})
-                SettingsRow("仅消息生成前", onClick = {})
+                SettingsSwitchRow("圆形加载指示器", state.morphLoadingIndicator) {
+                    onChange(state.copy(morphLoadingIndicator = it))
+                }
+                SettingsSwitchRow("仅消息生成前", state.morphLoadingBeforeResponseOnly) {
+                    onChange(state.copy(morphLoadingBeforeResponseOnly = it))
+                }
                 SettingsRow("横移返回手势", onClick = {})
                 SettingsRow("预测性返回手势", onClick = {})
             }

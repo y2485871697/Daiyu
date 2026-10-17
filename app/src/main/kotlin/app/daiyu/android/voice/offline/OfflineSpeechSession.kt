@@ -186,7 +186,10 @@ internal class OfflineSpeechSession(
 
     override fun close() {
         cancelled.set(true) // Fence already-queued final results, including after natural release.
-        gate.cancel(owner)
+        // Natural termination may already have retired/poisoned this lease. cancel(false) is not
+        // proof of drain: retain and rethrow the microphone's earlier release failure. Never wait
+        // for the JNI decoder here; its cleanup remains owned by run's worker.
+        try { gate.cancel(owner) } finally { releaseAudio() }
     }
 
     companion object {

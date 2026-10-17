@@ -49,6 +49,56 @@ class CloudEvidenceTests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def replace_reports(self, folder, *, skip=False, omit=False):
+        from evidence import verify_xml
+        from test_windows_unit_skips import CLASS, METHOD
+        import xml.etree.ElementTree as ET
+        aid = 1 if folder == self.linux else 2
+        with zipfile.ZipFile(folder / 'reports.zip', 'w') as z:
+            for index, module in enumerate(UNIT_REPORTS):
+                suite = ET.Element('testsuite', tests='1', failures='0', errors='0', skipped='0')
+                ET.SubElement(suite, 'testcase', classname='Portable', name='ok')
+                if index == 1 and not omit:
+                    suite.set('tests', '2')
+                    case = ET.SubElement(suite, 'testcase', classname=CLASS, name=METHOD)
+                    if skip:
+                        suite.set('skipped', '1')
+                        ET.SubElement(case, 'skipped', message='POSIX unavailable')
+                z.writestr(module + '/TEST-demo.xml', ET.tostring(suite))
+        record = json.loads((folder / 'record.json').read_text())
+        record['report_sha256'] = digest(folder / 'reports.zip')
+        if not (skip and folder == self.linux):
+            record['report_summary'] = verify_xml(folder / 'reports.zip', 'unit', platform=record['environment']['os'])
+        atomic_json(folder / 'record.json', record)
+        archive = self.base / f'{aid}.zip'
+        with zipfile.ZipFile(archive, 'w') as z:
+            for name in ('record.json', 'reports.zip', 'check.log'):
+                z.write(folder / name, 'unit/' + name)
+        artifact = json.loads((self.base / f'{aid}.json').read_text())
+        artifact['digest'] = 'sha256:' + digest(archive)
+        atomic_json(self.base / f'{aid}.json', artifact)
+        proof = json.loads((folder / 'proof.json').read_text())
+        proof['artifact_sha256'] = digest(archive)
+        proof['files'] = {n: digest(folder / n) for n in ('record.json', 'reports.zip', 'check.log')}
+        atomic_json(folder / 'proof.json', proof)
+
+    def test_windows_skips_require_linux_execution_from_either_matrix_member(self):
+        self.replace_reports(self.windows, skip=True)
+        self.replace_reports(self.linux)
+        for folder in (self.windows, self.linux):
+            verify_bundle(folder, self.sha, self.config, 'unit')
+        self.assertEqual(list(coverage(self.state, self.sha, self.config)), ['unit'])
+        self.replace_reports(self.linux, omit=True)
+        for folder in (self.windows, self.linux):
+            with self.assertRaisesRegex(ValueError, 'windows_skip_without_linux_execution'):
+                verify_bundle(folder, self.sha, self.config, 'unit')
+        self.assertEqual(coverage(self.state, self.sha, self.config), {})
+
+    def test_linux_skip_cannot_back_windows_skip(self):
+        self.replace_reports(self.windows, skip=True)
+        self.replace_reports(self.linux, skip=True)
+        self.assertEqual(coverage(self.state, self.sha, self.config), {})
+
     def test_both_platforms_pass_and_restart(self):
         self.assertEqual(list(coverage(self.state, self.sha, self.config)), ['unit'])
         self.assertEqual(list(coverage(self.state, self.sha, self.config)), ['unit'])

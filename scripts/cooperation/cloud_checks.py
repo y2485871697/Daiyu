@@ -52,9 +52,10 @@ def run(scope):
                 for p in reports.rglob('*.xml'):
                     base = root if item == 'unit' else reports
                     z.write(p, p.relative_to(base).as_posix())
+        report_summary = {}
         if code == 0:
             try:
-                verify_xml(folder / 'reports.zip', item)
+                report_summary = verify_xml(folder / 'reports.zip', item, platform=os.environ['RUNNER_OS'])
             except ValueError as error:
                 print(item, 'report_validation_failed', str(error), flush=True)
                 code = 1
@@ -69,6 +70,7 @@ def run(scope):
                       environment=dict(os=os.environ['RUNNER_OS'], jdk='27', gradle='9.8.1', agp='9.5.0-alpha09'),
                       exit_code=code, result='passed' if code == 0 else 'failed', apk_built=bool(packages), package_scan='passed' if not packages else 'failed', discovered_packages=packages, source_changed=source_changed,
                       log_sha256=digest(folder / 'check.log'), report_sha256=digest(folder / 'reports.zip'))
+        record['report_summary'] = report_summary
         atomic_json(folder / 'record.json', record)
         print(item, 'exit_code', code, flush=True)
         if code:

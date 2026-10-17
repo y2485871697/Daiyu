@@ -21,8 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger
 @Suppress("DEPRECATION")
 class ExtendedNeutralBackupTest : InstrumentationTestCase() {
     private val fixtures = mutableListOf<Fixture>()
-    private val png get() = android.util.Base64.decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kF9sAAAAASUVORK5CYII=", android.util.Base64.DEFAULT)
+    private val png get() = app.daiyu.android.validDeviceTestPng()
     private inner class Fixture(val context: Context, var db: ConversationDatabase) {
         fun service(assets: BackupGenerationAssets? = null) = NeutralBackupService(context, db, null, null, assets)
         fun count(table: String) = db.readableDatabase.rawQuery("SELECT count(*) FROM $table", null).use { check(it.moveToFirst()); it.getInt(0) }

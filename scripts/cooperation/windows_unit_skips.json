@@ -1,0 +1,58 @@
+{
+  "app.daiyu.android.ControllerTerminalPreparationTest": [
+    "linuxUnclaimedCancelReleasesButConfirmedCancelWaitsForBindingDrain",
+    "ambiguousApprovalRetainsClaimedLinuxResourceAndNeverReapprovesOrGuessesDrain"
+  ],
+  "app.daiyu.android.integration.tools.R08PersistentJournalTest": [
+    "rejectsSymlinkRootsFilesAndAncestorsAndNonPrivatePermissions",
+    "centralSemanticReplayWithoutClaimCreatesOnlyFinalObservation",
+    "completeWithoutClaimCannotInventAnExecution",
+    "changedBindingGenerationOperationAndParametersFailClosed",
+    "firstClaimIsDurableAndRepeatAndReopenOnlyLookup",
+    "observationWriteFailuresAreNotSilentlySuccessfulAndKeepClaim",
+    "everyWriteInterruptionRetainsEvidenceAndNeverGrantsAgain",
+    "independentInvocationsAndAllPreparedWriteKindsRemainDistinct",
+    "observationsAppendAndFinalUnknownCannotRestorePermissionOrEraseHistory",
+    "inputBoundsRejectBeforeWritingAndDiagnosticsAreRedacted",
+    "explicitCleanupReleaseKeepsDeterministicIntentAndEvidenceAcrossReopen",
+    "unexpectedFilesAndSequenceGapsFailClosed",
+    "corruptAndTruncatedAndOversizedRecordsAreNotEmptyJournals",
+    "manyThreadsAndInstancesProduceExactlyOnePermission",
+    "crashAfterClaimBeforeExecutionIsLookupOnly",
+    "independentJvmProcessesSerializeAndRestartDoesNotReexecute"
+  ],
+  "app.daiyu.android.integration.tools.RunTerminalToolsTest": [
+    "linuxFailedStartupKeepsBothOriginalCleanupAndApprovalPinUntilJoin",
+    "abandonedLinuxApprovalCanReleaseOnlyItsUnclaimedSnapshot",
+    "linuxLaunchIsFrozenBeforeAdvertisingAndHeldThroughActualTermination"
+  ],
+  "app.daiyu.android.terminal.LinuxPtySessionHostTest": [
+    "productionExecFailureTransfersCleanupAndDoesNotReleaseEvenAnAlreadyExitedProcess",
+    "productionOpenActuallyLaunchesSameLeasedArgvEnvironmentAndBoundShell"
+  ],
+  "app.daiyu.android.terminal.LinuxPtySessionTest": [
+    "failedCloseAndFailedWaitRetainLeaseAndRemainRetryable",
+    "closeOnlyFencesAndTimeoutKeepsLeaseUntilOneConfirmedExit",
+    "throwingWaitAfterOverlapRetainsLeaseAndResetsSingleFlight",
+    "protocolStartupFailureTransfersCleanupAndLeaseAndNeverReopens",
+    "cleanupWaitExceptionDoesNotReleaseGeneration",
+    "exitFrameAndEofDoNotReleaseBeforeHelperProcessExit",
+    "closeCanFenceDuringWaitButCannotReleaseBeforeConfirmedExit",
+    "configurationFailureAndJournalReservationFailureReleaseWithoutLaunch",
+    "overlappingShortJoinReturnsBeforeLongWaitAndFalseCanBeRetried",
+    "underlyingWaitReentryDoesNotInvokeWaitOrReleaseAgain",
+    "leaseReleaseRunsOutsideStateLockAndHasOnlyOneOwner",
+    "throwingLeaseCloseNeverReportsReleasedAndCanBeRetried",
+    "constructionFailureStillReturnsOriginalProcessWithLease",
+    "invalidWaitBudgetNeverReleasesTheOwnedGeneration",
+    "sameLeaseBuildsLaunchAndOriginalAuthorizationDelegatesAllOperations",
+    "failedStartWithoutProcessReleasesLeaseWithoutInventingCleanup",
+    "staleSelectionAndMismatchedOwnerNeverLaunchOrLeak",
+    "commitUnknownFailureKeepsGenerationAndOriginalCleanupFailure",
+    "publicOpenReleasesOnDefinitePreProcessFailure",
+    "startupCleanupSharesSingleFlightAndCloseDoesNotReleaseDuringWait"
+  ],
+  "app.daiyu.android.terminal.LinuxSettingsApplicationFreezeTest": [
+    "onlyExistingMatchingTrustedSelectionCanProduceNonStartingPinnedLaunch"
+  ]
+}

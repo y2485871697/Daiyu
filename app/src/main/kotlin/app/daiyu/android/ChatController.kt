@@ -551,6 +551,7 @@ class ChatController internal constructor(private val application:Application,
     private val messageImages by lazy { ControllerMessageImages(database,messageImageAssets) }
     private val imageJournal by lazy { application.getSharedPreferences("image-send-identities",0) }
     private var imageProvider:ProviderSnapshot?=null
+    private var messageActionReaders = 0
     private var imageReaders=0
 
     // One fixed application DB/account, not a resolver of whichever account is active later.
@@ -3417,7 +3418,7 @@ class ChatController internal constructor(private val application:Application,
         if (browserChildren.isNotEmpty()) return // Child workers/UNKNOWN still own the DB and ledger.
         pruneBackgroundRuns()
         if(resources!=null || preparing || generationEntry!=null || virtualDisplayEntry!=null || guiEntry!=null || generationReaders!=0 ||
-            unacceptedTools.isNotEmpty() || imageReaders!=0 || videoReaders!=0 || childCommandReaders!=0 || titleReaders!=0 || closingStorage) return
+            unacceptedTools.isNotEmpty() || messageActionReaders!=0 || imageReaders!=0 || videoReaders!=0 || childCommandReaders!=0 || titleReaders!=0 || closingStorage) return
         if(!childrenClosed) {
             if(!childrenClosing) {
                 childrenClosing=true
@@ -3461,19 +3462,19 @@ class ChatController internal constructor(private val application:Application,
         complete: (MessageActionSnapshot?) -> Unit): Boolean {
         synchronized(this) {
             if (!idleAvailable() || hasLiveChildTasks()) return false
-            dataBusy = true
+            messageActionReaders++
         }
         try { executor.execute {
             val snapshot = runCatching { messageActionStore.snapshot(owner) }.getOrNull()
             handler.post {
                 val deliver = synchronized(this) {
-                    dataBusy = false
+                    messageActionReaders--
                     if (closed) { closeStorageWhenIdle(); false } else true
                 }
                 if (deliver) { complete(snapshot); dispatchChanged() }
             }
         } } catch (_: java.util.concurrent.RejectedExecutionException) {
-            synchronized(this) { dataBusy = false }; return false
+            synchronized(this) { messageActionReaders--; if (closed) closeStorageWhenIdle() }; return false
         }
         return true
     }

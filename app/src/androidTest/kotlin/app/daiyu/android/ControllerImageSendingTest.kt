@@ -31,6 +31,7 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
             .apply { check(mkdirs()) }
         init { attachBaseContext(base) }
         override fun getFilesDir(): File = privateFiles
+        override fun getApplicationContext(): Context = this
     }
     private class Probe : ModelPort {
         val opens = AtomicInteger()
@@ -261,9 +262,16 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         f.db.save(assistant.copy(status = RunStatus.COMPLETED))
         assertTrue(f.controller.readImageReceipt(frozen.copy(parts = parts.reversed())) is ImageSendResult.Unknown)
         assertTrue(f.controller.readImageReceipt(frozen.copy(identity = identity.copy(runId = RunId("wrong")))) is ImageSendResult.Unknown)
-        f.db.save(user.copy(blocks = user.blocks + MessageBlock.Text("tampered", "not the original")))
-        assertTrue(f.controller.readImageReceipt(frozen) is ImageSendResult.Unknown)
-        f.db.save(user)
+        val originalBlocks = f.db.readableDatabase.rawQuery("SELECT blocks FROM messages WHERE id=?", arrayOf(user.id.value)).use {
+            check(it.moveToFirst()); it.getString(0)
+        }
+        try {
+            f.db.writableDatabase.execSQL("UPDATE messages SET blocks=? WHERE id=?",
+                arrayOf("[]", user.id.value))
+            assertTrue(f.controller.readImageReceipt(frozen) is ImageSendResult.Unknown)
+        } finally {
+            f.db.writableDatabase.execSQL("UPDATE messages SET blocks=? WHERE id=?", arrayOf(originalBlocks, user.id.value))
+        }
         assertTrue(f.controller.readImageReceipt(frozen) is ImageSendResult.Accepted)
         // Loss of the advisory journal is not loss of the host's original durable identity.
         journal.edit().clear().commit()

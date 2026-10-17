@@ -57,8 +57,14 @@ internal object BackupHistoryRows {
         a.keys().asSequence().all { key -> a.get(key).toString() == b.get(key).toString() }
     fun verify(db: SQLiteDatabase, table: String, row: JSONObject) {
         val keys = row.keys().asSequence().toList()
-        val args = keys.map { if (row.isNull(it)) null else row.get(it).toString() }.toTypedArray()
-        check(db.rawQuery("SELECT 1 FROM $table WHERE " + keys.joinToString(" AND ") { "$it IS ?" } + " LIMIT 1", args)
+        val args = mutableListOf<String>()
+        val predicates = keys.map { key ->
+            if (row.isNull(key)) "$key IS NULL" else {
+                args += row.get(key).toString()
+                "$key IS ?"
+            }
+        }
+        check(db.rawQuery("SELECT 1 FROM $table WHERE " + predicates.joinToString(" AND ") + " LIMIT 1", args.toTypedArray())
             .use { it.moveToFirst() }) { "备份历史回执不匹配" }
     }
     fun insert(db: SQLiteDatabase, table: String, row: JSONObject) {

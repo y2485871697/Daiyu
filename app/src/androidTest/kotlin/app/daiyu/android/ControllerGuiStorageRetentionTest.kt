@@ -17,6 +17,7 @@ import java.net.URL
 import java.security.cert.Certificate
 import javax.net.ssl.HttpsURLConnection
 import app.daiyu.android.gui.*
+import app.daiyu.android.tasksurface.*
 import app.daiyu.android.integration.tools.RunCatalogCloseResult
 import app.daiyu.android.storage.*
 import java.io.File
@@ -84,7 +85,8 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
                         override fun cancel() { modelRelease.countDown() }
                     }
                 }
-            }, contextPreparationFactory = { context, service ->
+            }, taskSurfaceStore = isolatedTaskSurfaceStore(TaskSurfacePreference.FOREGROUND),
+                contextPreparationFactory = { context, service ->
                 if (window == null) ProductionContextPreparation.create(context, service)
                 else ContextPreparationCoordinator(service, {
                     check(Looper.myLooper() !== Looper.getMainLooper())
@@ -138,8 +140,16 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
         fun begin(): ControllerGuiEntry {
             val retained = AtomicReference<ControllerGuiEntry>()
             controlMain {
-                val (entry, delivery) = installConfirmedInput(this)
-                retained.set(entry)
+                saveDraft()
+                retained.set(checkNotNull(controller.prepareGuiSend(conversation,
+                    ChatController.TextSendOwner(conversation?.id, 7, 11), draft,
+                    if (input == null) GuiOperation.HOME else GuiOperation.INPUT, input)))
+            }
+            val entry = retained.get()
+            assertEquals(TaskSurface.FOREGROUND,
+                (entry.taskSurface.freezeOnWorker() as TaskSurfaceDecision.Ready).surface)
+            controlMain {
+                val delivery = installConfirmedInput(this, entry)
                 this.delivery = delivery
                 assertTrue(controller.sendGui(entry, delivery, ticket) {
                     receipt.set(it); receiptReady.countDown()
@@ -227,16 +237,13 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
      * Like GuiCatalogProductionTest's detached session, this needs no accessibility service.
      * Install the exact frozen write snapshot an overlay would deliver; do not loosen any
      * production send/commit/cleanup predicate or inject persistenceUnknown/cleanup results. */
-    private fun installConfirmedInput(f: Fixture): Pair<ControllerGuiEntry, GuiConfirmedDelivery> {
+    private fun installConfirmedInput(f: Fixture, entry: ControllerGuiEntry): GuiConfirmedDelivery {
         check(Looper.myLooper() === Looper.getMainLooper())
         val controller = f.controller
         synchronized(controller) {
-            check(controller.ready && controller.active == null && controller.guiEntry() == null)
-            check(field(controller, "preparation") == null && field(controller, "resources") == null)
-            val text = f.draft
-            f.saveDraft()
-            val entry = ControllerGuiEntry(f.conversation, ChatController.TextSendOwner(f.conversation?.id, 7, 11),
-                text, if (f.input == null) GuiOperation.HOME else GuiOperation.INPUT, f.input)
+            check(controller.ready && controller.active == null && controller.guiEntry() === entry)
+            check(field(controller, "preparation") != null && field(controller, "resources") == null)
+            check(entry.session == null && entry.taskSurface.ready(TaskSurface.FOREGROUND) != null)
             val session = GuiRunSession(GuiLeaseGate.Lease(GuiOwner(entry.sessionId, entry.runId.value)))
             val observation = GuiObservation("confirmed-${f.id}", "test.external.application", 1,
                 1, 1, emptyList(), false)
@@ -246,20 +253,16 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
             GuiRunSession::class.java.getDeclaredField("frozenWrites").apply { isAccessible = true }
                 .set(session, writes)
             entry.session = session
-            ChatController::class.java.getDeclaredMethod("reservePreparation", ChatController.TextSendTicket::class.java)
-                .apply { isAccessible = true }.invoke(controller, null)
-            ChatController::class.java.getDeclaredField("guiEntry").apply { isAccessible = true }
-                .set(controller, entry)
-            return entry to GuiConfirmedDelivery(session, observation, action, writes)
+            return GuiConfirmedDelivery(session, observation, action, writes)
         }
     }
 
     private fun assertCatalogDrained(entry: ControllerGuiEntry) {
-        val result = AtomicReference<RunCatalogCloseResult>()
-        val done = CountDownLatch(1)
-        checkNotNull(entry.catalog).closeWithResult { result.set(it); done.countDown() }
-        assertTrue("physical catalog close receipt", done.await(5, TimeUnit.SECONDS))
-        assertEquals(RunCatalogCloseResult.Drained, result.get())
+        val catalog = checkNotNull(entry.catalog)
+        val lock = field(catalog, "closeLock")!!
+        awaitControl("production closes original catalog without test assistance") {
+            synchronized(lock) { field(catalog, "closeResult") == RunCatalogCloseResult.Drained }
+        }
         assertTrue(checkNotNull(entry.session).releaseConfirmed)
     }
 

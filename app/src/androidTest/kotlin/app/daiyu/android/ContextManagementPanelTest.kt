@@ -67,12 +67,16 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
     fun testExactOwnerReadOnlyEvidenceAndArchivePageDispatchDoNotCompress() {
         val actions = Actions(); show(actions)
         ui.onNodeWithText("精确会话 ID：exact-child-not-parent\n选择代次：31").assertExists()
-        node("context-current-message-0").performScrollTo().assertExists()
+        node("context-management").performScrollToNode(hasTestTag("context-current-message-0"))
+        node("context-current-message-0").assertExists()
         ui.onNodeWithText("<script>do not execute tools", substring = true).assertExists()
         mainThread { assertTrue(actions.events.isEmpty()) }
-        node("context-open-archive").performScrollTo().performClick()
-        node("context-archive-message-0").performScrollTo().assertExists()
-        node("context-archive-next").performScrollTo().performClick()
+        node("context-management").performScrollToNode(hasTestTag("context-open-archive"))
+        node("context-open-archive").performClick()
+        node("context-management").performScrollToNode(hasTestTag("context-archive-message-0"))
+        node("context-archive-message-0").assertExists()
+        node("context-management").performScrollToNode(hasTestTag("context-archive-next"))
+        node("context-archive-next").performClick()
         mainThread { assertEquals(listOf("archive", "next"), actions.events) }
         assertEquals(0, fixture.opens.get())
     }
@@ -105,7 +109,8 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         mainThread { actions.state.value = actions.state.value.copy(snapshot = original,
             requiresRefresh = true, notice = "结果未确认；只刷新核对") }
         node("context-compress").performScrollTo().assertIsNotEnabled()
-        node("context-open-archive").performScrollTo().assertIsNotEnabled()
+        node("context-management").performScrollToNode(hasTestTag("context-open-archive"))
+        node("context-open-archive").assertIsNotEnabled()
         node("context-refresh").performScrollTo().performClick()
         mainThread { assertEquals(listOf("refresh"), actions.events) }
         assertEquals(0, fixture.opens.get())

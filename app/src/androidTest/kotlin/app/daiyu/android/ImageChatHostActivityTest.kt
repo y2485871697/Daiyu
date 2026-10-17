@@ -18,6 +18,7 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.test.mock.MockContentResolver
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
 import app.daiyu.android.domain.*
 import app.daiyu.android.media.ImageAttachmentOwner
 import app.daiyu.android.model.images.FrozenMessageImagePlan
@@ -318,7 +319,13 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         }
     }
 
-    fun testLostReceiptNewControllerAndHostRecoverWithoutRepostOrClearingNewDraft() {
+    fun testLostReceiptNewControllerAndHostRecoverWithoutRepostOrClearingNewDraft() =
+        lostReceiptRecoveryPreservesNewEditor(injectDisabledSelection = false)
+
+    fun testLostReceiptRecoveryRejectsDisabledSelectionCallbackAndReopensEditor() =
+        lostReceiptRecoveryPreservesNewEditor(injectDisabledSelection = true)
+
+    private fun lostReceiptRecoveryPreservesNewEditor(injectDisabledSelection: Boolean) {
         setDraft("原进程正文")
         pick(2); waitImages(2); authorize()
         val oldHost = host()
@@ -376,10 +383,20 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             assertDraft("原进程正文")
             setSelection(1, 4)
             mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.ATTACH_IMAGE) }
-            node("image-host-recover").assertIsEnabled().performClick()
+            assertSelection(1, 4)
+            if (injectDisabledSelection) {
+                val editorBeforeRecovery = retainedControls(activity)
+                node("image-host-recover").assertIsEnabled()
+                    .performSemanticsAction(SemanticsActions.OnClick) { click ->
+                        assertTrue(click())
+                        assertTrue(host().sending)
+                        editorBeforeRecovery.onSelectionChange(4, 4)
+                    }
+            } else node("image-host-recover").assertIsEnabled().performClick()
             ui.waitUntil(10_000) { !host().sending && !host().fenced }
             assertDraft("原进程正文")
             assertSelection(1, 4)
+            if (injectDisabledSelection) setSelection(4, 1)
             assertEquals("原进程正文", controller.database.draft())
             assertNull(controller.preferences.getString("selected", null))
             assertTrue(host().session.attachments.state.value.items.isEmpty())

@@ -39,6 +39,95 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
             .put("sha256", PrivateBlobs.digest(raw.toByteArray(Charsets.UTF_8))).toString()
     }
     private fun reject(block: () -> Unit) { try { block(); fail("must reject") } catch (_: Exception) {} }
+    fun testHundredMiBCompleteFileRoundTripReopenDuplicateAndCleanup() {
+        if (androidx.test.platform.app.InstrumentationRegistry.getArguments()
+                .getString("daiyuLargeBackupOptIn") != "true") return
+        check(instrumentation.targetContext.packageName == "app.daiyu.android.synthetic")
+        val (sourceContext, source, exporter) = fresh()
+        val (targetContext, target, importer) = fresh()
+        fun stages(c: Context) = c.cacheDir.listFiles().orEmpty()
+            .filter { it.name.startsWith("complete-backup-") }.map { it.name }.toSet()
+        fun fileHash(file: File): String {
+            val sha = java.security.MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(8192)
+                while (true) { val n = input.read(buffer); if (n < 0) break; sha.update(buffer, 0, n) }
+            }
+            return sha.digest().joinToString("") { (it.toInt() and 255).toString(16).padStart(2, '0') }
+        }
+        val sourceStages = stages(sourceContext); val targetStages = stages(targetContext)
+        val owner = source.create("default").id
+        val body = "x".repeat(512 * 1024)
+        var attachmentOwner = ""
+        repeat(15) { n ->
+            val run = RunId("large-r-$n")
+            val user = Message(MessageId("large-u-$n"), owner, run, "user",
+                listOf(MessageBlock.Text("u", body)), RunStatus.COMPLETED)
+            val answer = Message(MessageId("large-a-$n"), owner, run, "assistant",
+                listOf(MessageBlock.Text("a", body)), RunStatus.RUNNING)
+            source.send(user, answer); source.save(answer.copy(status = RunStatus.COMPLETED))
+            attachmentOwner = answer.id.value
+        }
+        val expectedHashes = (0 until 16).map { index ->
+            val bytes = ByteArray(4 * 1024 * 1024) { (it * 31 + index).toByte() }
+            exporter.attach("large-asset-$index", attachmentOwner, "application/octet-stream", bytes)
+            PrivateBlobs.digest(bytes)
+        }
+        assertEquals(16, expectedHashes.toSet().size)
+        val expectedTextHash = Utf8Payload.sha256(source.exportBackup())
+        val output = File(sourceContext.filesDir, "hundred-mib.json")
+        lateinit var preparedFile: File
+        exporter.prepareExport().use { prepared ->
+            preparedFile = prepared.file
+            output.outputStream().use { prepared.writeTo(it) }
+        }
+        assertFalse(preparedFile.exists())
+        assertTrue(output.length() >= 100L * 1024 * 1024)
+        assertTrue(output.length() <= NeutralBackupService.MAX_PACKAGE)
+        assertEquals(sourceStages, stages(sourceContext))
+        val packageHash = fileHash(output)
+        val inventory = output.inputStream().use { importer.preflight(it) }
+        assertEquals(1, inventory.conversations); assertEquals(30, inventory.messages)
+        assertEquals(16, inventory.attachments); assertEquals(64L * 1024 * 1024, inventory.blobBytes)
+        assertEquals(targetStages, stages(targetContext)); assertTrue(target.conversations().isEmpty())
+        val imported = importer.importPackageFrom { output.inputStream() }
+        assertFalse(imported.alreadyImported); assertNull(imported.cleanupProblem)
+        assertEquals(inventory, imported.inventory); assertEquals(targetStages, stages(targetContext))
+        target.close()
+        val reopened = ConversationDatabase(targetContext)
+        try {
+            val restored = NeutralBackupService(targetContext, reopened)
+            assertEquals(expectedTextHash, Utf8Payload.sha256(reopened.exportBackup()))
+            expectedHashes.forEachIndexed { index, expected ->
+                assertEquals(expected, PrivateBlobs.digest(restored.attachment("large-asset-$index")))
+            }
+            val duplicate = restored.importPackageFrom { output.inputStream() }
+            assertTrue(duplicate.alreadyImported); assertNull(duplicate.cleanupProblem)
+            assertEquals(imported.packageId, duplicate.packageId)
+            assertEquals(1, reopened.readableDatabase.rawQuery("SELECT count(*) FROM neutral_imports", null)
+                .use { it.moveToFirst(); it.getInt(0) })
+        } finally { reopened.close() }
+        assertEquals(packageHash, fileHash(output))
+        assertEquals(expectedTextHash, Utf8Payload.sha256(source.exportBackup()))
+        expectedHashes.forEachIndexed { index, expected ->
+            assertEquals(expected, PrivateBlobs.digest(exporter.attachment("large-asset-$index")))
+        }
+        assertEquals(sourceStages, stages(sourceContext)); assertEquals(targetStages, stages(targetContext))
+        val packageBytes = output.length()
+        assertTrue(output.delete())
+        val report = JSONObject().put("package_bytes", packageBytes).put("package_sha256", packageHash)
+            .put("text_utf8_bytes", 15L * 1024 * 1024).put("original_bytes", 64L * 1024 * 1024)
+            .put("messages", 30).put("attachments", 16).put("heap_max", Runtime.getRuntime().maxMemory())
+            .put("restored_and_reopened", true).put("duplicate_idempotent", true)
+            .put("owned_staging_removed", true).put("output_removed", true)
+            .put("source_originals_unchanged", true).put("saf_measured", false).put("production_delivery", false)
+        val evidence = File(checkNotNull(instrumentation.targetContext.getExternalFilesDir("large-backup")),
+            "roundtrip-${UUID.randomUUID()}.json")
+        java.io.FileOutputStream(evidence).use { stream ->
+            stream.write(report.toString().toByteArray(Charsets.UTF_8)); stream.fd.sync()
+        }
+    }
+
     fun testPreparedConversationFileUsesV5AndExcludesGlobalConfiguration() {
         val (_, source, backup) = fresh(); val owner = seed(source, 1)
         backup.setNonSecretConfiguration(mapOf("model" to "global-only"))

@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -30,6 +31,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.ui.FeatureRoute
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.icons.DaiyuIcon
@@ -97,6 +100,8 @@ internal fun DaiyuSettingsScreen(
     onOpenPlatformTools: (() -> Unit)? = null,
     onOpenVoice: (() -> Unit)? = null,
 ) {
+    val context = LocalContext.current
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
     val visit = remember { SettingsHomeVisit() }
     DisposableEffect(visit) { onDispose { visit.active = false } }
     var localPage by remember { mutableStateOf<SettingsLocalPage?>(null) }
@@ -107,8 +112,23 @@ internal fun DaiyuSettingsScreen(
     val listState = rememberLazyListState()
     LaunchedEffect(section, query) { listState.scrollToItem(0) }
     val focus = LocalFocusManager.current
-    if (localPage == SettingsLocalPage.TASK_SURFACE) {
-        TaskSurfaceSettingsPanel(onBack = { if (visit.active) localPage = null }, modifier = modifier)
+    val openedPage = localPage
+    if (openedPage != null) {
+        val localBack: () -> Unit = {
+            if (visit.active && localPage == openedPage) {
+                localPage = if (openedPage == SettingsLocalPage.SHIZUKU_ACCESS) SettingsLocalPage.ENHANCEMENTS else null
+            }
+        }
+        if (openedPage == SettingsLocalPage.TASK_SURFACE) {
+            TaskSurfaceSettingsPanel(onBack = localBack, modifier = modifier)
+        } else {
+            SettingsSystemAccessPage(openedPage, onBack = localBack,
+                onOpenShizuku = {
+                    if (visit.active && localPage == openedPage) localPage = SettingsLocalPage.SHIZUKU_ACCESS
+                },
+                onRoute = { route -> if (visit.active && localPage == openedPage) onRoute(route) },
+                modifier = modifier)
+        }
         return
     }
     val selectedGroup = SettingsCatalog.groups.find { it.id == section }
@@ -116,7 +136,7 @@ internal fun DaiyuSettingsScreen(
     val back: () -> Unit = { if (section != null) section = null else onBack() }
     BackHandler(enabled = section != null) { section = null }
     val open: (SettingsEntry) -> Unit = open@ { entry ->
-        if (!visit.active || localPage != null) return@open
+        if (!visit.active || localPage != null || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@open
         focus.clearFocus()
         if (entry.localPage != null) { localPage = entry.localPage; return@open }
         when (entry.id) {
@@ -125,6 +145,7 @@ internal fun DaiyuSettingsScreen(
             "appearance" -> onOpenAppearance?.invoke()
             "haptics" -> onOpenHaptics?.invoke()
             "voice" -> onOpenVoice?.invoke()
+            "source" -> openProjectSource(context)
             "platform_tools", "permission_check" -> onOpenPlatformTools?.invoke()
             "relay" -> {
                 if (section != "about") { section = "about"; relayExpanded = true }

@@ -6,7 +6,7 @@ import app.daiyu.android.ui.icons.DaiyuIcons
 
 internal enum class SettingControl { PAGE, TOGGLE, CHOICE, ACTION }
 /** Pages hosted by the retained settings home, not an Activity-level FeatureRoute. */
-internal enum class SettingsLocalPage { TASK_SURFACE }
+internal enum class SettingsLocalPage { TASK_SURFACE, ENHANCEMENTS, SHIZUKU_ACCESS, OVERLAY }
 internal data class SettingsEntry(
     val id: String, val title: String, val icon: ImageVector,
     val control: SettingControl = SettingControl.PAGE, val route: FeatureRoute? = null,
@@ -61,8 +61,8 @@ internal object SettingsCatalog {
         )),
         SettingsGroup("permissions", "权限", "授权检查、悬浮窗与无障碍", listOf(
             SettingsEntry("permission_check", "权限检查", DaiyuIcons.Shield, SettingControl.PAGE),
-            SettingsEntry("enhancements", "Root 与系统增强", DaiyuIcons.Device, SettingControl.PAGE),
-            SettingsEntry("overlay", "悬浮窗权限", DaiyuIcons.VirtualScreen, SettingControl.PAGE),
+            SettingsEntry("enhancements", "Root 与系统增强", DaiyuIcons.Device, SettingControl.PAGE, localPage = SettingsLocalPage.ENHANCEMENTS),
+            SettingsEntry("overlay", "悬浮窗权限", DaiyuIcons.VirtualScreen, SettingControl.PAGE, localPage = SettingsLocalPage.OVERLAY),
             SettingsEntry("accessibility", "无障碍与 GUI 设置", DaiyuIcons.Accessibility, SettingControl.PAGE, FeatureRoute.GUI_SETTINGS),
             SettingsEntry("accessibility_keep", "无障碍服务状态与重新绑定", DaiyuIcons.Shield, SettingControl.PAGE, FeatureRoute.GUI_SETTINGS),
         )),

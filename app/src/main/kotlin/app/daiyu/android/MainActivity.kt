@@ -4086,7 +4086,7 @@ class MainActivity : ComponentActivity() {
         val labels = listOf("protocol" to "协议", "endpoint" to "服务地址", "responses-path" to "Responses 路径",
             "model" to "模型", "battery" to "只读电量工具", "device-status" to "只读设备状态工具")
         fun value(values: Map<String, Any?>, name: String): String = when {
-            name == "protocol" -> when (values[name]) { null, "responses" -> "Responses"; "messages" -> "Messages"; else -> "无效" }
+            name == "protocol" -> when (values[name]) { null, "responses" -> "Responses"; "messages" -> "Messages"; "chat_completions" -> "Chat Completions"; "gemini" -> "Gemini"; else -> "无效" }
             !values.containsKey(name) -> "（未设置）"
             values[name] == "" -> "（空）"
             values[name] is Boolean -> if (values[name] == true) "允许" else "关闭"

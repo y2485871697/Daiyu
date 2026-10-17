@@ -483,13 +483,16 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         config.keys().forEach { key ->
             if (key in BOOLEAN_KEYS) require(config.get(key) is Boolean)
             else { val value = string(config, key); require(value.length <= 2000)
-                if(key == "protocol") require(value == "responses" || value == "messages") { "模型协议无效" }
+                if(key == "protocol") require(value in setOf("responses", "messages", "chat_completions", "gemini")) { "模型协议无效" }
                 if (key == "endpoint" && value.isNotEmpty()) {
                     val uri = URI(value); require(uri.scheme == "https" && uri.host != null && uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null)
                 }
                 if (key == "responses-path" && value.isNotEmpty()) require(value.startsWith("/") && !value.contains('?') && !value.contains('#') && !value.contains(".."))
                 require(!value.contains('\n') && !value.contains('\r'))
             }
+        }
+        if(config.optString("protocol") in setOf("chat_completions", "gemini")) {
+            require(!config.has("responses-path") || config.get("responses-path") == "")
         }
         if(config.optString("protocol") == "messages") {
             require(!config.has("responses-path") || config.get("responses-path") == "")

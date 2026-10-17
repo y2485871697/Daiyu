@@ -15,6 +15,7 @@ object ModelFactory {
                 ResponsesModel(snapshot)
             }
             ProviderProtocol.MESSAGES -> MessagesModel(snapshot)
+            ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI -> NativeCompletionModel(snapshot)
             ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(snapshot.protocol.wireName)
         }
     }
@@ -23,6 +24,7 @@ object ModelFactory {
     fun create(snapshot: ProviderSnapshot, session: SessionGatewayContext): ModelPort = when (snapshot.protocol) {
         ProviderProtocol.RESPONSES -> ResponsesModel(snapshot, sessionContext = session)
         ProviderProtocol.MESSAGES -> MessagesModel(snapshot, sessionContext = session)
+        ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI -> NativeCompletionModel(snapshot, sessionContext = session)
         ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(snapshot.protocol.wireName)
     }
 
@@ -33,6 +35,7 @@ object ModelFactory {
     fun create(snapshot: ProviderSnapshot, instructions: String): ModelPort = when (snapshot.protocol) {
         ProviderProtocol.RESPONSES -> ResponsesModel(snapshot, instructions)
         ProviderProtocol.MESSAGES -> MessagesModel(snapshot, instructions)
+        ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI -> NativeCompletionModel(snapshot, instructions)
         ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(snapshot.protocol.wireName)
     }
 
@@ -43,6 +46,8 @@ object ModelFactory {
         val selected = when (protocol.trim().lowercase()) {
             ProviderProtocol.RESPONSES.wireName -> ProviderProtocol.RESPONSES
             ProviderProtocol.MESSAGES.wireName -> ProviderProtocol.MESSAGES
+            ProviderProtocol.CHAT_COMPLETIONS.wireName -> ProviderProtocol.CHAT_COMPLETIONS
+            ProviderProtocol.GEMINI.wireName -> ProviderProtocol.GEMINI
             else -> throw UnsupportedProviderException(protocol)
         }
         return create(settings, selected)

@@ -9,6 +9,8 @@ enum class ReconnectCapability(val supported: Boolean, val userMessage: String) 
     TRANSPORT_RESUME(true, "原会话支持只读取尚未确认事件的恢复；不会重新提交请求或工具结果"),
     RESPONSES_UNSUPPORTED(false, "当前 Responses 接入不支持无重发恢复；未重新 POST 模型请求或工具结果"),
     MESSAGES_UNSUPPORTED(false, "当前 Messages 接入不支持无重发恢复；未重新 POST 模型请求或工具结果"),
+    CHAT_COMPLETIONS_UNSUPPORTED(false, "当前 Chat Completions 接入不支持无重发恢复；未重新 POST 模型请求或工具结果"),
+    GEMINI_UNSUPPORTED(false, "当前 Gemini 接入不支持无重发恢复；未重新 POST 模型请求或工具结果"),
     UNKNOWN_TRANSPORT(false, "当前模型恢复能力未确认；未重新发送请求"),
     NOT_RESUMABLE(false, "当前模型会话未实现无重发恢复；未重新发送请求"),
     SESSION_UNAVAILABLE(false, "原模型会话当前不能安全恢复；未新建会话或重新发送请求"),
@@ -24,6 +26,8 @@ object ReconnectCapabilities {
     fun forProtocol(protocol: ProviderProtocol): ReconnectCapability = when (protocol) {
         ProviderProtocol.RESPONSES -> ReconnectCapability.RESPONSES_UNSUPPORTED
         ProviderProtocol.MESSAGES -> ReconnectCapability.MESSAGES_UNSUPPORTED
+        ProviderProtocol.CHAT_COMPLETIONS -> ReconnectCapability.CHAT_COMPLETIONS_UNSUPPORTED
+        ProviderProtocol.GEMINI -> ReconnectCapability.GEMINI_UNSUPPORTED
         ProviderProtocol.UNKNOWN -> ReconnectCapability.UNKNOWN_TRANSPORT
     }
 

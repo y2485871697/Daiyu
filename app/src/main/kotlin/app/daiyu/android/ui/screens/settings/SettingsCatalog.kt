@@ -59,8 +59,8 @@ internal object SettingsCatalog {
             SettingsEntry("permission_check", "权限检查", DaiyuIcons.Shield, SettingControl.PAGE),
             SettingsEntry("enhancements", "Root 与系统增强", DaiyuIcons.Device, SettingControl.PAGE),
             SettingsEntry("overlay", "悬浮窗权限", DaiyuIcons.VirtualScreen, SettingControl.PAGE),
-            SettingsEntry("accessibility", "无障碍增强工具", DaiyuIcons.Accessibility, SettingControl.PAGE),
-            SettingsEntry("accessibility_keep", "强制保持无障碍", DaiyuIcons.Shield, SettingControl.TOGGLE),
+            SettingsEntry("accessibility", "无障碍与 GUI 设置", DaiyuIcons.Accessibility, SettingControl.PAGE, FeatureRoute.GUI_SETTINGS),
+            SettingsEntry("accessibility_keep", "无障碍服务状态与重新绑定", DaiyuIcons.Shield, SettingControl.PAGE, FeatureRoute.GUI_SETTINGS),
         )),
         SettingsGroup("about", "关于", "版本、社区与项目入口", listOf(
             SettingsEntry("updates", "检查更新", DaiyuIcons.Refresh, SettingControl.ACTION),

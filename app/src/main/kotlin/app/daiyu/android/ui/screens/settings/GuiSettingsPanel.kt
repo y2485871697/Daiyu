@@ -70,15 +70,18 @@ internal fun GuiSettingsPanel(
                 SettingsRow(title = "前往系统无障碍设置", summary = "可能读取个人信息、操作其他应用。仅你可在系统页面明确开启或关闭。",
                     tag = "gui-open-system", onClick = { if (active()) notice = describe(GuiSystemSettings.openFromUser(context)) })
                 SettingsRow(title = "刷新服务状态", tag = "gui-refresh", onClick = { if (active()) refresh() })
-                SettingsRow(title = "请求系统重新绑定", summary = "仅系统已启用时请求；系统可以拒绝。无 root 保活、不点击权限、不静默启用。",
+                SettingsRow(title = "请求系统重新绑定", summary = "仅系统已启用时由你显式请求；系统可以拒绝，不保证连接或持续存活。无 root 保活、不点击权限、不静默启用。",
                     tag = "gui-rebind", onClick = { if (active()) { notice = describe(GuiSystemSettings.requestRebindFromUser(context)); refresh() } })
-                SettingsRow(title = "保持与增强能力的边界", summary = "不提供强制保活、提权或后台自动观察。锁屏/其他会话占用时拒绝；截图仅 API 30+ 且另行授权。",
+                SettingsRow(title = "服务重绑与能力边界", summary = "不提供强制保活、提权或后台自动观察。锁屏/其他会话占用时拒绝；截图仅 API 30+ 且另行授权。",
                     tag = "gui-boundaries")
             }
         }
         item(key = "gui-task") {
             SettingsSectionTitle("本次任务的明确授权")
             SettingsCard {
+                SettingsRow(title = "屏幕与输入的发送范围",
+                    summary = "本页不会读取屏幕或准备任务。具体任务确认前会读取整个有界 UI 树，而非仅所选节点；确认后整个有界观察和完整输入将发送给当前模型，可能进入任务或会话记录。请在实际读取前移开敏感内容。",
+                    tag = "gui-disclosure")
                 if (session == null) SettingsRow(title = "当前未申请屏幕工具", summary = "开启系统服务不会自动把屏幕能力交给模型。需从具体任务发起本次有限授权。", tag = "gui-no-run")
                 else {
                     SettingsRow(title = "当前会话 ${session.identity.sessionId} / 任务 ${session.identity.runId}",

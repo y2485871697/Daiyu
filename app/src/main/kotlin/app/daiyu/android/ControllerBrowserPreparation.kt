@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import app.daiyu.android.assistants.AssistantProfile
+import app.daiyu.android.browser.BrowserPrivateRoot
 import app.daiyu.android.browser.BrowserRunAuthorization
 import app.daiyu.android.browser.BrowserRunIdentity
 import app.daiyu.android.browser.BrowserRunPreparation
@@ -92,13 +93,21 @@ internal class ControllerBrowserPreparation private constructor(
     private var partialReceipt: BrowserCloseResult? = null
     private var cleanupRequests = 0
     private var stickyUnknown = false
+    @Volatile var childPlan: ControllerChildBrowserPlan? = null
+        private set
+    fun attachChild(plan: ControllerChildBrowserPlan): Boolean = synchronized(lock) {
+        if (phase != State.PREVIEW || cancelled || childPlan != null || plan.parent !== this) return false
+        childPlan = plan
+        true
+    }
     val state: State get() = synchronized(lock) { phase }
     val isCancelled: Boolean get() = synchronized(lock) { cancelled }
     val isSubmitted: Boolean get() = state != State.PREVIEW
 
     /** This is the ONLY token-producing entry. A settings save/ask_user cannot call it implicitly. */
     fun confirm(displayed: BrowserRunPreview, current: BrowserDraftSnapshot): Boolean = synchronized(lock) {
-        if (phase != State.PREVIEW || displayed !== preview || current != draft || cancelled) return false
+        if (phase != State.PREVIEW || displayed !== preview || current != draft || cancelled ||
+            childPlan?.confirmed == false) return false
         authorization = preparation.confirm(displayed)
         phase = State.CONFIRMED
         true
@@ -207,6 +216,7 @@ internal class ControllerBrowserPreparation private constructor(
 
     /** Short admission fence; an in-flight accept owns publication and defers native cleanup. */
     fun cancel() {
+        childPlan?.close()
         val clean = synchronized(lock) {
             if (phase == State.TRANSFERRED || phase == State.DRAINED) return
             cancelled = true
@@ -284,6 +294,18 @@ internal class ControllerBrowserPreparation private constructor(
     }
 
     companion object {
+        /** Parent sendBrowser must call on its worker AFTER confirmation, BEFORE openOnWorker.
+         * Fresh installs have no files/browser-runs yet; native host deliberately requires an
+         * existing private root. No preview-time mkdir and no arbitrary model-supplied path.
+         */
+        fun preparePrivateRootOnWorker(
+            context: Context,
+            main: BrowserMainDispatcher = AndroidBrowserMainDispatcher(),
+        ): Path {
+            check(!main.isMainThread()) { "browser_worker_required" }
+            return BrowserPrivateRoot.prepare(context.applicationContext.filesDir.toPath())
+        }
+
         /** No host/session/registry/file/network, and no active-profile/settings fallback. */
         fun prepare(
             conversation: Conversation?,

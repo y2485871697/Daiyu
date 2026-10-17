@@ -58,6 +58,9 @@ internal class RunCatalogTools(
     virtualDisplaySession: ControllerVirtualDisplaySession? = null,
     private val virtualDisplaySessionFactory: ((RunExecutionOwner, SessionCapabilities) -> ControllerVirtualDisplaySession)? = null,
     private val memoryContext: app.daiyu.android.assistants.AssistantRunContext? = null,
+    // Explicit trusted child admission only. Runs at worker schema setup, NOT in bindOwner,
+    // and only after the parent Runner's durable admission. Text-only tools are unchanged.
+    private val onCatalogReady: ((RunExecutionOwner, SessionCapabilities, TaskAuthorization) -> Unit)? = null,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
     // No temporary owner or authorization for generation. Legacy read-only callers retain
@@ -242,6 +245,7 @@ internal class RunCatalogTools(
                     check(!closed.get()) { "run_closed" }
                     bridge = result
                 }
+                onCatalogReady?.invoke(bound, capabilities, authorization)
                 result
             }
         } catch (failure: Exception) {

@@ -258,6 +258,22 @@ class ChatController internal constructor(private val application:Application,
         var video: ControllerVideoSession? = null
     }
     private var preparation: Preparation? = null
+    // Explicit tool-enabled child resources are retained independently of model worker exit.
+    // Unknown cleanup remains here and keeps its permit; no text-only batch is upgraded.
+    private val browserChildCapacity = java.util.concurrent.Semaphore(1, true)
+    private val browserChildren = mutableListOf<ControllerChildBrowserPlan>()
+    internal fun browserChildPlans(): List<ControllerChildBrowserPlan> = synchronized(this) { browserChildren.toList() }
+    internal fun stopBrowserChildren() {
+        val children = synchronized(this) { browserChildren.toList() }
+        children.forEach { it.close() }
+        browserChildrenChanged()
+    }
+    private fun browserChildrenChanged() {
+        handler.post { synchronized(this) {
+            browserChildren.removeAll { it.drained }
+            if (closed) closeStorageWhenIdle() else notifyChanged()
+        } }
+    }
     private val preparing: Boolean get() = preparation != null
     // Call only after the idle gate; selection is already initialized in memory.
     private fun reservePreparation(textTicket: TextSendTicket? = null): Preparation =
@@ -952,8 +968,17 @@ class ChatController internal constructor(private val application:Application,
     @Synchronized internal fun hasLiveChildTasks(conversationId:ConversationId?=null):Boolean =
         backgroundRuns.values.any { tasks -> tasks.snapshots().any {
             !it.settled && (conversationId==null || it.record.owner.conversationId==conversationId.value)
-        } }
+        } } || browserChildren.any { !it.drained &&
+            (conversationId == null || it.scope.owner.conversationId == conversationId.value) }
     internal fun stopChildTask(record:ChildTaskRecord):app.daiyu.android.domain.delegation.ChildTaskStop {
+        val browser = synchronized(this) {
+            if (closed || !ready) null else browserChildren.firstOrNull { it.scope.owner == record.owner }
+        }
+        if (browser != null) {
+            browser.close()
+            browserChildrenChanged()
+            return app.daiyu.android.domain.delegation.ChildTaskStop.REQUESTED
+        }
         val tasks=synchronized(this) {
             if(closed || !ready) null else backgroundRuns[RunId(record.owner.parentRunId)]
         }
@@ -1725,6 +1750,27 @@ class ChatController internal constructor(private val application:Application,
         }
     }
 
+    /** Pure trusted UI plan; no directories, hosts, DB rows or model creation here. */
+    internal fun prepareBrowserChild(pending: ControllerBrowserPreparation, prompt: String,
+                                    actions: Set<String>, writes: List<String>): ControllerChildBrowserPlan? {
+        synchronized(this) {
+            val token = preparation ?: return null
+            if (closed || token.revoked || token.submitted || token.browser !== pending ||
+                pending.state != ControllerBrowserPreparation.State.PREVIEW || pending.childPlan != null ||
+                browserChildren.count { !it.drained } >= 8) return null
+        }
+        val plan = try { ControllerChildBrowserPlan.prepare(pending, prompt, actions, writes) }
+            catch (_: Exception) { return null }
+        val attached = synchronized(this) {
+            val token = preparation
+            if (closed || token == null || token.revoked || token.submitted || token.browser !== pending) false
+            else pending.attachChild(plan).also { if (it) browserChildren.add(plan) }
+        }
+        if (!attached) { plan.close(); return null }
+        notifyChanged()
+        return plan
+    }
+
     internal fun rejectBrowser(pending: ControllerBrowserPreparation) {
         val token = synchronized(this) {
             preparation?.takeIf { it.browser === pending }?.also { it.revoked = true }
@@ -1749,9 +1795,16 @@ class ChatController internal constructor(private val application:Application,
         }
         try { executor.execute {
             val saved = try {
-                val binding = pending.openOnWorker(application, File(application.filesDir, "browser-runs").toPath())
-                if (binding == null) null else sendPrepared(token, pending.conversation, pending.text,
-                    expectedDraftText = pending.text, browserPreparation = pending, browserBinding = binding)
+                // The queued ticket may have been cancelled before this worker started. Fence
+                // BEFORE mkdir as well as native construction; preview/confirmation are pure.
+                if (preparationCancelled(token) || pending.isCancelled ||
+                    pending.state != ControllerBrowserPreparation.State.CONFIRMED) null else {
+                    val root = ControllerBrowserPreparation.preparePrivateRootOnWorker(application)
+                    val binding = if (preparationCancelled(token) || pending.isCancelled) null
+                        else pending.openOnWorker(application, root)
+                    if (binding == null) null else sendPrepared(token, pending.conversation, pending.text,
+                        expectedDraftText = pending.text, browserPreparation = pending, browserBinding = binding)
+                }
             } catch (_: Exception) { null }
             val result = when {
                 saved != null -> TextSendResult.Accepted(owner, saved)
@@ -2098,7 +2151,16 @@ class ChatController internal constructor(private val application:Application,
             // The SAME frozen authorization reaches Dispatcher and RunShizukuCommands.bind.
             val shizuku=shizukuPreparation?.open(shizukuAccess)
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
-                backgroundFactory, memoryContext=assistantContext, authorization=terminalRun?.authorization ?: shizukuAuthorization ?: browserBinding?.let {
+                backgroundFactory, memoryContext=assistantContext,
+                onCatalogReady = browserPreparation?.childPlan?.let { plan -> { realOwner: app.daiyu.android.domain.runtime.RunExecutionOwner,
+                    grants: SessionCapabilities, task: app.daiyu.android.domain.tools.TaskAuthorization ->
+                    plan.launch(application, realOwner, grants, task, toolLedger,
+                        checkNotNull(runtimeStore).childTasks, browserChildCapacity,
+                        model = { sessionModel?.invoke(provider, assistantContext, SessionGatewayContext(conversationId))
+                            ?: assistantModel?.invoke(provider, assistantContext) ?: model(config) },
+                        onChanged = ::browserChildrenChanged)
+                } },
+                authorization=terminalRun?.authorization ?: shizukuAuthorization ?: browserPreparation?.childPlan?.parentAuthorization ?: browserBinding?.let {
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value, it.requiredWrites)
                 }, shizuku=shizuku, browser=browserBinding, terminal=terminalRun?.binding,
                 authorizationFactory = if (video != null) { realOwner ->
@@ -2458,6 +2520,8 @@ class ChatController internal constructor(private val application:Application,
             it.initial.conversationId==message.conversationId && it.cleanupFailed && !it.cleaning
     }==true
     private fun closeStorageWhenIdle() {
+        browserChildren.removeAll { it.drained }
+        if (browserChildren.isNotEmpty()) return // Child workers/UNKNOWN still own the DB and ledger.
         pruneBackgroundRuns()
         if(resources!=null || preparing || generationEntry!=null || virtualDisplayEntry!=null || generationReaders!=0 ||
             unacceptedTools.isNotEmpty() || imageReaders!=0 || videoReaders!=0 || childCommandReaders!=0 || titleReaders!=0 || closingStorage) return
@@ -2852,11 +2916,15 @@ class ChatController internal constructor(private val application:Application,
                 ?.also {fenceRun(it)}
         } ?: return false
         lifetime.auxiliary?.cancel()
+        synchronized(this) { browserChildren.filter { it.parent.identity.runId == owner.runId }.toList() }
+            .forEach { it.close() }
+        browserChildrenChanged()
         lifetime.runner.stop();lifetime.tools.revokeChildren();lifetime.tools.close()
         handler.post {synchronized(this) {cleanupRun(lifetime)}}
         return true
     }
     fun stop() {
+        stopBrowserChildren()
         synchronized(this) { generationEntry }?.let { entry ->
             if (!entry.submitted) abandonGeneration(entry) else entry.session?.revokeAdmission()
         }
@@ -2869,6 +2937,7 @@ class ChatController internal constructor(private val application:Application,
         handler.post {synchronized(this) {cleanupRun(lifetime)}}
     }
     internal fun close() {
+        stopBrowserChildren()
         synchronized(this) { generationEntry }?.let { entry ->
             if (!entry.submitted) abandonGeneration(entry) else entry.session?.revokeAdmission()
         }

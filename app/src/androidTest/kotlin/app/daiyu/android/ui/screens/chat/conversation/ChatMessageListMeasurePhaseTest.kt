@@ -149,7 +149,13 @@ class ChatMessageListMeasurePhaseTest : ComposeActivityTestCase() {
             ui.onNodeWithTag("chat-draft").assert(SemanticsMatcher.expectValue(
                 androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange, range))
         }
+        val oldSelection = checkNotNull(ui.onNodeWithTag("chat-draft").fetchSemanticsNode()
+            .config[androidx.compose.ui.semantics.SemanticsActions.SetSelection].action)
         mainThread { composer = composer.copy(editorGeneration = 1, selectionStart = 1, selectionEnd = 3) }
+        ui.onNodeWithTag("chat-draft").assert(SemanticsMatcher.expectValue(
+            androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange,
+            androidx.compose.ui.text.TextRange(1, 3)))
+        mainThread { oldSelection(0, 0, false) }
         ui.onNodeWithTag("chat-draft").assert(SemanticsMatcher.expectValue(
             androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange,
             androidx.compose.ui.text.TextRange(1, 3)))

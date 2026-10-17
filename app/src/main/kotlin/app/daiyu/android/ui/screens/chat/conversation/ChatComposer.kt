@@ -51,6 +51,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifier: Modifier = Modifier) {
     val colors = MiuixTheme.colorScheme
+    val currentEditorGeneration by rememberUpdatedState(state.editorGeneration)
     var attachments by remember { mutableStateOf(false) }
     var voiceModes by remember { mutableStateOf(false) }
     val hasText = state.text.isNotBlank() || (state.phase == ComposerPhase.IDLE && state.imageSendAvailable)
@@ -75,15 +76,20 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerHigh)) {
             Column {
                 key(state.editorGeneration) {
-                    var editingValue by remember { mutableStateOf(TextFieldValue(state.text)) }
+                    val mountedGeneration = state.editorGeneration
+                    var editingValue by remember {
+                        mutableStateOf(TextFieldValue(state.text).forComposer(state.text, state.selectionStart, state.selectionEnd))
+                    }
                     val renderedValue = editingValue.forComposer(state.text, state.selectionStart, state.selectionEnd)
                     SideEffect { if (editingValue != renderedValue) editingValue = renderedValue }
                     BasicTextField(
                         value = renderedValue,
                         onValueChange = { value ->
-                            editingValue = value
-                            if (value.text != state.text) actions.onTextChange(value.text)
-                            actions.onSelectionChange(value.selection.start, value.selection.end)
+                            if (mountedGeneration == currentEditorGeneration) {
+                                editingValue = value
+                                if (value.text != state.text) actions.onTextChange(value.text)
+                                actions.onSelectionChange(value.selection.start, value.selection.end)
+                            }
                         },
                         enabled = state.enabled,
                         modifier = Modifier.testTag("chat-draft").fillMaxWidth().heightIn(min = 48.dp, max = 160.dp)

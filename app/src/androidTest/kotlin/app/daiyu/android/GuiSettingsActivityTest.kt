@@ -56,7 +56,7 @@ class GuiSettingsActivityTest : WiredActivityTestCase() {
             assertNoGuiPreparation()
             assertEquals(before, fixture.database.exportBackup())
             assertEquals(settings, fixture.settings.loadForEditing().settings)
-            backToChat(activity); node("page:设置").assertExists()
+            backToPage(activity, "page:设置"); node("page:设置").assertExists()
             backToChat(activity); assertDraft("GUI 设置不提交此草稿")
         }
     }
@@ -70,7 +70,7 @@ class GuiSettingsActivityTest : WiredActivityTestCase() {
         node("settings-row:$title").performClick()
         node("page:$page").assertExists()
         assertNoGuiPreparation()
-        backToChat(activity); node("page:设置").assertExists()
+        backToPage(activity, "page:设置"); node("page:设置").assertExists()
         activity = recreateActivity(activity)
         mainThread { stale() }
         node("page:$page").assertDoesNotExist()
@@ -94,7 +94,7 @@ class GuiSettingsActivityTest : WiredActivityTestCase() {
             }
             assertEquals(1L, session.cancelled.count)
             assertEquals(1, fixture.opens.get())
-            backToChat(activity); node("page:设置").assertExists()
+            backToPage(activity, "page:设置"); node("page:设置").assertExists()
             backToChat(activity); assertDraft("保留追加草稿")
         } finally { session.release.countDown() }
         awaitControl("original task finishes") { fixture.controller.active == null }

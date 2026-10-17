@@ -199,7 +199,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
             val systemDark = activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
             assertBars(systemDark)
             node("settings-radio:浅色").performClick()
-            backToChat(activity); backToChat(activity)
+            backToPage(activity, "page:设置"); backToChat(activity)
             assertBars(false)
         } finally {
             val editor = preferences.edit()

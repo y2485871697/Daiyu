@@ -35,7 +35,7 @@ class TerminalScreenTest : WiredActivityTestCase() {
 
     fun testEntryAndRecompositionAreReadOnlyAndLinuxWithoutSelectionCannotOpen() {
         show()
-        terminalNode("terminal-identity").assertTextEquals("Android 应用身份 · UID ${Process.myUid()} · 非 Android root")
+        terminalNode("terminal-identity").assertTextEquals("Android 应用身份 · UID ${Process.myUid()}")
         terminalNode("terminal-open-android").assertIsEnabled()
         terminalNode("terminal-close").assertIsNotEnabled()
         terminalNode("terminal-open-linux").assertIsNotEnabled()

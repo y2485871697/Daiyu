@@ -1,6 +1,7 @@
 package app.daiyu.android.terminal
 
 import android.content.Context
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -23,11 +24,17 @@ internal class TerminalApplicationProvider(context: Context) : AutoCloseable {
     private var closed = false
     private val mutableState = MutableStateFlow<TerminalApplicationState>(TerminalApplicationState.Loading)
     val state: StateFlow<TerminalApplicationState> = mutableState.asStateFlow()
+    @Volatile var initializationFailure: String? = null
+        private set
 
     init {
         scope.launch {
             val loaded = try { LinuxSettingsApplication.android(context.applicationContext) }
-                catch (_: Exception) { null }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) {
+                    initializationFailure = terminalInitializationFailureCode(failure)
+                    null
+                }
             val release = synchronized(lock) {
                 if (closed) true else {
                     mutableState.value = loaded?.let(TerminalApplicationState::Ready)
@@ -49,5 +56,20 @@ internal class TerminalApplicationProvider(context: Context) : AutoCloseable {
         }
         scope.cancel()
         loaded?.close()
+    }
+}
+
+internal fun terminalInitializationFailureCode(failure: Exception): String {
+    val message = failure.message
+    return when (message) {
+        "linux_catalog_symlink", "linux_catalog_corrupt", "linux_catalog_version",
+        "linux_catalog_noncanonical", "linux_catalog_duplicate_reference",
+        "linux_path_identity_unavailable", "linux_catalog_store_limit", "linux_environment_store_limit" -> message
+        else -> when (failure) {
+            is SecurityException -> "security_denied"
+            is java.io.IOException -> "io_failed"
+            is org.json.JSONException -> "catalog_json_failed"
+            else -> "initialization_failed"
+        }
     }
 }

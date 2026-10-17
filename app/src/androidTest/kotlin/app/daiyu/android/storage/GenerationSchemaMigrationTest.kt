@@ -94,6 +94,29 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
         }
     }
 
+    private fun assertVideoWitnessSchema(db: SQLiteDatabase) {
+        val expected = """CREATE TABLE message_video_witnesses(
+            message_id TEXT PRIMARY KEY NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+            reference_count INTEGER NOT NULL CHECK(typeof(reference_count)='integer' AND reference_count BETWEEN -1 AND 1024),
+            manifest_sha256 TEXT,
+            CHECK((reference_count=-1 AND manifest_sha256 IS NULL) OR
+              (reference_count>=0 AND typeof(manifest_sha256)='text' AND length(manifest_sha256)=64
+               AND manifest_sha256 NOT GLOB '*[^0-9a-f]*'))
+        )"""
+        fun normalized(sql: String) = sql.replace(Regex("\\s+"), "").lowercase()
+        assertEquals(normalized(expected), normalized(scalar(db,
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='message_video_witnesses'")))
+        assertEquals(listOf("message_id", "reference_count", "manifest_sha256"), columns(db, "message_video_witnesses"))
+        db.rawQuery("PRAGMA foreign_key_list(message_video_witnesses)", null).use { c ->
+            assertTrue(c.moveToFirst())
+            for ((column, value) in listOf("table" to "messages", "from" to "message_id", "to" to "id",
+                    "on_update" to "NO ACTION", "on_delete" to "CASCADE", "match" to "NONE")) {
+                assertEquals(column, value, c.getString(c.getColumnIndexOrThrow(column)))
+            }
+            assertFalse(c.moveToNext())
+        }
+    }
+
     private fun scalar(db: SQLiteDatabase, sql: String): String = db.rawQuery(sql, null).use {
         check(it.moveToFirst()); it.getString(0)
     }
@@ -148,8 +171,10 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
                 db.execSQL("UPDATE composer SET draft='composer retained'")
                 db.execSQL("DROP TABLE generation_outputs")
                 db.execSQL("DROP TABLE generation_attempts")
+                db.execSQL("DROP TABLE message_video_witnesses")
                 db.execSQL("DROP TABLE message_video_inputs")
                 assertFalse(tableExists(db, "message_video_inputs"))
+                assertFalse(tableExists(db, "message_video_witnesses"))
                 db.version = version
             }
             helper.close()
@@ -292,6 +317,7 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
         f.raw().use { db ->
             assertEquals(10, db.version)
             assertFalse(tableExists(db, "message_video_inputs"))
+            assertFalse(tableExists(db, "message_video_witnesses"))
             // A raw source connection must honor the helper's durability configuration too.
             db.setForeignKeyConstraintsEnabled(true)
             db.execSQL("PRAGMA synchronous=FULL")
@@ -323,20 +349,39 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
         val before = f.raw().use { db ->
             assertEquals(11, db.version)
             assertFalse(tableExists(db, "message_video_inputs"))
+            assertFalse(tableExists(db, "message_video_witnesses"))
             snapshot(db)
         }
         val helper = f.helper(); val db = helper.writableDatabase
         assertEquals(20, db.version)
         assertVideoSidecarSchema(db)
+        assertVideoWitnessSchema(db)
         assertEquals(0, count(db, "message_video_inputs"))
         val after = snapshot(db)
-        assertEquals(before.keys + "message_video_inputs", after.keys)
-        // The only new schema entries (table and automatic PK index) belong to the sidecar.
-        assertEquals(before["schema"], after.getValue("schema").filterNot {
-            it.split('\u0000')[2] == "message_video_inputs"
-        })
+        val addedTables = setOf("message_video_inputs", "message_video_witnesses")
+        assertEquals(before.keys + addedTables, after.keys)
+        val addedSchema = after.getValue("schema").filter { it.split('\u0000')[2] in addedTables }
+        assertEquals(listOf(
+            listOf("index", "sqlite_autoindex_message_video_inputs_1", "message_video_inputs"),
+            listOf("index", "sqlite_autoindex_message_video_witnesses_1", "message_video_witnesses"),
+            listOf("table", "message_video_inputs", "message_video_inputs"),
+            listOf("table", "message_video_witnesses", "message_video_witnesses"),
+        ), addedSchema.map { it.split('\u0000').take(3) })
+        addedSchema.filter { it.split('\u0000')[0] == "index" }.forEach { assertEquals("", it.split('\u0000')[3]) }
+        assertEquals(before["schema"], after.getValue("schema").filterNot { it.split('\u0000')[2] in addedTables })
         before.filterKeys { it != "version" && it != "schema" }.forEach { (table, rows) ->
             assertEquals(table, rows, after[table])
+        }
+        val migratedMessage = helper.messages(ConversationId(f.binding.conversationId)).single().second
+        val expectedWitness = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(MessageVideoInputCodec.encode(migratedMessage, emptyList()).toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        db.rawQuery("SELECT message_id,reference_count,manifest_sha256 FROM message_video_witnesses", null).use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals(f.binding.assistantMessageId, c.getString(0))
+            assertEquals(0, c.getInt(1))
+            assertEquals(expectedWitness, c.getString(2))
+            assertFalse(c.moveToNext())
         }
         val found = f.outputStore(helper).find(f.attempt, 0)!!
         assertEquals(receipt, found.receipt.assetId)
@@ -346,6 +391,7 @@ class GenerationSchemaMigrationTest : InstrumentationTestCase() {
         val reopened = f.helper(); val reopenedDb = reopened.writableDatabase
         assertEquals(20, reopenedDb.version)
         assertVideoSidecarSchema(reopenedDb)
+        assertVideoWitnessSchema(reopenedDb)
         assertEquals(after, snapshot(reopenedDb))
         assertEquals(found, f.outputStore(reopened).find(f.attempt, 0))
         reopenedDb.rawQuery("SELECT outcome FROM generation_attempts", null).use { c ->

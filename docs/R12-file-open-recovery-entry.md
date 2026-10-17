@@ -10,7 +10,7 @@
 - `app/src/main/AndroidManifest.xml`：MainActivity 已为 singleTop/exported，已有 ACTION_VIEW + DEFAULT + content/application-json 过滤；没有 file/http/wildcard MIME 捕获，本次不重复加过滤器。
 - `MainActivity.kt`：`onCreate(state == null)`、`onNewIntent` → `offerOpenedBackup`；四个 SAF 请求码 101–104、单会话导出 105、历史原件保存 106；`confirmBackupImport` 仍通过现有单次 prompt 做第二次确认。
 - `ChatController.kt`：`importUserBackup` 仅在明确确认后打开 ContentResolver 流，`use` 关闭；完整包读取上限 112 MiB、文本包 16 MiB，严格 UTF-8 解码，然后进入既有 `NeutralBackupService.importPackage` / `ConversationDatabase.importBackup`。现有拒绝损坏/未知格式的 parser 不在本次修改范围。
-- `backup/NeutralBackupService.kt` 与 `storage/ConversationDatabase.kt`：当前导出 envelope version 都是 **2**，兼容导入 version 1–2。`docs/R12-extended-backup-production.md` 记录已集成的完整备份/原件生产链，本次不替换它。
+- `backup/NeutralBackupService.kt` 与 `storage/ConversationDatabase.kt`：当前完整备份导出 envelope version 为 **3**（导入兼容 1–3），纯文本导出为 **2**（导入兼容 1–2）。`docs/R12-extended-backup-production.md` 记录已集成的完整备份/原件生产链，本次不替换它。
 - `BackupActivityTest.kt`：复用原有真实 Activity/SAF monitor、MockContentResolver 私有 provider、Controller/SQLite 与恢复门控夹具。本次不是重新建立另一条导入实现。
 
 这里只能核文件内容；委派材料提及的审查/提交 SHA 及 Git 分支状态须由父代理核验，子代理未执行 Git/Shell/网络。
@@ -36,7 +36,7 @@
 - `daiyu-complete.json`
 - `daiyu-conversation.json`
 
-这只影响 ACTION_CREATE_DOCUMENT 的 `EXTRA_TITLE`，不改变字节/格式、写流、原件保存、媒体或备份服务。BackupActivityTest 的真实导出测试改为断言 envelope version 2，而不是过期的 1。
+这只影响 ACTION_CREATE_DOCUMENT 的 `EXTRA_TITLE`，不改变字节/格式、写流、原件保存、媒体或备份服务。BackupActivityTest 的真实导出测试分别断言完整包 version 3、纯文本 version 2，而不是将两个协议版本混同。
 
 ## 新增/修正回归
 

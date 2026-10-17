@@ -3,7 +3,6 @@ package app.daiyu.android.context
 import android.content.Context
 import app.daiyu.android.domain.ConversationId
 import app.daiyu.android.domain.RunId
-import app.daiyu.android.domain.context.UsageTotals
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Collections
@@ -99,7 +98,8 @@ class ContextRegistry(private val service: ContextService) {
                     require(service.isUsageOwner(branch, run))
                 }
                 val totals = service.usage(branch, run)
-                usageJson(totals).put("ok", true).put("source", "provider_reported").put("incomplete", totals.incomplete)
+                totals.toJson().put("ok", true).put("source", "provider_reported")
+                    .put("record_source", "runtime_checkpoints+child_request_usage+runtime_preparations")
             }
             else -> JSONObject().put("ok", false).put("error", "unknown_tool")
         }
@@ -111,9 +111,6 @@ class ContextRegistry(private val service: ContextService) {
         val value = args.get(key); require(value is Int || value is Long)
         val n = (value as Number).toLong(); require(n in 0..Int.MAX_VALUE.toLong()); return n.toInt()
     }
-    private fun usageJson(t: UsageTotals) = JSONObject().put("requests", t.requests).put("reported_requests", t.reportedRequests)
-        .put("input_tokens", t.inputTokens).put("output_tokens", t.outputTokens).put("cached_tokens", t.cachedTokens)
-        .put("reasoning_tokens", t.reasoningTokens).put("total_tokens", t.totalTokens)
     private fun schema(name: String, description: String, properties: JSONObject, required: List<String>) =
         JSONObject().put("name", name).put("description", description).put("sideEffect", "none")
             .put("parameters", JSONObject().put("type", "object").put("properties", properties)

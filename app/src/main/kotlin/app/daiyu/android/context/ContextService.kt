@@ -145,18 +145,10 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             arrayOf(archiveId)).use { c -> if (c.moveToFirst()) ConversationId(c.getString(0)) else null }
     }
 
-    /**
-     * branch_id is a conversation ID, not its parent. Runs can exist only in provider receipts
-     * (e.g. summary/title tasks), so consult both sources. Missing or ambiguous ownership fails
-     * closed, even if a syntactically valid ID or a host grant was supplied.
-     */
+    /** branch_id names the materialized conversation, not an ancestor. Only authoritative
+     * message/child ownership can authorize a run; legacy context receipts cannot grant it. */
     fun isUsageOwner(branchId: String, runId: String? = null): Boolean = transactions.run { db ->
-        val exists = db.rawQuery("SELECT id FROM conversations WHERE id=?", arrayOf(branchId)).use { it.moveToFirst() }
-        exists && (runId == null || db.rawQuery(
-            "SELECT conversation_id FROM messages WHERE run_id=? UNION SELECT branch_id FROM context_usage WHERE run_id=?",
-            arrayOf(runId, runId)).use { c ->
-            c.moveToFirst() && c.getString(0) == branchId && !c.moveToNext()
-        })
+        RecordedContextUsageAdapter.isOwner(db, branchId, runId)
     }
 
     /** expectedOwner comes from trusted registry authorization, never tool JSON. Validate the
@@ -341,7 +333,11 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         check(inserted != -1L) { "用量回执未持久化" } // A trigger using RAISE(IGNORE) need not throw.
         inserted
     }
-    fun usage(branchId: String, runId: String? = null): UsageTotals = transactions.run { db -> aggregateUsage(readUsage(db, branchId).filter { runId == null || it.runId == runId }) }
+    /** Production query: read-only projection of committed parent + child observations.
+     * recordUsage/readUsage below retain the old compatibility algorithm, not a second source. */
+    fun usage(branchId: String, runId: String? = null): ContextUsageSnapshot = transactions.run { db ->
+        RecordedContextUsageAdapter.read(db, branchId, runId)
+    }
     private fun readUsage(db: SQLiteDatabase, branch: String): List<UsageRecord> = db.rawQuery("SELECT request_id,run_id,branch_id,input_tokens,output_tokens,cached_tokens,reasoning_tokens FROM context_usage WHERE branch_id=?", arrayOf(branch)).use { c ->
         buildList { while (c.moveToNext()) { fun n(i: Int): Long? = if (c.isNull(i)) null else c.getLong(i)
             add(UsageRecord(c.getString(0), c.getString(1), c.getString(2), n(3), n(4), n(5), n(6))) } }

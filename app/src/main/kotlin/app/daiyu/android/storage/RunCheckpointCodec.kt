@@ -18,7 +18,7 @@ internal object RunCheckpointCodec {
     fun encode(value: RunCheckpoint): String {
         validate(value)
         fun messages(rows: List<Message>) = JSONArray(String(ArchiveCodec.encode(rows), Charsets.UTF_8))
-        return JSONObject().put("version", 4).put("message", messages(listOf(value.message)))
+        return JSONObject().put("version", 5).put("message", messages(listOf(value.message)))
             .put("history", messages(value.history)).put("phase", value.phase.name)
             .put("tools", JSONArray().apply { value.tools.forEach { record -> put(JSONObject()
                 .put("id", record.invocation.id.value).put("name", record.invocation.name)
@@ -31,7 +31,7 @@ internal object RunCheckpointCodec {
             .put("owner", value.owner).put("revision", value.revision)
             .put("request", value.request?.let(::encodeRequest) ?: JSONObject.NULL)
             .put("usage", JSONArray().apply { value.usage.forEach { record -> put(JSONObject()
-                .put("request", encodeRequest(record.request))
+                .put("request", encodeRequest(record.request)).put("source", record.source.name)
                 .put("input_tokens", record.snapshot.inputTokens ?: JSONObject.NULL)
                 .put("output_tokens", record.snapshot.outputTokens ?: JSONObject.NULL)
                 .put("cached_tokens", record.snapshot.cachedTokens ?: JSONObject.NULL)) } })
@@ -46,7 +46,7 @@ internal object RunCheckpointCodec {
         val value = parser.nextValue()
         require(value is JSONObject && parser.nextClean() == '\u0000')
         val version = integer(value, "version")
-        require(version in 1L..4L)
+        require(version in 1L..5L)
         val keys = arrayOf("version", "message", "history", "phase", "tools", "outputs", "supplements", "round",
             "request_unconfirmed", "message_reconciled", "owner", "revision")
         fields(value, *(when (version) { 1L -> keys; 2L -> keys + "pending"; 3L -> keys + arrayOf("pending", "request");
@@ -61,10 +61,12 @@ internal object RunCheckpointCodec {
             val rows = value.getJSONArray("usage"); require(rows.length() <= 10_000)
             (0 until rows.length()).map { i ->
                 val row = rows.getJSONObject(i)
-                fields(row, "request", "input_tokens", "output_tokens", "cached_tokens")
+                val usageKeys = arrayOf("request", "input_tokens", "output_tokens", "cached_tokens")
+                fields(row, *(if (version < 5L) usageKeys else usageKeys + "source"))
                 RequestUsageCheckpoint(decodeRequest(row.get("request")), ModelEvent.Usage(
                     nullableInteger(row, "input_tokens"), nullableInteger(row, "output_tokens"),
-                    nullableInteger(row, "cached_tokens")))
+                    nullableInteger(row, "cached_tokens")),
+                    if (version < 5L) UsageRequestSource.MAIN else UsageRequestSource.valueOf(string(row, "source")))
             }
         }
         fun messages(key: String) = ArchiveCodec.decode(value.getJSONArray(key).toString().toByteArray(Charsets.UTF_8))
@@ -91,7 +93,11 @@ internal object RunCheckpointCodec {
         value.request?.let { require(value.phase == ExecutionPhase.TERMINAL || it.owner == value.owner) }
         require(value.usage.size <= 10_000)
         require(value.usage.map { it.request.owner to it.request.requestId }.distinct().size == value.usage.size)
-        value.usage.forEach { require(value.phase == ExecutionPhase.TERMINAL || it.request.owner == value.owner) }
+        value.usage.forEach {
+            require(value.phase == ExecutionPhase.TERMINAL || it.request.owner == value.owner ||
+                it.source == UsageRequestSource.SUMMARY)
+            require(it.request.operation != RequestOperation.OPEN)
+        }
         require((m.status == RunStatus.RUNNING) == (value.phase != ExecutionPhase.TERMINAL))
         require(value.history.all { it.conversationId == m.conversationId })
         require(value.supplements.map { it.id }.distinct().size == value.supplements.size)

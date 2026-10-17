@@ -47,7 +47,7 @@ check(!daiyuPhysicalPerformance || daiyuSyntheticApplication) {
 }
 
 android {
-    buildFeatures { compose = true; aidl = true }
+    buildFeatures { compose = true; aidl = true; buildConfig = true }
     useLibrary("android.test.runner")
     useLibrary("android.test.base")
     useLibrary("android.test.mock")

@@ -188,11 +188,16 @@ class LinuxInstallRecoveryBoundaryTest : TestCase() {
             if (directory == f.target.parentFile && f.target.exists() && failSync) throw IOException("parent fsync")
         }
         val prepared = installer.prepare(f.artifact, "primary", f.installation)
-        val receipt = installer.install(installer.approveDownloadAndInstall(prepared), LinuxInstallCancellation())
-        assertFalse(receipt.directorySyncConfirmed)
+        val pending = try {
+            installer.install(installer.approveDownloadAndInstall(prepared), LinuxInstallCancellation())
+            error("persistent sync failure must block cleanup")
+        } catch (failure: LinuxInstallCleanupPending) { failure }
+        assertFalse(pending.receipt!!.directorySyncConfirmed)
         assertNotNull(installer.inspectPublished(prepared))
+        assertTrue(File(f.target.parentFile, ".install-lock").exists())
         assertTrue(runCatching { installer.confirmPublishedDurability(prepared) }.isFailure)
         failSync = false
+        assertFalse(installer.retryCleanup(prepared)!!.directorySyncConfirmed)
         val lock = File(f.target.parentFile, ".install-lock")
         assertTrue(lock.mkdir())
         assertTrue(runCatching { installer.confirmPublishedDurability(prepared) }.isFailure)
@@ -220,8 +225,13 @@ class LinuxInstallRecoveryBoundaryTest : TestCase() {
         }
         val original = first.prepare(f.artifact, "primary", f.installation)
         first.rememberRequest(original)
-        assertFalse(first.install(first.approveDownloadAndInstall(original), LinuxInstallCancellation()).directorySyncConfirmed)
+        val pending = try {
+            first.install(first.approveDownloadAndInstall(original), LinuxInstallCancellation())
+            error("persistent sync failure must block cleanup")
+        } catch (failure: LinuxInstallCleanupPending) { failure }
+        assertFalse(pending.receipt!!.directorySyncConfirmed)
         failSync = false
+        assertFalse(first.retryCleanup(original)!!.directorySyncConfirmed)
         val frozen = app.daiyu.android.terminal.FrozenLinuxApproval(f.installation.copy(generation = "original-catalog-generation"))
         first.rememberRegistration(original, frozen)
         val before = f.tree()

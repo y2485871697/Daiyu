@@ -30,7 +30,14 @@ class LinuxProductionCompositionTest : TestCase() {
         override fun remember(prepared: PreparedLinuxInstall) {}
         override fun discard(prepared: PreparedLinuxInstall) {}
         var installs = 0
+        var cleanupRetries = 0
+        var cleanupReceipt: LinuxInstallReceipt? = null
+        override fun retryCleanup(prepared: PreparedLinuxInstall): LinuxInstallReceipt? {
+            cleanupRetries++
+            return cleanupReceipt
+        }
         var confirmations = 0
+        var confirmationFailure: Exception? = null
         var durable = false
         var recovered: RecoveredLinuxInstall? = null
         var recoveryFailure: Exception? = null
@@ -59,6 +66,7 @@ class LinuxProductionCompositionTest : TestCase() {
         }
         override fun confirmPublishedDurability(prepared: PreparedLinuxInstall): LinuxInstallReceipt {
             confirmations++
+            confirmationFailure?.let { throw it }
             return LinuxInstallReceipt(prepared.installation, true)
         }
     }
@@ -441,6 +449,102 @@ class LinuxProductionCompositionTest : TestCase() {
         assertFalse(install.discard())
         assertNull(install.state.value.prepared)
         assertEquals(0, transactions.installs)
+    }
+
+    fun testUnknownExplicitReinspectionNeverClearsRetainedOwnerOrReplaysWork() = runTest {
+        for (mode in LinuxExecutionMode.entries) {
+            val transactions = Transactions()
+            val configuration = app.daiyu.android.terminal.LinuxInstallation("alpine", "alpine", "retained",
+                File("/private/linux/alpine/retained/rootfs"),
+                if (mode == LinuxExecutionMode.PROOT) helpers().proot else null,
+                if (mode == LinuxExecutionMode.PROOT) helpers().prootSha256 else "",
+                if (mode == LinuxExecutionMode.PROOT) helpers().loader else null,
+                if (mode == LinuxExecutionMode.PROOT) helpers().loaderSha256 else "", executionMode = mode)
+            val prepared = transactions.prepare(LinuxRootfsCatalog.find("alpine", "arm64-v8a")!!, "primary", configuration)
+            val approval = FrozenLinuxApproval(configuration.copy(generation = "registration"))
+            transactions.recovered = RecoveredLinuxInstall(prepared, true, true, approval)
+            val catalog = Catalog().apply { fail = false }
+            val coordinator = LinuxInstallCoordinator(transactions, ::helpers, File("/private/linux"), catalog,
+                this, executionMode = mode, chrootAbi = { "arm64-v8a" })
+            runCurrent()
+            transactions.recovered = transactions.recovered!!.copy(unknown = false)
+            assertTrue(coordinator.recover())
+            runCurrent()
+            assertTrue(coordinator.state.value.unknown)
+            assertSame(prepared, coordinator.state.value.prepared)
+            assertSame(approval, coordinator.state.value.registration)
+            assertFalse(coordinator.downloadAndInstall(prepared))
+            assertFalse(coordinator.confirmPublishedDurability(prepared))
+            assertFalse(coordinator.approveRegistration(approval))
+            assertFalse(coordinator.retryCleanup(prepared))
+            assertEquals(0, transactions.installs)
+            assertEquals(0, transactions.completions)
+            assertEquals(0, catalog.freezes)
+            transactions.recovered = null
+            assertTrue(coordinator.recover())
+            runCurrent()
+            assertTrue(coordinator.state.value.unknown)
+            assertTrue(coordinator.state.value.recoveryBlocked)
+            assertSame(prepared, coordinator.state.value.prepared)
+            assertTrue(coordinator.blocksManual)
+            coordinator.close()
+        }
+    }
+
+    fun testCleanupFailureBlocksRegistrationUntilExactTransactionCleanupReceipt() = runTest {
+        val transactions = Transactions().apply {
+            beforeInstall = { throw LinuxInstallCleanupPending(cleanupReceipt, null, IOException("delete failed")) }
+        }
+        val catalog = Catalog().apply { fail = false }
+        val coordinator = LinuxInstallCoordinator(transactions, ::helpers, File("/private/linux"), catalog, this)
+        runCurrent()
+        coordinator.prepare("alpine", "primary")
+        runCurrent()
+        val prepared = coordinator.state.value.prepared!!
+        transactions.cleanupReceipt = LinuxInstallReceipt(prepared.installation, true)
+        assertTrue(coordinator.downloadAndInstall(prepared))
+        runCurrent()
+        assertTrue(coordinator.state.value.cleanupPending)
+        assertSame(transactions.cleanupReceipt, coordinator.state.value.receipt)
+        assertTrue(coordinator.blocksManual)
+        assertFalse(coordinator.prepareRegistration())
+        assertFalse(coordinator.downloadAndInstall(prepared))
+        assertFalse(coordinator.recover())
+        assertEquals(0, catalog.freezes)
+        assertTrue(coordinator.retryCleanup(prepared))
+        runCurrent()
+        assertFalse(coordinator.state.value.cleanupPending)
+        assertEquals(1, transactions.cleanupRetries)
+        assertEquals(1, transactions.installs)
+        assertEquals(1, catalog.freezes)
+        assertEquals(0, catalog.approvals.size)
+        coordinator.close()
+    }
+
+    fun testCleanupRetryPreservesPreviouslyPublishedReceiptAfterFailedConfirmation() = runTest {
+        val transactions = Transactions()
+        val coordinator = LinuxInstallCoordinator(transactions, ::helpers, File("/private/linux"), Catalog(), this)
+        runCurrent()
+        assertTrue(coordinator.prepare("alpine", "primary")); runCurrent()
+        val prepared = checkNotNull(coordinator.state.value.prepared)
+        assertTrue(coordinator.downloadAndInstall(prepared)); runCurrent()
+        val published = checkNotNull(coordinator.state.value.receipt)
+        assertFalse(published.directorySyncConfirmed)
+        transactions.confirmationFailure = LinuxInstallCleanupPending(null, IOException("sync"), IOException("cleanup"))
+        assertTrue(coordinator.confirmPublishedDurability(prepared)); runCurrent()
+        assertTrue(coordinator.state.value.cleanupPending)
+        assertSame(published, coordinator.state.value.receipt)
+        assertTrue(coordinator.retryCleanup(prepared)); runCurrent()
+        assertFalse(coordinator.state.value.cleanupPending)
+        assertSame(published, coordinator.state.value.receipt)
+        assertFalse(coordinator.downloadAndInstall(prepared))
+        transactions.confirmationFailure = null
+        assertTrue(coordinator.confirmPublishedDurability(prepared)); runCurrent()
+        assertTrue(checkNotNull(coordinator.state.value.receipt).directorySyncConfirmed)
+        assertEquals(1, transactions.installs)
+        assertEquals(1, transactions.cleanupRetries)
+        assertEquals(2, transactions.confirmations)
+        coordinator.close()
     }
 
     fun testPlatformGateAndPinnedPairs() {

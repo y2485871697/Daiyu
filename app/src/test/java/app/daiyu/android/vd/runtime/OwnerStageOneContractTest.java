@@ -50,7 +50,7 @@ public class OwnerStageOneContractTest {
     }
 
     @Test public void launchAndCoverContractsUseTheHostNamespace() {
-        assertEquals("app.daiyu.android/" + VirtualDisplayAnchorActivity.class.getName(),
+        assertEquals(app.daiyu.android.BuildConfig.APPLICATION_ID + "/" + VirtualDisplayAnchorActivity.class.getName(),
                 OwnerHandoff.ANCHOR_COMPONENT);
         assertEquals(VirtualDisplayAnchorActivity.LAUNCH_SCHEME + "://handoff/",
                 OwnerHandoff.ANCHOR_MARKER_PREFIX);

@@ -1,5 +1,6 @@
 package app.daiyu.android.terminal
 
+import app.daiyu.android.BuildConfig
 import android.content.Context
 import android.os.Process
 import java.io.File
@@ -10,7 +11,7 @@ import java.io.File
  * This object does not issue WRITE grants or register a model-facing tool.
  */
 object AndroidPtyHost {
-    private const val APPLICATION_ID = "app.daiyu.android"
+    private const val APPLICATION_ID = BuildConfig.APPLICATION_ID
     private const val HELPER_NAME = "libdaiyu_pty.so"
 
     /**

@@ -28,12 +28,14 @@ data class LinuxInstallState(
     val unknown: Boolean = false,
     val notice: String? = null,
     val recoveryBlocked: Boolean = false,
+    val cleanupPending: Boolean = false,
 )
 
 internal interface LinuxInstallTransactions {
     fun prepare(artifact: LinuxRootfsArtifact, mirrorId: String, installation: LinuxInstallation): PreparedLinuxInstall
     fun install(prepared: PreparedLinuxInstall, cancellation: LinuxInstallCancellation): LinuxInstallReceipt
     fun confirmPublishedDurability(prepared: PreparedLinuxInstall): LinuxInstallReceipt
+    fun retryCleanup(prepared: PreparedLinuxInstall): LinuxInstallReceipt? = error("linux_install_cleanup_not_retained")
     fun remember(prepared: PreparedLinuxInstall)
     fun rememberRegistration(prepared: PreparedLinuxInstall, approval: FrozenLinuxApproval)
     fun completeRegistration(prepared: PreparedLinuxInstall, approval: FrozenLinuxApproval)
@@ -51,6 +53,7 @@ private class RootlessInstallTransactions(private val installer: RootlessLinuxIn
         return installer.install(installer.approveDownloadAndInstall(prepared), cancellation)
     }
     override fun confirmPublishedDurability(prepared: PreparedLinuxInstall) = installer.confirmPublishedDurability(prepared)
+    override fun retryCleanup(prepared: PreparedLinuxInstall) = installer.retryCleanup(prepared)
     override fun remember(prepared: PreparedLinuxInstall) = installer.rememberRequest(prepared)
     override fun rememberRegistration(prepared: PreparedLinuxInstall, approval: FrozenLinuxApproval) =
         installer.rememberRegistration(prepared, approval)
@@ -83,10 +86,17 @@ class LinuxInstallCoordinator internal constructor(
     init { recover() }
 
     /** Reconstruct descriptions; retire recorded requests, never approve or replay a probe. */
-    internal fun recover(): Boolean = submit(recovering = true, eligible = { it.prepared == null || it.recoveryBlocked }) {
+    internal fun recover(): Boolean = submit(recovering = true, eligible = { !it.cleanupPending && (it.prepared == null || it.recoveryBlocked || it.unknown) }) {
+        val original = synchronized(lock) { mutable.value }
         val recovered = if (executionMode == LinuxExecutionMode.CHROOT) installer.recoverChroot(chrootAbi())
             else installer.recover(helpers())
-        if (recovered == null) LinuxInstallState(notice = "未发现待恢复请求；未下载、执行或注册。")
+        if (original.unknown) {
+            val previous = checkNotNull(original.prepared)
+            check(recovered != null && previous.installation == recovered.prepared.installation &&
+                previous.artifact.id == recovered.prepared.artifact.id && previous.mirror == recovered.prepared.mirror) { "linux_install_unknown_request_changed" }
+            // A clean disk scan is not termination evidence for the retained probe.
+            original.copy(notice = "已只读核验原请求；UNKNOWN 仍保留，未执行探针、清理锁或授予授权。")
+        } else if (recovered == null) LinuxInstallState(notice = "未发现待恢复请求；未下载、执行或注册。")
         else if (!recovered.unknown && recovered.registration != null &&
             catalog.registrationRecorded(recovered.registration)) {
             // A previous approval (including a tombstone) completes this request. Recovery
@@ -103,7 +113,7 @@ class LinuxInstallCoordinator internal constructor(
 
     val blocksManual: Boolean get() = synchronized(lock) {
         val value = mutable.value
-        value.busy || (value.prepared != null && !value.registered) || value.registrationPending || value.unknown || value.recoveryBlocked
+        value.busy || (value.prepared != null && !value.registered) || value.registrationPending || value.unknown || value.recoveryBlocked || value.cleanupPending
     }
 
     /** Only distribution and mirror IDs are accepted, never caller URLs, hashes, paths or ABI. */
@@ -147,6 +157,18 @@ class LinuxInstallCoordinator internal constructor(
     internal fun confirmPublishedDurability(prepared: PreparedLinuxInstall): Boolean = submit(
         eligible = { it.prepared === prepared && it.receipt?.directorySyncConfirmed == false && !it.unknown }
     ) { installedState(prepared, installer.confirmPublishedDurability(prepared)) }
+
+    internal fun retryCleanup(prepared: PreparedLinuxInstall): Boolean = submit(cleaning = true,
+        eligible = { it.prepared === prepared && it.cleanupPending && !it.unknown }) {
+        val returnedReceipt = installer.retryCleanup(prepared)
+        val receipt = synchronized(lock) {
+            mutable.value = mutable.value.copy(cleanupPending = false)
+            returnedReceipt ?: mutable.value.receipt
+        }
+        if (receipt == null) LinuxInstallState(prepared = prepared,
+            notice = "原事务资源清理及租约释放已确认；未重放下载或探针。可重新核对并明确批准原请求。")
+        else installedState(prepared, receipt)
+    }
 
     private fun installedState(prepared: PreparedLinuxInstall, receipt: LinuxInstallReceipt): LinuxInstallState {
         val retainedRegistration = synchronized(lock) { mutable.value.registration }
@@ -212,11 +234,13 @@ class LinuxInstallCoordinator internal constructor(
         cancellable: Boolean = false,
         fenceQueued: Boolean = false,
         recovering: Boolean = false,
+        cleaning: Boolean = false,
         before: (LinuxInstallState) -> LinuxInstallState = { it },
         operation: suspend () -> LinuxInstallState,
     ): Boolean = synchronized(lock) {
         val original = mutable.value
-        if (closed || original.unavailableReason != null || original.busy || !eligible(original)) return@synchronized false
+        if (closed || original.unavailableReason != null || original.busy ||
+            (original.cleanupPending && !cleaning) || (original.unknown && !recovering) || !eligible(original)) return@synchronized false
         token = if (cancellable) LinuxInstallCancellation() else null
         val epoch = admissionEpoch
         val identity = Any().also { activeOperation = it }
@@ -239,9 +263,12 @@ class LinuxInstallCoordinator internal constructor(
                 token = null
                 mutable.value = result.fold({ it.copy(busy = false) }, { failure ->
                     mutable.value.copy(busy = false,
+                        receipt = (failure as? LinuxInstallCleanupPending)?.receipt ?: mutable.value.receipt,
+                        cleanupPending = mutable.value.cleanupPending || failure is LinuxInstallCleanupPending,
                         unknown = mutable.value.unknown || failure is LinuxInstallProbeUnknown,
                         recoveryBlocked = mutable.value.recoveryBlocked || recovering,
                         notice = when {
+                            failure is LinuxInstallCleanupPending -> "原事务清理未完成：保留发布回执和原失败；禁止安装及注册。请显式重试原事务清理，不清理 UNKNOWN 探针。"
                             recovering -> "恢复验证失败：保留原 journal/目标/锁，禁止新代次绕过。${failure.message?.take(160)}"
                             failure is LinuxInstallProbeUnknown -> "探测终止结果 UNKNOWN：保留 staging、进程清理句柄及 writer 租约。禁止重试安装或清理锁。"
                             mutable.value.registrationPending -> "注册持久化未确认；请重试同一冻结配置。刷新或离页不代表成功。"

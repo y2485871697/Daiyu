@@ -160,9 +160,18 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             mainThread { activity.recreate() }
             val replacement = instrumentation.waitForMonitorWithTimeout(monitor, 5000) as? MainActivity
             assertNotNull("framework recreation must resume a new Activity", replacement)
-            ui.waitForIdle()
-            assertTrue(activity.isDestroyed)
-            return checkNotNull(replacement)
+            val created = checkNotNull(replacement)
+            try {
+                ui.waitForIdle()
+                assertTrue(activity.isDestroyed)
+                return created
+            } catch (failure: Throwable) {
+                try {
+                    mainThread { created.finish() }
+                    awaitControl("failed-recreation Activity destroyed") { created.isDestroyed }
+                } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
+                throw failure
+            }
         } finally { instrumentation.removeMonitor(monitor) }
     }
     protected fun startMain(intent: Intent = Intent(instrumentation.targetContext, MainActivity::class.java)): MainActivity {
@@ -213,31 +222,19 @@ abstract class WiredActivityTestCase : ComposeActivityTestCase() {
     override fun tearDown() {
         try { cleanupFixture() } finally { super.tearDown() }
     }
-    private fun cleanupFixture() {
+    protected open fun cleanupFixture() {
         if (activityRef == null && fixtureRef == null && original == null) return
-
         val closingActivity = activityRef
-        val closingFixture = fixtureRef
-        val restore = original
-        try {
-            mainThread { closingActivity?.finish() }
-            awaitControl("fixture Activity destroyed") { closingActivity?.isDestroyed != false }
-        } finally {
-            try {
-                mainThread {
-                    restore?.let {
-                        (instrumentation.targetContext.applicationContext as ChatApplication).controller = it
-                    }
-                }
-            } finally {
-                try {
-                    closingFixture?.close()
-                } finally {
-                    activityRef = null
-                    fixtureRef = null
-                    original = null
-                }
+        mainThread { closingActivity?.finish() }
+        awaitControl("fixture Activity destroyed") { closingActivity?.isDestroyed != false }
+        mainThread {
+            original?.let {
+                (instrumentation.targetContext.applicationContext as ChatApplication).controller = it
             }
         }
+        fixtureRef?.close()
+        activityRef = null
+        fixtureRef = null
+        original = null
     }
 }

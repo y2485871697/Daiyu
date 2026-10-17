@@ -21,7 +21,7 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
     <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
-    <!-- No all-packages/all-files permission, notification listener, or notification posting grant. -->
+    <!-- No all-packages/all-files permission or notification posting grant. Listener access below is separate explicit special access, never POST_NOTIFICATIONS. -->
     <!-- Android 11+ visibility for installed TTS and speech recognition services. -->
     <queries>
         <intent>
@@ -34,6 +34,16 @@
     <application android:name=".ChatApplication" android:usesCleartextTraffic="false" android:dataExtractionRules="@xml/data_extraction_rules" android:allowBackup="false" android:fullBackupContent="false" android:label="@string/app_name"
         android:icon="@drawable/task17_launcher_f6f7f9_2491ff" android:roundIcon="@drawable/task17_launcher_f6f7f9_2491ff" android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:supportsRtl="true">
+        <!-- Cross-app notification read special access only. Not posting, not a run/model grant.
+             No separate process: uses the application-owned capture store and listener gate. -->
+        <service android:name=".platform.CrossAppNotificationListener"
+            android:label="跨应用通知读取（独立授权）"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
         <!-- Only Android may bind this service; enabling it is an explicit system-settings action. -->
         <service android:name=".gui.GuiAccessibilityService"
             android:label="@string/gui_accessibility_label"

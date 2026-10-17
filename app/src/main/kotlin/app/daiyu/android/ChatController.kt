@@ -72,6 +72,11 @@ class ChatApplication:Application() {
     internal val terminalOwner get() = checkNotNull(
         (terminalProvider.state.value as? app.daiyu.android.terminal.TerminalApplicationState.Ready)?.application
     ) { "terminal_catalog_not_ready" }.terminalOwner
+    internal val notificationAccess by lazy {
+        app.daiyu.android.platform.CrossAppNotifications(
+            { app.daiyu.android.platform.CrossAppNotifications.systemGranted(this) },
+            app.daiyu.android.platform.NotificationHistoryStore(controller.database))
+    }
     val shizuku by lazy { app.daiyu.android.shizuku.ShizukuAuthorization(this) }
     lateinit var controller:ChatController
     lateinit var pets: app.daiyu.android.pet.PetApplicationHost

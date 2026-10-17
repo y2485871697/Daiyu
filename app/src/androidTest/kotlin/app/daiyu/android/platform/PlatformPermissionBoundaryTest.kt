@@ -74,7 +74,8 @@ class PlatformPermissionBoundaryTest : InstrumentationTestCase() {
         val backend = AndroidPlatformReads(DenyingContext(instrumentation.targetContext, runtimeGranted = true, uriGranted = true))
         val cases = listOf(PlatformReadTool.LAST_KNOWN_LOCATION to "{}", PlatformReadTool.APPS to "{}", PlatformReadTool.MEDIA to """{"kind":"image"}""",
             PlatformReadTool.CALENDAR to """{"start_ms":1,"end_ms":2}""", PlatformReadTool.CONTACTS to """{"query":"fixture"}""",
-            PlatformReadTool.NOTIFICATIONS to "{}", PlatformReadTool.FILES to """{"tree_uri":"content://fixture/tree/1"}""",
+            PlatformReadTool.NOTIFICATIONS to "{}", PlatformReadTool.CROSS_APP_NOTIFICATIONS to "{}",
+            PlatformReadTool.NOTIFICATION_HISTORY to "{}", PlatformReadTool.FILES to """{"tree_uri":"content://fixture/tree/1"}""",
             PlatformReadTool.FILE_METADATA to """{"uri":"content://fixture/document/1"}""",
             PlatformReadTool.FILE_TEXT to """{"uri":"content://fixture/document/1"}""")
         for ((tool, args) in cases) {

@@ -1,7 +1,7 @@
 package app.daiyu.android.domain.tools
 
-import app.daiyu.android.domain.ToolCallId
-import app.daiyu.android.domain.ToolInvocation
+import app.daiyu.android.domain.*
+import app.daiyu.android.domain.runtime.RunExecutionOwner
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
@@ -137,6 +137,67 @@ class ToolDispatcherTest {
         assertEquals("call_id_conflict", code(outcome(restored, task(taskId = "different-task"))))
         assertEquals("call_id_conflict", code(outcome(restored, task(setOf(effect(body = "changed"))), call(args = "{\"target\":\"a\",\"body\":\"changed\"}"))))
         assertEquals(1, executions)
+    }
+
+    @Test fun everyCachedConfirmedDeliveryIsReadmittedAfterEarlierBatchExecution() {
+        for (reason in listOf("access_revoked", "run_closed", "epoch_changed", "throw")) {
+            val store = InMemoryToolLedgerStore()
+            val owner = RunExecutionOwner.issue(Message(MessageId("assistant"), ConversationId("conversation"),
+                RunId("task"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
+            val authorization = task(emptySet())
+            var changed = false
+            var cachedExecutions = 0
+            var freshExecutions = 0
+            val events = mutableListOf<String>()
+            val cached = object : RegisteredTool {
+                override val definition = ToolDefinition("cached_read", 1, "cached read", "notes.read",
+                    ToolEffect.READ_ONLY, ToolSchema())
+                override fun prepare(arguments: ToolArguments) = PreparedTool.contextual(
+                    admit = { context ->
+                        assertSame(owner, context.owner)
+                        assertSame(authorization, context.authorization)
+                        assertEquals("cached_read", context.invocation.name)
+                        events.add("admit:${context.invocation.id.value}")
+                        if (changed && reason == "throw") throw IllegalStateException("synthetic-private")
+                        if (changed) ExecutionReceipt.NotExecuted(reason) else null
+                    },
+                    execute = { context ->
+                        cachedExecutions++
+                        ExecutionReceipt.Confirmed("synthetic-private:${context.invocation.id.value}", isError = true)
+                    })
+            }
+            val first = read {
+                events.add("execute:first")
+                freshExecutions++
+                changed = true
+                ExecutionReceipt.Confirmed("public")
+            }
+            val dispatcher = dispatcher(store, first, cached)
+            val cachedCalls = listOf(call("cached-b", "cached_read", "{}"), call("cached-c", "cached_read", "{}"))
+            val originals = dispatcher.dispatchOwned(authorization, cachedCalls, owner)
+            assertTrue(originals.all { (it.outcome as DispatchOutcome.Confirmed).isError })
+            val originalEntries = store.transaction { it.toList() }
+            events.clear()
+
+            // All preflight admissions succeed. A's synchronous callback then invalidates B and C.
+            val calls = listOf(call("first", "read_note", "{}")) + cachedCalls
+            val results = dispatcher.dispatchOwned(authorization, calls, owner)
+            assertEquals(calls.map { it.id }, results.map { it.callId })
+            assertEquals(DispatchOutcome.Confirmed("public", false), results.first().outcome)
+            val denialCode = if (reason == "throw") "context_admission_failed" else reason
+            assertEquals(List(2) { DispatchOutcome.NotExecuted(denialCode) }, results.drop(1).map { it.outcome })
+            assertEquals(listOf("admit:cached-b", "admit:cached-c", "execute:first", "admit:cached-b", "admit:cached-c"), events)
+            assertEquals(1, freshExecutions)
+            assertEquals(2, cachedExecutions)
+            assertEquals(originalEntries, store.transaction { rows -> rows.filter { it.callId.startsWith("cached-") } })
+
+            // A delivery denial must not replace a durable CONFIRMED receipt with NOT_EXECUTED.
+            changed = false
+            val restored = dispatcher.dispatchOwned(authorization, cachedCalls, owner)
+            assertEquals(originals.map { (it.outcome as DispatchOutcome.Confirmed).copy(replayed = true) }, restored.map { it.outcome })
+            assertEquals(2, cachedExecutions)
+            assertEquals(originalEntries, store.transaction { rows -> rows.filter { it.callId.startsWith("cached-") } })
+        }
     }
 
     @Test fun notExecutedReceiptIsNotUnknownAndNewExplicitCallCanExecute() {

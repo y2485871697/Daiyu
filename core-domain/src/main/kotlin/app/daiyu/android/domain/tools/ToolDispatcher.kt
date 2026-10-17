@@ -98,8 +98,16 @@ class ToolDispatcher(
         var stop = false
         return ReceiptBatchStart.Completed(invocations.mapIndexed { index, call ->
             val entry = reservation.entries[index]
-            if (entry.state == LedgerState.CONFIRMED) return@mapIndexed ToolDispatchResult(call.id,
-                DispatchOutcome.Confirmed(entry.payload, entry.isError, replayed = true))
+            if (entry.state == LedgerState.CONFIRMED) {
+                // An earlier call in this batch may have revoked access since whole-batch admission.
+                // Fence delivery without executing the tool or rewriting the original receipt.
+                val denial = if (stop || cancelled()) ExecutionReceipt.NotExecuted("batch_stopped_before_execution")
+                    else try { plans[index].admit(contexts[index]) }
+                    catch (_: Exception) { ExecutionReceipt.NotExecuted("context_admission_failed") }
+                return@mapIndexed ToolDispatchResult(call.id, if (denial != null)
+                    DispatchOutcome.NotExecuted(denial.code)
+                else DispatchOutcome.Confirmed(entry.payload, entry.isError, replayed = true))
+            }
             if (entry.state == LedgerState.NOT_EXECUTED) return@mapIndexed ToolDispatchResult(call.id,
                 DispatchOutcome.NotExecuted(entry.code))
             val receipt = if (stop || cancelled()) ExecutionReceipt.NotExecuted("batch_stopped_before_execution") else if (plans[index].isUserBarrier) {

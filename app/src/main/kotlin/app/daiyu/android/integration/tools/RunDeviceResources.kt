@@ -58,9 +58,15 @@ internal class RunDeviceResources(private val backend: BatteryTool,
         return executeRead(context, tool.toolName, tool.capability) { reader.read(tool, arguments, context.cancelled) }
     }
 
-    /** Pure admission also fences cached sensitive receipts before ledger replay. */
-    internal fun admit(context: ToolExecutionContext, name: String, capability: String): ExecutionReceipt.NotExecuted? =
-        synchronized(gate) { rejection(context, name, capability) }
+    /** Ownership first; live special-access checks also fence cached notification receipts.
+     * No Android I/O is performed while holding the run admission lock. */
+    internal fun admit(context: ToolExecutionContext, name: String, capability: String): ExecutionReceipt.NotExecuted? {
+        synchronized(gate) { rejection(context, name, capability) }?.let { return it }
+        val tool = PlatformReadTool.entries.firstOrNull { it.toolName == name }
+        val denial = tool?.let { platformBackend?.admission(it) }
+        if (denial != null) return ExecutionReceipt.NotExecuted(denial)
+        return synchronized(gate) { rejection(context, name, capability) }
+    }
 
     private fun rejection(context: ToolExecutionContext, name: String, capability: String): ExecutionReceipt.NotExecuted? {
         if (closed) return ExecutionReceipt.NotExecuted("run_closed")
@@ -74,6 +80,7 @@ internal class RunDeviceResources(private val backend: BatteryTool,
 
     private fun executeRead(context: ToolExecutionContext, name: String, capability: String,
         read: () -> String): ExecutionReceipt {
+        admit(context, name, capability)?.let { return it }
         synchronized(gate) {
             rejection(context, name, capability)?.let { return it }
             inFlight++
@@ -81,6 +88,11 @@ internal class RunDeviceResources(private val backend: BatteryTool,
         try {
             if (context.cancelled()) return ExecutionReceipt.NotExecuted("cancelled_before_execution")
             val payload = read()
+            // Do not publish a notification payload produced across stop, revoke or disconnect.
+            if (name == "current_notifications" || name == "notification_history") {
+                if (context.cancelled()) return ExecutionReceipt.NotExecuted("cancelled_before_delivery")
+                admit(context, name, capability)?.let { return it }
+            }
             if (payload.length > AndroidPlatformReads.MAX_RESULT_CHARS)
                 return ExecutionReceipt.Unknown("backend_result_too_large")
             val result = JSONObject(payload)

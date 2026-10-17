@@ -2525,8 +2525,21 @@ class MainActivity : ComponentActivity() {
                 top.yukonga.miuix.kmp.basic.TextButton(text = "收起", modifier = Modifier.heightIn(min = 48.dp),
                     onClick = { imagePanelVisible = false })
             }
-            if (imageHost.fenced) top.yukonga.miuix.kmp.basic.Text(
-                "发送结果待核实；图片和文字已保留，请勿重发", modifier = Modifier.testTag("image-host-unknown"))
+            val attempt = session.attempt
+            if (attempt != null && !session.uncertain) top.yukonga.miuix.kmp.basic.TextButton(
+                text = "取消图片准备", modifier = Modifier.heightIn(min = 48.dp).testTag("image-host-cancel"),
+                onClick = {
+                    if (editorGeneration == ownerGeneration && imageHost.session === session)
+                        imageHost.cancelPreparation(session, attempt)
+                })
+            if (imageHost.fenced) {
+                top.yukonga.miuix.kmp.basic.Text(
+                    "发送结果待核实；保留原草稿，禁止重发", modifier = Modifier.testTag("image-host-unknown"))
+                top.yukonga.miuix.kmp.basic.TextButton(text = "只读核实原发送结果", enabled = imageHost.canRecover,
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("image-host-recover"), onClick = {
+                        if (editorGeneration == ownerGeneration && imageHost.session === session) imageHost.recover(session)
+                    })
+            }
         }
     }
 
@@ -2567,10 +2580,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun settleImageReceipt(receipt: ImageSendResult.Accepted, text: String) {
-        // No text writes were admitted while any image receipt was outstanding. Reconcile the
-        // current view even after A -> B -> A or recreation; never navigate a different owner.
+        // Host withholds this callback if the editor was replaced while UNKNOWN (durably,
+        // even across numeric revision reuse). Reconcile only the exact unchanged current view.
         if (!activityUsable() || !selectionReady || imageHost.session.owner != receipt.owner ||
-            imageHost.session.attachments.state.value.draft.revision != receipt.revision ||
+            imageHost.session.attachments.state.value.draft.revision != receipt.revision || draftRevision != receipt.revision ||
             (selected != null && selected?.id != receipt.conversation.id) || draft != text) return
         selected = receipt.conversation; editorGeneration++; draftRevision++
         draft = ""; selectionStart = 0; selectionEnd = 0
@@ -3044,6 +3057,7 @@ class MainActivity : ComponentActivity() {
         cancelShizukuEditor()
         cancelBrowserEditor()
         guard {
+            if (draft != value && !imageHost.beforeTextEdit()) return@guard
             val id = selected?.id
             if (id == null) controller.database.draft(value) else controller.database.draft(id, value)
             if (draft != value) draftRevision++
@@ -3380,7 +3394,11 @@ class MainActivity : ComponentActivity() {
             statusText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中";
                 pendingTextSend != null -> "正在准备上下文并核实发送结果"; imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,
-                phase = phase, controlOwnerKey = controlOwner?.id?.value, modelLabel = if (controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
+                phase = phase, controlOwnerKey = controlOwner?.id?.value,
+                imageSendAvailable = imageHost.session.attachments.state.value.canSubmit && !imageHost.busy &&
+                    videoHost.state.items.isEmpty() && !videoSending && controller.active == null,
+                imageSendBlocked = imageHost.busy || imageHost.hasAttachments && !imageHost.session.attachments.state.value.canSubmit,
+                modelLabel = if (controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
                 reasoningLabel = try { reasoningPreference.snapshot(selected?.id?.value).displayName } catch (_: Exception) { "配置无效，需重存" },
                 assistantLabel = if (controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && !shizukuWritesBlocked,
                 supplementAvailable = state?.phase == ExecutionPhase.PAUSED && supplementDraft.pending == null,

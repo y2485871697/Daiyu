@@ -52,7 +52,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val colors = MiuixTheme.colorScheme
     var attachments by remember { mutableStateOf(false) }
     var voiceModes by remember { mutableStateOf(false) }
-    val hasText = state.text.isNotBlank()
+    val hasText = state.text.isNotBlank() || (state.phase == ComposerPhase.IDLE && state.imageSendAvailable)
     val primaryEnabled = if (hasText) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
     val secondaryColor = if (state.enabled) colors.onSurfaceVariantSummary else colors.disabledOnSurface
     val primaryIcon = when {

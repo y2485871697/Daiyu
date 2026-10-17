@@ -8,6 +8,18 @@ import org.junit.Test
 
 class ComposerTextActionTest {
     private val composer = ComposerUi(text = "new text")
+    @Test fun pureImagesEnableOnlyIdleSendAndNeverAnEmptySupplement() {
+        val images = ComposerUi(imageSendAvailable = true)
+        assertTrue(images.textActionEnabled())
+        assertFalse(images.copy(enabled = false).textActionEnabled())
+        assertFalse(images.copy(text = "editable frozen draft", imageSendBlocked = true).textActionEnabled())
+        assertFalse(images.copy(supplementPending = true).textActionEnabled())
+        assertFalse(images.copy(phase = ComposerPhase.RUNNING).textActionEnabled())
+        assertFalse(images.copy(phase = ComposerPhase.PAUSED, supplementAvailable = true).textActionEnabled())
+        assertTrue(images.copy(text = "append", phase = ComposerPhase.PAUSED,
+            supplementAvailable = true).textActionEnabled())
+        assertFalse(ComposerUi().textActionEnabled()) // no video/file/path capability inference
+    }
     @Test fun idleTextCanSendWithoutSupplementCapability() {
         assertTrue(composer.textActionEnabled())
     }

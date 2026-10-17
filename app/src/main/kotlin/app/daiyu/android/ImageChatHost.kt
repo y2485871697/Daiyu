@@ -37,17 +37,36 @@ internal class ImageChatHost private constructor(controller: ChatController) {
     private var settled: (ImageSendResult.Accepted, String) -> Unit = { _, _ -> }
     private val store = ImageHostDraftStore(controller.preferences)
     internal class Session(conversation: String?, restored: ImageHostDraftStore.Draft? = null) {
-        val owner = restored?.owner ?: ImageAttachmentOwner(conversation ?: UUID.randomUUID().toString(), UUID.randomUUID().toString())
+        var generation = restored?.generation ?: 0L
+        var retired = false
+        var owner = restored?.owner ?: ImageAttachmentOwner(conversation ?: UUID.randomUUID().toString(), UUID.randomUUID().toString())
+            private set
         val attachments = ImageAttachmentsState(ImageAttachmentDraft(owner, restored?.revision ?: 0), restored?.images.orEmpty())
+        init { if (restored?.retired == true) replaceRetiredOwner() }
+
+        // The counter is durable; the nonce also keeps unrelated/new-chat owners disjoint.
+        // No new picker/import can run while the old receipt holds the global write gate.
+        fun replaceRetiredOwner() {
+            check(attachments.state.value.ready.isEmpty())
+            owner = ImageAttachmentOwner(owner.conversationId, "${generation}:${UUID.randomUUID()}")
+            attachments.activate(ImageAttachmentDraft(owner, attachments.state.value.draft.revision))
+            retired = false
+        }
         val imports = mutableMapOf<ImageAttachmentItemKey, CancellationSignal>()
         var attempt: Attempt? = null
+        var frozen: FrozenImageSend? = restored?.frozen
+        var editorReplaced = restored?.editorReplaced == true
         var abandoned = false
         var uncertain by mutableStateOf(restored?.fenced == true)
     }
     internal class Attempt(val submission: ImageAttachmentSubmission, val text: String) {
         var handle: ImageSendHandle? = null
         var cancelled = false
-        fun cancel() { cancelled = true; handle?.cancel() }
+        fun cancel(): Boolean {
+            if (handle?.cancel() == false) return false
+            cancelled = true
+            return true
+        }
     }
 
     // These jobs terminate individually. We deliberately do not cancel receipt/file cleanup on close.
@@ -82,7 +101,8 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         if (storageFailed) return false // Never overwrite unreadable state with fresh identities.
         val saved = store.write(sessions.map { (conversation, target) ->
             ImageHostDraftStore.Draft(conversation, target.owner, target.attachments.state.value.draft.revision,
-                target.attachments.state.value.ready.map { it.attachment }, target.uncertain || target.attempt != null)
+                target.attachments.state.value.ready.map { it.attachment }, target.uncertain || target.attempt != null,
+                target.frozen, target.editorReplaced, target.generation, target.retired)
         })
         if (!saved) storageFailed = true
         return saved
@@ -244,6 +264,11 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         target.attachments.activate(ImageAttachmentDraft(target.owner, revision), ready)
         val submission = target.attachments.beginSubmission() ?: return
         val attempt = Attempt(submission, text)
+        val frozen = FrozenImageSend(target.owner, revision, text, buildList {
+            if (text.isNotEmpty()) add(ImageSendPart.Text(text))
+            submission.attachments.forEach { add(ImageSendPart.Image(it)) }
+        }, ImageSendIdentity.create())
+        target.frozen = frozen
         target.attempt = attempt
         outstanding++
         // Durably fence this exact owner/revision before any Controller enqueue. A restart
@@ -265,14 +290,12 @@ internal class ImageChatHost private constructor(controller: ChatController) {
                 val route = request?.second
                 if (attempt.cancelled || target.abandoned || closed || !visible || !stillCurrent() || provider == null || route?.actual?.imageInputSupported != true) {
                     finish(target, attempt, ImageSendResult.Rejected(target.owner, revision,
-                        "实际图片路由未配置或能力未确认；请检查辅助视觉或主模型声明，草稿保留"))
+                        if (attempt.cancelled) "图片准备已取消；未进入提交，草稿保留"
+                        else "实际图片路由未配置、能力未确认或编辑器已变化；草稿保留，未提交"))
                     return@withContext
                 }
-                val parts = buildList {
-                    if (text.isNotEmpty()) add(ImageSendPart.Text(text))
-                    submission.attachments.forEach { add(ImageSendPart.Image(it)) }
-                }
-                attempt.handle = controller.sendImages(conversation, target.owner, revision, parts, provider, text, checkNotNull(route)) {
+                attempt.handle = controller.sendImages(conversation, target.owner, revision, frozen.parts,
+                    provider, text, checkNotNull(route), frozen.identity) {
                     finish(target, attempt, it)
                 }
                 if (attempt.handle == null) finish(target, attempt,
@@ -281,17 +304,63 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         }
     }
 
+    /** Persist before admitting a newer text edit. Activity counters can repeat after process
+     * death; equal text/revision numbers alone never prove this is the submitted editor.
+     */
+    fun beforeTextEdit(): Boolean {
+        val target = session
+        if (target.frozen == null) return true
+        if (target.editorReplaced) return !storageFailed
+        target.editorReplaced = true
+        return persist()
+    }
+
+    val canRecover: Boolean get() = session.uncertain && session.frozen != null &&
+        session.attempt == null && !storageFailed && !sending
+
+    /** Reachable while fenced: receipt lookup only. Never clear a fence or route through send(). */
+    fun recover(expected: Session = session) {
+        if (closed || !visible || session !== expected || !canRecover) return
+        val frozen = expected.frozen ?: return
+        val submission = expected.attachments.beginSubmission() ?: return
+        val attempt = Attempt(submission, frozen.text)
+        expected.attempt = attempt
+        outstanding++
+        changed()
+        io.launch {
+            val result = controller.readImageReceipt(frozen)
+            withContext(Dispatchers.Main) { finish(expected, attempt, result) }
+        }
+    }
+
+    /** Captured by the current page; stale callbacks cannot cancel a later attempt or run.
+     * A false return means the commit gate already won: wait for the actual receipt.
+     */
+    fun cancelPreparation(expected: Session, attempt: Attempt): Boolean? {
+        if (closed || !visible || session !== expected || expected.attempt !== attempt || expected.uncertain) return null
+        return attempt.cancel().also { won ->
+            notice(if (won) "已请求取消准备；等待原发送结果" else "已进入提交；等待真实发送结果，未撤销")
+            changed()
+        }
+    }
+
     private fun finish(target: Session, attempt: Attempt, result: ImageSendResult) {
         if (target.attempt !== attempt) return
         // A malformed/mismatched receipt grants no deletion authority, and is never retried.
-        val exact = imageReceiptMatches(attempt.submission, result)
+        val frozen = target.frozen
+        val exact = imageReceiptMatches(attempt.submission, result) &&
+            (result !is ImageSendResult.Accepted || frozen != null &&
+                result.userId == frozen.identity.userId && result.assistantId == frozen.identity.assistantId &&
+                result.runId == frozen.identity.runId && controller.confirmImageReceipt(frozen, result))
         val acceptance = when {
             !exact -> ImageAttachmentAcceptance.Unknown
             result is ImageSendResult.Accepted -> ImageAttachmentAcceptance.Accepted
             result is ImageSendResult.Rejected -> ImageAttachmentAcceptance.Rejected
             else -> ImageAttachmentAcceptance.Unknown
         }
+        val editorUnchanged = !target.editorReplaced
         target.uncertain = acceptance == ImageAttachmentAcceptance.Unknown
+        if (!target.uncertain) { target.frozen = null; target.editorReplaced = false }
         target.attachments.finishSubmission(attempt.submission, acceptance)
         target.attempt = null
         if (exact && result is ImageSendResult.Accepted) {
@@ -301,16 +370,29 @@ internal class ImageChatHost private constructor(controller: ChatController) {
                 sessions.remove(null)
                 sessions[result.conversation.id.value] = target
             }
-            persist()
-            delete(result.images)
-            // The currently attached Activity reconciles BEFORE the global write gate opens.
-            // Never deliver exclusively to the Activity which happened to submit the request.
-            if (!closed) {
-                settled(result, attempt.text)
-                // Settlement may correctly decline navigation (e.g. recreated empty text).
-                // Reconcile the still-selected slot before admitting writes to that editor.
-                changed()
+            // Retire the consumed journal owner durably BEFORE any Activity callback. Main's
+            // editor revision can repeat after death, and its text check may decline settlement.
+            // A crash between these two saves restores a retired owner, never the old send lane.
+            if (target.generation == Long.MAX_VALUE) storageFailed = true // never wrap identities
+            else {
+                target.generation++
+                target.retired = true
             }
+            val retiredSaved = persist()
+            delete(result.images)
+            // Keep the original owner/revision just for Main's existing exact receipt check.
+            // Regardless of whether it clears text/navigates, open a fresh owned generation.
+            try {
+                if (retiredSaved && !closed && editorUnchanged) settled(result, attempt.text)
+            } finally {
+                if (retiredSaved) {
+                    target.replaceRetiredOwner()
+                    persist()
+                }
+            }
+            // Reconcile the still-selected slot before the global write gate opens. Never
+            // replace the currently selected Session, clear its text, or touch another owner.
+            if (!closed) changed()
         } else {
             persist()
             if (!closed && target === session && !target.abandoned) {

@@ -115,6 +115,181 @@ class ControllerImageSendingTest : InstrumentationTestCase() {
         } } finally { super.tearDown() }
     }
 
+    fun testNewControllerAndHostReadOnlyRecoveryUsesFrozenIdentityWithoutSettingsOrModel() {
+        val f = fixture(); val conversation = f.db.create("default")
+        val owner = ImageAttachmentOwner(conversation.id.value, "lost-process-editor")
+        val first = image(f, owner); val second = image(f, owner)
+        val parts = listOf(ImageSendPart.Text("before"), ImageSendPart.Image(first),
+            ImageSendPart.Text("between"), ImageSendPart.Image(second))
+        val identity = ImageSendIdentity.create()
+        val frozen = FrozenImageSend(owner, 17, "original composer", parts, identity)
+        val journal = f.app.getSharedPreferences("image-send-identities", 0)
+        val attempt = ControllerImageAttempt(owner, 17, parts, provider(f), ImageSendHandle(owner, 17),
+            journal, frozen.text, identity = identity)
+        assertNull(attempt.reserve(f.db))
+        val user = attempt.prepare(f.controller.imageAttachments.store,
+            MessageImageAssetStore(File(f.app.filesDir, "media-message-images")), 123L)
+        val assistant = Message(identity.assistantId, conversation.id, identity.runId,
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING, createdAt = 123L)
+        f.db.send(user, assistant)
+        f.db.save(assistant.copy(status = RunStatus.COMPLETED))
+        // Simulate accepted SQLite pair with no delivered callback / tombstone confirmation.
+        val store = ImageHostDraftStore(f.controller.preferences)
+        assertTrue(store.write(listOf(ImageHostDraftStore.Draft(conversation.id.value, owner, 17,
+            listOf(first, second), true, frozen))))
+        lateinit var oldHost: ImageChatHost
+        main {
+            oldHost = ImageChatHost.obtain(f.controller, {}, {}, { _, _ -> fail("lost callback") })
+            oldHost.enter(conversation.id.value)
+            assertTrue(oldHost.fenced)
+            oldHost.close()
+        }
+        f.controller.close()
+        val db = ConversationDatabase(f.app)
+        // Recovery must not consume a newer persisted editor, even if the owner is unchanged.
+        db.draft(conversation.id, "newer draft must survive")
+        f.app.getSharedPreferences("model-settings", 0).edit().clear().commit()
+        val factories = AtomicInteger()
+        val replacement = ChatController(f.app, db, f.settings, f.app.getSharedPreferences("conversation-ui", 0),
+            { factories.incrementAndGet(); error("recovery cannot create a model") },
+            { factories.incrementAndGet(); error("recovery cannot create an image model") })
+        val next = f.copy(db = db, controller = replacement)
+        fixtures.remove(f); fixtures.add(next)
+        await(next) { replacement.ready }
+        val rows = db.messages(conversation.id)
+        // Receipt lookup must not freeze/reopen the old draft bytes (published assets remain).
+        listOf(first, second).forEach { replacement.imageAttachments.store.remove(owner, it) }
+        assertTrue(replacement.imageAttachments.store.list(owner).isEmpty())
+        val journalBefore = journal.all.toMap()
+        val direct = replacement.readImageReceipt(frozen) as ImageSendResult.Accepted
+        assertEquals(identity.userId, direct.userId); assertEquals(identity.assistantId, direct.assistantId)
+        assertEquals(identity.runId, direct.runId)
+        assertEquals(journalBefore, journal.all) // receipt query is read-only, even advisory state
+        assertEquals(rows, db.messages(conversation.id))
+        val done = CountDownLatch(1)
+        lateinit var host: ImageChatHost
+        main {
+            host = ImageChatHost.obtain(replacement, {}, {}, { receipt, text ->
+                assertEquals(identity.userId, receipt.userId)
+                assertEquals(frozen.text, text)
+                done.countDown()
+            })
+            host.enter(conversation.id.value)
+            assertTrue(host !== oldHost)
+            assertEquals(owner, host.session.owner)
+            assertEquals(frozen, host.session.frozen)
+            assertTrue(host.canRecover)
+            host.recover()
+        }
+        assertTrue(done.await(10, TimeUnit.SECONDS))
+        main {
+            assertFalse(host.fenced)
+            assertTrue(host.session.attachments.state.value.items.isEmpty())
+            assertEquals(1L, host.session.generation)
+            assertFalse(owner == host.session.owner)
+            assertEquals(owner.conversationId, host.session.owner.conversationId)
+            host.close()
+        }
+        val successor = store.read().single { it.conversation == conversation.id.value }
+        assertEquals(host.session.owner, successor.owner)
+        assertEquals(1L, successor.generation)
+        assertFalse(successor.retired)
+        assertEquals("newer draft must survive", db.conversations().single().draft)
+        assertEquals(rows, db.messages(conversation.id))
+        assertTrue(journal.all.values.all { org.json.JSONObject(it as String).getBoolean("confirmed") })
+        // A genuinely new image uses the durable successor even with EXACTLY the old revision.
+        val nextParts = listOf(ImageSendPart.Image(image(next, successor.owner)))
+        val later = ControllerImageAttempt(successor.owner, 17, nextParts, null,
+            ImageSendHandle(successor.owner, 17), journal, "newer draft must survive")
+        assertNull(later.reserve(db))
+        assertTrue(later.rejected("test does not submit the new generation") is ImageSendResult.Rejected)
+        // Simulate death after the retirement commit but before the successor-owner save.
+        assertTrue(store.write(listOf(successor.copy(owner = owner, retired = true))))
+        val retired = store.read().single()
+        assertTrue(retired.retired)
+        val restored = ImageChatHost.Session(conversation.id.value, retired)
+        assertEquals(1L, restored.generation)
+        assertEquals(17L, restored.attachments.state.value.draft.revision)
+        assertFalse(owner == restored.owner)
+        assertFalse(restored.retired)
+        assertTrue(restored.attachments.state.value.items.isEmpty())
+        assertEquals(0, factories.get()); assertEquals(0, f.probe.opens.get())
+    }
+
+    fun testMissingContradictoryAndUnreadableReceiptsRemainUnknownWithoutWrites() {
+        val f = fixture(); val conversation = f.db.create("default")
+        val owner = ImageAttachmentOwner(conversation.id.value, "read-only-editor")
+        val attachment = image(f, owner)
+        val parts = listOf(ImageSendPart.Image(attachment), ImageSendPart.Text("after"))
+        val identity = ImageSendIdentity.create()
+        val frozen = FrozenImageSend(owner, 4, "draft", parts, identity)
+        val journal = f.app.getSharedPreferences("image-send-identities", 0)
+        val attempt = ControllerImageAttempt(owner, 4, parts, provider(f), ImageSendHandle(owner, 4),
+            journal, frozen.text, identity = identity)
+        assertNull(attempt.reserve(f.db))
+        val pending = journal.all.toMap()
+        repeat(2) { assertTrue(f.controller.readImageReceipt(frozen) is ImageSendResult.Unknown) }
+        assertEquals(pending, journal.all)
+        assertTrue(f.db.messages(conversation.id).isEmpty())
+        val store = ImageHostDraftStore(f.controller.preferences)
+        assertTrue(store.write(listOf(ImageHostDraftStore.Draft(conversation.id.value, owner, 4,
+            listOf(attachment), true, frozen))))
+        val lookedUp = CountDownLatch(1)
+        lateinit var host: ImageChatHost
+        main {
+            host = ImageChatHost.obtain(f.controller, { if (!host.sending) lookedUp.countDown() }, {},
+                { _, _ -> fail("missing receipt is not acceptance") })
+            host.enter(conversation.id.value)
+            host.send(conversation, 999, "must not enqueue", { true }) // busy UNKNOWN rejects send
+            assertEquals(frozen, host.session.frozen)
+            host.recover()
+        }
+        assertTrue(lookedUp.await(10, TimeUnit.SECONDS))
+        main {
+            assertTrue(host.fenced); assertTrue(host.canRecover)
+            assertEquals(frozen, host.session.frozen)
+            assertEquals(listOf(attachment), host.session.attachments.state.value.ready.map { it.attachment })
+            host.close()
+        }
+        assertEquals(frozen, store.read().single { it.owner == owner }.frozen)
+        assertEquals(pending, journal.all)
+        val user = attempt.prepare(f.controller.imageAttachments.store,
+            MessageImageAssetStore(File(f.app.filesDir, "media-message-images")), 0L)
+        val assistant = Message(identity.assistantId, conversation.id, identity.runId,
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING, createdAt = 0L)
+        f.db.send(user, assistant)
+        f.db.save(assistant.copy(status = RunStatus.COMPLETED))
+        assertTrue(f.controller.readImageReceipt(frozen.copy(parts = parts.reversed())) is ImageSendResult.Unknown)
+        assertTrue(f.controller.readImageReceipt(frozen.copy(identity = identity.copy(runId = RunId("wrong")))) is ImageSendResult.Unknown)
+        f.db.save(user.copy(blocks = user.blocks + MessageBlock.Text("tampered", "not the original")))
+        assertTrue(f.controller.readImageReceipt(frozen) is ImageSendResult.Unknown)
+        f.db.save(user)
+        assertTrue(f.controller.readImageReceipt(frozen) is ImageSendResult.Accepted)
+        // Loss of the advisory journal is not loss of the host's original durable identity.
+        journal.edit().clear().commit()
+        assertTrue(f.controller.readImageReceipt(frozen) is ImageSendResult.Accepted)
+        val key = pending.keys.single()
+        journal.edit().putString(key, "invalid-json").commit()
+        assertTrue(f.controller.readImageReceipt(frozen) is ImageSendResult.Unknown)
+        assertEquals("invalid-json", journal.getString(key, null))
+        journal.edit().clear().commit()
+        f.db.writableDatabase.execSQL("ALTER TABLE messages RENAME TO unavailable_image_receipt")
+        try { assertTrue(f.controller.readImageReceipt(frozen) is ImageSendResult.Unknown) }
+        finally { f.db.writableDatabase.execSQL("ALTER TABLE unavailable_image_receipt RENAME TO messages") }
+        assertEquals(2, f.db.messages(conversation.id).size)
+        assertEquals(0, f.probe.opens.get())
+    }
+
+    fun testImageHandleCancelWinsOnlyBeforeCommitGate() {
+        val owner = ImageAttachmentOwner("gate-conversation", "gate-draft")
+        val callbacks = AtomicInteger()
+        val cancelled = ImageSendHandle(owner, 1) { callbacks.incrementAndGet() }
+        assertTrue(cancelled.cancel()); assertFalse(cancelled.beginCommit())
+        val committed = ImageSendHandle(owner, 2) { callbacks.incrementAndGet() }
+        assertTrue(committed.beginCommit()); assertFalse(committed.cancel())
+        assertFalse(committed.isCancelled()); assertEquals(1, callbacks.get())
+    }
+
     fun testPreparedImageTimeAndReceiptReconstructionUseOriginalRowIncludingLegacyNullAndEpoch() {
         val f = fixture()
         val journal = f.app.getSharedPreferences("image-send-identities", 0)

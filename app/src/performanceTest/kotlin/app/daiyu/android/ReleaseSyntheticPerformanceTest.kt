@@ -35,7 +35,6 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
     private val ui = createEmptyComposeRule()
     private fun legacyRunBare() = super.runBare()
     override fun runBare() {
-        InstrumentationRegistry.registerInstance(instrumentation, Bundle())
         ui.apply(object : Statement() { override fun evaluate() = legacyRunBare() },
             Description.createTestDescription(javaClass, name)).evaluate()
     }
@@ -57,7 +56,15 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
         try { check(latch.await(5, TimeUnit.SECONDS)) { "synthetic_draw_missing" }; return timestamp.get() }
         finally { main { if (view.viewTreeObserver.isAlive) view.viewTreeObserver.removeOnDrawListener(listener) } }
     }
-    fun testCollectRawFramesAndSyntheticInputUpperBounds() {
+    fun testCollectRawFramesAndSyntheticInputUpperBounds() = collect(fullScale = false)
+
+    fun testCollectFullScaleScrollInputAndBackendMigration() {
+        val args = InstrumentationRegistry.getArguments()
+        check(args.getString("daiyuFullPerformance") == "true") { "explicit_full_performance_opt_in_required" }
+        collect(fullScale = true)
+    }
+
+    private fun collect(fullScale: Boolean) {
         val target = instrumentation.targetContext
         check(target.packageName == "app.daiyu.android.synthetic") { "non_synthetic_target_refused" }
         check(instrumentation.context.packageName == "${target.packageName}.test")
@@ -65,29 +72,49 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
         check(target.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0)
         check(target.applicationInfo.isProfileableByShell)
         val application = target.applicationContext as ChatApplication
-        val original = main { application.controller }; awaitReady(original)
+        val original = main { application.controller }
         val id = UUID.randomUUID().toString()
         val output = File(checkNotNull(target.getExternalFilesDir("synthetic-performance")), "raw-$id.jsonl")
-        val fixture = PerformanceFixture(target, id)
+        var fixture: PerformanceFixture? = null
         var activity: MainActivity? = null; var collector: SyntheticFrameCollector? = null
         var injected = false; var complete = false; var primaryFailure: Throwable? = null
+        var cleanupFailed = false
+        var frameReportWritten = false
+        var stage = "initialization"
+        var migrationReport: File? = null
+        var migrationPackageFile: File? = null
         var scrollStart = 0L; var scrollEnd = 0L; var refreshRate = 0f; var preferredRate = 0f
         val inputs = ArrayList<JSONObject>()
+        var dataset: FullPerformanceDataset.Snapshot? = null
+        var migration: FullPerformanceDataset.Package? = null
         try {
-            awaitReady(fixture.controller)
-            val conversation = fixture.database.create("default")
-            repeat(80) { index ->
+            awaitReady(original)
+            val activeFixture = PerformanceFixture(target, id, onConstructionCleanupFailure = { cleanupFailed = true }).also { fixture = it }
+            stage = "dataset_setup"
+            awaitReady(activeFixture.controller)
+            val conversation = if (fullScale) {
+                val backup = app.daiyu.android.backup.NeutralBackupService(activeFixture.context, activeFixture.database)
+                val selected = FullPerformanceDataset.seed(activeFixture.database, backup)
+                val packageFile = File(output.parentFile, "migration-$id.package.json")
+                migrationPackageFile = packageFile
+                migration = FullPerformanceDataset.buildPackage(activeFixture.database, backup, packageFile)
+                dataset = FullPerformanceDataset.snapshot(activeFixture.database, backup)
+                File(output.parentFile, "dataset-$id.json").writeText(checkNotNull(dataset).manifest)
+                selected
+            } else activeFixture.database.create("default")
+            if (!fullScale) repeat(80) { index ->
                 val run = RunId("synthetic-run-$index")
-                fixture.database.send(
+                activeFixture.database.send(
                     Message(MessageId("synthetic-user-$index"), conversation.id, run, Message.USER_ROLE,
                         listOf(MessageBlock.Text("u", "Synthetic prompt $index")), RunStatus.COMPLETED),
                     Message(MessageId("synthetic-answer-$index"), conversation.id, run, Message.ASSISTANT_ROLE,
                         listOf(MessageBlock.Text("a", "Synthetic response $index\n".repeat(8))), RunStatus.RUNNING))
-                fixture.database.messages(conversation.id, limit = 1).last().second.let { answer ->
-                    fixture.database.save(answer.copy(status = RunStatus.COMPLETED))
+                activeFixture.database.messages(conversation.id, limit = 1).last().second.let { answer ->
+                    activeFixture.database.save(answer.copy(status = RunStatus.COMPLETED))
                 }
             }
-            main { application.controller = fixture.controller; injected = true }
+            stage = "activity_setup"
+            main { application.controller = activeFixture.controller; injected = true }
             val launched = instrumentation.startActivitySync(Intent(target, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
             activity = launched; ui.waitForIdle(); main { launched.select(conversation) }; ui.waitForIdle()
@@ -95,6 +122,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
             ui.onNodeWithTag("chat-messages").assertIsDisplayed()
             main { refreshRate = launched.window.decorView.display.refreshRate; preferredRate = launched.window.attributes.preferredRefreshRate }
             val captured = SyntheticFrameCollector(instrumentation, launched.window); collector = captured
+            stage = "scroll"
             captured.scenario("synthetic_scroll"); scrollStart = System.nanoTime()
             val deadline = scrollStart + TimeUnit.SECONDS.toNanos(30)
             var direction = false
@@ -105,6 +133,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                 direction = !direction
             }
             ui.waitForIdle(); scrollEnd = System.nanoTime(); captured.scenario("synthetic_semantics_input")
+            stage = "semantics_input"
             repeat(20) { round ->
                 val text = "SYNTHETIC-$round"; val start = System.nanoTime()
                 ui.onNodeWithTag("chat-draft").performTextReplacement(text)
@@ -115,12 +144,29 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                     .put("method", "semantics_text_replacement_to_verified_text_next_draw")
                     .put("latency_kind", "instrumented_upper_bound").put("hardware_input_latency", false)
                     .put("ime_commit_latency", false).put("present_latency", false)
+                    .put("first_visible_feedback_measured", false)
                     .put("start_ns", start).put("semantics_verified_ns", verified).put("next_draw_ns", draw)
                     .put("upper_bound_ns", draw - start))
             }
             captured.close()
             assertTrue("raw frames missing", captured.frameCount > 0)
             assertEquals(0L, captured.overflow); assertEquals(0L, captured.droppedReports); assertEquals(20, inputs.size)
+            if (fullScale) {
+                stage = "backend_migration"
+                val targetFixture = PerformanceFixture(target, "$id-migration", createController = false,
+                    onConstructionCleanupFailure = { cleanupFailed = true })
+                AutoCloseable {
+                    try { targetFixture.close() }
+                    catch (failure: Throwable) { cleanupFailed = true; throw failure }
+                }.use {
+                    val sample = FullPerformanceDataset.migrate(targetFixture.context, targetFixture.database,
+                        checkNotNull(migration), checkNotNull(dataset)).put("collection_id", id)
+                    File(output.parentFile, "migration-$id.json").also { report ->
+                        report.writeText(sample.toString()); migrationReport = report
+                    }
+                }
+            }
+            stage = "completed"
             complete = true
         } catch (failure: Throwable) { primaryFailure = failure; throw failure }
         finally {
@@ -128,6 +174,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
             fun cleanup(action: () -> Unit) {
                 try { action() }
                 catch (failure: Throwable) {
+                    cleanupFailed = true
                     val first = primaryFailure
                     if (first == null) primaryFailure = failure else if (first !== failure) first.addSuppressed(failure)
                 }
@@ -143,29 +190,61 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                 }
             }
             cleanup { if (injected) main { application.controller = original } }
-            cleanup { fixture.close() }
+            cleanup { fixture?.close() }
             cleanup {
                 collector?.let { captured ->
-                    captured.write(output, JSONObject().put("application_id", target.packageName)
+                    captured.write(output, JSONObject().put("collection_id", id)
+                        .put("fixture_mode", if (fullScale) "full_scale" else "small_smoke")
+                        .put("application_id", target.packageName)
                         .put("activity", MainActivity::class.java.name).put("debuggable", false).put("profileable", true)
                         .put("sdk", Build.VERSION.SDK_INT).put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL)
                         .put("refresh_rate_hz_at_start", refreshRate).put("preferred_refresh_rate_hz_at_start", preferredRate)
-                        .put("fixture_messages", 160).put("fixture_matches_approved_dataset", false)
+                        .put("expected_fixture_messages", if (fullScale) 10000 else 160)
+                        .put("expected_fixture_conversations", if (fullScale) 1000 else 1)
+                        .put("fixture_matches_approved_dataset", false)
+                        .put("full_scale_fixture_verified", dataset != null)
+                        .put("dataset_sha256", dataset?.sha256 ?: JSONObject.NULL)
+                        .put("migration_package_sha256", migration?.sha256 ?: JSONObject.NULL)
+                        .put("migration_package_bytes", if (migration != null) FullPerformanceDataset.PACKAGE_BYTES else 0L)
+                        .put("mb_definition", "decimal_1000000_bytes")
                         .put("scroll_start_ns", scrollStart).put("scroll_end_ns", scrollEnd)
                         .put("scroll_window_includes_driver_idle_time", true).put("collection_completed", complete)
-                        .put("cleanup_succeeded", primaryFailure == null)
+                        .put("cleanup_succeeded", !cleanupFailed)
+                        .put("cleanup_scope", "fixture_controller_databases_preferences_cache")
+                        .put("backend_migration_report", migrationReport?.name ?: JSONObject.NULL)
                         .put("failure_class", primaryFailure?.javaClass?.name ?: JSONObject.NULL), inputs)
-                    instrumentation.sendStatus(0, Bundle().apply {
-                        putString("synthetic_performance_report", output.absolutePath); putString("business_acceptance", "false")
-                    })
+                    frameReportWritten = true
                 }
+            }
+            cleanup {
+                val status = File(output.parentFile, "status-$id.json")
+                status.writeText(JSONObject().put("schema", "daiyu.synthetic.performance.status.v1")
+                    .put("collection_id", id).put("fixture_mode", if (fullScale) "full_scale" else "small_smoke")
+                    .put("collection_completed", complete).put("failure_stage", if (primaryFailure == null) JSONObject.NULL else stage)
+                    .put("failure_class", primaryFailure?.javaClass?.name ?: JSONObject.NULL)
+                    .put("cleanup_succeeded", !cleanupFailed)
+                        .put("cleanup_scope", "fixture_controller_databases_preferences_cache").put("frame_report_written", frameReportWritten)
+                    .put("frame_report", if (frameReportWritten) output.name else JSONObject.NULL)
+                    .put("backend_migration_report", migrationReport?.name ?: JSONObject.NULL)
+                    .put("dataset_verified", dataset != null).put("synthetic_data", true)
+                    .put("retained_migration_package", migrationPackageFile?.name ?: JSONObject.NULL)
+                    .put("retained_migration_package_bytes", migrationPackageFile?.length() ?: 0L)
+                    .put("retained_migration_package_integrity_verified", migration != null)
+                    .put("production_delivery", false).put("business_acceptance", false)
+                    .put("collection_authenticated", false).toString())
+                instrumentation.sendStatus(0, Bundle().apply {
+                    putString("synthetic_performance_status", status.absolutePath)
+                    if (frameReportWritten) putString("synthetic_performance_report", output.absolutePath)
+                    putString("business_acceptance", "false")
+                })
             }
             if (!bodyFailed) primaryFailure?.let { throw it }
         }
     }
 }
 
-private class PerformanceFixture(private val base: Context, id: String) : AutoCloseable {
+private class PerformanceFixture(private val base: Context, id: String, createController: Boolean = true,
+    private val onConstructionCleanupFailure: () -> Unit = {}) : AutoCloseable {
     private val prefix = "performance-$id-"
     private var controllerConstructionStarted = false
     private val root = File(base.cacheDir, "performance-fixture-$id")
@@ -189,6 +268,8 @@ private class PerformanceFixture(private val base: Context, id: String) : AutoCl
         init { attachBaseContext(base) }
         override fun getApplicationContext(): Context = this
     }
+    lateinit var context: Context
+        private set
     lateinit var database: ConversationDatabase
         private set
     lateinit var controller: ChatController
@@ -198,19 +279,23 @@ private class PerformanceFixture(private val base: Context, id: String) : AutoCl
         try {
             check(root.mkdirs())
             val application = FixtureApplication(isolated)
+            context = application
             database = ConversationDatabase(application)
-            val surfaces = TaskSurfaceStore(object : TaskSurfacePersistence {
-                private var record: String? = null
-                @Synchronized override fun read() = record
-                @Synchronized override fun write(record: String) { this.record = record }
-            }).apply { check(save(TaskSurfacePreference.FOREGROUND)) }
-            val modelSettings = ModelSettingsStore(application, "app.daiyu.android.synthetic.performance.$id")
-            val uiPreferences = application.getSharedPreferences("conversation-ui", 0)
-            controllerConstructionStarted = true
-            controller = ChatController(application, database, modelSettings, uiPreferences,
-                { error("external_model_request_forbidden") }, taskSurfaceStore = surfaces)
+            if (createController) {
+                val surfaces = TaskSurfaceStore(object : TaskSurfacePersistence {
+                    private var record: String? = null
+                    @Synchronized override fun read() = record
+                    @Synchronized override fun write(record: String) { this.record = record }
+                }).apply { check(save(TaskSurfacePreference.FOREGROUND)) }
+                val modelSettings = ModelSettingsStore(application, "app.daiyu.android.synthetic.performance.$id")
+                val uiPreferences = application.getSharedPreferences("conversation-ui", 0)
+                controllerConstructionStarted = true
+                controller = ChatController(application, database, modelSettings, uiPreferences,
+                    { error("external_model_request_forbidden") }, taskSurfaceStore = surfaces)
+            }
         } catch (failure: Throwable) {
             try { close() } catch (cleanup: Throwable) {
+                onConstructionCleanupFailure()
                 if (cleanup !== failure) failure.addSuppressed(cleanup)
             }
             throw failure

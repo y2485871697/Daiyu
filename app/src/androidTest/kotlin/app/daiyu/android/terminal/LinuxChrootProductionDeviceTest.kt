@@ -1,7 +1,7 @@
 package app.daiyu.android.terminal
 
 import android.test.InstrumentationTestCase
-import android.test.InstrumentationTestRunner
+import androidx.test.platform.app.InstrumentationRegistry
 import app.daiyu.android.domain.ConversationId
 import app.daiyu.android.domain.tools.TaskAuthorization
 import org.json.JSONObject
@@ -57,7 +57,7 @@ class LinuxChrootProductionDeviceTest : InstrumentationTestCase() {
     }
 
     fun testExplicitRootChrootSelectionAndDetachedDescendantDrain() {
-        val args = (instrumentation as InstrumentationTestRunner).arguments
+        val args = InstrumentationRegistry.getArguments()
         if (args.getString("daiyuChrootOptIn") != "true") return
         val context = instrumentation.targetContext
         check(context.packageName == "app.daiyu.android.synthetic") { "isolated_synthetic_required" }

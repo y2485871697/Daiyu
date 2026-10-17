@@ -80,8 +80,8 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         val (second, _) = seedHistory("new conversation output")
         val old = open(first)
         val record = (property(old, "getHistory") as List<TerminalJobHistoryReader.Record>).single()
-        // launch executes through withContext(IO) now; its Main continuation cannot publish
-        // until this same Main turn has switched owner and revoked the original visit.
+        // The accepted read is queued. This same Main turn revokes its visit before
+        // admission; neither the worker refusal nor a result may refill the old UI.
         mainThread {
             invoke("terminalHistoryPage", old, record, 0L)
             activity.select(second)
@@ -107,7 +107,10 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         val (conversation, _) = seedHistory("paused history must not publish")
         val old = open(conversation)
         val record = (property(old, "getHistory") as List<TerminalJobHistoryReader.Record>).single()
-        realPauseResume(activity, beforePause = { invoke("terminalHistoryPage", old, record, 0L) }) {
+        realPauseResume(activity, beforePause = {
+            invoke("terminalHistoryPage", old, record, 0L)
+            assertEquals(true, property(old, "getBusy"))
+        }) {
             assertNull(invoke("getTerminalJobsVisit"))
         }
         awaitControl("paused history worker returned") { property(old, "getBusy") == false }

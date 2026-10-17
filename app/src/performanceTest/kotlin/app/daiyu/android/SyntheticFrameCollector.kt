@@ -81,7 +81,8 @@ internal class SyntheticFrameCollector(instrumentation: Instrumentation, private
                 .put("collector_overflow_count", overflow).put("metric_unavailable_value", -1)
                 .put("scenario_label_kind", "hint_at_callback_delivery").put("environment", environment)
                 .put("metric_names", JSONArray(metrics.keys.toList()))
-                .put("not_measured", JSONArray(listOf("cold_start", "migration", "stop_feedback", "streaming", "ime", "anr_count", "memory_growth"))))
+                .put("measurement_scope", "frame_and_semantics_input_only")
+                .put("not_measured_by_this_report", JSONArray(listOf("cold_start", "migration_ui_progress", "backend_migration", "stop_feedback", "streaming", "ime", "anr_count", "memory_growth"))))
             copy.forEachIndexed { index, raw ->
                 line(JSONObject().put("type", "frame").put("index", index).put("callback_ns", raw.callbackNs)
                     .put("scenario_hint", raw.label).put("framework_drop_count", raw.dropped)

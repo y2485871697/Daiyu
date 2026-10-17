@@ -99,7 +99,7 @@ class AndroidPtyHostTest : InstrumentationTestCase() {
         val root = File(context.cacheDir, "linux-pty-unselected-${UUID.randomUUID()}").apply { mkdirs() }
         val journal = File(root, "journal")
         try {
-            expectRefusal(LinuxRuntimePlatform.unavailableReason() ?: "linux_environment_not_selected") {
+            expectRefusal("linux_environment_not_selected") {
                 AndroidPtyHost.openLinux(context, owner(), LinuxEnvironmentStore(File(root, "selection")),
                     LinuxGenerationRef("android", "installed"), root, root, journal, "unselected")
             }
@@ -121,7 +121,7 @@ class AndroidPtyHostTest : InstrumentationTestCase() {
             val denied = session.write(copied, "denied", 1, "exit 99\n".toByteArray())
             assertEquals("not_executed", denied.getString("execution"))
             val delivery = session.write(owner.authorization, "probe", 1,
-                ("if [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; then stty size; " +
+                ("if [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; then stty size || exit 92; " +
                     "printf '\\nandroid-pty-live\\n'; exit 7; else exit 91; fi\n").toByteArray())
             assertTrue(delivery.getBoolean("helper_input_written"))
             assertEquals("unknown", delivery.getString("pty_delivery"))
@@ -135,10 +135,10 @@ class AndroidPtyHostTest : InstrumentationTestCase() {
                 result = session.read(owner.authorization)
             }
             assertEquals("exited", result.getString("state"))
-            assertEquals(7 shl 8, result.getInt("wait_status"))
+            assertEquals("PTY probe stdout=${result.getString("stdout")}", 7 shl 8, result.getInt("wait_status"))
             val lines = result.getString("stdout").lines().map(String::trim)
             assertTrue("shell stdio must be a real PTY", "android-pty-live" in lines)
-            assertTrue("host dimensions must reach the slave", "31 97" in lines)
+            assertTrue("host dimensions must reach the slave; stdout=${result.getString("stdout")}", "31 97" in lines)
             assertTrue("the adapter must never create WRITE grants", owner.authorization.allowedWrites.isEmpty())
         } catch (failure: PtyStartupFailure) {
             startupCleanup = failure.cleanup

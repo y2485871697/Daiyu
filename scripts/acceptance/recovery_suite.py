@@ -407,7 +407,7 @@ def source_results(files, source, run, jobs, sha, attempt):
     require(isinstance(command, list) and command and all(isinstance(a, str) for a in command), "invalid_execution_command")
     if kind == "instrumentation":
         require(command == ["adb", "shell", "am", "instrument", "-w",
-                            "app.daiyu.android.test/android.test.InstrumentationTestRunner"], "wrong_instrumentation_command")
+                            "app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner"], "wrong_instrumentation_command")
         require(receipt.get("physical_device") is False and receipt.get("sdk_int") == (26 if api == "26" else 37),
                 "emulator_api_mismatch")
     elif kind == "domain":

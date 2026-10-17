@@ -433,13 +433,36 @@ class SQLiteGenerationOutputStoreTest : InstrumentationTestCase() {
             f.db.execSQL("DROP TRIGGER fail_output")
             assertEquals(0, f.count("generation_outputs"))
         }
-        f.db.execSQL("CREATE TABLE commit_guard(owner TEXT REFERENCES conversations(id) DEFERRABLE INITIALLY DEFERRED)")
-        f.db.execSQL("CREATE TRIGGER fail_output AFTER INSERT ON generation_outputs BEGIN INSERT INTO commit_guard VALUES('missing'); END")
+        val failedDb = f.db
+        failedDb.execSQL("CREATE TABLE commit_guard(owner TEXT REFERENCES conversations(id) DEFERRABLE INITIALLY DEFERRED)")
+        failedDb.execSQL("CREATE TRIGGER fail_output AFTER INSERT ON generation_outputs BEGIN INSERT INTO commit_guard VALUES('missing'); END")
         rejects { store.register(f.attempt, pending) }
-        f.db.execSQL("DROP TRIGGER fail_output")
-        assertEquals(0, f.count("generation_outputs")); assertEquals(1, f.count("generation_attempts"))
+        assertFalse("production must quarantine the failed database object", failedDb.isOpen)
+        val recovered = f.db
+        assertNotSame(failedDb, recovered); assertSame(recovered, f.db)
+        fun verifyNoFailedWrite(db: SQLiteDatabase) {
+            fun count(table: String) = db.rawQuery("SELECT count(*) FROM $table", null).use {
+                check(it.moveToFirst()); it.getInt(0)
+            }
+            assertEquals(0, count("generation_outputs")); assertEquals(0, count("commit_guard"))
+            assertEquals(1, count("generation_attempts"))
+            db.rawQuery("SELECT fingerprint,protocol FROM generation_attempts", null).use {
+                assertTrue(it.moveToFirst()); assertEquals(f.attempt.fingerprint, it.getString(0))
+                assertEquals(f.attempt.protocol.name, it.getString(1)); assertFalse(it.moveToNext())
+            }
+        }
+        verifyNoFailedWrite(recovered)
+        val independentlyReopened = helper(File(f.root, "owner.sqlite"))
+        verifyNoFailedWrite(independentlyReopened.writableDatabase)
+        assertNull(store.find(f.attempt, 0))
         assertEquals(pending, f.assets().pending(pending.receipt)) // Files were NOT cleaned up on DB failure.
+        recovered.execSQL("DROP TRIGGER fail_output")
         assertEquals(pending.receipt, store.register(f.attempt, pending).receipt)
+        f.helper.close()
+        assertEquals(1, f.count("generation_outputs")); assertEquals(0, f.count("commit_guard"))
+        assertEquals(1, f.count("generation_attempts"))
+        assertEquals(pending.receipt, store.find(f.attempt, 0)!!.receipt)
+        assertTrue(png.contentEquals(store.open(f.attempt, 0)!!.use { it.readBytes() }))
     }
 
     fun testPublishedSlotRecoversWithoutRetainedReceiptAfterSqlFailureAndReopen() {

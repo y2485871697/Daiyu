@@ -2145,19 +2145,23 @@ class MainActivity : ComponentActivity() {
         platformActionVisit = Any()
         controller.platformActionPreparation()?.let(controller::rejectPlatformAction)
     }
+    private fun platformActionCurrent(visit: Any, expected: ChatController.TextSendOwner, text: String): Boolean =
+        platformActionVisit === visit && voiceForeground && activityUsable() && retainedPage == "chat" && !sidebarVisible && selectionReady &&
+            ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) == expected &&
+            draft == text && !imageHost.hasAttachments && videoHost.state.items.isEmpty() &&
+            !videoSending && pendingTextSend == null && shizukuEditor == null &&
+            browserApproval == null && generationApproval == null && terminalEditor == null &&
+            mcpApproval == null && !mcpPreparing && guiEditor == null && virtualDisplayEditor == null
+
     @Composable private fun PlatformActionComposerEntry(available: Boolean) {
         val visit = platformActionVisit
         val owner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
         val originalText = draft
-        fun current(expected: ChatController.TextSendOwner, text: String): Boolean =
-            platformActionVisit === visit && voiceForeground && activityUsable() && retainedPage == "chat" && !sidebarVisible && selectionReady &&
-                ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) == expected &&
-                draft == text && !imageHost.hasAttachments && videoHost.state.items.isEmpty() &&
-                !videoSending && pendingTextSend == null && shizukuEditor == null &&
-                browserApproval == null && generationApproval == null && terminalEditor == null &&
-                mcpApproval == null && !mcpPreparing && guiEditor == null && virtualDisplayEditor == null
+        val current: (ChatController.TextSendOwner, String) -> Boolean = remember(visit) {
+            { expected, value -> platformActionCurrent(visit, expected, value) }
+        }
         app.daiyu.android.ui.PlatformActionApprovalHost(controller, selected, originalText, owner, visit,
-            enabled = available && current(owner, originalText), isCurrent = ::current,
+            enabled = available && current(owner, originalText), isCurrent = current,
             onAccepted = { preview, saved ->
                 if (current(owner, originalText) && preview.conversation?.id == owner.conversationId &&
                     preview.text == originalText && saved.id == preview.conversationId) {
@@ -2462,7 +2466,7 @@ class MainActivity : ComponentActivity() {
         record: app.daiyu.android.terminal.TerminalJobHistoryReader.Record, offset: Long) {
         if (!terminalJobsCurrent(visit) || visit.busy || record !in visit.history) return
         visit.busy = true
-        lifecycleScope.launch {
+        lifecycleScope.launch(Dispatchers.Main) {
             try {
                 val result = withContext(Dispatchers.IO) {
                     controller.terminalJobHistoryPageOnWorker(visit.conversation, record, offset, 16384) { !visit.revoked.get() }

@@ -1,5 +1,8 @@
 package app.daiyu.android.terminal.install
 
+import app.daiyu.android.terminal.hostLinuxCatalog
+import app.daiyu.android.terminal.hostDirectorySync
+import app.daiyu.android.terminal.hostLinuxStore
 import app.daiyu.android.terminal.FrozenLinuxApproval
 import app.daiyu.android.terminal.LinuxGenerationRef
 import app.daiyu.android.terminal.LinuxInstallation
@@ -265,12 +268,12 @@ class LinuxProductionCompositionTest : TestCase() {
             val configuration = LinuxInstallation("alpine", "env", "original", guest,
                 proot, hash(proot), loader, hash(loader))
             val directory = File(root, "catalog")
-            val catalog = app.daiyu.android.terminal.TrustedLinuxCatalog(directory, { dir ->
+            val catalog = app.daiyu.android.terminal.hostLinuxCatalog(directory, { dir ->
                 if (dir == directory && File(directory, "trusted-linux-catalog.json").isFile && holding.count > 0) {
                     holding.countDown()
                     check(release.await(5, java.util.concurrent.TimeUnit.SECONDS))
                 }
-                app.daiyu.android.terminal.TerminalDurability.syncDirectory(dir)
+                app.daiyu.android.terminal.hostDirectorySync(dir)
             }, { if (calls.incrementAndGet() == 2) queued.countDown() })
             val adapter = app.daiyu.android.terminal.LinuxSettingsCatalogAdapter(catalog)
             val transactions = Transactions()

@@ -15,3 +15,7 @@ internal fun hostDirectorySync(directory: File) {
 internal fun hostJournal(directory: File, scope: String, limit: Int = 256, binding: JSONObject? = null) =
     OperationJournal(directory, scope, limit, binding, ::hostDirectorySync)
 
+
+internal fun hostLinuxStore(directory: File) = LinuxEnvironmentStore(directory, ::hostDirectorySync)
+internal fun hostLinuxCatalog(directory: File, directorySync: (File) -> Unit = ::hostDirectorySync,
+    beforeApprovalGate: () -> Unit = {}) = TrustedLinuxCatalog(directory, directorySync, beforeApprovalGate)

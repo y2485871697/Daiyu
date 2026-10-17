@@ -93,3 +93,11 @@ enum class ModelFailure(val userMessage: String) {
     NETWORK("网络连接失败，请检查服务地址和网络；未自动重试")
 }
 class ModelRequestException(val failure: ModelFailure) : RuntimeException("Model request failed")
+
+/** A local reconnect budget expiry, never a retryable provider/network failure. */
+open class TransportReconnectDeadlineException(lateSuccess: Boolean = false) : RuntimeException(
+    if (lateSuccess) "错误重连期限已到，未接纳迟到的响应；此前正文和工具结果已保留。"
+    else "错误重连期限已到，模型请求仍未恢复；此前正文和工具结果已保留。"
+) {
+    val userMessage: String = checkNotNull(message)
+}

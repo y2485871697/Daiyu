@@ -55,7 +55,7 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
     private fun show(actions: Actions) {
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     val state by actions.state.collectAsState()
                     ContextManagementPanel(state, actions, onClose = { actions.close() })
                 }

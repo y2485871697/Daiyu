@@ -23,7 +23,7 @@ class DeviceQueryBoundsTest : InstrumentationTestCase() {
             queries++
             // Deliberately ignores query limit hints, as a real provider is allowed to do.
             return MatrixCursor(arrayOf("_id", "name")).apply {
-                repeat(75) { addRow(arrayOf(it.toLong(), "fixture-" + "x".repeat(1024))) }
+                repeat(75) { addRow(arrayOf<Any?>(it.toLong(), "fixture-" + "x".repeat(1024))) }
                 returned = this
             }
         }

@@ -31,6 +31,7 @@ class RootlessLinuxInstallerTest : TestCase() {
         var beforeDownload: (() -> Unit)? = null
         var afterExtract: (() -> Unit)? = null
         val cancellation = LinuxInstallCancellation()
+        val fileOps = HostInstallLinkFileOps()
 
         fun installer(sync: (File) -> Unit = {},
                       move: ((File, File) -> Unit)? = null,
@@ -63,7 +64,7 @@ class RootlessLinuxInstallerTest : TestCase() {
             { from, to ->
                 moves++
                 if (move != null) move(from, to) else { Files.move(from.toPath(), to.toPath()); Unit }
-            }
+            }, fileOps = fileOps
         )
     }
 
@@ -175,14 +176,15 @@ class RootlessLinuxInstallerTest : TestCase() {
     }
 
     fun testDirectoryConfirmationDoesNotChangeExternalRootPermissionsOrSyncItsAncestors() = fixture { f ->
-        val permissions = PosixFilePermissions.fromString("rwxr-x---")
-        Files.setPosixFilePermissions(f.root.toPath(), permissions)
+        if ((Files.getFileAttributeView(f.root.toPath(), java.nio.file.attribute.PosixFileAttributeView::class.java, java.nio.file.LinkOption.NOFOLLOW_LINKS) != null))
+            Files.setPosixFilePermissions(f.root.toPath(), PosixFilePermissions.fromString("rwxr-x---"))
+        val permissions = HostInstallFileOps.permissions(f.root)
         val synced = mutableListOf<File>()
         val installer = f.installer(sync = { synced.add(it) })
         val prepared = installer.prepare(f.artifact, "primary", f.installation)
         val receipt = installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation)
         assertTrue(receipt.directorySyncConfirmed)
-        assertEquals(permissions, Files.getPosixFilePermissions(f.root.toPath()))
+        assertEquals(permissions, HostInstallFileOps.permissions(f.root))
         assertTrue(synced.contains(f.root))
         assertTrue(synced.all { it.toPath().startsWith(f.root.toPath()) })
     }
@@ -322,7 +324,7 @@ class RootlessLinuxInstallerTest : TestCase() {
         rejected { installer.inspectPublished(prepared) }
         marker.writeBytes(saved)
         File(f.target, "bin/sh").delete()
-        Files.createSymbolicLink(File(f.target, "bin/sh").toPath(), f.proot.toPath())
+        f.fileOps.createSymbolicLink(File(f.target, "bin/sh").toPath(), f.proot.toPath())
         rejected { installer.inspectPublished(prepared) }
     }
 
@@ -347,11 +349,12 @@ class RootlessLinuxInstallerTest : TestCase() {
         assertEquals(0, f.requests)
         File(f.target.parentFile, ".install-lock").delete()
         f.privateRoot.deleteRecursively()
-        Files.createSymbolicLink(f.privateRoot.toPath(), f.root.toPath())
-        rejected { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation) }
+        f.fileOps.createSymbolicLink(f.privateRoot.toPath(), f.root.toPath())
+        try { installer.install(installer.approveDownloadAndInstall(prepared), f.cancellation); fail("must reject parent link") }
+        catch (failure: IllegalStateException) { assertEquals("linux_install_symlink_path", failure.message) }
         assertEquals(0, f.requests)
         // Avoid a recursive test-cleanup traversal of the intentionally hostile symlink.
-        Files.delete(f.privateRoot.toPath())
+        f.fileOps.delete(f.privateRoot.toPath())
     }
 
     private fun rejected(block: () -> Unit) {

@@ -32,7 +32,7 @@ class CompressionSettingsFormTest : WiredActivityTestCase() {
         submitted = null
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     var value by remember { mutableStateOf(initial) }
                     CompressionSettingsForm(value, onChange = { value = it; observed = it },
                         onSave = {

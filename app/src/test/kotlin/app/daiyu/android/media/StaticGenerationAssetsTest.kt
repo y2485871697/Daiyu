@@ -30,8 +30,17 @@ class StaticGenerationAssetsTest {
     }
     @Before fun setUp() { root = Files.createTempDirectory("static-generation").toFile() }
     @After fun tearDown() { root.deleteRecursively() }
-    private fun assets(afterMove: () -> Unit = {}) = StaticGenerationAssets(root, inspector,
-        videoInspector, ImageAttachmentLimits(), VideoAttachmentLimits(), afterMove)
+    private val directoryForceCalls = mutableListOf<java.nio.file.Path>()
+    private fun hostDirectoryForce(directory: File) {
+        assertFalse(Files.isSymbolicLink(directory.toPath()))
+        assertTrue(Files.isDirectory(directory.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS))
+        directoryForceCalls.add(directory.toPath().toAbsolutePath().normalize())
+        if (File.separatorChar != '\\') java.nio.channels.FileChannel.open(directory.toPath(),
+            java.nio.file.StandardOpenOption.READ, java.nio.file.LinkOption.NOFOLLOW_LINKS).use { it.force(true) }
+    }
+    private fun assets(directoryForce: ((File) -> Unit)? = if (File.separatorChar == '\\') ::hostDirectoryForce else null,
+        afterMove: () -> Unit = {}) = StaticGenerationAssets(root, inspector,
+        videoInspector, ImageAttachmentLimits(), VideoAttachmentLimits(), afterMove, directoryForce)
     private fun output(branch: String = "branch", original: ByteArray = bytes): StaticGenerationOutput {
         val b = GenerationAttemptBinding("source", "source-assistant", "source-run", "source-call", "generate_images")
         val hash = staticDigest(original)
@@ -229,4 +238,28 @@ class StaticGenerationAssetsTest {
         Files.createSymbolicLink(File(otherRoot, "generation-static-v1").toPath(), directory(value).toPath())
         rejects { StaticGenerationAssets(otherRoot, inspector, videoInspector, ImageAttachmentLimits(), VideoAttachmentLimits()) }
     }
+    @Test fun directoryForceFailureBeforeAndAfterPublishKeepsCorrectEvidence() {
+        val value = output()
+        var failStage = true
+        var failPublished = false
+        val store = assets(directoryForce = { syncedDirectory ->
+            hostDirectoryForce(syncedDirectory)
+            if (failStage && syncedDirectory.name.endsWith(".pending")) throw java.io.IOException("stage force")
+            if (failPublished && syncedDirectory.name == "generation-static-v1" && directory(value).exists())
+                throw java.io.IOException("published force")
+        })
+        rejects { store.prepare(value, reader()) }
+        assertFalse(directory(value, ".pending").exists()); assertFalse(marker(value).exists())
+        failStage = false
+        val lease = store.prepare(value, reader())
+        failPublished = true
+        assertThrows(StaticGenerationPublicationUnknown::class.java) { store.publish(lease) }
+        store.settle(lease, StaticGenerationSettlement.ROLLED_BACK_UNREFERENCED)
+        assertEquals(StaticGenerationAssets.State.UNKNOWN, lease.state)
+        assertTrue(directory(value).isDirectory); assertTrue(marker(value).exists())
+        assertArrayEquals(bytes, read(assets(), value))
+        assertTrue(directoryForceCalls.any { it.fileName.toString().endsWith(".pending") })
+        assertTrue(directoryForceCalls.any { it.fileName.toString() == "generation-static-v1" })
+    }
+
 }

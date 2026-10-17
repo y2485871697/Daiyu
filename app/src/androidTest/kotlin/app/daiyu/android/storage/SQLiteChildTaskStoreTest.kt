@@ -65,12 +65,28 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
             override fun cancel() {}
         } }
         val supervisor = RetainedChildTasks(runtime.childTasks, maxRetainedTasks = 1)
-        val session = SessionCapabilities("commands", emptySet()); val authorization = TaskAuthorization(session.sessionId, owner.runId.value)
+        val session = SessionCapabilities("commands", setOf("child_test"))
+        val authorization = TaskAuthorization(session.sessionId, owner.runId.value)
         val binding = supervisor.bind(owner, session, authorization, mapOf("review" to ChildModelDefinition("pool", 1) { model }))
         val invocation = ToolInvocation(ToolCallId("initial"), "start_child_tasks", "{}")
-        val accepted = supervisor.submit(binding, ToolExecutionContext(owner, invocation, authorization) { false },
-            listOf(ChildModelTask("review", "source prompt"))) as ChildTaskAdmission.Accepted
+        val admission = AtomicReference<ChildTaskAdmission>()
+        val tool = object : RegisteredTool {
+            override val definition = app.daiyu.android.domain.tools.ToolDefinition("start_child_tasks", 1, "Fixture child admission", "child_test",
+                ToolEffect.READ_ONLY, ToolSchema())
+            override fun prepare(arguments: ToolArguments) = PreparedTool.contextual { context ->
+                val result = supervisor.submit(binding, context, listOf(ChildModelTask("review", "source prompt")))
+                admission.set(result)
+                when (result) {
+                    is ChildTaskAdmission.Accepted -> ExecutionReceipt.Confirmed("accepted")
+                    is ChildTaskAdmission.Rejected -> ExecutionReceipt.NotExecuted(result.code)
+                    is ChildTaskAdmission.Unconfirmed -> ExecutionReceipt.Unknown(result.code)
+                }
+            }
+        }
+        val dispatcher = ToolDispatcher(ToolRegistry().register(tool).snapshot(), session, ToolLedger(InMemoryToolLedgerStore()))
         try {
+            assertEquals(DispatchOutcome.Confirmed("accepted", false), dispatcher.dispatchOwned(authorization, listOf(invocation), owner).single().outcome)
+            val accepted = checkNotNull(admission.get()) as ChildTaskAdmission.Accepted
             assertTrue(entered.await(3, TimeUnit.SECONDS))
             val source = checkNotNull(runtime.childTasks.get(accepted.tasks.single().owner))
             val command = ChildTaskCommand("directed", source, ChildTaskCommandKind.APPEND, "review", "additional")

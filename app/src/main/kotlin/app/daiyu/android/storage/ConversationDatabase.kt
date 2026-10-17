@@ -12,7 +12,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 20), ConversationStore {
+class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 20), ConversationStore {
+    constructor(context: Context) : this(context, {})
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
         db, assistantPreferences.getString(app.daiyu.android.assistants.LegacyAssistantCodec.KEY, null))
@@ -310,6 +311,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             check(userRowId != -1L) {"用户消息未持久化"}
             val assistantRowId=db.insertOrThrow("messages",null,values(assistant))
             check(assistantRowId != -1L) {"运行消息未持久化"}
+            afterSendRowsWritten()
             SQLiteMessageVideoStore.insert(db, user, videoInputs)
             SQLiteMessageVideoStore.insert(db, assistant, emptyList())
             // Verify both receipts after all inserts, so trigger side effects cannot leave a half-run.

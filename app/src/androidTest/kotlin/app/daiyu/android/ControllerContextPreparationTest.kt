@@ -38,10 +38,11 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
     private fun fresh(config: CompressionSettings = CompressionSettings(),
         summary: SummaryModelResolver = SummaryModelResolver { error("unexpected summary resolution") },
         production: Boolean = false,
+        afterSendRowsWritten: () -> Unit = {},
         factory: (ModelSettings) -> ModelPort): Fixture {
         val id = UUID.randomUUID().toString()
         val app = FixtureApplication(testContext(instrumentation.targetContext,"controller-context-$id-"))
-        val db = ConversationDatabase(app)
+        val db = ConversationDatabase(app, afterSendRowsWritten)
         val alias = "app.daiyu.android.test.context.$id"
         val settings = ModelSettingsStore(app,alias)
         settings.save(ModelSettings("https://example.invalid","context-fixture","synthetic-key",false))
@@ -194,11 +195,17 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
         lateinit var owner: Conversation
         f=fresh {
             val first=f.db.messages(owner.id,limit=200).first {it.second.role=="assistant"}.second
-            f.db.save(first.copy(blocks=listOf(MessageBlock.Text("changed","concurrent original edit"))))
+            f.db.writableDatabase.execSQL("UPDATE messages SET blocks=? WHERE id=?",
+                arrayOf<Any?>("[{\"type\":\"text\",\"item\":\"changed\",\"text\":\"concurrent original edit\"}]", first.id.value))
+            f.db.readableDatabase.rawQuery("SELECT blocks FROM messages WHERE id=?", arrayOf(first.id.value)).use { c ->
+                assertTrue(c.moveToFirst())
+                assertEquals("concurrent original edit", org.json.JSONArray(c.getString(0)).getJSONObject(0).getString("text"))
+            }
             ModelPort {error("CAS conflict must not open")}
         }
         owner=seed(f,32);f.db.draft(owner.id,"pending")
         assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Rejected)
+        assertEquals("会话、原文或编辑草稿已变化；保留当前草稿，未启动聊天模型请求", f.controller.problem)
         assertEquals(64,ContextService(f.app,f.db).displayHistory(owner.id).size)
         assertEquals("pending",f.db.conversations().single().draft)
     }
@@ -357,18 +364,17 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
 
     fun testCancelTextSendAfterCommitGateKeepsAcceptedReceipt() {
         val opens=AtomicInteger();val cancellations=AtomicInteger()
-        val f=fresh {ModelPort {opens.incrementAndGet();session()}}
+        val onWritten = AtomicReference<(() -> Unit)?>(null)
+        val f=fresh(afterSendRowsWritten = { onWritten.get()?.invoke() }) {ModelPort {opens.incrementAndGet();session()}}
         val owner=seed(f,1);f.db.draft(owner.id,"pending")
         val ticket=ChatController.TextSendTicket()
         // The real SQLite insert runs after beginCommit but before returning its receipt.
-        f.db.writableDatabase.addCustomFunction("cancel_prepared",0) {
+        onWritten.set {
             main {
                 assertTrue(f.controller.cancelTextSend(ticket));cancellations.incrementAndGet()
                 assertNull(checkNotNull(f.controller.textSendState()).result)
             }
         }
-        f.db.writableDatabase.execSQL("CREATE TRIGGER cancel_after_accept AFTER INSERT ON messages " +
-            "WHEN NEW.role='assistant' BEGIN SELECT cancel_prepared(); END")
         val result=send(f,owner,"pending",ticket)
         assertTrue(result is ChatController.TextSendResult.Accepted)
         assertEquals(1,cancellations.get());assertEquals(0,opens.get());assertNull(f.controller.active)
@@ -400,12 +406,11 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
 
     fun testCloseAfterCommitGateReturnsReceiptWithoutStartingRunner() {
         val opens=AtomicInteger()
-        val f=fresh {ModelPort {opens.incrementAndGet();session()}}
+        val onWritten = AtomicReference<(() -> Unit)?>(null)
+        val f=fresh(afterSendRowsWritten = { onWritten.get()?.invoke() }) {ModelPort {opens.incrementAndGet();session()}}
         val owner=seed(f,1);f.db.draft(owner.id,"pending")
         // Fires inside the real send transaction after beginCommit, before its receipt returns.
-        f.db.writableDatabase.addCustomFunction("close_prepared",0) { main {f.controller.close()} }
-        f.db.writableDatabase.execSQL("CREATE TRIGGER close_after_accept AFTER INSERT ON messages " +
-            "WHEN NEW.role='assistant' BEGIN SELECT close_prepared(); END")
+        onWritten.set { main {f.controller.close()} }
         assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Accepted)
         assertEquals(0,opens.get());assertNull(f.controller.active)
     }

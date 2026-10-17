@@ -1,5 +1,6 @@
 package app.daiyu.android.voice.personal
 
+import app.daiyu.android.testing.HostAtomicFileShadow
 import android.app.Application
 import app.daiyu.android.voice.providers.DoubaoSpeech
 import app.daiyu.android.voice.providers.SpeechEngine
@@ -21,7 +22,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class, sdk = [34])
+@Config(application = Application::class, sdk = [34], shadows = [HostAtomicFileShadow::class])
 class MimoPersonalVoicesTest {
     @get:Rule val folder = TemporaryFolder()
     private val wav get() = DoubaoSpeech.pcmToWav(byteArrayOf(1, 2, 3, 4))

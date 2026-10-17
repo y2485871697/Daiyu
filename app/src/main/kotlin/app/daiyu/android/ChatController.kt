@@ -2954,17 +2954,20 @@ class ChatController internal constructor(private val application:Application,
         // diagnostic only: no open/resume/repost or tool replay; only approved background sessions resume.
         // Both assignment and callback reads of this original lifetime are under our monitor.
         var reconnectResources: RunResources? = null
-        val observedModel = frozenReconnect.observeFailures(preparedModel) { message ->
+        var reconnectNotice: String? = null
+        fun postReconnectNotice(message: String?) {
             handler.post { synchronized(this) {
                 val original = reconnectResources
                 if (original != null && resources === original && !original.fenced && !closed &&
                     runner === original.runner && active?.id == assistant.id &&
                     active?.runId == run && active?.conversationId == conversationId) {
-                    problem = message
+                    if (message != null || problem == reconnectNotice) problem = message
+                    reconnectNotice = message
                     notifyChanged()
                 }
             } }
         }
+        val observedModel = frozenReconnect.observeFailures(preparedModel, ::postReconnectNotice)
         var preparingTools: RunCatalogTools? = null
         var preparingDevices: RunDeviceResources? = null
         var preparingChildren: RunChildModels? = null
@@ -3067,7 +3070,19 @@ class ChatController internal constructor(private val application:Application,
             generation?.catalog = tools
             // GUI evidence is already frozen in preparedContext.messages; do not append it again.
             val owned = ChatRunner(observedModel, database, tools,
-                RunnerOptions(reconnect=frozenReconnect.runnerPolicy(),
+                RunnerOptions(reconnect=frozenReconnect.runnerPolicyWithDiagnostics { event ->
+                    if (event.status == "succeeded") {
+                        postReconnectNotice(null)
+                        return@runnerPolicyWithDiagnostics
+                    }
+                    val status = when (event.status) {
+                        "running" -> "正在重连"
+                        "stopped" -> "重连已暂停或停止"
+                        "failed" -> "重连未恢复"
+                        else -> return@runnerPolicyWithDiagnostics
+                    }
+                    postReconnectNotice("$status · 第${event.round + 1}轮 · ${event.elapsedMs / 1000}秒")
+                },
                     runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools,
                     onReasoning={ event -> publishReasoning(assistant,event) })) {
                 afterTitleParentPersisted(it, user, assistant, pendingTitle)

@@ -26,7 +26,7 @@ class LinuxSettingsLocalCatalogTest : TestCase() {
             .joinToString("") { "%02x".format(it.toInt() and 255) }
         val draft = LinuxSettingsDraft("local", "environment", guest.path, proot.path, digest(proot),
             loader.path, digest(loader), "/work", listOf(LinuxSettingsMount(shared.path, "/shared")))
-        try { test(root, draft, TrustedLinuxCatalog(File(root, "catalog"))) }
+        try { test(root, draft, hostLinuxCatalog(File(root, "catalog"))) }
         finally { root.deleteRecursively() }
     }
 
@@ -58,7 +58,7 @@ class LinuxSettingsLocalCatalogTest : TestCase() {
                 beforeFailure()
                 if (fail) throw IOException("injected post-rename directorySync failure")
             }
-            TerminalDurability.syncDirectory(value)
+            hostDirectorySync(value)
             if (visible) successes++
         }
     }
@@ -111,7 +111,7 @@ class LinuxSettingsLocalCatalogTest : TestCase() {
 
     fun testPostRenameApprovalFailureSurvivesRefreshAndReentryUntilExactObjectRetry() = fixture { root, draft, _ ->
         val sync = PostRenameSync(root, active = true)
-        val catalog = TrustedLinuxCatalog(File(root, "catalog"), sync)
+        val catalog = hostLinuxCatalog(File(root, "catalog"), sync)
         val calls = RecordingCatalog(catalog)
         val gate = LinuxSettingsAdmission(emptySet())
         val controller = LinuxSettingsController(calls, gate)
@@ -175,7 +175,7 @@ class LinuxSettingsLocalCatalogTest : TestCase() {
         seed.approve(frozen)
         val reference = LinuxGenerationRef(frozen.installation.environmentId, frozen.installation.generation)
         val sync = PostRenameSync(root, active = false)
-        val catalog = TrustedLinuxCatalog(File(root, "catalog"), sync)
+        val catalog = hostLinuxCatalog(File(root, "catalog"), sync)
         val calls = RecordingCatalog(catalog)
         val gate = LinuxSettingsAdmission(setOf(reference))
         val controller = LinuxSettingsController(calls, gate)
@@ -239,7 +239,7 @@ class LinuxSettingsLocalCatalogTest : TestCase() {
             try { check(release.await(5, TimeUnit.SECONDS)) }
             finally { completed.countDown() }
         }
-        val catalog = TrustedLinuxCatalog(File(root, "catalog"), sync)
+        val catalog = hostLinuxCatalog(File(root, "catalog"), sync)
         val calls = RecordingCatalog(catalog)
         val controller = LinuxSettingsController(calls, LinuxSettingsAdmission(emptySet()))
         try {

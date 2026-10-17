@@ -35,32 +35,48 @@ class LegacyImportService internal constructor(private val database: () -> SQLit
         val importId = newId(); val conversationIds = plan.conversations.map { newId() }
         val db = database()
         check(!db.inTransaction()) { "Legacy import owns one helper transaction; call outside another transaction" }
+        val rows = mutableListOf<Pair<String, ContentValues>>()
+        val payloads = mutableListOf<Triple<String, String, ByteArray>>()
+        fun insert(table: String, values: ContentValues) {
+            check(db.insertOrThrow(table, null, values) != -1L) { "Compatibility row was not inserted" }
+            rows += table to values
+        }
+        fun payload(owner: String, name: String, bytes: ByteArray) {
+            writeChunks(db, owner, name, bytes)
+            payloads += Triple(owner, name, bytes)
+        }
         db.beginTransaction()
         try {
             LegacyCompatibilitySchema.install(db)
-            db.insertOrThrow("legacy_r12_imports", null, ContentValues().apply {
+            listOf("sqlite_master", "sqlite_temp_master").forEach { catalog ->
+                db.rawQuery("SELECT 1 FROM $catalog WHERE type='trigger' AND tbl_name IN ('legacy_r12_imports','legacy_r12_histories','legacy_r12_assets','legacy_r12_chunks') LIMIT 1", null).use {
+                    check(!it.moveToFirst()) { "Compatibility tables must not have triggers" }
+                }
+            }
+            insert("legacy_r12_imports", ContentValues().apply {
                 put("id", importId); put("source_hash", container.sha256); put("format", plan.format); put("version", plan.version)
             })
-            writeChunks(db, importId, "report", reportJson(plan.report).toString().toByteArray(Charsets.UTF_8))
+            payload(importId, "report", reportJson(plan.report).toString().toByteArray(Charsets.UTF_8))
             plan.originals.forEach { (entry, bytes) ->
-                db.insertOrThrow("legacy_r12_assets", null, ContentValues().apply {
+                insert("legacy_r12_assets", ContentValues().apply {
                     put("import_id", importId); put("entry", entry); put("sha256", digest(bytes)); put("byte_count", bytes.size)
                 })
-                writeChunks(db, importId, "asset:$entry", bytes)
+                payload(importId, "asset:$entry", bytes)
             }
             plan.conversations.forEachIndexed { index, conv ->
                 val id = conversationIds[index]
-                db.insertOrThrow("legacy_r12_histories", null, ContentValues().apply {
+                insert("legacy_r12_histories", ContentValues().apply {
                     put("id", id); put("import_id", importId); put("source_id", conv.sourceId); put("title", conv.title)
                     if (conv.createdAt == null) putNull("source_created") else put("source_created", conv.createdAt)
                     if (conv.updatedAt == null) putNull("source_updated") else put("source_updated", conv.updatedAt)
                 })
-                writeChunks(db, id, "compat", conv.raw.toByteArray(Charsets.UTF_8))
+                payload(id, "compat", conv.raw.toByteArray(Charsets.UTF_8))
                 // IDs of source records remain only in the raw evidence and source_id metadata.
                 // New IDs are never tool call IDs, runs, accepted context or checkpoints.
-                writeChunks(db, id, "view", views[index])
+                payload(id, "view", views[index])
             }
             beforeCommit()
+            verifyWrittenRows(db, importId, conversationIds, rows, payloads)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
         return LegacyImportResult(importId, conversationIds, plan.report)
@@ -139,17 +155,66 @@ class LegacyImportService internal constructor(private val database: () -> SQLit
         var offset = 0; var part = 0
         do {
             val end = minOf(bytes.size, offset + 65536)
-            db.insertOrThrow("legacy_r12_chunks", null, ContentValues().apply {
+            check(db.insertOrThrow("legacy_r12_chunks", null, ContentValues().apply {
                 put("owner", owner); put("name", name); put("part", part++); put("data", bytes.copyOfRange(offset, end))
-            })
+            }) != -1L) { "Compatibility chunk was not inserted" }
             offset = end
         } while (offset < bytes.size)
+    }
+    private fun verifyWrittenRows(db: SQLiteDatabase, importId: String, conversationIds: List<String>,
+        rows: List<Pair<String, ContentValues>>, payloads: List<Triple<String, String, ByteArray>>) {
+        rows.forEach { (table, values) ->
+            val keys = if (table == "legacy_r12_assets") listOf("import_id", "entry") else listOf("id")
+            db.query(table, null, keys.joinToString(" AND ") { "$it=?" },
+                keys.map { values.getAsString(it) }.toTypedArray(), null, null, null).use { c ->
+                check(c.moveToFirst()) { "Missing compatibility row" }
+                values.valueSet().forEach { (column, expected) ->
+                    val index = c.getColumnIndexOrThrow(column)
+                    check(when (expected) {
+                        null -> c.isNull(index)
+                        is Number -> c.getType(index) == android.database.Cursor.FIELD_TYPE_INTEGER && c.getLong(index) == expected.toLong()
+                        else -> c.getType(index) == android.database.Cursor.FIELD_TYPE_STRING && c.getString(index) == expected.toString()
+                    }) { "Compatibility row changed before commit" }
+                }
+                check(!c.moveToNext())
+            }
+        }
+        listOf("legacy_r12_histories", "legacy_r12_assets").forEach { table ->
+            db.rawQuery("SELECT count(*) FROM $table WHERE import_id=?", arrayOf(importId)).use { c ->
+                check(c.moveToFirst() && c.getLong(0) == rows.count { it.first == table }.toLong())
+            }
+        }
+        payloads.forEach { (owner, name, expected) ->
+            var offset = 0
+            var part = 0
+            db.rawQuery("SELECT part,data FROM legacy_r12_chunks WHERE owner=? AND name=? ORDER BY part",
+                arrayOf(owner, name)).use { c ->
+                while (c.moveToNext()) {
+                    check(c.getType(0) == android.database.Cursor.FIELD_TYPE_INTEGER && c.getLong(0) == part++.toLong())
+                    check(c.getType(1) == android.database.Cursor.FIELD_TYPE_BLOB)
+                    val bytes = c.getBlob(1)
+                    val end = minOf(expected.size, offset + 65536)
+                    check(bytes.contentEquals(expected.copyOfRange(offset, end))) { "Compatibility payload changed before commit" }
+                    offset = end
+                }
+            }
+            check(offset == expected.size && part == maxOf(1, (expected.size + 65535) / 65536))
+        }
+        val chunkCounts = payloads.groupBy { it.first }.mapValues { (_, entries) ->
+            entries.sumOf { maxOf(1, (it.third.size + 65535) / 65536).toLong() }
+        }
+        (listOf(importId) + conversationIds).forEach { owner ->
+            val expected = chunkCounts.getValue(owner)
+            db.rawQuery("SELECT count(*) FROM legacy_r12_chunks WHERE owner=?", arrayOf(owner)).use { c ->
+                check(c.moveToFirst() && c.getLong(0) == expected) { "Unexpected compatibility payload" }
+            }
+        }
     }
     private fun readChunks(db: SQLiteDatabase, owner: String, name: String, limit: Int): ByteArray {
         val out = ByteArrayOutputStream(); var part = 0
         db.rawQuery("SELECT part,data FROM legacy_r12_chunks WHERE owner=? AND name=? ORDER BY part", arrayOf(owner, name)).use { c ->
             while (c.moveToNext()) {
-                check(c.getInt(0) == part++); val bytes = c.getBlob(1)
+                check(c.getType(0) == android.database.Cursor.FIELD_TYPE_INTEGER && c.getLong(0) == part++.toLong()); val bytes = c.getBlob(1)
                 check(bytes.size <= 65536 && out.size().toLong() + bytes.size <= limit); out.write(bytes)
             }
         }

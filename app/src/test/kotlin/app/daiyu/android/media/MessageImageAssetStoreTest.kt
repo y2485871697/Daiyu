@@ -227,7 +227,11 @@ class MessageImageAssetStoreTest {
     @Test fun trustedPlatformParentAliasIsAnchoredAndRootSymlinkIsRejected() {
         val alias = File(root, "platform-alias")
         Files.createSymbolicLink(alias.toPath(), root.toPath())
-        val anchored = MessageImageAssetStore(File(alias, "anchored"))
+        val expected = File(root.toPath().toRealPath().toFile(), "anchored")
+        val supplied = File(alias, "anchored")
+        assertEquals(expected.toPath(), initializeMediaRoot(supplied).toPath())
+        assertEquals(expected.toPath(), initializeMediaRoot(supplied).toPath())
+        val anchored = MessageImageAssetStore(supplied)
         val refs = anchored.prepare(owner, draftOwner, frozen())
         alias.delete() // Later changes to the platform alias cannot redirect the established root.
         assertArrayEquals(bytes, anchored.resolver.read(owner, refs.single()))

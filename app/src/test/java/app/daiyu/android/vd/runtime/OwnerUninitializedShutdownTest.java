@@ -23,11 +23,12 @@ import static org.junit.Assert.*;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = {26, 36}, manifest = Config.NONE)
 public class OwnerUninitializedShutdownTest {
+    private final OwnerReceiptTestPlatform platform = new OwnerReceiptTestPlatform();
     @Rule public TemporaryFolder temporary = new TemporaryFolder();
 
     private Path root() throws Exception {
         Path path = temporary.newFolder().toPath();
-        Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rwx------"));
+        platform.setPermissions(path, PosixFilePermissions.fromString("rwx------"));
         return path;
     }
 
@@ -79,7 +80,7 @@ public class OwnerUninitializedShutdownTest {
     @Test public void lookupOnlyShutdownClosesLockWithoutCreatingOrWritingAndFencesInitialize() throws Exception {
         Path root = root();
         AtomicInteger creates = new AtomicInteger(), writes = new AtomicInteger();
-        OwnerReceiptStore store = new OwnerReceiptStore(root, point -> writes.incrementAndGet());
+        OwnerReceiptStore store = platform.open(root, point -> writes.incrementAndGet());
         OwnerReceiptCoordinator c = new OwnerReceiptCoordinator(store, () -> {
             creates.incrementAndGet(); throw new AssertionError("must not create");
         });
@@ -100,14 +101,14 @@ public class OwnerUninitializedShutdownTest {
         assertFalse(c.dispatch(shutdown()).getBoolean("ok"));
         assertEquals(0, creates.get());
         assertEquals(0, writes.get());
-        try (OwnerReceiptStore reopened = new OwnerReceiptStore(root)) {
+        try (OwnerReceiptStore reopened = platform.open(root)) {
             assertNull(reopened.lookupGeneration("fresh", binding()));
         }
     }
 
     @Test public void oldReceiptsIncludingUnknownRemainByteIdentical() throws Exception {
         Path root = root();
-        try (OwnerReceiptStore seed = new OwnerReceiptStore(root)) {
+        try (OwnerReceiptStore seed = platform.open(root)) {
             for (OwnerReceiptStore.State state : new OwnerReceiptStore.State[]{
                     OwnerReceiptStore.State.RESERVED, OwnerReceiptStore.State.STARTED,
                     OwnerReceiptStore.State.UNKNOWN, OwnerReceiptStore.State.SUCCEEDED}) {
@@ -135,7 +136,7 @@ public class OwnerUninitializedShutdownTest {
             }
         }
         Map<String, String> before = bytes(root);
-        OwnerReceiptStore store = new OwnerReceiptStore(root);
+        OwnerReceiptStore store = platform.open(root);
         OwnerReceiptCoordinator c = new OwnerReceiptCoordinator(store, () -> { throw new AssertionError(); });
         for (String g : new String[]{"RESERVED", "STARTED", "UNKNOWN", "SUCCEEDED"}) {
             assertTrue(c.dispatch(request("receipt", g)).getBoolean("found"));
@@ -144,7 +145,7 @@ public class OwnerUninitializedShutdownTest {
         assertTrue(c.dispatch(request("initialize", "STARTED")).getBoolean("receiptOnly"));
         assertTrue(c.dispatch(shutdown()).getBoolean("ok"));
         assertEquals(before, bytes(root));
-        try (OwnerReceiptStore reopened = new OwnerReceiptStore(root)) {
+        try (OwnerReceiptStore reopened = platform.open(root)) {
             assertEquals(OwnerReceiptStore.State.UNKNOWN, reopened.lookupGeneration("UNKNOWN", binding()).state);
         }
     }
@@ -152,7 +153,7 @@ public class OwnerUninitializedShutdownTest {
     @Test public void admittedInitializationEvenWithoutBackendCannotShutdown() throws Exception {
         for (boolean failWrite : new boolean[]{false, true}) {
             Path root = root();
-            try (OwnerReceiptStore store = new OwnerReceiptStore(root, point -> {
+            try (OwnerReceiptStore store = platform.open(root, point -> {
                 if (failWrite) throw new IOException("injected admission write failure");
             })) {
                 AtomicInteger creates = new AtomicInteger();
@@ -171,7 +172,7 @@ public class OwnerUninitializedShutdownTest {
 
     @Test public void initializedOwnerRetainsOriginalReleaseFinalsAndMarker() throws Exception {
         Path root = root();
-        try (OwnerReceiptStore store = new OwnerReceiptStore(root)) {
+        try (OwnerReceiptStore store = platform.open(root)) {
             boolean[] released = {false};
             OwnerReceiptCoordinator c = new OwnerReceiptCoordinator(store, () -> new OwnerReceiptCoordinator.Backend() {
                 public JSONObject dispatch(OwnerProtocol.Request r) {
@@ -198,7 +199,7 @@ public class OwnerUninitializedShutdownTest {
     @Test public void uncertainCloseNeverStopsNeverRetriesNeverReopensInitialization() throws Exception {
         Path root = root();
         AtomicInteger closes = new AtomicInteger();
-        OwnerReceiptStore store = new OwnerReceiptStore(root, point -> {}, point -> {
+        OwnerReceiptStore store = platform.open(root, point -> {}, point -> {
             if (point == OwnerReceiptStore.LifecyclePoint.CHANNEL_CLOSED) {
                 closes.incrementAndGet(); throw new IOException("injected close failure");
             }
@@ -211,7 +212,7 @@ public class OwnerUninitializedShutdownTest {
         assertFalse(c.dispatch(shutdown()).getBoolean("ok"));
         assertEquals("INITIALIZATION_CLOSED", c.dispatch(request("initialize", "fresh")).getString("error"));
         assertEquals(1, closes.get());
-        assertThrows(OwnerReceiptStore.StoreException.class, () -> new OwnerReceiptStore(root));
+        assertThrows(OwnerReceiptStore.StoreException.class, () -> platform.open(root));
         // The store intentionally retains this root's uncertain-close registration. No retry/kill.
     }
 }

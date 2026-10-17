@@ -119,7 +119,8 @@ if [[ ",$test_classes," == *",app.daiyu.android.SettingsChromeActivityTest,"* ]]
 fi
 adb_stage packages 20 shell pm list packages > smoke/packages.txt
 if grep -q 'package:io.github.mangi.eta$' smoke/packages.txt; then exit 1; fi
-adb_stage launch 30 shell am start -W -n app.daiyu.android/.MainActivity > smoke/start.txt
+# Verify a fresh application launch, independent of instrumentation Activity state.
+adb_stage launch 30 shell am start -S -W -n app.daiyu.android/.MainActivity > smoke/start.txt 2>&1
 cat smoke/start.txt
 grep -q 'Status: ok' smoke/start.txt
 chat_ready() {

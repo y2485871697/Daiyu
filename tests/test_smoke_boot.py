@@ -42,6 +42,7 @@ class SourceTests(unittest.TestCase):
         stages = [(phase, int(seconds)) for phase, seconds in re.findall(r'adb_stage ([a-z-]+) (\d+) ', script)]
         instrumentation = next(seconds for phase, seconds in stages if phase == 'instrumentation')
         self.assertGreater(wrapper, instrumentation + 5)
+        self.assertIn('adb_stage launch 30 shell am start -S -W -n app.daiyu.android/.MainActivity', script)
         step = int(re.search(r'        timeout-minutes: (\d+)', workflow).group(1)) * 60
         job = int(re.search(r'^    timeout-minutes: (\d+)', workflow, re.M).group(1)) * 60
         # 600s emulator boot + all one-shot stages; loops include kill grace.
@@ -191,8 +192,18 @@ case "$*" in
   esac
   [ "$CASE" != duplicate-terminal ] || printf 'INSTRUMENTATION_CODE: -1\n'
   [ "$CASE" != after-terminal ] || printf 'INSTRUMENTATION_STATUS_CODE: 0\n'
-  case "$CASE" in instrument-timeout) exit 124 ;; instrument-fail) exit 9 ;; esac ;;
- 'shell am start '*) printf 'Status: ok\n' ;;
+  case "$CASE" in instrument-timeout) exit 124 ;; instrument-fail) exit 9 ;; esac
+  : > smoke/fake-app-running ;;
+ 'shell am start '*)
+  printf '%s\n' "$@" > smoke/launch-args.txt
+  [ "$#" -eq 7 ] && [ "$4" = -S ] && [ "$5" = -W ] && [ "$6" = -n ] &&
+    [ "$7" = app.daiyu.android/.MainActivity ] || exit 12
+  rm -f smoke/fake-app-running
+  case "$CASE" in
+   launch-bad-status) printf 'Status: timeout\n' ;;
+   *) printf 'Status: ok\n' ;;
+  esac
+  case "$CASE" in launch-timeout) exit 124 ;; launch-fail) exit 9 ;; esac ;;
  'shell pm list '*)
   if [ "$CASE" = old-package ]; then printf 'package:io.github.mangi.eta\n'
   else printf 'package:app.daiyu.android\n'; fi ;;
@@ -246,6 +257,35 @@ exit 0
         args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
         self.assertEqual(args[3:8], ['-w', '-r', '-e', 'class', 'app.daiyu.android.FirstTest'])
         self.assertEqual(args[8], 'app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner')
+
+    def test_launch_isolated_from_instrumentation_on_both_apis(self):
+        for api in (26, 37):
+            with self.subTest(api=api):
+                result = self.smoke(api=api)
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                self.assertEqual((self.root / 'smoke/launch-args.txt').read_text().splitlines(),
+                                 ['shell', 'am', 'start', '-S', '-W', '-n', 'app.daiyu.android/.MainActivity'])
+                self.assertFalse((self.root / 'smoke/fake-app-running').exists())
+                self.assertTrue((self.root / 'smoke/启动.png').is_file())
+
+    def test_launch_timeout_preserved_even_with_ok_status(self):
+        result = self.smoke(case='launch-timeout')
+        self.assertEqual(result.returncode, 124)
+        self.assertTrue(json.loads((self.root / 'smoke/instrumentation-result.json').read_text())['valid'])
+        self.assertIn('Status: ok', (self.root / 'smoke/start.txt').read_text())
+        self.assertIn('phase=launch exit=124', (self.root / 'smoke/stages.txt').read_text())
+        self.assertFalse((self.root / 'smoke/boot.xml').exists())
+        self.assertFalse((self.root / 'smoke/启动.png').exists())
+
+    def test_launch_failure_is_not_hidden(self):
+        result = self.smoke(case='launch-fail')
+        self.assertEqual(result.returncode, 9)
+        self.assertFalse((self.root / 'smoke/启动.png').exists())
+
+    def test_launch_requires_ok_status(self):
+        result = self.smoke(case='launch-bad-status')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / 'smoke/启动.png').exists())
 
     def test_androidx_junit3_status_frames_are_accepted_on_both_apis(self):
         for api in (26, 37):

@@ -33,6 +33,12 @@ import java.util.concurrent.atomic.AtomicReference
 /** Isolated real SQLite + static PNG. No app DB migration, HTTP, UI, paid generation or GC. */
 @Suppress("DEPRECATION")
 class SQLiteGenerationOutputStoreTest : InstrumentationTestCase() {
+    private fun fixtureScalar(cursor: Cursor): Any = when (cursor.getType(0)) {
+        Cursor.FIELD_TYPE_INTEGER -> cursor.getLong(0)
+        Cursor.FIELD_TYPE_STRING -> cursor.getString(0)
+        else -> error("unexpected_fixture_scalar_type")
+    }
+
     private val helpers = mutableListOf<SQLiteOpenHelper>()
     private val roots = mutableListOf<File>()
     private val png get() = app.daiyu.android.validDeviceTestPng()
@@ -244,15 +250,15 @@ class SQLiteGenerationOutputStoreTest : InstrumentationTestCase() {
         val f = fixture(); f.reserve(); val pending = f.publish(); val store = f.store()
         val registered = store.register(f.attempt, pending)
         // Simulate host corruption; an idempotent call must not overwrite even a single field.
-        val changes = listOf("fingerprint" to "b".repeat(64), "protocol" to "OPENAI_IMAGE_EDIT_MULTIPART",
+        val changes: List<Pair<String, Any>> = listOf("fingerprint" to "b".repeat(64), "protocol" to "OPENAI_IMAGE_EDIT_MULTIPART",
             "account_scope" to "foreign", "conversation_id" to "foreign", "assistant_id" to "foreign",
             "run_id" to "foreign", "tool_call_id" to "foreign", "tool_name" to "foreign",
             "receipt" to ("genasset-v1-" + "0".repeat(64) + "-" + pending.sha256),
-            "kind" to "VIDEO", "mime_type" to "image/jpeg", "byte_count" to "999", "sha256" to "0".repeat(64),
-            "width" to "2", "height" to "2", "duration_ms" to "1")
+            "kind" to "VIDEO", "mime_type" to "image/jpeg", "byte_count" to 999L, "sha256" to "0".repeat(64),
+            "width" to 2L, "height" to 2L, "duration_ms" to 1L)
         changes.forEach { (column, changed) ->
             val original = f.db.rawQuery("SELECT $column FROM generation_outputs", null).use {
-                check(it.moveToFirst()); it.getString(0)
+                check(it.moveToFirst()); fixtureScalar(it)
             }
             try {
                 f.db.execSQL("UPDATE generation_outputs SET $column=?", arrayOf(changed))
@@ -552,7 +558,7 @@ class SQLiteGenerationOutputStoreTest : InstrumentationTestCase() {
             "duration_ms" to "1", "account_scope" to "'foreign'")
         corruptions.forEach { (column, literal) ->
             val original = f.db.rawQuery("SELECT $column FROM generation_outputs WHERE $where", key).use {
-                check(it.moveToFirst()); it.getString(0)
+                check(it.moveToFirst()); fixtureScalar(it)
             }
             try {
                 f.db.execSQL("PRAGMA ignore_check_constraints=ON")

@@ -1,0 +1,71 @@
+package app.daiyu.android
+
+import android.app.Activity
+import android.app.Instrumentation
+import android.content.Intent
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.*
+import java.util.concurrent.CopyOnWriteArrayList
+
+class SettingsExternalLinksActivityTest : WiredActivityTestCase() {
+    private fun entry(title: String): SemanticsNodeInteraction {
+        node("settings-search").performTextReplacement(title)
+        return reveal("settings-row:$title", "设置")
+    }
+    private fun intercept(action: () -> Unit): List<Intent> {
+        val observed = CopyOnWriteArrayList<Intent>()
+        val monitor = object : Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
+                if (intent.action != Intent.ACTION_VIEW) return null
+                observed += Intent(intent)
+                return Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null)
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        try { action(); instrumentation.waitForIdleSync(); return observed.toList() }
+        finally { instrumentation.removeMonitor(monitor) }
+    }
+
+    fun testRetainedCommunityAndRelayTargetsPreserveDraftAndSettings() {
+        setDraft("retained links unsent")
+        val before = fixture.database.exportBackup()
+        val settings = fixture.settings.loadForEditing().settings
+        val targets = listOf(
+            "Telegram 频道" to "https://t.me/+6JhB2iRjjDExYWM1",
+            "QQ 群" to "mqqapi://card/show_pslcard?src_type=internal&version=1&uin=174109605&card_type=group&source=qrcode",
+            "ST API" to "https://st.123336.xyz/join/ZKjSNbdYUh6RbF5_Kdxjrp-_AoAVcMH9",
+            "摸鱼" to "https://www.u354483.nyat.app:35119/register?aff=5U8U292F5RG6",
+        )
+        openSettings()
+        targets.forEach { (title, target) ->
+            val intents = intercept { entry(title).performClick() }
+            assertEquals(1, intents.size)
+            assertEquals(target, intents.single().dataString)
+            assertEquals(target.startsWith("https://"), intents.single().hasCategory(Intent.CATEGORY_BROWSABLE))
+            assertEquals(before, fixture.database.exportBackup())
+            assertEquals(settings, fixture.settings.loadForEditing().settings)
+            assertEquals(0, fixture.opens.get())
+        }
+        backToChat(activity); assertDraft("retained links unsent")
+    }
+
+    fun testDonationRemainsUserRequestedPlaceholderWithoutOpeningPayment() {
+        setDraft("donation placeholder unsent")
+        val before = fixture.database.exportBackup()
+        openSettings()
+        assertTrue(intercept { entry("给煮波恰饭🍚").performClick() }.isEmpty())
+        node("page:设置").assertExists()
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+        backToChat(activity); assertDraft("donation placeholder unsent")
+    }
+
+    fun testPausedOrRetiredCommunityCallbackCannotOpenLink() {
+        openSettings()
+        val click = checkNotNull(entry("Telegram 频道").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        assertTrue(intercept { realPauseResume(activity, atPause = { click() }) }.isEmpty())
+        backToChat(activity)
+        assertTrue(intercept { mainThread { click() } }.isEmpty())
+        assertEquals(0, fixture.opens.get())
+    }
+}

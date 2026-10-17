@@ -33,6 +33,7 @@ internal class SyntheticFrameCollector(instrumentation: Instrumentation, private
     private val frames = ArrayList<Frame>()
     private val label = AtomicReference("setup")
     private var closed = false
+    private var listenerDetached = false
     private val startedNs = System.nanoTime()
     private var endedNs = 0L
     var overflow = 0L; private set
@@ -53,13 +54,18 @@ internal class SyntheticFrameCollector(instrumentation: Instrumentation, private
     fun scenario(value: String) { check(!closed); label.set(value) }
     override fun close() {
         if (closed) return
-        closed = true
-        try { syntheticMain(instrumentation) { window.removeOnFrameMetricsAvailableListener(listener) } }
-        finally {
-            thread.quitSafely(); thread.join(5_000)
-            check(!thread.isAlive) { "frame_callback_drain_unconfirmed" }
-            endedNs = System.nanoTime()
+        try {
+            if (!listenerDetached) {
+                syntheticMain(instrumentation) { window.removeOnFrameMetricsAvailableListener(listener) }
+                listenerDetached = true
+            }
+        } finally {
+            thread.quitSafely()
+            thread.join(5_000)
         }
+        check(!thread.isAlive) { "frame_callback_drain_unconfirmed" }
+        endedNs = System.nanoTime()
+        closed = true
     }
     fun write(file: File, environment: JSONObject, inputs: List<JSONObject>) {
         check(closed && !thread.isAlive)

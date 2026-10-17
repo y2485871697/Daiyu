@@ -4,6 +4,9 @@ import os
 import re
 from pathlib import Path
 import shutil
+import signal
+import time
+import xml.etree.ElementTree as ET
 import subprocess
 import tempfile
 import unittest
@@ -135,48 +138,63 @@ class ProcessTests(unittest.TestCase):
             path.write_text(text)
         self.executable('sleep', '#!/bin/sh\nexit 0\n')
         self.executable('timeout', '#!/bin/sh\nshift 2\nexec "$@"\n')
-        self.executable('adb', '''#!/usr/bin/env python3
-import os,sys
-from pathlib import Path
-import xml.etree.ElementTree as ET
-a=sys.argv[1:];case=os.environ['CASE'];api=os.environ['API']
-if a==['shell','getprop','ro.build.version.sdk']: print(api)
-elif a==['shell','getprop','sys.boot_completed']: print('1')
-elif a and 'pidof' in a[-1]: print('123\\n456')
-elif a==['shell','pm','path','android']: print('package:/system/framework/framework-res.apk')
-elif a[:3]==['shell','cat','/proc/meminfo']: print('MemTotal: 5000000 kB')
-elif a[0]=='install':
- print('Success');sys.exit(7 if case=='install-fail' else 0)
-elif a[:3]==['shell','am','instrument']:
- Path('smoke/instrumentation-args.txt').write_text('\\n'.join(a))
- classes=os.environ['TEST_CLASSES']
- if a!=['shell','am','instrument','-w','-e','class',classes,'app.daiyu.android.test/android.test.InstrumentationTestRunner']: sys.exit(11)
- summary='OK ('+os.environ['TEST_COUNT']+' tests)'
- if case=='terminal-before': print('INSTRUMENTATION_CODE: -1')
- print('prefix '+summary+' suffix' if case=='substring-ok' else ' '+summary if case=='indented-ok' else summary,flush=True)
- if case=='duplicate-ok': print(summary)
- if case=='failure': print('FAILURES!!!')
- if case=='status-fail': print('INSTRUMENTATION_STATUS_CODE: -2')
- if case!='missing-terminal': print('INSTRUMENTATION_CODE: 0' if case=='terminal-conflict' else 'INSTRUMENTATION_CODE: -1')
- if case=='duplicate-terminal': print('INSTRUMENTATION_CODE: -1')
- if case=='after-terminal': print('INSTRUMENTATION_STATUS_CODE: 0')
- sys.exit(124 if case=='instrument-timeout' else 9 if case=='instrument-fail' else 0)
-elif a[:3]==['shell','am','start']: print('Status: ok')
-elif a[:3]==['shell','pm','list']: print('package:io.github.mangi.eta' if case=='old-package' else 'package:app.daiyu.android')
-elif a[:3]==['shell','uiautomator','dump'] and case=='dump-fail': sys.exit(8)
-elif a[0]=='pull':
- if case=='pull-fail': sys.exit(8)
- root=ET.Element('hierarchy')
- package='other.app' if case=='foreign-ui' else 'app.daiyu.android'
- for desc in ['打开侧边栏','更多','发送']:
-  if case=='missing-send' and desc=='发送': continue
-  ET.SubElement(root,'node',{'package':package,'class':'android.view.View','content-desc':desc})
- if case!='missing-editor': ET.SubElement(root,'node',{'package':package,'class':'android.widget.EditText'})
- ET.SubElement(root,'node',{'package':package,'class':'android.widget.TextView','text':'代鱼'})
- Path(a[-1]).write_text('<broken' if case=='malformed-ui' else '代鱼 · 聊天 发送' if case=='old-title-only' else ET.tostring(root,encoding='unicode'),encoding='utf-8')
-elif a[0]=='logcat': print('FATAL EXCEPTION' if case=='crash' else '')
-elif a[0]=='exec-out': sys.stdout.buffer.write(b'bad' if case=='png' else b'\\x89PNG\\r\\n\\x1a\\n')
-elif a[:3]==['emu','screenrecord','screenshot']: Path(a[-1],'Screenshot_fake.png').write_bytes(b'\\x89PNG\\r\\n\\x1a\\n')
+        # Build UI bytes once; fake adb must not launch Python at every readiness/retry step.
+        ui = ET.Element('hierarchy')
+        package = 'other.app' if case == 'foreign-ui' else 'app.daiyu.android'
+        for description in ('打开侧边栏', '更多', '发送'):
+            if case == 'missing-send' and description == '发送':
+                continue
+            ET.SubElement(ui, 'node', {'package': package, 'class': 'android.view.View',
+                                      'content-desc': description})
+        if case != 'missing-editor':
+            ET.SubElement(ui, 'node', {'package': package, 'class': 'android.widget.EditText'})
+        ET.SubElement(ui, 'node', {'package': package, 'class': 'android.widget.TextView', 'text': '代鱼'})
+        fake_ui = self.root / 'fake-ui.xml'
+        fake_ui.write_text('<broken' if case == 'malformed-ui' else
+                           '代鱼 · 聊天 发送' if case == 'old-title-only' else
+                           ET.tostring(ui, encoding='unicode'), encoding='utf-8')
+        self.executable('adb', r'''#!/bin/sh
+case "$*" in
+ 'shell getprop ro.build.version.sdk') printf '%s\n' "$API" ;;
+ 'shell getprop sys.boot_completed') printf '1\n' ;;
+ *pidof*) printf '123\n456\n' ;;
+ 'shell pm path android') printf 'package:/system/framework/framework-res.apk\n' ;;
+ 'shell cat /proc/meminfo') printf 'MemTotal: 5000000 kB\n' ;;
+ 'install '*) printf 'Success\n'; [ "$CASE" != install-fail ] || exit 7 ;;
+ 'shell am instrument '*)
+  printf '%s\n' "$@" > smoke/instrumentation-args.txt
+  [ "$#" -eq 8 ] && [ "$4" = -w ] && [ "$5" = -e ] && [ "$6" = class ] &&
+   [ "$7" = "$TEST_CLASSES" ] && [ "$8" = app.daiyu.android.test/android.test.InstrumentationTestRunner ] || exit 11
+  summary="OK ($TEST_COUNT tests)"
+  [ "$CASE" != terminal-before ] || printf 'INSTRUMENTATION_CODE: -1\n'
+  case "$CASE" in
+   substring-ok) printf 'prefix %s suffix\n' "$summary" ;;
+   indented-ok) printf ' %s\n' "$summary" ;;
+   *) printf '%s\n' "$summary" ;;
+  esac
+  [ "$CASE" != duplicate-ok ] || printf '%s\n' "$summary"
+  [ "$CASE" != failure ] || printf 'FAILURES!!!\n'
+  [ "$CASE" != status-fail ] || printf 'INSTRUMENTATION_STATUS_CODE: -2\n'
+  case "$CASE" in
+   missing-terminal) : ;;
+   terminal-conflict) printf 'INSTRUMENTATION_CODE: 0\n' ;;
+   *) printf 'INSTRUMENTATION_CODE: -1\n' ;;
+  esac
+  [ "$CASE" != duplicate-terminal ] || printf 'INSTRUMENTATION_CODE: -1\n'
+  [ "$CASE" != after-terminal ] || printf 'INSTRUMENTATION_STATUS_CODE: 0\n'
+  case "$CASE" in instrument-timeout) exit 124 ;; instrument-fail) exit 9 ;; esac ;;
+ 'shell am start '*) printf 'Status: ok\n' ;;
+ 'shell pm list '*)
+  if [ "$CASE" = old-package ]; then printf 'package:io.github.mangi.eta\n'
+  else printf 'package:app.daiyu.android\n'; fi ;;
+ 'shell uiautomator dump '*) [ "$CASE" != dump-fail ] || exit 8 ;;
+ 'pull '*) [ "$CASE" != pull-fail ] || exit 8; cat "$FAKE_UI" > "$3" ;;
+ 'logcat '*) [ "$CASE" != crash ] || printf 'FATAL EXCEPTION\n' ;;
+ 'exec-out '*)
+  if [ "$CASE" = png ]; then printf bad; else printf '\211PNG\r\n\032\n'; fi ;;
+ 'emu screenrecord screenshot '*) printf '\211PNG\r\n\032\n' > "$4/Screenshot_fake.png" ;;
+esac
+exit 0
 ''')
         if expected_classes is None:
             expected_classes = ('app.daiyu.android.FirstTest,app.daiyu.android.other.SecondTest'
@@ -184,8 +202,30 @@ elif a[:3]==['emu','screenrecord','screenshot']: Path(a[-1],'Screenshot_fake.png
         if reported_count is None:
             reported_count = 3 if case == 'multi' else 2 if case == 'count' else 1
         env = dict(self.env, API=str(api), CASE=case,
-                   TEST_CLASSES=expected_classes, TEST_COUNT=str(reported_count))
-        return subprocess.run(['bash', str(ROOT / 'scripts/smoke_boot.sh')], cwd=self.root, env=env, capture_output=True, timeout=15)
+                   TEST_CLASSES=expected_classes, TEST_COUNT=str(reported_count), FAKE_UI=str(fake_ui))
+        return self.run_process(['bash', str(ROOT / 'scripts/smoke_boot.sh')], env=env)
+
+    def run_process(self, argv, env=None, timeout=15):
+        with subprocess.Popen(argv, cwd=self.root, env=env or self.env,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              start_new_session=True) as process:
+            try:
+                stdout, stderr = process.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.communicate()
+                raise
+            return subprocess.CompletedProcess(process.args, process.returncode, stdout, stderr)
+
+    def test_fixture_timeout_reaps_pipe_holding_descendants(self):
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            self.run_process(['/bin/sh', '-c', '/bin/sleep 30 & wait'], timeout=0.2)
+        self.assertLess(time.monotonic() - started, 5)
+
 
     def test_api26_success_and_png_isolation(self):
         result = self.smoke()
@@ -333,8 +373,9 @@ elif a[:3]==['emu','screenrecord','screenshot']: Path(a[-1],'Screenshot_fake.png
     def test_business_gates_remain(self):
         for case in ['count', 'failure', 'old-package', 'crash', 'png', 'foreign-ui',
                      'missing-send', 'missing-editor', 'malformed-ui', 'old-title-only']:
+            result = self.smoke(case=case)
             with self.subTest(case=case):
-                self.assertNotEqual(self.smoke(case=case).returncode, 0)
+                self.assertNotEqual(result.returncode, 0)
 
 
 if __name__ == '__main__':

@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
@@ -73,25 +74,31 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
         Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerHigh)) {
             Column {
-                BasicTextField(
-                    value = TextFieldValue(state.text, TextRange(state.selectionStart.coerceIn(0, state.text.length), state.selectionEnd.coerceIn(0, state.text.length))),
-                    onValueChange = { value ->
-                        if (value.text != state.text) actions.onTextChange(value.text)
-                        actions.onSelectionChange(value.selection.start, value.selection.end)
-                    },
-                    enabled = state.enabled,
-                    modifier = Modifier.testTag("chat-draft").fillMaxWidth().heightIn(min = 48.dp, max = 160.dp)
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
-                    maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = colors.onSurface, fontSize = 15.sp, lineHeight = 22.sp),
-                    cursorBrush = SolidColor(colors.primary),
-                    decorationBox = { inner ->
-                        Box {
-                            if (state.text.isEmpty()) Text("给代鱼发消息", color = colors.onSurfaceVariantSummary,
-                                style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp, lineHeight = 22.sp))
-                            inner()
-                        }
-                    },
-                )
+                key(state.editorGeneration) {
+                    var editingValue by remember { mutableStateOf(TextFieldValue(state.text)) }
+                    val renderedValue = editingValue.forComposer(state.text, state.selectionStart, state.selectionEnd)
+                    SideEffect { if (editingValue != renderedValue) editingValue = renderedValue }
+                    BasicTextField(
+                        value = renderedValue,
+                        onValueChange = { value ->
+                            editingValue = value
+                            if (value.text != state.text) actions.onTextChange(value.text)
+                            actions.onSelectionChange(value.selection.start, value.selection.end)
+                        },
+                        enabled = state.enabled,
+                        modifier = Modifier.testTag("chat-draft").fillMaxWidth().heightIn(min = 48.dp, max = 160.dp)
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = colors.onSurface, fontSize = 15.sp, lineHeight = 22.sp),
+                        cursorBrush = SolidColor(colors.primary),
+                        decorationBox = { inner ->
+                            Box {
+                                if (state.text.isEmpty()) Text("给代鱼发消息", color = colors.onSurfaceVariantSummary,
+                                    style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp, lineHeight = 22.sp))
+                                inner()
+                            }
+                        },
+                    )
+                }
                 // Same centered overlay as Eta's ChatComposerActionRow: both the visible
                 // circle and its 48dp touch target are centered on the whole input row.
                 Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {

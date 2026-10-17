@@ -28,8 +28,7 @@ class PlatformActionVisitActivityTest : WiredActivityTestCase() {
     private fun route() { host("setRetainedPage", "settings"); host("setRetainedPage", "chat") }
     private fun pause() { instrumentation.callActivityOnPause(activity); instrumentation.callActivityOnResume(activity) }
     private fun clickAction(tag: String) {
-        node(tag).assertIsEnabled()
-            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        node(tag).assertIsDisplayed().assertIsEnabled().performClick()
     }
     private fun preview(): ControllerPlatformActionPreparation {
         clickAction("platform-action-entry")

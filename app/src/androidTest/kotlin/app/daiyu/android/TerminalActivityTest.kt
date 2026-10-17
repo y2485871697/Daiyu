@@ -8,11 +8,13 @@ class TerminalActivityTest : WiredActivityTestCase() {
     private val owner get() = (instrumentation.targetContext.applicationContext as ChatApplication).terminalOwner
 
     private fun awaitTerminal() {
-        ui.waitUntil(5_000) {
-            ui.onAllNodesWithTag("terminal-screen")
-                .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        awaitUniqueTag("terminal-screen") {
+            val provider = (instrumentation.targetContext.applicationContext as ChatApplication).terminalProvider
+            val pageOwner = MainActivity::class.java.getDeclaredField("terminalPageOwner")
+                .apply { isAccessible = true }.get(activity)
+            "provider=${provider.state.value.javaClass.simpleName} pageOwnerPresent=${pageOwner != null} " +
+                "finishing=${activity.isFinishing} destroyed=${activity.isDestroyed}"
         }
-        node("terminal-screen").assertExists()
     }
 
     private fun enterFromSettings() {

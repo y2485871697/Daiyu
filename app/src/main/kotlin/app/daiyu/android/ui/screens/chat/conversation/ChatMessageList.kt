@@ -138,9 +138,9 @@ internal fun ChatMessageList(
                 it.size > 0 && it.offset < layout.viewportEndOffset &&
                     it.offset + it.size in (layout.viewportStartOffset + 1)..layout.viewportEndOffset
             }.map { it.key }.toSet()
-            currentTurns.filterIsInstance<ChatTurnUi.Assistant>()
+            currentReadAction to currentTurns.filterIsInstance<ChatTurnUi.Assistant>()
                 .filter { it.status == RunStatus.COMPLETED && it.listKey in visibleKeys && readyTurns[it.listKey] == it }
-        }.collectLatest { completed ->
+        }.collect { (readAction, completed) ->
             if (completed.isNotEmpty()) {
                 // Wait for the formatted terminal body, not a shorter raw-text placeholder.
                 withFrameNanos { }
@@ -151,7 +151,7 @@ internal fun ChatMessageList(
                     it.offset + it.size in (layout.viewportStartOffset + 1)..layout.viewportEndOffset
                 }.map { it.key }.toSet()
                 val current = currentTurns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey }
-                currentReadAction(completed.filter {
+                readAction(completed.filter {
                     it.listKey in stillVisible && current[it.listKey] == it && readyTurns[it.listKey] == it
                 }.map { it.listKey }.toSet())
             }

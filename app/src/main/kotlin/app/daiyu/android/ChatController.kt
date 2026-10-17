@@ -289,13 +289,14 @@ class ChatController internal constructor(private val application:Application,
     // Fence under the short monitor; transport cancellation callbacks must run OUTSIDE it.
     private fun cancelPreparation() {
         val token = synchronized(this) {
+            guiEntry?.let { it.revoked = true; it.session?.close() }
             virtualDisplayEntry?.let { it.revoked = true; it.session?.close() }
             preparation?.also { it.revoked = true; it.video?.revoke() }
         }
         token?.cancellation?.cancel()
         token?.browser?.cancel()
         if (token != null && !token.submitted && (token.browser != null || token.terminal != null ||
-            synchronized(this) { virtualDisplayEntry?.submitted == false })) finishPreparation(token)
+            synchronized(this) { virtualDisplayEntry?.submitted == false || guiEntry?.submitted == false })) finishPreparation(token)
     }
     internal fun bindConversationAssistant(owner: ConversationId, expected: String?, replacement: String): Boolean {
         val token = synchronized(this) {
@@ -884,6 +885,8 @@ class ChatController internal constructor(private val application:Application,
             if(observation.drained) {
                 unacceptedTools.remove(tools)
                 clearCleanupProblem(tools)
+                guiEntry?.takeIf { it.catalog === tools && !it.persistenceUnknown && it.session?.releaseConfirmed == true }
+                    ?.let { guiEntry = null }
                 virtualDisplayEntry?.takeIf { it.catalog === tools && !it.persistenceUnknown }?.let {
                     virtualDisplayEntry = null
                 }
@@ -1104,7 +1107,7 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     private fun idleAvailable() = !closed && ready && !preparing && !dataBusy && active==null &&
-        resources==null && generationEntry==null && virtualDisplayEntry==null && generationReaders==0 && pendingShizuku==null && unacceptedTools.isEmpty() &&
+        resources==null && generationEntry==null && virtualDisplayEntry==null && guiEntry==null && generationReaders==0 && pendingShizuku==null && unacceptedTools.isEmpty() &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
     internal val selections=mutableMapOf<ConversationId?,Pair<Int,Int>>()
     @Volatile var active:Message?=null;private set
@@ -1203,6 +1206,8 @@ class ChatController internal constructor(private val application:Application,
     private fun fenceRun(lifetime:RunResources) {
         if(lifetime.fenced) return
         lifetime.fenced=true
+        guiEntry?.takeIf { it.assistantId == lifetime.initial.id && it.runId == lifetime.initial.runId &&
+            it.conversationId == lifetime.initial.conversationId }?.let { it.revoked = true; it.session?.close() }
         virtualDisplayEntry?.takeIf { it.assistantId == lifetime.initial.id && it.runId == lifetime.initial.runId &&
             it.conversationId == lifetime.initial.conversationId }?.let { it.revoked = true; it.session?.close() }
         videoSession?.takeIf { it.assistant.runId == lifetime.initial.runId }?.revoke()
@@ -1281,6 +1286,7 @@ class ChatController internal constructor(private val application:Application,
     }
     /** Cancellation is scoped to the original editor submission, never a later preparation. */
     internal fun cancelTextSend(ticket: TextSendTicket): Boolean {
+        synchronized(this) { guiEntry?.takeIf { it.textTicket === ticket } }?.let { return cancelGui(it) }
         synchronized(this) { virtualDisplayEntry?.takeIf { it.textTicket === ticket } }
             ?.let { return cancelVirtualDisplay(it) }
         val token = synchronized(this) {
@@ -1366,6 +1372,21 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     private fun finishPreparation(token: Preparation) {
+        val gui = synchronized(this) { if (preparation === token) guiEntry?.takeIf { it.catalog == null } else null }
+        if (gui != null) {
+            gui.session?.close()
+            if (gui.session?.releaseConfirmed == false) {
+                if (token.cleanupDeadline == 0L) token.cleanupDeadline = android.os.SystemClock.uptimeMillis() + 30_000
+                if (android.os.SystemClock.uptimeMillis() < token.cleanupDeadline)
+                    handler.postDelayed({ finishPreparation(token) }, 50)
+                else synchronized(this) {
+                    problem = "GUI 清理未确认；保留原会话与草稿，不自动重试"
+                    notifyChanged()
+                }
+                return
+            }
+            synchronized(this) { if (guiEntry === gui && !gui.persistenceUnknown) guiEntry = null }
+        }
         val installed = synchronized(this) { resources?.initial?.runId == token.video?.assistant?.runId && token.video != null }
         if (!installed) {
             token.video?.revoke()
@@ -1441,6 +1462,89 @@ class ChatController internal constructor(private val application:Application,
             pendingImage = null
             if (closed) closeStorageWhenIdle() else notifyChanged()
         }
+    }
+
+    private var guiEntry: ControllerGuiEntry? = null
+    @Synchronized internal fun guiEntry(): ControllerGuiEntry? = guiEntry
+
+    /** Main/user-only reservation. Retain the real identity before acquiring the screen lease;
+     * retain the session before Main can attach the confirmation overlay. */
+    internal fun prepareGuiSend(conversation: Conversation?, editor: TextSendOwner, text: String,
+        operation: app.daiyu.android.gui.GuiOperation, input: String?): ControllerGuiEntry? {
+        check(Looper.myLooper() === Looper.getMainLooper())
+        val (entry, token) = synchronized(this) {
+            if (!idleAvailable() || pendingTextState != null) return null
+            val entry = runCatching { ControllerGuiEntry(conversation, editor, text, operation, input) }.getOrNull()
+                ?: return null
+            guiEntry = entry
+            entry to reservePreparation()
+        }
+        val opened = try { app.daiyu.android.gui.GuiRuntime.openForUser(
+            app.daiyu.android.gui.GuiOwner(entry.sessionId, entry.runId.value)) }
+        catch (_: Exception) { app.daiyu.android.gui.GuiResult.Rejected("GUI_HOST_UNAVAILABLE") }
+        if (opened !is app.daiyu.android.gui.GuiResult.Value) {
+            cancelGui(entry)
+            finishPreparation(token)
+            return null
+        }
+        synchronized(this) { entry.session = opened.value }
+        notifyChanged()
+        return entry
+    }
+
+    internal fun cancelGui(entry: ControllerGuiEntry): Boolean {
+        val (running, token) = synchronized(this) {
+            if (guiEntry !== entry) return false
+            entry.revoked = true
+            entry.session?.close() // synchronous admission fence; physical release is separately observed
+            val pending = preparation?.also { it.revoked = true }
+            val running = resources?.takeIf { it.initial.id == entry.assistantId &&
+                it.initial.runId == entry.runId && it.initial.conversationId == entry.conversationId }
+                ?.also { fenceRun(it) }
+            running to pending
+        }
+        token?.cancellation?.cancel()
+        if (running != null) stopRun(running)
+        else if (!entry.submitted && token != null) finishPreparation(token)
+        return true
+    }
+
+    internal fun sendGui(entry: ControllerGuiEntry, delivery: app.daiyu.android.gui.GuiConfirmedDelivery,
+        ticket: TextSendTicket, complete: (TextSendResult) -> Unit): Boolean {
+        val token = synchronized(this) {
+            val current = preparation ?: return false
+            if (closed || guiEntry !== entry || entry.revoked || entry.submitted || current.revoked ||
+                pendingTextState != null || entry.session !== delivery.session ||
+                delivery.session.identity != app.daiyu.android.gui.GuiOwner(entry.sessionId, entry.runId.value) ||
+                delivery.action.operation != entry.operation || delivery.action.text != entry.input ||
+                delivery.action.observationId != delivery.observation.observationId ||
+                delivery.writes != setOf(delivery.action.effect(delivery.session.identity))) return false
+            entry.delivery = delivery
+            entry.submitted = true
+            entry.textTicket = ticket
+            current.submitted = true
+            current.textTicket = ticket
+            pendingTextState = TextSendState(ticket, entry.editor, entry.text)
+            current
+        }
+        try { executor.execute {
+            val saved = try { sendPrepared(token, entry.conversation, entry.text,
+                expectedDraftText = entry.text, gui = entry) } catch (_: Exception) { null }
+            val result = when {
+                saved != null -> TextSendResult.Accepted(entry.editor, saved)
+                token.persistenceUnconfirmed -> TextSendResult.Unknown(entry.editor)
+                else -> TextSendResult.Rejected(entry.editor)
+            }
+            synchronized(this) {
+                if (pendingTextState?.ticket === ticket) pendingTextState = pendingTextState?.copy(result = result)
+            }
+            finishPreparation(token)
+            handler.post { try { complete(result) } catch (_: Exception) {} }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { if (pendingTextState?.ticket === ticket) pendingTextState = null }
+            cancelGui(entry); finishPreparation(token); return false
+        }
+        return true
     }
 
     private var virtualDisplayEntry: ControllerVirtualDisplayEntry? = null
@@ -1905,7 +2009,12 @@ class ChatController internal constructor(private val application:Application,
         terminalPreparation:ControllerTerminalPreparation?=null,
         terminalRun:TerminalConfirmedRun?=null,
         virtualDisplay:ControllerVirtualDisplayEntry?=null,
+        gui:ControllerGuiEntry?=null,
         videoAttempt:ControllerVideoAttempt?=null):Conversation? {
+        require(gui == null || (virtualDisplay == null && generation == null && shizukuPreparation == null &&
+            shizukuAuthorization == null && browserPreparation == null && browserBinding == null &&
+            imageAttempt == null && terminalRun == null && videoAttempt == null && !withChildren &&
+            gui.session != null && gui.delivery?.session === gui.session && !gui.revoked))
         require((terminalPreparation == null) == (terminalRun == null))
         require(terminalRun == null || (imageAttempt == null && shizukuPreparation == null &&
             browserPreparation == null && generation == null && virtualDisplay == null && videoAttempt == null && !withChildren &&
@@ -1971,22 +2080,22 @@ class ChatController internal constructor(private val application:Application,
             problem="错误重连配置无效或写入未确认；请重新保存，草稿保留，未启动聊天模型请求"
             notifyChanged(); return null
         }
-        val conversationId=virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
+        val conversationId=gui?.conversationId ?: virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
-        val run=virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
+        val run=gui?.runId ?: virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
         // One acceptance candidate, including its media reconstruction and all run owners.
         // This value must not change during preflight, streaming, or receipt reconciliation.
         val acceptedAt = System.currentTimeMillis()
         var user=try {imageAttempt?.prepare(imageAttachments.store,messageImageAssets,acceptedAt) ?:
             Message(videoAttempt?.userId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED,createdAt=acceptedAt)
         } catch (_:Exception) {problem="图片冻结失败或模型不支持；草稿保留，未发起网络请求";notifyChanged();return null}
-        val assistant=Message(virtualDisplay?.assistantId ?: terminalRun?.preview?.identity?.assistantMessageId ?: videoAttempt?.assistantId ?: generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING,createdAt=acceptedAt)
+        val assistant=Message(gui?.assistantId ?: virtualDisplay?.assistantId ?: terminalRun?.preview?.identity?.assistantMessageId ?: videoAttempt?.assistantId ?: generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING,createdAt=acceptedAt)
         val physicalVideoHistory = try { ControllerVideoHistory(database).capture(conversationId) }
         catch (_: Exception) {
             problem="原视频来源无法确认；草稿保留，未启动模型请求";notifyChanged();return null
         }
         if (physicalVideoHistory.inputs.isNotEmpty() && (withChildren || imageAttempt != null ||
-                generation != null || terminalRun != null || virtualDisplay != null ||
+                generation != null || terminalRun != null || virtualDisplay != null || gui != null ||
                 shizukuPreparation != null || shizukuAuthorization != null ||
                 browserPreparation != null || browserBinding != null)) {
             problem="当前专用批准不能与原视频历史混合发送；保留草稿，请使用原视频文本发送入口"
@@ -2154,19 +2263,20 @@ class ChatController internal constructor(private val application:Application,
             preparingChildren = children
             val devices = RunDeviceResources(application, resultPolicy = platformSnapshot.resultPolicy)
             preparingDevices = devices
-            val registry = AndroidToolRegistry.create(devices, contextTools, enableUserBarrier=interactiveSnapshot.enabled)
-            val capabilities = SessionCapabilities(terminalRun?.preview?.identity?.sessionId ?: run.value,
+            val registry = AndroidToolRegistry.create(devices, contextTools, enableUserBarrier=interactiveSnapshot.enabled && gui == null)
+            val capabilities = SessionCapabilities(gui?.sessionId ?: terminalRun?.preview?.identity?.sessionId ?: run.value,
                 (if (virtualDisplay == null) AndroidToolRegistry.capabilitiesFor(config.enabledTools(),
                     platformAllowed = platformSnapshot.platformAllowed) else emptySet()) + contextTools.map { it.definition.capability } +
                     setOf(SkillRunSession.READ, SkillRunSession.RESOURCE) +
                     (if (assistantContext.memoryReadPort == null) emptySet() else setOf(ScopedAssistantMemoryTools.READ)) +
-                    (if (interactiveSnapshot.enabled) setOf(AndroidToolRegistry.ASK_USER_CAPABILITY) else emptySet()) +
+                    (if (interactiveSnapshot.enabled && gui == null) setOf(AndroidToolRegistry.ASK_USER_CAPABILITY) else emptySet()) +
                     (if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY,RunChildTasks.CAPABILITY)) +
                     (if (shizukuPreparation == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)) +
                     (if (browserBinding == null) emptySet() else setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY)) +
                     (if (generation == null) emptySet() else setOf(RunGenerationTools.CAPABILITY)) +
                     (if (terminalRun == null) emptySet() else setOf(RunTerminalTools.CAPABILITY)) +
-                    (if (virtualDisplay == null) emptySet() else setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY)))
+                    (if (virtualDisplay == null) emptySet() else setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY)) +
+                    (if (gui == null) emptySet() else setOf(app.daiyu.android.gui.GuiScreenToolFactory.CAPABILITY)))
             val backgroundFactory: ((app.daiyu.android.domain.runtime.RunExecutionOwner, SessionCapabilities,
                 app.daiyu.android.domain.tools.TaskAuthorization) -> RunChildTasks)? =
                 if(childModels.isEmpty()) null else { owner, grants, authorization ->
@@ -2190,9 +2300,12 @@ class ChatController internal constructor(private val application:Application,
                             ?: assistantModel?.invoke(provider, assistantContext) ?: model(config) },
                         onChanged = ::browserChildrenChanged)
                 } },
-                authorization=terminalRun?.authorization ?: shizukuAuthorization ?: browserPreparation?.childPlan?.parentAuthorization ?: browserBinding?.let {
+                authorization=terminalRun?.authorization ?: shizukuAuthorization ?: gui?.let {
+                    app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value,
+                        checkNotNull(it.delivery).writes)
+                } ?: browserPreparation?.childPlan?.parentAuthorization ?: browserBinding?.let {
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value, it.requiredWrites)
-                }, shizuku=shizuku, browser=browserBinding, terminal=terminalRun?.binding,
+                }, shizuku=shizuku, browser=browserBinding, terminal=terminalRun?.binding, gui=gui?.session,
                 authorizationFactory = if (video != null) { realOwner ->
                     video.first.bindOwner(realOwner)
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value,
@@ -2230,9 +2343,11 @@ class ChatController internal constructor(private val application:Application,
             }
             preparingTools = tools
             if (terminalRun != null) token.terminalCatalog = tools
-            synchronized(this) { virtualDisplay?.catalog = tools }
+            synchronized(this) { virtualDisplay?.catalog = tools; gui?.catalog = tools }
             generation?.catalog = tools
-            val owned = ChatRunner(observedModel, database, tools,
+            val runModel = if (gui == null) observedModel else app.daiyu.android.gui.GuiConfirmedModelPort(
+                observedModel, user.id, checkNotNull(gui.delivery))
+            val owned = ChatRunner(runModel, database, tools,
                 RunnerOptions(reconnect=frozenReconnect.runnerPolicy(),
                     runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools,
                     onReasoning={ event -> publishReasoning(assistant,event) })) {
@@ -2315,7 +2430,10 @@ class ChatController internal constructor(private val application:Application,
             }
         } catch (_:Exception) {
             token.persistenceUnconfirmed=databaseSendEntered || token.videoReceipt?.outcome == VideoDraftOutcome.UNKNOWN
-            synchronized(this) { virtualDisplay?.persistenceUnknown = token.persistenceUnconfirmed }
+            synchronized(this) {
+                virtualDisplay?.persistenceUnknown = token.persistenceUnconfirmed
+                gui?.persistenceUnknown = token.persistenceUnconfirmed
+            }
             if(databaseSendEntered) imageAttempt?.unknown() else imageAttempt?.draftChanged()
             auxiliaryPort?.close()
             closeUnacceptedTools(tools)
@@ -2342,7 +2460,7 @@ class ChatController internal constructor(private val application:Application,
             } catch (_: Exception) { titleNotice = "独立标题配置不可用；聊天已保存" }
         }
         imageAttempt?.accepted(saved)
-        synchronized(this) { virtualDisplay?.accepted = true }
+        synchronized(this) { virtualDisplay?.accepted = true; gui?.accepted = true }
         video?.first?.accepted(user, videoPrepared?.inputs.orEmpty())
         generation?.session?.recordPersistence(generation.identity, GenerationPersistenceReceipt.Accepted(saved))
         val lifetime=RunResources(assistant,owned,tools,auxiliaryPort)
@@ -2529,6 +2647,8 @@ class ChatController internal constructor(private val application:Application,
         if (videoSession?.assistant?.runId == lifetime.initial.runId) videoSession = null
         resources=null;runner=null;runTools=null
         clearCleanupProblem(lifetime.tools)
+        guiEntry?.takeIf { it.catalog === lifetime.tools && !it.persistenceUnknown && it.session?.releaseConfirmed == true }
+            ?.let { guiEntry = null }
         virtualDisplayEntry?.takeIf { it.catalog === lifetime.tools }?.let {
             virtualDisplayEntry = null
         }
@@ -2553,7 +2673,7 @@ class ChatController internal constructor(private val application:Application,
         browserChildren.removeAll { it.drained }
         if (browserChildren.isNotEmpty()) return // Child workers/UNKNOWN still own the DB and ledger.
         pruneBackgroundRuns()
-        if(resources!=null || preparing || generationEntry!=null || virtualDisplayEntry!=null || generationReaders!=0 ||
+        if(resources!=null || preparing || generationEntry!=null || virtualDisplayEntry!=null || guiEntry!=null || generationReaders!=0 ||
             unacceptedTools.isNotEmpty() || imageReaders!=0 || videoReaders!=0 || childCommandReaders!=0 || titleReaders!=0 || closingStorage) return
         if(!childrenClosed) {
             if(!childrenClosing) {

@@ -599,7 +599,7 @@ class MainActivity : ComponentActivity() {
     private var shizukuInFlight by mutableStateOf<ControllerShizukuPreparation?>(null)
     private val shizukuWritesBlocked: Boolean get() = shizukuInFlight != null ||
         controller.shizukuPreparation()?.isSubmitted() == true || controller.generationSubmissionPending() ||
-        controller.virtualDisplayEntry() != null || virtualDisplayPlanVisit != null
+        controller.virtualDisplayEntry() != null || virtualDisplayPlanVisit != null || controller.guiEntry() != null
     private val imagePicker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         imageHost.picked(uris)
     }
@@ -607,7 +607,7 @@ class MainActivity : ComponentActivity() {
     private var sidebarVisible: Boolean
         get() = sidebarVisibleState
         set(value) {
-            if (value && !sidebarVisibleState) { stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor() }
+            if (value && !sidebarVisibleState) { stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor() }
             sidebarVisibleState = value
         }
     private var retainedPageState by mutableStateOf("chat")
@@ -619,7 +619,7 @@ class MainActivity : ComponentActivity() {
                 reconnectSettingsPageOwner?.revoke()
                 reconnectSettingsPageOwner = null
             }
-            if (value != retainedPageState) { stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationOutputs(); cancelVirtualDisplayEditor() }
+            if (value != retainedPageState) { stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationOutputs(); cancelVirtualDisplayEditor(); cancelGuiEditor() }
             if (value != "session-gateway") {
                 gatewayOwner?.revoke(); gatewayOwner = null
                 gatewayEditing = null; gatewayDraft = null
@@ -745,6 +745,7 @@ class MainActivity : ComponentActivity() {
     // Workers read only this atomic owner, never Compose state or the current text editor.
     private val currentCleanupOwner = AtomicReference<R08CleanupUiOwner?>(null)
     private var virtualDisplayCleanupVisit by mutableStateOf<VirtualDisplayCleanupVisit?>(null)
+    private var guiEditor by mutableStateOf<ControllerGuiEntry?>(null)
     private var virtualDisplayEditor by mutableStateOf<ControllerVirtualDisplayEntry?>(null)
     private var virtualDisplayRequest by mutableStateOf<app.daiyu.android.vdapproval.VirtualDisplayApprovalRequest?>(null)
     private var browserApproval by mutableStateOf<ControllerBrowserPreparation?>(null)
@@ -864,6 +865,7 @@ class MainActivity : ComponentActivity() {
         if (state?.getBoolean("balance-page", false) == true) retainedPageState = "balance-settings"
         // An Activity mount never inherits an approval capability from an older mount.
         controller.virtualDisplayEntry()?.let(controller::cancelVirtualDisplay)
+        controller.guiEntry()?.let(controller::cancelGui)
         app.daiyu.android.voice.offline.OfflineSpeechPack.initialize(applicationContext)
         lifecycleScope.launch {
             try { withContext(Dispatchers.IO) { controller.voiceAccounts.voices.load() } }
@@ -1666,6 +1668,19 @@ class MainActivity : ComponentActivity() {
                     !controller.generationSubmissionPending(),
                 modifier = Modifier.testTag("generation-approval-entry").heightIn(min = 48.dp),
                 onClick = ::openGenerationApproval)
+            top.yukonga.miuix.kmp.basic.TextButton(text = "GUI 精确动作审批（前台屏幕）",
+                enabled = available && pendingTextSend == null && guiEditor == null,
+                modifier = Modifier.testTag("gui-prepare-entry").heightIn(min = 48.dp),
+                onClick = ::openGuiPreparation)
+            top.yukonga.miuix.kmp.basic.TextButton(text = "GUI 系统无障碍设置",
+                modifier = Modifier.testTag("gui-settings-entry").heightIn(min = 48.dp),
+                onClick = { if (activityUsable()) app.daiyu.android.gui.GuiSystemSettings.openFromUser(this@MainActivity) })
+            guiEditor?.let { entry ->
+                androidx.compose.material3.Text(if (entry.submitted) "GUI 已交给本次任务；Unknown 不重试，资源释放前不可再次批准。"
+                    else "请切换到目标应用，在无障碍浮层读取并确认唯一真实目标。返回聊天或取消可撤销。")
+                top.yukonga.miuix.kmp.basic.TextButton(text = "撤销 GUI 准备 / 停止原任务",
+                    modifier = Modifier.testTag("gui-cancel"), onClick = { cancelGuiEditor(entry); publishChat() })
+            }
             top.yukonga.miuix.kmp.basic.TextButton(text = "副屏运行准备（需单独批准）",
                 enabled = available && pendingTextSend == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null &&
                     controller.virtualDisplayEntry() == null,
@@ -2096,6 +2111,69 @@ class MainActivity : ComponentActivity() {
             publishChat(); selected?.let(::loadAcceptedHistory)
         }
     }
+
+    private fun guiOwnerCurrent(entry: ControllerGuiEntry): Boolean = activityUsable() &&
+        guiEditor === entry && controller.guiEntry() === entry && !entry.revoked &&
+        retainedPage == "chat" && !sidebarVisible && selectionReady &&
+        entry.editor == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) &&
+        entry.text == draft && !imageHost.hasAttachments && videoHost.state.items.isEmpty() && !videoSending
+
+    private fun openGuiPreparation() {
+        if (!activityUsable() || retainedPage != "chat" || sidebarVisible || !selectionReady ||
+            pendingTextSend != null || imageHost.busy || imageHost.hasAttachments ||
+            videoHost.state.items.isNotEmpty() || videoSending || shizukuWritesBlocked || draft.isBlank()) return
+        val editor = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+        val text = draft
+        prompt = InputPrompt("本次 GUI 精确动作", "{\"operation\":\"tap\"}",
+            "operation：tap、long_press、scroll_forward、scroll_backward、input、back、home、recents、notifications。" +
+                "仅 input 必须带完整 text（最多 4096 字符）；不接受坐标。随后在真实目标应用浮层选择节点并最终确认。",
+            "打开真实目标确认", { raw ->
+                if (!activityUsable() || retainedPage != "chat" || sidebarVisible || !selectionReady ||
+                    editor != ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) ||
+                    text != draft || shizukuWritesBlocked || pendingTextSend != null || imageHost.hasAttachments ||
+                    videoHost.state.items.isNotEmpty() || videoSending) return@InputPrompt
+                val parsed = try { app.daiyu.android.gui.GuiUserActionRequest.parse(raw) }
+                catch (_: Exception) { toast("GUI 参数无效；未打开授权、未执行动作"); return@InputPrompt }
+                cancelBrowserEditor(); cancelShizukuEditor(); dictationHost.invalidate()
+                val entry = controller.prepareGuiSend(selected, editor, text, parsed.operation, parsed.text)
+                if (entry == null) { toast("GUI 不可用或仍待释放；请手动启用系统服务，草稿保留"); return@InputPrompt }
+                guiEditor = entry // retain before overlay attachment
+                val result = try { checkNotNull(entry.session).prepareExactActionFromUser(entry.operation, entry.input,
+                    ownerCurrent = { guiOwnerCurrent(entry) },
+                    onNotExecuted = { code ->
+                        if (guiEditor === entry) { cancelGuiEditor(entry); toast("GUI 未执行：$code"); publishChat() }
+                    }, onRevoked = {
+                        if (entry.submitted && guiEditor === entry) cancelGuiEditor(entry)
+                        else controller.cancelGui(entry)
+                    }, onConfirmed = { delivery ->
+                        if (!guiOwnerCurrent(entry) || entry.submitted || pendingTextSend != null) false else {
+                            try {
+                                if (selected == null) controller.database.draft(entry.text)
+                                else controller.database.draft(checkNotNull(selected).id, entry.text)
+                                val pending = PendingTextSend(entry.editor, entry.text)
+                                pendingTextSend = pending
+                                controller.sendGui(entry, delivery, pending.ticket) { receipt ->
+                                    completeTextSend(pending, receipt)
+                                }.also { accepted -> if (!accepted) {
+                                    pendingTextSend = null
+                                    toast("GUI 任务未受理；草稿保留，不自动重试")
+                                } }
+                            } catch (_: Exception) { pendingTextSend = null; false }
+                        }
+                    }) } catch (_: Exception) { app.daiyu.android.gui.GuiResult.Rejected("GUI_OVERLAY_UNAVAILABLE") }
+                if (result !is app.daiyu.android.gui.GuiResult.Value) {
+                    cancelGuiEditor(entry); toast("GUI 确认浮层不可用；未执行，草稿保留")
+                }
+                publishChat()
+            })
+    }
+
+    private fun cancelGuiEditor(original: ControllerGuiEntry) {
+        if (guiEditor !== original) return
+        controller.cancelGui(original) // fence before hiding; retain Controller resource until real release
+        guiEditor = null
+    }
+    private fun cancelGuiEditor() { guiEditor?.let(::cancelGuiEditor) }
 
     private fun openVirtualDisplayPreparation() {
         if (videoHost.state.items.isNotEmpty() || videoSending) return
@@ -2631,6 +2709,7 @@ class MainActivity : ComponentActivity() {
         gatewayOwner?.revoke(); gatewayOwner = null
         gatewayEditing = null; gatewayDraft = null
         balanceLifecycle?.close(); balanceLifecycle = null
+        cancelGuiEditor()
         fenceVideoRoute()
         controller.detachVideoUi(videoUi)
         pendingTextSend?.let { controller.cancelTextSend(it.ticket) }
@@ -3204,6 +3283,10 @@ class MainActivity : ComponentActivity() {
         return result
     }
     private fun publishChat() {
+        guiEditor?.let { entry ->
+            if (controller.guiEntry() !== entry) guiEditor = null
+            else if (!entry.submitted && !guiOwnerCurrent(entry)) cancelGuiEditor(entry)
+        }
         refreshUniversalAdmission()
         cascadeVoice.update(controller.active, shown.map { it.second }, selected?.id?.value)
         syncHaptics()

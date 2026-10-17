@@ -75,11 +75,11 @@ internal object GuiRuntime {
     private var generation = 0L
     private var confirmation: GuiConfirmationOverlay? = null
     internal fun showConfirmation(session: GuiRunSession, operation: GuiOperation, text: String?,
-        ownerCurrent: () -> Boolean, onNotExecuted: (String) -> Unit,
+        ownerCurrent: () -> Boolean, onNotExecuted: (String) -> Unit, onRevoked: () -> Unit,
         deliver: (GuiConfirmedDelivery) -> Boolean): GuiResult<Unit> {
         onMain(); gate.rejection(session.lease)?.let { return it }; screenRejection()?.let { return it }
         if (confirmation != null) return GuiResult.Rejected("CONFIRMATION_ALREADY_OPEN")
-        val host = GuiConfirmationOverlay(service!!, session, operation, text, ownerCurrent, onNotExecuted, deliver)
+        val host = GuiConfirmationOverlay(service!!, session, operation, text, ownerCurrent, onNotExecuted, onRevoked, deliver)
         confirmation = host
         return try { host.show(); GuiResult.Value(Unit) } catch (_: Exception) {
             session.close(); GuiResult.Rejected("OVERLAY_UNAVAILABLE_NOT_EXECUTED")
@@ -153,9 +153,10 @@ internal object GuiRuntime {
     private val closingLeases = mutableSetOf<GuiLeaseGate.Lease>()
     internal fun close(lease: GuiLeaseGate.Lease, onReleased: () -> Unit) {
         onMain(); closingLeases.add(lease)
+        lease.valid = false // fence even if overlay/node disposal fails; never manufacture a release
         if (!dismissConfirmation(lease)) return
-        if (gate.rejection(lease) == null) clearNodes()
-        lease.valid = false // admission closes now, but a pending platform capture still owns the slot
+        if (gate.ownsSlot(lease)) clearNodes()
+        // A pending platform capture still owns the slot until terminal callback/resource disposal.
         draining[lease] = onReleased
         finishDrain(lease)
     }
@@ -358,11 +359,10 @@ internal object GuiRuntime {
         val permit = gate.consumeRead(lease, screenshot = true)
         if (permit is GuiResult.Rejected) return rejected(permit.code)
         val current = service ?: return rejected("SERVICE_DISCONNECTED_NOT_EXECUTED")
-        val future = CompletableFuture<GuiResult<GuiScreenshot>>()
         captures[lease] = (captures[lease] ?: 0) + 1
-        val finished = java.util.concurrent.atomic.AtomicBoolean(false)
-        fun completeCapture() { if (finished.compareAndSet(false, true)) captureFinished(lease) }
-        try {
+        val request = GuiCaptureRequest<GuiScreenshot> { captureFinished(lease) }
+        val future = request.future
+        request.submit {
             current.takeScreenshot(Display.DEFAULT_DISPLAY, current.mainExecutor, object : AccessibilityService.TakeScreenshotCallback {
                 override fun onSuccess(screenshot: AccessibilityService.ScreenshotResult) {
                     val buffer = screenshot.hardwareBuffer
@@ -389,17 +389,19 @@ internal object GuiRuntime {
                         future.complete(GuiResult.Value(GuiScreenshot(observationId, image.width, image.height, bytes.toByteArray())))
                     } catch (_: Exception) { future.complete(GuiResult.Rejected("SCREENSHOT_UNAVAILABLE")) }
                     finally {
-                        try { software?.recycle(); hardware?.recycle(); buffer.close() }
-                        finally { completeCapture() }
+                        // Attempt every disposal even if another one throws. A failed disposal
+                        // must retain the slot: callback arrival alone is not a resource receipt.
+                        var disposed = true
+                        try { software?.recycle() } catch (_: Exception) { disposed = false }
+                        try { hardware?.recycle() } catch (_: Exception) { disposed = false }
+                        try { buffer.close() } catch (_: Exception) { disposed = false }
+                        if (disposed) request.resourcesDisposed()
                     }
                 }
                 override fun onFailure(errorCode: Int) {
-                    future.complete(GuiResult.Rejected("SCREENSHOT_PLATFORM_ERROR_$errorCode"))
-                    completeCapture()
+                    request.callbackFailure("SCREENSHOT_PLATFORM_ERROR_$errorCode")
                 }
             })
-        } catch (_: Exception) {
-            future.complete(GuiResult.Rejected("SCREENSHOT_UNAVAILABLE")); completeCapture()
         }
         return future
     }

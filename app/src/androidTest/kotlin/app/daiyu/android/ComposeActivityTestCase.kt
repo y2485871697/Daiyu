@@ -167,8 +167,16 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
     protected fun startMain(intent: Intent = Intent(instrumentation.targetContext, MainActivity::class.java)): MainActivity {
         val activity = instrumentation.startActivitySync(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
-        ui.waitForIdle()
-        return activity
+        try {
+            ui.waitForIdle()
+            return activity
+        } catch (failure: Throwable) {
+            try {
+                mainThread { activity.finish() }
+                awaitControl("failed-start Activity destroyed") { activity.isDestroyed }
+            } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
+            throw failure
+        }
     }
 }
 
@@ -195,12 +203,25 @@ abstract class WiredActivityTestCase : ComposeActivityTestCase() {
         }
         activity = startMain()
     }
+    override fun runBare() {
+        try { super.runBare() }
+        catch (failure: Throwable) {
+            try { cleanupFixture() } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
+            throw failure
+        }
+    }
     override fun tearDown() {
+        try { cleanupFixture() } finally { super.tearDown() }
+    }
+    private fun cleanupFixture() {
+        if (activityRef == null && fixtureRef == null && original == null) return
+
         val closingActivity = activityRef
         val closingFixture = fixtureRef
         val restore = original
         try {
             mainThread { closingActivity?.finish() }
+            awaitControl("fixture Activity destroyed") { closingActivity?.isDestroyed != false }
         } finally {
             try {
                 mainThread {
@@ -215,7 +236,6 @@ abstract class WiredActivityTestCase : ComposeActivityTestCase() {
                     activityRef = null
                     fixtureRef = null
                     original = null
-                    super.tearDown()
                 }
             }
         }

@@ -59,12 +59,14 @@ internal fun BrowserSettingsScreen(
     BackHandler(onBack = leavePage)
     LaunchedEffect(store, pageSaveOwner) {
         val result = withContext(Dispatchers.IO) { runCatching { store.snapshot() } }
-        if (page.active && pageSaveOwner.isActive && currentOwner()) {
-            result.onSuccess { selected = it.access; saved = it.access }.onFailure {
-                failed = true
-                notice = "无法确认已保存设置。请明确选择并重新保存；不会据此授予浏览器权限。"
+        withContext(Dispatchers.Main.immediate) {
+            if (page.active && pageSaveOwner.isActive && currentOwner()) {
+                result.onSuccess { selected = it.access; saved = it.access }.onFailure {
+                    failed = true
+                    notice = "无法确认已保存设置。请明确选择并重新保存；不会据此授予浏览器权限。"
+                }
+                busy = false
             }
-            busy = false
         }
     }
     MiuixScaffoldPage(title = "浏览器", onBack = leavePage, modifier = modifier) {
@@ -91,15 +93,17 @@ internal fun BrowserSettingsScreen(
                                 // No Compose state or ownerCurrent lambda is read on IO.
                                 runCatching { store.save(requested, pageSaveOwner) }
                             }
-                            if (page.active && pageSaveOwner.isActive && currentOwner()) {
-                                result.onSuccess {
-                                    selected = it.access; saved = it.access; failed = false
-                                    notice = "已保存并回读：${accessLabel(it.access)}。未创建任何任务授权。"
-                                }.onFailure {
-                                    saved = null; failed = true
-                                    notice = "保存或回读未确认，请重新保存。不会使用未确认设置授权。"
+                            withContext(Dispatchers.Main.immediate) {
+                                if (page.active && pageSaveOwner.isActive && currentOwner()) {
+                                    result.onSuccess {
+                                        selected = it.access; saved = it.access; failed = false
+                                        notice = "已保存并回读：${accessLabel(it.access)}。未创建任何任务授权。"
+                                    }.onFailure {
+                                        saved = null; failed = true
+                                        notice = "保存或回读未确认，请重新保存。不会使用未确认设置授权。"
+                                    }
+                                    busy = false
                                 }
-                                busy = false
                             }
                         }
                     }

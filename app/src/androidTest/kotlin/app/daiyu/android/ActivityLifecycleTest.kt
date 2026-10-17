@@ -80,16 +80,44 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
         application = instrumentation.targetContext.applicationContext as ChatApplication
         mainThread { original = application.controller; application.controller = controller }
     }
+    private var fixtureCleaned = false
+    override fun runBare() {
+        try { super.runBare() }
+        catch (failure: Throwable) {
+            try { cleanupFixture() } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
+            throw failure
+        }
+    }
     override fun tearDown() {
+        try { cleanupFixture() } finally { super.tearDown() }
+    }
+    private fun cleanupFixture() {
+        if (fixtureCleaned) return
+        fixtureCleaned = true
         try {
-            mainThread { activity?.finish(); application.controller = original }; controller.close()
-            fixture.deleteDatabase("conversations.db")
-            fixture.getSharedPreferences("conversation-ui", 0).edit().clear().commit()
-            fixture.getSharedPreferences("model-settings", 0).edit().clear().commit()
-            val keys = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-            java.util.Collections.list(keys.aliases()).filter { it == aliasPrefix || it.startsWith("$aliasPrefix.") }.forEach { keys.deleteEntry(it) }
-            directory.deleteRecursively()
-        } finally { super.tearDown() }
+            mainThread { activity?.finish() }
+            awaitControl("lifecycle Activity destroyed") { activity?.isDestroyed != false }
+        } finally {
+            try {
+                if (::application.isInitialized && ::original.isInitialized)
+                    mainThread { application.controller = original }
+            } finally {
+                try { if (::controller.isInitialized) controller.close() }
+                finally {
+                    if (::fixture.isInitialized) {
+                        fixture.deleteDatabase("conversations.db")
+                        fixture.getSharedPreferences("conversation-ui", 0).edit().clear().commit()
+                        fixture.getSharedPreferences("model-settings", 0).edit().clear().commit()
+                    }
+                    if (::aliasPrefix.isInitialized) {
+                        val keys = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+                        java.util.Collections.list(keys.aliases()).filter { it == aliasPrefix || it.startsWith("$aliasPrefix.") }
+                            .forEach { keys.deleteEntry(it) }
+                    }
+                    if (::directory.isInitialized) directory.deleteRecursively()
+                }
+            }
+        }
     }
     private fun start(open: Boolean = false): MainActivity {
         val intent = Intent(instrumentation.targetContext, MainActivity::class.java)

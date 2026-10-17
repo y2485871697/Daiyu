@@ -24,7 +24,8 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         setDraft(text)
         node("shizuku-text-entry").performClick()
         ui.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.ToggleableState) and
-            hasAnyAncestor(hasTestTag("shizuku-text-panel"))).performClick()
+            hasAnyAncestor(hasTestTag("shizuku-text-panel"))).performScrollTo()
+            .assertIsDisplayed().assertIsEnabled().performClick()
         ui.onNode(hasSetTextAction() and hasText("精确 UID：0 或 2000（必选，无默认值）"))
             .performScrollTo().performTextReplacement("2000")
         ui.onNode(hasSetTextAction() and hasText("本次精确 shell 命令"))
@@ -37,8 +38,17 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         openEditor()
         ui.onNodeWithText("预览命令及本次运行").performScrollTo().performClick()
         ui.waitUntil(5_000) { fixture.controller.shizukuPreparation() != null }
-        mainThread { invoke("trackShizukuPreparation") }
-        return checkNotNull(fixture.controller.shizukuPreparation())
+        val preparation = checkNotNull(fixture.controller.shizukuPreparation())
+        ui.waitUntil(5_000) {
+            var published = false
+            instrumentation.runOnMainSync {
+                val current = editor()
+                published = current?.javaClass?.getDeclaredField("preview")
+                    ?.apply { isAccessible = true }?.get(current) === preparation
+            }
+            published
+        }
+        return preparation
     }
 
     fun testIndependentEntryDefaultsOffAndUidHasNoFallback() {
@@ -47,7 +57,8 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         assertNull(fixture.controller.shizukuPreparation())
         ui.onNodeWithText("本次精确 shell 命令").assertDoesNotExist()
         ui.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.ToggleableState) and
-            hasAnyAncestor(hasTestTag("shizuku-text-panel"))).performClick()
+            hasAnyAncestor(hasTestTag("shizuku-text-panel"))).performScrollTo()
+            .assertIsDisplayed().assertIsEnabled().performClick()
         ui.onNode(hasSetTextAction() and hasText("本次精确 shell 命令"))
             .performScrollTo().performTextReplacement(command)
         // Even with valid text/command/timeout, no UID was selected.

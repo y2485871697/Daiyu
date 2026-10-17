@@ -81,6 +81,22 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
                 ControllerVirtualDisplayRuntime.LeaseStore({ root }, gate)) { host }
         }).also { check(it.taskSurfaces.save(app.daiyu.android.tasksurface.TaskSurfacePreference.BACKGROUND)) }
 
+    override fun tearDown() {
+        try {
+            // Business assertions may intentionally retain UNKNOWN; the fake host now observes exit.
+            physicalUnknown.set(false)
+            val entry = fixture.controller.virtualDisplayEntry()
+            if (entry != null) {
+                mainThread { fixture.controller.cancelVirtualDisplay(entry) }
+                awaitControl("fixture original run stopped") { fixture.controller.active == null }
+                mainThread { fixture.controller.observeVirtualDisplayClose(entry) }
+                awaitControl("fixture original display cleanup drained") {
+                    fixture.controller.virtualDisplayEntry() == null
+                }
+            }
+        } finally { super.tearDown() }
+    }
+
     private fun invokeMain(name: String, vararg arguments: Any?): Any? {
         val method = MainActivity::class.java.declaredMethods.single {
             it.name == name && it.parameterCount == arguments.size

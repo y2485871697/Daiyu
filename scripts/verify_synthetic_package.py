@@ -11,9 +11,12 @@ from verify_signing import verify_certificate
 APP_ID = 'app.daiyu.android.synthetic'
 TEST_ID = APP_ID + '.test'
 ANDROID = '{http://schemas.android.com/apk/res/android}'
+VARIANTS = ('debug-synthetic', 'release-synthetic')
 
 
-def verify_manifests(app_xml, test_xml):
+def verify_manifests(app_xml, test_xml, variant='debug-synthetic'):
+    if variant not in VARIANTS:
+        raise ValueError('synthetic_variant_invalid')
     app, tests = ET.fromstring(app_xml), ET.fromstring(test_xml)
     if app.get('package') != APP_ID or tests.get('package') != TEST_ID:
         raise ValueError('synthetic_package_identity_mismatch')
@@ -22,6 +25,12 @@ def verify_manifests(app_xml, test_xml):
     application = app.find('application')
     if application is None or application.get(ANDROID + 'name') != 'app.daiyu.android.ChatApplication':
         raise ValueError('synthetic_application_mismatch')
+    if variant == 'release-synthetic':
+        if application.get(ANDROID + 'debuggable', 'false') != 'false':
+            raise ValueError('synthetic_release_debuggable_forbidden')
+        profileable = application.findall('profileable')
+        if len(profileable) != 1 or profileable[0].get(ANDROID + 'shell') != 'true':
+            raise ValueError('synthetic_release_profileable_required')
     for manifest, package_id in ((app, APP_ID), (tests, TEST_ID)):
         for provider in manifest.findall('application/provider'):
             if any(not value.startswith(package_id + '.') for value in provider.get(ANDROID + 'authorities', '').split(';')):
@@ -32,7 +41,8 @@ def verify_manifests(app_xml, test_xml):
         raise ValueError('synthetic_instrumentation_mismatch')
 
 
-def verify_pair(directory, apkanalyzer, apksigner, env, run=subprocess.run):
+def verify_pair(directory, apkanalyzer, apksigner, env, run=subprocess.run,
+                variant='debug-synthetic'):
     app, tests = directory / 'app-synthetic.apk', directory / 'tests/platform-test.apk'
     sha = env['GITHUB_SHA']
     if len(sha) != 40 or any(c not in '0123456789abcdef' for c in sha):
@@ -52,12 +62,18 @@ def verify_pair(directory, apkanalyzer, apksigner, env, run=subprocess.run):
             for chunk in iter(lambda: stream.read(1024 * 1024), b''):
                 digest.update(chunk)
         sums[apk.relative_to(directory).as_posix()] = digest.hexdigest()
-    verify_manifests(*manifests)
+    verify_manifests(*manifests, variant=variant)
+    application = ET.fromstring(manifests[0]).find('application')
+    debuggable = application.get(ANDROID + 'debuggable', 'false') == 'true'
+    profileable = application.find('profileable')
+    shell_profileable = profileable is not None and profileable.get(ANDROID + 'shell') == 'true'
     for name, manifest in zip(('app', 'test'), manifests):
         (directory / (name + '-manifest.xml')).write_text(manifest, encoding='utf-8')
     (directory / 'signatures.txt').write_text('\n'.join(signatures), encoding='utf-8')
     record = dict(source_sha=sha, run_id=env['GITHUB_RUN_ID'], attempt=env['GITHUB_RUN_ATTEMPT'],
-                  application_id=APP_ID, test_application_id=TEST_ID, variant='debug-synthetic',
+                  application_id=APP_ID, test_application_id=TEST_ID, variant=variant,
+                  build_type='release' if variant == 'release-synthetic' else 'debug',
+                  debuggable=debuggable, profileable=shell_profileable, signing='daiyu-fixed',
                   production_delivery=False, sha256=sums)
     (directory / 'synthetic-record.json').write_text(json.dumps(record, ensure_ascii=False) + '\n', encoding='utf-8')
     (directory / 'SHA256SUMS').write_text(''.join(f'{digest}  {name}\n' for name, digest in sums.items()), encoding='utf-8')
@@ -69,5 +85,6 @@ if __name__ == '__main__':
     parser.add_argument('--directory', required=True, type=Path)
     parser.add_argument('--apkanalyzer', required=True, type=Path)
     parser.add_argument('--apksigner', required=True, type=Path)
+    parser.add_argument('--variant', choices=VARIANTS, default='debug-synthetic')
     args = parser.parse_args()
-    verify_pair(args.directory, args.apkanalyzer, args.apksigner, os.environ)
+    verify_pair(args.directory, args.apkanalyzer, args.apksigner, os.environ, variant=args.variant)

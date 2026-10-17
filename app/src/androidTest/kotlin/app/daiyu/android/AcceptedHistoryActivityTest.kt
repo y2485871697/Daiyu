@@ -16,6 +16,38 @@ class AcceptedHistoryActivityTest : WiredActivityTestCase() {
     private fun shown() = (field("shown") as List<Pair<Long, Message>>).toList()
     private fun contentRevision() = ((field("chatState\$delegate") as State<*>).value as ChatScreenState).contentRevision
 
+    fun testSelectionOnlyChangeRetainsTurnsAndContentRevision() {
+        val conversation = fixture.database.create("default")
+        val run = RunId("selection-only-run")
+        val answer = Message(MessageId("selection-only-answer"), conversation.id, run,
+            Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("body", "retained answer")), RunStatus.RUNNING)
+        fixture.database.send(Message(MessageId("selection-only-user"), conversation.id, run,
+            Message.USER_ROLE, listOf(MessageBlock.Text("body", "retained question")), RunStatus.COMPLETED), answer)
+        fixture.database.save(answer.copy(status = RunStatus.COMPLETED))
+        mainThread { activity.select(conversation) }
+        setDraft("selection-only text")
+        ui.waitForIdle()
+        lateinit var before: ChatScreenState
+        mainThread {
+            before = (field("chatState\$delegate") as State<*>).value as ChatScreenState
+            assertTrue(before.turns.isNotEmpty())
+        }
+        setSelection(2, 7)
+        mainThread {
+            fun state() = (field("chatState\$delegate") as State<*>).value as ChatScreenState
+            val after = state()
+            assertSame(before.turns, after.turns)
+            assertEquals(before.contentRevision, after.contentRevision)
+            assertSame(before.scrollRequest, after.scrollRequest)
+            assertEquals(2, after.composer.selectionStart)
+            assertEquals(7, after.composer.selectionEnd)
+            retainedControls(activity).onSelectionChange(2, 7)
+            assertSame(after, state())
+        }
+        assertSelection(2, 7)
+        assertDraft("selection-only text")
+    }
+
     fun testLateAcceptedHistoryCannotOverwriteExpandedWindowOrNewFinalText() {
         val conversation = fixture.database.create("default")
         repeat(70) { index ->

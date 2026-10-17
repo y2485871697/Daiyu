@@ -37,14 +37,27 @@ class TaskSurfaceSettingsActivityTest : WiredActivityTestCase() {
         reveal("settings-radio:后台执行", "Agent任务偏好").assertIsEnabled().performClick()
         reveal("settings-row:保存任务位置", "Agent任务偏好").performClick()
         val failure = "保存失败，未确认新偏好。后续执行将拒绝使用未确认的位置；请重试保存。"
-        ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodesWithText(failure).fetchSemanticsNodes().isNotEmpty() }
-        ui.onNodeWithText(failure).assertExists()
+        awaitControl("failed preference write fenced") { store.load() === TaskSurfaceSettings.Unavailable }
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("settings-row:保存任务位置")
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
+        node("page:Agent任务偏好").performScrollToNode(hasText(failure))
+        ui.onNodeWithText(failure).assertIsDisplayed()
         assertEquals("task-surface-v1\nASK\n", record)
         assertSame(TaskSurfaceSettings.Unavailable, store.load())
         mainThread { failWrite = false }
         reveal("settings-row:保存任务位置", "Agent任务偏好").performClick()
         val success = "任务位置偏好已保存；当前运行的决定保持不变。"
-        ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodesWithText(success).fetchSemanticsNodes().isNotEmpty() }
+        awaitControl("successful preference retry read back") {
+            store.load() == TaskSurfaceSettings.Available(TaskSurfacePreference.BACKGROUND)
+        }
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("settings-row:保存任务位置")
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
+        node("page:Agent任务偏好").performScrollToNode(hasText(success))
+        ui.onNodeWithText(success).assertIsDisplayed()
         assertEquals(TaskSurfaceSettings.Available(TaskSurfacePreference.BACKGROUND), store.load())
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(modelSettings, fixture.settings.loadForEditing().settings)

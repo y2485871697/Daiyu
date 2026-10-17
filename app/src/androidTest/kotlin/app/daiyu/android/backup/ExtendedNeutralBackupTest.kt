@@ -250,13 +250,52 @@ class ExtendedNeutralBackupTest : InstrumentationTestCase() {
         val before = exporter.exportPackage()
         val conversations = source.db.conversations()
         val history = ContextService(source.context, source.db).displayHistory(ConversationId(g.binding.conversationId))
-        assertGenerationBranchRefused(source, g, "生成资产尚无安全")
+        assertGenerationBranchRefused(source, g, "静态生成原件复制能力未接入")
         assertEquals(conversations, source.db.conversations())
         assertEquals(before, exporter.exportPackage())
         assertEquals(1, source.count("generation_outputs")); assertEquals(1, source.count("generation_attempts"))
         assertEquals(0, source.count("context_branches"))
         assertTrue(png.contentEquals(g.media.openOriginal(g.reference.receipt).use { it.readBytes() }))
-        history.forEach { assertTrue(SQLiteMessageVideoStore.readVerified(source.db.writableDatabase, it).isEmpty()) }
+        DatabaseTransactions { source.db.writableDatabase }.run { sql ->
+            history.forEach { assertTrue(SQLiteMessageVideoStore.readVerified(sql, it).isEmpty()) }
+        }
+    }
+    fun testLateGenerationRegistrationRejectsTextOnlyBranchAndPreservesSourceAfterReopen() {
+        val source = fresh(); val g = generate(source, closeTool = true)
+        val owner = ConversationId(g.binding.conversationId)
+        val through = MessageId(g.binding.assistantMessageId)
+        assertEquals(1, source.db.writableDatabase.delete("generation_outputs", "assistant_id=?", arrayOf(through.value)))
+        val before = source.db.exportBackup()
+        val conversations = source.db.conversations()
+        val messages = source.count("messages")
+        val witnesses = source.count("message_video_witnesses")
+        var copied = false
+        val branch = ProductionConversationBranch(source.db, PrivateBlobs(source.context),
+            DatabaseTransactions { source.db.writableDatabase }, null, null, { false })
+        try {
+            branch.branch(owner, through, { }) { _, mapped ->
+                copied = true
+                assertEquals(g.reference, SQLiteGenerationOutputStore({ source.db.writableDatabase },
+                    GenerationAssetOwner("offline-account", g.binding), g.media).register(g.attempt, g.reference.receipt))
+                mapped
+            }
+            fail("late original registration must not be omitted by a text-only branch")
+        } catch (failure: IllegalArgumentException) {
+            assertTrue(failure.message.orEmpty().contains("静态生成原件复制能力未接入"))
+        }
+        assertTrue(copied)
+        fun unchanged() {
+            assertEquals(before, source.db.exportBackup())
+            assertEquals(conversations, source.db.conversations())
+            assertEquals(messages, source.count("messages"))
+            assertEquals(witnesses, source.count("message_video_witnesses"))
+            assertEquals(0, source.count("context_branches"))
+            assertEquals(1, source.count("generation_outputs"))
+            assertEquals(g.reference, SQLiteGenerationOutputStore({ source.db.writableDatabase },
+                GenerationAssetOwner("offline-account", g.binding), g.media).find(g.attempt, 0))
+        }
+        unchanged(); source.reopen(); unchanged()
+        assertTrue(png.contentEquals(g.media.openOriginal(g.reference.receipt).use { it.readBytes() }))
     }
     fun testBackupReadonlyGenerationPrefixRefusesWithPresentOrMissingOriginal() {
         val source = fresh(); val g = generate(source, closeTool = true)
@@ -271,7 +310,7 @@ class ExtendedNeutralBackupTest : InstrumentationTestCase() {
             val before = target.db.exportBackup()
             val conversations = target.db.conversations()
             val history = ContextService(target.context, target.db).displayHistory(ConversationId(g.binding.conversationId))
-            assertGenerationBranchRefused(target, g, "只读生成原件尚无安全")
+            assertGenerationBranchRefused(target, g, "静态生成原件复制能力未接入")
             assertEquals(before, target.db.exportBackup())
             assertEquals(conversations, target.db.conversations())
             assertEquals(listOf(historical), service.historicalGenerationOutputs())
@@ -279,7 +318,9 @@ class ExtendedNeutralBackupTest : InstrumentationTestCase() {
             assertEquals(0, target.count("generation_outputs")); assertEquals(0, target.count("context_branches"))
             assertEquals(GenerationReservation.Existing(g.attempt.fingerprint, null),
                 SQLiteGenerationAttemptStore({ target.db.writableDatabase }, g.binding).reserve(g.attempt))
-            history.forEach { assertTrue(SQLiteMessageVideoStore.readVerified(target.db.writableDatabase, it).isEmpty()) }
+            DatabaseTransactions { target.db.writableDatabase }.run { sql ->
+            history.forEach { assertTrue(SQLiteMessageVideoStore.readVerified(sql, it).isEmpty()) }
+        }
             if (missing) {
                 rejects { service.historicalGenerationOriginal(historical) }
                 assertFalse(blob.exists()) // Rejection must not repair or manufacture a missing original.
@@ -314,7 +355,9 @@ class ExtendedNeutralBackupTest : InstrumentationTestCase() {
         assertTrue(png.contentEquals(service.historicalGenerationOriginal(historical)))
         assertEquals(0, target.count("generation_outputs")); assertEquals(1, target.count("generation_attempts"))
         assertEquals(1, target.count("context_branches"))
-        copied.forEach { assertTrue(SQLiteMessageVideoStore.readVerified(target.db.writableDatabase, it).isEmpty()) }
+        DatabaseTransactions { target.db.writableDatabase }.run { sql ->
+            copied.forEach { assertTrue(SQLiteMessageVideoStore.readVerified(sql, it).isEmpty()) }
+        }
     }
     fun testVersionOnePackageStillImportsAndFutureVersionsFailClosed() {
         val source = fresh(); source.db.create()

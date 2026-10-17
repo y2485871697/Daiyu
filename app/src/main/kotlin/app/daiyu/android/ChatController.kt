@@ -1439,6 +1439,19 @@ class ChatController internal constructor(private val application:Application,
         }
         true
     }
+    internal fun testModelConnection(draft: ModelSettings, cancelled: () -> Boolean,
+        complete: (app.daiyu.android.model.catalog.ModelConnectionResult) -> Unit): Boolean = synchronized(this) {
+        if (closed || !ready || active != null || dataBusy || cancelled()) return@synchronized false
+        val service = modelCatalog
+        try {
+            executor.execute {
+                fun revoked() = synchronized(this) { closed } || cancelled()
+                val result = service.testDraft(draft, ::revoked)
+                if (!revoked()) handler.post { if (!revoked()) complete(result) }
+            }
+            true
+        } catch (_: java.util.concurrent.RejectedExecutionException) { false }
+    }
     @Synchronized fun observe(listener:()->Unit) {
         if(!closed && listener !in listeners) listeners[listener]=Any()
     }

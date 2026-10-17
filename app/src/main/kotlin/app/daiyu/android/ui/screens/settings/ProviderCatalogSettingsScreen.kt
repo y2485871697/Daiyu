@@ -46,6 +46,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     errorText: String? = null,
     credentialUnavailable: Boolean = false,
     requestOptionsUnavailable: Boolean = false,
+    testConnection: ModelConnectionTester? = null,
 ) {
     val scope = rememberCoroutineScope()
     var state by remember(persistence) { mutableStateOf(CatalogImportSession.State()) }
@@ -56,6 +57,9 @@ internal fun <T> ProviderCatalogSettingsScreen(
     }
     ModelSettingsScreen(
         engineeringUi = engineeringUi,
+        testConnection = testConnection?.let { test -> { value, cancelled, deliver ->
+            session.invalidate(); test(value, cancelled, deliver)
+        } },
         draft = draft,
         onDraftChange = { session.invalidate(); onDraftChange(it) },
         onSave = { session.invalidate(); onSave(it) },

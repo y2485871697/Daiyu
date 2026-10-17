@@ -64,7 +64,7 @@ class SettingsDiagnosticsActivityTest : WiredActivityTestCase() {
         openDiagnostics(); enable()
         fixture.diagnostics.record(DiagnosticEvent.RUN_FAILED)
         val provider = instrumentation.context.packageManager.getPackageInfo(instrumentation.context.packageName,
-            PackageManager.GET_PROVIDERS).providers.single { it.name == DiagnosticExportTestProvider::class.java.name }
+            PackageManager.GET_PROVIDERS).providers.orEmpty().single { it.name == DiagnosticExportTestProvider::class.java.name }
         val uri = Uri.Builder().scheme("content").authority(provider.authority).appendPath(UUID.randomUUID().toString()).build()
         val launches = AtomicInteger()
         val monitor = object : Instrumentation.ActivityMonitor() {

@@ -77,6 +77,14 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
         val output = File(checkNotNull(target.getExternalFilesDir("synthetic-performance")), "raw-$id.jsonl")
         var fixture: PerformanceFixture? = null
         var activity: MainActivity? = null; var collector: SyntheticFrameCollector? = null
+        var setupActivity: MainActivity? = null
+        fun finishActivity(closing: MainActivity) {
+            main { closing.finish() }; instrumentation.waitForIdleSync()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (!main { closing.isDestroyed }) {
+                check(System.nanoTime() < deadline) { "synthetic_activity_not_destroyed" }; Thread.sleep(10)
+            }
+        }
         var injected = false; var complete = false; var primaryFailure: Throwable? = null
         var cleanupFailed = false
         var frameReportWritten = false
@@ -88,6 +96,11 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
         var dataset: FullPerformanceDataset.Snapshot? = null
         var migration: FullPerformanceDataset.Package? = null
         try {
+            // Keep an actual resumed Activity throughout unmeasured dataset setup. A background
+            // instrumentation process may otherwise be frozen before it can launch the measured UI.
+            setupActivity = instrumentation.startActivitySync(Intent(target, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+            ui.waitForIdle()
             awaitReady(original)
             val activeFixture = PerformanceFixture(target, id, onConstructionCleanupFailure = { cleanupFailed = true }).also { fixture = it }
             stage = "dataset_setup"
@@ -114,6 +127,8 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                 }
             }
             stage = "activity_setup"
+            finishActivity(checkNotNull(setupActivity))
+            setupActivity = null
             main { application.controller = activeFixture.controller; injected = true }
             val launched = instrumentation.startActivitySync(Intent(target, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
@@ -180,17 +195,24 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                 }
             }
             cleanup { collector?.close() }
+            var activitiesDestroyed = false
+            var controllerRestored = !injected
+            var fixtureCleanupAttempted = false
             cleanup {
-                activity?.let { closing ->
-                    main { closing.finish() }; instrumentation.waitForIdleSync()
-                    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
-                    while (!main { closing.isDestroyed }) {
-                        check(System.nanoTime() < deadline) { "synthetic_activity_not_destroyed" }; Thread.sleep(10)
-                    }
+                activity?.let(::finishActivity)
+                setupActivity?.let(::finishActivity)
+                activitiesDestroyed = true
+            }
+            if (activitiesDestroyed) {
+                cleanup {
+                    if (injected) main { application.controller = original }
+                    controllerRestored = true
+                }
+                if (controllerRestored) cleanup {
+                    fixtureCleanupAttempted = fixture != null
+                    fixture?.close()
                 }
             }
-            cleanup { if (injected) main { application.controller = original } }
-            cleanup { fixture?.close() }
             cleanup {
                 collector?.let { captured ->
                     captured.write(output, JSONObject().put("collection_id", id)
@@ -210,6 +232,10 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                         .put("scroll_start_ns", scrollStart).put("scroll_end_ns", scrollEnd)
                         .put("scroll_window_includes_driver_idle_time", true).put("collection_completed", complete)
                         .put("cleanup_succeeded", !cleanupFailed)
+                        .put("activity_destruction_confirmed", activitiesDestroyed)
+                        .put("controller_restoration_confirmed", controllerRestored)
+                        .put("fixture_cleanup_attempted", fixtureCleanupAttempted)
+                        .put("fixture_resources_retained", fixture != null && (!activitiesDestroyed || !controllerRestored))
                         .put("cleanup_scope", "fixture_controller_databases_preferences_cache")
                         .put("backend_migration_report", migrationReport?.name ?: JSONObject.NULL)
                         .put("failure_class", primaryFailure?.javaClass?.name ?: JSONObject.NULL), inputs)
@@ -223,6 +249,10 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                     .put("collection_completed", complete).put("failure_stage", if (primaryFailure == null) JSONObject.NULL else stage)
                     .put("failure_class", primaryFailure?.javaClass?.name ?: JSONObject.NULL)
                     .put("cleanup_succeeded", !cleanupFailed)
+                        .put("activity_destruction_confirmed", activitiesDestroyed)
+                        .put("controller_restoration_confirmed", controllerRestored)
+                        .put("fixture_cleanup_attempted", fixtureCleanupAttempted)
+                        .put("fixture_resources_retained", fixture != null && (!activitiesDestroyed || !controllerRestored))
                         .put("cleanup_scope", "fixture_controller_databases_preferences_cache").put("frame_report_written", frameReportWritten)
                     .put("frame_report", if (frameReportWritten) output.name else JSONObject.NULL)
                     .put("backend_migration_report", migrationReport?.name ?: JSONObject.NULL)

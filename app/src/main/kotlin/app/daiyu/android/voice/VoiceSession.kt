@@ -187,7 +187,7 @@ class VoiceChain(private val gate: AudioOwnerGate, private val output: SpeechOut
         }
     }
     fun delta(next: VoiceOwner, value: String) = stateLock.withLock {
-        if (owner != next || lease?.let(gate::current) != true || final || ended) return
+        if (owner != next || lease?.let(gate::current) != true || final || ended) return@withLock
         require(received.length + value.length <= 100_000)
         received += value; buffer.append(value); extract(false); pump()
     }

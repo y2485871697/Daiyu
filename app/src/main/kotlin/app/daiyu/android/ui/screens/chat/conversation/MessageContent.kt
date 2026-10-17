@@ -31,14 +31,14 @@ internal fun MessageContent(
     actions: ChatScreenActions,
     imageLoader: MessageImageLoader?,
     markdown: Boolean,
+    textBody: @Composable (String, Modifier) -> Unit = { text, modifier -> MessageMarkdown(text, modifier, markdown) },
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         var imageNumber = 0
         content.forEachIndexed { index, block ->
             when (block) {
                 is MessageContentUi.Text -> {
-                    if (block.text.isNotBlank()) MessageMarkdown(block.text,
-                        modifier = Modifier.testTag("message-content-text:$index"), markdown = markdown)
+                    if (block.text.isNotBlank()) textBody(block.text, Modifier.testTag("message-content-text:$index"))
                 }
                 is MessageContentUi.Image -> MessageImage(block.image, ++imageNumber, imageLoader)
                 is MessageContentUi.Tool -> {

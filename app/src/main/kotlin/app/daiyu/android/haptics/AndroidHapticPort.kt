@@ -12,6 +12,7 @@ import android.os.VibratorManager
 import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.View
+import androidx.annotation.RequiresApi
 import app.daiyu.android.domain.haptics.*
 import java.lang.ref.WeakReference
 
@@ -83,14 +84,12 @@ class AndroidHapticPort(view: View) : HapticPort {
             vibrator.arePrimitivesSupported(primitive).firstOrNull() == true
         val plan = motorEffect(request, Build.VERSION.SDK_INT, supported, vibrator.hasAmplitudeControl())
         val effect = when (plan) {
-            HapticMotorEffect.SystemTick -> {
-                check(Build.VERSION.SDK_INT >= 29)
-                VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK)
-            }
-            is HapticMotorEffect.Primitive -> {
-                check(Build.VERSION.SDK_INT >= 30)
-                VibrationEffect.startComposition().addPrimitive(primitive, plan.scale).compose()
-            }
+            HapticMotorEffect.SystemTick -> if (Build.VERSION.SDK_INT >= 29) {
+                systemTickEffect()
+            } else error("System tick requires API 29")
+            is HapticMotorEffect.Primitive -> if (Build.VERSION.SDK_INT >= 30) {
+                primitiveEffect(primitive, plan.scale)
+            } else error("Primitive vibration requires API 30")
             is HapticMotorEffect.OneShot -> VibrationEffect.createOneShot(plan.durationMillis,
                 plan.amplitude ?: VibrationEffect.DEFAULT_AMPLITUDE)
         }
@@ -105,6 +104,14 @@ class AndroidHapticPort(view: View) : HapticPort {
         motorStarted = true
         return HapticDelivery.PLAYED
     }
+
+    @RequiresApi(29)
+    private fun systemTickEffect(): VibrationEffect =
+        VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK)
+
+    @RequiresApi(30)
+    private fun primitiveEffect(primitive: Int, scale: Float): VibrationEffect =
+        VibrationEffect.startComposition().addPrimitive(primitive, scale).compose()
 
     private fun agentEffect(vibrator: Vibrator, action: HapticAgentAction,
                             intensity: HapticIntensity): VibrationEffect {

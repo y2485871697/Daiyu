@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="image_attachments_title">图片附件 %1$d / %2$d</string>
+    <string name="image_attachments_select">选择图片</string>
+    <string name="image_attachments_empty">可选择多张图片，发送前可预览或移除</string>
+    <string name="image_attachments_selecting">正在选择图片…</string>
+    <string name="image_attachments_importing">正在导入…</string>
+    <string name="image_attachments_submitting">等待发送接受回执，图片仍保留在草稿中</string>
+    <string name="image_attachments_preview">原图预览</string>
+    <string name="image_attachments_preview_number">预览第 %1$d 张图片</string>
+    <string name="image_attachments_remove_number">移除第 %1$d 项</string>
+    <string name="image_attachments_preview_loading">正在加载预览…</string>
+    <string name="image_attachments_preview_failed">预览加载失败，附件仍保留</string>
+    <string name="image_attachments_retry_preview">重试预览</string>
+    <string name="image_attachments_preview_size">原始尺寸 %1$d × %2$d · 双指缩放与拖动</string>
+    <string name="image_attachments_close">关闭</string>
+    <string name="image_attachments_reset_zoom">重置缩放</string>
+    <string name="image_attachments_error_source">无法读取图片，请重新选择</string>
+    <string name="image_attachments_error_type">不支持此图片格式</string>
+    <string name="image_attachments_error_invalid">图片损坏或无效</string>
+    <string name="image_attachments_error_size">图片大小超出限制</string>
+    <string name="image_attachments_error_count">图片数量超出限制</string>
+    <string name="image_attachments_error_model">当前模型不支持图片</string>
+    <string name="image_attachments_error_cancelled">图片导入已取消</string>
+    <string name="image_attachments_error_missing">图片已丢失，请重新选择</string>
+    <string name="image_attachments_error_storage">无法保存到当前草稿，请重新选择</string>
+</resources>

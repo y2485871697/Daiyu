@@ -16,6 +16,10 @@ interface AssistantStore {
     fun list(): List<AssistantProfile> = assistants.value
     fun read(id: String): AssistantProfile? = list().firstOrNull { it.id == id }
     fun save(profile: AssistantProfile): AssistantProfile
+    /** Existing-row edit only. Implementations must atomically compare the complete profile.
+     * A default failure is intentional: an unimplemented CAS must never fall back to upsert. */
+    fun compareAndSet(expected: AssistantProfile, updated: AssistantProfile): AssistantProfile =
+        throw UnsupportedOperationException("此助手存储不支持安全编辑")
     fun delete(id: String)
     fun select(id: String)
 }
@@ -33,27 +37,35 @@ class SharedPreferencesAssistantStore(private val preferences: SharedPreferences
         if (preferences.getString(KEY, null) == null) persist(profiles.value, active.value)
     }
 
-    @Synchronized
-    override fun save(profile: AssistantProfile): AssistantProfile {
+    override fun read(id: String): AssistantProfile? = synchronized(preferences) { load().first.firstOrNull { it.id == id } }
+
+    override fun save(profile: AssistantProfile): AssistantProfile = synchronized(preferences) {
         AssistantStorage.id(profile.id)
-        val next = profile.copy(name = profile.name.trim().ifBlank { AssistantPrompt.DEFAULT_NAME })
-        val current = list()
+        val next = profile.copy(name = profile.name.trim().ifBlank { AssistantPrompt.DEFAULT_NAME },
+            enabledSkillIds = profile.enabledSkillIds.toList())
+        val (current, selected) = load()
         val updated = if (current.any { it.id == next.id }) current.map { if (it.id == next.id) next else it } else current + next
-        persist(updated, active.value)
-        return next
+        persist(updated, selected)
+        next
     }
 
-    @Synchronized
-    override fun delete(id: String) {
-        val remaining = list().filterNot { it.id == id }
+    override fun compareAndSet(expected: AssistantProfile, updated: AssistantProfile): AssistantProfile = synchronized(preferences) {
+        require(expected.id == updated.id)
+        if (read(expected.id) != expected) throw StaleAssistantProfileException()
+        save(updated)
+    }
+
+    override fun delete(id: String) = synchronized(preferences) {
+        val (current, selected) = load()
+        val remaining = current.filterNot { it.id == id }
         require(remaining.isNotEmpty()) { "必须保留至少一个助手" }
-        persist(remaining, active.value.takeIf { it != id } ?: remaining.first().id)
+        persist(remaining, selected.takeIf { it != id } ?: remaining.first().id)
     }
 
-    @Synchronized
-    override fun select(id: String) {
-        require(read(id) != null) { "助手不存在" }
-        persist(list(), id)
+    override fun select(id: String) = synchronized(preferences) {
+        val current = load().first
+        require(current.any { it.id == id }) { "助手不存在" }
+        persist(current, id)
     }
 
     private fun persist(items: List<AssistantProfile>, selected: String) {

@@ -860,11 +860,8 @@ class ChatController internal constructor(private val application:Application,
                 frozenAssistantId = assistantId
                 val profile = assistantStore.read(assistantId)?.let { it.copy(enabledSkillIds = it.enabledSkillIds.toList()) }
                     ?: throw AssistantNotFoundException(assistantId)
-                val memory = if (profile.memoryEnabled) assistantAssets.memory(assistantId).content else ""
-                val frozen = object : AssistantStore by assistantStore {
-                    override fun read(id: String): AssistantProfile? = profile.takeIf { it.id == id }
-                }
-                val assistantContext = AssistantRunContext.capture(frozen, assistantId, memory)
+                val assistantContext = AssistantRunContext.capture(assistantStore, assistantId, assistantAssets)
+                check(assistantStore.read(assistantId) == profile) { "assistant_profile_changed" }
                 childBindings.freeze(key, childPreferences.snapshot(key)) { provider ->
                     val delegate = assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
                     messageImages.wrap(delegate, provider)
@@ -1435,11 +1432,8 @@ class ChatController internal constructor(private val application:Application,
         var pending: ControllerTerminalPreparation? = null
         try {
             val (profile, provider) = terminalConfiguration(conversation)
-            val memory = if (profile.memoryEnabled) assistantAssets.memory(profile.id).content else ""
-            val frozen = object : AssistantStore by assistantStore {
-                override fun read(id: String): AssistantProfile? = profile.takeIf { it.id == id }
-            }
-            val context = AssistantRunContext.capture(frozen, profile.id, memory)
+            val context = AssistantRunContext.capture(assistantStore, profile.id, assistantAssets)
+            check(assistantStore.read(profile.id) == profile) { "assistant_profile_changed" }
             launch = if (linux == null) TerminalPtyLaunch.Android(listOf("/system/bin/sh"),
                 mapOf("HOME" to application.filesDir.path, "TMPDIR" to application.cacheDir.path,
                     "PATH" to "/system/bin:/system/xbin", "TERM" to "xterm-256color"), application.filesDir)
@@ -1544,11 +1538,8 @@ class ChatController internal constructor(private val application:Application,
             val profile = assistantStore.read(checkNotNull(id) { "会话未绑定助手" })
                 ?.let { it.copy(enabledSkillIds = it.enabledSkillIds.toList()) }
                 ?: error("会话助手不存在")
-            val memory = if (profile.memoryEnabled) assistantAssets.memory(profile.id).content else ""
-            val frozen = object : AssistantStore by assistantStore {
-                override fun read(id: String): AssistantProfile? = profile.takeIf { it.id == id }
-            }
-            val context = AssistantRunContext.capture(frozen, profile.id, memory)
+            val context = AssistantRunContext.capture(assistantStore, profile.id, assistantAssets)
+            check(assistantStore.read(profile.id) == profile) { "assistant_profile_changed" }
             val config = settings.load().also { it.validate() }
             val browserSettings = app.daiyu.android.browser.BrowserSettingsStore(application).snapshot()
             val run = RunId(UUID.randomUUID().toString())
@@ -1703,15 +1694,7 @@ class ChatController internal constructor(private val application:Application,
             val binding=if(conversation==null) token.assistantId
                 else database.assistantId(conversation.id)
             if(binding==null) throw MissingAssistantBindingException()
-            // Freeze the profile before any memory/history I/O. capture consumes this exact
-            // value once; subsequent edits/deletion/global switching cannot change this run.
-            val profile=assistantStore.read(binding)?.let {it.copy(enabledSkillIds=it.enabledSkillIds.toList())}
-                ?: throw AssistantNotFoundException(binding)
-            val memory=if(profile.memoryEnabled) assistantAssets.memory(binding).content else ""
-            val frozen=object : AssistantStore by assistantStore {
-                override fun read(id:String):AssistantProfile? = profile.takeIf {it.id==id}
-            }
-            AssistantRunContext.capture(frozen,binding,memory)
+            AssistantRunContext.capture(assistantStore,binding,assistantAssets)
         } catch (_:MissingAssistantBindingException) {
             problem="会话未绑定助手；请显式选择助手，草稿保留";notifyChanged();return null
         } catch (_:AssistantNotFoundException) {
@@ -1901,6 +1884,7 @@ class ChatController internal constructor(private val application:Application,
             val capabilities = SessionCapabilities(terminalRun?.preview?.identity?.sessionId ?: run.value,
                 (if (virtualDisplay == null) AndroidToolRegistry.capabilitiesFor(config.enabledTools()) else emptySet()) + contextTools.map { it.definition.capability } +
                     setOf(SkillRunSession.READ, SkillRunSession.RESOURCE) +
+                    (if (assistantContext.memoryReadPort == null) emptySet() else setOf(ScopedAssistantMemoryTools.READ)) +
                     (if (interactiveSnapshot.enabled) setOf(AndroidToolRegistry.ASK_USER_CAPABILITY) else emptySet()) +
                     (if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY,RunChildTasks.CAPABILITY)) +
                     (if (shizukuPreparation == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)) +
@@ -1922,7 +1906,7 @@ class ChatController internal constructor(private val application:Application,
             // The SAME frozen authorization reaches Dispatcher and RunShizukuCommands.bind.
             val shizuku=shizukuPreparation?.open(shizukuAccess)
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
-                backgroundFactory, authorization=terminalRun?.authorization ?: shizukuAuthorization ?: browserBinding?.let {
+                backgroundFactory, memoryContext=assistantContext, authorization=terminalRun?.authorization ?: shizukuAuthorization ?: browserBinding?.let {
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value, it.requiredWrites)
                 }, shizuku=shizuku, browser=browserBinding, terminal=terminalRun?.binding,
                 authorizationFactory = if (video != null) { realOwner ->

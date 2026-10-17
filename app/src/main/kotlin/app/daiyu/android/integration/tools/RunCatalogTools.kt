@@ -57,6 +57,7 @@ internal class RunCatalogTools(
     // Session owns authorization and its leaf; never also supply authorizationFactory or a leaf factory.
     virtualDisplaySession: ControllerVirtualDisplaySession? = null,
     private val virtualDisplaySessionFactory: ((RunExecutionOwner, SessionCapabilities) -> ControllerVirtualDisplaySession)? = null,
+    private val memoryContext: app.daiyu.android.assistants.AssistantRunContext? = null,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
     // No temporary owner or authorization for generation. Legacy read-only callers retain
@@ -220,6 +221,13 @@ internal class RunCatalogTools(
                     error("run_closed")
                 }
                 ScopedSkillTools.create(scope, authorization).forEach { registry.register(it) }
+                memoryContext?.let { context ->
+                    ScopedAssistantMemoryTools.create(context) {
+                        synchronized(closeLock) {
+                            !closed.get() && owner === bound && boundAuthorization === authorization
+                        }
+                    }.forEach { registry.register(it) }
+                }
                 children?.let { registry.register(it.tool()) }
                 background?.let { registry.register(it.tool()); registry.register(it.commandTool()) }
                 shizuku?.let { registry.register(it.commands.tool()) }

@@ -127,7 +127,7 @@ Controller/Main 接线。任务提供基线 `9a090b0b` 和只读审查 `9d4944bf
   `/proc/self/fd/<held-parent>/terminal-jobs` 固定 root；保留 filesDir/root 两个 FD
   到整次操作结束。扫描使用固定 root FD，metadata 与日志都相对该 FD 打开。
 - 沿用 `TerminalPaths.openDescriptor` 的 Android Os/PFD 与 API26 兼容复制方式：
-  每次打开均带 `O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK`，目录另带 `O_DIRECTORY`；
+  每次打开均带 `O_RDONLY|O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK`，目录在同一 fd 上以 `fstat/S_ISDIR` 准入；
   打开后用 `fstat` 只接纳目录/regular file，读取、seek、大小上限及前后 size 校验都用
   同一叶子 FD。拒绝 FIFO/其它特殊文件，不以易变 pathname 的检查结果授权读取。
 - root 在固定前变成 symlink 时拒绝；固定后 pathname 临时换成 symlink 再恢复时，

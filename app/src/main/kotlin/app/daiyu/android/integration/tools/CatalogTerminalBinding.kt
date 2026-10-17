@@ -33,17 +33,23 @@ internal sealed interface TerminalPtyLaunch {
         private val lease: LinuxEnvironmentStore.Lease,
         val argv: List<String>,
         val environment: Map<String, String>,
+        val rootScope: app.daiyu.android.terminal.RootScopeLaunch?,
     ) : TerminalPtyLaunch, AutoCloseable {
         private var claimed = false
         private var released = false
         @Synchronized internal fun claim() { check(!claimed && !released) { "terminal_launch_already_claimed" }; claimed = true }
         @Synchronized override fun close() { check(!claimed) { "terminal_launch_owned_by_binding" }; release() }
         @Synchronized internal fun release() { if (!released) { lease.close(); released = true } }
-        internal fun commandConfiguration(): TerminalConfiguration = lease.configuration(tempDirectory, hostWorkingDirectory)
+        val executionMode get() = if (rootScope == null) app.daiyu.android.terminal.LinuxExecutionMode.PROOT else app.daiyu.android.terminal.LinuxExecutionMode.CHROOT
+        internal fun commandConfiguration(): TerminalConfiguration {
+            val current = lease.configuration(tempDirectory, hostWorkingDirectory)
+            check(rootScope == null && current.linux?.rootScope == null) { "linux_chroot_command_jobs_not_supported" }
+            return current
+        }
         internal fun revalidate() {
-            val current = commandConfiguration()
+            val current = lease.configuration(tempDirectory, hostWorkingDirectory)
             val backend = checkNotNull(current.linux)
-            check(backend.shellArgv == argv && backend.environment + current.environment == environment) { "terminal_launch_changed" }
+            check(backend.shellArgv == argv && backend.environment + current.environment == environment && backend.rootScope == rootScope) { "terminal_launch_changed" }
         }
         companion object {
             /** Worker-only metadata/identity checks; does not launch a process. */
@@ -57,7 +63,7 @@ internal sealed interface TerminalPtyLaunch {
                     val backend = checkNotNull(configuration.linux)
                     return Linux(store, expected, temp, cwd, lease,
                         Collections.unmodifiableList(backend.shellArgv.toList()),
-                        Collections.unmodifiableMap((backend.environment + configuration.environment).toMap()))
+                        Collections.unmodifiableMap((backend.environment + configuration.environment).toMap()), backend.rootScope)
                 } catch (failure: Throwable) { lease.close(); throw failure }
             }
         }
@@ -139,8 +145,13 @@ internal class TerminalPtyPlan(
         val launchKey = when (launch) {
             is TerminalPtyLaunch.Android -> digest(digest(*launch.argv.toTypedArray()),
                 digest(*launch.environment.toSortedMap().flatMap { listOf(it.key, it.value) }.toTypedArray()))
-            is TerminalPtyLaunch.Linux -> digest(digest(*launch.argv.toTypedArray()),
-                digest(*launch.environment.toSortedMap().flatMap { listOf(it.key, it.value) }.toTypedArray()))
+            is TerminalPtyLaunch.Linux -> {
+                val argv = digest(*launch.argv.toTypedArray())
+                val environment = digest(*launch.environment.toSortedMap().flatMap { listOf(it.key, it.value) }.toTypedArray())
+                val root = launch.rootScope
+                if (root == null) digest(argv, environment)
+                else digest("linux-chroot-root-scope-v1", argv, environment, root.rootfs.path, root.su.path)
+            }
         }
         val target = digest(conversationId.value, sessionId, runId, environmentId, generation,
             this.journalDirectory.path, sessionScope, rows.toString(), columns.toString(), launchKey, *backend.toTypedArray())

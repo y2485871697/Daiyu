@@ -75,8 +75,8 @@ fun TerminalScreenContent(
     MiuixScaffoldPage(title = "终端", onBack = onBack, modifier = Modifier.testTag("terminal-screen")) {
         item(key = "identity") {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Android 应用身份 · UID ${Process.myUid()} · 非 Android root", modifier = Modifier.testTag("terminal-identity"))
-                Text("仅明确打开后启动交互式 PTY。输入会直接交给终端，不经过模型；不提供 Android root 或任意后台任务入口。")
+                Text("Android 应用身份 · UID ${Process.myUid()}", modifier = Modifier.testTag("terminal-identity"))
+                Text("仅明确打开后启动交互式 PTY。输入会直接交给终端，不经过模型；Android 终端不提供 Root；Linux chroot 会启动经授权的 Root 子进程，不提供任意后台任务入口。")
                 Text("状态：${state.phase}", modifier = Modifier.testTag("terminal-state"))
                 state.environment?.let { Text("当前/最近运行环境：$it") }
                 when {
@@ -95,13 +95,13 @@ fun TerminalScreenContent(
         item(key = "linux") {
             Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Linux：${state.linux.state}", modifier = Modifier.testTag("terminal-linux-state"))
-                Text("安装与本地配置请到设置→工具→Linux 环境；须单独确认安装及注册，不会自动下载。当前随包 Linux 仅支持 API34+ 的64位进程；文件就绪不等于工具验证成功，Linux guest UID 0 不改变 Android 应用身份。")
+                Text("安装与本地配置请到设置→工具→Linux 环境；须单独确认安装及注册，不会自动下载。PRoot 需要 API34+，仅模拟 guest UID 0；chroot 需要 API26+、64位进程、Android Root 和 cgroup2。文件就绪不等于工具验证成功；应用 UID 不变，但 chroot 子进程具有 Root 权限，须信任整个 rootfs。")
                 state.linux.distribution?.let { Text("已选择：$it · ${state.linux.selected?.generation}") }
                 state.linux.error?.let { Text("检查：$it") }
                 state.linux.choices.forEach { choice ->
                     OutlinedButton(onClick = { onSelectLinux(choice.reference) }, enabled = state.canOpen,
                         modifier = Modifier.testTag("terminal-select-${choice.reference.environmentId}-${choice.reference.generation}")) {
-                        Text("选择已安装配置：${choice.label} · ${choice.reference.generation}")
+                        Text("选择已安装配置：${choice.label} · ${choice.executionMode.wire} · ${choice.reference.generation}")
                     }
                 }
                 if (state.linux.choices.isEmpty()) Text("父层未提供可信的已安装配置。")

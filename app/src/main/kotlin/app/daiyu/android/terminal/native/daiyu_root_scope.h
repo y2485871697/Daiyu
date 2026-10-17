@@ -13,7 +13,8 @@
 
 /* Only explicit root launches use this protocol. X is a leader status, not drain.
  * S pins a fresh scope; D acknowledges kill, empty scope, full reap and removal.
- * No D means UNKNOWN, even if su or this monitor has already exited. */
+ * F is permitted only before a guest fork with no remaining created scope.
+ * Otherwise no D means UNKNOWN, even if su or this monitor has exited. */
 static int root_mode;
 static struct {
     int parent, dir, procs, killfd, events;
@@ -44,12 +45,12 @@ static int root_flush(int timeout_ms);
 static int root_create(void) {
     unsigned char nonce[16]; size_t at=0; int made=0,have_identity=0,typefd=-1;
     struct statfs fs; char type[64];
-    if(getuid()!=0 || geteuid()!=0) { errno=EPERM; return -1; }
-    if(signal(SIGCHLD,SIG_DFL)==SIG_ERR || prctl(PR_SET_CHILD_SUBREAPER,1,0,0,0)<0) return -1;
+    if(getuid()!=0 || geteuid()!=0) { errno=EPERM; goto fail; }
+    if(signal(SIGCHLD,SIG_DFL)==SIG_ERR || prctl(PR_SET_CHILD_SUBREAPER,1,0,0,0)<0) goto fail;
     while(at<sizeof(nonce)) {
         ssize_t n=syscall(SYS_getrandom,nonce+at,sizeof(nonce)-at,0);
         if(n<0 && errno==EINTR) continue;
-        if(n<=0) { if(!n) errno=EIO; return -1; }
+        if(n<=0) { if(!n) errno=EIO; goto fail; }
         at+=(size_t)n;
     }
     memcpy(root_scope.name,"daiyu-",6);
@@ -96,7 +97,10 @@ fail: {
             if(!removed) saved=errno;
         }
     }
-    if(!removed) {
+    if(removed) {
+        const char *receipt="DROOT0 guest=0 scope_clean=1";
+        (void)frame('F',receipt,strlen(receipt)); (void)root_flush(500);
+    } else {
         unsigned char bytes[4]; put32(bytes,(uint32_t)saved);
         (void)frame('S',root_scope.name,strlen(root_scope.name));
         (void)frame('E',bytes,4); (void)root_flush(500);

@@ -16,6 +16,7 @@ class LinuxSettingsApplication private constructor(
     val settings: LinuxSettingsController,
     private val admission: LinuxSettingsAdmission,
     private val terminalSelection: TerminalTrustedLinuxSelection,
+    private val executionModes: Map<LinuxGenerationRef, LinuxExecutionMode>,
 ) : AutoCloseable {
     /**
      * All parent Linux open callbacks must use this entry, not terminalOwner.openLinux directly.
@@ -23,7 +24,7 @@ class LinuxSettingsApplication private constructor(
      * cannot return and then admit a previously checked open. Already admitted runs retain leases.
      */
     fun openLinux(reference: LinuxGenerationRef, conversationId: ConversationId? = null): Boolean =
-        LinuxRuntimePlatform.unavailableReason() == null &&
+        executionModes[reference]?.let { LinuxRuntimePlatform.unavailableReason(it) == null } == true &&
             admission.admit(reference) { terminalOwner.openLinux(reference, conversationId) }
 
     /**
@@ -38,8 +39,8 @@ class LinuxSettingsApplication private constructor(
         hostWorkingDirectory: File,
     ): TerminalPtyLaunch.Linux {
         check(Looper.myLooper() != Looper.getMainLooper()) { "terminal_freeze_requires_worker" }
-        LinuxRuntimePlatform.requireSupported()
         return admission.freeze(reference) {
+            LinuxRuntimePlatform.requireSupported(checkNotNull(executionModes[reference]) { "linux_trusted_installation_unavailable" })
             terminalSelection.withSelection(reference) { store ->
                 TerminalPtyLaunch.Linux.freeze(store, reference, tempDirectory, hostWorkingDirectory)
             }
@@ -55,19 +56,23 @@ class LinuxSettingsApplication private constructor(
     companion object {
         suspend fun android(
             context: Context,
-            catalog: TrustedLinuxCatalog = TrustedLinuxCatalog(File(context.filesDir, "trusted-linux-catalog")),
+            catalog: TrustedLinuxCatalog = TrustedLinuxCatalog(File(context.filesDir, "trusted-linux-catalog"),
+                File(context.filesDir.canonicalFile, "linux-chroot-installations")),
         ): LinuxSettingsApplication {
             val snapshot = catalog.load()
-            val supported = LinuxRuntimePlatform.unavailableReason() == null
-            val admission = LinuxSettingsAdmission(if (supported)
-                snapshot.map { LinuxGenerationRef(it.environmentId, it.generation) }.toSet() else emptySet())
+            val modes = snapshot.associate { LinuxGenerationRef(it.environmentId, it.generation) to it.executionMode }
+            val admission = LinuxSettingsAdmission(snapshot.filter { LinuxRuntimePlatform.unavailableReason(it.executionMode) == null }
+                .map { LinuxGenerationRef(it.environmentId, it.generation) }.toSet())
             // Host metadata is fixed for this entire owner lifetime. New approvals never replace it.
             val owner = TerminalUiOwner(TerminalEnvironmentHost.android(context.applicationContext, snapshot), admission::current)
-            val access = LinuxSettingsCatalogAdapter(catalog) { LinuxRuntimePlatform.requireSupported(); Unit }
+            val access = LinuxSettingsCatalogAdapter(catalog) { mode -> LinuxRuntimePlatform.requireSupported(mode); Unit }
             val installation = app.daiyu.android.terminal.install.LinuxInstallCoordinator.android(context, access)
-            val settings = LinuxSettingsController(access, admission, startupEntries = snapshot, installation = installation)
-            val selection = TerminalTrustedLinuxSelection(File(context.filesDir, "user-terminal/linux-selection"), snapshot)
-            return LinuxSettingsApplication(owner, settings, admission, selection)
+            val chrootInstallation = app.daiyu.android.terminal.install.LinuxInstallCoordinator.android(context, access, LinuxExecutionMode.CHROOT)
+            val settings = LinuxSettingsController(access, admission, startupEntries = snapshot, installation = installation,
+                chrootInstallation = chrootInstallation)
+            val selection = TerminalTrustedLinuxSelection(File(context.filesDir, "user-terminal/linux-selection"), snapshot,
+                chrootRoot = File(context.filesDir.canonicalFile, "linux-chroot-installations"))
+            return LinuxSettingsApplication(owner, settings, admission, selection, modes)
         }
     }
 }

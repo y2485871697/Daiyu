@@ -28,12 +28,23 @@ data class LinuxBackend(
 )
 
 /** Fixed host transport for an explicitly selected installation, never model argv. */
-data class RootScopeLaunch internal constructor(val rootfs: File, val su: File) {
+data class RootScopeLaunch internal constructor(val rootfs: File, val su: File, internal val identityProbe: Boolean = false) {
     init {
         require(rootfs.isAbsolute && rootfs == rootfs.canonicalFile && rootfs.isDirectory)
-        require(su.isAbsolute && su == su.canonicalFile && su.isFile && su.canExecute())
+        require(su.isAbsolute && su.toPath().normalize() == su.toPath() && su.isFile && su.canExecute())
     }
-    internal fun guestArgv(): List<String> = listOf("/system/bin/chroot", rootfs.path, "/bin/sh")
+    companion object {
+        internal fun requireTrustedTransport(): List<File> =
+            listOf("/system/bin/su", "/system/bin/chroot", "/system/bin/env").map(::File).also { files ->
+                check(files.all { file ->
+                    val actual = file.canonicalFile
+                    actual.isFile && actual.canExecute() && !actual.canWrite() &&
+                        actual.parentFile?.canWrite() == false && file.parentFile?.canWrite() == false
+                }) { "linux_chroot_transport_unavailable" }
+            }
+    }
+    internal fun guestArgv(): List<String> = listOf("/system/bin/chroot", rootfs.path, "/bin/sh") +
+        if (identityProbe) listOf("-c", "id -u") else emptyList()
 }
 internal class BackendUnavailable(val code: String, val cleanup: BackendProbeCleanup? = null) : Exception(code)
 

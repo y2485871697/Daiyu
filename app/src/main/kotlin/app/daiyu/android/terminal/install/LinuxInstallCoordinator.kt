@@ -2,6 +2,8 @@ package app.daiyu.android.terminal.install
 
 import android.content.Context
 import app.daiyu.android.terminal.FrozenLinuxApproval
+import app.daiyu.android.terminal.LinuxExecutionMode
+import app.daiyu.android.terminal.LinuxRuntimePlatform
 import app.daiyu.android.terminal.LinuxInstallation
 import app.daiyu.android.terminal.LinuxSettingsCatalogAccess
 import kotlinx.coroutines.CoroutineScope
@@ -37,6 +39,7 @@ internal interface LinuxInstallTransactions {
     fun completeRegistration(prepared: PreparedLinuxInstall, approval: FrozenLinuxApproval)
     fun discard(prepared: PreparedLinuxInstall)
     fun recover(helpers: PackagedProotHelpers): RecoveredLinuxInstall?
+    fun recoverChroot(abi: String): RecoveredLinuxInstall? = error("linux_chroot_recovery_unavailable")
 }
 
 private class RootlessInstallTransactions(private val installer: RootlessLinuxInstaller) : LinuxInstallTransactions {
@@ -55,6 +58,7 @@ private class RootlessInstallTransactions(private val installer: RootlessLinuxIn
         installer.completeRegistration(prepared, approval)
     override fun discard(prepared: PreparedLinuxInstall) = installer.discardRequest(prepared)
     override fun recover(helpers: PackagedProotHelpers) = installer.recoverRequest(helpers)
+    override fun recoverChroot(abi: String) = installer.recoverChrootRequest(abi)
 }
 
 /** Application-lived; retains the exact request and FrozenLinuxApproval across page recreation. */
@@ -65,6 +69,8 @@ class LinuxInstallCoordinator internal constructor(
     private val catalog: LinuxSettingsCatalogAccess,
     private val worker: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
     unavailableReason: String? = null,
+    val executionMode: LinuxExecutionMode = LinuxExecutionMode.PROOT,
+    private val chrootAbi: () -> String = { LinuxRuntimePlatform.requireSupported(LinuxExecutionMode.CHROOT) },
 ) : AutoCloseable {
     private val lock = Any()
     private val mutable = MutableStateFlow(LinuxInstallState(unavailableReason = unavailableReason))
@@ -78,7 +84,8 @@ class LinuxInstallCoordinator internal constructor(
 
     /** Reconstruct descriptions; retire recorded requests, never approve or replay a probe. */
     internal fun recover(): Boolean = submit(recovering = true, eligible = { it.prepared == null || it.recoveryBlocked }) {
-        val recovered = installer.recover(helpers())
+        val recovered = if (executionMode == LinuxExecutionMode.CHROOT) installer.recoverChroot(chrootAbi())
+            else installer.recover(helpers())
         if (recovered == null) LinuxInstallState(notice = "未发现待恢复请求；未下载、执行或注册。")
         else if (!recovered.unknown && recovered.registration != null &&
             catalog.registrationRecorded(recovered.registration)) {
@@ -103,15 +110,16 @@ class LinuxInstallCoordinator internal constructor(
     internal fun prepare(distribution: String, mirrorId: String): Boolean = submit(
         eligible = { !it.unknown && !it.recoveryBlocked && !it.registrationPending && (it.prepared == null || it.registered) }
     ) {
-        val packaged = helpers()
-        val artifact = requireNotNull(LinuxRootfsCatalog.find(distribution, packaged.abi)) {
+        val packaged = if (executionMode == LinuxExecutionMode.PROOT) helpers() else null
+        val abi = packaged?.abi ?: chrootAbi()
+        val artifact = requireNotNull(LinuxRootfsCatalog.find(distribution, abi)) {
             "linux_install_unsupported_catalog_entry"
         }
         val generation = UUID.randomUUID().toString()
         val target = File(File(File(privateRoot, distribution), generation), "rootfs")
         val prepared = installer.prepare(artifact, mirrorId, LinuxInstallation(distribution,
-            distribution, generation, target, packaged.proot, packaged.prootSha256,
-            packaged.loader, packaged.loaderSha256, "/", emptyMap()))
+            distribution, generation, target, packaged?.proot, packaged?.prootSha256.orEmpty(),
+            packaged?.loader, packaged?.loaderSha256.orEmpty(), "/", emptyMap(), executionMode))
         synchronized(lock) { mutable.value = LinuxInstallState(busy = true, prepared = prepared) }
         installer.remember(prepared) // Durable description only; no download/registration capability.
         LinuxInstallState(prepared = prepared, notice = "请核对固定条目和完整目标；尚未下载或批准注册。")
@@ -253,13 +261,17 @@ class LinuxInstallCoordinator internal constructor(
     }
 
     companion object {
-        internal fun android(context: Context, catalog: LinuxSettingsCatalogAccess): LinuxInstallCoordinator {
+        internal fun android(context: Context, catalog: LinuxSettingsCatalogAccess,
+            mode: LinuxExecutionMode = LinuxExecutionMode.PROOT): LinuxInstallCoordinator {
             val application = context.applicationContext
+            val runner = AndroidLinuxInstallProbeRunner(application)
+            val installer = if (mode == LinuxExecutionMode.CHROOT) RootlessLinuxInstaller.forChroot(application, runner)
+                else RootlessLinuxInstaller.forApp(application, runner)
             return LinuxInstallCoordinator(
-                RootlessInstallTransactions(RootlessLinuxInstaller.forApp(application, AndroidLinuxInstallProbeRunner(application))),
+                RootlessInstallTransactions(installer),
                 PackagedProotHelperProvider(application)::resolve,
-                File(application.filesDir, "linux-installations"), catalog,
-                unavailableReason = PackagedProotHelperProvider.platformUnavailableReason())
+                File(application.filesDir.canonicalFile, if (mode == LinuxExecutionMode.CHROOT) "linux-chroot-installations" else "linux-installations"), catalog,
+                unavailableReason = LinuxRuntimePlatform.unavailableReason(mode), executionMode = mode)
         }
     }
 }

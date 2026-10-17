@@ -7,7 +7,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 import java.io.File
-import java.security.MessageDigest
 import java.util.Base64
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executors
@@ -22,7 +21,8 @@ data class TerminalOpenRequest(
     val linux: LinuxGenerationRef? = null,
 )
 
-data class TerminalLinuxChoice(val reference: LinuxGenerationRef, val label: String)
+data class TerminalLinuxChoice(val reference: LinuxGenerationRef, val label: String,
+    val executionMode: LinuxExecutionMode = LinuxExecutionMode.PROOT)
 data class TerminalLinuxState(
     val state: String = "NOT_CHECKED",
     val selected: LinuxGenerationRef? = null,
@@ -335,7 +335,8 @@ private class AndroidTerminalEnvironmentBackend(
 ) : TerminalEnvironmentBackend {
     // Lazy properties are first resolved on the worker, not on page construction.
     private val root by lazy { File(context.filesDir, "user-terminal") }
-    private val selection by lazy { TerminalTrustedLinuxSelection(File(root, "linux-selection"), installations) }
+    private val selection by lazy { TerminalTrustedLinuxSelection(File(root, "linux-selection"), installations,
+        chrootRoot = File(context.filesDir.canonicalFile, "linux-chroot-installations")) }
 
     override fun linuxStatus(): TerminalLinuxState = selection.status()
 
@@ -378,11 +379,12 @@ internal class TerminalTrustedLinuxSelection(
     installations: List<LinuxInstallation>,
     private val directorySync: (File) -> Unit = TerminalDurability::syncDirectory,
     private val fileKey: (java.nio.file.Path) -> Any? = ::strictLinuxFileKey,
+    private val chrootRoot: File? = null,
 ) {
     private val installations = installations.map { it.copy(sharedMounts = it.sharedMounts.toMap()) }
-    private val store by lazy { LinuxEnvironmentStore(directory, directorySync, fileKey) }
+    private val store by lazy { LinuxEnvironmentStore(directory, directorySync, fileKey, chrootRoot) }
     private val choices get() = installations.map {
-        TerminalLinuxChoice(LinuxGenerationRef(it.environmentId, it.generation), it.distribution)
+        TerminalLinuxChoice(LinuxGenerationRef(it.environmentId, it.generation), it.distribution, it.executionMode)
     }
 
     fun status(): TerminalLinuxState {
@@ -415,19 +417,7 @@ internal class TerminalTrustedLinuxSelection(
         val trusted = trusted(reference)
         check(directory.isDirectory) { "linux_environment_not_selected" }
         return store.acquire(reference).use { lease ->
-            // backend() exposes the actual leased launch metadata and revalidates its identities.
-            // An existing selection directory suffices for inspection; never create a temp/home.
-            val actual = lease.backend(directory)
-            val binds = trusted.sharedMounts.entries.sortedBy { it.key }.flatMap { (host, guest) -> listOf("-b", "$host:$guest") }
-            val argv = listOf(trusted.proot.path, "-0", "-r", trusted.rootfs.path,
-                "-w", trusted.guestWorkingDirectory) + binds + listOf("/bin/sh")
-            check(actual.label == trusted.distribution &&
-                actual.environmentId == "${trusted.environmentId}:${trusted.generation}" &&
-                actual.shellArgv == argv && actual.environment["PROOT_LOADER"] == trusted.loader.path &&
-                actual.guestWorkingDirectory == trusted.guestWorkingDirectory && actual.sharedMounts == trusted.sharedMounts &&
-                digest(trusted.proot) == trusted.prootSha256 && digest(trusted.loader) == trusted.loaderSha256) {
-                "linux_trusted_installation_mismatch"
-            }
+            lease.assertMatches(trusted)
             action(store)
         }
     }
@@ -436,22 +426,7 @@ internal class TerminalTrustedLinuxSelection(
         it.environmentId == reference.environmentId && it.generation == reference.generation
     }
 
-    private fun digest(file: File): String {
-        check(file.length() in 1..(64L * 1024 * 1024))
-        val digest = MessageDigest.getInstance("SHA-256")
-        file.inputStream().use { input ->
-            val bytes = ByteArray(8192)
-            var total = 0L
-            while (true) {
-                val count = input.read(bytes)
-                if (count < 0) break
-                total += count
-                check(total <= 64L * 1024 * 1024)
-                digest.update(bytes, 0, count)
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
-    }
+
 }
 
 private class TerminalResource(

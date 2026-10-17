@@ -5,6 +5,7 @@ import app.daiyu.android.terminal.hostDirectorySync
 import app.daiyu.android.terminal.hostLinuxStore
 import app.daiyu.android.terminal.FrozenLinuxApproval
 import app.daiyu.android.terminal.LinuxGenerationRef
+import app.daiyu.android.terminal.LinuxExecutionMode
 import app.daiyu.android.terminal.LinuxInstallation
 import app.daiyu.android.terminal.LinuxSettingsAdmission
 import app.daiyu.android.terminal.LinuxSettingsCatalogAccess
@@ -35,6 +36,12 @@ class LinuxProductionCompositionTest : TestCase() {
         var recoveryFailure: Exception? = null
         override fun recover(helpers: PackagedProotHelpers): RecoveredLinuxInstall? {
             recoveryFailure?.let { throw it }
+            return recovered
+        }
+        var chrootRecoveries = 0
+        override fun recoverChroot(abi: String): RecoveredLinuxInstall? {
+            check(abi == "arm64-v8a")
+            chrootRecoveries++
             return recovered
         }
         var beforeRememberRegistration: (() -> Unit)? = null
@@ -80,6 +87,45 @@ class LinuxProductionCompositionTest : TestCase() {
     }
     private fun helpers() = PackagedProotHelpers("arm64-v8a", File("/apk/libproot_exec.so"), "a".repeat(64),
         File("/apk/libproot_loader.so"), "b".repeat(64))
+
+    fun testChrootCoordinatorNeverCallsProotProviderAndBothRecoveredRequestsCanBeDiscarded() = runTest {
+        val proot = Transactions()
+        val chroot = Transactions()
+        val catalog = Catalog()
+        val first = LinuxInstallCoordinator(proot, ::helpers, File("/private/proot"), catalog, this)
+        val second = LinuxInstallCoordinator(chroot, { error("must_not_resolve_proot_helpers") },
+            File("/private/chroot"), catalog, this, executionMode = LinuxExecutionMode.CHROOT, chrootAbi = { "arm64-v8a" })
+        runCurrent()
+        assertEquals(1, chroot.chrootRecoveries)
+        // Simulate two independently restored journals; cleanup must not deadlock across modes.
+        assertTrue(first.prepare("alpine", "primary")); assertTrue(second.prepare("alpine", "primary"))
+        runCurrent()
+        val installed = second.state.value.prepared!!.installation
+        assertEquals(LinuxExecutionMode.CHROOT, installed.executionMode)
+        assertNull(installed.proot); assertNull(installed.loader)
+        assertTrue(installed.rootfs.path.startsWith("/private/chroot/"))
+        val controller = LinuxSettingsController(catalog, LinuxSettingsAdmission(emptySet()), this,
+            installation = first, chrootInstallation = second)
+        val page = controller.enterPage(); runCurrent()
+        assertFalse(page.prepareInstall("debian", "primary", LinuxExecutionMode.CHROOT))
+        assertTrue(page.discardInstall(LinuxExecutionMode.CHROOT)); runCurrent()
+        assertNull(second.state.value.prepared); assertNotNull(first.state.value.prepared)
+        assertTrue(page.discardInstall()); runCurrent()
+        assertFalse(controller.installationBlocksManual)
+        page.close()
+        assertFalse(page.prepareInstall("alpine", "primary", LinuxExecutionMode.CHROOT))
+        controller.close()
+    }
+    fun testRootLeaderExitWaitsForDrainWithoutMaskingRealProtocolFailure() {
+        val value = org.json.JSONObject().put("ok", true).put("state", "unknown")
+            .put("leader_exited", true).put("wait_status", 0).put("error", org.json.JSONObject.NULL)
+        assertFalse(installProbeUnknown(value, true))
+        assertTrue(installProbeUnknown(value, false))
+        value.put("error", "pty_root_scope_drain_unknown")
+        assertTrue(installProbeUnknown(value, true))
+        value.put("error", org.json.JSONObject.NULL).put("ok", false)
+        assertTrue(installProbeUnknown(value, true))
+    }
 
     fun testTwoConfirmationsDurabilityAndOriginalFrozenRetryAcrossPageRecreation() = runTest {
         val transactions = Transactions()

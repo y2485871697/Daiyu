@@ -117,7 +117,9 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         fixture.database.writableDatabase.execSQL("UPDATE messages SET blocks=? WHERE id=?", arrayOf(originalBlocks, first.id.value))
         node("search:retry").performClick()
         awaitTag("search:message:${conversation.id.value}:${first.id.value}")
-        ui.onNodeWithText(activity.getString(R.string.search_limited_results, 200)).assertExists()
+        ui.onNodeWithText(activity.getString(R.string.search_message_count, 1)).assertExists()
+        node("search:error").assertDoesNotExist()
+        ui.onNodeWithText(activity.getString(R.string.search_limited_results, 200)).assertDoesNotExist()
         node("search:query").performTextReplacement("不存在的正文")
         awaitTag("search:empty")
         node("search:error").assertDoesNotExist()
@@ -125,6 +127,52 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         node("search:prompt").assertExists()
         backToChat(activity)
         node("chat-draft").assertExists()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testLoadMoreOpens201stPersistedMessageWithoutTruncation() {
+        lateinit var conversation: Conversation
+        lateinit var last: Message
+        mainThread {
+            conversation = fixture.database.create("default")
+            repeat(201) { index ->
+                val user = Message(MessageId("paging-ui-user-$index"), conversation.id, RunId("paging-ui-run-$index"),
+                    "user", listOf(MessageBlock.Text("paging-ui-text-$index", "分页UI命中 $index")), RunStatus.COMPLETED)
+                val answer = user.copy(id = MessageId("paging-ui-answer-$index"), role = "assistant",
+                    blocks = emptyList(), status = RunStatus.RUNNING)
+                fixture.database.send(user, answer)
+                fixture.database.save(answer.copy(status = RunStatus.COMPLETED))
+                last = user
+            }
+            repeat(30) { index ->
+                val user = Message(MessageId("paging-tail-user-$index"), conversation.id, RunId("paging-tail-run-$index"),
+                    "user", listOf(MessageBlock.Text("paging-tail-text-$index", "后续不匹配正文 $index")), RunStatus.COMPLETED)
+                val answer = user.copy(id = MessageId("paging-tail-answer-$index"), role = "assistant",
+                    blocks = emptyList(), status = RunStatus.RUNNING)
+                fixture.database.send(user, answer)
+                fixture.database.save(answer.copy(status = RunStatus.COMPLETED))
+            }
+            activity.select(conversation)
+        }
+        setDraft("分页跳转前草稿")
+        openMessages()
+        node("search:query").performTextReplacement("分页UI命中")
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithText(activity.getString(R.string.search_message_count, 200)).fetchSemanticsNodes().isNotEmpty()
+        }
+        val lastTag = "search:message:${conversation.id.value}:${last.id.value}"
+        page(R.string.search_messages_title).performScrollToNode(hasText(text(R.string.search_load_more)))
+        ui.onNodeWithText(text(R.string.search_load_more)).performClick()
+        page(R.string.search_messages_title).performScrollToIndex(0)
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithText(activity.getString(R.string.search_message_count, 201)).fetchSemanticsNodes().isNotEmpty()
+        }
+        page(R.string.search_messages_title).performScrollToNode(hasTestTag(lastTag))
+        node(lastTag).performClick()
+        page(R.string.search_messages_title).assertDoesNotExist()
+        awaitTag("chat-turn:${last.id.value}")
+        node("chat-turn:${last.id.value}").assertIsDisplayed()
+        assertDraft("分页跳转前草稿")
         assertEquals(0, fixture.opens.get())
     }
 

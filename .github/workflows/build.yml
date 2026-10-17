@@ -289,7 +289,7 @@ jobs:
           path: performance-delivery/
           if-no-files-found: error
   smoke:
-    name: 启动验证 API ${{ matrix.api }}
+    name: 启动验证 API ${{ matrix.api }} 分片${{ matrix.shard }}
     needs: build
     if: always() && github.ref == 'refs/heads/main' && ((inputs.mode == 'build' && needs.build.result == 'success') || inputs.mode == 'smoke')
     runs-on: ubuntu-26.04
@@ -297,7 +297,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.mode == 'smoke' && inputs.smoke_api == '26' && '[{"api":"26","target":"google_apis","ram":4096}]' || inputs.mode == 'smoke' && inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144}]' || '[{"api":"26","target":"google_apis","ram":4096},{"api":"37.2","target":"google_apis_ps16k","ram":6144}]') }}
+        include: ${{ fromJSON(inputs.mode == 'smoke' && inputs.smoke_api == '26' && '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3}]' || inputs.mode == 'smoke' && inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]' || '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -310,7 +310,7 @@ jobs:
         if: always() && inputs.mode == 'smoke'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: 代鱼工具证据-smoke-API${{ matrix.api }}
+          name: 代鱼工具证据-smoke-API${{ matrix.api }}-分片${{ matrix.shard }}
           path: tool-evidence/
           if-no-files-found: error
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
@@ -355,6 +355,8 @@ jobs:
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
           EMULATOR_RAM_MB: ${{ matrix.ram }}
+          SMOKE_SHARD_COUNT: 4
+          SMOKE_SHARD_INDEX: ${{ matrix.shard }}
         with:
           api-level: ${{ matrix.api }}
           arch: x86_64
@@ -376,6 +378,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: 代鱼启动证据-API${{ matrix.api }}
+          name: 代鱼启动证据-API${{ matrix.api }}-分片${{ matrix.shard }}
           path: smoke/
           if-no-files-found: ignore

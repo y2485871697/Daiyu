@@ -50,7 +50,7 @@ class GuiSettingsActivityTest : WiredActivityTestCase() {
             reveal("gui-status", page).assertExists()
             reveal("gui-open-system", page).assertHasClickAction()
             reveal("gui-rebind", page).assertTextContains("手动重新启用", substring = true)
-            reveal("gui-disclosure", page).assertTextContains("整个有界观察和完整输入将发送给当前模型", substring = true)
+            reveal("gui-disclosure", page).assert(hasAnyDescendant(hasText("整个有界观察和完整输入将发送给当前模型", substring = true)))
             reveal("gui-no-run", page).assertExists()
             reveal("gui-refresh", page).performClick()
             assertNoGuiPreparation()

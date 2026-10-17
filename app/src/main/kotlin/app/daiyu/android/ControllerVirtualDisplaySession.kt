@@ -423,7 +423,7 @@ internal class ControllerVirtualDisplaySession internal constructor(
         }
         val intent = target.third.intent("host-cleanup-release-v1", target.third.writes.single())
         var evidence = R08VirtualDisplayEvidence.UNKNOWN
-        var persistedConfirmation = false
+        var outcomeRecorded = false
         try {
             if (target.first.claim(intent) == R08VirtualDisplayPermit.EXECUTE_ONCE) {
                 val reply = target.second.execute(intent.operationId, intent.operation, JSONObject(intent.canonicalParameters))
@@ -436,14 +436,15 @@ internal class ControllerVirtualDisplaySession internal constructor(
             }
             // Maintenance evidence, NOT a fabricated central tool-ledger final result.
             target.first.complete(intent, evidence)
-            persistedConfirmation = evidence == R08VirtualDisplayEvidence.CONFIRMED
-            if (persistedConfirmation) return CleanupResult.CONFIRMED
+            outcomeRecorded = true
+            if (evidence == R08VirtualDisplayEvidence.CONFIRMED) return CleanupResult.CONFIRMED
         } catch (_: Exception) {
             // Never retry claim/send/completion. The original claim (or a failed append's
             // pending evidence) remains durable; absence of completion is NOT success.
         } finally {
             synchronized(lock) {
-                if (!persistedConfirmation) uncertain = true
+                // UNKNOWN is an operation result, not a denial of independent physical exit proof.
+                if (!outcomeRecorded) uncertain = true
                 cleanupBusy = false
             }
         }

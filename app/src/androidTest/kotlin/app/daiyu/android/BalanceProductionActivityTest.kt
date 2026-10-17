@@ -130,7 +130,7 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
         }
         ui.waitUntil(timeoutMillis = 5000) { activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) }
-        ui.onNodeWithText("独立余额设置").assertIsDisplayed()
+        ui.onNodeWithText("独立余额设置").performScrollTo().assertIsDisplayed()
         ui.waitUntil(timeoutMillis = 5000) { !runtime.state.value.refreshing }
         val before = calls.get()
         querySaved()

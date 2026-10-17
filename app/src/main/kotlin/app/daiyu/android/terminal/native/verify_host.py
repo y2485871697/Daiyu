@@ -54,7 +54,7 @@ try:
 finally:
     if p.poll() is None:p.kill()
     p.wait(timeout=3)
-record={'CHECK_ID':'terminal-r09-pty-host','environment':'Debian cc/Linux PTY; not Android ABI evidence','source_sha256':hashlib.sha256(source.read_bytes()).hexdigest(),'tests':tests,'exit_code':0,'output':output.decode(errors='replace')}
+record={'CHECK_ID':'terminal-r09-pty-host','environment':'Debian cc/Linux PTY; not Android ABI evidence','source_sha256':hashlib.sha256(source.read_bytes()).hexdigest(),'root_scope_header_sha256':hashlib.sha256(source.with_name('daiyu_root_scope.h').read_bytes()).hexdigest(),'tests':tests,'exit_code':0,'output':output.decode(errors='replace')}
 
 # Child exits while a background job retains the slave: wait status must stay bounded.
 p=subprocess.Popen([str(helper),'24','80','--','/bin/sh','-c','sleep 20 & exit 4'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
@@ -90,5 +90,10 @@ try:
 finally:
     if p.poll() is None:p.kill()
     p.wait(timeout=3)
+faults=subprocess.run([str(helper.with_name('root_scope_faults'))],check=True,capture_output=True,text=True,timeout=5)
+assert faults.stdout.strip()=='root_scope_faults: 5 passed',faults.stdout
+tests.extend(['root scope open failure removes its empty group','root scope fstat failure removes its empty group',
+    'root scope removal retries EINTR','failed scope removal reports S/E without drain',
+    'pre-hello launch failure sends S/E/D and removes scope'])
 record['tests']=tests
 (out/'check.json').write_text(json.dumps(record,indent=2));print(json.dumps({k:record[k] for k in ['CHECK_ID','tests','exit_code']},indent=2))

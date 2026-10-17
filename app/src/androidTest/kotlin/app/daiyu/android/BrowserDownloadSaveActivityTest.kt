@@ -499,7 +499,7 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
         assertEquals(0, documents.opens.get())
         chooseStatic(output, Activity.RESULT_OK, beforeReturn = {
             assertNotSame(firstVisit, field("staticGenerationVisit"))
-            lifecycle("onPause"); lifecycle("onResume") // a fresh pick gets exactly one fresh hop
+            // The framework result delivery supplies this pick's one pause hop.
         })
         assertEquals(1, documents.opens.get())
         assertTrue(staticBytes.contentEquals(documents.file(destination).readBytes()))

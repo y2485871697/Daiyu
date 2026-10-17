@@ -41,21 +41,45 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         assertNull(getter.apply { isAccessible = true }.invoke(activity))
     }
     private fun stopped(block: () -> Unit) {
+        val original = activity
+        val stopped = java.util.concurrent.CountDownLatch(1)
+        var assertion: Throwable? = null
+        val callbacks = object : android.app.Application.ActivityLifecycleCallbacks {
+            override fun onActivityStopped(target: android.app.Activity) {
+                if (target !== original) return
+                try { block() } catch (failure: Throwable) { assertion = failure }
+                finally { stopped.countDown() }
+            }
+            override fun onActivityCreated(target: android.app.Activity, state: android.os.Bundle?) = Unit
+            override fun onActivityStarted(target: android.app.Activity) = Unit
+            override fun onActivityResumed(target: android.app.Activity) = Unit
+            override fun onActivityPaused(target: android.app.Activity) = Unit
+            override fun onActivitySaveInstanceState(target: android.app.Activity, state: android.os.Bundle) = Unit
+            override fun onActivityDestroyed(target: android.app.Activity) = Unit
+        }
+        original.application.registerActivityLifecycleCallbacks(callbacks)
         try {
-            mainThread {
-                instrumentation.callActivityOnPause(activity)
-                instrumentation.callActivityOnStop(activity)
-                // Assert before Compose disposal, not just after an idle frame removes the route.
-                block()
-            }
+            mainThread { assertTrue(original.moveTaskToBack(true)) }
+            assertTrue("original Activity stopped", stopped.await(5, java.util.concurrent.TimeUnit.SECONDS))
         } finally {
-            mainThread {
-                instrumentation.callActivityOnRestart(activity)
-                instrumentation.callActivityOnStart(activity)
-                instrumentation.callActivityOnResume(activity)
+            original.application.unregisterActivityLifecycleCallbacks(callbacks)
+            instrumentation.targetContext.startActivity(
+                android.content.Intent(instrumentation.targetContext, MainActivity::class.java).addFlags(
+                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+        }
+        ui.waitUntil(5_000) {
+            var resumed = false
+            instrumentation.runOnMainSync {
+                resumed = !original.isDestroyed && original.lifecycle.currentState == androidx.lifecycle.Lifecycle.State.RESUMED
             }
+            resumed
+        }
+        ui.waitUntil(5_000) {
+            ui.onAllNodes(isRoot()).fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
         }
         ui.waitForIdle()
+        assertion?.let { throw it }
     }
     @Suppress("UNCHECKED_CAST")
     private fun offerConfirmationMetadata(adapter: ContextManagementControllerAdapter) {

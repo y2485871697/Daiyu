@@ -259,6 +259,7 @@ class ChatController internal constructor(private val application:Application,
     internal val interactiveMode = app.daiyu.android.config.InteractiveModePreference(preferences)
     private val executor=Executors.newSingleThreadExecutor()
     private val handler=Handler(Looper.getMainLooper())
+    private val imageReceiptHandler=Handler(Looper.getMainLooper())
     // Entry points and callback commits share this controller's monitor. Runner control and
     // shutdown waits stay outside it, so a worker can always finish its last publication.
     private val listeners=mutableMapOf<()->Unit,Any>()
@@ -2643,7 +2644,7 @@ class ChatController internal constructor(private val application:Application,
             }
             finishPreparation(token)
             // A receipt belongs to the submitted revision, not whichever editor is visible now.
-            handler.post {try {complete(result)} catch (_:Exception) {}}
+            imageReceiptHandler.post {try {complete(result)} catch (_:Exception) {}}
         } } catch (_:java.util.concurrent.RejectedExecutionException) {
             finishPreparation(token);return null
         }

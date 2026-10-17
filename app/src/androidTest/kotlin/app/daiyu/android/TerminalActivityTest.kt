@@ -7,11 +7,19 @@ import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 class TerminalActivityTest : WiredActivityTestCase() {
     private val owner get() = (instrumentation.targetContext.applicationContext as ChatApplication).terminalOwner
 
+    private fun awaitTerminal() {
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("terminal-screen")
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
+        node("terminal-screen").assertExists()
+    }
+
     private fun enterFromSettings() {
         openSettings()
         reveal("settings-row:工具", "设置").performClick()
         reveal("settings-row:终端", "工具").performClick()
-        node("terminal-screen").assertExists()
+        awaitTerminal()
     }
 
     fun testSettingsEntryAndRecreationKeepSameIdleOwnerWithoutOpeningPty() {
@@ -21,7 +29,7 @@ class TerminalActivityTest : WiredActivityTestCase() {
         assertFalse(retained.host.state.value.ownsResources)
         node("terminal-identity").assertTextContains(android.os.Process.myUid().toString(), substring = true)
         activity = recreateActivity(activity)
-        node("terminal-screen").assertExists()
+        awaitTerminal()
         assertSame(retained, owner)
         assertSame(caller, owner.caller.value)
         assertFalse(owner.host.state.value.ownsResources)
@@ -29,7 +37,7 @@ class TerminalActivityTest : WiredActivityTestCase() {
 
     fun testOldTerminalPageOpenCallbackCannotAcquireAfterReentry() {
         mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.OPEN_TERMINAL) }
-        node("terminal-screen").assertExists()
+        awaitTerminal()
         lateinit var oldOpen: () -> Unit
         mainThread {
             val page = MainActivity::class.java.getDeclaredField("terminalPageOwner")
@@ -43,7 +51,7 @@ class TerminalActivityTest : WiredActivityTestCase() {
         node("terminal-screen").assertDoesNotExist()
         reveal("settings-row:工具", "设置").performClick()
         reveal("settings-row:终端", "工具").performClick()
-        node("terminal-screen").assertExists()
+        awaitTerminal()
         val caller = owner.caller.value
         mainThread { oldOpen() }
         assertSame(caller, owner.caller.value)

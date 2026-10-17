@@ -7,6 +7,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ChatController
 import app.daiyu.android.ControllerShizukuPreparation
@@ -50,7 +51,8 @@ internal fun ShizukuApprovalHost(
     val preview = remember(controller, revision) { controller.shizukuPreparation() }
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Switch(checked = enabled, enabled = preview == null, onCheckedChange = { enabled = it })
+            Switch(checked = enabled, enabled = preview == null, onCheckedChange = { enabled = it },
+                modifier = Modifier.testTag("shizuku-text-enable"))
             Text("本次可选 Shizuku 命令（默认关闭）")
         }
         if (enabled) {

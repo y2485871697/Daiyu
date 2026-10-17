@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
 import app.daiyu.android.domain.Conversation
 import app.daiyu.android.terminal.TerminalJobHistoryReader
 import org.json.JSONObject
@@ -47,7 +48,8 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         ui.onAllNodesWithText("停止此 job…").assertCountEquals(0)
         node("terminal-job-stop-confirm").assertDoesNotExist()
         node("terminal-jobs-panel").performScrollToNode(hasTestTag("terminal-history-read-$id"))
-        node("terminal-history-read-$id").performClick()
+        node("terminal-history-read-$id").assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         awaitControl("first history page") {
             val visit = checkNotNull(invoke("getTerminalJobsVisit"))
             !(property(visit, "getBusy") as Boolean) && property(visit, "getHasMore") == true

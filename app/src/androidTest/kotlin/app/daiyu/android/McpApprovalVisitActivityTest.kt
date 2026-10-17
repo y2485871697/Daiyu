@@ -57,6 +57,12 @@ class McpApprovalVisitActivityTest : WiredActivityTestCase() {
         val token = ChatController::class.java.getDeclaredField("preparation").apply { isAccessible = true }.get(fixture.controller)
         token?.javaClass?.getDeclaredField("mcp")?.apply { isAccessible = true }?.get(token) as ControllerMcpPreparation?
     }
+    private fun awaitTag(tag: String) {
+        ui.waitUntil(timeoutMillis = 5_000) {
+            ui.onAllNodesWithTag(tag).fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
+        node(tag).assertExists()
+    }
     @Suppress("UNCHECKED_CAST")
     private fun openInput(): (String) -> Unit {
         lateinit var action: (String) -> Unit
@@ -66,7 +72,8 @@ class McpApprovalVisitActivityTest : WiredActivityTestCase() {
             action = input.javaClass.getDeclaredMethod("getAction").apply { isAccessible = true }.invoke(input) as (String) -> Unit
             assertNotNull(visit())
         }
-        node("dialog-confirm").assertExists()
+        awaitTag("prompt-input")
+        awaitTag("dialog-confirm")
         return action
     }
     private fun preview(): Pair<ControllerMcpPreparation, Any> {
@@ -77,7 +84,7 @@ class McpApprovalVisitActivityTest : WiredActivityTestCase() {
             instrumentation.runOnMainSync { ready = approval() != null }
             ready
         }
-        node("mcp-approve").assertExists()
+        awaitTag("mcp-approve")
         lateinit var result: Pair<ControllerMcpPreparation, Any>
         mainThread { result = checkNotNull(approval()) to checkNotNull(visit()) }
         return result

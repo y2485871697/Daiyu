@@ -117,8 +117,8 @@ API37.2 使用自己的 job ID、API 与文件。所有路径都相对于 `--evi
 - 必须有**且只有一条**整行 `OK (N tests)`（或 `OK (1 test)`），N 必须等于该报告的 `expected_tests`，不得为零。带前后缀、缩进、第二条 OK 或其他含独立 OK 单词的行均拒绝，不能把多次执行拼接成一次通过。
 - 原文或 logcat 含 failure/failed、crash、fatal、exception、error、abort、timeout/timed out、cancel、skipped/ignored、`shortMsg=` 等否定信号时拒绝。Java `AssertionError` 等 Error/Exception 类型同样拒绝。匹配不区分大小写。
 - 任何包含 `INSTRUMENTATION_` 标记的原文行都必须是严格从第 0 列开始的已支持协议行；空格、tab、日志前缀及同一行内嵌的第二个标记均拒绝，不 trim、不去前缀、不归一化为合法协议。
-- 如原文包含 `INSTRUMENTATION_CODE:`，只能有一条且必须为 `-1`；`INSTRUMENTATION_STATUS_CODE:` 只能是 0 或 1；`numtests` 必须等于 N；`current` 必须为 1..N。`INSTRUMENTATION_RESULT` 只允许 stream 字段，未知 instrumentation 行拒绝。
-- 终端 code 可省略，以兼容已有仅含 runner summary 的原文；但已给出的 code 不能与 OK 冲突。instrumentation 和 logcat 均须提交并匹配摘要，不能只信 job 的 success 或 JSON 内的 exit_code。
+- `INSTRUMENTATION_CODE: -1` **必须存在且仅一条，并为最后一个非空行**；不再兼容只有 runner summary 的旧原文。`INSTRUMENTATION_STATUS_CODE:` 只能是 0 或 1；`numtests` 必须等于 N；`current` 必须为 1..N。`INSTRUMENTATION_RESULT` 只允许 stream 字段，未知 instrumentation 行拒绝。
+- smoke 与本离线工具统一调用 `scripts/acceptance/instrumentation_result.py`，无第二套成功规则；终态缺失、在 summary 前出现、重复、冲突或后续状态均拒绝。instrumentation 和 logcat 均须提交并匹配摘要，不能只信 job 的 success 或 JSON 内的 exit_code。
 
 这是刻意保守的原文筛选器，不是通用 Android 日志语义分析器：例如 `errors: 0` 或无害日志中提到 exception 也可能拒绝。不能为了通过校验而删改原文；需要另行审阅并升级格式/策略，不能把拒绝解释为通过。
 

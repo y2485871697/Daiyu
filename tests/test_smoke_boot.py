@@ -35,8 +35,14 @@ class SourceTests(unittest.TestCase):
         record = dict(source_sha='a' * 40, run_id='123', attempt='1', application_id='app.daiyu.android')
         run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main', workflow_id=383377276, status='completed')
         jobs = [dict(name='单测、检查与开发包', conclusion='success')]
-        source.verify(env, record, run, jobs, ['scripts/smoke_boot.sh', 'docs/重构清单.md'])
-        for changed in (['app/build.gradle.kts'], ['core-domain/src/main/Foo.kt'], ['scripts/prepare_signing.py']):
+        source.verify(env, record, run, jobs, ['scripts/smoke_boot.sh', 'docs/acceptance/final-delivery-entry.md',
+                                              'scripts/acceptance/cloud_report.py', 'tests/test_smoke_boot.py'])
+        for changed in (['app/build.gradle.kts'], ['core-domain/src/main/Foo.kt'],
+                        ['scripts/prepare_signing.py'], ['scripts/verify_signing.py'],
+                        ['scripts/prepare-speech-runtime.py'], ['scripts/new-build-input.py'],
+                        ['scripts/cooperation/checks_only.init.gradle'], ['.github/workflows/build.yml'],
+                        ['docs/重构清单.md'], ['scripts/acceptance/../prepare-speech-runtime.py'],
+                        ['tests/../app/build.gradle.kts']):
             with self.assertRaises(ValueError):
                 source.verify(env, record, run, jobs, changed)
         for field, value in [('run_attempt', 2), ('head_sha', 'b' * 40), ('status', 'in_progress')]:
@@ -129,8 +135,15 @@ elif a[:3]==['shell','am','instrument']:
  Path('smoke/instrumentation-args.txt').write_text('\\n'.join(a))
  classes=os.environ['TEST_CLASSES']
  if a!=['shell','am','instrument','-w','-e','class',classes,'app.daiyu.android.test/android.test.InstrumentationTestRunner']: sys.exit(11)
- print('OK ('+os.environ['TEST_COUNT']+' tests)',flush=True)
+ summary='OK ('+os.environ['TEST_COUNT']+' tests)'
+ if case=='terminal-before': print('INSTRUMENTATION_CODE: -1')
+ print('prefix '+summary+' suffix' if case=='substring-ok' else ' '+summary if case=='indented-ok' else summary,flush=True)
+ if case=='duplicate-ok': print(summary)
  if case=='failure': print('FAILURES!!!')
+ if case=='status-fail': print('INSTRUMENTATION_STATUS_CODE: -2')
+ if case!='missing-terminal': print('INSTRUMENTATION_CODE: 0' if case=='terminal-conflict' else 'INSTRUMENTATION_CODE: -1')
+ if case=='duplicate-terminal': print('INSTRUMENTATION_CODE: -1')
+ if case=='after-terminal': print('INSTRUMENTATION_STATUS_CODE: 0')
  sys.exit(9 if case=='instrument-fail' else 0)
 elif a[:3]==['shell','am','start']: print('Status: ok')
 elif a[:3]==['shell','pm','list']: print('package:io.github.mangi.eta' if case=='old-package' else 'package:app.daiyu.android')
@@ -166,6 +179,19 @@ elif a[:3]==['emu','screenrecord','screenshot']: Path(a[-1],'Screenshot_fake.png
         self.assertIn('phase=instrumentation budget=600s', (self.root / 'smoke/stages.txt').read_text())
         args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
         self.assertEqual(args[3:7], ['-w', '-e', 'class', 'app.daiyu.android.FirstTest'])
+
+    def test_strict_shared_result_rejects_ambiguous_and_failed_protocol(self):
+        for case in ('substring-ok', 'indented-ok', 'duplicate-ok', 'missing-terminal',
+                     'terminal-conflict', 'duplicate-terminal', 'terminal-before',
+                     'after-terminal', 'status-fail'):
+            with self.subTest(case=case):
+                result = self.smoke(case=case)
+                self.assertNotEqual(result.returncode, 0)
+                raw = (self.root / 'smoke/platform-tests.txt').read_bytes()
+                self.assertIn(b'OK (1 tests)', raw)
+                self.assertNotIn(b'phase=instrumentation', raw)
+                # Failure occurs before any UI/launch evidence can be created.
+                self.assertFalse((self.root / 'smoke/启动.png').exists())
 
     def test_all_source_classes_are_selected(self):
         result = self.smoke(case='multi', extra_source=(

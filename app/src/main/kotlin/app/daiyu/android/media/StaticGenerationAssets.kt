@@ -64,7 +64,8 @@ internal class StaticGenerationAssets internal constructor(
     private val videoInspector: VideoInspector,
     private val imageLimits: ImageAttachmentLimits,
     private val videoLimits: VideoAttachmentLimits,
-    private val afterAtomicMove: () -> Unit = {}, // fault injection; never replaces actual rename
+    private val afterAtomicMove: () -> Unit = {},
+    private val directoryForce: ((File) -> Unit)? = null, // fault injection; never replaces actual rename
 ) {
     constructor(root: File) : this(root, AndroidImageInspector(), AndroidVideoInspector(),
         ImageAttachmentLimits(maxImageBytes = GenerationRequestPlan.MAX_IMAGE_BYTES),
@@ -320,7 +321,9 @@ internal class StaticGenerationAssets internal constructor(
     private fun syncDirectory(directory: File) {
         checkMediaPath(directory)
         require(Files.isDirectory(directory.toPath(), NOFOLLOW_LINKS))
-        FileChannel.open(directory.toPath(), READ, NOFOLLOW_LINKS).use { it.force(true) }
+        val force = directoryForce
+        if (force != null) force(directory)
+        else FileChannel.open(directory.toPath(), READ, NOFOLLOW_LINKS).use { it.force(true) }
     }
     private fun cleanupKnown(directory: File): Boolean = try {
         checkMediaPath(directory)

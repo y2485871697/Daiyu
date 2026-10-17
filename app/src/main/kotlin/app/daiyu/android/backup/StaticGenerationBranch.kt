@@ -27,7 +27,18 @@ internal class StaticGenerationBranch(
         val staticRows: List<StaticGenerationOutput>, val sources: List<Source>, val outputs: List<StaticGenerationOutput>) {
         val leases = mutableListOf<StaticGenerationAssets.Lease>()
     }
-    fun capture(db: SQLiteDatabase, original: List<Message>, mapped: List<Message>): Capture {
+    fun freezeAccount(db: SQLiteDatabase): Result<String> {
+        check(!db.inTransaction())
+        return runCatching { account() }
+    }
+    fun verifyAccountAndPrepareSchema(db: SQLiteDatabase, capture: Capture) {
+        check(!db.inTransaction())
+        if (capture.outputs.isEmpty()) return
+        val scope = account()
+        check(capture.outputs.all { it.destination.accountScope == scope }) { "生成账户范围已变化" }
+        if (!BackupHistoryRows.exists(db, "neutral_backup_history")) BackupHistoryRows.install(db)
+    }
+    fun capture(db: SQLiteDatabase, original: List<Message>, mapped: List<Message>, accountScope: Result<String>): Capture {
         val conversation = original.first().conversationId.value
         val generation = BackupGenerationCodec.export(db, conversation)
         // The full physical history (not a UI page or only the copied prefix) authorizes every
@@ -46,7 +57,7 @@ internal class StaticGenerationBranch(
             else Source(StaticGenerationProvenance.capture(reference), live = reference)
         } + static.filter { it.destination.assistantMessageId in owners }.map { Source(it.source, static = it) }
         val byOwner = original.zip(mapped).associate { it.first.id.value to it.second }
-        val scope = if (sources.isEmpty()) null else account()
+        val scope = if (sources.isEmpty()) null else accountScope.getOrThrow()
         val outputs = sources.map { selected ->
             val oldOwner = selected.static?.destination?.assistantMessageId ?: selected.provenance.assistantMessageId
             val owner = byOwner.getValue(oldOwner)
@@ -62,7 +73,6 @@ internal class StaticGenerationBranch(
         check(BackupGenerationCodec.export(db, capture.conversation).toString() == capture.generation) { "生成来源集合已变化" }
         check(BackupHistoryRows.history(db, "generation_output", capture.conversation).keys == capture.historicalKeys)
         check(StaticGenerationCodec.read(db, capture.conversation) == capture.staticRows) { "静态来源集合已变化" }
-        if (capture.outputs.isNotEmpty()) check(capture.outputs.all { it.destination.accountScope == account() })
     }
     fun prepareAndPublish(capture: Capture) {
         capture.sources.zip(capture.outputs).forEach { (selected, output) ->
@@ -78,7 +88,8 @@ internal class StaticGenerationBranch(
         capture.leases.forEach { assets.publish(it) }
     }
     fun save(db: SQLiteDatabase, capture: Capture, messages: List<Message>) {
-        BackupHistoryRows.install(db)
+        check(db.inTransaction())
+        if (capture.outputs.isNotEmpty()) check(BackupHistoryRows.exists(db, "neutral_backup_history"))
         capture.outputs.forEach { StaticGenerationCodec.saveInTransaction(db, it, staticMessageRows(messages)) }
     }
     fun verifyDestination(db: SQLiteDatabase, capture: Capture, messages: List<Message>) {

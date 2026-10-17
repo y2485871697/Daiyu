@@ -42,6 +42,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
         fun archives(sql: SQLiteDatabase) = BackupHistoryRows.read(sql, "context_archives",
             listOf("id", "conversation_id", "prefix_count", "revision", "summary", "blob_hash", "created", "active"),
             " WHERE conversation_id=?", arrayOf(id.value))
+        val accountScope = generation?.freezeAccount(db)
         val snapshot = transactions.run { sql ->
             checkCancelled(); authorize(sql)
             val original = ContextService.read(sql, id)
@@ -57,7 +58,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
             val mapped = prefix.map { m -> m.copy(id = remap(m, m.id), conversationId = copy,
                 runId = runs.getOrPut(m.runId) { RunId(UUID.randomUUID().toString()) },
                 historySegments = m.historySegments.map { it.copy(messageId = remap(m, it.messageId)) }) }
-            val capture = generation?.capture(sql, prefix, mapped)
+            val capture = generation?.capture(sql, prefix, mapped, checkNotNull(accountScope))
             if (generation == null) prefix.forEach { m ->
                 require(!sql.rawQuery("SELECT 1 FROM generation_outputs WHERE assistant_id=?", arrayOf(m.id.value)).use { it.moveToFirst() })
                 require(!BackupHistoryRows.exists(sql, "neutral_backup_history") || !sql.rawQuery(
@@ -121,6 +122,7 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                 }.also { MessageVideoInputCodec.encode(copied[position], it) }
             }
             snapshot.generation?.let { generation!!.prepareAndPublish(it) }
+            snapshot.generation?.let { generation!!.verifyAccountAndPrepareSchema(db, it) }
             check(!db.inTransaction()); attemptedT2 = true
             db.beginTransaction()
             var successful = false

@@ -40,6 +40,7 @@ class RootlessLinuxInstaller internal constructor(
         Unit
     },
     private val fileForce: (FileChannel) -> Unit = { it.force(true) },
+    private val fileOps: FileOps = PosixFileOps,
 ) {
     private val owner = Any()
     // Strong references to unknown PTY resources; their writer locks/staging remain on disk.
@@ -285,12 +286,12 @@ class RootlessLinuxInstaller internal constructor(
             secureDirectory(parent)
             // Cross-instance/process writer exclusion, fail-closed after an interrupted owner.
             // No automatic stale-lock removal: parent can recover after inspecting disk state.
-            Files.createDirectory(lock.toPath(), PRIVATE_DIRECTORY)
+            fileOps.createPrivateDirectory(lock)
             lockOwned = true
             check(!exists(prepared.targetRootfs)) { "linux_install_target_exists" }
             cancellation.check()
             validateHelpers(prepared.installation, cancellation)
-            val stage = Files.createTempDirectory(parent.toPath(), ".staging-", PRIVATE_DIRECTORY).toFile()
+            val stage = fileOps.createPrivateStaging(parent)
             staging = stage
             val download = File(parent, stage.name + ".archive")
             archive = download
@@ -350,7 +351,7 @@ class RootlessLinuxInstaller internal constructor(
         val parent = prepared.targetRootfs.parentFile!!
         secureDirectory(parent)
         val lock = File(parent, ".install-lock")
-        Files.createDirectory(lock.toPath(), PRIVATE_DIRECTORY)
+        fileOps.createPrivateDirectory(lock)
         try {
             check(inspectPublished(prepared) != null) { "linux_install_not_published" }
             validateHelpers(prepared.installation, LinuxInstallCancellation())
@@ -449,8 +450,8 @@ class RootlessLinuxInstaller internal constructor(
 
     private fun validateShell(root: File) {
         check(root.canRead() && root.isDirectory)
-        val shell = File(root, "bin/sh").canonicalFile
-        check(shell.toPath().startsWith(root.canonicalFile.toPath()) && shell.isFile && shell.canRead()) {
+        val shell = fileOps.canonicalFile(File(root, "bin/sh"))
+        check(shell.toPath().startsWith(fileOps.canonicalFile(root).toPath()) && shell.isFile && shell.canRead()) {
             "linux_install_shell_unavailable"
         }
     }
@@ -479,7 +480,7 @@ class RootlessLinuxInstaller internal constructor(
         } else {
             secureDirectory(parent)
         }
-        if (!exists(directory)) Files.createDirectory(directory.toPath(), PRIVATE_DIRECTORY)
+        if (!exists(directory)) fileOps.createPrivateDirectory(directory)
         check(Files.isDirectory(directory.toPath(), NOFOLLOW_LINKS))
         // Existence does not prove durability: a previous attempt may have created this
         // name but failed its parent sync. Reconfirm the entire managed chain on every
@@ -491,16 +492,23 @@ class RootlessLinuxInstaller internal constructor(
         cleanAbsolutePath(file)
         var current: Path? = file.toPath()
         while (current != null) {
-            check(!Files.isSymbolicLink(current)) { "linux_install_symlink_path" }
+            check(!fileOps.isSymbolicLink(current)) { "linux_install_symlink_path" }
             current = current.parent
         }
     }
 
-    private fun cleanAbsolutePath(file: File) {
-        require(file.isAbsolute && file.path.length <= 4096)
-        require(file.path.none { it.code < 32 || it.code == 127 })
-        require(file.path.split('/').none { it == "." || it == ".." })
-        require(':' !in file.path)
+    private fun cleanAbsolutePath(file: File) = app.daiyu.android.terminal.LinuxPathSyntax.host(file.path)
+
+    internal interface FileOps {
+        fun createPrivateDirectory(directory: File)
+        fun createPrivateStaging(parent: File): File
+        fun isSymbolicLink(path: Path): Boolean = Files.isSymbolicLink(path)
+        fun canonicalFile(file: File): File = file.canonicalFile
+    }
+    private object PosixFileOps : FileOps {
+        override fun createPrivateDirectory(directory: File) { Files.createDirectory(directory.toPath(), PRIVATE_DIRECTORY) }
+        override fun createPrivateStaging(parent: File): File =
+            Files.createTempDirectory(parent.toPath(), ".staging-", PRIVATE_DIRECTORY).toFile()
     }
 
     private fun exists(file: File) = Files.exists(file.toPath(), NOFOLLOW_LINKS)

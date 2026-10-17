@@ -20,7 +20,7 @@ class ShizukuApprovalScreenTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 val state = session.states.collectAsState().value
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         ShizukuApprovalContent(state, busy = false, canOpen = true,
                             onEdit = session::edit, onApprove = { session.approve(state) },
@@ -89,7 +89,7 @@ class ShizukuApprovalScreenTest : WiredActivityTestCase() {
             cleanup = ShizukuCloseResult.Unknown("permission_revoked"))
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
                         ShizukuApprovalContent(state, busy = false, canOpen = false,
                             onEdit = { _, _, _ -> fail("closed") }, onApprove = { fail("closed") },

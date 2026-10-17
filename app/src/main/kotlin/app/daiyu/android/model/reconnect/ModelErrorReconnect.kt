@@ -41,9 +41,7 @@ internal data class ReconnectChanged(val round: Int, val reconnectId: String, va
     val elapsedMs: Long, val reason: ModelFailure)
 
 internal class ReconnectDeadlineException(val lastReason: ModelFailure, lateSuccess: Boolean = false) :
-    IllegalStateException(if (lateSuccess)
-        "错误重连期限已到，未接纳迟到的响应；此前正文和工具结果已保留。"
-    else "错误重连期限已到，模型请求仍未恢复；此前正文和工具结果已保留。")
+    app.daiyu.android.domain.TransportReconnectDeadlineException(lateSuccess)
 
 /** One disconnect, including waits AND in-flight transport reads. Construct at FIRST failure,
  * not before the original request, and do not replace it for every retry. Closing its binding

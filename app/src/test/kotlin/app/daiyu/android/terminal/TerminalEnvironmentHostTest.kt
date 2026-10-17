@@ -176,12 +176,12 @@ class TerminalEnvironmentHostTest {
     @Test fun emptyTrustedListIgnoresResidualSelectionAndCreatesNothing() = linuxFixture { root, spec ->
         val reference = LinuxGenerationRef(spec.environmentId, spec.generation)
         val directory = File(root, "user-terminal/linux-selection")
-        val gate = TerminalTrustedLinuxSelection(directory, emptyList())
+        val gate = TerminalTrustedLinuxSelection(directory, emptyList(), directorySync = ::hostDirectorySync)
         assertLinuxRefused(root, gate, reference)
         assertEquals("UNAVAILABLE", gate.status().state)
         assertTrue(gate.status().choices.isEmpty())
         assertFalse(File(root, "user-terminal").exists())
-        val store = LinuxEnvironmentStore(directory).apply { select(spec) }
+        val store = hostLinuxStore(directory).apply { select(spec) }
         assertEquals("FILES_READY", store.status().getString("state")) // The legacy-only check would accept it.
         val selection = File(directory, "selected-linux.json")
         val before = selection.readText()
@@ -192,7 +192,7 @@ class TerminalEnvironmentHostTest {
 
     @Test fun trustedListWithoutSelectionIsReadOnlyAndDoesNotCreateWorkingDirectories() = linuxFixture { root, spec ->
         val directory = File(root, "user-terminal/linux-selection")
-        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec))
+        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync)
         assertEquals("NOT_SELECTED", gate.status().state)
         assertLinuxRefused(root, gate, LinuxGenerationRef(spec.environmentId, spec.generation))
         assertFalse(File(root, "user-terminal").exists())
@@ -200,8 +200,8 @@ class TerminalEnvironmentHostTest {
 
     @Test fun matchingTrustedConfigurationIsReadyAndGuardLeaseBlocksSelectionReplacement() = linuxFixture { root, spec ->
         val directory = File(root, "user-terminal/linux-selection")
-        val store = LinuxEnvironmentStore(directory).apply { select(spec) }
-        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec))
+        val store = hostLinuxStore(directory).apply { select(spec) }
+        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync)
         val reference = LinuxGenerationRef(spec.environmentId, spec.generation)
         assertEquals("FILES_READY", gate.status().state)
         assertEquals(reference, gate.status().selected)
@@ -217,8 +217,8 @@ class TerminalEnvironmentHostTest {
 
     @Test fun sameIdsCannotAuthorizeDifferentInstallationMetadata() = linuxFixture { root, spec ->
         val directory = File(root, "user-terminal/linux-selection")
-        val store = LinuxEnvironmentStore(directory)
-        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec))
+        val store = hostLinuxStore(directory)
+        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync)
         val reference = LinuxGenerationRef(spec.environmentId, spec.generation)
         val otherRoot = File(root, "other-guest").apply { mkdirs() }
         File(otherRoot, "bin").mkdirs()
@@ -247,14 +247,14 @@ class TerminalEnvironmentHostTest {
             store.clearSelection() // A rejection must not leak its validation lease.
         }
         store.select(spec)
-        val ambiguous = TerminalTrustedLinuxSelection(directory, listOf(spec, spec.copy(rootfs = otherRoot)))
+        val ambiguous = TerminalTrustedLinuxSelection(directory, listOf(spec, spec.copy(rootfs = otherRoot)), directorySync = ::hostDirectorySync)
         assertLinuxRefused(root, ambiguous, reference)
     }
 
     @Test fun forgedSelectionHashesCannotOverrideParentTrustedDigests() = linuxFixture { root, spec ->
         val directory = File(root, "user-terminal/linux-selection")
-        val store = LinuxEnvironmentStore(directory).apply { select(spec) }
-        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec))
+        val store = hostLinuxStore(directory).apply { select(spec) }
+        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync)
         val reference = LinuxGenerationRef(spec.environmentId, spec.generation)
         val selection = File(directory, "selected-linux.json")
         for ((file, field) in listOf(spec.proot to "proot_sha256", spec.loader to "loader_sha256")) {
@@ -269,9 +269,9 @@ class TerminalEnvironmentHostTest {
         }
         assertEquals("FILES_READY", gate.status().state)
         assertLinuxRefused(root, TerminalTrustedLinuxSelection(directory,
-            listOf(spec.copy(prootSha256 = "0".repeat(64)))), reference)
+            listOf(spec.copy(prootSha256 = "0".repeat(64))), directorySync = ::hostDirectorySync), reference)
         assertLinuxRefused(root, TerminalTrustedLinuxSelection(directory,
-            listOf(spec.copy(loaderSha256 = "0".repeat(64)))), reference)
+            listOf(spec.copy(loaderSha256 = "0".repeat(64))), directorySync = ::hostDirectorySync), reference)
     }
 
     @Test fun constructionAndRepeatedObservationNeverOpenOrSelect() {

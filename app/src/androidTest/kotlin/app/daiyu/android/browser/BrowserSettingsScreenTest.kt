@@ -28,7 +28,7 @@ class BrowserSettingsScreenTest : WiredActivityTestCase() {
     ) {
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     BrowserSettingsScreen(store, onBack = {}, ownerCurrent = current, saveOwner = owner)
                 }
             }

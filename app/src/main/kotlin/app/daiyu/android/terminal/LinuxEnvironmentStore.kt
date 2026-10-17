@@ -22,7 +22,9 @@ data class LinuxInstallation(
 
 data class LinuxGenerationRef(val environmentId: String, val generation: String)
 
-class LinuxEnvironmentStore(private val directory: File) {
+class LinuxEnvironmentStore internal constructor(private val directory: File,
+    private val directorySync: (File) -> Unit) {
+    constructor(directory: File) : this(directory, TerminalDurability::syncDirectory)
     private val selection = File(directory, "selected-linux.json")
     private val shared = synchronized(stores) {
         stores[directory.canonicalPath] ?: run {
@@ -33,7 +35,7 @@ class LinuxEnvironmentStore(private val directory: File) {
     private val control get() = shared
 
 
-    init { TerminalDurability.ensureDirectory(directory) }
+    init { TerminalDurability.ensureDirectory(directory, directorySync) }
 
     /** User-selected installation, never implicit fallback to another distribution. */
     fun select(installation: LinuxInstallation) = synchronized(control) {
@@ -42,13 +44,13 @@ class LinuxEnvironmentStore(private val directory: File) {
         validate(frozen)
         val bytes = encode(frozen).toString().toByteArray(Charsets.UTF_8)
         require(bytes.size <= 32768) { "linux_installation_metadata_limit" }
-        TerminalDurability.replace(selection, bytes)
+        TerminalDurability.replace(selection, bytes, directorySync = directorySync)
     }
 
     fun clearSelection() = synchronized(control) {
         check(shared.leases == 0) { "linux_environment_in_use" }
         // Persist an explicit empty choice rather than an un-fsynced unlink.
-        TerminalDurability.replace(selection, JSONObject().put("version", 1).toString().toByteArray(Charsets.UTF_8))
+        TerminalDurability.replace(selection, JSONObject().put("version", 1).toString().toByteArray(Charsets.UTF_8), directorySync = directorySync)
     }
 
     fun status(): JSONObject = synchronized(control) {
@@ -117,22 +119,24 @@ class LinuxEnvironmentStore(private val directory: File) {
         require(value.rootfs.isAbsolute && value.rootfs.isDirectory && value.rootfs.canRead())
         require(value.proot.isAbsolute && value.proot.isFile && value.proot.canExecute())
         require(value.loader.isAbsolute && value.loader.isFile && value.loader.canRead())
-        require(guestPath(value.guestWorkingDirectory))
+        LinuxPathSyntax.guest(value.guestWorkingDirectory)
         require(value.sharedMounts.size <= 32)
         value.sharedMounts.forEach { (host, guest) ->
-            require(':' !in host && ':' !in guest && '\u0000' !in host && host.length <= 4096)
-            require(File(host).isAbsolute && File(host).isDirectory && File(host).canRead() && guestPath(guest))
+            LinuxPathSyntax.host(host)
+            LinuxPathSyntax.guest(guest)
+            require(File(host).isDirectory && File(host).canRead())
         }
-        val targets = value.sharedMounts.values.map { java.nio.file.Paths.get(it).normalize() }
+        val targets = value.sharedMounts.values.map(LinuxPathSyntax::guestParts)
         require(targets.toSet().size == targets.size)
-        for (i in targets.indices) for (j in 0 until i) require(!targets[i].startsWith(targets[j]) && !targets[j].startsWith(targets[i]))
+        for (i in targets.indices) for (j in 0 until i) require(
+            !LinuxPathSyntax.contains(targets[i], targets[j]) && !LinuxPathSyntax.contains(targets[j], targets[i]))
         require(value.prootSha256.matches(Regex("[a-f0-9]{64}")) && digest(value.proot) == value.prootSha256)
         require(value.loaderSha256.matches(Regex("[a-f0-9]{64}")) && digest(value.loader) == value.loaderSha256)
         val root = value.rootfs.canonicalFile.toPath()
         val shell = File(value.rootfs, "bin/sh").canonicalFile
         require(shell.toPath().startsWith(root) && shell.isFile && shell.canRead())
-        val protectedShellPaths = listOf(java.nio.file.Paths.get("/bin/sh"), java.nio.file.Paths.get("/").resolve(root.relativize(shell.toPath())))
-        for (target in targets) require(protectedShellPaths.none { it.startsWith(target) }) { "linux_bind_overrides_shell" }
+        val protectedShellPaths = listOf(listOf("bin", "sh"), root.relativize(shell.toPath()).map { it.toString() })
+        for (target in targets) require(protectedShellPaths.none { LinuxPathSyntax.contains(target, it) }) { "linux_bind_overrides_shell" }
         return (listOf(value.rootfs, value.proot, value.loader, shell) + value.sharedMounts.keys.map(::File)).map { file ->
             val real = file.toPath().toRealPath()
             val attrs = Files.readAttributes(real, BasicFileAttributes::class.java)
@@ -167,9 +171,6 @@ class LinuxEnvironmentStore(private val directory: File) {
         private class StoreControl { var leases = 0 }
         private val stores = mutableMapOf<String, StoreControl>()
     }
-
-    private fun guestPath(path: String) = path.startsWith('/') && path.length <= 4096 && '\u0000' !in path &&
-        path.split('/').none { it == ".." }
 
     private fun digest(file: File): String {
         check(file.length() in 1..(64L * 1024 * 1024))

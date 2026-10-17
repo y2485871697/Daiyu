@@ -30,6 +30,7 @@ import static org.junit.Assert.*;
 @RunWith(RobolectricTestRunner.class)
 @Config(sdk = {26, 36}, manifest = Config.NONE)
 public class OwnerReceiptCoordinatorTest {
+    private final OwnerReceiptTestPlatform platform = new OwnerReceiptTestPlatform();
     @Rule public TemporaryFolder temporary = new TemporaryFolder();
     private final List<OwnerReceiptStore> stores = new ArrayList<OwnerReceiptStore>();
     private static final String SECRET = "private-bootstrap-secret";
@@ -41,8 +42,8 @@ public class OwnerReceiptCoordinatorTest {
 
     private OwnerReceiptStore store(OwnerReceiptStore.WriteFault fault) throws Exception {
         Path root = temporary.newFolder().toPath();
-        Files.setPosixFilePermissions(root, PosixFilePermissions.fromString("rwx------"));
-        OwnerReceiptStore store = new OwnerReceiptStore(root, fault);
+        platform.setPermissions(root, PosixFilePermissions.fromString("rwx------"));
+        OwnerReceiptStore store = platform.open(root, fault);
         stores.add(store);
         return store;
     }
@@ -388,8 +389,8 @@ public class OwnerReceiptCoordinatorTest {
 
     @Test public void reopenedStoreSupportsOnlyHistoricalReceiptLookupNotOwnerRecreation() throws Exception {
         Path root = temporary.newFolder().toPath();
-        Files.setPosixFilePermissions(root, PosixFilePermissions.fromString("rwx------"));
-        OwnerReceiptStore previous = new OwnerReceiptStore(root);
+        platform.setPermissions(root, PosixFilePermissions.fromString("rwx------"));
+        OwnerReceiptStore previous = platform.open(root);
         stores.add(previous);
         OwnerReceiptStore.Reservation generation = previous.reserveGeneration("generation_1", binding());
         previous.start(generation.newClaim);
@@ -397,7 +398,7 @@ public class OwnerReceiptCoordinatorTest {
         previous.start(operation.newClaim); // crash-equivalent unresolved STARTED, not NotExecuted
         previous.close();
         final int[] writes = {0};
-        OwnerReceiptStore reopened = new OwnerReceiptStore(root, point -> {
+        OwnerReceiptStore reopened = platform.open(root, point -> {
             if (point == OwnerReceiptStore.WritePoint.BEFORE_WRITE) writes[0]++;
         });
         stores.add(reopened);

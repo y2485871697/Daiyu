@@ -732,12 +732,51 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         assertEquals(0, scalarCount(f, "generation_attempts")); assertEquals(0, scalarCount(f, "generation_outputs")); assertEquals(0, f.opens.get())
     }
 
+    fun testProductionStaticBranchReadsAccountOnlyOutsideSqlAndRechecksBeforeT2() {
+        val f = fresh(configured = false); val seeded = staticFixture(f); val service = staticBackup(f, seeded)
+        val calls = AtomicInteger()
+        val integration = app.daiyu.android.backup.StaticGenerationBranch(seeded.assets,
+            account = {
+                check(!f.db.writableDatabase.inTransaction())
+                calls.incrementAndGet()
+                seeded.output.destination.accountScope
+            }, liveOriginal = { error("not live") }, historicalOriginal = { error("not backup history") },
+            lookup = { identity -> check(!f.db.writableDatabase.inTransaction()); service.findStaticGeneration(identity) })
+        val store = MessageActionStore(f.db, ContextService(f.app, f.db), MessageImageAssetStore(File(f.app.filesDir, "account-static-images")),
+            staticGeneration = integration)
+        val copied = store.branch(store.snapshot(seeded.conversation.id).targets.values.first())
+        assertTrue(seeded.conversation.id != copied.id)
+        assertEquals(2, calls.get())
+        assertEquals(2, f.db.conversations().size)
+        assertEquals(0, f.opens.get())
+    }
+
+    fun testProductionStaticBranchRejectsChangedAccountBeforeT2WithoutAnotherRead() {
+        val f = fresh(configured = false); val seeded = staticFixture(f); val service = staticBackup(f, seeded)
+        val calls = AtomicInteger()
+        val before = history(f, seeded.conversation.id)
+        val integration = app.daiyu.android.backup.StaticGenerationBranch(seeded.assets,
+            account = {
+                check(!f.db.writableDatabase.inTransaction())
+                if (calls.incrementAndGet() == 1) seeded.output.destination.accountScope else "changed-account"
+            }, liveOriginal = { error("not live") }, historicalOriginal = { error("not backup history") },
+            lookup = { identity -> service.findStaticGeneration(identity) })
+        val store = MessageActionStore(f.db, ContextService(f.app, f.db), MessageImageAssetStore(File(f.app.filesDir, "changed-account-images")),
+            staticGeneration = integration)
+        try { store.branch(store.snapshot(seeded.conversation.id).targets.values.first()); fail("changed account") }
+        catch (_: app.daiyu.android.context.BranchRolledBack) { }
+        assertEquals(2, calls.get()); assertEquals(1, f.db.conversations().size)
+        assertEquals(before, history(f, seeded.conversation.id))
+        seeded.assets.openVerified(seeded.output, service::findStaticGeneration).use { assertTrue(it.read() >= 0) }
+        assertEquals(0, f.opens.get())
+    }
+
     fun testProductionFullStaticSourceSetCasRejectsInsertionBetweenT1AndT2WithoutRetry() {
         val f = fresh(configured = false); val seeded = staticFixture(f); val service = staticBackup(f, seeded)
         val changed = java.util.concurrent.atomic.AtomicBoolean(false)
         val reads = AtomicInteger()
         val integration = app.daiyu.android.backup.StaticGenerationBranch(seeded.assets,
-            account = { seeded.output.destination.accountScope }, liveOriginal = { error("not live") },
+            account = { check(!f.db.writableDatabase.inTransaction()); seeded.output.destination.accountScope }, liveOriginal = { error("not live") },
             historicalOriginal = { error("not backup history") }, lookup = { identity ->
                 check(!f.db.writableDatabase.inTransaction()); reads.incrementAndGet()
                 val selected = service.findStaticGeneration(identity)
@@ -765,7 +804,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
             VideoAttachmentLimits(maxVideoBytes = app.daiyu.android.model.generation.GenerationRequestPlan.MAX_VIDEO_BYTES.toLong()),
             afterAtomicMove = { throw java.io.IOException("offline publication fault") })
         val integration = app.daiyu.android.backup.StaticGenerationBranch(assets,
-            account = { seeded.output.destination.accountScope }, liveOriginal = { error("not live") },
+            account = { check(!f.db.writableDatabase.inTransaction()); seeded.output.destination.accountScope }, liveOriginal = { error("not live") },
             historicalOriginal = { error("not backup history") }, lookup = { identity ->
                 check(!f.db.writableDatabase.inTransaction()); service.findStaticGeneration(identity)
             })

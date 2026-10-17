@@ -1,5 +1,6 @@
 package app.daiyu.android.mcp
 
+import app.daiyu.android.testing.HostAtomicFileShadow
 import android.app.Application
 import org.junit.Assert.*
 import org.junit.Test
@@ -11,7 +12,7 @@ import java.io.File
 import javax.crypto.KeyGenerator
 
 @RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class, sdk = [34])
+@Config(application = Application::class, sdk = [34], shadows = [HostAtomicFileShadow::class])
 class McpSettingsStoreTest {
     @Test fun privateEnvelopeIsEncryptedRandomizedAndDoesNotRestoreApprovalAcrossAbaOrCiphertextRollback() {
         val context = RuntimeEnvironment.getApplication()

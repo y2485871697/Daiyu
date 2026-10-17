@@ -21,7 +21,7 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
         val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
         val store = McpSettingsStore(context) { key }; val owner = McpSettingsOwner()
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings()) {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 McpSettingsScreen(store, owner, ownerCurrent = { true }, onBack = {})
             } } }
             ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("mcp-settings-status") and hasText("保存只配置服务器，不授予工具权限。")).fetchSemanticsNodes().isNotEmpty() }

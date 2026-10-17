@@ -126,6 +126,69 @@ class LegacyImportServiceTest {
         db.execSQL("UPDATE legacy_r12_chunks SET data=zeroblob(length(data)) WHERE owner=? AND name=? AND part=0", arrayOf(result.importId, "asset:$entry"))
         rejects { service.original(result.importId, entry) }
     }
+    @Test fun ignoredInsertAndLatePayloadMutationNeverReturnSuccess() {
+        val bytes = LegacyFixtures.bytes(LegacyFixtures.single())
+        val previous = import(bytes)
+        val names = tables()
+        val before = snapshot(names)
+        db.execSQL("CREATE TRIGGER ignore_legacy_chunk BEFORE INSERT ON legacy_r12_chunks BEGIN SELECT RAISE(IGNORE); END")
+        rejects { import(bytes) }
+        assertEquals(before, snapshot(names))
+        db.execSQL("DROP TRIGGER ignore_legacy_chunk")
+        db.execSQL("CREATE TRIGGER alter_legacy_view AFTER INSERT ON legacy_r12_chunks WHEN NEW.name='view' BEGIN UPDATE legacy_r12_chunks SET data=X'00' WHERE owner=NEW.owner AND name=NEW.name AND part=NEW.part; END")
+        rejects { import(bytes) }
+        assertEquals(before, snapshot(names))
+        assertEquals("source", service.reopen(previous.conversationIds.single()).summary.sourceId)
+        db.execSQL("DROP TRIGGER alter_legacy_view")
+        db.execSQL("CREATE TRIGGER alter_legacy_metadata AFTER INSERT ON legacy_r12_chunks WHEN NEW.name='view' BEGIN UPDATE legacy_r12_histories SET source_created=12.5 WHERE id=NEW.owner; END")
+        rejects { import(bytes) }
+        assertEquals(before, snapshot(names))
+        db.execSQL("DROP TRIGGER alter_legacy_metadata")
+        db.execSQL("CREATE TRIGGER alter_live AFTER INSERT ON legacy_r12_chunks BEGIN UPDATE conversations SET title='tampered'; END")
+        rejects { import(bytes) }
+        assertEquals(before, snapshot(names))
+        db.execSQL("DROP TRIGGER alter_live")
+        db.execSQL("CREATE TEMP TRIGGER alter_old AFTER INSERT ON main.legacy_r12_chunks BEGIN UPDATE legacy_r12_histories SET title='tampered'; END")
+        rejects { import(bytes) }
+        assertEquals(before, snapshot(names))
+        assertEquals("source", service.reopen(previous.conversationIds.single()).summary.sourceId)
+        db.execSQL("DROP TRIGGER alter_old")
+        store.close()
+        store = ConversationDatabase(context)
+        db = store.writableDatabase
+        assertEquals(before, snapshot(names))
+    }
+    @Test fun beforeCommitMutationIsReadBackAndRollsBackWithoutTriggers() {
+        val (doc, original) = LegacyFixtures.attached()
+        val bytes = LegacyFixtures.zip(doc, original)
+        val previous = import(bytes)
+        val names = tables()
+        val before = snapshot(names)
+        val mutations = listOf(
+            "UPDATE legacy_r12_chunks SET data=X'00' WHERE name='view' AND owner NOT IN (SELECT id FROM legacy_r12_histories WHERE import_id='${previous.importId}')",
+            "UPDATE legacy_r12_histories SET source_created=12.5 WHERE import_id<>'${previous.importId}'",
+            "DELETE FROM legacy_r12_chunks WHERE owner IN (SELECT id FROM legacy_r12_histories WHERE import_id<>'${previous.importId}')",
+            "UPDATE legacy_r12_assets SET byte_count=byte_count+1 WHERE import_id<>'${previous.importId}'",
+        )
+        mutations.forEach { sql ->
+            var reached = false
+            val corrupting = LegacyImportService({ store.writableDatabase }) {
+                reached = true
+                db.execSQL(sql)
+                db.rawQuery("SELECT changes()", null).use { c ->
+                    assertTrue(c.moveToFirst()); assertTrue(c.getLong(0) > 0)
+                }
+            }
+            val preview = corrupting.preview(input(bytes))
+            rejects { corrupting.commit(input(bytes), preview.sha256) }
+            assertTrue(reached)
+            assertEquals(before, snapshot(names))
+        }
+        store.close()
+        store = ConversationDatabase(context); db = store.writableDatabase
+        assertEquals(before, snapshot(names))
+        assertArrayEquals(original.second, LegacyImportService(store).original(previous.importId, original.first))
+    }
     @Test fun oversizedAndUnexpectedZipEntriesFailBeforeAnySchemaInstallation() {
         val names = tables(); val before = snapshot(names)
         val data = LegacyFixtures.zip(LegacyFixtures.single(), "unlisted.txt" to "synthetic".toByteArray())

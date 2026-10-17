@@ -24,7 +24,8 @@ import java.util.zip.GZIPInputStream
  */
 class TarLinuxRootfsExtraction internal constructor(
     private val maxExpandedBytes: Long = MAX_EXPANDED_BYTES,
-    private val maxEntries: Int = MAX_ENTRIES
+    private val maxEntries: Int = MAX_ENTRIES,
+    private val ops: TarRootfsFileOps = NioTarRootfsFileOps
 ) : LinuxRootfsExtraction {
     init {
         require(maxExpandedBytes in 1..MAX_EXPANDED_BYTES)
@@ -38,13 +39,13 @@ class TarLinuxRootfsExtraction internal constructor(
         require(root.isAbsolute && root == root.normalize()) { "linux_extract_staging_path" }
         var ancestor: Path? = root
         while (ancestor != null) {
-            check(!Files.isSymbolicLink(ancestor)) { "linux_extract_staging_symlink" }
+            check(!ops.isSymbolicLink(ancestor)) { "linux_extract_staging_symlink" }
             ancestor = ancestor.parent
         }
         check(Files.isDirectory(root, NOFOLLOW_LINKS)) { "linux_extract_staging_directory" }
         Files.newDirectoryStream(root).use { check(!it.iterator().hasNext()) { "linux_extract_staging_not_empty" } }
-        check(Files.isRegularFile(verifiedArchive.toPath(), NOFOLLOW_LINKS)) { "linux_extract_archive_file" }
-        Files.setPosixFilePermissions(root, PosixFilePermissions.fromString("rwx------"))
+        check(ops.isRegularFile(verifiedArchive.toPath())) { "linux_extract_archive_file" }
+        ops.setPermissions(root, PosixFilePermissions.fromString("rwx------"))
         val names = HashSet<String>()
         val declared = HashMap<Path, Boolean>() // true = deferred link; ancestors may never be links
         val links = ArrayList<DeferredLink>()
@@ -115,7 +116,7 @@ class TarLinuxRootfsExtraction internal constructor(
                                 }
                                 entry.isDirectory -> {
                                     if (!Files.exists(destination, NOFOLLOW_LINKS)) {
-                                        Files.createDirectory(destination, PRIVATE_DIRECTORY)
+                                        ops.createPrivateDirectory(destination)
                                     }
                                     check(Files.isDirectory(destination, NOFOLLOW_LINKS)) { "linux_extract_directory_collision" }
                                     directoryModes[destination] = entry.mode
@@ -161,7 +162,7 @@ class TarLinuxRootfsExtraction internal constructor(
                 chain.add(link)
                 checkAncestors(root, link.target, cancellation)
                 if (Files.exists(link.target, NOFOLLOW_LINKS)) {
-                    check(Files.isRegularFile(link.target, NOFOLLOW_LINKS)) { "linux_extract_hardlink_not_regular" }
+                    check(ops.isRegularFile(link.target)) { "linux_extract_hardlink_not_regular" }
                     break
                 }
                 link = hardLinks[link.target] ?: error("linux_extract_hardlink_cycle_or_missing")
@@ -179,7 +180,7 @@ class TarLinuxRootfsExtraction internal constructor(
             ensureParents(root, link.path.parent, cancellation)
             // Store relative guest links, including guest-absolute links. Never store /host paths.
             val relative = link.path.parent.relativize(link.target)
-            Files.createSymbolicLink(link.path,
+            ops.createSymbolicLink(link.path,
                 if (relative.toString().isEmpty()) root.fileSystem.getPath(".") else relative)
         }
         for ((directory, mode) in directoryModes.entries.sortedByDescending { it.key.nameCount }) {
@@ -219,8 +220,8 @@ class TarLinuxRootfsExtraction internal constructor(
         for (part in root.relativize(directory)) {
             cancellation.check()
             current = current.resolve(part)
-            if (!Files.exists(current, NOFOLLOW_LINKS)) Files.createDirectory(current, PRIVATE_DIRECTORY)
-            check(Files.isDirectory(current, NOFOLLOW_LINKS) && !Files.isSymbolicLink(current)) {
+            if (!Files.exists(current, NOFOLLOW_LINKS)) ops.createPrivateDirectory(current)
+            check(Files.isDirectory(current, NOFOLLOW_LINKS) && !ops.isSymbolicLink(current)) {
                 "linux_extract_link_ancestor"
             }
         }
@@ -232,7 +233,7 @@ class TarLinuxRootfsExtraction internal constructor(
         for (part in root.relativize(target)) {
             cancellation.check()
             current = current.resolve(part)
-            check(!Files.isSymbolicLink(current)) { "linux_extract_hardlink_symlink" }
+            check(!ops.isSymbolicLink(current)) { "linux_extract_hardlink_symlink" }
         }
     }
 
@@ -243,7 +244,7 @@ class TarLinuxRootfsExtraction internal constructor(
             PosixFilePermission.GROUP_WRITE, PosixFilePermission.GROUP_EXECUTE,
             PosixFilePermission.OTHERS_READ, PosixFilePermission.OTHERS_WRITE,
             PosixFilePermission.OTHERS_EXECUTE)
-        Files.setPosixFilePermissions(path, bits.filterIndexed { index, _ -> mode and (1 shl (8 - index)) != 0 }.toSet())
+        ops.setPermissions(path, bits.filterIndexed { index, _ -> mode and (1 shl (8 - index)) != 0 }.toSet())
     }
 
     private data class DeferredLink(val path: Path, val target: Path, val symbolic: Boolean)
@@ -387,6 +388,5 @@ class TarLinuxRootfsExtraction internal constructor(
         private const val MAX_DEPTH = 128
         private const val RESERVED_MARKER = ".daiyu-rootfs-install"
         private val ALLOWED_TYPES = setOf(0, '0'.code, '1'.code, '2'.code, '5'.code)
-        private val PRIVATE_DIRECTORY = PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------"))
     }
 }

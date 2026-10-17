@@ -27,7 +27,7 @@ public class OwnerStageOneContractTest {
             ShadowProcess.setUid(uid);
             assertEquals(3, VirtualDisplayOwnerMain.run(new String[]{
                     "--socket", "host-contract", "--allow-uid", "10000",
-                    "--receipt-root", "/private/owner-receipts"}));
+                    "--receipt-root", java.nio.file.Paths.get("private", "owner-receipts").toAbsolutePath().normalize().toString()}));
         }
     }
 

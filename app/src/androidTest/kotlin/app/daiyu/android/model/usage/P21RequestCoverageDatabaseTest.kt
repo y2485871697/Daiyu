@@ -87,7 +87,7 @@ class P21RequestCoverageDatabaseTest : InstrumentationTestCase() {
                     parent.id.value, request, source, "fixture-process")
             }
             it.execSQL("INSERT INTO context_usage(request_id,run_id,branch_id,input_tokens) VALUES(?,?,?,?)",
-                arrayOf("legacy-delete-fixture", first.runId.value, first.conversationId.value, 7L))
+                arrayOf<Any?>("legacy-delete-fixture", first.runId.value, first.conversationId.value, 7L))
             val manual = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), "fixture", RequestOperation.NEXT)
             SQLiteAdditionalUsageStore.admit(it, first.conversationId.value, null, null, manual,
                 UsageRequestSource.MANUAL_SUMMARY, "fixture-process", "manual-delete-fixture")
@@ -221,7 +221,7 @@ class P21RequestCoverageDatabaseTest : InstrumentationTestCase() {
         val db = database.writableDatabase
         for ((index, hasUsage) in listOf(0, 1).withIndex()) {
             db.execSQL("INSERT INTO runtime_preparations(message_id,conversation_id,run_id,owner,process_owner,revision,state,request_id,request_owner,attempt_id,has_usage,input_tokens,output_tokens,cached_tokens) VALUES(?,?,'','owner','process',1,'TERMINAL',?,'owner','attempt',?,9,1,0)",
-                arrayOf("bad-parent-$index", assistant.conversationId.value, "bad-request-$index", hasUsage))
+                arrayOf<Any?>("bad-parent-$index", assistant.conversationId.value, "bad-request-$index", hasUsage))
         }
         // Corrupt identity and INTEGER storage classes independently; getLong() must not
         // normalize REAL 1.5/0.5 into an apparently valid revision or report-presence bit.

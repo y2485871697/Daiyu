@@ -101,15 +101,15 @@ public class OwnerProtocolV2Test {
     @Test public void trustedStartupRequiresFixedRootAndAnApplicationUid() {
         for (String uid : new String[]{"0", "2000", "1000", "99000"}) {
             assertThrows(IllegalArgumentException.class, () -> VirtualDisplayOwnerMain.Args.parse(
-                    new String[]{"--socket", "test", "--allow-uid", uid, "--receipt-root", "/private/receipts"}));
+                    new String[]{"--socket", "test", "--allow-uid", uid, "--receipt-root", java.nio.file.Paths.get("private", "receipts").toAbsolutePath().normalize().toString()}));
         }
         assertThrows(IllegalArgumentException.class, () -> VirtualDisplayOwnerMain.Args.parse(
                 new String[]{"--socket", "test", "--allow-uid", "10000"}));
         assertThrows(IllegalArgumentException.class, () -> VirtualDisplayOwnerMain.Args.parse(
                 new String[]{"--socket", "test", "--allow-uid", "10000", "--receipt-root", "relative"}));
         VirtualDisplayOwnerMain.Args parsed = VirtualDisplayOwnerMain.Args.parse(
-                new String[]{"--socket", "test", "--allow-uid", "110000", "--receipt-root", "/private/receipts"});
+                new String[]{"--socket", "test", "--allow-uid", "110000", "--receipt-root", java.nio.file.Paths.get("private", "receipts").toAbsolutePath().normalize().toString()});
         assertEquals(110000, parsed.allowUid);
-        assertEquals("/private/receipts", parsed.receiptRoot.toString());
+        assertEquals(java.nio.file.Paths.get("private", "receipts").toAbsolutePath().normalize().toString(), parsed.receiptRoot.toString());
     }
 }

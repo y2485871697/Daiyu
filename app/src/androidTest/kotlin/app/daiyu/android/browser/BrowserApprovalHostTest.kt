@@ -36,7 +36,7 @@ class BrowserApprovalHostTest : WiredActivityTestCase() {
         val calls = AtomicInteger()
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     BrowserApprovalHost(originalDraft, assistant, settings, null, null,
                         onPrepare = { _, _ -> calls.incrementAndGet(); false },
                         onConfirm = { _, _, _ -> calls.incrementAndGet(); false }, onCancel = {})
@@ -59,7 +59,7 @@ class BrowserApprovalHostTest : WiredActivityTestCase() {
         val confirmations = AtomicInteger()
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     BrowserApprovalHost(originalDraft, assistant, settings, p, phase.value,
                         onPrepare = { _, _ -> false }, onConfirm = { target, displayed, draft ->
                             assertSame(p, target)
@@ -90,7 +90,7 @@ class BrowserApprovalHostTest : WiredActivityTestCase() {
         assertFalse(p.confirm(p.preview, originalDraft))
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     ChildBrowserApprovalHost(p) { _, _, _, _ -> error("already frozen") }
                 }
             }
@@ -115,7 +115,7 @@ class BrowserApprovalHostTest : WiredActivityTestCase() {
         val confirmations = AtomicInteger()
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     BrowserApprovalHost(draft.value, assistant, settings, p, phase.value,
                         onPrepare = { _, _ -> false },
                         onConfirm = { _, _, _ -> confirmations.incrementAndGet(); false },

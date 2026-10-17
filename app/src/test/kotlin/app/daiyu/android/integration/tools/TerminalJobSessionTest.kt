@@ -18,7 +18,7 @@ class TerminalJobSessionTest {
     private val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
     private fun plan(mode: String = "async") = TerminalJobPlan(message.conversationId, message.runId,
-        TerminalPtyLaunch.Android(listOf("/system/bin/sh"), mapOf("PATH" to "/system/bin"), File("/tmp")),
+        TerminalPtyLaunch.Android(listOf("/system/bin/sh"), mapOf("PATH" to "/system/bin"), File(System.getProperty("java.io.tmpdir")).absoluteFile),
         "printf 'approved exact command'", mode)
     private fun owner(): RunExecutionOwner {
         var value: RunExecutionOwner? = null

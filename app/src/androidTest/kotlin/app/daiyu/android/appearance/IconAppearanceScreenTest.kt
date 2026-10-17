@@ -69,7 +69,7 @@ class IconAppearanceScreenTest : ComposeActivityTestCase() {
     private fun show(coordinator: IconAppearanceCoordinator) {
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     IconAppearanceScreen(coordinator = coordinator, onBack = {})
                 }
             }

@@ -29,7 +29,7 @@ class ControllerVideoSessionTest : InstrumentationTestCase() {
     private val settings = ModelSettings(OpenRouterVideoCapability.ENDPOINT, "fixture/model", "synthetic-key", false)
     private val provider by lazy { ProviderSnapshot.capture(settings) }
     private val epoch = AtomicLong(7)
-    private lateinit var conversation: ConversationId
+    private var conversation: ConversationId by kotlin.properties.Delegates.notNull()
     private val sessions = mutableListOf<ControllerVideoSession>()
     private class Ui : ControllerVideoUi {
         var editor = ControllerVideoEditor(null, 3, 4, "  unchanged original  ", true)
@@ -66,7 +66,7 @@ class ControllerVideoSessionTest : InstrumentationTestCase() {
             val run = RunId("seed-$n")
             val user = Message(MessageId("user-$n"), conversation, run, Message.USER_ROLE,
                 listOf(MessageBlock.Text("text", "history-$n")), RunStatus.COMPLETED)
-            val assistant = user.copy(id = MessageId("assistant-$n"), role = Message.ASSISTANT_ROLE)
+            val assistant = user.copy(id = MessageId("assistant-$n"), role = Message.ASSISTANT_ROLE, status = RunStatus.RUNNING)
             val owner = MessageVideoOwner(conversation.value, user.id.value)
             val refs = if (n == 0) listOf(MessageVideoInput(owner, listOf(MessageVideoReference(owner,
                 "original", "video/mp4", 3, "a".repeat(64), 1000, 32, 24)))) else emptyList()
@@ -118,7 +118,12 @@ class ControllerVideoSessionTest : InstrumentationTestCase() {
         assertEquals(1, main { ui.prompts.single().videoCount })
         // Mutate the earliest row (which a latest-page-only parent would not see).
         val first = session.snapshot.rows.first()
-        db.save(first.copy(blocks = listOf(MessageBlock.Text("text", "changed earliest input"))))
+        db.writableDatabase.execSQL("UPDATE messages SET blocks=? WHERE id=?",
+            arrayOf<Any?>("[{\"type\":\"text\",\"item\":\"text\",\"text\":\"changed earliest input\"}]", first.id.value))
+        db.readableDatabase.rawQuery("SELECT blocks FROM messages WHERE id=?", arrayOf(first.id.value)).use { c ->
+            assertTrue(c.moveToFirst())
+            assertEquals("changed earliest input", org.json.JSONArray(c.getString(0)).getJSONObject(0).getString("text"))
+        }
         main { ui.decisions.single()(true) }
         assertTrue(wait.done.await(5, TimeUnit.SECONDS))
         assertTrue(wait.result.get() is Throwable)

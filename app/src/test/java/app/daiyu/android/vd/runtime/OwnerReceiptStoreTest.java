@@ -26,8 +26,9 @@ import static app.daiyu.android.vd.runtime.OwnerReceiptStore.Error.*;
 import static app.daiyu.android.vd.runtime.OwnerReceiptStore.State.*;
 import static org.junit.Assert.*;
 
-/** POSIX tmpdir only. No display, process, network, root launcher or Android APIs. */
+/** Linux POSIX primitives; non-POSIX host metadata model. No display, process, network, root launcher or Android APIs. */
 public class OwnerReceiptStoreTest {
+    private final OwnerReceiptTestPlatform platform = new OwnerReceiptTestPlatform();
     @Rule public TemporaryFolder temporary = new TemporaryFolder();
     private Path root;
     private OwnerOperationIdentity.RunBinding binding;
@@ -39,7 +40,7 @@ public class OwnerReceiptStoreTest {
 
     private OwnerReceiptStore openStore(Path directory, OwnerReceiptStore.WriteFault fault)
             throws IOException {
-        OwnerReceiptStore store = new OwnerReceiptStore(directory, fault);
+        OwnerReceiptStore store = platform.open(directory, fault);
         stores.add(store);
         return store;
     }
@@ -63,7 +64,7 @@ public class OwnerReceiptStoreTest {
 
     private Path privateRoot() throws IOException {
         Path path = temporary.newFolder().toPath().toAbsolutePath();
-        Files.setPosixFilePermissions(path, PosixFilePermissions.fromString("rwx------"));
+        platform.setPermissions(path, PosixFilePermissions.fromString("rwx------"));
         return path;
     }
 
@@ -90,8 +91,8 @@ public class OwnerReceiptStoreTest {
         OwnerReceiptStore.Reservation reservation = store.reserveOperation(generation, identity);
         assertNotNull(reservation.newClaim);
         assertEquals(RESERVED, store.lookup(identity).state);
-        assertEquals("rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(operationFile("one"))));
-        assertEquals("rwx------", PosixFilePermissions.toString(Files.getPosixFilePermissions(root.resolve("g-gen_1"))));
+        assertEquals("rw-------", PosixFilePermissions.toString(platform.permissions(operationFile("one"))));
+        assertEquals("rwx------", PosixFilePermissions.toString(platform.permissions(root.resolve("g-gen_1"))));
         OwnerReceiptStore.Start started = store.start(reservation.newClaim);
         assertTrue(started.mayExecute);
         assertEquals(STARTED, store.lookup(identity).state);
@@ -230,35 +231,35 @@ public class OwnerReceiptStoreTest {
     }
 
     @Test public void rejectNonPrivateNonNormalizedAndSymlinkRootOrAncestor() throws Exception {
-        Files.setPosixFilePermissions(root, PosixFilePermissions.fromString("rwxr-xr-x"));
+        platform.setPermissions(root, PosixFilePermissions.fromString("rwxr-xr-x"));
         expect(UNSAFE_PATH, () -> openStore(root));
-        Files.setPosixFilePermissions(root, PosixFilePermissions.fromString("rwx------"));
+        platform.setPermissions(root, PosixFilePermissions.fromString("rwx------"));
         expect(UNSAFE_PATH, () -> openStore(root.resolve("../" + root.getFileName())));
         Path link = temporary.getRoot().toPath().resolve("root-link");
-        Files.createSymbolicLink(link, root);
+        platform.createSymbolicLink(link, root);
         expect(UNSAFE_PATH, () -> openStore(link));
         Path child = root.resolve("child");
-        Files.createDirectory(child, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rwx------")));
+        platform.createPrivateDirectory(child);
         expect(UNSAFE_PATH, () -> openStore(link.resolve("child")));
     }
 
     @Test public void symlinkGenerationReceiptAndLockAreRejectedWithoutTouchingTarget() throws Exception {
         OwnerReceiptStore store = openStore(root);
         Path outside = privateRoot();
-        Files.createSymbolicLink(root.resolve("g-gen_1"), outside);
+        platform.createSymbolicLink(root.resolve("g-gen_1"), outside);
         expect(UNSAFE_PATH, () -> store.reserveGeneration("gen_1", binding));
         assertEquals(0, childCount(outside));
-        Files.delete(root.resolve("g-gen_1"));
+        platform.delete(root.resolve("g-gen_1"));
         OwnerReceiptStore.Claim generation = liveGeneration(store);
         store.reserveOperation(generation, identity("one"));
         Path target = outside.resolve("outside"); Files.write(target, new byte[]{7});
-        Files.delete(operationFile("one"));
-        Files.createSymbolicLink(operationFile("one"), target);
+        platform.delete(operationFile("one"));
+        platform.createSymbolicLink(operationFile("one"), target);
         expect(UNSAFE_PATH, () -> store.lookup(identity("one")));
         assertArrayEquals(new byte[]{7}, Files.readAllBytes(target));
         store.close();
-        Files.delete(root.resolve(".receipt.lock"));
-        Files.createSymbolicLink(root.resolve(".receipt.lock"), target);
+        platform.delete(root.resolve(".receipt.lock"));
+        platform.createSymbolicLink(root.resolve(".receipt.lock"), target);
         expect(UNSAFE_PATH, () -> openStore(root));
     }
 
@@ -276,7 +277,7 @@ public class OwnerReceiptStoreTest {
             expect(CORRUPT, () -> store.reserveOperation(generation, identity("one")));
         }
         Files.write(file, original);
-        Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-r--r--"));
+        platform.setPermissions(file, PosixFilePermissions.fromString("rw-r--r--"));
         expect(UNSAFE_PATH, () -> store.lookup(identity("one")));
     }
 
@@ -307,7 +308,7 @@ public class OwnerReceiptStoreTest {
         expect(INDETERMINATE_WRITE, () -> store.lookup(identity("one")));
         expect(INDETERMINATE_WRITE, () -> store.reserveOperation(generation, identity("one")));
         assertArrayEquals(new byte[]{1, 2, 3}, Files.readAllBytes(pending));
-        Files.delete(root.resolve("g-gen_1/generation.receipt"));
+        platform.delete(root.resolve("g-gen_1/generation.receipt"));
         store.close();
         expect(CORRUPT, () -> openStore(root).reserveGeneration("gen_1", binding));
     }
@@ -361,7 +362,7 @@ public class OwnerReceiptStoreTest {
     @Test public void constructorFailureAfterAcquiringLockReleasesChannelAndRoot() throws Exception {
         IOException injected = new IOException("injected constructor failure");
         try {
-            new OwnerReceiptStore(root, point -> { }, point -> {
+            platform.open(root, point -> { }, point -> {
                 if (point == OwnerReceiptStore.LifecyclePoint.LOCKED) throw injected;
             });
             fail("expected constructor failure");
@@ -415,7 +416,7 @@ public class OwnerReceiptStoreTest {
         IOException injected = new IOException("injected close failure");
         // Report failure after actually closing the channel so this fault test leaks no OS handle.
         // The registry must nevertheless remain fail-closed: a real close error is ambiguous.
-        OwnerReceiptStore store = new OwnerReceiptStore(root, point -> { }, point -> {
+        OwnerReceiptStore store = platform.open(root, point -> { }, point -> {
             if (point == OwnerReceiptStore.LifecyclePoint.CHANNEL_CLOSED) throw injected;
         });
         OwnerReceiptStore.Claim generation = liveGeneration(store);

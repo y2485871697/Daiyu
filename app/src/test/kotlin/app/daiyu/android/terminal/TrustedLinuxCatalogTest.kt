@@ -10,6 +10,7 @@ import java.security.MessageDigest
 
 /** Fixture files are inert text. No shell, download, installer or native helper is invoked. */
 class TrustedLinuxCatalogTest : TestCase() {
+    private val linkModels = mutableMapOf<File, MutableSet<java.nio.file.Path>>()
     private fun fixture(test: suspend (File, LinuxInstallation, TrustedLinuxCatalog) -> Unit) = runBlocking {
         val root = Files.createTempDirectory("trusted-linux-catalog-").toFile()
         val guest = File(root, "guest").apply { mkdirs() }
@@ -21,8 +22,13 @@ class TrustedLinuxCatalogTest : TestCase() {
             .joinToString("") { "%02x".format(it.toInt() and 255) }
         val spec = LinuxInstallation("fixture", "installed-env", "ignored-input-generation", guest,
             proot, hash(proot), loader, hash(loader))
-        try { test(root, spec, TrustedLinuxCatalog(File(root, "catalog"))) }
-        finally { root.deleteRecursively() }
+        try {
+            val links = mutableSetOf<java.nio.file.Path>()
+            linkModels[root] = links
+            test(root, spec, TrustedLinuxCatalog(File(root, "catalog"), ::hostDirectorySync,
+                symbolicLink = { Files.isSymbolicLink(it) || it.toAbsolutePath().normalize() in links }))
+        }
+        finally { linkModels.remove(root); root.deleteRecursively() }
     }
 
     private suspend fun rejected(action: suspend () -> Unit) {
@@ -51,7 +57,7 @@ class TrustedLinuxCatalogTest : TestCase() {
                 attempts++
                 if (attempts <= 2) throw IOException("injected_catalog_directory_fsync_failure")
             }
-            TerminalDurability.syncDirectory(directory)
+            hostDirectorySync(directory)
             if (snapshotVisible) successes++
         }
     }
@@ -103,17 +109,17 @@ class TrustedLinuxCatalogTest : TestCase() {
         val approved = catalog.approve(approval)
         assertEquals(listOf(approval.installation), approved)
         assertTrue(approved.single().sharedMounts.isEmpty())
-        assertEquals(approved, TrustedLinuxCatalog(File(root, "catalog")).load())
+        assertEquals(approved, hostLinuxCatalog(File(root, "catalog")).load())
         assertFalse(File(root, "catalog/selected-linux.json").exists())
         assertFalse(File(root, "user-terminal/linux-selection").exists())
         assertEquals(approved, catalog.approve(approval)) // exact repeat is idempotent
     }
 
     fun testResidualSelectionAndValidationScratchCannotAuthorize() = fixture { root, spec, catalog ->
-        LinuxEnvironmentStore(File(root, "user-terminal/linux-selection")).select(spec)
-        LinuxEnvironmentStore(File(root, "catalog/validation-only")).select(spec)
+        hostLinuxStore(File(root, "user-terminal/linux-selection")).select(spec)
+        hostLinuxStore(File(root, "catalog/validation-only")).select(spec)
         // Even a selection placed beside the catalog is not an import source.
-        LinuxEnvironmentStore(File(root, "catalog")).select(spec)
+        hostLinuxStore(File(root, "catalog")).select(spec)
         assertTrue(catalog.load().isEmpty())
         assertFalse(manifest(root).exists())
     }
@@ -216,7 +222,7 @@ class TrustedLinuxCatalogTest : TestCase() {
 
     fun testSameApprovalRetryMustSyncDirectoryAfterPostRenameFailure() = fixture { root, spec, _ ->
         val sync = PostRenameDirectorySyncFailure(root, active = true)
-        val catalog = TrustedLinuxCatalog(File(root, "catalog"), sync)
+        val catalog = hostLinuxCatalog(File(root, "catalog"), sync)
         val approval = catalog.freezeForApproval(spec)
         directorySyncRejected { catalog.approve(approval) }
         assertEquals(1, sync.attempts)
@@ -239,14 +245,14 @@ class TrustedLinuxCatalogTest : TestCase() {
         assertEquals(3, sync.attempts)
         assertEquals(1, sync.successes)
         assertTrue(visible.contentEquals(manifest(root).readBytes()))
-        assertEquals(listOf(approval.installation), TrustedLinuxCatalog(File(root, "catalog")).load())
+        assertEquals(listOf(approval.installation), hostLinuxCatalog(File(root, "catalog")).load())
     }
 
     fun testLastActiveRemovalRetryMustSyncDirectoryAfterPostRenameFailure() = fixture { root, spec, original ->
         val approval = original.freezeForApproval(spec)
         original.approve(approval)
         val sync = PostRenameDirectorySyncFailure(root, active = false)
-        val catalog = TrustedLinuxCatalog(File(root, "catalog"), sync)
+        val catalog = hostLinuxCatalog(File(root, "catalog"), sync)
         val ref = reference(approval.installation)
         directorySyncRejected { catalog.remove(ref) }
         assertEquals(1, sync.attempts)
@@ -268,7 +274,7 @@ class TrustedLinuxCatalogTest : TestCase() {
         assertEquals(3, sync.attempts)
         assertEquals(1, sync.successes)
         assertTrue(visible.contentEquals(manifest(root).readBytes()))
-        assertTrue(TrustedLinuxCatalog(File(root, "catalog")).load().isEmpty())
+        assertTrue(hostLinuxCatalog(File(root, "catalog")).load().isEmpty())
         rejected { catalog.approve(approval) } // a recovered tombstone still cannot resurrect
         assertTrue(visible.contentEquals(manifest(root).readBytes()))
     }
@@ -277,10 +283,16 @@ class TrustedLinuxCatalogTest : TestCase() {
         catalog.approve(catalog.freezeForApproval(spec))
         val outside = File(root, "outside.json")
         assertTrue(manifest(root).renameTo(outside))
-        Files.createSymbolicLink(manifest(root).toPath(), outside.toPath())
+        if (File.separatorChar != '\\') Files.createSymbolicLink(manifest(root).toPath(), outside.toPath())
+        else {
+            Files.createFile(manifest(root).toPath())
+            checkNotNull(linkModels[root]).add(manifest(root).toPath().toAbsolutePath().normalize())
+        }
         val before = outside.readBytes()
-        rejected { catalog.load() }
-        rejected { catalog.approve(catalog.freezeForApproval(spec)) }
+        try { catalog.load(); fail("must reject catalog link") }
+        catch (failure: IllegalStateException) { assertEquals("linux_catalog_symlink", failure.message) }
+        try { catalog.approve(catalog.freezeForApproval(spec)); fail("must reject catalog link") }
+        catch (failure: IllegalStateException) { assertEquals("linux_catalog_symlink", failure.message) }
         assertTrue(before.contentEquals(outside.readBytes()))
     }
 }

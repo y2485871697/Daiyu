@@ -37,7 +37,7 @@ class TerminalApprovalHostTest : WiredActivityTestCase() {
         val confirms = AtomicInteger()
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     TerminalApprovalHost(draft, assistant, provider, null, null,
                         onPrepare = { prepares.incrementAndGet(); false },
                         onConfirm = { _, _, _ -> confirms.incrementAndGet(); false }, onCancel = {})
@@ -59,7 +59,7 @@ class TerminalApprovalHostTest : WiredActivityTestCase() {
         val confirmations = AtomicInteger()
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     TerminalApprovalHost(draft, assistant, provider, p, state.value,
                         onPrepare = { false }, onConfirm = { candidate, displayed, current ->
                             assertSame(p, candidate)
@@ -96,7 +96,7 @@ class TerminalApprovalHostTest : WiredActivityTestCase() {
         val confirmations = AtomicInteger()
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     TerminalApprovalHost(current.value, assistant, provider, p, phase.value,
                         onPrepare = { false }, onConfirm = { _, _, _ -> confirmations.incrementAndGet(); false },
                         onCancel = { it.cancel(); phase.value = it.state })
@@ -120,7 +120,7 @@ class TerminalApprovalHostTest : WiredActivityTestCase() {
         val cancellations = AtomicInteger()
         mainThread {
             activity.setContent {
-                AgentAppTheme(AppearanceSettings()) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     if (mounted.value) TerminalApprovalHost(draft, assistant, current.value, p, phase.value,
                         onPrepare = { false }, onConfirm = { _, _, _ -> fail("implicit confirmation"); false },
                         onCancel = { cancellations.incrementAndGet(); it.cancel(); phase.value = it.state })

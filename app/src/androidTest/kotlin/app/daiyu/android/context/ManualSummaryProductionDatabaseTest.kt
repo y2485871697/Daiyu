@@ -304,7 +304,7 @@ class ManualSummaryProductionDatabaseTest : InstrumentationTestCase() {
         db.execSQL("INSERT INTO context_usage(request_id,run_id,branch_id,input_tokens,output_tokens) VALUES('legacy','history-0',?,NULL,0)", arrayOf(owner))
         db.version = 16
         database.close(); database = ConversationDatabase(context); service = ContextService(context, database)
-        assertEquals(17, database.writableDatabase.version)
+        assertEquals(18, database.writableDatabase.version)
         assertEquals("LEGACY", text("SELECT usage_source FROM context_usage"))
         assertEquals(1L, scalar("SELECT COUNT(*) FROM context_usage WHERE request_id='legacy' AND input_tokens IS NULL AND output_tokens=0 AND run_id='history-0'"))
         val wire = Wire(); val worker = worker(wire)

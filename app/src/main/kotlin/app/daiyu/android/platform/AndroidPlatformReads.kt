@@ -26,6 +26,24 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
     private val locationCache = lastKnownLocationSource ?: AndroidLastKnownLocationSource(app)
     private class Rejected(val code: String, val permission: String? = null) : RuntimeException()
 
+    private val notificationAdmissionGate = Any()
+    private var notificationEpoch: Long? = null
+    override fun admission(tool: PlatformReadTool): String? = when (tool) {
+        PlatformReadTool.CROSS_APP_NOTIFICATIONS, PlatformReadTool.NOTIFICATION_HISTORY -> try {
+            synchronized(notificationAdmissionGate) {
+                val host = CrossAppNotifications.from(app)
+                val denial = host.admission(tool, resultPolicy)
+                if (denial != null) denial else {
+                    val epoch = host.epoch()
+                    val frozen = notificationEpoch
+                    if (frozen == null) { notificationEpoch = epoch; null }
+                    else if (frozen != epoch) "notification_access_changed" else null
+                }
+            }
+        } catch (_: RuntimeException) { "notification_access_unavailable" }
+        else -> null
+    }
+
     override fun read(tool: PlatformReadTool, arguments: ToolArguments, cancelled: () -> Boolean): String = try {
         checkReadCancellation(cancelled)
         val args = JSONObject(arguments.canonicalJson()) // Already strictly parsed/normalized by ToolSchema.
@@ -54,6 +72,8 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
             PlatformReadTool.CONTACTS -> DeviceQueries.contacts(app, args, cancelled)
             PlatformReadTool.NOTIFICATIONS -> DeviceQueries.notifications(app, args, cancelled)
             PlatformReadTool.LAST_KNOWN_LOCATION -> LastKnownLocationReads.read(app, locationCache, cancelled)
+            PlatformReadTool.CROSS_APP_NOTIFICATIONS, PlatformReadTool.NOTIFICATION_HISTORY ->
+                CrossAppNotifications.from(app).read(tool, arguments, resultPolicy, cancelled)
         }
         checkReadCancellation(cancelled)
         val delivered = resultPolicy.forSharedDelivery(tool.toolName, result.put("observed_at", System.currentTimeMillis()))

@@ -61,7 +61,7 @@ class PlatformProductionSettingsTest {
 
     @Test fun allSelectionsRoundTripWithoutGrantingAnySiblingOrDestination() {
         val store = PlatformToolSettings(preferences)
-        assertEquals(14, PlatformReadTool.entries.size)
+        assertEquals(16, PlatformReadTool.entries.size)
         for (tool in PlatformReadTool.entries) {
             store.select(tool, true)
             val frozen = PlatformToolSettings(preferences).freeze()

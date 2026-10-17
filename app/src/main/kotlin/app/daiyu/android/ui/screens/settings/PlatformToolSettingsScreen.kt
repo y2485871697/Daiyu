@@ -43,6 +43,9 @@ internal fun PlatformToolSettingsScreen(context: Context, settings: PlatformTool
                     SettingsSwitchRow("选择 ${tool.toolName}", tool in snapshot.platformAllowed,
                         onCheckedChange = { act { settings.select(tool, it) } })
                     SettingsRow("系统授权与范围", summary = PlatformSettingsAccess.status(context, tool))
+                    if (tool == PlatformReadTool.CROSS_APP_NOTIFICATIONS || tool == PlatformReadTool.NOTIFICATION_HISTORY) {
+                        NotificationSettingsRows(context, tool, revision, { block -> act(block) }, onPermission)
+                    }
                     if (tool.toolName in DeviceResultPolicy.PRIVATE_TOOLS) {
                         SettingsSwitchRow("${tool.toolName}：同意发送私密结果给模型", snapshot.modelConsent(tool),
                             onCheckedChange = { act { settings.consentModel(tool, it) } })

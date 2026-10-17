@@ -160,7 +160,10 @@ class MainActivity : ComponentActivity() {
     private fun requestPlatformPermission(tool: app.daiyu.android.platform.PlatformReadTool, permission: String) {
         val owner = platformSettingsPageOwner
         if (!platformPageCurrent(owner) || platformPermissionOwner != null || platformSafRequest != null) return
-        if (tool == app.daiyu.android.platform.PlatformReadTool.PERMISSIONS && permission.isEmpty()) {
+        if (tool in setOf(app.daiyu.android.platform.PlatformReadTool.CROSS_APP_NOTIFICATIONS,
+                app.daiyu.android.platform.PlatformReadTool.NOTIFICATION_HISTORY) && permission.isEmpty()) {
+            startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        } else if (tool == app.daiyu.android.platform.PlatformReadTool.PERMISSIONS && permission.isEmpty()) {
             startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
         } else {
             val permissions = app.daiyu.android.platform.PlatformSettingsAccess.permissionRequest(tool, permission)

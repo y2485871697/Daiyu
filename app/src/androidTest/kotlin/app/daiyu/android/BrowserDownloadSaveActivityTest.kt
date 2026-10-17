@@ -413,8 +413,9 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
         }
         instrumentation.addMonitor(monitor)
         try {
-            mainThread { MainActivity::class.java.getDeclaredMethod("pickStaticGenerationOriginal", StaticGenerationOutput::class.java)
-                .apply { isAccessible = true }.invoke(activity, output) }
+            mainThread { MainActivity::class.java.getDeclaredMethod("pickStaticGenerationOriginal", StaticGenerationOutput::class.java,
+                java.util.concurrent.atomic.AtomicBoolean::class.java)
+                .apply { isAccessible = true }.invoke(activity, output, field("staticGenerationVisit")) }
             assertTrue(seen.await(5, TimeUnit.SECONDS))
             instrumentation.waitForIdleSync()
             ui.waitUntil(10_000) { pendingCode() == null && !controller.dataBusy }
@@ -429,6 +430,34 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
             instrumentation.waitForIdleSync()
             ui.waitUntil(10_000) { field("selectionReady") == true }
         } finally { instrumentation.removeMonitor(monitor) }
+    }
+
+    fun testObsoleteStaticSaveVisitCannotBorrowReopenedListing() {
+        val output = seedStaticOriginal()
+        openStaticListing()
+        val original = field("staticGenerationVisit")
+        mainThread { MainActivity::class.java.getDeclaredMethod("cancelGenerationOutputs")
+            .apply { isAccessible = true }.invoke(activity) }
+        openStaticListing()
+        val current = field("staticGenerationVisit")
+        assertNotSame(original, current)
+        val nextCode = field("nextBrowserSaveRequestCode")
+        mainThread {
+            try {
+                MainActivity::class.java.getDeclaredMethod("pickStaticGenerationOriginal", StaticGenerationOutput::class.java,
+                    java.util.concurrent.atomic.AtomicBoolean::class.java).apply { isAccessible = true }
+                    .invoke(activity, output, original)
+                fail("obsolete visit must reject before opening picker")
+            } catch (failure: java.lang.reflect.InvocationTargetException) {
+                assertTrue(failure.cause is IllegalStateException)
+            }
+        }
+        assertNull(pendingCode()); assertNull(field("pendingStaticOriginal"))
+        assertEquals(nextCode, field("nextBrowserSaveRequestCode"))
+        assertSame(current, field("staticGenerationVisit"))
+        assertEquals(0, documents.opens.get())
+        chooseStatic(output, Activity.RESULT_OK)
+        assertEquals(1, documents.opens.get())
     }
 
     fun testStaticAndBrowserShareMonotonicCodesAndStaleCancelDuplicateCannotSaveNewSelection() {

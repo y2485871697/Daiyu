@@ -23,7 +23,8 @@ data class LinuxInstallation(
 data class LinuxGenerationRef(val environmentId: String, val generation: String)
 
 class LinuxEnvironmentStore internal constructor(private val directory: File,
-    private val directorySync: (File) -> Unit) {
+    private val directorySync: (File) -> Unit,
+    private val fileKey: (java.nio.file.Path) -> Any? = ::strictLinuxFileKey) {
     constructor(directory: File) : this(directory, TerminalDurability::syncDirectory)
     private val selection = File(directory, "selected-linux.json")
     private val shared = synchronized(stores) {
@@ -139,9 +140,9 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
         for (target in targets) require(protectedShellPaths.none { LinuxPathSyntax.contains(target, it) }) { "linux_bind_overrides_shell" }
         return (listOf(value.rootfs, value.proot, value.loader, shell) + value.sharedMounts.keys.map(::File)).map { file ->
             val real = file.toPath().toRealPath()
-            val attrs = Files.readAttributes(real, BasicFileAttributes::class.java)
-            check(attrs.fileKey() != null) { "linux_path_identity_unavailable" }
-            file.absolutePath + "\n" + real + "\n" + attrs.fileKey()
+            val key = fileKey(real)
+            check(key != null) { "linux_path_identity_unavailable" }
+            file.absolutePath + "\n" + real + "\n" + key
         }
     }
 
@@ -186,3 +187,6 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
         return digest.digest().joinToString("") { "%02x".format(it) }
     }
 }
+
+internal fun strictLinuxFileKey(path: java.nio.file.Path): Any? =
+    Files.readAttributes(path, BasicFileAttributes::class.java).fileKey()

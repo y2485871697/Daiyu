@@ -173,10 +173,38 @@ class TerminalEnvironmentHostTest {
         assertFalse(File(root, "user-terminal/journal").exists())
     }
 
+    @Test fun missingIdentityFailsClosedWithoutReplacingApprovedSelection() = linuxFixture { root, spec ->
+        val directory = File(root, "selection")
+        hostLinuxStore(directory).select(spec)
+        val selection = File(directory, "selected-linux.json")
+        val before = selection.readBytes()
+        val unavailable = LinuxEnvironmentStore(directory, ::hostDirectorySync) { null }
+        try { unavailable.select(spec); fail("missing key must reject") }
+        catch (failure: IllegalStateException) { assertEquals("linux_path_identity_unavailable", failure.message) }
+        assertTrue(before.contentEquals(selection.readBytes()))
+        assertEquals("BROKEN", unavailable.status().getString("state"))
+        try { unavailable.acquire(); fail("missing identity must not lease") }
+        catch (failure: IllegalStateException) { assertEquals("linux_path_identity_unavailable", failure.message) }
+    }
+
+    @Test fun replacementAtSamePathInvalidatesOriginalLease() = linuxFixture { root, spec ->
+        val store = hostLinuxStore(File(root, "selection")).apply { select(spec) }
+        store.acquire().use { lease ->
+            val original = spec.loader.toPath()
+            val moved = original.resolveSibling("retired-loader")
+            Files.move(original, moved)
+            Files.copy(moved, original)
+            HostLinuxIdentity.replaced(original)
+            try { lease.backend(root); fail("same-path replacement must reject original lease") }
+            catch (failure: IllegalStateException) { assertEquals("linux_installation_changed", failure.message) }
+        }
+        store.acquire().use { it.backend(root) }
+    }
+
     @Test fun emptyTrustedListIgnoresResidualSelectionAndCreatesNothing() = linuxFixture { root, spec ->
         val reference = LinuxGenerationRef(spec.environmentId, spec.generation)
         val directory = File(root, "user-terminal/linux-selection")
-        val gate = TerminalTrustedLinuxSelection(directory, emptyList(), directorySync = ::hostDirectorySync)
+        val gate = TerminalTrustedLinuxSelection(directory, emptyList(), directorySync = ::hostDirectorySync, fileKey = ::hostLinuxFileKey)
         assertLinuxRefused(root, gate, reference)
         assertEquals("UNAVAILABLE", gate.status().state)
         assertTrue(gate.status().choices.isEmpty())
@@ -192,7 +220,7 @@ class TerminalEnvironmentHostTest {
 
     @Test fun trustedListWithoutSelectionIsReadOnlyAndDoesNotCreateWorkingDirectories() = linuxFixture { root, spec ->
         val directory = File(root, "user-terminal/linux-selection")
-        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync)
+        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync, fileKey = ::hostLinuxFileKey)
         assertEquals("NOT_SELECTED", gate.status().state)
         assertLinuxRefused(root, gate, LinuxGenerationRef(spec.environmentId, spec.generation))
         assertFalse(File(root, "user-terminal").exists())
@@ -201,7 +229,7 @@ class TerminalEnvironmentHostTest {
     @Test fun matchingTrustedConfigurationIsReadyAndGuardLeaseBlocksSelectionReplacement() = linuxFixture { root, spec ->
         val directory = File(root, "user-terminal/linux-selection")
         val store = hostLinuxStore(directory).apply { select(spec) }
-        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync)
+        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync, fileKey = ::hostLinuxFileKey)
         val reference = LinuxGenerationRef(spec.environmentId, spec.generation)
         assertEquals("FILES_READY", gate.status().state)
         assertEquals(reference, gate.status().selected)
@@ -218,7 +246,7 @@ class TerminalEnvironmentHostTest {
     @Test fun sameIdsCannotAuthorizeDifferentInstallationMetadata() = linuxFixture { root, spec ->
         val directory = File(root, "user-terminal/linux-selection")
         val store = hostLinuxStore(directory)
-        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync)
+        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync, fileKey = ::hostLinuxFileKey)
         val reference = LinuxGenerationRef(spec.environmentId, spec.generation)
         val otherRoot = File(root, "other-guest").apply { mkdirs() }
         File(otherRoot, "bin").mkdirs()
@@ -247,14 +275,14 @@ class TerminalEnvironmentHostTest {
             store.clearSelection() // A rejection must not leak its validation lease.
         }
         store.select(spec)
-        val ambiguous = TerminalTrustedLinuxSelection(directory, listOf(spec, spec.copy(rootfs = otherRoot)), directorySync = ::hostDirectorySync)
+        val ambiguous = TerminalTrustedLinuxSelection(directory, listOf(spec, spec.copy(rootfs = otherRoot)), directorySync = ::hostDirectorySync, fileKey = ::hostLinuxFileKey)
         assertLinuxRefused(root, ambiguous, reference)
     }
 
     @Test fun forgedSelectionHashesCannotOverrideParentTrustedDigests() = linuxFixture { root, spec ->
         val directory = File(root, "user-terminal/linux-selection")
         val store = hostLinuxStore(directory).apply { select(spec) }
-        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync)
+        val gate = TerminalTrustedLinuxSelection(directory, listOf(spec), directorySync = ::hostDirectorySync, fileKey = ::hostLinuxFileKey)
         val reference = LinuxGenerationRef(spec.environmentId, spec.generation)
         val selection = File(directory, "selected-linux.json")
         for ((file, field) in listOf(spec.proot to "proot_sha256", spec.loader to "loader_sha256")) {
@@ -269,9 +297,9 @@ class TerminalEnvironmentHostTest {
         }
         assertEquals("FILES_READY", gate.status().state)
         assertLinuxRefused(root, TerminalTrustedLinuxSelection(directory,
-            listOf(spec.copy(prootSha256 = "0".repeat(64))), directorySync = ::hostDirectorySync), reference)
+            listOf(spec.copy(prootSha256 = "0".repeat(64))), directorySync = ::hostDirectorySync, fileKey = ::hostLinuxFileKey), reference)
         assertLinuxRefused(root, TerminalTrustedLinuxSelection(directory,
-            listOf(spec.copy(loaderSha256 = "0".repeat(64))), directorySync = ::hostDirectorySync), reference)
+            listOf(spec.copy(loaderSha256 = "0".repeat(64))), directorySync = ::hostDirectorySync, fileKey = ::hostLinuxFileKey), reference)
     }
 
     @Test fun constructionAndRepeatedObservationNeverOpenOrSelect() {

@@ -57,6 +57,7 @@ internal class ModelErrorReconnect(
     private val startedMs = timing.nowMs()
     private var id = UUID.randomUUID().toString()
     private var pausedAtMs: Long? = null
+    private var pauseRevision = -1L
     private var pausedDurationMs = 0L
     private var started = false
     private var wakeupGeneration = 0L
@@ -94,9 +95,17 @@ internal class ModelErrorReconnect(
     }
 
     /** Pause closes the visible segment and freezes its budget, not task/tool owners. */
-    fun setPaused(paused: Boolean) {
+    fun setPaused(paused: Boolean) = applyPause(paused, null)
+
+    fun setPaused(paused: Boolean, revision: Long) = applyPause(paused, revision)
+
+    private fun applyPause(paused: Boolean, revision: Long?) {
         val interruptedScope = synchronized(lock) {
             if (terminal) return
+            if (revision != null) {
+                if (revision <= pauseRevision) return
+                pauseRevision = revision
+            }
             if (paused) {
                 if (pausedAtMs != null) return
                 elapsedLocked()

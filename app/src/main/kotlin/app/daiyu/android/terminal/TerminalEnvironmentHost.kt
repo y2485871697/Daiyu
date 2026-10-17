@@ -377,9 +377,10 @@ internal class TerminalTrustedLinuxSelection(
     private val directory: File,
     installations: List<LinuxInstallation>,
     private val directorySync: (File) -> Unit = TerminalDurability::syncDirectory,
+    private val fileKey: (java.nio.file.Path) -> Any? = ::strictLinuxFileKey,
 ) {
     private val installations = installations.map { it.copy(sharedMounts = it.sharedMounts.toMap()) }
-    private val store by lazy { LinuxEnvironmentStore(directory, directorySync) }
+    private val store by lazy { LinuxEnvironmentStore(directory, directorySync, fileKey) }
     private val choices get() = installations.map {
         TerminalLinuxChoice(LinuxGenerationRef(it.environmentId, it.generation), it.distribution)
     }

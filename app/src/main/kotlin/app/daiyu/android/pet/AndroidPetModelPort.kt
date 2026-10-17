@@ -169,10 +169,13 @@ class AndroidPetModelPort internal constructor(
             val retired = synchronized(authority) {
                 if (!closed.compareAndSet(false, true)) return
                 generation.incrementAndGet()
-                jobs.values.toList().also { jobs.clear() }
+                snapshotForDrain(jobs.values).also { jobs.clear() }
             }
             retired.forEach { it.cancel() }
             executor.shutdownNow()
         }
     }
 }
+
+internal fun <T> snapshotForDrain(values: Collection<T>): List<T> =
+    buildList { values.forEach { add(it) } }

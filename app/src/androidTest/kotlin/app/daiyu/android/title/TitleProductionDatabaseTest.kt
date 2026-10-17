@@ -11,7 +11,8 @@ import app.daiyu.android.testContext
 import java.io.File
 import java.util.UUID
 
-/** Actual ConversationDatabase + unchanged rename/delete + existing ContextService usage port. */
+/** Actual ConversationDatabase + unchanged rename/delete + LEGACY usage port compatibility.
+ * Current typed production title authority is covered by P21RequestCoverageDatabaseTest. */
 @Suppress("DEPRECATION")
 class TitleProductionDatabaseTest : InstrumentationTestCase() {
     private lateinit var context: Context
@@ -25,7 +26,7 @@ class TitleProductionDatabaseTest : InstrumentationTestCase() {
         context = object : ContextWrapper(base) { override fun getFilesDir(): File = files }
         database = ConversationDatabase(context)
         service = ContextService(context, database)
-        assertEquals(16, database.writableDatabase.version)
+        assertEquals(17, database.writableDatabase.version)
         // Production helper, not a test-only manual schema installation.
         assertTrue(database.writableDatabase.rawQuery("SELECT 1 FROM sqlite_master WHERE name='conversation_title_revisions'", null).use { it.moveToFirst() })
     }
@@ -45,6 +46,10 @@ class TitleProductionDatabaseTest : InstrumentationTestCase() {
             r.usage?.inputTokens, r.usage?.outputTokens, r.usage?.cachedTokens))
     })
     private fun receipt(id: ConversationId) = ParentTitleUsage("title-synthetic-receipt", id, run, ModelEvent.Usage(8, null, 2))
+    private fun legacyUsageCount(id: ConversationId): Long = database.readableDatabase.rawQuery(
+        "SELECT COUNT(*) FROM context_usage WHERE branch_id=? AND usage_source='LEGACY'", arrayOf(id.value)).use {
+        it.moveToFirst(); it.getLong(0)
+    }
 
     fun testTitleAndExistingUsageSurviveReopenAndDeleteUsesExistingCleanup() {
         val id = seed(); val adapter = adapter(); val frozen = adapter.capture(id)!!
@@ -52,18 +57,19 @@ class TitleProductionDatabaseTest : InstrumentationTestCase() {
         assertTrue(adapter.commit(frozen, "保全标题", receipt(id)))
         database.close(); database = ConversationDatabase(context); service = ContextService(context, database)
         assertEquals("保全标题", database.conversations().single().title)
-        assertEquals(1L, service.usage(id.value).requests)
+        assertEquals(1L, legacyUsageCount(id))
+        assertEquals(0L, service.usage(id.value).requests) // No source evidence: legacy is preserved, not promoted.
         assertFalse(adapter().isCurrent(frozen))
         database.delete(id)
         assertTrue(database.conversations().isEmpty())
         assertNull(adapter().capture(id))
-        assertEquals(0L, service.usage(id.value).requests)
+        assertEquals(0L, legacyUsageCount(id))
     }
     fun testUnchangedManualRenameSameTitleFencesResultAndEmitsNoUsage() {
         val id = seed(); val adapter = adapter(); val frozen = adapter.capture(id)!!
         database.rename(id, "新会话")
         assertFalse(adapter.commit(frozen, "保全标题", receipt(id)))
-        assertEquals(0L, service.usage(id.value).requests)
+        assertEquals(0L, legacyUsageCount(id))
     }
     fun testUpgrade13Through15InstallsBeforeEarlyReturnAndPreservesTimeAndVideoWitness() {
         val id = seed()
@@ -84,7 +90,7 @@ class TitleProductionDatabaseTest : InstrumentationTestCase() {
             }
             database.close()
             database = ConversationDatabase(context); service = ContextService(context, database)
-            assertEquals(16, database.writableDatabase.version)
+            assertEquals(17, database.writableDatabase.version)
             val captured = adapter().capture(id)!!
             assertTrue(adapter().isCurrent(captured)); assertFalse(captured.titleTouched)
             assertEquals("新会话", captured.originalTitle)
@@ -95,7 +101,7 @@ class TitleProductionDatabaseTest : InstrumentationTestCase() {
             assertTrue(database.readableDatabase.rawQuery("SELECT created_at FROM messages WHERE role='assistant'", null).use {
                 assertTrue(it.moveToFirst()); it.isNull(0)
             })
-            assertEquals(0L, service.usage(id.value).requests) // migration never generates titles
+            assertEquals(0L, legacyUsageCount(id)) // migration never generates titles
         }
     }
 
@@ -110,10 +116,10 @@ class TitleProductionDatabaseTest : InstrumentationTestCase() {
         assertFalse(backup.importPackage(exported).alreadyImported)
         val restored = database.conversations().single()
         assertEquals("保全标题", restored.title)
-        assertEquals(1L, service.usage(restored.id.value).requests)
+        assertEquals(1L, legacyUsageCount(restored.id))
         assertFalse(adapter().isCurrent(frozen))
         assertTrue(backup.importPackage(exported).alreadyImported)
-        assertEquals(1L, service.usage(restored.id.value).requests)
+        assertEquals(1L, legacyUsageCount(restored.id))
     }
 
     fun testExistingUsageInsertFailureRollsBackTitleAndWitness() {
@@ -122,6 +128,6 @@ class TitleProductionDatabaseTest : InstrumentationTestCase() {
         try { adapter.commit(frozen, "保全标题", receipt(id)); fail() } catch (_: TitleUsagePersistenceException) { }
         assertEquals(frozen, adapter.capture(id))
         assertEquals("新会话", database.conversations().single().title)
-        assertEquals(0L, service.usage(id.value).requests)
+        assertEquals(0L, legacyUsageCount(id))
     }
 }

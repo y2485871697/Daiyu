@@ -30,7 +30,7 @@ internal data class ContextManagementSnapshot(
  * No network until that retained candidate is consumed by the existing coordinator/service. */
 internal interface ContextManagementSummaryProfiles {
     fun describe(binding: SummaryModelBinding): SummaryProfileDescriptor?
-    fun freeze(expected: SummaryProfileDescriptor): BoundSummaryModel?
+    fun freeze(expected: SummaryProfileDescriptor, usagePort: BoundSummaryUsagePort): BoundSummaryModel?
 }
 
 internal data class ContextManagementArchive(
@@ -110,24 +110,40 @@ internal class ContextManagementWorker(
         // Explicit manual consent enables this SINGLE frozen preparation, not the saved auto switch.
         // Existing coordinator still freezes/validates the exact independent candidate and cancellation.
         val target = requireNotNull(expected.summaryTarget)
-        val coordinator = ContextPreparationCoordinator(service, { saved.copy(automatic = true) }, policies,
-            SummaryModelResolver { binding ->
-                require(binding == target.binding) { "摘要目标不匹配；请刷新并重新确认" }
-                // Atomic revision comparison + credential capture, not a check followed by resolving
-                // the current binding again. All later I/O uses this exact retained candidate.
-                profiles.freeze(target)
-            })
-        val frozen = coordinator.freeze(expected.conversationId, emptyList(), lease.cancellation)
-        val summarizer = requireNotNull(frozen.summarizer) { "独立摘要模型不可用；未回退聊天模型" }
-        checkLease(lease)
-        check(frozen.consumed.compareAndSet(false, true)) { "准备只能使用一次" }
-        // Manual intent bypasses only the automatic pressure threshold. Service owns the retained
-        // cut, full authoritative-history CAS, budget, archive publication and cancellation checks.
-        // Never call prepare() afterwards: that would risk a second summary request.
-        val archive = service.compress(expected.conversationId, frozen.policy, summarizer,
-            pendingMessages = frozen.pendingMessages, cancelled = { lease.cancellation.isCancelled })
-        // No fallible post-publication read/check: publication can already have committed.
-        return ContextCompressionReceipt(archive, expected.historyRevision)
+        val operation = service.manualSummaryUsage(lease)
+        var success = false
+        var failure: Throwable? = null
+        try {
+            val coordinator = ContextPreparationCoordinator(service, { saved.copy(automatic = true) }, policies,
+                SummaryModelResolver { binding ->
+                    require(binding == target.binding) { "摘要目标不匹配；请刷新并重新确认" }
+                    // Atomic revision comparison + credential capture, not a check followed by resolving
+                    // the current binding again. All later I/O uses this exact retained candidate.
+                    profiles.freeze(target, operation.port)
+                })
+            val frozen = coordinator.freeze(expected.conversationId, emptyList(), lease.cancellation)
+            val summarizer = requireNotNull(frozen.summarizer) { "独立摘要模型不可用；未回退聊天模型" }
+            checkLease(lease)
+            check(frozen.consumed.compareAndSet(false, true)) { "准备只能使用一次" }
+            // Manual intent bypasses only the automatic pressure threshold. Service owns the retained
+            // cut, full authoritative-history CAS, budget, archive publication and cancellation checks.
+            // Never call prepare() afterwards: that would risk a second summary request.
+            val archive = service.compress(expected.conversationId, frozen.policy, summarizer,
+                pendingMessages = frozen.pendingMessages, cancelled = { lease.cancellation.isCancelled })
+            // No post-publication history check or second request. Usage close remains in finally;
+            // a close failure is an accounting error, never permission to repeat paid work.
+            success = true
+            return ContextCompressionReceipt(archive, expected.historyRevision)
+        } catch (caught: Throwable) {
+            failure = caught
+            throw caught
+        } finally {
+            // No Runner follows manual compression; its own worker must close every admitted attempt.
+            try { operation.finish(success) }
+            catch (closeFailure: Throwable) {
+                if (failure != null) failure.addSuppressed(closeFailure) else throw closeFailure
+            }
+        }
     }
 
     private fun validateSnapshot(lease: ContextManagementLease, expected: ContextManagementSnapshot) {
@@ -169,13 +185,13 @@ internal class ContextManagementWorker(
                         requireWorker()
                         return SummaryProfileStore(app).descriptor(binding)
                     }
-                    override fun freeze(expected: SummaryProfileDescriptor): BoundSummaryModel? {
+                    override fun freeze(expected: SummaryProfileDescriptor, usagePort: BoundSummaryUsagePort): BoundSummaryModel? {
                         requireWorker()
                         val configuration = SummaryProfileStore(app).configuration(expected)
-                        return ProviderSummaryModelResolver { binding ->
+                        return ProviderSummaryModelResolver(lookup = { binding ->
                             require(binding == expected.binding)
-                            configuration // Never look up the current binding a second time.
-                        }.resolve(expected.binding)
+                            configuration // Retain the exact descriptor revision; do not resolve again.
+                        }, usagePort = usagePort).resolve(expected.binding)
                     }
                 })
         }

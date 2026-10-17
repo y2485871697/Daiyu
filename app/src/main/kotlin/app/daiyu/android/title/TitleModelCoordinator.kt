@@ -24,6 +24,8 @@ class TitleJob internal constructor(
     val parentRunId: RunId,
     val requestId: String,
 ) {
+    internal val usageRequest = app.daiyu.android.domain.runtime.RequestCheckpoint(requestId,
+        UUID.randomUUID().toString(), UUID.randomUUID().toString(), app.daiyu.android.domain.runtime.RequestOperation.NEXT)
     internal var started = false
     internal var revoked = false
     internal var session: ModelSession? = null
@@ -89,7 +91,7 @@ class TitleModelCoordinator internal constructor(
         var saved = false
         var usageFailed = false
         var reported: ModelEvent.Usage? = null
-        fun receipt() = ParentTitleUsage(job.requestId, job.conversationId, job.parentRunId, reported)
+        fun receipt() = ParentTitleUsage(job.requestId, job.conversationId, job.parentRunId, reported, job.usageRequest)
         try {
             if (committedFirstTurn.isEmpty() || committedFirstTurn.any {
                 it.conversationId != job.conversationId || it.runId != job.parentRunId || it.status != RunStatus.COMPLETED
@@ -137,9 +139,13 @@ class TitleModelCoordinator internal constructor(
                     }
                 } catch (_: TitleModelUnavailableException) { return TitleOutcome.BINDING_UNAVAILABLE }
             }
+            commits.beginRequestUsage(receipt())
             session.next(emptyList()) { event ->
                 // Preserve actual usage even on a cancellation/deadline boundary.
-                if (event is ModelEvent.Usage) reported = event
+                if (event is ModelEvent.Usage) {
+                    reported = event
+                    commits.observeRequestUsage(receipt())
+                }
                 synchronized(gate) { check(!closed && !job.revoked && !timedOut.get()) }
                 when (event) {
                     is ModelEvent.TextFinal -> {

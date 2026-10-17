@@ -85,7 +85,7 @@ class ChildCommandSchemaMigrationTest : InstrumentationTestCase() {
         val conversation = legacy(context, helper)
         val before = context.openOrCreateDatabase("conversations.db", 0, null).use { raw -> witnesses(raw) to messages(raw) }
         val sql = helper.readableDatabase
-        assertEquals(15, sql.version)
+        assertEquals(17, sql.version)
         val rows = SQLiteChildTaskStore(helper).list(conversation.value)
         assertEquals(1, rows.size)
         val old = rows.single()
@@ -121,7 +121,7 @@ class ChildCommandSchemaMigrationTest : InstrumentationTestCase() {
             })
         }
         val sql = helper.readableDatabase
-        assertEquals(15, sql.version)
+        assertEquals(17, sql.version)
         assertEquals(before.first, messages(sql)); assertEquals(before.second, witnesses(sql))
         assertEquals(before.third, sidecars(sql))
         val history = helper.messages(conversation)

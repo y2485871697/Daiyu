@@ -32,6 +32,37 @@ internal class SQLiteRuntimeStore private constructor(
             synchronized(this) { available(); check(recovered); work() }
         }
     }
+    /** Admission happens on each real auxiliary call, not cache hits or model construction. */
+    @Synchronized internal fun auxiliaryUsage(initial: Message): app.daiyu.android.model.usage.AuxiliaryUsageAttempt {
+        available(); check(recovered)
+        val request = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), processOwner, RequestOperation.NEXT)
+        return additionalUsage(initial, request, UsageRequestSource.AUXILIARY_VISION)
+    }
+    private fun additionalUsage(initial: Message, request: RequestCheckpoint, source: UsageRequestSource):
+        app.daiyu.android.model.usage.AuxiliaryUsageAttempt {
+        transactions.run { db -> app.daiyu.android.model.usage.SQLiteAdditionalUsageStore.admit(db,
+            initial.conversationId.value, initial.runId.value, initial.id.value, request, source, processOwner) }
+        return object : app.daiyu.android.model.usage.AuxiliaryUsageAttempt {
+            private var ended = false
+            private var latest: ModelEvent.Usage? = null
+            override fun observe(usage: ModelEvent.Usage) = synchronized(this@SQLiteRuntimeStore) {
+                available(); check(recovered && !ended)
+                transactions.run { db -> app.daiyu.android.model.usage.SQLiteAdditionalUsageStore.observe(db,
+                    initial.conversationId.value, initial.runId.value, initial.id.value, request,
+                    source, processOwner, usage, false) }
+                latest = usage
+            }
+            override fun close() = synchronized(this@SQLiteRuntimeStore) {
+                if (!ended) {
+                    available(); check(recovered)
+                    transactions.run { db -> app.daiyu.android.model.usage.SQLiteAdditionalUsageStore.observe(db,
+                        initial.conversationId.value, initial.runId.value, initial.id.value, request,
+                        source, processOwner, latest, true) }
+                    ended = true
+                }
+            }
+        }
+    }
     @Synchronized override fun preparationUsage(initial: Message): List<RequestUsageCheckpoint> {
         available(); check(recovered)
         return transactions.run { db -> preparations.seed(db, initial) }
@@ -68,6 +99,7 @@ internal class SQLiteRuntimeStore private constructor(
             check(recoverable(db) == priors) { "恢复准备后检查点已变化" }
             priors.forEach { reconcile(db, it) }
             preparations.recover(db)
+            app.daiyu.android.model.usage.SQLiteAdditionalUsageStore.recover(db, processOwner)
             database.recoverUncheckpointed(db)
             SQLiteChildTaskStore.recoverPending(db)
         }
@@ -82,6 +114,9 @@ internal class SQLiteRuntimeStore private constructor(
     }
     private fun commit(checkpoint: RunCheckpoint, supplement: Message?) {
         available(); check(recovered)
+        require(checkpoint.usage.all { it.source == UsageRequestSource.MAIN || it.source == UsageRequestSource.SUMMARY }) {
+            "additional_usage_must_not_modify_parent_checkpoint"
+        }
         val encoded = RunCheckpointCodec.encode(checkpoint)
         transactions.run { db ->
             val m = checkpoint.message
@@ -193,6 +228,7 @@ internal class SQLiteRuntimeStore private constructor(
         private fun read(db: SQLiteDatabase, messageId: String): Stored? {
             val metadata = db.rawQuery("SELECT conversation_id,run_id,owner,revision,phase,process_owner,length(payload) FROM runtime_checkpoints WHERE message_id=?",
                 arrayOf(messageId)).use { c -> if (!c.moveToFirst()) null else {
+                require(c.getType(3) == android.database.Cursor.FIELD_TYPE_INTEGER)
                 val size = c.getLong(6); require(size in 1..(64L * 1024 * 1024))
                 listOf(c.getString(0), c.getString(1), c.getString(2), c.getLong(3).toString(), c.getString(4), c.getString(5), size.toString())
             } } ?: return null

@@ -2,9 +2,9 @@ package app.daiyu.android.context
 
 import android.database.sqlite.SQLiteDatabase
 
-/** Called ONLY by the unique ConversationDatabase helper in onCreate / v15 -> v16 upgrade.
+/** Called ONLY by the unique ConversationDatabase helper in onCreate / v16 -> v17 upgrade.
  * Not a parallel usage ledger: a row is the runtime authority before a real message exists.
- * The first real checkpoint transfers its snapshot and clears has_usage in the SAME transaction.
+ * The first checkpoint transfers tokens in the SAME transaction, keeping report-presence metadata.
  * Terminal preparations retain usage even if the parent send was never accepted. */
 internal object RuntimePreparationSchema {
     fun install(db: SQLiteDatabase) {

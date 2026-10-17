@@ -32,8 +32,24 @@ fun interface SummaryUsagePort {
  * Every observation, including an identical replay, reaches the durable sink so cancelled or
  * handed-off owners cannot acknowledge a late duplicate. The sink enforces durable CAS and
  * replay/conflict rules. A new attempt requires fresh host admission, never automatic POST. */
-class BoundSummaryUsagePort(val parent: ParentSummaryUsage,
-    private val beforeClaim: () -> Unit = {}, private val sink: SummaryUsagePort) {
+class BoundSummaryUsagePort private constructor(
+    val conversationId: String,
+    private val parentIdentity: ParentSummaryUsage?,
+    private val beforeClaim: () -> Unit,
+    private val record: (ModelEvent.Usage) -> Unit,
+) {
+    /** Only automatic send preparation has a parent. Manual callers use conversationId. */
+    val parent: ParentSummaryUsage get() = checkNotNull(parentIdentity) { "manual_summary_has_no_parent" }
+
+    constructor(parent: ParentSummaryUsage, beforeClaim: () -> Unit = {}, sink: SummaryUsagePort) :
+        this(parent.conversationId, parent, beforeClaim, { snapshot ->
+            sink.record(parent, RequestUsageCheckpoint(parent.request, snapshot,
+                app.daiyu.android.domain.runtime.UsageRequestSource.SUMMARY))
+        })
+
+    internal constructor(conversationId: String, beforeClaim: () -> Unit,
+        record: (ModelEvent.Usage) -> Unit) : this(conversationId, null, beforeClaim, record)
+
     private var claimed = false
 
     @Synchronized internal fun claim() {
@@ -45,7 +61,6 @@ class BoundSummaryUsagePort(val parent: ParentSummaryUsage,
     @Synchronized internal fun observe(snapshot: ModelEvent.Usage) {
         check(claimed) { "summary_usage_request_not_opened" }
         // The durable sink validates even identical late observations after revoke/handoff.
-        sink.record(parent, RequestUsageCheckpoint(parent.request, snapshot,
-            app.daiyu.android.domain.runtime.UsageRequestSource.SUMMARY))
+        record(snapshot)
     }
 }

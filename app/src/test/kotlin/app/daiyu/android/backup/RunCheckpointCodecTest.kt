@@ -24,7 +24,7 @@ class RunCheckpointCodecTest {
     private fun reject(block:()->Unit) {try {block();fail("invalid checkpoint accepted")} catch(_:Exception) {}}
     @Test fun strictVersionTypesBoundsAndOwnership() {
         val text=RunCheckpointCodec.encode(checkpoint())
-        val mutations=listOf<(JSONObject)->Unit>({it.put("version",6)}, {it.put("revision","4")},
+        val mutations=listOf<(JSONObject)->Unit>({it.put("version",7)}, {it.put("revision","4")},
             {it.put("owner","")},{it.put("round",101)},{it.put("message_reconciled",false)},
             {it.put("phase","TERMINAL")},{it.put("extra",true)}, {it.put("request_unconfirmed",1)})
         mutations.forEach {mutate-> val json=JSONObject(text);mutate(json);reject {RunCheckpointCodec.decode(json.toString())}}
@@ -68,9 +68,11 @@ class RunCheckpointCodecTest {
             phase = ExecutionPhase.WAITING_USER, tools = listOf(ToolRecord(question, ToolDisposition.IN_FLIGHT)),
             outputs = emptyList(), pending = PendingToolCheckpoint(question.id))
     }
-    @Test fun writesV5AndReadsLegacyOnlyWithTheirExactFields() {
-        val original = checkpoint(); val v5 = JSONObject(RunCheckpointCodec.encode(original))
-        assertEquals(5, v5.getInt("version"))
+    @Test fun writesV6AndReadsLegacyOnlyWithTheirExactFields() {
+        val original = checkpoint(); val v6 = JSONObject(RunCheckpointCodec.encode(original))
+        assertEquals(6, v6.getInt("version"))
+        assertEquals(original, RunCheckpointCodec.decode(v6.toString()))
+        val v5 = JSONObject(v6.toString()).put("version", 5); v5.remove("usage_requests")
         assertEquals(original, RunCheckpointCodec.decode(v5.toString()))
         val v4 = JSONObject(v5.toString()).put("version", 4)
         assertTrue(v4.isNull("request"))
@@ -90,7 +92,7 @@ class RunCheckpointCodecTest {
             reject { RunCheckpointCodec.decode(missing.toString()) }
         }
         val impossibleV1 = JSONObject(RunCheckpointCodec.encode(waiting())).put("version", 1)
-        listOf("pending", "request", "usage").forEach(impossibleV1::remove)
+        listOf("pending", "request", "usage", "usage_requests").forEach(impossibleV1::remove)
         reject { RunCheckpointCodec.decode(impossibleV1.toString()) }
     }
     private fun withUsage() = checkpoint().let { value ->
@@ -100,6 +102,7 @@ class RunCheckpointCodecTest {
     @Test fun explicitSummarySourceRoundTripsAcrossExecutionOwnerHandoffAndLegacyV4DefaultsMain() {
         val original = withUsage()
         val legacy = JSONObject(RunCheckpointCodec.encode(original)).put("version", 4)
+        legacy.remove("usage_requests")
         legacy.getJSONArray("usage").getJSONObject(0).remove("source")
         assertEquals(original, RunCheckpointCodec.decode(legacy.toString()))
         val summary = original.copy(usage = original.usage.map { it.copy(
@@ -108,6 +111,20 @@ class RunCheckpointCodecTest {
         val invalid = JSONObject(RunCheckpointCodec.encode(summary))
         invalid.getJSONArray("usage").getJSONObject(0).put("source", "guessed-from-prefix")
         reject { RunCheckpointCodec.decode(invalid.toString()) }
+    }
+    @Test fun v6MainAdmissionsRoundTripWithoutInventingUsageAndRejectMalformedMetadata() {
+        val request = RequestCheckpoint("missing", "attempt", "owner", RequestOperation.NEXT)
+        val original = checkpoint().copy(request = request, usageRequests = listOf(request))
+        val encoded = RunCheckpointCodec.encode(original)
+        assertEquals(original, RunCheckpointCodec.decode(encoded))
+        assertTrue(RunCheckpointCodec.decode(encoded).usage.isEmpty())
+        val recovered = ProcessRecovery.interrupt(original).copy(owner = "recovery", revision = 5, messageReconciled = true)
+        assertEquals(recovered, RunCheckpointCodec.decode(RunCheckpointCodec.encode(recovered)))
+        reject { RunCheckpointCodec.encode(original.copy(usageRequests = listOf(request, request))) }
+        reject { RunCheckpointCodec.encode(original.copy(usageRequests = listOf(request.copy(operation = RequestOperation.OPEN)))) }
+        reject { RunCheckpointCodec.encode(original.copy(usageRequests = listOf(request.copy(owner = "foreign")))) }
+        val bad = JSONObject(encoded); bad.remove("usage_requests")
+        reject { RunCheckpointCodec.decode(bad.toString()) }
     }
     @Test fun usageRoundTripsUnknownZeroAndRecoveryOwnership() {
         val value = withUsage()

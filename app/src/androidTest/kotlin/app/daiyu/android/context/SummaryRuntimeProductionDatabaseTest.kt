@@ -113,7 +113,7 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
             assertEquals("HANDED", state(s.assistant.id))
             val beforeMain = checkpoint(s.assistant.id)
             assertEquals(staged.requests.single().snapshot, beforeMain.usage.single().snapshot)
-            assertEquals(0L, scalar("SELECT has_usage FROM runtime_preparations WHERE message_id=?", s.assistant.id.value))
+            assertEquals(1L, scalar("SELECT has_usage FROM runtime_preparations WHERE message_id=?", s.assistant.id.value))
             reject { runtime.commitCheckpoint(beforeMain.copy(revision = beforeMain.revision + 1, usage = emptyList())) }
             object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
@@ -196,6 +196,22 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
         s.usage.close(); restart()
         assertNull(read(owner).summary.combined.input.reportedTokens)
         assertEquals(0L, read(owner).summary.combined.cached.reportedTokens)
+    }
+
+    fun testIgnoredAdmissionNeverOpensSummaryTransport() {
+        val owner = seed(); val s = submission(owner)
+        database.writableDatabase.execSQL("CREATE TRIGGER ignore_summary BEFORE INSERT ON runtime_preparations BEGIN SELECT RAISE(IGNORE); END")
+        try {
+            var failed = false
+            try { s.coordinator.prepare(s.frozen) } catch (_: Exception) { failed = true }
+            assertTrue("ignored admission accepted", failed)
+            assertEquals(0, s.wire.posts)
+            assertEquals(0L, scalar("SELECT COUNT(*) FROM runtime_preparations WHERE message_id=?", s.assistant.id.value))
+            assertEquals(0L, scalar("SELECT COUNT(*) FROM messages WHERE id=?", s.assistant.id.value))
+        } finally {
+            database.writableDatabase.execSQL("DROP TRIGGER ignore_summary")
+            s.usage.close()
+        }
     }
 
     private class Wire(private val beforePost: () -> Unit) : HttpsURLConnection(URL("https://example.invalid/fixture")) {

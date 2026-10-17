@@ -94,7 +94,6 @@ import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.components.*
 import app.daiyu.android.ui.components.subagent.SubAgentThinkingEffortPickerDialog
 import app.daiyu.android.ui.model.ConversationPaneUiState
-import app.daiyu.android.ui.model.ConversationReasoningPreference
 import app.daiyu.android.ui.model.ConversationSummaryUi
 import app.daiyu.android.ui.model.MessageSearchHit
 import app.daiyu.android.ui.screens.assistants.AssistantEditScreen
@@ -185,9 +184,7 @@ class MainActivity : ComponentActivity() {
     private val retainedData by lazy { RetainedConversationData(controller.database, ContextService(this, controller.database)) }
     private val assistantStore get() = controller.assistantStore
     private val assistantAssets get() = controller.assistantAssets
-    private val reasoningPreference by lazy {
-        ConversationReasoningPreference(getSharedPreferences("conversation-ui", MODE_PRIVATE))
-    }
+    private val reasoningPreference get() = controller.reasoningPreference
     private val subAgentRepository by lazy {
         ConversationSubAgentPreferences(getSharedPreferences("subagent_configuration", MODE_PRIVATE))
     }
@@ -1411,13 +1408,16 @@ class MainActivity : ComponentActivity() {
                     onDismiss = { collaborationVisible = false; collaborationOwner = null }, taskRunning = controller.active != null || backupBusy,
                     ownerMatches = { activityUsable() && selected?.id?.value == owner && retainedPage == "chat" && !controller.dataBusy },
                     repositoryFactory = { subAgentRepository })
-                // UI preference only: no runtime reasoning-capability contract exists yet.
+                // Saved independently for the standalone composer or this conversation.
+                // The preparation worker freezes it once; edits never mutate an active request.
                 val thinkingOwner = chatState.conversationKey
                 SubAgentThinkingEffortPickerDialog(show = thinkingPicker, effort = reasoningPreference.get(thinkingOwner),
-                    options = ReasoningEffort.entries, onDismiss = { thinkingPicker = false }, onEffortChange = { effort ->
+                    options = ReasoningEffort.entries,
+                    description = "下一次主请求生效。默认保留供应商配置；Responses 使用 reasoning。Messages 手动 thinking 预算：最小1024、低2048、中4096、高8192；未设 max_tokens 时为预算+4096，已有上限不足会拒绝。不支持的配置不会自动降档；远端模型仍可能拒绝。仅展示模型已报告的摘要或思考文本，不代表获得隐藏内部推理。",
+                    onDismiss = { thinkingPicker = false }, onEffortChange = { effort ->
                         if (activityUsable() && selected?.id?.value == thinkingOwner) {
-                            reasoningPreference.set(thinkingOwner, effort)
-                            publishChat()
+                            try { reasoningPreference.set(thinkingOwner, effort); publishChat() }
+                            catch (_: Exception) { toast("思考偏好保存未确认；请重新保存") }
                         }
                         thinkingPicker = false
                     })
@@ -3381,7 +3381,7 @@ class MainActivity : ComponentActivity() {
                 pendingTextSend != null -> "正在准备上下文并核实发送结果"; imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,
                 phase = phase, controlOwnerKey = controlOwner?.id?.value, modelLabel = if (controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
-                reasoningLabel = reasoningPreference.get(selected?.id?.value).displayName,
+                reasoningLabel = try { reasoningPreference.snapshot(selected?.id?.value).displayName } catch (_: Exception) { "配置无效，需重存" },
                 assistantLabel = if (controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && !shizukuWritesBlocked,
                 supplementAvailable = state?.phase == ExecutionPhase.PAUSED && supplementDraft.pending == null,
                 supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&

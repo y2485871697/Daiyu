@@ -46,6 +46,7 @@ class ChatRunnerUsageCheckpointTest {
         val record = runtime.rows.last().usage.single()
         assertEquals(RequestOperation.RESUME, record.request.operation)
         assertEquals(runtime.rows.last().request, record.request)
+        assertEquals(listOf(record.request), runtime.rows.last().usageRequests)
         val first = runtime.rows.first { it.usage.isNotEmpty() }.usage.single()
         assertEquals(first.request.requestId, record.request.requestId)
         assertNotEquals(first.request.attemptId, record.request.attemptId)
@@ -67,6 +68,8 @@ class ChatRunnerUsageCheckpointTest {
             val result = ChatRunner(port, messages, BatteryTool { "ok" }, RunnerOptions(runtimeStore = runtime)) {}.run(initial(), emptyList())
             assertEquals(RunStatus.COMPLETED, result.status); assertEquals(2, rounds)
             val records = runtime.rows.last().usage
+            assertEquals(2, runtime.rows.last().usageRequests.size)
+            assertEquals(2, runtime.rows.last().usageRequests.map { it.requestId }.distinct().size)
             assertEquals(if (report) 2 else 0, records.size)
             if (report) {
                 assertEquals(2, records.map { it.request.requestId }.distinct().size)

@@ -14,6 +14,7 @@ internal object MessagesStream {
     private class Block(val wire: JSONObject) {
         val text = StringBuilder()
         val json = StringBuilder()
+        val signature = StringBuilder()
         var stopped = false
     }
 
@@ -83,6 +84,22 @@ internal object MessagesStream {
                                 protocol(chars <= 2_000_000)
                                 if (text.isNotEmpty()) deliver(ModelEvent.TextDelta("$id:$index", text))
                             }
+                            "thinking" -> {
+                                val text = wire.get("thinking") as? String ?: throw ModelRequestException(ModelFailure.PROTOCOL)
+                                block.text.append(text)
+                                if (wire.has("signature")) block.signature.append(wire.get("signature") as? String
+                                    ?: throw ModelRequestException(ModelFailure.PROTOCOL))
+                                chars += text.length + block.signature.length
+                                protocol(chars <= 2_000_000)
+                                if (text.isNotEmpty()) deliver(ModelEvent.ReasoningDelta("$id:$index", text))
+                            }
+                            "redacted_thinking" -> {
+                                val opaque = wire.get("data") as? String ?: throw ModelRequestException(ModelFailure.PROTOCOL)
+                                protocol(opaque.isNotBlank())
+                                chars += opaque.length
+                                protocol(chars <= 2_000_000)
+                                // Opaque signed/redacted material is replay data, never public prose.
+                            }
                             "tool_use" -> {
                                 val callId = wire.getString("id")
                                 protocol(callId.isNotBlank() && callIds.add(callId) && wire.getString("name").isNotBlank())
@@ -110,6 +127,21 @@ internal object MessagesStream {
                                 block.text.append(text)
                                 deliver(ModelEvent.TextDelta("$id:$index", text))
                             }
+                            "thinking_delta" -> {
+                                protocol(block.wire.getString("type") == "thinking")
+                                val text = delta.get("thinking") as? String ?: throw ModelRequestException(ModelFailure.PROTOCOL)
+                                chars += text.length
+                                protocol(chars <= 2_000_000)
+                                block.text.append(text)
+                                deliver(ModelEvent.ReasoningDelta("$id:$index", text))
+                            }
+                            "signature_delta" -> {
+                                protocol(block.wire.getString("type") == "thinking")
+                                val signature = delta.get("signature") as? String ?: throw ModelRequestException(ModelFailure.PROTOCOL)
+                                chars += signature.length
+                                protocol(chars <= 2_000_000)
+                                block.signature.append(signature)
+                            }
                             "input_json_delta" -> {
                                 protocol(block.wire.getString("type") == "tool_use")
                                 // Android getString coerces other JSON types; fragments must be strings.
@@ -127,9 +159,15 @@ internal object MessagesStream {
                         val block = blocks[event.getInt("index")] ?: throw ModelRequestException(ModelFailure.PROTOCOL)
                         protocol(!block.stopped)
                         block.stopped = true
-                        if (block.wire.getString("type") == "text") block.wire.put("text", block.text.toString())
-                        else if (block.json.isNotEmpty()) block.wire.put("input", MessagesRequest.jsonObject(
-                            block.json.toString(), MessagesRequest.MAX_TOOL_INPUT_CONTAINER_DEPTH))
+                        when (block.wire.getString("type")) {
+                            "text" -> block.wire.put("text", block.text.toString())
+                            "thinking" -> {
+                                protocol(block.signature.isNotBlank())
+                                block.wire.put("thinking", block.text.toString()).put("signature", block.signature.toString())
+                            }
+                            "tool_use" -> if (block.json.isNotEmpty()) block.wire.put("input", MessagesRequest.jsonObject(
+                                block.json.toString(), MessagesRequest.MAX_TOOL_INPUT_CONTAINER_DEPTH))
+                        }
                     }
                     "message_delta" -> {
                         protocol(id != null && reason == null && blocks.values.all { it.stopped })
@@ -157,9 +195,12 @@ internal object MessagesStream {
             val saved = MessagesRequest.message("assistant", content).toString()
             val confirmedUsage = ProviderUsage.messages(input, output, cached, creation)
             blocks.forEach { (index, block) ->
-                if (block.wire.getString("type") == "text") deliver(ModelEvent.TextFinal("$id:$index", block.text.toString()))
-                else deliver(ModelEvent.ToolReady(ToolInvocation(ToolCallId(block.wire.getString("id")),
-                    block.wire.getString("name"), block.wire.getJSONObject("input").toString())))
+                when (block.wire.getString("type")) {
+                    "text" -> deliver(ModelEvent.TextFinal("$id:$index", block.text.toString()))
+                    "thinking" -> deliver(ModelEvent.ReasoningFinal("$id:$index", block.text.toString()))
+                    "tool_use" -> deliver(ModelEvent.ToolReady(ToolInvocation(ToolCallId(block.wire.getString("id")),
+                        block.wire.getString("name"), block.wire.getJSONObject("input").toString())))
+                }
             }
             // Anthropic input_tokens excludes both cache categories; expose total input and cache reads.
             confirmedUsage?.let(::deliver)

@@ -234,6 +234,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var round = 0
         var requestUnconfirmed = false
         var request: RequestCheckpoint? = null
+        var usageRequests = emptyList<RequestCheckpoint>()
         var usage: List<RequestUsageCheckpoint> =
             (options.runtimeStore as? PreparationRuntimeStore)?.preparationUsage(initial).orEmpty()
         val executionOwner = RunExecutionOwner.issue(initial)
@@ -247,7 +248,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (message.status != RunStatus.RUNNING) ExecutionPhase.TERMINAL else execution.phase,
                 records.values.toList(), outputs, supplements.toList(), round, requestUnconfirmed,
                 owner = owner, revision = revision + 1,
-                pending = if (message.status == RunStatus.RUNNING) pendingCheckpoint else null, request = request, usage = usageSnapshot)
+                pending = if (message.status == RunStatus.RUNNING) pendingCheckpoint else null, request = request, usage = usageSnapshot, usageRequests = usageRequests)
         }
         fun checkpoint(next: RunCheckpoint = snapshot()) {
             val runtime = options.runtimeStore ?: return
@@ -467,6 +468,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     continue
                 }
                 request = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
+                usageRequests = usageRequests + checkNotNull(request)
                 requestUnconfirmed = true
                 checkpoint()
                 val sink: (ModelEvent) -> Unit = { event ->
@@ -491,10 +493,14 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         }
                         is ModelEvent.ReasoningDelta -> {
                             checkText(event.itemId, event.text, final = false, reasoning = true)
+                            segmentHistory.acceptReasoning(event.itemId, event.text, final = false)
+                            apply(current)
                             try { options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
                         }
                         is ModelEvent.ReasoningFinal -> {
                             checkText(event.itemId, event.text, final = true, reasoning = true)
+                            segmentHistory.acceptReasoning(event.itemId, event.text, final = true)
+                            apply(current)
                             try { options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
                         }
                         is ModelEvent.ProtocolOutput -> {
@@ -593,6 +599,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 setPhase(ExecutionPhase.STREAMING, attempt)
                             }
                             request = checkNotNull(request).copy(attemptId = UUID.randomUUID().toString(), operation = RequestOperation.RESUME)
+                            usageRequests = usageRequests.map { if (it.requestId == request?.requestId) checkNotNull(request) else it }
                             // Persist the resumed request boundary before invoking transport again.
                             checkpoint()
                         }

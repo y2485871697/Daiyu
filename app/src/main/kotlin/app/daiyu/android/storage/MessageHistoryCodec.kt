@@ -4,6 +4,7 @@ import app.daiyu.android.domain.Message
 import app.daiyu.android.domain.MessageHistory
 import app.daiyu.android.domain.MessageBlock
 import app.daiyu.android.domain.MessageHistorySegment
+import app.daiyu.android.domain.ReportedReasoning
 import app.daiyu.android.domain.MessageId
 import app.daiyu.android.domain.ToolCallId
 import app.daiyu.android.domain.ToolInvocation
@@ -12,8 +13,9 @@ import org.json.JSONObject
 
 /**
  * Stable v1 representation for the provider history attached to a message.
- * The original four keys remain closed except for optional created_at milliseconds.
- * Unknown time is omitted so legacy histories retain their exact encoding.
+ * The original four keys accept optional created_at and reported_reasoning metadata.
+ * Unknown time and absent reported text are omitted, retaining exact legacy encodings.
+ * Reported text is display data, never synthesized provider protocol or body content.
  */
 object MessageHistoryCodec {
     fun encode(segments: List<MessageHistorySegment>): JSONArray {
@@ -26,6 +28,11 @@ object MessageHistoryCodec {
                     .put("blocks", encodeBlocks(segment.blocks))
                     .put("protocol", JSONArray(segment.protocolItems)).also {
                         MessageTimeCodec.write(it, segment.createdAt)
+                        if (segment.reportedReasoning.isNotEmpty()) it.put("reported_reasoning", JSONArray().apply {
+                            segment.reportedReasoning.forEach { reported ->
+                                put(JSONObject().put("item_id", reported.itemId).put("text", reported.text))
+                            }
+                        })
                     })
             }
         }
@@ -34,7 +41,7 @@ object MessageHistoryCodec {
     fun decode(array: JSONArray): List<MessageHistorySegment> {
         val result = (0 until array.length()).map {
             val value = array.getJSONObject(it)
-            require(value.keys().asSequence().toSet() - MessageTimeCodec.FIELD == setOf("message_id", "role", "blocks", "protocol"))
+            require(value.keys().asSequence().toSet() - MessageTimeCodec.FIELD - "reported_reasoning" == setOf("message_id", "role", "blocks", "protocol"))
             val id = text(value, "message_id")
             val role = text(value, "role")
             val blocks = value.getJSONArray("blocks")
@@ -43,7 +50,16 @@ object MessageHistoryCodec {
             val protocolItems = (0 until protocol.length()).map { (protocol.get(it) as? String)
                 ?: error("历史协议项须为文本") }
             MessageHistorySegment(MessageId(id), role, decodeBlocks(blocks), protocolItems,
-                createdAt = MessageTimeCodec.read(value))
+                createdAt = MessageTimeCodec.read(value),
+                reportedReasoning = if (!value.has("reported_reasoning")) emptyList() else {
+                    val reported = value.getJSONArray("reported_reasoning")
+                    require(reported.length() in 1..1024)
+                    (0 until reported.length()).map { index ->
+                        val part = reported.getJSONObject(index)
+                        require(part.keys().asSequence().toSet() == setOf("item_id", "text"))
+                        ReportedReasoning(text(part, "item_id"), text(part, "text"))
+                    }
+                })
         }
         result.forEach { validateSegment(it) }
         return result

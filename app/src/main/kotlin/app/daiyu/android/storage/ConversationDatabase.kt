@@ -12,7 +12,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 16), ConversationStore {
+class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 17), ConversationStore {
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
         db, assistantPreferences.getString(app.daiyu.android.assistants.LegacyAssistantCodec.KEY, null))
@@ -36,6 +36,8 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         SQLiteRuntimeStore.installSchema(db)
         SQLiteChildTaskStore.installSchema(db)
         app.daiyu.android.model.usage.SQLiteChildUsageStore.installSchema(db)
+        app.daiyu.android.context.RuntimePreparationSchema.install(db)
+        app.daiyu.android.model.usage.SQLiteAdditionalUsageStore.install(db)
         installGenerationSchema(db)
         SQLiteMessageVideoStore.installSchema(db)
         ControllerVideoManifestWitness.installSchema(db)
@@ -50,7 +52,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..15 && newVersion == 16) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..16 && newVersion == 17) { "不支持此数据库版本，保留原数据" }
         // Install before the >=13 early return; do not rewrite timestamps or video witnesses.
         app.daiyu.android.title.SqliteTitleCommitAdapter.installSchema(db)
         // No backfill: conversation.updated is not evidence of any message's creation time.
@@ -76,6 +78,9 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             app.daiyu.android.model.usage.SQLiteChildUsageStore.installSchema(db)
             createUiFolders(db)
         }
+        // Install AFTER legacy child tables exist and BEFORE the >=13 early return.
+        app.daiyu.android.context.RuntimePreparationSchema.install(db)
+        app.daiyu.android.model.usage.SQLiteAdditionalUsageStore.install(db)
         if (oldVersion < 11) upgradeGenerationSchema(db)
         if (oldVersion < 14) SQLiteChildTaskStore.installCommandSchema(db)
         if (oldVersion >= 13) return // Existing command/video rows and witnesses remain unchanged.

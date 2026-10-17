@@ -22,10 +22,16 @@ class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
             .apply { isAccessible = true }.get(fixture.controller) as java.util.concurrent.atomic.AtomicLong
         val before = epoch.get()
         val original = fixture.settings.load()
-        mainThread { fixture.controller.saveModelSettings(original, false, false) {} }
-        awaitControl("same-value configuration save") { !fixture.controller.dataBusy }
-        mainThread { fixture.controller.saveModelSettings(original, false, false) {} }
-        awaitControl("same-value configuration restore") { !fixture.controller.dataBusy }
+        repeat(2) { index ->
+            val saved = java.util.concurrent.atomic.AtomicReference<Boolean?>()
+            mainThread {
+                fixture.controller.saveModelSettings(original, false, false) { saved.set(it) }
+            }
+            awaitControl("same-value configuration save #${index + 1}") {
+                saved.get() != null && !fixture.controller.dataBusy
+            }
+            assertEquals(java.lang.Boolean.TRUE, saved.get())
+        }
         assertEquals(before + 2, epoch.get())
         assertEquals(0, fixture.opens.get())
     }
@@ -36,10 +42,11 @@ class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
         val run = RunId("historical-video")
         val user = Message(MessageId("historical-user"), conversation.id, run, Message.USER_ROLE,
             listOf(MessageBlock.Text("body", "old question")), RunStatus.COMPLETED)
-        val assistant = user.copy(id = MessageId("historical-assistant"), role = Message.ASSISTANT_ROLE)
+        val assistant = user.copy(id = MessageId("historical-assistant"), role = Message.ASSISTANT_ROLE, status = RunStatus.RUNNING)
         val owner = MessageVideoOwner(conversation.id.value, user.id.value)
         db.send(user, assistant, videoInputs = listOf(MessageVideoInput(owner, listOf(MessageVideoReference(
-            owner, "original", "video/mp4", 3, "a".repeat(64), 1000, 32, 24)))))
+            owner, "12345678-1234-1234-1234-123456789abc", "video/mp4", 3, "a".repeat(64), 1000, 32, 24)))))
+        db.save(assistant.copy(status = RunStatus.COMPLETED))
         // Enabled but unusable auxiliary vision is irrelevant to the original-video route.
         fixture.controller.independentModels.save(app.daiyu.android.storage.IndependentModelSettings.Slot.VISION,
             app.daiyu.android.storage.ModelSettings("https://vision.invalid", "vision", "test-key", false),
@@ -68,15 +75,17 @@ class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
                 .get(activity) as ControllerVideoUi).editor()
         }
         val owner = VideoAttachmentOwner(conversation.id.value, "receipt-draft")
-        val video = VideoAttachment(owner, "original", "video/mp4", 3, "a".repeat(64), 1000, 32, 24)
+        val video = VideoAttachment(owner, "12345678-1234-1234-1234-123456789abc", "video/mp4", 3, "a".repeat(64), 1000, 32, 24)
         val request = VideoDraftRequest(conversation.id.value, owner, 2, editor.text, listOf(video))
         val run = RunId("accepted-run")
         val user = Message(MessageId("accepted-user"), conversation.id, run, Message.USER_ROLE,
             listOf(MessageBlock.Text("text", editor.text)), RunStatus.COMPLETED)
         val messageOwner = MessageVideoOwner(conversation.id.value, user.id.value)
-        val saved = db.send(user, user.copy(id = MessageId("accepted-assistant"), role = Message.ASSISTANT_ROLE),
+        val assistant = user.copy(id = MessageId("accepted-assistant"), role = Message.ASSISTANT_ROLE, status = RunStatus.RUNNING)
+        val saved = db.send(user, assistant,
             videoInputs = listOf(MessageVideoInput(messageOwner, listOf(MessageVideoReference(messageOwner,
                 video.id, video.mime, video.bytes, video.sha256, video.durationMs, video.width, video.height)))))
+        db.save(assistant.copy(status = RunStatus.COMPLETED))
         val receipt = VideoDraftReceipt(request.conversation, owner, request.revision, request.videos,
             VideoDraftOutcome.ACCEPTED, conversation.id.value)
         // Freeze the admitted view before editing, then publish a real DB receipt at the receiving
@@ -161,15 +170,17 @@ class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
             val editor = ui.editor()
             assertTrue(editor.visible)
             val owner = VideoAttachmentOwner(conversation.id.value, "visible-receipt")
-            val video = VideoAttachment(owner, "original", "video/mp4", 3, "a".repeat(64), 1000, 32, 24)
+            val video = VideoAttachment(owner, "12345678-1234-1234-1234-123456789abc", "video/mp4", 3, "a".repeat(64), 1000, 32, 24)
             val request = VideoDraftRequest(conversation.id.value, owner, 1, editor.text, listOf(video))
             val run = RunId("visible-receipt")
             val user = Message(MessageId("visible-user"), conversation.id, run, Message.USER_ROLE,
                 listOf(MessageBlock.Text("text", editor.text)), RunStatus.COMPLETED)
             val messageOwner = MessageVideoOwner(conversation.id.value, user.id.value)
-            val saved = db.send(user, user.copy(id = MessageId("visible-assistant"), role = Message.ASSISTANT_ROLE),
+            val assistant = user.copy(id = MessageId("visible-assistant"), role = Message.ASSISTANT_ROLE, status = RunStatus.RUNNING)
+            val saved = db.send(user, assistant,
                 videoInputs = listOf(MessageVideoInput(messageOwner, listOf(MessageVideoReference(messageOwner,
                     video.id, video.mime, video.bytes, video.sha256, video.durationMs, video.width, video.height)))))
+            db.save(assistant.copy(status = RunStatus.COMPLETED))
             val receipt = VideoDraftReceipt(request.conversation, owner, request.revision, request.videos,
                 VideoDraftOutcome.ACCEPTED, conversation.id.value)
             ChatController::class.java.getDeclaredField("pendingVideoState").apply { isAccessible = true }
@@ -193,16 +204,22 @@ class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
     fun testVideoSubmissionDisablesTerminalAndRejectsStaleVirtualDisplayEntry() {
         setDraft("keep video caption")
         mainThread {
-            MainActivity::class.java.getDeclaredField("videoSending").apply { isAccessible = true }
-                .setBoolean(activity, true)
+            @Suppress("UNCHECKED_CAST")
+            val sending = MainActivity::class.java.getDeclaredField("videoSending\$delegate")
+                .apply { isAccessible = true }.get(activity) as androidx.compose.runtime.MutableState<Boolean>
+            sending.value = true
         }
         ui.waitForIdle()
         node("terminal-chat-entry").assertIsNotEnabled()
         mainThread {
             MainActivity::class.java.getDeclaredMethod("openVirtualDisplayPreparation").apply { isAccessible = true }
                 .invoke(activity)
-            assertNull(MainActivity::class.java.getDeclaredField("virtualDisplayEditor")
-                .apply { isAccessible = true }.get(activity))
+            for (name in listOf("virtualDisplayEditor", "virtualDisplayPlanVisit")) {
+                val state = MainActivity::class.java.getDeclaredField("${name}\$delegate")
+                    .apply { isAccessible = true }.get(activity) as androidx.compose.runtime.State<*>
+                assertNull(state.value)
+            }
+            assertNull(fixture.controller.virtualDisplayEntry())
         }
         assertDraft("keep video caption")
         assertEquals(0, fixture.opens.get())

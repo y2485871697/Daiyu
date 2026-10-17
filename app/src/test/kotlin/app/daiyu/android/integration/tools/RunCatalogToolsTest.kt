@@ -133,6 +133,9 @@ class RunCatalogToolsTest {
         assertEquals(1,captures)
         try {tools.execute(owner.copy(runId=RunId("other")),listOf(call())){false};fail("foreign run accepted")}
         catch (_:IllegalArgumentException) {}
+        val close = AtomicReference<RunCatalogCloseResult?>()
+        tools.closeWithResult { close.set(it) }
+        assertEquals(RunCatalogCloseResult.Drained, close.get())
     }
     @Test fun disabledOrEmptySnapshotsDoNotAdvertiseAndResourcePermissionCannotBeAdded() {
         for (permissions in listOf(emptySet(),setOf(SkillRunSession.READ))) {

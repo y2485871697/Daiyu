@@ -26,10 +26,10 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
         val assistant = user.copy(id = MessageId("assistant-$key"), role = Message.ASSISTANT_ROLE,
             status = RunStatus.RUNNING, blocks = emptyList())
         val calls = receipts.indices.map { ToolInvocation(ToolCallId("call-$it"), "read", "{}") }
-        database.send(user, assistant)
         var round = 0
         SQLiteRuntimeStore.acquire(database).use { runtime ->
             runtime.recoverPending()
+            database.send(user, assistant)
             val runner = ChatRunner(ModelPort { object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                     if (round++ == 0) calls.forEach { sink(ModelEvent.ToolReady(it)) }

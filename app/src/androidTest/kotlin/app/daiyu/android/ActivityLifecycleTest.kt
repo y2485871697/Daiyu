@@ -112,11 +112,13 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
             assertFalse(singleton.closed)
         }
         openSettings()
-        reveal("settings-row:鲸鱼女仆", "设置").performClick()
+        reveal("settings-row:扩展", "设置").performClick()
+        reveal("settings-row:鲸鱼女仆", "扩展").performClick()
         instrumentation.waitForIdleSync()
         mainThread { assertNotNull(current.window.decorView.findViewWithTag<android.view.View>("pet-settings-view")) }
         backToChat(current) // Pet settings BackHandler returns to the actual SettingsHome.
-        reveal("settings-row:辅助视觉模型", "设置").performClick()
+        reveal("settings-row:模型功能", "设置").performClick()
+        reveal("settings-row:辅助视觉模型", "模型功能").performClick()
         ui.waitUntil(timeoutMillis = 5_000) {
             var found = false
             instrumentation.runOnMainSync {

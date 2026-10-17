@@ -65,7 +65,8 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
 
     private fun openBalance() {
         openSettings()
-        reveal("settings-row:供应商余额", "设置").performClick()
+        reveal("settings-row:LLM 提供商", "设置").performClick()
+        reveal("settings-row:供应商余额", "LLM 提供商").performClick()
         ui.onNodeWithText("独立余额设置").assertIsDisplayed()
         ui.waitUntil(timeoutMillis = 5000) {
             ui.onAllNodesWithText("独立余额账户标识").fetchSemanticsNodes().isNotEmpty()

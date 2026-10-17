@@ -279,11 +279,19 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         } } })
         val event = AtomicReference<app.daiyu.android.pet.PetAssistantTransition?>()
         val committed = CountDownLatch(1)
-        val lease = f.controller.petTransitions.subscribe {
-            // This callback is downstream of the real atomic Runner commit, not an observe/diff.
-            assertEquals(it.after, f.database.storedMessage(f.database.readableDatabase,
-                it.after.conversationId, it.after.id.value))
-            event.set(it); committed.countDown()
+        val callbackFailure = AtomicReference<Throwable?>()
+        val lease = f.controller.petTransitions.subscribe { transition ->
+            try {
+                app.daiyu.android.context.DatabaseTransactions { f.database.readableDatabase }.run { db ->
+                    assertEquals(transition.after, f.database.storedMessage(db,
+                        transition.after.conversationId, transition.after.id.value))
+                }
+                event.set(transition)
+            } catch (failure: Throwable) {
+                callbackFailure.set(failure)
+            } finally {
+                committed.countDown()
+            }
         }
         try {
             val accepted = checkNotNull(f.controller.send(null, "completion event"))
@@ -293,6 +301,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
             f.controller.assistantStore.select("different")
             release.countDown()
             assertTrue(committed.await(10, TimeUnit.SECONDS))
+            callbackFailure.get()?.let { throw it }
             val actual = checkNotNull(event.get())
             assertEquals(RunStatus.RUNNING, actual.before.status)
             assertEquals(RunStatus.COMPLETED, actual.after.status)

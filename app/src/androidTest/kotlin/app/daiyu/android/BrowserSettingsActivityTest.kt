@@ -26,8 +26,10 @@ class BrowserSettingsActivityTest : WiredActivityTestCase() {
         reveal("settings-row:工具", "设置").performClick()
         reveal("settings-row:浏览器", "工具").performClick()
         node("page:浏览器").assertExists()
+        reveal("browser-saved", "浏览器").assertExists()
         ui.waitUntil(timeoutMillis = 5_000) {
-            ui.onAllNodes(hasTestTag("browser-saved") and hasText("关闭（DISABLED）", substring = true))
+            ui.onAllNodes(hasTestTag("browser-saved") and
+                hasAnyDescendant(hasText("关闭（DISABLED）", substring = true)), useUnmergedTree = true)
                 .fetchSemanticsNodes().isNotEmpty()
         }
     }

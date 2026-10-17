@@ -3552,7 +3552,7 @@ class MainActivity : ComponentActivity() {
         fun valid() = activityUsable() && prompt === current
         when (current) {
             is InputPrompt -> DaiyuTextInputDialog(current.title, current.initial, current.hint, current.confirm,
-                onConfirm = { value -> if (valid()) { prompt = null; current.action(value) } },
+                onConfirm = { value -> confirmInputPrompt(current, value) },
                 onDismiss = { if (valid()) { if (current === mcpInput) cancelMcpEditor() else prompt = null } })
             is ChoicePrompt -> DaiyuChoiceSheet(current.title, current.options,
                 onSelect = { index -> if (valid()) { prompt = null; current.action(index) } }, onDismiss = { if (valid()) prompt = null })
@@ -3565,6 +3565,9 @@ class MainActivity : ComponentActivity() {
         if (prompt !== expected) return
         if (deferredOpenedBackup?.waitingPrompt === expected) cancelDeferredOpenedBackup()
         prompt = null
+    }
+    private fun confirmInputPrompt(expected: InputPrompt, value: String) {
+        if (activityUsable() && prompt === expected) { prompt = null; expected.action(value) }
     }
     private fun confirmPrompt(expected: ConfirmPrompt) {
         if (activityUsable() && prompt === expected) { prompt = null; expected.action() }

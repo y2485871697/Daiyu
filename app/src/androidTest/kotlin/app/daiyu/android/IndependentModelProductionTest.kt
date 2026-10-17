@@ -149,7 +149,7 @@ class IndependentModelProductionTest : InstrumentationTestCase() {
         val conversation = db.create("default")
         val oldRun = RunId("old-source-run")
         val originalImage = MessageBlock.Image(MessageImageReference(
-            MessageImageOwner(conversation.id.value, "original-user"), "original-image", "image/png", 4,
+            MessageImageOwner(conversation.id.value, "original-user"), "11111111-1111-1111-1111-111111111111", "image/png", 4,
             "a".repeat(64), 1, 1))
         val user = Message(MessageId("original-user"), conversation.id, oldRun, Message.USER_ROLE,
             listOf(originalImage), RunStatus.COMPLETED)
@@ -164,7 +164,7 @@ class IndependentModelProductionTest : InstrumentationTestCase() {
             emptyList(), RunStatus.RUNNING)
         db.send(nextUser, initial)
         val segmentImage = MessageBlock.Image(MessageImageReference(
-            MessageImageOwner(conversation.id.value, "supplement"), "segment-image", "image/png", 4,
+            MessageImageOwner(conversation.id.value, "supplement"), "22222222-2222-2222-2222-222222222222", "image/png", 4,
             "b".repeat(64), 1, 1))
         val physical = initial.copy(historySegments = listOf(
             MessageHistorySegment(initial.id, Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("answer", "partial"))),

@@ -209,7 +209,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         setDraft("抽屉草稿"); ui.onNodeWithContentDescription("打开侧边栏").performClick()
         ui.waitForIdle()
         mainThread {
-            val sidebar = MainActivity::class.java.getDeclaredField("sidebarVisible\$delegate").apply { isAccessible = true }.get(activity) as androidx.compose.runtime.State<*>
+            val sidebar = MainActivity::class.java.getDeclaredField("sidebarVisibleState\$delegate").apply { isAccessible = true }.get(activity) as androidx.compose.runtime.State<*>
             assertEquals(true, sidebar.value)
             activity.onBackPressedDispatcher.onBackPressed()
         }

@@ -176,7 +176,7 @@ class ControllerLifecycleTest:InstrumentationTestCase() {
         assertTrue(s.entered.await(5,TimeUnit.SECONDS));s.release.countDown();awaitState(f) {f.controller.active==null}
         f.db.draft(c.id,"history read failure");f.db.writableDatabase.execSQL("UPDATE messages SET blocks='not-json'")
         assertNull(f.controller.send(c,"history read failure"))
-        assertTrue(f.controller.problem?.startsWith("上下文准备失败")==true)
+        assertEquals("原视频来源无法确认；草稿保留，未启动模型请求",f.controller.problem)
         assertEquals("history read failure",f.db.conversations().single().draft);assertEquals(1,f.calls.get())
     }
     fun testStartupGateWaitsForRealRecoveryAndNeverReplaysInterruptedRun() {

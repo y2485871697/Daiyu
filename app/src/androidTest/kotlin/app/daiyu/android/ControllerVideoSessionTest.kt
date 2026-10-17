@@ -69,7 +69,7 @@ class ControllerVideoSessionTest : InstrumentationTestCase() {
             val assistant = user.copy(id = MessageId("assistant-$n"), role = Message.ASSISTANT_ROLE, status = RunStatus.RUNNING)
             val owner = MessageVideoOwner(conversation.value, user.id.value)
             val refs = if (n == 0) listOf(MessageVideoInput(owner, listOf(MessageVideoReference(owner,
-                "original", "video/mp4", 3, "a".repeat(64), 1000, 32, 24)))) else emptyList()
+                "12345678-1234-1234-1234-123456789abc", "video/mp4", 3, "a".repeat(64), 1000, 32, 24)))) else emptyList()
             db.send(user, assistant, videoInputs = refs)
         }
     }

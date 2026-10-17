@@ -14,9 +14,12 @@ import java.util.concurrent.atomic.AtomicReference
 
 @Suppress("DEPRECATION")
 class ControllerModelPreparationTest : InstrumentationTestCase() {
+    private val expectedBaseCatalog = setOf("get_battery_status", "context_usage", "ask_user",
+        "assistant_memory_read", "assistant_memory_search")
     private class FixtureApplication(base: Context) : Application() {
         private val privateFiles=File(base.cacheDir,"controller-model-files-${UUID.randomUUID()}").apply {check(mkdirs() || isDirectory)}
         init { attachBaseContext(base) }
+        override fun getApplicationContext(): Context = this
         override fun getFilesDir():File=privateFiles
     }
     private data class Fixture(val app: FixtureApplication, val db: ConversationDatabase,
@@ -117,7 +120,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
                 override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = error("legacy enums must not swallow catalog")
                 override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
                     opens.incrementAndGet()
-                    assertEquals(setOf(ReadOnlyTool.BATTERY.toolName, "context_usage", "ask_user"), definitions.map { it.name }.toSet())
+                    assertEquals(expectedBaseCatalog, definitions.map { it.name }.toSet())
                     assertEquals(setOf("ask_user"), definitions.filter {it.sideEffect}.map {it.name}.toSet())
                     assertEquals("fixture-model", config.model)
                     assertEquals("fixture-key", config.apiKey)
@@ -167,6 +170,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         var definitions = emptyList<ToolDefinition>()
         var history = emptyList<Message>()
         var batches = emptyList<List<ToolInvocation>>()
+        var firstUsage: ModelEvent.Usage? = null
         val returned = java.util.concurrent.CopyOnWriteArrayList<List<ToolOutput>>()
         var beforeReturn: () -> Unit = {}
         override fun open(history: List<Message>): ModelSession = error("catalog required")
@@ -176,6 +180,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             return object : ModelSession {
                 private var turn=0
                 override fun next(outputs:List<ToolOutput>,sink:(ModelEvent)->Unit) {
+                    if (turn == 0 && outputs.isEmpty()) firstUsage?.let { sink(it) }
                     if(outputs.isNotEmpty()) returned.add(outputs.toList())
                     if(turn<batches.size) {
                         batches[turn++].forEach {sink(ModelEvent.ToolReady(it))}
@@ -260,7 +265,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             f.settings.save(config.copy(batteryEnabled=false,deviceStatusEnabled=true));probe
         }
         val c=f.db.create("default");finish(f,c)
-        assertEquals(setOf("get_battery_status","context_usage","ask_user"),probe.definitions.map {it.name}.toSet())
+        assertEquals(expectedBaseCatalog,probe.definitions.map {it.name}.toSet())
         assertEquals(setOf("ask_user"),probe.definitions.filter {it.sideEffect}.map {it.name}.toSet())
         val usage=probe.definitions.single {it.name=="context_usage"}
         val reply=f.db.messages(c.id).last().second
@@ -272,6 +277,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         val service=app.daiyu.android.context.ContextService(f.app,f.db)
         val prior=service.prepareSend(a.conversation.id).messages
         val ready=CountDownLatch(1);val release=CountDownLatch(1)
+        probe.firstUsage = ModelEvent.Usage(100, 20, 0)
         probe.batches=listOf(listOf(call("archive","context_archive_page",org.json.JSONObject()
             .put("archive_id",a.id).put("offset",0).put("limit",2)),
             call("usage","context_usage",org.json.JSONObject().put("branch_id",a.conversation.id.value))))
@@ -289,7 +295,14 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         val page=org.json.JSONObject(outputs[0].output);assertTrue(page.getBoolean("ok"))
         assertEquals(a.original.take(2),app.daiyu.android.context.ArchiveCodec.decode(
             page.getJSONArray("messages").toString().toByteArray(Charsets.UTF_8)))
-        assertEquals(120L,org.json.JSONObject(outputs[1].output).getLong("total_tokens"))
+        val usage = org.json.JSONObject(outputs[1].output)
+        assertTrue(usage.getBoolean("ok"))
+        assertEquals(1L, usage.getLong("requests"))
+        assertEquals(1L, usage.getLong("reported_requests"))
+        assertEquals(100L, usage.getLong("input_tokens"))
+        assertEquals(20L, usage.getLong("output_tokens"))
+        assertEquals(120L, usage.getLong("total_tokens"))
+        assertEquals("provider_reported", usage.getString("source"))
         val reply=f.db.messages(a.conversation.id).last().second
         assertEquals(RunStatus.COMPLETED,reply.status)
         assertEquals(outputs.map {it.output},reply.blocks.filterIsInstance<MessageBlock.Tool>().map {it.result})
@@ -333,7 +346,14 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         app.daiyu.android.skills.SkillStore(f.app).install(listOf(app.daiyu.android.skills.SkillBundle(mapOf(
             "SKILL.md" to "---\nname: demo\ndescription: Demo\n---\n$body".toByteArray(),
             "references/guide.md" to "guide".toByteArray()))),
-            if(revision==null) emptyMap() else mapOf("demo" to revision)).single()
+            if(revision==null) emptyMap() else mapOf("demo" to revision)).single().also { installed ->
+                val store = f.controller.assistantStore
+                val before = checkNotNull(store.read("default"))
+                val id = "user:${installed.name}"
+                if (id !in before.enabledSkillIds) {
+                    store.compareAndSet(before, before.copy(enabledSkillIds = before.enabledSkillIds + id))
+                }
+            }
     private fun skillArguments(revision:String)=org.json.JSONObject().put("id","user:demo").put("revision",revision)
 
     fun testSkillsActualCatalogFreezesIndexAndBodyButRejectsChangedResource() {

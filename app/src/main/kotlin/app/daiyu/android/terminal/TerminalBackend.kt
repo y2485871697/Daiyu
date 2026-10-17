@@ -35,11 +35,16 @@ data class RootScopeLaunch internal constructor(val rootfs: File, val su: File, 
         require(su.isAbsolute && su.toPath().normalize() == su.toPath() && su.isFile)
     }
     companion object {
-        internal fun requireTrustedTransport(): List<File> =
-            listOf("/system/bin/su", "/system/bin/chroot", "/system/bin/env").map(::File).also { files ->
-                try { files.forEach(ChrootTransportTrust::requireTrusted) }
-                catch (_: Exception) { throw IllegalStateException("linux_chroot_transport_unavailable") }
-            }
+        private val transportPaths = listOf("/system/bin/su", "/system/bin/chroot", "/system/bin/env")
+        internal fun isFixedTransport(file: File): Boolean = file.path in transportPaths
+        internal fun trustedTransportIdentity(file: File): String {
+            require(isFixedTransport(file))
+            return try { ChrootTransportTrust.identity(file) }
+            catch (_: Exception) { throw IllegalStateException("linux_chroot_transport_unavailable") }
+        }
+        internal fun requireTrustedTransport(): List<File> = transportPaths.map(::File).also { files ->
+            files.forEach { trustedTransportIdentity(it) }
+        }
     }
     internal fun guestArgv(): List<String> = listOf("/system/bin/chroot", rootfs.path, "/bin/sh") +
         if (identityProbe) listOf("-c", "id -u") else emptyList()

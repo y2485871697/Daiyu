@@ -39,6 +39,53 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
             .put("sha256", PrivateBlobs.digest(raw.toByteArray(Charsets.UTF_8))).toString()
     }
     private fun reject(block: () -> Unit) { try { block(); fail("must reject") } catch (_: Exception) {} }
+    fun testPreparedConversationFileUsesV5AndExcludesGlobalConfiguration() {
+        val (_, source, backup) = fresh(); val owner = seed(source, 1)
+        backup.setNonSecretConfiguration(mapOf("model" to "global-only"))
+        val binary = ByteArray(60_003) { it.toByte() }
+        backup.attach("stream-asset", source.messages(owner).first().second.id.value, "application/octet-stream", binary)
+        val (_, target, importer) = fresh()
+        backup.prepareExport(conversationId = owner).use { prepared ->
+            val envelope = JSONObject(prepared.file.readText())
+            assertEquals(5, envelope.getInt("version"))
+            assertEquals(0, JSONObject(envelope.getString("payload")).getJSONObject("config").length())
+            assertEquals(1, prepared.file.inputStream().use(backup::preflight).attachments)
+            assertFalse(importer.importPackageFrom { prepared.file.inputStream() }.alreadyImported)
+            assertTrue(importer.importPackageFrom { prepared.file.inputStream() }.alreadyImported)
+        }
+        assertEquals(source.messages(owner), target.messages(owner))
+        assertTrue(binary.contentEquals(importer.attachment("stream-asset")))
+        assertEquals(0, importer.importedConfiguration().length())
+    }
+    fun testActualCompleteSourceCloseFailurePrecedesOriginalPublicationAndSql() {
+        val (_, source, backup) = fresh(); val owner = seed(source, 1)
+        backup.attach("close-asset", source.messages(owner).first().second.id.value, "application/octet-stream", byteArrayOf(1, 2, 3))
+        val text = backup.exportPackage()
+        val (context, target, importer) = fresh(); val before = target.exportBackup()
+        val temporary = context.cacheDir.listFiles().orEmpty().filter { it.name.startsWith("complete-backup-") }.map { it.name }.toSet()
+        var closes = 0; val expected = java.io.IOException("test_source_close_failed")
+        try {
+            importer.importPackageFrom {
+                object : java.io.ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)) {
+                    override fun close() { closes++; throw expected }
+                }
+            }
+            fail("source close failure must precede publication")
+        } catch (actual: java.io.IOException) { assertSame(expected, actual) }
+        assertEquals(1, closes); assertEquals(before, target.exportBackup())
+        assertEquals(0, target.readableDatabase.rawQuery("SELECT count(*) FROM neutral_imports", null)
+            .use { it.moveToFirst(); it.getInt(0) })
+        assertTrue(File(context.filesDir, "neutral-context-blobs").listFiles().orEmpty().isEmpty())
+        assertEquals(temporary, context.cacheDir.listFiles().orEmpty().filter { it.name.startsWith("complete-backup-") }.map { it.name }.toSet())
+    }
+    fun testStringAndStreamRejectDuplicateEnvelopeFieldsWithoutChangingTarget() {
+        val (_, source, backup) = fresh(); seed(source, 1)
+        val text = backup.exportPackage().replaceFirst("{", "{\"version\":99,")
+        val (_, target, importer) = fresh(); val before = target.exportBackup()
+        reject { importer.importPackage(text) }
+        reject { text.byteInputStream().use(importer::importPackage) }
+        assertEquals(before, target.exportBackup())
+    }
     fun testCompleteRoundTripCountsHashesArchivesDraftsAndDuplicate() {
         val (sourceContext, source, backup) = fresh(); val owner = seed(source, 6)
         source.draft(owner, "会话草稿"); source.draft("未发送草稿")

@@ -296,7 +296,7 @@ class PtySession internal constructor(
                     val command = if (rootScope == null) helperArgv else
                         listOf(rootScope.su.path, "-c", "exec " +
                             (listOf("/system/bin/env", "-i") + frozenEnvironment.toSortedMap().map { (key, value) -> "$key=$value" } +
-                                helperArgv).joinToString(" ") { quote(it) })
+                                listOf("/system/bin/sh", "-c", "exec \"$@\"", "daiyu-root-pty") + helperArgv).joinToString(" ") { quote(it) })
                     val builder = ProcessBuilder(command)
                         .directory(cwd).redirectError(File("/dev/null")).apply {
                             environment().clear(); environment().putAll(frozenEnvironment)

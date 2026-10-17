@@ -3,7 +3,6 @@ package app.daiyu.android.backup
 import android.content.ContentValues
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
-import android.util.Base64
 import app.daiyu.android.context.*
 import app.daiyu.android.domain.context.ContextRevision
 import app.daiyu.android.storage.ConversationDatabase
@@ -23,7 +22,8 @@ data class BackupInventory(val conversations: Int, val messages: Int, val branch
     val childCommands: Int = 0, val childRequests: Int = 0,
     val runtimeUsageCheckpoints: Int = 0, val runtimeUsageRequests: Int = 0,
     val staticGenerationOutputs: Int = 0)
-data class ImportResult(val packageId: String, val inventory: BackupInventory, val alreadyImported: Boolean)
+data class ImportResult(val packageId: String, val inventory: BackupInventory, val alreadyImported: Boolean,
+    val cleanupProblem: String? = null)
 
 /** Extends, never reimplements, schema3 text backup. Blobs are immutable and all visible references/config
  * commit in the same SQLite transaction as the existing text importer. Source is always read-only.
@@ -126,7 +126,22 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             BackupHistoryRows.history(db, "generation_output", conversationId?.value).keys.toSet(),
             if (videoIntegration == null) null else BackupVideoManifest.read(db, messages))
     }
-    private fun exportPackage(configuration: Map<String, Any?>?, conversationId: ConversationId?): String {
+    private fun exportPackage(configuration: Map<String, Any?>?, conversationId: ConversationId?): String =
+        prepareExport(configuration, conversationId).use { it.file.readText(Charsets.UTF_8) }
+
+    internal class PreparedExport internal constructor(private val spool: BackupPackageSpool, internal val file: java.io.File) : java.io.Closeable {
+        fun writeTo(target: java.io.OutputStream) = file.inputStream().use { it.copyTo(target) }
+        override fun close() = spool.close()
+    }
+    internal fun prepareExport(configuration: Map<String, Any?>? = null, conversationId: ConversationId? = null): PreparedExport {
+        val spool = BackupPackageSpool(blobs.backupStagingParent)
+        try { return prepareExport(if (conversationId == null) configuration else emptyMap(), conversationId, spool) }
+        catch (failure: Throwable) {
+            try { spool.close() } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
+            throw failure
+        }
+    }
+    private fun prepareExport(configuration: Map<String, Any?>?, conversationId: ConversationId?, spool: BackupPackageSpool): PreparedExport {
         check(!transactions.database().inTransaction()) { "完整备份原件读取不能在外层SQL事务内" }
         val capture = captureExport(configuration, conversationId)
         // T1 is fully released before any original reader/fence is acquired.
@@ -136,13 +151,8 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val archives = tables.getJSONArray("context_archives"); val assets = tables.getJSONArray("neutral_assets")
         repeat(archives.length()) { hashes.add(archives.getJSONObject(it).getString("blob_hash")) }
         repeat(assets.length()) { hashes.add(assets.getJSONObject(it).getString("blob_hash")) }
-        val originals = linkedMapOf<String, ByteArray>(); var total = 0L
-        fun include(hash: String, bytes: ByteArray) {
-            require(PrivateBlobs.digest(bytes) == hash)
-            val previous = originals[hash]
-            if (previous != null) require(previous.contentEquals(bytes))
-            else { total += bytes.size; require(total <= MAX_BYTES); originals[hash] = bytes }
-        }
+        val originals = spool.bytes
+        fun include(hash: String, bytes: ByteArray) = spool.include(hash, bytes)
         hashes.sorted().forEach { hash -> include(hash, blobs.read(hash)) }
         val references = BackupImageManifest.References()
         val textData = objectOf(objectOf(text).getString("payload"))
@@ -205,8 +215,8 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         // Full scalar collection CAS, including insert/delete and inert runtime v4 observations.
         check(captureExport(configuration, conversationId).signature() == capture.signature()) { "备份来源已变化；未自动重试" }
         val contents = JSONArray()
-        originals.toSortedMap().forEach { (hash, bytes) -> contents.put(JSONObject().put("sha256", hash).put("bytes", bytes.size)
-            .put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))) }
+        originals.keys.sorted().forEach { hash -> contents.put(JSONObject().put("sha256", hash)
+            .put("bytes", spool.original(hash).length())) }
         val payload = JSONObject().put("text_backup", text).put("tables", tables).put("config", config)
             .put("blobs", contents).put("excluded", JSONArray(listOf("凭据、授权令牌和密钥材料不导出", "生成授权结果及供应商地址不导出；恢复只读历史，不恢复执行许可")))
             .put("generation_history", generationHistory).put("child_task_history", childHistory)
@@ -216,17 +226,50 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         if (videos.sidecars.isNotEmpty()) payload.put("message_videos", videoManifest)
         val inventory = inventory(payload)
         payload.put("inventory", inventoryJson(inventory))
-        val raw = payload.toString()
-        val result = JSONObject().put("format", "daiyu-neutral-complete").put("version", 5)
-            .put("sha256", Utf8Payload.sha256(raw)).put("payload", raw).toString()
-        Utf8Payload.byteCount(result, MAX_PACKAGE)
-        validate(result); return result
+        validatePayload(5, "export-validation", payload, originals)
+        return PreparedExport(spool, spool.write(5, payload))
     }
-    fun preflight(text: String): BackupInventory = validate(text).inventory
-    fun importPackage(source: InputStream): ImportResult =
-        importPackage(Utf8Payload.read(source, MAX_PACKAGE.toInt()))
+    fun preflight(text: String): BackupInventory {
+        Utf8Payload.byteCount(text, MAX_PACKAGE)
+        return BackupPackageSpool(blobs.backupStagingParent).use { spool ->
+            val envelope = spool.read(java.io.StringReader(text))
+            validatePayload(envelope.version, envelope.id, envelope.payload, spool.bytes).inventory
+        }
+    }
+    fun preflight(source: InputStream): BackupInventory = BackupPackageSpool(blobs.backupStagingParent).use { spool ->
+        val envelope = spool.read(source)
+        validatePayload(envelope.version, envelope.id, envelope.payload, spool.bytes).inventory
+    }
+    fun importPackage(source: InputStream): ImportResult = withImportSpool { spool ->
+        val envelope = spool.read(source)
+        importParsed(validatePayload(envelope.version, envelope.id, envelope.payload, spool.bytes))
+    }
+    internal fun importPackageFrom(open: () -> InputStream): ImportResult = withImportSpool { spool ->
+        val parsed = open().use { source ->
+            val envelope = spool.read(source)
+            validatePayload(envelope.version, envelope.id, envelope.payload, spool.bytes)
+        }
+        importParsed(parsed)
+    }
     fun importPackage(text: String): ImportResult {
-        val parsed = validate(text)
+        Utf8Payload.byteCount(text, MAX_PACKAGE)
+        return withImportSpool { spool ->
+            val envelope = spool.read(java.io.StringReader(text))
+            importParsed(validatePayload(envelope.version, envelope.id, envelope.payload, spool.bytes))
+        }
+    }
+    private fun withImportSpool(work: (BackupPackageSpool) -> ImportResult): ImportResult {
+        val spool = BackupPackageSpool(blobs.backupStagingParent)
+        val result = try { work(spool) } catch (failure: Throwable) {
+            try { spool.close() } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
+            throw failure
+        }
+        return try { spool.close(); result } catch (_: Exception) {
+            // The import already committed. Preserve its result so the host refreshes committed data.
+            result.copy(cleanupProblem = "导入已确认，但私有暂存文件清理未完成")
+        }
+    }
+    private fun importParsed(parsed: Parsed): ImportResult {
         val access = if (parsed.images.isEmpty()) null else requireNotNull(imageAssets) { "消息原图存储未接入；不能恢复图片引用" }
         val video = if (parsed.videos.sidecars.isEmpty()) null else requireNotNull(videoIntegration) { "原视频存储未接入；不能恢复视频引用" }
         val db = transactions.database()
@@ -424,15 +467,8 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val children: BackupChildTaskCodec.Validated, val runtimeUsage: BackupRuntimeUsageCodec.Validated,
         val version: Long, val columns: Map<String, List<String>>,
         val static: List<app.daiyu.android.storage.StaticGenerationOutput>)
-    private fun validate(text: String): Parsed {
-        Utf8Payload.byteCount(text, MAX_PACKAGE)
-        val envelope = objectOf(text); fields(envelope, setOf("format", "version", "sha256", "payload"))
-        val version = integer(envelope, "version")
-        require(envelope.get("format") == "daiyu-neutral-complete" && version in 1L..5L)
+    private fun validatePayload(version: Long, id: String, payload: JSONObject, bytes: Map<String, ByteArray>): Parsed {
         val schema = columnsFor(version)
-        val raw = string(envelope, "payload"); val id = Utf8Payload.sha256(raw)
-        require(id == string(envelope, "sha256")) { "备份摘要不匹配" }
-        val payload = objectOf(raw)
         val payloadFields = setOf("text_backup", "tables", "config", "blobs", "excluded", "inventory")
         fields(payload, payloadFields + listOf("message_images", "message_videos").filter { payload.has(it) } +
             (if (version >= 2L) setOf("generation_history", "child_task_history") else emptySet()) +
@@ -452,18 +488,17 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             val primary = columns.first(); uniqueIds(rows, primary)
             repeat(rows.length()) { fields(rows.getJSONObject(it), columns.toSet()) }
         }
-        val bytes = mutableMapOf<String, ByteArray>(); var total = 0L
+        val hashes = hashSetOf<String>(); var total = 0L
         val encoded = payload.getJSONArray("blobs"); require(encoded.length() <= 50000)
-        repeat(encoded.length()) { val blob = encoded.getJSONObject(it); fields(blob, setOf("sha256", "bytes", "data"))
-            val hash = string(blob, "sha256"); require(hash.matches(Regex("[0-9a-f]{64}")) && hash !in bytes)
+        repeat(encoded.length()) { val blob = encoded.getJSONObject(it)
+            fields(blob, setOf("sha256", "bytes"))
+            val hash = string(blob, "sha256"); require(hash.matches(Regex("[0-9a-f]{64}")) && hashes.add(hash))
             val size = integer(blob, "bytes"); require(size in 0..PrivateBlobs.MAX_BLOB)
-            total += size; require(total <= MAX_BYTES) // Reserve before allocating decoded originals.
-            val data = string(blob, "data"); require(data.length.toLong() <= (size + 2) / 3 * 4)
-            val decoded = Base64.decode(data, Base64.NO_WRAP); require(decoded.size.toLong() == size && PrivateBlobs.digest(decoded) == hash)
-            bytes[hash] = decoded
-            // This private parsed projection is never reserialized as the source package.
-            blob.remove("data")
+            total += size; require(total <= MAX_BYTES)
+            val decoded = bytes.getValue(hash)
+            require(decoded.size.toLong() == size && PrivateBlobs.digest(decoded) == hash)
         }
+        require(hashes == bytes.keys)
         val used = mutableSetOf<String>()
         val imageReferences = BackupImageManifest.References().apply { addRows(messages) }
         val archives = tables.getJSONArray("context_archives")

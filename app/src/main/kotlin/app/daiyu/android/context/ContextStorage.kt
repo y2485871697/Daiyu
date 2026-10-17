@@ -35,6 +35,7 @@ object ContextStorage {
 
 /** Content addressed immutable private files. Files precede DB references: crash leaves only harmless orphans. */
 class PrivateBlobs(context: Context) {
+    internal val backupStagingParent: File = context.cacheDir
     private val root = File(context.filesDir, "neutral-context-blobs").apply { check(mkdirs() || isDirectory) }
     fun put(bytes: ByteArray): String {
         require(bytes.size.toLong() <= MAX_BLOB)

@@ -94,7 +94,7 @@ class PtyRootScopeProtocolTest {
 
     @Test fun rootLaunchRebuildsGuestEnvironmentAfterSuShell() {
         val root = Files.createTempDirectory("pty-root-env-").toFile()
-        val helper = root.resolve("helper with ' quote").apply { writeText("helper"); setExecutable(true) }
+        val helper = root.resolve("helper== with ' quote").apply { writeText("helper"); setExecutable(true) }
         val su = root.resolve("su with space").apply { writeText("su"); setExecutable(true) }
         val rootfs = root.resolve("root fs").apply { mkdirs() }
         val launch = RootScopeLaunch(rootfs.canonicalFile, su.canonicalFile)
@@ -109,6 +109,7 @@ class PtyRootScopeProtocolTest {
             fun quote(value: String) = "'" + value.replace("'", "'\"'\"'") + "'"
             val expected = listOf("/system/bin/env", "-i") +
                 environment.toSortedMap().map { (key, value) -> "$key=$value" } +
+                listOf("/system/bin/sh", "-c", "exec \"$@\"", "daiyu-root-pty") +
                 listOf(helper.path, "--root-scope", "24", "80", "--") + launch.guestArgv()
             assertEquals(listOf(launch.su.path, "-c", "exec " + expected.joinToString(" ") { quote(it) }),
                 checkNotNull(captured).command())

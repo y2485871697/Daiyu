@@ -66,6 +66,7 @@ internal fun ChatMessageList(
     var consumedScrollSerial by rememberSaveable { mutableStateOf<Long?>(null) }
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
+    val currentReadAction by rememberUpdatedState(actions.onVisibleCompleted)
     val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
     val scope = rememberCoroutineScope()
     val requestedIndex = scrollRequest?.targetIndex(turns) ?: -1
@@ -109,6 +110,33 @@ internal fun ChatMessageList(
                     val overflow = last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset
                     if (overflow > 0) listState.scrollBy(overflow.toFloat())
                 }
+            }
+        }
+    }
+    // Read confirmation observes existing measured layout only; it never changes follow/scroll.
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            val visibleKeys = layout.visibleItemsInfo.filter {
+                it.size > 0 && it.offset < layout.viewportEndOffset &&
+                    it.offset + it.size in (layout.viewportStartOffset + 1)..layout.viewportEndOffset
+            }.map { it.key }.toSet()
+            Triple(currentTurns, visibleKeys, currentReadAction)
+        }.collectLatest { (rendered, visibleKeys, confirm) ->
+            val completed = rendered.filterIsInstance<ChatTurnUi.Assistant>()
+                .filter { it.status == RunStatus.COMPLETED && it.listKey in visibleKeys }.map { it.listKey }.toSet()
+            if (completed.isNotEmpty()) {
+                // A turns update can arrive before that frame's measurement. Allow a full frame
+                // to apply/measure the terminal content, then inspect the measured tail again.
+                withFrameNanos { }
+                withFrameNanos { }
+                val layout = listState.layoutInfo
+                val stillVisible = layout.visibleItemsInfo.filter {
+                    it.size > 0 && it.offset < layout.viewportEndOffset &&
+                    it.offset + it.size in (layout.viewportStartOffset + 1)..layout.viewportEndOffset
+                }.map { it.key }.toSet()
+                if (currentTurns == rendered && currentReadAction === confirm)
+                    confirm(completed.filter { it in stillVisible }.toSet())
             }
         }
     }

@@ -68,7 +68,7 @@ class RetainedConversationDataTest : android.test.AndroidTestCase() {
         assertTrue(recorded.scanComplete); assertEquals(61, recorded.messagesWithoutCheckpoint)
         assertEquals(0L, recorded.summary.requestSnapshotCount); assertNull(recorded.summary.input.reportedTokens)
         val summary = data.summaries(null).single()
-        assertFalse(summary.isActiveRun); assertFalse(summary.hasCompletionMarker)
+        assertFalse(summary.isActiveRun); assertTrue(summary.hasCompletionMarker) // Real completed events remain unread.
     }
     fun testMixedImageHistorySearchKeepsSegmentAndNavigationOwnerWithoutMetadataLeaks() {
         val conversation = database.create("default"); val run = RunId("image-history-run")

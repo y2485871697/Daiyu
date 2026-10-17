@@ -10,6 +10,7 @@ import app.daiyu.android.domain.RunStatus
 object ChatTurnMapper {
     fun map(
         messages: List<Message>,
+        confirmedToolError: (Message, MessageBlock.Tool) -> Boolean? = { _, _ -> null },
         timestamp: (Message) -> String = { "" },
     ): List<ChatTurnUi> {
         // The host can pass either persisted owners or already-expanded history. Expansion
@@ -30,12 +31,12 @@ object ChatTurnMapper {
                     id = message.id.value,
                     text = message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n\n") { it.text },
                     timestamp = timestamp(message),
-                    content = mixedContent(message),
+                    content = mixedContent(message, confirmedToolError),
                     listKey = listKey,
                     ownerMessageId = databaseOwners[owner] ?: message.id.value,
                     segmentIndex = segment,
                 )
-                Message.ASSISTANT_ROLE -> mapAssistant(message, timestamp(message)).copy(
+                Message.ASSISTANT_ROLE -> mapAssistant(message, timestamp(message), confirmedToolError).copy(
                     listKey = listKey,
                     ownerMessageId = databaseOwners[owner] ?: message.id.value,
                     segmentIndex = segment,
@@ -59,26 +60,32 @@ object ChatTurnMapper {
     }
 
     /** Legacy text-only layout remains unchanged; mixed content is authoritative when set. */
-    private fun mixedContent(message: Message): List<MessageContentUi> {
+    private fun mixedContent(message: Message,
+        confirmedToolError: (Message, MessageBlock.Tool) -> Boolean?): List<MessageContentUi> {
         if (message.blocks.none { it is MessageBlock.Image }) return emptyList()
         val owner = MessageImageOwner(message.conversationId.value, message.id.value)
         return message.blocks.map { block -> when (block) {
             is MessageBlock.Text -> MessageContentUi.Text(block.itemId, block.text)
             is MessageBlock.Image -> MessageContentUi.Image(MessageImageUi(owner, block.reference))
             is MessageBlock.Tool -> MessageContentUi.Tool(
-                workStep(block, message.status), block.invocation.arguments, block.result,
+                workStep(block, message.status, confirmedToolError(message, block)), block.invocation.arguments, block.result,
             )
         } }
     }
 
-    private fun workStep(block: MessageBlock.Tool, status: RunStatus) = WorkStepUi(
+    private fun workStep(block: MessageBlock.Tool, status: RunStatus, confirmedError: Boolean?) = WorkStepUi(
         id = block.invocation.id.value,
         name = block.invocation.name,
         detail = block.result?.takeIf { it.isNotBlank() } ?: block.invocation.arguments,
-        state = stepState(block.result, status),
+        state = when (confirmedError) {
+            true -> WorkStepState.FAILED
+            false -> WorkStepState.OK
+            null -> stepState(block.result, status)
+        },
     )
 
-    private fun mapAssistant(message: Message, timestamp: String): ChatTurnUi.Assistant {
+    private fun mapAssistant(message: Message, timestamp: String,
+        confirmedToolError: (Message, MessageBlock.Tool) -> Boolean?): ChatTurnUi.Assistant {
         val hasTools = message.blocks.any { it is MessageBlock.Tool }
         val lastText = message.blocks.indexOfLast { it is MessageBlock.Text }
         val finalText = if (hasTools) {
@@ -95,7 +102,7 @@ object ChatTurnMapper {
                         segments += WorkSegmentUi(narration = block.text)
                     }
                     is MessageBlock.Tool -> {
-                        val step = workStep(block, message.status)
+                        val step = workStep(block, message.status, confirmedToolError(message, block))
                         // Keep even trailing tools while reserving the last text for the final answer.
                         if (segments.isEmpty()) segments += WorkSegmentUi()
                         val previous = segments.last()
@@ -122,7 +129,7 @@ object ChatTurnMapper {
             status = message.status,
             error = message.error,
             reportedReasoning = message.reportedReasoning,
-            content = mixedContent(message),
+            content = mixedContent(message, confirmedToolError),
         )
     }
 

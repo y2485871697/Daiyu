@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.SpeechRecognizer
+import androidx.compose.ui.test.*
 import app.daiyu.android.voice.*
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -104,6 +105,54 @@ class DictationActivityTest : WiredActivityTestCase() {
             activity.onRequestPermissionsResult(code, arrayOf(Manifest.permission.RECORD_AUDIO),
                 intArrayOf(if (granted) PackageManager.PERMISSION_GRANTED else PackageManager.PERMISSION_DENIED))
         }
+    }
+
+    fun testRealMainProjectsOnlyOwnedRecognizerListeningAndFencesLateReady() {
+        setDraft("base")
+        voice()
+        val first = platform.listeners.last()
+        ui.onNodeWithContentDescription("语音输入").assertExists() // A click/PREPARING is not listening.
+        assertFalse(host.state.value.listening)
+        first.onReadyForSpeech(Bundle())
+        instrumentation.waitForIdleSync()
+        ui.onNodeWithContentDescription("停止语音输入").assertExists()
+        assertTrue(host.state.value.listening)
+        first.onEndOfSpeech()
+        instrumentation.waitForIdleSync()
+        ui.onNodeWithContentDescription("语音输入").assertExists() // Waiting for final is not capture.
+        assertFalse(host.state.value.listening)
+        mainThread { activity.select(null) } // Same nullable conversation, a different editor owner.
+        first.onReadyForSpeech(Bundle())
+        instrumentation.waitForIdleSync()
+        ui.onNodeWithContentDescription("语音输入").assertExists()
+        assertFalse(host.state.value.listening)
+        voice()
+        val hidden = platform.listeners.last()
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        hidden.onReadyForSpeech(Bundle())
+        instrumentation.waitForIdleSync()
+        backToChat(activity)
+        ui.onNodeWithContentDescription("语音输入").assertExists()
+        assertFalse(host.state.value.listening)
+        voice()
+        val background = platform.listeners.last()
+        mainThread { call("onPause") }
+        background.onReadyForSpeech(Bundle())
+        instrumentation.waitForIdleSync()
+        mainThread { call("onResume") }
+        ui.onNodeWithContentDescription("语音输入").assertExists()
+        assertFalse(host.state.value.listening)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testMainRunningIsNotRecognitionListening() {
+        val session = fixture.session(holdSeconds = 120)
+        setDraft("request"); node("chat-send").performClick(); awaitTextSendResult(activity)
+        ui.onNodeWithContentDescription("语音输入").assertExists()
+        ui.onNodeWithContentDescription("停止语音输入").assertDoesNotExist()
+        assertFalse(host.state.value.listening)
+        session.release.countDown()
+        awaitControl("run completed") { fixture.controller.active == null }
     }
 
     fun testActivityPermissionDenialGrantAndExplicitRetryNeverSend() {

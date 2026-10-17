@@ -109,4 +109,78 @@ class ChatMessageListMeasurePhaseTest : ComposeActivityTestCase() {
         ui.onNodeWithText("touch controlled tail").assertIsDisplayed()
     }
 
+    fun testReadAuthorizationChangeRechecksAlreadyMeasuredCompletedTurn() {
+        val terminal = ChatTurnUi.Assistant("completed", finalText = "already measured answer",
+            status = app.daiyu.android.domain.RunStatus.COMPLETED)
+        var allowed by mutableStateOf(false)
+        val refused = java.util.concurrent.atomic.AtomicInteger()
+        val accepted = java.util.concurrent.atomic.AtomicInteger()
+        val deny: (Set<String>) -> Unit = { keys ->
+            if (terminal.listKey in keys) refused.incrementAndGet()
+        }
+        val accept: (Set<String>) -> Unit = { keys ->
+            if (terminal.listKey in keys) accepted.incrementAndGet()
+        }
+        mount {
+            ChatMessageList(listOf(terminal), false,
+                ChatScreenActions(onVisibleCompleted = if (allowed) accept else deny))
+        }
+        ui.waitUntil(5_000) { refused.get() > 0 }
+        assertEquals(0, accepted.get())
+        ui.onNodeWithText("already measured answer").assertIsDisplayed()
+        mainThread { allowed = true }
+        ui.waitUntil(5_000) { accepted.get() > 0 }
+        ui.onNodeWithText("already measured answer").assertIsDisplayed()
+    }
+
+    fun testUnfocusedComposerAcceptsExplicitRangesAndFreshEditor() {
+        var composer by mutableStateOf(ComposerUi("abcdef", selectionStart = 0, selectionEnd = 0))
+        val actions = ChatScreenActions(onSelectionChange = { start, end ->
+            composer = composer.copy(selectionStart = start, selectionEnd = end)
+        })
+        mount { ChatComposer(composer, actions) }
+        ui.onNodeWithTag("chat-draft").assertIsNotFocused()
+        for (range in listOf(androidx.compose.ui.text.TextRange(2, 4),
+            androidx.compose.ui.text.TextRange(4), androidx.compose.ui.text.TextRange(4, 2))) {
+            ui.onNodeWithTag("chat-draft").performSemanticsAction(
+                androidx.compose.ui.semantics.SemanticsActions.SetSelection) {
+                assertTrue(it(range.start, range.end, false))
+            }
+            ui.onNodeWithTag("chat-draft").assert(SemanticsMatcher.expectValue(
+                androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange, range))
+        }
+        mainThread { composer = composer.copy(editorGeneration = 1, selectionStart = 1, selectionEnd = 3) }
+        ui.onNodeWithTag("chat-draft").assert(SemanticsMatcher.expectValue(
+            androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange,
+            androidx.compose.ui.text.TextRange(1, 3)))
+    }
+
+    fun testReadConfirmationDoesNotStarveWhileCallbackChangesEveryFrame() {
+        val terminal = ChatTurnUi.Assistant("stable", finalText = "stable measured answer")
+        var churn by mutableStateOf(false)
+        var epoch by mutableStateOf(0)
+        val received = java.util.concurrent.atomic.AtomicInteger()
+        mount {
+            androidx.compose.runtime.LaunchedEffect(churn) {
+                if (churn) repeat(20) {
+                    androidx.compose.runtime.withFrameNanos { }
+                    epoch++
+                }
+            }
+            val callback = androidx.compose.runtime.remember(epoch) {
+                { keys: Set<String> -> if (terminal.listKey in keys) received.incrementAndGet(); Unit }
+            }
+            ChatMessageList(listOf(terminal), false, ChatScreenActions(onVisibleCompleted = callback))
+        }
+        ui.waitUntil(5_000) { received.get() > 0 }
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { churn = true; received.set(0) }
+            repeat(8) { ui.mainClock.advanceTimeByFrame() }
+            assertTrue("read confirmation must complete before callback churn stops", received.get() > 0)
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
 }

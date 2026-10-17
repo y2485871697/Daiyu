@@ -12,7 +12,8 @@ internal class PlatformActionScope(
     val runId: RunId,
     val action: PlatformAction,
     val authorization: TaskAuthorization,
-    private val backend: PlatformActionBackend
+    private val backend: PlatformActionBackend,
+    private val onDrained: () -> Unit = {},
 ) : AutoCloseable {
     private var owner: RunExecutionOwner? = null
     private var closed = false
@@ -78,6 +79,7 @@ internal class PlatformActionScope(
             val result = if (unknown) RunCatalogCloseResult.Unknown("platform_effect_unverified_no_retry") else RunCatalogCloseResult.Drained
             observers.toList().also { observers.clear() } to result
         }
+        if (delivery.second == RunCatalogCloseResult.Drained) onDrained()
         delivery.first.forEach { it(delivery.second) }
     }
 }

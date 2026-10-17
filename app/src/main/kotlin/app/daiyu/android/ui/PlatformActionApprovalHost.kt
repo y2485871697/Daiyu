@@ -13,6 +13,8 @@ import app.daiyu.android.ChatController
 import app.daiyu.android.ControllerPlatformActionPreparation
 import app.daiyu.android.domain.Conversation
 import app.daiyu.android.platform.actions.PlatformActionKind
+import app.daiyu.android.tasksurface.*
+import app.daiyu.android.ui.screens.settings.TaskSurfaceLocationDialog
 import org.json.JSONObject
 
 /** Dedicated, opt-in composer adjunct. Settings/capability switches never issue a WRITE grant. */
@@ -34,6 +36,8 @@ import org.json.JSONObject
     var preview by remember(owner, visit) { mutableStateOf<ControllerPlatformActionPreparation?>(null) }
     var error by remember(owner, visit) { mutableStateOf<String?>(null) }
     var sending by remember(owner, visit) { mutableStateOf(false) }
+    var locationState by remember(owner, visit) { mutableStateOf<TaskSurfaceDecision?>(null) }
+    var locationQuestion by remember(owner, visit) { mutableStateOf<TaskSurfaceRunDecision.LocationQuestion?>(null) }
     val active = remember(owner, visit) { java.util.concurrent.atomic.AtomicBoolean(true) }
     val currentState by rememberUpdatedState(isCurrent)
     fun current(expected: ChatController.TextSendOwner, value: String) = active.get() && currentState(expected, value)
@@ -105,19 +109,47 @@ import org.json.JSONObject
                     sending = false
                     preview = arguments?.let { controller.preparePlatformAction(conversation, text, checkNotNull(selected), it) }
                     error = if (preview == null) "参数、系统能力或运行状态不允许；未执行。请检查精确值。" else null
+                    locationState = null; locationQuestion = null
+                    preview?.takeIf { it.requiresLocation }?.let { frozen ->
+                        if (!controller.preparePlatformActionLocation(frozen) { route ->
+                            if (preview !== frozen || !current(owner, text)) controller.rejectPlatformAction(frozen)
+                            else {
+                                locationState = route
+                                if (route === TaskSurfaceDecision.AskRequired) {
+                                    val location = frozen.location
+                                    locationQuestion = location?.let { it.adapter?.askFromUser(it.request) }
+                                }
+                            }
+                        }) locationState = TaskSurfaceDecision.NotExecuted("CLOCK_LOCATION_UNAVAILABLE", "位置准备不可用；未执行")
+                    }
                 }) { Text("预览本次精确动作") }
         }
     }
     preview?.let { frozen ->
-        AlertDialog(onDismissRequest = { controller.rejectPlatformAction(frozen); preview = null },
+        val location = frozen.location
+        val question = locationQuestion
+        val adapter = location?.adapter
+        if (question != null && location != null && adapter != null) {
+            TaskSurfaceLocationDialog(adapter, location.request, question, onResolved = {
+                locationQuestion = null
+                locationState = location.decision()
+            })
+        } else AlertDialog(onDismissRequest = { controller.rejectPlatformAction(frozen); preview = null },
             title = { Text("确认单次系统操作") },
             text = { Column(Modifier.heightIn(max = 440.dp).verticalScroll(rememberScrollState())) {
                 Text("会话 ${frozen.conversationId.value}\n运行 ${frozen.runId.value}\n${frozen.action.preview}")
                 Text("以下为完整发送内容。仅此动作可获写授权；更换参数会被拒绝。Intent/媒体键不能验证效果，UNKNOWN 将保留原运行且禁止自动重试。")
                 Text(frozen.messageText)
+                if (frozen.requiresLocation) {
+                    val state = locationState
+                    if (state == null) Text("正在冻结原运行的执行位置；尚未批准动作。")
+                    else if (state is TaskSurfaceDecision.NotExecuted) Text("${state.code}：${state.message}")
+                    else if (state is TaskSurfaceDecision.Ready) Text("本次位置：前台。位置选择不授予动作权限；仍须下方单次批准。")
+                }
                 error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             } },
-            confirmButton = { Button(enabled = !sending && !frozen.submitted, modifier = Modifier.testTag("platform-action-confirm"), onClick = {
+            confirmButton = { Button(enabled = !sending && !frozen.submitted &&
+                (!frozen.requiresLocation || (locationState is TaskSurfaceDecision.Ready && location?.ready(TaskSurface.FOREGROUND) != null)), modifier = Modifier.testTag("platform-action-confirm"), onClick = {
                 sending = true
                 if (!current(owner, text)) {
                     controller.rejectPlatformAction(frozen); preview = null; error = "草稿或页面已变化，未发送"

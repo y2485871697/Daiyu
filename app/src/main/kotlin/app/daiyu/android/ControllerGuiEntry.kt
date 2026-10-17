@@ -8,11 +8,12 @@ import java.util.UUID
 /** Retained by Controller before opening the real screen lease or overlay. These IDs are also
  * used by database acceptance and Runner; approval never creates a parallel task or dispatcher. */
 internal class ControllerGuiEntry(val conversation: Conversation?, val editor: ChatController.TextSendOwner,
-    val text: String, val operation: GuiOperation, val input: String?) {
+    val text: String, val operation: GuiOperation, val input: String?, val targetPackage: String? = null) {
     val conversationId = conversation?.id ?: ConversationId(UUID.randomUUID().toString())
     val runId = RunId(UUID.randomUUID().toString())
     val assistantId = MessageId(UUID.randomUUID().toString())
     val sessionId = runId.value
+    lateinit var taskSurface: ControllerTaskSurface
     var session: GuiRunSession? = null
     var delivery: GuiConfirmedDelivery? = null
     var submitted = false
@@ -26,5 +27,7 @@ internal class ControllerGuiEntry(val conversation: Conversation?, val editor: C
         require(editor.editorGeneration >= 0 && editor.draftRevision >= 0)
         require((operation == GuiOperation.INPUT) == (input != null))
         require(input == null || input.length <= 4096)
+        require(targetPackage == null || (targetPackage.length <= 255 &&
+            targetPackage.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)*"))))
     }
 }

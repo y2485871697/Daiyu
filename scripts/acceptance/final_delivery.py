@@ -13,10 +13,12 @@ from pathlib import Path
 import subprocess
 import sys
 import zipfile
+import zlib
 
 # Existing scripts remain the authoritative signing/reuse policy implementations.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import verify_signing
+import verify_license_bundle
 import verify_smoke_source
 import cloud_report
 import evidence
@@ -90,7 +92,7 @@ def run_and_job(files, run_ref, jobs_ref, expected, name):
     return run, jobs["jobs"], job
 
 
-def delivery(files, document, expected):
+def delivery(files, document, expected, repo_root):
     shape(document, ("run", "jobs", "artifact", "archive", "record", "sums", "signature", "app", "test"),
           "invalid_delivery")
     run, jobs, job = run_and_job(files, document["run"], document["jobs"], expected, "单测、检查与开发包")
@@ -153,6 +155,18 @@ def delivery(files, document, expected):
             verify_signing.verify_certificate(output)
         except ValueError:
             raise InvalidEvidence("signature_evidence_mismatch") from None
+    # Bind the license gate to the main APK, not the test APK or a fixture ZIP.
+    # Recheck the existing digest on this same safely opened stream before ZIP
+    # inspection; a path substitution between the earlier checks cannot pass.
+    app_path = artifact_path(files.root, document["app"]["path"])
+    with os.fdopen(evidence._open_regular(app_path), "rb") as stream:
+        require(stream_digest(stream, APK_LIMIT) == document["app"]["sha256"], "file_digest_mismatch")
+        stream.seek(0)
+        try:
+            records = verify_license_bundle.verify_tree(Path(repo_root))
+            verify_license_bundle.verify_apk(Path(repo_root), stream, records)
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError, zipfile.BadZipFile, NotImplementedError):
+            raise InvalidEvidence("apk_license_bundle_mismatch") from None
     return record, run, jobs, {"artifact_id": meta["id"], "artifact_sha256": document["archive"]["sha256"],
                               "metadata_sha256": document["artifact"]["sha256"],
                               "app_sha256": document["app"]["sha256"], "test_sha256": document["test"]["sha256"]}
@@ -197,7 +211,7 @@ def verify(manifest_path, manifest_sha256, repo_root, evidence_root,
         require(doc["build"] != doc["check"], "recheck_identity_required")
     files = Files(evidence_root)
     source = source_gate.verify(repo_root, check_sha)
-    record, run, jobs, apk = delivery(files, doc["delivery"], doc["build"])
+    record, run, jobs, apk = delivery(files, doc["delivery"], doc["build"], repo_root)
     reuse_ok = doc["mode"] == "full_build"
     if not reuse_ok and source["source_bound"]:
         reuse(repo_root, doc["build"], doc["check"], record, run, jobs)
@@ -268,7 +282,7 @@ def main(argv=None):
                           "internal_consistency_satisfied": False, "trusted_collection": False}, sort_keys=True))
         return 2
     except (OSError, ValueError, TypeError, KeyError, RecursionError, OverflowError, subprocess.SubprocessError,
-            zipfile.BadZipFile, NotImplementedError):
+            zipfile.BadZipFile, NotImplementedError, zlib.error):
         print('{"valid": false, "error": "unreadable_or_invalid_input", "final_acceptance_passed": false, '
               '"business_satisfied": false, "business_evidence_authenticated": false, '
               '"internal_consistency_satisfied": false, "trusted_collection": false}')

@@ -36,6 +36,10 @@ androidComponents.onVariants { variant ->
     variant.sources.kotlin?.addGeneratedSourceDirectory(stageBrowserCore,StageBrowserCore::outputDirectory)
 }
 
+val daiyuSyntheticApplication = providers.gradleProperty("daiyuSyntheticApplication").map {
+    it.toBooleanStrictOrNull() ?: error("daiyuSyntheticApplication 必须是 true 或 false")
+}.getOrElse(false)
+
 android {
     buildFeatures { compose = true; aidl = true }
     useLibrary("android.test.runner")
@@ -104,7 +108,10 @@ android {
         }
     }
     buildTypes {
-        debug { if (fixedSigning) signingConfig = signingConfigs.getByName("release") }
+        debug {
+            if (daiyuSyntheticApplication) applicationIdSuffix = ".synthetic"
+            if (fixedSigning) signingConfig = signingConfigs.getByName("release")
+        }
         release {
             isMinifyEnabled = false
             if (fixedSigning) signingConfig = signingConfigs.getByName("release")

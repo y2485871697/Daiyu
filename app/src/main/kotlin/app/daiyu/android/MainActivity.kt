@@ -3071,7 +3071,10 @@ class MainActivity : ComponentActivity() {
 
     private fun cancelVirtualDisplayPlan(original: VirtualDisplayPlanVisit) {
         original.host.cancel()
-        if (virtualDisplayPlanVisit === original) virtualDisplayPlanVisit = null
+        if (virtualDisplayPlanVisit === original) {
+            virtualDisplayPlanVisit = null
+            publishChat(rowsChanged = false)
+        }
     }
 
     private fun freezeVirtualDisplayPlan(original: VirtualDisplayPlanVisit, frozen: R08FrozenPlan) {

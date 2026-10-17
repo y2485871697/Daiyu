@@ -5,6 +5,7 @@ import android.content.Context
 import android.test.InstrumentationTestCase
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.*
+import app.daiyu.android.tasksurface.*
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -24,6 +25,8 @@ internal class RunControlFixture(base:Context,
     val database=ConversationDatabase(application)
     private val alias="app.daiyu.android.test.run-control.${UUID.randomUUID()}"
     val settings=ModelSettingsStore(application,alias)
+    // Never use AndroidTaskSurfaceStore here: UI fixtures must not read or change user preference.
+    val taskSurfaces = isolatedTaskSurfaceStore(TaskSurfacePreference.FOREGROUND)
     val opens=AtomicInteger()
     private val sessions=mutableListOf<Session>()
     private val queued=java.util.ArrayDeque<Session>()
@@ -41,7 +44,7 @@ internal class RunControlFixture(base:Context,
             }
         }
         controller=ChatController(application,database,settings,application.getSharedPreferences("conversation-ui",0),factory,
-            virtualDisplayFactory = virtualDisplayFactory, mcpTransport = mcpTransport,
+            virtualDisplayFactory = virtualDisplayFactory, mcpTransport = mcpTransport, taskSurfaceStore = taskSurfaces,
             sessionModel = if (onSession == null) null else { provider, assistant, session ->
                 onSession(provider, assistant, session); factory(provider.asModelSettings())
             })

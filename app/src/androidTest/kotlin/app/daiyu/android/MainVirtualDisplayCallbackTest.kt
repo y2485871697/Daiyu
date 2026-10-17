@@ -79,7 +79,7 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
             val root = context.cacheDir.canonicalFile.toPath().resolve("main-vd-callback-$leaseId")
             ControllerVirtualDisplayRuntime.assemble(owner, caps, writes, reads, parent, retention,
                 ControllerVirtualDisplayRuntime.LeaseStore({ root }, gate)) { host }
-        })
+        }).also { check(it.taskSurfaces.save(app.daiyu.android.tasksurface.TaskSurfacePreference.BACKGROUND)) }
 
     private fun invokeMain(name: String, vararg arguments: Any?): Any? {
         val method = MainActivity::class.java.declaredMethods.single {
@@ -100,12 +100,18 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         node("vd-prepare-entry").assertIsEnabled().performClick()
         // Real R08 editor visit freezes inputs before the unchanged Controller prepare seam.
         node("r08-plan-freeze").assertExists().performClick()
+        awaitControl("retained background location decision") {
+            fixture.controller.virtualDisplayEntry()?.taskSurface?.ready(app.daiyu.android.tasksurface.TaskSurface.BACKGROUND) != null
+        }
         node("vd-cancel").assertExists()
         var prepared: ControllerVirtualDisplayEntry? = null
         mainThread { prepared = editor() }
         return checkNotNull(prepared)
     }
     private fun submit(entry: ControllerVirtualDisplayEntry): VirtualDisplayApprovalRequest {
+        awaitControl("same entry ready for its background backend") {
+            entry.taskSurface.ready(app.daiyu.android.tasksurface.TaskSurface.BACKGROUND) != null
+        }
         node("vd-submit").performClick()
         awaitTextSendResult(activity)
         awaitControl("Main displays the exact accepted-run request") {

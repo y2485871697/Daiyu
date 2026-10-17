@@ -8,6 +8,9 @@ import java.util.concurrent.TimeUnit
 /** Production Main navigation and real Controller preparation. No root, owner or transport is
  * opened by these tests. Accepted/lease behavior is covered by ControllerVirtualDisplayParentTest. */
 class VirtualDisplayMainActivityTest : WiredActivityTestCase() {
+    internal override fun createFixture() = super.createFixture().also {
+        check(it.taskSurfaces.save(app.daiyu.android.tasksurface.TaskSurfacePreference.BACKGROUND))
+    }
     private val text = "只在本次批准的副屏运行\n保留原始正文  "
     private fun invoke(name: String, vararg args: Any?): Any? =
         MainActivity::class.java.declaredMethods.single { it.name == name && it.parameterCount == args.size }
@@ -17,7 +20,53 @@ class VirtualDisplayMainActivityTest : WiredActivityTestCase() {
         setDraft(text)
         node("vd-prepare-entry").performScrollTo().performClick()
         node("r08-plan-freeze").performClick()
+        awaitControl("original VD location frozen to background") {
+            fixture.controller.virtualDisplayEntry()?.taskSurface?.ready(app.daiyu.android.tasksurface.TaskSurface.BACKGROUND) != null
+        }
         return checkNotNull(fixture.controller.virtualDisplayEntry())
+    }
+
+    fun testForegroundPreferenceHasNoEquivalentVdBackendAndCannotSubmit() {
+        check(fixture.taskSurfaces.save(app.daiyu.android.tasksurface.TaskSurfacePreference.FOREGROUND))
+        setDraft(text)
+        node("vd-prepare-entry").performScrollTo().performClick()
+        node("r08-plan-freeze").performClick()
+        awaitControl("foreground VD plan rejected without fallback") { fixture.controller.virtualDisplayEntry() == null }
+        node("vd-submit").assertDoesNotExist()
+        assertNull(fixture.controller.textSendState())
+        assertEquals(0, fixture.opens.get())
+        assertTrue(fixture.database.conversations().isEmpty())
+        assertDraft(text)
+    }
+
+    fun testCancelledLocationAndRetainedResolvedCallbackCannotDefaultToForegroundOrChangeNewEntry() {
+        check(fixture.taskSurfaces.save(app.daiyu.android.tasksurface.TaskSurfacePreference.ASK))
+        setDraft(text)
+        node("vd-prepare-entry").performScrollTo().performClick()
+        node("r08-plan-freeze").performClick()
+        awaitControl("VD location question pending before acceptance") {
+            fixture.controller.virtualDisplayEntry()?.taskSurface?.decision() === app.daiyu.android.tasksurface.TaskSurfaceDecision.AskPending
+        }
+        val original = checkNotNull(fixture.controller.virtualDisplayEntry())
+        lateinit var visit: Any
+        mainThread {
+            visit = checkNotNull(invoke("getTaskLocationVisit"))
+            assertNull(original.owner); assertNull(original.session)
+            assertFalse(original.submitted)
+            invoke("taskLocationResolved", visit, null) // shared production dialog-dismiss callback
+            assertTrue(original.revoked)
+            assertNull(fixture.controller.virtualDisplayEntry())
+        }
+        check(fixture.taskSurfaces.save(app.daiyu.android.tasksurface.TaskSurfacePreference.BACKGROUND))
+        val replacement = prepare()
+        mainThread {
+            invoke("taskLocationResolved", visit, app.daiyu.android.tasksurface.TaskSurface.FOREGROUND)
+            assertSame(replacement, fixture.controller.virtualDisplayEntry())
+            assertFalse(replacement.revoked); assertFalse(replacement.submitted)
+        }
+        assertEquals(0, fixture.opens.get())
+        assertTrue(fixture.database.conversations().isEmpty())
+        assertDraft(text)
     }
 
     fun testPreparationIsExplicitExclusiveAndSidebarSynchronouslyRevokesIt() {

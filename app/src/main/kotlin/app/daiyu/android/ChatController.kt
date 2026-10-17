@@ -23,6 +23,7 @@ import app.daiyu.android.context.ProductionContextPreparation
 import app.daiyu.android.context.ContextRegistry
 import app.daiyu.android.context.ContextRegistryScope
 import app.daiyu.android.integration.tools.*
+import app.daiyu.android.tasksurface.*
 import app.daiyu.android.delegation.*
 import app.daiyu.android.domain.delegation.ChildTaskRecord
 import app.daiyu.android.domain.delegation.ChildTaskCommand
@@ -140,7 +141,7 @@ class ChatController internal constructor(private val application:Application,
         app.daiyu.android.platform.actions.AndroidPlatformActionBackend(application),
     private val mcpTransport: (app.daiyu.android.mcp.McpServer) -> app.daiyu.android.mcp.McpHttpSession = {
         app.daiyu.android.mcp.McpHttpSession(it)
-    }) {
+    }, private val taskSurfaceStore: TaskSurfaceStore = AndroidTaskSurfaceStore.get(application)) {
     // Voice credentials remain independent from chat settings.
     internal val voiceAccounts by lazy { app.daiyu.android.voice.account.VoiceAccountResources.forContext(application) }
     internal val voiceRuntime by lazy {
@@ -1149,8 +1150,9 @@ class ChatController internal constructor(private val application:Application,
                 unacceptedTools.remove(tools)
                 clearCleanupProblem(tools)
                 guiEntry?.takeIf { it.catalog === tools && !it.persistenceUnknown && it.session?.releaseConfirmed == true }
-                    ?.let { guiEntry = null }
+                    ?.let { it.taskSurface.end(); guiEntry = null }
                 virtualDisplayEntry?.takeIf { it.catalog === tools && !it.persistenceUnknown }?.let {
+                    it.taskSurface.end()
                     virtualDisplayEntry = null
                 }
             }
@@ -1641,12 +1643,33 @@ class ChatController internal constructor(private val application:Application,
         if (!idleAvailable()) return null
         val preview = runCatching {
             ControllerPlatformActionPreparation(conversation, text,
-                app.daiyu.android.platform.actions.PlatformAction.parse(kind, arguments), platformActions)
+                app.daiyu.android.platform.actions.PlatformAction.parse(kind, arguments), platformActions,
+                { taskSurfaceStore }, application.packageName,
+                clockTarget = {
+                    val action = if (kind == app.daiyu.android.platform.actions.PlatformActionKind.ALARM)
+                        android.provider.AlarmClock.ACTION_SET_ALARM else android.provider.AlarmClock.ACTION_SET_TIMER
+                    android.content.Intent(action).resolveActivity(application.packageManager)?.packageName
+                })
         }.getOrNull() ?: return null
         pendingPlatformToken = reservePreparation()
         pendingPlatformAction = preview
         notifyChanged()
         return preview
+    }
+    internal fun preparePlatformActionLocation(preview: ControllerPlatformActionPreparation,
+        complete: (app.daiyu.android.tasksurface.TaskSurfaceDecision) -> Unit): Boolean {
+        synchronized(this) {
+            if (closed || pendingPlatformAction !== preview || preview.cancelled || preview.submitted || !preview.requiresLocation) return false
+        }
+        return try {
+            executor.execute {
+                val decision = try { preview.freezeLocationOnWorker() } catch (_: Exception) {
+                    app.daiyu.android.tasksurface.TaskSurfaceDecision.NotExecuted("CLOCK_LOCATION_UNAVAILABLE", "时钟位置准备失败；未执行")
+                }
+                handler.post { complete(decision) }
+            }
+            true
+        } catch (_: java.util.concurrent.RejectedExecutionException) { false }
     }
     internal fun rejectPlatformAction(preview: ControllerPlatformActionPreparation) {
         val token = synchronized(this) {
@@ -1663,7 +1686,8 @@ class ChatController internal constructor(private val application:Application,
         complete: (Conversation?) -> Unit): Boolean {
         val token = synchronized(this) {
             if (closed || pendingPlatformAction !== preview || preview.submitted || preview.cancelled ||
-                pendingPlatformToken?.revoked != false) return false
+                pendingPlatformToken?.revoked != false ||
+                (preview.requiresLocation && preview.location?.ready(app.daiyu.android.tasksurface.TaskSurface.FOREGROUND) == null)) return false
             preview.approve() // User confirmation only, no Android calls.
             checkNotNull(pendingPlatformToken)
         }
@@ -1729,7 +1753,10 @@ class ChatController internal constructor(private val application:Application,
                 }
                 return
             }
-            synchronized(this) { if (guiEntry === gui && !gui.persistenceUnknown) guiEntry = null }
+            synchronized(this) { if (guiEntry === gui && !gui.persistenceUnknown) {
+                gui.taskSurface.end()
+                guiEntry = null
+            } }
         }
         val installed = synchronized(this) { resources?.initial?.runId == token.video?.assistant?.runId && token.video != null }
         if (!installed) {
@@ -1816,7 +1843,7 @@ class ChatController internal constructor(private val application:Application,
             if (preparation !== token) return
             preparation = null
             virtualDisplayEntry?.takeIf { !it.accepted && !token.persistenceUnconfirmed && !it.factoryEntered && it.catalog == null }
-                ?.let { virtualDisplayEntry = null }
+                ?.let { it.taskSurface.end(); virtualDisplayEntry = null }
             pendingImage = null
             if (closed) closeStorageWhenIdle() else notifyChanged()
         }
@@ -1825,29 +1852,50 @@ class ChatController internal constructor(private val application:Application,
     private var guiEntry: ControllerGuiEntry? = null
     @Synchronized internal fun guiEntry(): ControllerGuiEntry? = guiEntry
 
-    /** Main/user-only reservation. Retain the real identity before acquiring the screen lease;
-     * retain the session before Main can attach the confirmation overlay. */
-    internal fun prepareGuiSend(conversation: Conversation?, editor: TextSendOwner, text: String,
-        operation: app.daiyu.android.gui.GuiOperation, input: String?): ControllerGuiEntry? {
-        check(Looper.myLooper() === Looper.getMainLooper())
-        val (entry, token) = synchronized(this) {
-            if (!idleAvailable() || pendingTextState != null) return null
-            val entry = runCatching { ControllerGuiEntry(conversation, editor, text, operation, input) }.getOrNull()
-                ?: return null
-            guiEntry = entry
-            entry to reservePreparation()
+    /** Reserve only: no screen lease, overlay, model, or durable acceptance. The original entry
+     * is the location owner and must be retained while its one frozen decision is pending. */
+    @Synchronized internal fun prepareGuiSend(conversation: Conversation?, editor: TextSendOwner, text: String,
+        operation: app.daiyu.android.gui.GuiOperation, input: String?, targetPackage: String? = null): ControllerGuiEntry? {
+        if (!idleAvailable() || pendingTextState != null) return null
+        val entry = runCatching { ControllerGuiEntry(conversation, editor, text, operation, input, targetPackage) }
+            .getOrNull() ?: return null
+        entry.taskSurface = ControllerTaskSurface(entry, taskSurfaceStore, application.packageName,
+            targetPackage, backgroundSupported = false) {
+            synchronized(this) { !closed && guiEntry === entry && !entry.revoked }
         }
+        guiEntry = entry
+        reservePreparation()
+        notifyChanged()
+        return entry
+    }
+
+    /** The foreground backend is opened separately, only after the retained location decision.
+     * Main and direct Controller callers use the same gate; reservation itself is not permission. */
+    internal fun openPreparedGui(entry: ControllerGuiEntry): Boolean {
+        check(Looper.myLooper() === Looper.getMainLooper())
+        synchronized(this) {
+            val token = preparation ?: return false
+            if (closed || guiEntry !== entry || entry.revoked || entry.submitted || token.revoked ||
+                entry.session != null || pendingTextState != null) return false
+        }
+        val ready = entry.taskSurface.ready(TaskSurface.FOREGROUND) ?: return false
         val opened = try { app.daiyu.android.gui.GuiRuntime.openForUser(
-            app.daiyu.android.gui.GuiOwner(entry.sessionId, entry.runId.value)) }
+            app.daiyu.android.gui.GuiOwner(entry.sessionId, entry.runId.value),
+            targetPackage = entry.targetPackage, selfTarget = ready.selfTarget, surfaceOwner = entry) }
         catch (_: Exception) { app.daiyu.android.gui.GuiResult.Rejected("GUI_HOST_UNAVAILABLE") }
         if (opened !is app.daiyu.android.gui.GuiResult.Value) {
             cancelGui(entry)
-            finishPreparation(token)
-            return null
+            return false
         }
-        synchronized(this) { entry.session = opened.value }
+        synchronized(this) {
+            entry.session = opened.value // Retain before overlay attachment, including a late cancellation.
+            if (closed || guiEntry !== entry || entry.revoked || preparation?.revoked != false) {
+                opened.value.close()
+                return false
+            }
+        }
         notifyChanged()
-        return entry
+        return true
     }
 
     internal fun cancelGui(entry: ControllerGuiEntry): Boolean {
@@ -1872,6 +1920,7 @@ class ChatController internal constructor(private val application:Application,
         val token = synchronized(this) {
             val current = preparation ?: return false
             if (closed || guiEntry !== entry || entry.revoked || entry.submitted || current.revoked ||
+                entry.taskSurface.ready(TaskSurface.FOREGROUND) == null ||
                 pendingTextState != null || entry.session !== delivery.session ||
                 delivery.session.identity != app.daiyu.android.gui.GuiOwner(entry.sessionId, entry.runId.value) ||
                 delivery.action.operation != entry.operation || delivery.action.text != entry.input ||
@@ -1916,7 +1965,15 @@ class ChatController internal constructor(private val application:Application,
         text: String, writes: List<R08VirtualDisplayWrite>, reads: List<R08VirtualDisplayRead>): ControllerVirtualDisplayEntry? {
         if (!idleAvailable() || pendingTextState != null) return null
         return runCatching { ControllerVirtualDisplayEntry(conversation, editor, text, writes, reads) }
-            .getOrNull()?.also { virtualDisplayEntry = it; reservePreparation(); notifyChanged() }
+            .getOrNull()?.also { entry ->
+                val targets = entry.writes.mapNotNull { (it.action as? R08VirtualDisplayAction.Launch)?.packageName }
+                val containsSelf = application.packageName in targets
+                entry.taskSurface = ControllerTaskSurface(entry, taskSurfaceStore, application.packageName,
+                    targets.firstOrNull(), backgroundSupported = !containsSelf, unsupportedPlan = containsSelf) {
+                    synchronized(this) { !closed && virtualDisplayEntry === entry && !entry.revoked }
+                }
+                virtualDisplayEntry = entry; reservePreparation(); notifyChanged()
+            }
     }
 
     /** Identity fence is synchronous, including while a factory or DB receipt is in flight.
@@ -2003,6 +2060,8 @@ class ChatController internal constructor(private val application:Application,
         val token = synchronized(this) {
             val current = preparation ?: return false
             if (closed || virtualDisplayEntry !== entry || entry.revoked || entry.submitted ||
+                entry.taskSurface.ready(TaskSurface.BACKGROUND)?.selfTarget != null ||
+                entry.taskSurface.ready(TaskSurface.BACKGROUND) == null ||
                 current.revoked || pendingTextState != null) return false
             entry.submitted = true
             entry.textTicket = ticket
@@ -2037,7 +2096,8 @@ class ChatController internal constructor(private val application:Application,
         realOwner: app.daiyu.android.domain.runtime.RunExecutionOwner,
         caps: SessionCapabilities): ControllerVirtualDisplaySession {
         synchronized(this) {
-            check(virtualDisplayEntry === entry && entry.accepted && !entry.factoryEntered)
+            check(virtualDisplayEntry === entry && entry.accepted && !entry.revoked && !entry.factoryEntered)
+            check(entry.taskSurface.ready(TaskSurface.BACKGROUND)?.let { it.selfTarget == null } == true)
             check(realOwner.conversationId == entry.conversationId && realOwner.runId == entry.runId &&
                 realOwner.assistantMessageId == entry.assistantId)
             entry.factoryEntered = true
@@ -2649,6 +2709,11 @@ class ChatController internal constructor(private val application:Application,
         require(shizukuPreparation==null || (imageAttempt==null && shizukuAuthorization!=null))
         require(generation == null || (shizukuPreparation == null && browserBinding == null && imageAttempt == null))
         if(preparationCancelled(token)) return null
+        // All callers, including direct Controller sends, recheck the ORIGINAL location run
+        // before draft/history/model preparation or SQLite acceptance. No preference reload here.
+        if (gui != null && gui.taskSurface.ready(TaskSurface.FOREGROUND) == null) return null
+        if (virtualDisplay != null && virtualDisplay.taskSurface.ready(TaskSurface.BACKGROUND)
+                ?.let { it.selfTarget == null } != true) return null
         // Independent platform capability and destination consents are frozen once for this run.
         // The exact policy and selection below reach the same catalog/resource owner and drain.
         val platformSnapshot = platformSettings.freeze()
@@ -3310,8 +3375,9 @@ class ChatController internal constructor(private val application:Application,
         resources=null;runner=null;runTools=null
         clearCleanupProblem(lifetime.tools)
         guiEntry?.takeIf { it.catalog === lifetime.tools && !it.persistenceUnknown && it.session?.releaseConfirmed == true }
-            ?.let { guiEntry = null }
+            ?.let { it.taskSurface.end(); guiEntry = null }
         virtualDisplayEntry?.takeIf { it.catalog === lifetime.tools }?.let {
+            it.taskSurface.end()
             virtualDisplayEntry = null
         }
         generationEntry?.takeIf { it.runner === lifetime.runner }?.let {

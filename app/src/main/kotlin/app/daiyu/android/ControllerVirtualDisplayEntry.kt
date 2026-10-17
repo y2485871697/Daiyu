@@ -21,6 +21,7 @@ internal class ControllerVirtualDisplayEntry(
     val assistantId = MessageId(java.util.UUID.randomUUID().toString())
     val writes = writes.toList()
     val reads = reads.toList()
+    lateinit var taskSurface: ControllerTaskSurface
     var submitted = false
     var textTicket: ChatController.TextSendTicket? = null
     var accepted = false

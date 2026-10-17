@@ -29,6 +29,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
+import app.daiyu.android.tasksurface.*
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -826,6 +827,13 @@ class MainActivity : ComponentActivity() {
     // Workers read only this atomic owner, never Compose state or the current text editor.
     private val currentCleanupOwner = AtomicReference<R08CleanupUiOwner?>(null)
     private var virtualDisplayCleanupVisit by mutableStateOf<VirtualDisplayCleanupVisit?>(null)
+    private class TaskLocationVisit(val owner: Any, val surface: ControllerTaskSurface,
+        val current: () -> Boolean, val proceed: () -> Unit, val cancel: () -> Unit) {
+        // These closures retain the exact leaf question identity, not a lookup of the latest one.
+        var questionUi by mutableStateOf<(@Composable () -> Unit)?>(null)
+        var cancelQuestion: (() -> Unit)? = null
+    }
+    private var taskLocationVisit by mutableStateOf<TaskLocationVisit?>(null)
     private var guiEditor by mutableStateOf<ControllerGuiEntry?>(null)
     private var virtualDisplayEditor by mutableStateOf<ControllerVirtualDisplayEntry?>(null)
     private var virtualDisplayRequest by mutableStateOf<app.daiyu.android.vdapproval.VirtualDisplayApprovalRequest?>(null)
@@ -1543,6 +1551,7 @@ class MainActivity : ComponentActivity() {
                 PromptSurface()
                 UnknownBranchSurface()
                 VirtualDisplayR08Surfaces()
+                taskLocationVisit?.let { visit -> key(visit) { visit.questionUi?.invoke() } }
                 val vdEntry = virtualDisplayEditor
                 val vdRequest = virtualDisplayRequest
                 if (vdEntry != null && vdRequest != null) {
@@ -2028,7 +2037,8 @@ class MainActivity : ComponentActivity() {
             virtualDisplayEditor?.let { entry ->
                 androidx.compose.material3.Text("已冻结 ${entry.writes.size} 项写步骤、${entry.reads.size} 项读取；消息受理后仍须审阅完整副屏授权。")
                 top.yukonga.miuix.kmp.basic.TextButton(text = "接受消息并审阅完整副屏授权",
-                    enabled = !entry.submitted,
+                    enabled = !entry.submitted && entry.taskSurface.ready(TaskSurface.BACKGROUND)?.selfTarget == null &&
+                        entry.taskSurface.ready(TaskSurface.BACKGROUND) != null,
                     modifier = Modifier.testTag("vd-submit"),
                     onClick = { submitVirtualDisplay(entry) })
                 top.yukonga.miuix.kmp.basic.TextButton(text = "停止副屏运行 / 取消准备",
@@ -2867,11 +2877,95 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun taskLocationCurrent(visit: TaskLocationVisit): Boolean =
+        taskLocationVisit === visit && activityUsable() && voiceForeground && visit.current()
+
+    private fun clearTaskLocation(owner: Any) {
+        val visit = taskLocationVisit?.takeIf { it.owner === owner } ?: return
+        visit.cancelQuestion?.invoke() // Deny the ORIGINAL question before unmounting.
+        visit.cancelQuestion = null
+        visit.questionUi = null
+        taskLocationVisit = null
+    }
+
+    private fun cancelTaskLocation(visit: TaskLocationVisit) {
+        visit.cancelQuestion?.invoke()
+        visit.cancelQuestion = null
+        visit.cancel() // Controller admission fence precedes hiding the location UI.
+        if (taskLocationVisit === visit) {
+            visit.questionUi = null
+            taskLocationVisit = null
+        }
+    }
+
+    private fun startTaskLocation(owner: Any, surface: ControllerTaskSurface,
+        current: () -> Boolean, proceed: () -> Unit, cancel: () -> Unit) {
+        taskLocationVisit?.let(::cancelTaskLocation)
+        val visit = TaskLocationVisit(owner, surface, current, proceed, cancel)
+        taskLocationVisit = visit // Retain before disk read; pause/navigation can fence this read.
+        lifecycleScope.launch {
+            try { withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { surface.freezeOnWorker() } }
+            catch (_: Exception) {
+                if (taskLocationCurrent(visit)) toast("任务位置读取失败；未执行，草稿保留")
+                cancelTaskLocation(visit)
+                return@launch
+            }
+            if (!taskLocationCurrent(visit)) cancelTaskLocation(visit) else continueTaskLocation(visit)
+            publishChat()
+        }
+    }
+
+    private fun taskLocationResolved(visit: TaskLocationVisit, answer: TaskSurface?) {
+        // The dialog already answered its retained original question. A stale callback cannot
+        // supply a default foreground answer or resurrect a cancelled/replaced visit.
+        if (answer == null || !taskLocationCurrent(visit)) cancelTaskLocation(visit)
+        else continueTaskLocation(visit)
+        publishChat()
+    }
+
+    private fun continueTaskLocation(visit: TaskLocationVisit) {
+        if (!taskLocationCurrent(visit)) { cancelTaskLocation(visit); return }
+        when (val decision = visit.surface.decision()) {
+            is TaskSurfaceDecision.Ready -> {
+                val expected = if (visit.owner is ControllerVirtualDisplayEntry) TaskSurface.BACKGROUND else TaskSurface.FOREGROUND
+                if (decision.surface != expected ||
+                    (visit.owner is ControllerVirtualDisplayEntry && decision.selfTarget != null)) {
+                    toast("此完整计划在所选位置没有等价后端；未执行，不会回退到另一位置")
+                    cancelTaskLocation(visit)
+                    return
+                }
+                // Resolving location is not the end of the run. Keep its snapshot through drain.
+                visit.cancelQuestion = null
+                visit.questionUi = null
+                taskLocationVisit = null
+                visit.proceed()
+            }
+            TaskSurfaceDecision.AskRequired -> {
+                if (visit.questionUi != null) return
+                val adapter = checkNotNull(visit.surface.adapter)
+                val request = visit.surface.request
+                val question = adapter.askFromUser(request) ?: run { cancelTaskLocation(visit); return }
+                visit.cancelQuestion = { adapter.answerFromUser(request, question, null); Unit }
+                visit.questionUi = {
+                    app.daiyu.android.ui.screens.settings.TaskSurfaceLocationDialog(adapter, request, question) { answer ->
+                        taskLocationResolved(visit, answer)
+                    }
+                }
+            }
+            TaskSurfaceDecision.AskPending -> Unit // Keep the existing question, never create another entry.
+            is TaskSurfaceDecision.NotExecuted -> {
+                toast("未执行：${decision.message}")
+                cancelTaskLocation(visit)
+            }
+        }
+    }
+
     private fun guiOwnerCurrent(entry: ControllerGuiEntry): Boolean = activityUsable() &&
         guiEditor === entry && controller.guiEntry() === entry && !entry.revoked &&
         retainedPage == "chat" && !sidebarVisible && selectionReady &&
+        controller.ready && !controller.dataBusy && selected?.id == entry.conversation?.id &&
         entry.editor == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) &&
-        entry.text == draft && !imageHost.hasAttachments && videoHost.state.items.isEmpty() && !videoSending
+        entry.text == draft && !imageHost.busy && !imageHost.hasAttachments && videoHost.state.items.isEmpty() && !videoSending
 
     private fun openGuiPreparation() {
         if (!activityUsable() || retainedPage != "chat" || sidebarVisible || !selectionReady ||
@@ -2881,7 +2975,8 @@ class MainActivity : ComponentActivity() {
         val text = draft
         prompt = InputPrompt("本次 GUI 精确动作", "{\"operation\":\"tap\"}",
             "operation：tap、long_press、scroll_forward、scroll_backward、input、back、home、recents、notifications。" +
-                "仅 input 必须带完整 text（最多 4096 字符）；不接受坐标。随后在真实目标应用浮层选择节点并最终确认。",
+                "仅 input 必须带完整 text（最多 4096 字符）；不接受坐标。可选 target_package 填写你明确选择的完整目标包名；" +
+                "缺省按普通外部目标选择任务位置。前台仍须在真实目标应用浮层选择节点并最终确认。",
             "打开真实目标确认", { raw ->
                 if (!activityUsable() || retainedPage != "chat" || sidebarVisible || !selectionReady ||
                     editor != ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) ||
@@ -2890,10 +2985,23 @@ class MainActivity : ComponentActivity() {
                 val parsed = try { app.daiyu.android.gui.GuiUserActionRequest.parse(raw) }
                 catch (_: Exception) { toast("GUI 参数无效；未打开授权、未执行动作"); return@InputPrompt }
                 cancelBrowserEditor(); cancelShizukuEditor(); dictationHost.invalidate()
-                val entry = controller.prepareGuiSend(selected, editor, text, parsed.operation, parsed.text)
-                if (entry == null) { toast("GUI 不可用或仍待释放；请手动启用系统服务，草稿保留"); return@InputPrompt }
-                guiEditor = entry // retain before overlay attachment
-                val result = try { checkNotNull(entry.session).prepareExactActionFromUser(entry.operation, entry.input,
+                val entry = controller.prepareGuiSend(selected, editor, text, parsed.operation, parsed.text, parsed.targetPackage)
+                if (entry == null) { toast("GUI 不可用或仍待释放；草稿保留"); return@InputPrompt }
+                guiEditor = entry // Retain before location routing, screen lease or overlay attachment.
+                startTaskLocation(entry, entry.taskSurface, current = { guiOwnerCurrent(entry) && !entry.submitted },
+                    proceed = { attachPreparedGui(entry) }, cancel = {
+                        if (guiEditor === entry) cancelGuiEditor(entry) else controller.cancelGui(entry)
+                    })
+                publishChat()
+            })
+    }
+
+    private fun attachPreparedGui(entry: ControllerGuiEntry) {
+        if (!guiOwnerCurrent(entry) || !controller.openPreparedGui(entry)) {
+            cancelGuiEditor(entry); toast("GUI 未执行：服务不可用或位置已撤销；草稿保留")
+            return
+        }
+        val result = try { checkNotNull(entry.session).prepareExactActionFromUser(entry.operation, entry.input,
                     ownerCurrent = { guiOwnerCurrent(entry) },
                     onNotExecuted = { code ->
                         if (guiEditor === entry) { cancelGuiEditor(entry); toast("GUI 未执行：$code"); publishChat() }
@@ -2916,16 +3024,16 @@ class MainActivity : ComponentActivity() {
                             } catch (_: Exception) { pendingTextSend = null; false }
                         }
                     }) } catch (_: Exception) { app.daiyu.android.gui.GuiResult.Rejected("GUI_OVERLAY_UNAVAILABLE") }
-                if (result !is app.daiyu.android.gui.GuiResult.Value) {
-                    cancelGuiEditor(entry); toast("GUI 确认浮层不可用；未执行，草稿保留")
-                }
-                publishChat()
-            })
+        if (result !is app.daiyu.android.gui.GuiResult.Value) {
+            cancelGuiEditor(entry); toast("GUI 确认浮层不可用；未执行，草稿保留")
+        }
+        publishChat()
     }
 
     private fun cancelGuiEditor(original: ControllerGuiEntry) {
         if (guiEditor !== original) return
         controller.cancelGui(original) // fence before hiding; retain Controller resource until real release
+        clearTaskLocation(original)
         guiEditor = null
     }
     private fun cancelGuiEditor() { guiEditor?.let(::cancelGuiEditor) }
@@ -2960,7 +3068,12 @@ class MainActivity : ComponentActivity() {
         virtualDisplayEditor = controller.prepareVirtualDisplaySend(original.conversation, original.editor,
             original.text, frozen.writes, frozen.reads)
         virtualDisplayPlanVisit = null
-        if (virtualDisplayEditor == null) toast("副屏计划未受理；保留草稿，不自动重发")
+        val entry = virtualDisplayEditor
+        if (entry == null) toast("副屏计划未受理；保留草稿，不自动重发")
+        else startTaskLocation(entry, entry.taskSurface, current = { virtualDisplayOwnerCurrent(entry) },
+            proceed = { publishChat() }, cancel = {
+                if (virtualDisplayEditor === entry) cancelVirtualDisplayEditor(entry) else controller.cancelVirtualDisplay(entry)
+            })
         publishChat()
     }
 
@@ -3055,7 +3168,16 @@ class MainActivity : ComponentActivity() {
         } }
     }
 
+    private fun virtualDisplayOwnerCurrent(entry: ControllerVirtualDisplayEntry): Boolean = activityUsable() &&
+        virtualDisplayEditor === entry && controller.virtualDisplayEntry() === entry && !entry.revoked && !entry.submitted &&
+        retainedPage == "chat" && !sidebarVisible && selectionReady && controller.ready && !controller.dataBusy &&
+        selected?.id == entry.conversation?.id &&
+        entry.editor == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) &&
+        entry.text == draft && !imageHost.busy && !imageHost.hasAttachments && videoHost.state.items.isEmpty() && !videoSending
+
     private fun submitVirtualDisplay(entry: ControllerVirtualDisplayEntry) {
+        if (entry.taskSurface.ready(TaskSurface.BACKGROUND)?.let { it.selfTarget == null } != true) return
+        if (!virtualDisplayOwnerCurrent(entry)) return
         if (videoHost.state.items.isNotEmpty() || videoSending) return
         if (!activityUsable() || virtualDisplayEditor !== entry || retainedPage != "chat" || sidebarVisible ||
             pendingTextSend != null || imageHost.hasAttachments || entry.text != draft ||
@@ -3085,6 +3207,7 @@ class MainActivity : ComponentActivity() {
         if (virtualDisplayEditor !== original) return
         // Fence BEFORE hiding the approval; disposal of an old screen cannot affect a later run.
         controller.cancelVirtualDisplay(original)
+        clearTaskLocation(original)
         virtualDisplayRequest = null
         virtualDisplayEditor = null
     }
@@ -3540,6 +3663,9 @@ class MainActivity : ComponentActivity() {
     }
     override fun onPause() {
         revokePlatformActionVisit()
+        // Pending location UI cannot survive backgrounding. An already handed-off external GUI
+        // overlay MUST survive this pause so the user can switch to the actual target app.
+        taskLocationVisit?.let(::cancelTaskLocation)
         revokeTerminalJobsVisit()
         val preserveLegacy = legacyPickerHop && retainedPage == "legacy-library" &&
             pendingLegacy != null
@@ -3605,6 +3731,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onDestroy() {
         revokePlatformActionVisit()
+        taskLocationVisit?.let(::cancelTaskLocation)
         revokeLegacyLibrary()
         legacyLaunchersReady = false
         if (revokeContextManagementEntry()) editorGeneration++
@@ -3896,6 +4023,7 @@ class MainActivity : ComponentActivity() {
         offlineHost.invalidate()
         cancelShizukuEditor()
         cancelBrowserEditor()
+        cancelGuiEditor()
         guard {
             if (draft != value && !imageHost.beforeTextEdit()) return@guard
             val id = selected?.id
@@ -3913,6 +4041,7 @@ class MainActivity : ComponentActivity() {
         val shizukuOwned = shizukuEditor != null || shizukuWritesBlocked
         cancelShizukuEditor()
         cancelBrowserEditor()
+        cancelGuiEditor()
         val list = controller.database.conversations()
         var targetDraft = if (conversation == null) controller.database.draft() else list.first { it.id == conversation.id }.draft
         if (selectionReady) {
@@ -4207,6 +4336,7 @@ class MainActivity : ComponentActivity() {
         return result
     }
     private fun publishChat() {
+        taskLocationVisit?.takeIf { !taskLocationCurrent(it) }?.let(::cancelTaskLocation)
         guiEditor?.let { entry ->
             if (controller.guiEntry() !== entry) guiEditor = null
             else if (!entry.submitted && !guiOwnerCurrent(entry)) cancelGuiEditor(entry)

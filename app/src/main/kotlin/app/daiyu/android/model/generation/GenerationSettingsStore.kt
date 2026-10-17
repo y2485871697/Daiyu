@@ -104,6 +104,13 @@ class GenerationSettingsStore internal constructor(
         { id, key -> credentialStore(context, id).save(credentialEnvelope(key)) },
     )
 
+    /** Manifest-only local identity for read-only history/backup. Never opens a credential vault,
+     * mints a scope, repairs metadata or grants execution/download authority. A validated saving
+     * manifest (including a process-fenced save) retains its original identity; unavailable keys
+     * must not prevent reading already-published originals. Missing returns null; corrupt fails.
+     */
+    fun readAccountScope(): String? = synchronized(lock) { readRecord()?.scope }
+
     fun loadSnapshot(): GenerationSettingsSnapshot = synchronized(lock) {
         if (namespace in fenced) fail(GenerationSettingsFailure.SAVE_UNCONFIRMED)
         val record = readRecord() ?: fail(GenerationSettingsFailure.MISSING)

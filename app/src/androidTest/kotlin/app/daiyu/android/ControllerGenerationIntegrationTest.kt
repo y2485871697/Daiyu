@@ -31,10 +31,23 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
     private val editor = GenerationEditorSnapshot(23, "  exact generation draft\n ")
     private lateinit var store: GenerationSettingsStore
     private var configured: GenerationSettingsSnapshot? = null
+    private var forbidGenerationCredentials = false
+    private val credentialOpens = AtomicInteger()
 
     override fun setUp() {
         super.setUp()
-        fixture = RunControlFixture(instrumentation.targetContext)
+        forbidGenerationCredentials = false
+        credentialOpens.set(0)
+        val guarded = object : android.content.ContextWrapper(instrumentation.targetContext) {
+            override fun getSharedPreferences(name: String, mode: Int): android.content.SharedPreferences {
+                if (name.contains("generation-credential-")) {
+                    credentialOpens.incrementAndGet()
+                    check(!forbidGenerationCredentials) { "credential vault access forbidden during backup/history" }
+                }
+                return super.getSharedPreferences(name, mode)
+            }
+        }
+        fixture = RunControlFixture(guarded)
         awaitControl("controller ready") { controller.ready }
         store = GenerationSettingsStore(fixture.application)
         configured = null
@@ -282,7 +295,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
         assertEquals(0, fixture.opens.get())
         assertTrue(fixture.database.conversations().isEmpty())
         assertEquals(editor.text, fixture.database.draft())
-        assertTrue(ControllerGenerationResources.DOWNLOAD_STATUS.contains("未启用"))
+        assertTrue(ControllerGenerationResources.DOWNLOAD_STATUS.contains("显式接入"))
         // Capability alone and a configured host are still not download permission.
         assertFalse(ControllerGenerationResources.DENY_DOWNLOADS.allows(
             app.daiyu.android.media.GenerationAssetOwner(saved.accountScope,
@@ -318,31 +331,37 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
      * Tool.result URL or fake output reader can make these tests pass. The central attempt is
      * durably UNKNOWN, not Confirmed; readback must not reserve a new paid attempt.
      */
-    private fun existingOutput(): ExistingOutput {
+    private fun existingOutput(kind: GenerationKind = GenerationKind.IMAGE): ExistingOutput {
         val settings = saveSettings()
         val conversation = fixture.database.create("default")
         val run = RunId(UUID.randomUUID().toString())
         val assistantId = MessageId(UUID.randomUUID().toString())
-        val call = ToolInvocation(ToolCallId(UUID.randomUUID().toString()), RunGenerationTools.IMAGE_TOOL, "{}")
+        val call = ToolInvocation(ToolCallId(UUID.randomUUID().toString()),
+            if (kind == GenerationKind.IMAGE) RunGenerationTools.IMAGE_TOOL else RunGenerationTools.VIDEO_TOOL, "{}")
         val tool = MessageBlock.Tool(call)
         val assistant = Message(assistantId, conversation.id, run, Message.ASSISTANT_ROLE,
-            listOf(tool), RunStatus.RUNNING, historySegments = listOf(
+            listOf(tool), RunStatus.RUNNING, createdAt = 1_700_000_000_123L, historySegments = listOf(
                 MessageHistorySegment(assistantId, Message.ASSISTANT_ROLE, listOf(tool))))
         fixture.database.send(Message(MessageId(UUID.randomUUID().toString()), conversation.id, run,
-            Message.USER_ROLE, listOf(MessageBlock.Text("prompt", "offline fixture")), RunStatus.COMPLETED), assistant)
+            Message.USER_ROLE, listOf(MessageBlock.Text("prompt", "offline fixture")), RunStatus.COMPLETED,
+            createdAt = 1_700_000_000_123L), assistant)
         assertTrue(checkNotNull(loadOutputs(conversation.id)).isEmpty()) // constructs parent's resource
         val resources = field(controller, "generationResources") as ControllerGenerationResources
         val owner = GenerationAssetOwner(settings.accountScope, GenerationAttemptBinding(conversation.id.value,
             assistantId.value, run.value, call.id.value, call.name))
         val attempt = GenerationAttempt(owner.binding.identity("item"), "a".repeat(64),
-            GenerationProtocol.OPENAI_IMAGES_JSON)
+            if (kind == GenerationKind.IMAGE) GenerationProtocol.OPENAI_IMAGES_JSON else GenerationProtocol.OPENAI_VIDEO_MULTIPART)
         val attempts = SQLiteGenerationAttemptStore(resources::database, owner.binding)
         assertEquals(GenerationReservation.Started, attempts.reserve(attempt))
-        val png = Base64.getDecoder().decode(
+        val png = if (kind == GenerationKind.IMAGE) Base64.getDecoder().decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kF9sAAAAASUVORK5CYII=")
+        else {
+            val video = File(fixture.application.cacheDir, "generation-fixture-${UUID.randomUUID()}.mp4")
+            try { encodeOfflineBackupMp4(video); video.readBytes() } finally { video.delete() }
+        }
         val assets = resources.assets(resources.createFence(owner))
-        val info = assets.inspect(GenerationKind.IMAGE, png, "image/png")
-        val receipt = assets.commit(attempt.identity, 0, GenerationKind.IMAGE, png, info)
+        val info = assets.inspect(kind, png, if (kind == GenerationKind.IMAGE) "image/png" else "video/mp4")
+        val receipt = assets.commit(attempt.identity, 0, kind, png, info)
         SQLiteGenerationOutputStore(resources::database, owner, assets).register(attempt, receipt)
         attempts.finish(attempt, Submission.Unknown(GenerationFailure.TRANSPORT))
         val endedTool = tool.copy(result = "{\"status\":\"UNKNOWN\"}")
@@ -376,10 +395,245 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
         } // Closing a sibling reader must not seal the cached reader or a writer.
     }
 
-    private fun dataOperation(start: () -> Unit): String {
-        controlMain { controller.consumeDataNotice(); start() }
-        awaitControl("data operation completed") { !controller.dataBusy && controller.dataNotice != null }
-        return checkNotNull(controller.dataNotice)
+    private fun dataOperation(target: ChatController = controller, start: () -> Unit): String {
+        controlMain { target.consumeDataNotice(); start() }
+        awaitControl("data operation completed") { !target.dataBusy && target.dataNotice != null }
+        return checkNotNull(target.dataNotice)
+    }
+
+    private fun historicalOutputs(target: ChatController, id: ConversationId): List<ChatController.HistoricalGenerationAssetDisplay> {
+        val done = CountDownLatch(1)
+        val result = AtomicReference<List<ChatController.HistoricalGenerationAssetDisplay>?>()
+        controlMain { assertTrue(target.loadHistoricalGenerationOutputs(id) { result.set(it); done.countDown() }) }
+        assertTrue("historical original read completion", done.await(10, TimeUnit.SECONDS))
+        return checkNotNull(result.get())
+    }
+
+    private fun addHistoricalChildren(parent: ExistingOutput): app.daiyu.android.domain.delegation.ChildTaskCommand {
+        val b = parent.owner.binding
+        val token = UUID.randomUUID().toString()
+        val source = app.daiyu.android.domain.delegation.ChildTaskRecord(
+            app.daiyu.android.domain.delegation.ChildRunOwner(b.conversationId, b.runId, "group-$token", 1,
+                "source-$token", "assistant-source-$token"), b.assistantMessageId, "original-parent-owner", 0,
+            "historical-profile", "source prompt", app.daiyu.android.domain.delegation.ChildTaskStatus.COMPLETED, "source result")
+        val command = app.daiyu.android.domain.delegation.ChildTaskCommand("command-$token", source,
+            app.daiyu.android.domain.delegation.ChildTaskCommandKind.APPEND, "historical-profile", "follow-up")
+        val successor = app.daiyu.android.domain.delegation.ChildTaskRecord(
+            app.daiyu.android.domain.delegation.ChildRunOwner(b.conversationId, b.runId, "successor-group-$token", 2,
+                "successor-$token", "assistant-successor-$token"), b.assistantMessageId, source.parentOwnerId, 0,
+            command.profileId, command.instruction, app.daiyu.android.domain.delegation.ChildTaskStatus.RUNNING,
+            sourceTaskId = source.owner.childRunId, commandKind = command.kind)
+        fun row(t: app.daiyu.android.domain.delegation.ChildTaskRecord) = org.json.JSONObject()
+            .put("task_id", t.owner.childRunId).put("conversation_id", t.owner.conversationId)
+            .put("parent_run_id", t.owner.parentRunId).put("parent_message_id", t.parentMessageId).put("parent_owner_id", t.parentOwnerId)
+            .put("task_group_id", t.owner.taskGroupId).put("generation", t.owner.generation).put("task_index", t.index)
+            .put("assistant_message_id", t.owner.assistantMessageId).put("profile_id", t.profileId).put("prompt", t.prompt)
+            .put("status", t.status.name).put("text", t.text).put("detail", t.detail ?: org.json.JSONObject.NULL)
+            .put("control_revision", t.revision).put("source_task_id", t.sourceTaskId ?: org.json.JSONObject.NULL)
+            .put("command_kind", t.commandKind?.name ?: org.json.JSONObject.NULL)
+        val db = fixture.database.writableDatabase
+        app.daiyu.android.backup.BackupHistoryRows.insert(db, "child_tasks", row(source.copy(revision = 1)))
+        app.daiyu.android.backup.BackupHistoryRows.insert(db, "child_tasks", row(successor))
+        app.daiyu.android.backup.BackupHistoryRows.insert(db, "child_task_commands", org.json.JSONObject()
+            .put("call_id", command.callId).put("fingerprint", command.fingerprint()).put("source_id", source.owner.childRunId)
+            .put("successor_id", successor.owner.childRunId).put("expected_revision", 0).put("acknowledged", 0))
+        app.daiyu.android.backup.BackupHistoryRows.insert(db, "child_request_usage", org.json.JSONObject()
+            .put("task_id", successor.owner.childRunId).put("request_id", "request-$token").put("request_owner", "historical-request-owner")
+            .put("attempt_id", "attempt-$token").put("operation", "OPEN").put("checkpoint_revision", 1)
+            .put("input_tokens", 7).put("output_tokens", 3).put("cached_tokens", org.json.JSONObject.NULL))
+        return command
+    }
+
+    /** Real Controller construction/acceptance worker -> complete service -> owner-fenced
+     * generated originals -> Controller import -> independent backup-only display/save paths.
+     * Both image and encoded synthetic video traverse production inspectors and byte stores.
+     */
+    fun testProductionCompleteExportImportOriginalsChildrenTimeDuplicateAndBadBlobRollbackWithoutKeyReads() {
+        val image = existingOutput()
+        val video = existingOutput(GenerationKind.VIDEO)
+        val command = addHistoricalChildren(image)
+        val sourceText = fixture.database.exportBackup()
+        val originalRows = listOf(image, video).associate { it.conversation.id to fixture.database.messages(it.conversation.id) }
+        val retained = field(controller, "generationResources")
+        val opensBefore = credentialOpens.get()
+        forbidGenerationCredentials = true
+        val file = File(fixture.application.cacheDir, "production-complete-${UUID.randomUUID()}.json")
+        val saved = File(fixture.application.cacheDir, "historical-original-${UUID.randomUUID()}")
+        val targetFiles = File(fixture.application.cacheDir, "backup-target-${UUID.randomUUID()}").apply { check(mkdirs()) }
+        val isolated = object : android.content.ContextWrapper(instrumentation.targetContext) {
+            override fun getFilesDir() = targetFiles
+        }
+        val target = RunControlFixture(isolated)
+        fun count(table: String) = target.database.readableDatabase.rawQuery("SELECT count(*) FROM $table", null).use {
+            check(it.moveToFirst()); it.getInt(0)
+        }
+        fun payload(text: String) = org.json.JSONObject(org.json.JSONObject(text).getString("payload"))
+        try {
+            awaitControl("target ready") { target.controller.ready }
+            assertTrue(dataOperation { controller.exportUserBackup(Uri.fromFile(file), true) }.startsWith("完整中立备份已导出"))
+            val text = file.readText()
+            val data = payload(text)
+            assertEquals(2, data.getJSONObject("generation_history").getJSONArray("outputs").length())
+            assertEquals(2, data.getJSONObject("child_task_history").getJSONArray("tasks").length())
+            assertEquals(1, data.getJSONObject("child_task_history").getJSONArray("commands").length())
+            assertEquals(1, data.getJSONObject("child_task_history").getJSONArray("usage").length())
+            assertEquals(sourceText, fixture.database.exportBackup())
+            assertSame(retained, field(controller, "generationResources"))
+            val readers = field(controller, "generationOutputReaders") as Map<*, *>
+            val owners = field(controller, "generationOutputConversations") as Map<*, *>
+            assertEquals(2, readers.size); assertEquals(readers.keys, owners.keys)
+            assertNotNull(checkNotNull(loadOutputs(image.conversation.id)).single().thumbnail)
+            assertEquals(GenerationKind.VIDEO, checkNotNull(loadOutputs(video.conversation.id)).single().metadata.kind)
+            assertEquals(opensBefore, credentialOpens.get())
+
+            // A bad input original fails before visible import; then a final-receipt trigger
+            // demonstrates real SQL rollback after text, history and commands were inserted.
+            val broken = payload(text)
+            broken.getJSONArray("blobs").getJSONObject(0).put("data", "AAAA")
+            val raw = broken.toString()
+            file.writeText(org.json.JSONObject(text).put("payload", raw)
+                .put("sha256", app.daiyu.android.context.PrivateBlobs.digest(raw.toByteArray(Charsets.UTF_8))).toString())
+            assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("导入失败"))
+            assertEquals(0, count("messages")); assertEquals(0, count("neutral_imports"))
+            file.writeText(text)
+            target.database.writableDatabase.execSQL("CREATE TRIGGER controller_bad_receipt AFTER INSERT ON neutral_imports " +
+                "BEGIN UPDATE generation_attempts SET outcome=X'01'; END")
+            assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("导入失败"))
+            for (table in listOf("messages", "generation_attempts", "child_tasks", "child_task_commands", "child_request_usage", "neutral_imports"))
+                assertEquals(table, 0, count(table))
+            assertFalse(app.daiyu.android.backup.BackupHistoryRows.exists(
+                target.database.readableDatabase, "neutral_backup_history"))
+            target.database.writableDatabase.execSQL("DROP TRIGGER controller_bad_receipt")
+            assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("已导入"))
+            assertEquals(15, target.database.readableDatabase.version)
+            assertEquals(0, count("generation_outputs")); assertEquals(0, count("runtime_checkpoints"))
+            assertEquals(2, count("generation_attempts")); assertEquals(1, count("child_task_commands")); assertEquals(1, count("child_request_usage"))
+            originalRows.forEach { (conversation, rows) ->
+                assertEquals(rows.map { it.second }, target.database.messages(conversation).map { it.second })
+                assertTrue(target.database.messages(conversation).all { it.second.createdAt == 1_700_000_000_123L })
+            }
+            val receipt = SQLiteChildTaskStore(target.database).commandReceipt(command) as
+                app.daiyu.android.domain.delegation.ChildTaskCommandReceipt.Accepted
+            assertEquals(app.daiyu.android.domain.delegation.ChildTaskStatus.UNKNOWN, receipt.task.status)
+            assertEquals("original-parent-owner", receipt.task.parentOwnerId)
+            listOf(image, video).forEach { original ->
+                val display = historicalOutputs(target.controller, original.conversation.id).single()
+                assertTrue(display.history.historicalOnly)
+                assertEquals(original.png.size.toLong(), display.history.bytes)
+                if (original === image) assertNotNull(display.thumbnail) else assertEquals(GenerationKind.VIDEO, display.history.kind)
+                assertTrue(dataOperation(target.controller) {
+                    target.controller.saveHistoricalGenerationOriginal(display.history, Uri.fromFile(saved))
+                }.startsWith("历史生成原件已保存"))
+                assertTrue(original.png.contentEquals(saved.readBytes()))
+            }
+            assertNull(field(target.controller, "generationResources"))
+            assertTrue((field(target.controller, "generationOutputReaders") as Map<*, *>).isEmpty())
+            assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("此完整备份已导入过"))
+            assertTrue(dataOperation(target.controller) { target.controller.exportUserBackup(Uri.fromFile(saved), true) }.startsWith("完整中立备份已导出"))
+            val reexported = payload(saved.readText())
+            assertEquals(data.getJSONObject("generation_history").toString(), reexported.getJSONObject("generation_history").toString())
+            assertEquals(data.getJSONObject("child_task_history").toString(), reexported.getJSONObject("child_task_history").toString())
+            val blob = File(targetFiles, "neutral-context-blobs/${displayHash(image)}")
+            assertTrue(blob.isFile)
+            val bad = byteArrayOf(9, 8, 7)
+            blob.writeBytes(bad)
+            val beforeFailure = target.database.exportBackup()
+            assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("导入失败"))
+            assertTrue(bad.contentEquals(blob.readBytes()))
+            assertEquals(beforeFailure, target.database.exportBackup())
+            assertEquals(1, count("neutral_imports")); assertEquals(0, count("generation_outputs"))
+            assertEquals(0, fixture.opens.get()); assertEquals(0, target.opens.get())
+            assertEquals(opensBefore, credentialOpens.get())
+        } finally {
+            forbidGenerationCredentials = false
+            file.delete(); saved.delete(); target.close(); targetFiles.deleteRecursively()
+        }
+    }
+
+    private fun displayHash(output: ExistingOutput) = app.daiyu.android.context.PrivateBlobs.digest(output.png)
+
+    fun testCompleteBackupUsesManifestScopeNotSelectedRowsAndRejectsAlteredRegisteredMapping() {
+        val output = existingOutput()
+        val preferences = fixture.application.getSharedPreferences(GenerationSettingsStore.METADATA_NAMESPACE, 0)
+        val originalManifest = checkNotNull(preferences.getString(GenerationSettingsStore.KEY, null))
+        val file = File(fixture.application.cacheDir, "scope-backup-${UUID.randomUUID()}.json")
+        val readsBefore = credentialOpens.get()
+        forbidGenerationCredentials = true
+        try {
+            assertTrue(dataOperation { controller.exportConversationBackup(Uri.fromFile(file), output.conversation.id) }
+                .startsWith("单会话中立备份已导出"))
+            val readers = field(controller, "generationOutputReaders") as Map<*, *>
+            val conversations = field(controller, "generationOutputConversations") as Map<*, *>
+            assertEquals(readers.keys, conversations.keys)
+            val reader = readers.values.single() as ControllerGenerationOutputReader
+            val registered = checkNotNull(SQLiteGenerationOutputStore(output.resources::database, output.owner, output.assets)
+                .find(output.attempt, 0))
+            assertTrue(output.png.contentEquals(reader.readBackup(registered)))
+            var rejected = false
+            try { reader.readBackup(registered.copy(width = registered.width + 1)) } catch (_: Exception) { rejected = true }
+            assertTrue("selected scalar row is never authority", rejected)
+            val changed = org.json.JSONObject(originalManifest).put("scope", "generation_" + "f".repeat(32))
+            check(preferences.edit().putString(GenerationSettingsStore.KEY, changed.toString()).commit())
+            assertTrue(dataOperation { controller.exportUserBackup(Uri.fromFile(file), true) }.startsWith("导出失败"))
+            assertEquals(output.owner.accountScope, registered.accountScope)
+            // Missing metadata must not adopt the live output row's scope either.
+            check(preferences.edit().remove(GenerationSettingsStore.KEY).commit())
+            assertTrue(dataOperation { controller.exportUserBackup(Uri.fromFile(file), true) }.startsWith("导出失败"))
+            assertSame(output.resources, field(controller, "generationResources"))
+            assertEquals(readsBefore, credentialOpens.get()); assertEquals(0, fixture.opens.get())
+        } finally {
+            check(preferences.edit().putString(GenerationSettingsStore.KEY, originalManifest).commit())
+            forbidGenerationCredentials = false; file.delete()
+        }
+    }
+
+    fun testCompleteExportHoldsDataAcceptanceNotControllerMonitorWhileWaitingForSharedOwnerGate() {
+        val output = existingOutput()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val failure = AtomicReference<Throwable?>()
+        val holder = Thread {
+            try {
+                output.resources.createFence(output.owner).admit {
+                    entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
+                }
+            } catch (t: Throwable) { failure.set(t) }
+        }
+        val file = File(fixture.application.cacheDir, "blocked-backup-${UUID.randomUUID()}.json")
+        val worker = (field(controller, "executor") as java.util.concurrent.ExecutorService)
+            .submit<Thread> { Thread.currentThread() }.get(5, TimeUnit.SECONDS)
+        holder.start()
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            controlMain { controller.consumeDataNotice(); controller.exportUserBackup(Uri.fromFile(file), true) }
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            fun atGate() = worker.state == Thread.State.BLOCKED && worker.stackTrace.any {
+                it.className == "app.daiyu.android.media.GenerationAssetPublicationGate" && it.methodName.startsWith("admit")
+            }
+            while (!atGate() && System.nanoTime() < deadline) Thread.sleep(10)
+            assertTrue("real export worker must reach retained owner's gate", atGate())
+            val monitorAvailable = CountDownLatch(1)
+            val busy = AtomicBoolean()
+            val probe = Thread { synchronized(controller) { busy.set(controller.dataBusy); monitorAvailable.countDown() } }
+            probe.start()
+            assertTrue("gate wait cannot retain Controller monitor", monitorAvailable.await(2, TimeUnit.SECONDS))
+            assertTrue("acceptance spans prefetch and final snapshot", busy.get())
+            controlMain {
+                var rejected = false
+                try { controller.mutateGenerationOwners(setOf(output.conversation.id.value), completed = {}) {} }
+                catch (_: IllegalStateException) { rejected = true }
+                assertTrue("delete cannot be admitted during original prefetch", rejected)
+            }
+        } finally {
+            release.countDown(); holder.join(5000)
+        }
+        try {
+            assertFalse(holder.isAlive)
+            assertNull(failure.get())
+            awaitControl("blocked backup completed") { !controller.dataBusy && controller.dataNotice != null }
+            assertTrue(checkNotNull(controller.dataNotice).startsWith("完整中立备份已导出"))
+            assertEquals(0, fixture.opens.get())
+        } finally { file.delete() }
     }
 
     fun testExistingOutputSurvivesFailedDuplicateAndUnrelatedAppendImports() {

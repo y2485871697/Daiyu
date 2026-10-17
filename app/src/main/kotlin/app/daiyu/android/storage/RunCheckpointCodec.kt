@@ -103,7 +103,8 @@ internal object RunCheckpointCodec {
         require(value.owner.isNotBlank() && value.owner.length <= 200 && value.revision in 1 until Long.MAX_VALUE)
         require(value.round in 0..100 && value.messageReconciled)
         value.transport?.let { transport ->
-            require(value.request != null && value.request.operation != RequestOperation.OPEN)
+            val request = value.request
+            require(request != null && request.operation != RequestOperation.OPEN)
             require(transport.decoderState.length in 2..16_000_000)
             val parser = JSONTokener(transport.decoderState)
             val state = parser.nextValue()

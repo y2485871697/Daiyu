@@ -33,7 +33,7 @@ class ChatRunnerTransportResumeTest {
     }
     private fun batch(sequence: Long, events: List<ModelEvent> = emptyList()) =
         ModelEventBatch(events,TransportCheckpoint("resp_fixture",sequence,"{}"))
-    private abstract class Session : CheckpointedResumableModelSession {
+    private abstract inner class Session : CheckpointedResumableModelSession {
         override val canResume = true
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) = error("Unit sink is not ACK")
         override fun resume(sink: (ModelEvent) -> Unit) = error("Unit sink is not ACK")

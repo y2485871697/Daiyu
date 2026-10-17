@@ -89,4 +89,24 @@ class ChatMessageListMeasurePhaseTest : ComposeActivityTestCase() {
         ui.waitForIdle()
         ui.onNodeWithText("measured tail").assertIsDisplayed()
     }
+    fun testTouchStopsHeightGrowthFollowAndExplicitBottomRequestRestoresIt() {
+        var extraHeight by mutableStateOf(40.dp)
+        var request by mutableStateOf(ChatScrollRequest(1))
+        mount {
+            ChatMessageList(listOf(ChatTurnUi.Assistant("a", finalText = "answer")), false,
+                ChatScreenActions(), scrollRequest = request, turnExtras = {
+                    Box(Modifier.height(extraHeight))
+                    Text("touch controlled tail")
+                })
+        }
+        ui.onNodeWithText("touch controlled tail").assertIsDisplayed()
+        ui.onNodeWithTag("chat-messages").performTouchInput { click() }
+        mainThread { extraHeight = 900.dp }
+        ui.waitForIdle()
+        ui.onNodeWithText("touch controlled tail").assertIsNotDisplayed()
+        mainThread { request = ChatScrollRequest(2) }
+        ui.waitForIdle()
+        ui.onNodeWithText("touch controlled tail").assertIsDisplayed()
+    }
+
 }

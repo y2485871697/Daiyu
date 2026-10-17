@@ -48,6 +48,32 @@ class AcceptedHistoryActivityTest : WiredActivityTestCase() {
         assertDraft("selection-only text")
     }
 
+    fun testTextOnlyChangeRetainsTurnsAndContentRevisionAndPersistsDraft() {
+        val conversation = fixture.database.create("default")
+        val run = RunId("text-only-run")
+        val answer = Message(MessageId("text-only-answer"), conversation.id, run,
+            Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("body", "retained answer")), RunStatus.RUNNING)
+        fixture.database.send(Message(MessageId("text-only-user"), conversation.id, run,
+            Message.USER_ROLE, listOf(MessageBlock.Text("body", "retained question")), RunStatus.COMPLETED), answer)
+        fixture.database.save(answer.copy(status = RunStatus.COMPLETED))
+        mainThread { activity.select(conversation) }
+        ui.waitForIdle()
+        mainThread {
+            val before = (field("chatState\$delegate") as State<*>).value as ChatScreenState
+            assertTrue(before.turns.isNotEmpty())
+            retainedControls(activity).onTextChange("new draft without remapping history")
+            val after = (field("chatState\$delegate") as State<*>).value as ChatScreenState
+            assertSame(before.turns, after.turns)
+            assertEquals(before.contentRevision, after.contentRevision)
+            assertSame(before.scrollRequest, after.scrollRequest)
+            assertEquals(before.composer.modelLabel, after.composer.modelLabel)
+            assertEquals(before.composer.assistantLabel, after.composer.assistantLabel)
+            assertEquals("new draft without remapping history", after.composer.text)
+            assertEquals(after.composer.text, fixture.database.draft(conversation.id))
+        }
+        assertDraft("new draft without remapping history")
+    }
+
     fun testLateAcceptedHistoryCannotOverwriteExpandedWindowOrNewFinalText() {
         val conversation = fixture.database.create("default")
         repeat(70) { index ->

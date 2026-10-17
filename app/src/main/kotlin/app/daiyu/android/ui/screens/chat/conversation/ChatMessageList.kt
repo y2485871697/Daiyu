@@ -99,15 +99,26 @@ internal fun ChatMessageList(
     // Observe measured height as well as item count, so streaming text also stays in view.
     LaunchedEffect(listState) {
         snapshotFlow {
-            val layout = listState.layoutInfo
-            currentTurns to Triple(layout.totalItemsCount, layout.visibleItemsInfo.lastOrNull()?.size, layout.viewportEndOffset)
-        }.collectLatest {
+            if (!followBottom || currentDragging || currentTurns.isEmpty()) null
+            else {
+                val index = currentTurns.lastIndex
+                val layout = listState.layoutInfo
+                val last = layout.visibleItemsInfo.lastOrNull { it.index == index }
+                val overflow = last?.let {
+                    it.offset + it.size + layout.afterContentPadding - layout.viewportEndOffset
+                }
+                if (overflow == null || overflow > 0) index to overflow else null
+            }
+        }.collectLatest { pending ->
+            if (pending == null) return@collectLatest
             // Layout notifications can resume this collector during measurement.
             withFrameNanos { }
             if (followBottom && !currentDragging && currentTurns.isNotEmpty()) {
-                listState.scrollToItem(currentTurns.lastIndex)
+                val index = currentTurns.lastIndex
+                if (listState.layoutInfo.visibleItemsInfo.none { it.index == index })
+                    listState.scrollToItem(index)
                 val layout = listState.layoutInfo
-                val last = layout.visibleItemsInfo.lastOrNull()
+                val last = layout.visibleItemsInfo.lastOrNull { it.index == index }
                 if (last != null) {
                     val overflow = last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset
                     if (overflow > 0) listState.scrollBy(overflow.toFloat())

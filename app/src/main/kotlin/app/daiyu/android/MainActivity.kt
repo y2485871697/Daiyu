@@ -4104,7 +4104,7 @@ class MainActivity : ComponentActivity() {
             val id = selected?.id
             if (id == null) controller.database.draft(value) else controller.database.draft(id, value)
             if (draft != value) draftRevision++
-            draft = value; publishChat()
+            draft = value; publishChat(rowsChanged = false)
         }
     }
     internal fun select(conversation: Conversation?) {
@@ -4410,7 +4410,9 @@ class MainActivity : ComponentActivity() {
         }
         return result
     }
-    private fun publishChat() {
+    private fun publishChat() = publishChat(rowsChanged = true)
+
+    private fun publishChat(rowsChanged: Boolean) {
         taskLocationVisit?.takeIf { !taskLocationCurrent(it) }?.let(::cancelTaskLocation)
         guiEditor?.let { entry ->
             if (controller.guiEntry() !== entry) guiEditor = null
@@ -4422,7 +4424,7 @@ class MainActivity : ComponentActivity() {
         // Also catches new-chat -> persisted conversation after sending, without auto-playing.
         speechHost.syncConversation(selected?.id?.value)
         imageHost.syncConversation(selected?.id?.value)
-        questionRows = shown.mapNotNull { (_, message) ->
+        if (rowsChanged) questionRows = shown.mapNotNull { (_, message) ->
             val projections = message.blocks.filterIsInstance<MessageBlock.Tool>()
                 .mapNotNull { controller.questionProjection(message, it.invocation) }
             val retryCleanup = controller.canRetryQuestionCleanup(message)
@@ -4433,10 +4435,10 @@ class MainActivity : ComponentActivity() {
         val phase = composerPhaseForRun(state?.pauseRequested)
         val allowed = !sidebarVisible && controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
-            contentRevision = chatState.contentRevision + 1,
-            turns = ChatTurnMapper.map(shown.map { it.second }, timestamp = { message ->
+            contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
+            turns = if (!rowsChanged) chatState.turns else ChatTurnMapper.map(shown.map { it.second }, timestamp = { message ->
                 MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
-            }, confirmedToolError = app.daiyu.android.ui.RetainedToolOutcomes.reader(controller.database, shown.map { it.second })), canJumpToPreviousUser = shown.any { it.second.role == "user" },
+            }, confirmedToolError = app.daiyu.android.ui.RetainedToolOutcomes.reader(controller.database, shown.map { it.second })), canJumpToPreviousUser = if (rowsChanged) shown.any { it.second.role == "user" } else chatState.canJumpToPreviousUser,
             statusText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中";
                 pendingTextSend != null -> "正在准备上下文并核实发送结果"; imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,
@@ -4444,9 +4446,9 @@ class MainActivity : ComponentActivity() {
                 imageSendAvailable = imageHost.session.attachments.state.value.canSubmit && !imageHost.busy &&
                     videoHost.state.items.isEmpty() && !videoSending && controller.active == null,
                 imageSendBlocked = imageHost.busy || imageHost.hasAttachments && !imageHost.session.attachments.state.value.canSubmit,
-                modelLabel = if (controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
+                modelLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
                 reasoningLabel = try { reasoningPreference.snapshot(selected?.id?.value).displayName } catch (_: Exception) { "配置无效，需重存" },
-                assistantLabel = if (controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null,
+                assistantLabel = if (!rowsChanged || controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null,
                 supplementAvailable = state?.phase == ExecutionPhase.PAUSED && supplementDraft.pending == null,
                 supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&
                     supplementDraft.pending != null,

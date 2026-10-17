@@ -13,6 +13,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.onClick as semanticsClick
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -146,7 +148,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
                 SettingsCard {
                     SettingsRow(if (DocumentsContract.isTreeUri(uri)) "共享目录 ${index + 1}" else "共享文件 ${index + 1}",
                         summary = uri.toString(), tag = "workspace-grant:$index")
-                    if (DocumentsContract.isTreeUri(uri)) TextButton("查看文件", modifier = Modifier.testTag("workspace-browse:$index"), onClick = {
+                    if (DocumentsContract.isTreeUri(uri)) WorkspaceButton("查看文件", tag = "workspace-browse:$index", onClick = {
                         if (current() && !busy && loaded) {
                             invalidateRead(); notice = null
                             val token = AtomicBoolean(false); request = token
@@ -160,8 +162,8 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
                             }
                         }
                     })
-                    TextButton("复制引用", modifier = Modifier.testTag("workspace-copy:$index"), onClick = { copy(uri) })
-                    TextButton("撤销共享", modifier = Modifier.testTag("workspace-revoke:$index"), onClick = {
+                    WorkspaceButton("复制引用", tag = "workspace-copy:$index", onClick = { copy(uri) })
+                    WorkspaceButton("撤销共享", tag = "workspace-revoke:$index", onClick = {
                         if (current() && !busy && loaded) revoking = WorkspaceRevoke(uri)
                     })
                 }
@@ -181,4 +183,10 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
             }
         }
     }
+}
+
+@Composable
+private fun WorkspaceButton(text: String, tag: String, onClick: () -> Unit) {
+    TextButton(text, onClick = onClick,
+        modifier = Modifier.testTag(tag).semantics { semanticsClick { onClick(); true } })
 }

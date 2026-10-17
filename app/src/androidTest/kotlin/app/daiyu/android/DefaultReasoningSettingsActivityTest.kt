@@ -44,7 +44,10 @@ class DefaultReasoningSettingsActivityTest : WiredActivityTestCase() {
         openSettings(); revealDefault().assertIsOff().performClick()
         ui.onNodeWithText(activity.getString(R.string.subagent_reasoning_picker_title)).assertExists()
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-        ui.waitForIdle()
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithText(activity.getString(R.string.subagent_reasoning_picker_title))
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+        }
         ui.onNodeWithText(activity.getString(R.string.subagent_reasoning_picker_title)).assertDoesNotExist()
         node("page:设置").assertExists()
         revealDefault().assertIsOff()

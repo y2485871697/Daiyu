@@ -3773,7 +3773,7 @@ class ChatController internal constructor(private val application:Application,
         if (complete) {
             val result = neutralBackup.importPackageFrom(open)
             val inventory = result.inventory
-            val summary = if (result.alreadyImported) "此备份已导入过，未重复添加"
+            val summary = if (result.alreadyImported) "此完整备份已导入过，未重复添加"
             else "已导入${inventory.conversations}个会话、${inventory.messages}条消息、${inventory.attachments}个附件"
             return (result.cleanupProblem?.let { "$summary；$it" } ?: summary) to (inventory.configEntries > 0)
         }

@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 @Suppress("DEPRECATION")
 class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
+    override val engineeringUi: Boolean = true
     private class Documents(private val root: File) : ContentProvider() {
         val opens = AtomicInteger()
         val openEntered = CountDownLatch(1)

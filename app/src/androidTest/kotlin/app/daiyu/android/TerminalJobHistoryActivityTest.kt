@@ -10,6 +10,7 @@ import java.util.UUID
 
 /** Mounted production panel with zero live sessions. No shell, real provider or restored control. */
 class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
+    override val engineeringUi: Boolean = true
     private val created = mutableListOf<File>()
     private fun invoke(name: String, vararg args: Any?): Any? = MainActivity::class.java.declaredMethods
         .single { it.name == name && it.parameterCount == args.size }.apply { isAccessible = true }.invoke(activity, *args)

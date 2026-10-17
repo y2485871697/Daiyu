@@ -124,7 +124,11 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
         if (open) intent.setAction(Intent.ACTION_VIEW).setDataAndType(uri, "application/json").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         return startMain(intent).also { activity = it }
     }
-    private fun confirmation() { node("prompt-choice:1").performClick(); node("dialog-confirm").assertTextEquals("导入") }
+    private fun confirmation() {
+        node("prompt-choice:0").assertDoesNotExist(); node("prompt-choice:1").assertDoesNotExist()
+        node("dialog-confirm").assertTextEquals("导入").assertIsDisplayed().assertIsEnabled()
+        assertEquals(0, provider.opens.get()); assertEquals(0L, controller.dataRevision)
+    }
     private fun assertNoImport(before: String) {
         instrumentation.waitForIdleSync(); awaitControl("idle") { !controller.dataBusy }
         assertEquals(0, provider.opens.get()); assertEquals(0L, controller.dataRevision)

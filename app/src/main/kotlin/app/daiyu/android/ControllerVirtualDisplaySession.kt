@@ -8,6 +8,7 @@ import app.daiyu.android.domain.tools.*
 import app.daiyu.android.integration.tools.*
 import app.daiyu.android.vd.AndroidVirtualDisplayOwnerHost
 import app.daiyu.android.vd.OwnerRunBinding
+import app.daiyu.android.vd.OwnerReply
 import app.daiyu.android.vdapproval.VirtualDisplayApproval
 import app.daiyu.android.vdapproval.VirtualDisplayApprovalRequest
 import app.daiyu.android.vdapproval.R08CleanupApprovalRequest
@@ -50,7 +51,8 @@ internal class ControllerVirtualDisplaySession internal constructor(
         fun finish(finalResults: List<ToolDispatchResult>)
     }
     /** Identity is additionally validated against this session's live ticket set. */
-    class BatchTicket internal constructor(internal val completion: BatchCompletion)
+    class BatchTicket internal constructor(internal val completion: BatchCompletion,
+                                           internal val originalWholeBatch: List<ToolInvocation>)
 
     interface Lease {
         val generation: String
@@ -106,6 +108,9 @@ internal class ControllerVirtualDisplaySession internal constructor(
     private var released = false
     private var shutdownClaimed = false
     private var shutdownBusy = false
+    // Only the original authenticated business reply can prove Handoff. Central replay alone
+    // is not authority to send an additional Release; final feedback may downgrade this evidence.
+    private var handoffConfirmed = false
     private var cleanupRequest: R08CleanupApprovalRequest? = null
     private var cleanupApproval: VirtualDisplayApproval? = null
     private var cleanupDecision: Boolean? = null
@@ -159,6 +164,25 @@ internal class ControllerVirtualDisplaySession internal constructor(
             val retained = ownerFactory()
             synchronized(lock) { handle = retained }
             val guarded = object : R08VirtualDisplayEndpoint by retained.endpoint {
+                override fun execute(id: String, operation: String, parameters: JSONObject): OwnerReply {
+                    worker()
+                    // A model cannot skip the approved Handoff and send Release first. This is
+                    // NOT permission to insert/retry Handoff or replace the frozen parameters.
+                    if (operation == "release" && prepared.writes.any { it.operation == "handoff" } &&
+                        !synchronized(lock) { handoffConfirmed }) return OwnerReply(OwnerReply.Outcome.UNKNOWN)
+                    val reply = retained.endpoint.execute(id, operation, parameters)
+                    if (operation == "handoff") {
+                        val body = reply.payloadCopy()
+                        val confirmed = reply.outcome == OwnerReply.Outcome.REPLIED && body != null &&
+                            body.opt("ok") == true && body.opt("receiptOnly") != true &&
+                            body.opt("mutationUncertain") != true && body.opt("handedOff") == true &&
+                            body.opt("sourceEmpty") == true &&
+                            body.optJSONObject("receipt")?.optString("state") == "SUCCEEDED"
+                        synchronized(lock) { handoffConfirmed = confirmed }
+                    }
+                    return reply
+                }
+
                 override fun start(generation: String, binding: OwnerRunBinding): Boolean {
                     worker()
                     val admitted = synchronized(lock) {
@@ -231,7 +255,9 @@ internal class ControllerVirtualDisplaySession internal constructor(
         }
         try {
             val completion = parent.beginBatch(current, originalWholeBatch)
-            return BatchTicket(completion).also { ticket -> synchronized(lock) { batchTickets.add(ticket) } }
+            return BatchTicket(completion, originalWholeBatch.toList()).also { ticket ->
+                synchronized(lock) { batchTickets.add(ticket) }
+            }
         } catch (_: Exception) {
             synchronized(lock) { uncertain = true }
             throw IllegalStateException("virtual_display_batch_registration_unknown")
@@ -246,7 +272,16 @@ internal class ControllerVirtualDisplaySession internal constructor(
             completedBatchTickets.add(ticket)
             batchCallbacks++
         }
-        try { ticket.completion.finish(finalResults) }
+        try {
+            ticket.completion.finish(finalResults)
+            ticket.originalWholeBatch.zip(finalResults).forEach { (call, result) ->
+                val stepId = try { JSONObject(call.arguments).optString("step_id") } catch (_: Exception) { "" }
+                if (call.name == R08VirtualDisplayCatalogLeaf.WRITE_TOOL &&
+                    synchronized(lock) { plan?.writes?.any { it.id == stepId && it.operation == "handoff" } == true } &&
+                    (result.callId != call.id || result.outcome !is DispatchOutcome.Confirmed))
+                    synchronized(lock) { handoffConfirmed = false }
+            }
+        }
         catch (_: Exception) {
             synchronized(lock) { uncertain = true }
             throw IllegalStateException("virtual_display_final_batch_unknown")
@@ -332,7 +367,8 @@ internal class ControllerVirtualDisplaySession internal constructor(
 
     /** Explicit host action AFTER Stop + parent drain, never called by close/observe/timers.
      * Freezes an additional Release-only request on the SAME owner, capabilities and durable
-     * generation. A previous Release (successful or uncertain) is never replaced by maintenance.
+     * generation. It never adds Handoff: plans that may own tasks require the original approved
+     * Handoff's known success first. A previous Release (successful or uncertain) is never replaced.
      * No store, IPC, reserve, catalog registration or combined tool authorization happens here.
      */
     fun prepareInitializedCleanupOnWorker(parentDrained: Boolean): R08CleanupApprovalRequest? {
@@ -421,6 +457,10 @@ internal class ControllerVirtualDisplaySession internal constructor(
             shutdownBusy || cleanupBusy || batchCallbacks != 0 || batchTickets.isNotEmpty() || lease == null ||
             handle == null || plan == null) return false
         val state = leaf?.heldState() ?: return false
+        // Additional cleanup is exactly the separately approved Release, never an implicit
+        // Handoff. If this plan could own tasks, require its original verified Handoff first.
+        if (plan!!.writes.any { it.operation == "launch" || it.operation == "handoff" } &&
+            !handoffConfirmed) return false
         return state.revoked && state.startAttempted && state.initialized && !state.uncertain &&
             !state.releaseAttempted && state.activeExecutions == 0 && state.pendingFinalOutcomes == 0
     }

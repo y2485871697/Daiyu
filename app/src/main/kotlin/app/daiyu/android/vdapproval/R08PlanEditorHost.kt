@@ -9,11 +9,12 @@ import java.util.Collections
 internal enum class R08PlanAction(val fields: List<String>, val defaults: List<String>) {
     START(emptyList(), emptyList()),
     INITIALIZE(emptyList(), emptyList()),
-    LAUNCH(listOf("package"), listOf("")),
+    LAUNCH(listOf("package", "component"), listOf("", "")),
     TAP(listOf("x", "y"), listOf("0", "0")),
     SWIPE(listOf("x1", "y1", "x2", "y2", "durationMs"), listOf("0", "0", "100", "100", "300")),
     TEXT(listOf("text"), listOf("")),
     KEY(listOf("keyCode"), listOf("4")),
+    HANDOFF(emptyList(), emptyList()),
     RELEASE(emptyList(), emptyList()),
     STATUS(emptyList(), emptyList()),
     SNAPSHOT(listOf("include", "maxBytes"), listOf("true", "6291456"))
@@ -58,11 +59,7 @@ internal class R08FrozenPlan private constructor(writes: List<R08VirtualDisplayW
                 val action: R08VirtualDisplayAction? = when (row.action) {
                     R08PlanAction.START -> R08VirtualDisplayAction.Start
                     R08PlanAction.INITIALIZE -> R08VirtualDisplayAction.Initialize
-                    R08PlanAction.LAUNCH -> {
-                        require(value(0).matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")) &&
-                            value(0).length <= 255) { "请输入完整包名" }
-                        R08VirtualDisplayAction.Launch(value(0))
-                    }
+                    R08PlanAction.LAUNCH -> R08VirtualDisplayAction.Launch(value(0), value(1))
                     R08PlanAction.TAP -> R08VirtualDisplayAction.Tap(coordinate(0), coordinate(1))
                     R08PlanAction.SWIPE -> R08VirtualDisplayAction.Swipe(coordinate(0), coordinate(1), coordinate(2),
                         coordinate(3), number(4, 1..60000))
@@ -72,6 +69,7 @@ internal class R08FrozenPlan private constructor(writes: List<R08VirtualDisplayW
                         R08VirtualDisplayAction.Text(value(0))
                     }
                     R08PlanAction.KEY -> R08VirtualDisplayAction.Key(number(0, 0..1000))
+                    R08PlanAction.HANDOFF -> R08VirtualDisplayAction.Handoff
                     R08PlanAction.RELEASE -> R08VirtualDisplayAction.Release
                     R08PlanAction.STATUS -> {
                         reads += R08VirtualDisplayRead(id)
@@ -90,10 +88,7 @@ internal class R08FrozenPlan private constructor(writes: List<R08VirtualDisplayW
             require(actions.take(2) == listOf(R08VirtualDisplayAction.Start, R08VirtualDisplayAction.Initialize) &&
                 actions.count { it == R08VirtualDisplayAction.Start } == 1 &&
                 actions.count { it == R08VirtualDisplayAction.Initialize } == 1) { "写计划必须以唯一 Start、Initialize 开始" }
-            require(actions.count { it == R08VirtualDisplayAction.Release } <= 1 &&
-                (R08VirtualDisplayAction.Release !in actions || actions.last() == R08VirtualDisplayAction.Release)) {
-                "Release 至多一次且必须是最后一项写操作"
-            }
+            R08VirtualDisplayPlan.validateExitSequence(actions)
             return R08FrozenPlan(writes, reads)
         }
     }

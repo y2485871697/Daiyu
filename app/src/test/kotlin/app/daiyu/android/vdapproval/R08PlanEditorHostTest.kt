@@ -18,9 +18,10 @@ class R08PlanEditorHostTest {
 
     @Test fun editedParametersBecomeExactFrozenPlanAndFinalApprovalRows() {
         val values = mutableListOf("11", "22")
-        val rows = (prefix() + listOf(row(R08PlanAction.LAUNCH, "org.example.notes"),
+        val rows = (prefix() + listOf(row(R08PlanAction.LAUNCH, "org.example.notes", "org.example.notes/.MainActivity"),
             R08PlanEditorRow(R08PlanAction.TAP, values), row(R08PlanAction.SWIPE, "1", "2", "30", "40", "456"),
-            row(R08PlanAction.TEXT, "输入 exact text"), row(R08PlanAction.KEY, "66"), row(R08PlanAction.RELEASE),
+            row(R08PlanAction.TEXT, "输入 exact text"), row(R08PlanAction.KEY, "66"), row(R08PlanAction.HANDOFF),
+            row(R08PlanAction.RELEASE),
             row(R08PlanAction.STATUS), row(R08PlanAction.SNAPSHOT, "false", "1024"))).toMutableList()
         val host = R08PlanEditorHost()
         val frozen = host.freeze(rows)
@@ -33,9 +34,13 @@ class R08PlanEditorHostTest {
         val review = VirtualDisplayApprovalRequest(plan)
         assertSame(owner, plan.owner)
         assertSame(caps, plan.capabilities)
-        assertEquals(listOf("start", "initialize", "launch", "input", "input", "input", "input", "release"),
+        assertEquals(listOf("start", "initialize", "launch", "input", "input", "input", "input", "handoff", "release"),
             review.rows.map { it.operation })
         assertEquals("org.example.notes", plan.writes[2].parameters().getString("package"))
+        assertEquals("org.example.notes/.MainActivity", plan.writes[2].parameters().getString("component"))
+        assertEquals("{\"taskIds\":[]}", plan.writes[7].canonicalParameters)
+        assertEquals("{}", plan.writes[8].canonicalParameters)
+        assertEquals(plan.writes.map { it.canonicalParameters }, review.rows.map { it.effectiveParameters })
         assertEquals(11, plan.writes[3].parameters().getInt("x"))
         assertEquals(456, plan.writes[4].parameters().getInt("durationMs"))
         assertEquals("输入 exact text", plan.writes[5].parameters().getString("text"))
@@ -53,7 +58,12 @@ class R08PlanEditorHostTest {
     }
 
     @Test fun finiteValidationRejectsUnsafeAndAmbiguousInputsWithoutConsumingEditor() {
-        val bad = listOf(row(R08PlanAction.LAUNCH, "org.example;kill"), row(R08PlanAction.TAP, "-1", "0"),
+        val bad = listOf(row(R08PlanAction.LAUNCH, "org.example.notes"),
+            row(R08PlanAction.LAUNCH, "org.example.notes", ""),
+            row(R08PlanAction.LAUNCH, "org.example.notes", "other.package/.Main"),
+            row(R08PlanAction.LAUNCH, "org.example.notes", "org.example.notes/.Main;kill"),
+            row(R08PlanAction.LAUNCH, "org.example;kill", "org.example;kill/.Main"),
+            row(R08PlanAction.TAP, "-1", "0"),
             row(R08PlanAction.TAP, "2147483648", "0"), row(R08PlanAction.TAP, "01", "0"),
             row(R08PlanAction.SWIPE, "0", "0", "2", "3", "60001"), row(R08PlanAction.KEY, "1001"),
             row(R08PlanAction.TEXT, "secret\ncommand"), row(R08PlanAction.TEXT, ""),

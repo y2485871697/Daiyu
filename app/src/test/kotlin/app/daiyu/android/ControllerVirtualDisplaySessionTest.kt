@@ -27,14 +27,17 @@ class ControllerVirtualDisplaySessionTest {
             require(old == null || old == intent)
             return if (old == null) R08VirtualDisplayPermit.EXECUTE_ONCE else R08VirtualDisplayPermit.LOOKUP_ONLY
         }
+        var failHandoffComplete = false
         var failCleanupComplete = false
         val evidence = mutableListOf<Pair<R08VirtualDisplayIntent, R08VirtualDisplayEvidence>>()
         override fun complete(intent: R08VirtualDisplayIntent, evidence: R08VirtualDisplayEvidence) {
+            if (failHandoffComplete && intent.operation == "handoff") throw IOException("lost handoff completion")
             if (failCleanupComplete && intent.invocationId == "host-cleanup-release-v1") throw IOException("lost completion")
             this.evidence += intent to evidence
         }
+        val finals = mutableListOf<Pair<String, R08VirtualDisplayEvidence>>()
         override fun finalOutcome(bindingKey: String, generation: String, invocationId: String,
-                                  evidence: R08VirtualDisplayEvidence) = Unit
+                                  evidence: R08VirtualDisplayEvidence) { finals += invocationId to evidence }
     }
     private class Lease : ControllerVirtualDisplaySession.Lease {
         override val generation = "persisted_generation"
@@ -63,6 +66,11 @@ class ControllerVirtualDisplaySessionTest {
         }
         var confirmInitialize = false
         var confirmRelease = false
+        var confirmLaunch = false
+        var confirmHandoff = false
+        var handoffBody: JSONObject? = null
+        val executed = mutableListOf<Triple<String, String, String>>()
+        val handoffIds = mutableListOf<String>()
         var releaseEntered: CountDownLatch? = null
         var releaseContinue: CountDownLatch? = null
         val releaseIds = mutableListOf<String>()
@@ -74,6 +82,16 @@ class ControllerVirtualDisplaySessionTest {
         }
         override fun execute(id: String, operation: String, parameters: JSONObject): OwnerReply {
             writes++
+            executed += Triple(id, operation, parameters.toString())
+            if (operation == "launch" && confirmLaunch) return OwnerReply(OwnerReply.Outcome.REPLIED, JSONObject()
+                .put("ok", true).put("launched", true).put("receipt", JSONObject().put("state", "SUCCEEDED")))
+            if (operation == "handoff") {
+                handoffIds += id
+                if (handoffBody != null) return OwnerReply(OwnerReply.Outcome.REPLIED, handoffBody)
+                if (confirmHandoff) return OwnerReply(OwnerReply.Outcome.REPLIED, JSONObject()
+                    .put("ok", true).put("handedOff", true).put("sourceEmpty", true)
+                    .put("receipt", JSONObject().put("state", "SUCCEEDED")))
+            }
             if (operation == "release") {
                 releaseIds += id
                 releaseEntered?.countDown()
@@ -134,7 +152,8 @@ class ControllerVirtualDisplaySessionTest {
             }
         }
     }
-    private class Fixture(includeRelease: Boolean = false) : AutoCloseable {
+    private class Fixture(includeRelease: Boolean = false, includeHandoff: Boolean = false,
+                          includeLaunch: Boolean = false) : AutoCloseable {
         val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
         val owner = runnerOwner(message)
@@ -147,6 +166,9 @@ class ControllerVirtualDisplaySessionTest {
         val mutableWrites = mutableListOf(R08VirtualDisplayWrite("start", R08VirtualDisplayAction.Start),
             R08VirtualDisplayWrite("initialize", R08VirtualDisplayAction.Initialize),
             R08VirtualDisplayWrite("tap", R08VirtualDisplayAction.Tap(12, 34))).apply {
+                if (includeLaunch) add(R08VirtualDisplayWrite("launch",
+                    R08VirtualDisplayAction.Launch("org.example.notes", "org.example.notes/.MainActivity")))
+                if (includeHandoff) add(R08VirtualDisplayWrite("handoff", R08VirtualDisplayAction.Handoff))
                 if (includeRelease) add(R08VirtualDisplayWrite("release", R08VirtualDisplayAction.Release))
             }
         val session = ControllerVirtualDisplaySession(capabilities, mutableWrites,
@@ -528,6 +550,155 @@ class ControllerVirtualDisplaySessionTest {
         } finally { f.endpoint.releaseContinue!!.countDown(); extra.shutdownNow() }
         assertEquals(1, f.endpoint.releaseIds.size)
     }
+
+    @Test fun exactLaunchHandoffReleaseUsesOneApprovalJournalAndPhysicalDrainGate() =
+        Fixture(includeRelease = true, includeHandoff = true, includeLaunch = true).use { f ->
+            val pending = f.begin()
+            val request = f.request()
+            val launch = request.plan.writes.single { it.operation == "launch" }
+            assertEquals("org.example.notes/.MainActivity", launch.parameters().getString("component"))
+            assertEquals(listOf("start", "initialize", "input", "launch", "handoff", "release"),
+                request.rows.map { it.operation })
+            assertEquals(listOf("{\"taskIds\":[]}", "{}"), request.rows.takeLast(2).map { it.effectiveParameters })
+            f.mutableWrites.clear()
+            assertTrue(f.session.answerFromUi(request, true))
+            val auth = pending.get(5, TimeUnit.SECONDS)
+            f.endpoint.confirmInitialize = true
+            f.endpoint.confirmLaunch = true
+            f.endpoint.confirmHandoff = true
+            f.endpoint.confirmRelease = true
+            assertTrue(f.steps(auth, "start", "initialize", "launch", "handoff", "release")
+                .all { it.outcome is DispatchOutcome.Confirmed })
+            assertEquals(listOf("launch", "handoff", "release"), f.endpoint.executed.map { it.second })
+            val sentLaunch = JSONObject(f.endpoint.executed.first().third)
+            assertEquals(launch.canonicalParameters, request.plan.intent("launch-call", launch).canonicalParameters)
+            assertEquals(launch.parameters().toString(), sentLaunch.toString())
+            val claims = f.parent.lease.journal.claims.values
+            assertEquals(setOf(f.parent.lease.generation), claims.map { it.generation }.toSet())
+            assertEquals(setOf(request.plan.bindingKey), claims.map { it.bindingKey }.toSet())
+            assertEquals(launch.canonicalParameters, claims.single { it.operation == "launch" }.canonicalParameters)
+            assertEquals(listOf("start-call", "initialize-call", "launch-call", "handoff-call", "release-call"),
+                f.parent.lease.journal.finals.map { it.first })
+            assertTrue(f.parent.lease.journal.finals.all { it.second == R08VirtualDisplayEvidence.CONFIRMED })
+            f.session.close()
+            assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
+            assertEquals(0, f.parent.lease.releases.get())
+            f.endpoint.drained()
+            assertEquals(ControllerVirtualDisplaySession.CloseResult.Drained, f.observe())
+            assertEquals(1, f.parent.reserves.get())
+            assertEquals(1, f.parent.lease.releases.get())
+        }
+
+    @Test fun incompleteHandoffBusinessEvidenceNeverSendsReleaseOrReplaysHandoff() {
+        val success = JSONObject().put("ok", true).put("handedOff", true).put("sourceEmpty", true)
+            .put("receipt", JSONObject().put("state", "SUCCEEDED"))
+        val badBodies = listOf<JSONObject?>(null,
+            JSONObject(success.toString()).put("sourceEmpty", false),
+            JSONObject(success.toString()).put("handedOff", false),
+            JSONObject(success.toString()).put("receiptOnly", true),
+            JSONObject(success.toString()).put("mutationUncertain", true),
+            JSONObject(success.toString()).put("receipt", JSONObject().put("state", "UNKNOWN")))
+        badBodies.forEach { body -> Fixture(includeRelease = true, includeHandoff = true).use { f ->
+            val auth = f.initialized()
+            f.endpoint.handoffBody = body
+            f.endpoint.confirmRelease = true
+            assertTrue(f.steps(auth, "handoff", "release").all { it.outcome is DispatchOutcome.Unknown })
+            assertTrue(f.steps(auth, "handoff").single().outcome is DispatchOutcome.Unknown)
+            assertEquals(1, f.endpoint.handoffIds.size)
+            assertTrue(f.endpoint.releaseIds.isEmpty())
+            f.session.close()
+            assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            f.endpoint.drained()
+            assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
+            assertEquals(0, f.parent.lease.releases.get())
+            assertEquals(1, f.parent.reserves.get())
+        } }
+    }
+
+    @Test fun releaseCannotSkipApprovedHandoffAndUnknownDoesNotTriggerRepairSend() =
+        Fixture(includeRelease = true, includeHandoff = true).use { f ->
+            val auth = f.initialized()
+            f.endpoint.confirmRelease = true
+            f.endpoint.confirmHandoff = true
+            assertTrue(f.steps(auth, "release").single().outcome is DispatchOutcome.Unknown)
+            assertTrue(f.steps(auth, "handoff").single().outcome is DispatchOutcome.Unknown)
+            assertTrue(f.endpoint.executed.isEmpty())
+            f.session.close()
+            assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            assertEquals(1, f.parent.reserves.get())
+        }
+
+    @Test fun stoppedLaunchWithoutOriginalHandoffCannotGrowReleaseCleanupIntoUnapprovedHandoff() =
+        Fixture(includeHandoff = true, includeLaunch = true).use { f ->
+            val auth = f.initialized()
+            f.endpoint.confirmLaunch = true
+            assertTrue(f.steps(auth, "launch").single().outcome is DispatchOutcome.Confirmed)
+            f.session.close()
+            assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            assertTrue(f.endpoint.handoffIds.isEmpty())
+            assertTrue(f.endpoint.releaseIds.isEmpty())
+            assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
+        }
+
+    @Test fun knownOriginalHandoffAllowsOnlySeparatelyApprovedReleaseCleanup() =
+        Fixture(includeHandoff = true, includeLaunch = true).use { f ->
+            val auth = f.initialized()
+            f.endpoint.confirmLaunch = true
+            f.endpoint.confirmHandoff = true
+            assertTrue(f.steps(auth, "launch", "handoff").all { it.outcome is DispatchOutcome.Confirmed })
+            f.session.close()
+            val request = checkNotNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            assertEquals(listOf("release"), request.review.rows.map { it.operation })
+            assertTrue(f.session.answerCleanupFromUi(request, true))
+            f.endpoint.confirmRelease = true
+            assertEquals(ControllerVirtualDisplaySession.CleanupResult.CONFIRMED,
+                f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+            assertEquals(listOf("launch", "handoff", "release"), f.endpoint.executed.map { it.second })
+            assertEquals(1, f.endpoint.handoffIds.size)
+            assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
+            f.endpoint.drained()
+            assertEquals(ControllerVirtualDisplaySession.CloseResult.Drained, f.observe())
+        }
+
+    @Test fun lostHandoffCompletionAndCentralDowngradeBothFenceReleaseAndCleanup() {
+        listOf(false, true).forEach { lostCompletion -> Fixture(includeRelease = true, includeHandoff = true).use { f ->
+            val auth = f.initialized()
+            f.endpoint.confirmHandoff = true
+            f.parent.lease.journal.failHandoffComplete = lostCompletion
+            val results = f.steps(auth, "handoff", forward = false)
+            f.work {
+                f.session.finishBatch(checkNotNull(f.lastTicket), if (lostCompletion) results else
+                    listOf(ToolDispatchResult(results.single().callId, DispatchOutcome.Unknown("central-write-lost"))))
+            }
+            assertTrue(f.steps(auth, "release").single().outcome is DispatchOutcome.Unknown)
+            assertEquals(1, f.endpoint.handoffIds.size)
+            assertTrue(f.endpoint.releaseIds.isEmpty())
+            assertTrue(f.parent.lease.journal.finals.any {
+                it.first == "handoff-call" && it.second == R08VirtualDisplayEvidence.UNKNOWN
+            })
+            f.session.close()
+            assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            f.endpoint.drained()
+            assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
+        } }
+    }
+
+    @Test fun centralHandoffReplayAloneIsNotAuthorityForExtraCleanupRelease() =
+        Fixture(includeHandoff = true).use { f ->
+            f.initialized()
+            f.work {
+                val call = ToolInvocation(ToolCallId("replayed-handoff"), R08VirtualDisplayCatalogLeaf.WRITE_TOOL,
+                    "{\"step_id\":\"handoff\"}")
+                val ticket = f.session.beginBatch(listOf(call))
+                f.session.finishBatch(ticket, listOf(ToolDispatchResult(call.id,
+                    DispatchOutcome.Confirmed("{\"ok\":true}", false, replayed = true))))
+            }
+            f.session.close()
+            assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+            assertTrue(f.endpoint.executed.isEmpty())
+            assertEquals(0, f.parent.lease.releases.get())
+        }
 
     @Test fun explicitUninitializedShutdownIsLookupGatedOnceAndNotDrainEvidence() = Fixture().use { f ->
         f.dispatch(f.approve()); f.session.close()

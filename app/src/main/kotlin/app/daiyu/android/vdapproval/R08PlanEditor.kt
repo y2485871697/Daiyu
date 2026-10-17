@@ -38,6 +38,8 @@ internal fun R08PlanEditor(
     Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("R08 副屏动作计划", style = MaterialTheme.typography.headlineSmall)
         Text("编辑仅生成有限计划，不启动 root、不接受消息、不授予权限。冻结后请在原运行审批中核对每项规范参数和 effect。" +
+            "Launch 必填 package 和显式 component（包名/.Activity 或 包名/完整类名），不会在执行时解析或替换。" +
+            "启动任务后的正常退出请在同一计划添加 HANDOFF → RELEASE；Handoff 明确不保留任务（taskIds=[]），由原 owner 验证并清理 owned 任务。" +
             "写步骤按下列顺序规划；执行仍经过现有中央目录，读取独立可用且绝不初始化。")
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("r08-plan-rows"),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -86,7 +88,7 @@ internal fun R08PlanEditor(
         OutlinedButton(onClick = { deny() }, enabled = !answered, modifier = Modifier.fillMaxWidth()) { Text("取消计划") }
         Button(onClick = {
             val frozen = try { host.freeze(rows) } catch (_: IllegalArgumentException) {
-                error = "计划无效：请检查顺序、完整包名、整数范围、文本及 snapshot 参数。"; null
+                error = "计划无效：请检查顺序、包名与显式组件、整数范围、文本及 snapshot 参数。"; null
             } catch (_: IllegalStateException) {
                 error = "计划参数无效或编辑器已失效。"; null
             }

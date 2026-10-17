@@ -391,11 +391,11 @@ internal object GuiRuntime {
                     finally {
                         // Attempt every disposal even if another one throws. A failed disposal
                         // must retain the slot: callback arrival alone is not a resource receipt.
-                        var disposed = true
-                        try { software?.recycle() } catch (_: Exception) { disposed = false }
-                        try { hardware?.recycle() } catch (_: Exception) { disposed = false }
-                        try { buffer.close() } catch (_: Exception) { disposed = false }
-                        if (disposed) request.resourcesDisposed()
+                        request.disposeSuccessResources(
+                            software = { software?.recycle(); Unit },
+                            hardware = { hardware?.recycle(); Unit },
+                            buffer = { buffer.close() },
+                        )
                     }
                 }
                 override fun onFailure(errorCode: Int) {

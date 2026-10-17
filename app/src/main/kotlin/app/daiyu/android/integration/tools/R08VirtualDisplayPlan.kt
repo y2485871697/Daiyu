@@ -15,11 +15,29 @@ import java.util.Collections
 internal sealed interface R08VirtualDisplayAction {
     data object Start : R08VirtualDisplayAction
     data object Initialize : R08VirtualDisplayAction
-    data class Launch(val packageName: String) : R08VirtualDisplayAction
+    /** Explicit flattened Android component, entered before approval; never resolved at execution. */
+    data class Launch(val packageName: String, val component: String) : R08VirtualDisplayAction {
+        init {
+            require(packageName.length <= 255 &&
+                packageName.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+"))) {
+                "请输入完整包名"
+            }
+            val parts = component.split('/')
+            // Match the owner's existing safe-identifier subset; do not relax it for '$'.
+            val segment = "[A-Za-z_][A-Za-z0-9_]*"
+            require(component.length <= 255 && parts.size == 2 && parts[0] == packageName &&
+                parts[1].matches(Regex("(?:\\.$segment(?:\\.$segment)*|$segment(?:\\.$segment)+)"))) {
+                "请输入与包名一致的显式组件（包名/.Activity 或 包名/完整类名）"
+            }
+        }
+    }
     data class Tap(val x: Int, val y: Int) : R08VirtualDisplayAction
     data class Swipe(val x1: Int, val y1: Int, val x2: Int, val y2: Int, val durationMs: Int = 300) : R08VirtualDisplayAction
     data class Text(val text: String) : R08VirtualDisplayAction
     data class Key(val keyCode: Int) : R08VirtualDisplayAction
+    /** Explicit cleanup-only Handoff: keep no tasks; owner verifies/removes owned tasks.
+     * No runtime task-ID discovery or arbitrary task/display selector. */
+    data object Handoff : R08VirtualDisplayAction
     data object Release : R08VirtualDisplayAction
 }
 internal data class R08VirtualDisplayWrite(val id: String, val action: R08VirtualDisplayAction)
@@ -59,12 +77,31 @@ internal class R08VirtualDisplayPlan private constructor(
     override fun toString() = "R08VirtualDisplayPlan(host-only)"
 
     companion object {
+        /** Handoff is terminal except for Release. Release-only plans remain valid for the
+         * separately approved cleanup seam; they never implicitly add a Handoff. */
+        fun validateExitSequence(actions: List<R08VirtualDisplayAction>) {
+            require(actions.count { it == R08VirtualDisplayAction.Handoff } <= 1) { "Handoff 至多一次" }
+            val handoff = actions.indexOf(R08VirtualDisplayAction.Handoff)
+            require(handoff < 0 || actions.drop(handoff + 1).all { it == R08VirtualDisplayAction.Release }) {
+                "Handoff 后仅允许 Release"
+            }
+            require(actions.count { it == R08VirtualDisplayAction.Release } <= 1 &&
+                (R08VirtualDisplayAction.Release !in actions || actions.last() == R08VirtualDisplayAction.Release)) {
+                "Release 至多一次且必须是最后一项写操作"
+            }
+            require(actions.none { it is R08VirtualDisplayAction.Launch } ||
+                R08VirtualDisplayAction.Release !in actions || handoff >= 0) {
+                "含 Launch 的退出计划需要同一批准中的 Handoff → Release"
+            }
+        }
+
         fun prepare(owner: RunExecutionOwner, capabilities: SessionCapabilities, generation: String,
                     writes: List<R08VirtualDisplayWrite>, reads: List<R08VirtualDisplayRead> = emptyList()): R08VirtualDisplayPlan {
             require(generation.matches(Regex("[A-Za-z0-9_-]{1,64}")))
             require(writes.size <= 64 && reads.size <= 64 && (writes.isNotEmpty() || reads.isNotEmpty()))
             require((writes.map { it.id } + reads.map { it.id }).all { it.matches(Regex("[A-Za-z0-9_-]{1,64}")) })
             require(writes.map { it.id }.distinct().size == writes.size && reads.map { it.id }.distinct().size == reads.size)
+            validateExitSequence(writes.map { it.action })
             val binding = OwnerRunBinding(capabilities.sessionId, owner.runId.value, owner.conversationId.value,
                 owner.runId.value, owner.assistantMessageId.value, owner.ownerId)
             val key = OwnerV2Contract.bindingDigest(binding.trusted)
@@ -74,8 +111,7 @@ internal class R08VirtualDisplayPlan private constructor(
                     R08VirtualDisplayAction.Start -> "start" to JSONObject()
                     R08VirtualDisplayAction.Initialize -> "initialize" to JSONObject()
                     is R08VirtualDisplayAction.Launch -> {
-                        require(a.packageName.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+")))
-                        "launch" to JSONObject().put("package", a.packageName)
+                        "launch" to JSONObject().put("package", a.packageName).put("component", a.component)
                     }
                     is R08VirtualDisplayAction.Tap -> {
                         require(a.x >= 0 && a.y >= 0)
@@ -94,6 +130,7 @@ internal class R08VirtualDisplayPlan private constructor(
                         require(a.keyCode in 0..1000)
                         "input" to JSONObject().put("kind", "key").put("keyCode", a.keyCode)
                     }
+                    R08VirtualDisplayAction.Handoff -> "handoff" to JSONObject().put("taskIds", JSONArray())
                     R08VirtualDisplayAction.Release -> "release" to JSONObject()
                 }
                 val parameters = if (op == "start" || op == "initialize") input else OwnerV2Contract.normalize(op, input)

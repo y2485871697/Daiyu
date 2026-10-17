@@ -8,6 +8,14 @@ import app.daiyu.android.context.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.context.CompressionPolicy
 import app.daiyu.android.domain.context.estimateTokens
+import app.daiyu.android.domain.runtime.UsageRequestSource
+import app.daiyu.android.model.ProviderProtocol
+import app.daiyu.android.model.ProviderSnapshot
+import app.daiyu.android.model.ResponsesModel
+import java.io.ByteArrayOutputStream
+import java.net.URL
+import java.security.cert.Certificate
+import javax.net.ssl.HttpsURLConnection
 import app.daiyu.android.gui.*
 import app.daiyu.android.integration.tools.RunCatalogCloseResult
 import app.daiyu.android.storage.*
@@ -32,6 +40,7 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
     }
 
     private inner class Fixture(val window: Long? = null, val input: String? = null,
+        val automatic: Boolean = false, holdSummary: Boolean = false,
         private val beforePolicy: () -> Unit = {}) {
         val id = UUID.randomUUID().toString()
         val root = File(instrumentation.targetContext.cacheDir, "gui-storage-$id").apply { mkdirs() }
@@ -39,13 +48,18 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
         val database = ConversationDatabase(app)
         val alias = "app.daiyu.android.test.gui-storage.$id"
         val settings = ModelSettingsStore(app, alias)
+        val binding = SummaryModelBinding("gui-summary-provider", "gui-summary-model")
+        val summary = InMemoryWire(holdSummary)
+        val conversation: Conversation? = if (automatic) seedHistory() else null
+        val originalHistory = conversation?.let { database.messages(it.id).map { row -> row.second } }.orEmpty()
         val opens = AtomicInteger()
         val factories = AtomicInteger()
         val modelInput = AtomicReference<List<Message>>()
         lateinit var delivery: GuiConfirmedDelivery
         val draft = "  exact GUI draft\nretained on unknown  "
-        val modelEntered = CountDownLatch(1)
-        val modelRelease = CountDownLatch(1)
+        val chat = InMemoryWire(hold = true, main = true)
+        val modelEntered = if (automatic) chat.entered else CountDownLatch(1)
+        val modelRelease = if (automatic) chat.release else CountDownLatch(1)
         val ticket = ChatController.TextSendTicket()
         val receipt = AtomicReference<ChatController.TextSendResult>()
         val receiptReady = CountDownLatch(1)
@@ -60,7 +74,8 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
                 ModelPort { history ->
                     modelInput.set(history)
                     opens.incrementAndGet()
-                    object : ModelSession {
+                    if (automatic) ResponsesModel(settings.load(), { chat }).open(history)
+                    else object : ModelSession {
                         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                             modelEntered.countDown()
                             check(modelRelease.await(10, TimeUnit.SECONDS))
@@ -74,15 +89,51 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
                 else ContextPreparationCoordinator(service, {
                     check(Looper.myLooper() !== Looper.getMainLooper())
                     beforePolicy()
-                    CompressionSettings(contextWindowTokens = window, reserveTokens = 128)
+                    CompressionSettings(automatic = automatic, contextWindowTokens = window, reserveTokens = 128,
+                        triggerPercent = if (automatic) 50 else 80, keepTurns = if (automatic) 1 else 2,
+                        summaryModel = binding.takeIf { automatic })
                 }, CompressionPolicyResolver { snapshot ->
                     CompressionPolicy(snapshot.automaticWithKnownWindow, snapshot.contextWindowTokens,
-                        snapshot.triggerPercent, snapshot.reserveTokens, 2)
-                }, SummaryModelResolver { error("No summary binding in this fixture") })
+                        snapshot.triggerPercent, snapshot.reserveTokens, checkNotNull(snapshot.keepTurns))
+                }, if (!automatic) SummaryModelResolver { error("No summary binding in this fixture") }
+                else ProviderSummaryModelResolver({ requested ->
+                    check(requested == binding)
+                    val provider = ProviderSnapshot.capture(ModelSettings("https://example.invalid/v1", binding.modelId,
+                        "offline-summary-only", false, protocol = ProviderProtocol.RESPONSES))
+                    SummaryProviderConfiguration(binding, provider, binding.modelId,
+                        128000, 127104, 256, 128, 512, 60000)
+                }, { summary }, object : SummaryDeadlineScheduler {
+                    // Only the synthetic summary transport's timer; GUI clocks/expiry are untouched.
+                    override fun schedule(delayMillis: Long, expire: () -> Unit) = AutoCloseable {}
+                }))
             })
             awaitControl("controller recovery ready") { controller.ready }
             assertNull(controller.problem)
         }
+
+        private fun seedHistory(): Conversation {
+            val owner = database.create("default")
+            repeat(4) { n ->
+                val user = Message(MessageId("old-u-$n-$id"), owner.id, RunId("old-$n-$id"), Message.USER_ROLE,
+                    listOf(MessageBlock.Text("old", "fact $n ".repeat(36))), RunStatus.COMPLETED)
+                val assistant = user.copy(id = MessageId("old-a-$n-$id"), role = Message.ASSISTANT_ROLE,
+                    status = RunStatus.RUNNING)
+                database.send(user, assistant)
+                database.save(assistant.copy(status = RunStatus.COMPLETED))
+            }
+            return owner
+        }
+
+        fun saveDraft() {
+            val owner = conversation
+            if (owner == null) database.draft(draft) else database.draft(owner.id, draft)
+        }
+
+        fun retainedDraft(): String = conversation?.let { owner ->
+            database.readableDatabase.rawQuery("SELECT draft FROM conversations WHERE id=?", arrayOf(owner.id.value)).use {
+                check(it.moveToFirst()); it.getString(0)
+            }
+        } ?: database.draft()
 
         fun begin(): ControllerGuiEntry {
             val retained = AtomicReference<ControllerGuiEntry>()
@@ -104,6 +155,7 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
         fun submit(): ControllerGuiEntry = begin().also { awaitReceipt() }
 
         fun dispose() {
+            summary.release.countDown()
             modelRelease.countDown()
             controlMain { controller.stop(); controller.close() }
             // Persistence-Unknown intentionally keeps the original entry, executor and SQLite
@@ -123,6 +175,51 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
         }
     }
 
+    /** Production Responses serializer/parser and cancellation, with HTTPS replaced only at
+     * the connection boundary. disconnect deliberately cannot unblock a held platform read. */
+    private class InMemoryWire(private val hold: Boolean, private val main: Boolean = false) :
+        HttpsURLConnection(URL("https://example.invalid/fixture")) {
+        val posts = AtomicInteger()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val disconnected = CountDownLatch(1)
+        val body = ByteArrayOutputStream()
+        override fun connect() {}
+        override fun disconnect() { disconnected.countDown(); if (main) release.countDown() }
+        override fun usingProxy() = false
+        override fun getCipherSuite() = "fixture"
+        override fun getLocalCertificates(): Array<Certificate>? = null
+        override fun getServerCertificates(): Array<Certificate> = emptyArray()
+        override fun getOutputStream(): ByteArrayOutputStream {
+            check(requestMethod == "POST")
+            posts.incrementAndGet()
+            return body
+        }
+        override fun getResponseCode() = 200
+        override fun getContentType() = "text/event-stream"
+        override fun getInputStream(): java.io.InputStream {
+            entered.countDown()
+            if (hold) check(release.await(10, TimeUnit.SECONDS))
+            val text = if (main) "done" else "summary text"
+            val input = if (main) 100 else 10
+            val output = if (main) 40 else 20
+            val cached = if (main) 10 else 5
+            return ("event: response.completed\n" +
+                "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"final\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"$text\"}]}],\"usage\":{\"input_tokens\":$input,\"output_tokens\":$output,\"input_tokens_details\":{\"cached_tokens\":$cached}}}}\n\n").byteInputStream()
+        }
+    }
+
+    private fun scalar(f: Fixture, sql: String, vararg args: String): Long =
+        f.database.readableDatabase.rawQuery(sql, args).use { check(it.moveToFirst()); it.getLong(0) }
+
+    private fun checkpoint(f: Fixture, entry: ControllerGuiEntry) =
+        f.database.readableDatabase.rawQuery("SELECT payload FROM runtime_checkpoints WHERE message_id=?",
+            arrayOf(entry.assistantId.value)).use { check(it.moveToFirst()); RunCheckpointCodec.decode(it.getString(0)) }
+
+    private fun usage(f: Fixture, owner: ConversationId) = DatabaseTransactions { f.database.writableDatabase }.run {
+        RecordedUsageReader.readAttributed(it, owner)
+    }
+
     private fun field(target: Any, name: String): Any? =
         target.javaClass.getDeclaredField(name).apply { isAccessible = true }.get(target)
 
@@ -137,8 +234,8 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
             check(controller.ready && controller.active == null && controller.guiEntry() == null)
             check(field(controller, "preparation") == null && field(controller, "resources") == null)
             val text = f.draft
-            f.database.draft(text)
-            val entry = ControllerGuiEntry(null, ChatController.TextSendOwner(null, 7, 11),
+            f.saveDraft()
+            val entry = ControllerGuiEntry(f.conversation, ChatController.TextSendOwner(f.conversation?.id, 7, 11),
                 text, if (f.input == null) GuiOperation.HOME else GuiOperation.INPUT, f.input)
             val session = GuiRunSession(GuiLeaseGate.Lease(GuiOwner(entry.sessionId, entry.runId.value)))
             val observation = GuiObservation("confirmed-${f.id}", "test.external.application", 1,
@@ -269,6 +366,186 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
             controlMain { f.controller.close() }
             assertTrue("accepted original GUI owner drains", f.closeDone.await(10, TimeUnit.SECONDS))
             assertCatalogDrained(entry)
+        } finally { f.dispose() }
+    }
+
+    fun testOnlyConfirmedGuiEvidenceCrossesAutomaticTriggerAndOneSummaryFeedsOnePendingGuiAndUsageCheckpoint() {
+        val policy = CompressionPolicy(true, 8192, 50, 128, 1)
+        // Negative control: same real Controller, history, policy and exact short draft, no GUI.
+        val plain = Fixture(window = 8192, automatic = true)
+        try {
+            val owner = checkNotNull(plain.conversation)
+            plain.saveDraft()
+            controlMain {
+                assertTrue(plain.controller.sendText(owner, 7, 11, plain.draft, ticket = plain.ticket) {
+                    plain.receipt.set(it); plain.receiptReady.countDown()
+                })
+            }
+            plain.awaitReceipt()
+            assertTrue(plain.receipt.get() is ChatController.TextSendResult.Accepted)
+            assertTrue(plain.modelEntered.await(5, TimeUnit.SECONDS))
+            assertFalse(policy.shouldCompress(estimateTokens(plain.modelInput.get())))
+            assertEquals(plain.originalHistory, plain.modelInput.get().dropLast(1))
+            assertEquals(listOf(MessageBlock.Text("user", plain.draft)), plain.modelInput.get().last().blocks)
+            assertEquals(0, plain.summary.posts.get())
+            assertEquals(1, plain.chat.posts.get())
+            assertEquals(0L, scalar(plain, "SELECT COUNT(*) FROM context_archives"))
+            plain.modelRelease.countDown()
+            awaitControl("plain control Runner drained") { plain.controller.active == null && field(plain.controller, "resources") == null }
+            controlMain { plain.controller.close() }
+            assertTrue(plain.closeDone.await(10, TimeUnit.SECONDS))
+        } finally { plain.dispose() }
+
+        val fullInput = "  exact\n\"quoted\"\\input  " + "x".repeat(4000)
+        val f = Fixture(window = 8192, input = fullInput, automatic = true)
+        try {
+            val entry = f.submit()
+            assertTrue(f.receipt.get() is ChatController.TextSendResult.Accepted)
+            assertTrue("actual chat POST entered after summary", f.modelEntered.await(5, TimeUnit.SECONDS))
+            val sentHistory = f.modelInput.get()
+            val sent = sentHistory.last()
+            val displayed = ContextService(f.app, f.database).displayHistory(entry.conversationId)
+            val user = displayed.single { it.role == Message.USER_ROLE && it.runId == entry.runId }
+            assertFalse(policy.shouldCompress(estimateTokens(f.originalHistory + user)))
+            assertTrue(policy.shouldCompress(estimateTokens(f.originalHistory + GuiConfirmedModelPort.project(user, f.delivery))))
+            assertEquals(f.originalHistory, displayed.filter { it.runId != entry.runId })
+            assertEquals(f.originalHistory.size + 2, displayed.size)
+            assertEquals(listOf(MessageBlock.Text("user", entry.text)), user.blocks)
+            assertEquals(user.copy(blocks = sent.blocks), sent)
+            assertEquals(1, sentHistory.count { it.runId == entry.runId })
+            assertEquals(1, sentHistory.count { it.id == user.id })
+            assertEquals(2, sent.blocks.size)
+            assertEquals(user.blocks.single(), sent.blocks.first())
+            val evidence = sent.blocks.filterIsInstance<MessageBlock.Text>().single { it.itemId == "gui_confirmed_action" }
+            assertEquals(f.delivery.modelContext(), evidence.text)
+            assertEquals(fullInput, org.json.JSONObject(f.delivery.actionArgumentsJson()).getString("text"))
+            assertTrue(policy.fitsSendBudget(estimateTokens(sentHistory)))
+            assertEquals("", f.retainedDraft())
+            assertEquals(1, f.summary.posts.get())
+            assertEquals(1, f.chat.posts.get())
+            val wireInput = org.json.JSONObject(f.chat.body.toString("UTF-8")).getJSONArray("input")
+            val wireTexts = (0 until wireInput.length()).map { wireInput.getJSONObject(it).getString("content") }
+            assertEquals(sentHistory.size, wireInput.length())
+            assertEquals(entry.text + "\n" + evidence.text, wireTexts.last())
+            assertEquals(1, wireTexts.count { it.contains(f.delivery.observation.observationId) })
+            assertEquals(1, f.factories.get())
+            assertEquals(1, f.opens.get())
+            assertEquals(1L, scalar(f, "SELECT COUNT(*) FROM context_archives WHERE active=1"))
+            f.database.readableDatabase.rawQuery("SELECT id,prefix_count,summary FROM context_archives WHERE active=1", null).use {
+                assertTrue(it.moveToFirst())
+                assertEquals(6, it.getInt(1)) // four complete old turns, keep one
+                assertEquals("summary text", it.getString(2))
+                assertEquals("summary-${it.getString(0)}", sentHistory.first().id.value)
+            }
+            assertEquals(f.originalHistory.takeLast(2), sentHistory.drop(1).dropLast(1))
+            val summaryBody = f.summary.body.toString("UTF-8")
+            assertEquals(f.binding.modelId, org.json.JSONObject(summaryBody).getString("model"))
+            assertEquals(0, org.json.JSONObject(summaryBody).optJSONArray("tools")?.length() ?: 0)
+            assertTrue(summaryBody.contains("fact 0"))
+            assertFalse("pending GUI is not old summary evidence", summaryBody.contains("gui_confirmed_action"))
+            assertFalse(summaryBody.contains("x".repeat(4000)))
+            assertEquals(sentHistory, checkpoint(f, entry).history)
+            val staged = usage(f, entry.conversationId)
+            val summaryRequest = staged.requests.single { it.source == UsageRequestSource.SUMMARY }
+            assertEquals(entry.runId.value, summaryRequest.parentRunId)
+            assertEquals(entry.assistantId.value, summaryRequest.parentMessageId)
+            assertEquals(10L, staged.summary.main.input.reportedTokens)
+            assertEquals(20L, staged.summary.main.output.reportedTokens)
+            assertEquals(5L, staged.summary.main.cached.reportedTokens)
+            assertEquals(summaryRequest.snapshot, checkpoint(f, entry).usage.single {
+                it.source == UsageRequestSource.SUMMARY }.snapshot)
+
+            f.modelRelease.countDown()
+            awaitControl("real Runner and original GUI catalog drain") {
+                f.controller.active == null && field(f.controller, "resources") == null && f.controller.guiEntry() == null
+            }
+            assertCatalogDrained(entry)
+            val final = checkpoint(f, entry)
+            assertEquals(RunStatus.COMPLETED, final.message.status)
+            assertEquals(sentHistory, final.history)
+            assertEquals(1, final.usage.count { it.source == UsageRequestSource.SUMMARY })
+            assertEquals(1, final.usage.count { it.source == UsageRequestSource.MAIN })
+            val total = usage(f, entry.conversationId)
+            assertEquals(110L, total.summary.combined.input.reportedTokens)
+            assertEquals(60L, total.summary.combined.output.reportedTokens)
+            assertEquals(15L, total.summary.combined.cached.reportedTokens)
+            assertEquals(1, f.summary.posts.get())
+            assertEquals(1, f.chat.posts.get())
+            controlMain { f.controller.close() }
+            assertTrue(f.closeDone.await(10, TimeUnit.SECONDS))
+        } finally { f.dispose() }
+    }
+
+    fun testCancellationWhileActualSummaryReadIsHeldKeepsPreparationGateUntilWorkerReturnsAndNeverPostsChat() {
+        val f = Fixture(window = 8192, input = "x".repeat(4000), automatic = true, holdSummary = true)
+        try {
+            val sqlite = f.database.writableDatabase
+            val entry = f.begin()
+            val session = checkNotNull(entry.session)
+            val token = checkNotNull(field(f.controller, "preparation"))
+            assertTrue("actual summary POST/read in flight", f.summary.entered.await(5, TimeUnit.SECONDS))
+            assertEquals(1, f.summary.posts.get())
+            f.database.readableDatabase.rawQuery("SELECT state FROM runtime_preparations WHERE message_id=?",
+                arrayOf(entry.assistantId.value)).use { assertTrue(it.moveToFirst()); assertEquals("ADMITTED", it.getString(0)) }
+            controlMain { assertTrue(f.controller.cancelGui(entry)) }
+            assertTrue("cancel reaches actual summary connection", f.summary.disconnected.await(5, TimeUnit.SECONDS))
+            controlMain {
+                assertTrue(entry.revoked)
+                assertSame(entry, f.controller.guiEntry())
+                assertSame(token, field(f.controller, "preparation"))
+                assertSame(session, entry.session)
+                assertTrue("no captures: original session's physical main-loop drain is real", session.releaseConfirmed)
+                assertFalse(session.lease.valid)
+                assertNull(entry.catalog)
+                assertFalse(f.controller.sendText(f.conversation, 8, 12, "must stay gated") {
+                    fail("busy rejection must not deliver a receipt")
+                })
+                f.controller.close()
+                assertFalse(field(f.controller, "closingStorage") as Boolean)
+                assertFalse(field(f.controller, "childrenClosing") as Boolean)
+            }
+            assertEquals("send worker has not returned", 1L, f.receiptReady.count)
+            assertFalse(f.closeDone.await(100, TimeUnit.MILLISECONDS))
+            assertFalse(f.executor.isShutdown)
+            assertTrue("original SQLite remains open, not a reopened helper", sqlite.isOpen)
+            assertEquals(f.draft, f.retainedDraft())
+            assertEquals(f.originalHistory, ContextService(f.app, f.database).displayHistory(entry.conversationId))
+            assertEquals(0L, scalar(f, "SELECT COUNT(*) FROM context_archives"))
+            assertEquals(0L, scalar(f, "SELECT COUNT(*) FROM runtime_checkpoints WHERE message_id=?", entry.assistantId.value))
+            assertEquals(0, f.factories.get())
+            assertEquals(0, f.opens.get())
+            assertEquals(0, f.chat.posts.get())
+
+            // A late success-shaped response after real disconnect is not a new authorization.
+            f.summary.release.countDown()
+            f.awaitReceipt()
+            assertTrue(f.receipt.get() is ChatController.TextSendResult.Rejected)
+            assertEquals(entry.editor, f.receipt.get().owner)
+            assertFalse(entry.accepted)
+            assertFalse(entry.persistenceUnknown)
+            assertTrue("worker exit and original session drain permit storage close", f.closeDone.await(10, TimeUnit.SECONDS))
+            controlMain {
+                assertNull(f.controller.guiEntry())
+                assertNull(field(f.controller, "preparation"))
+                assertNull(field(f.controller, "resources"))
+                assertSame(session, entry.session)
+                assertTrue(session.releaseConfirmed)
+            }
+            assertFalse(sqlite.isOpen)
+            assertEquals(1, f.summary.posts.get())
+            assertEquals(0, f.chat.posts.get())
+            assertEquals(0, f.opens.get())
+            assertEquals(0, f.factories.get())
+            // Inspect durable rejection only after proving the ORIGINAL handle really closed.
+            ConversationDatabase(f.app).use { reopened ->
+                assertEquals(f.originalHistory, ContextService(f.app, reopened).displayHistory(entry.conversationId))
+                reopened.readableDatabase.rawQuery("SELECT draft FROM conversations WHERE id=?",
+                    arrayOf(entry.conversationId.value)).use { assertTrue(it.moveToFirst()); assertEquals(f.draft, it.getString(0)) }
+                for (table in listOf("context_archives", "runtime_checkpoints")) reopened.readableDatabase.rawQuery(
+                    "SELECT COUNT(*) FROM $table", null).use { assertTrue(it.moveToFirst()); assertEquals(0, it.getInt(0)) }
+                reopened.readableDatabase.rawQuery("SELECT state FROM runtime_preparations WHERE message_id=?",
+                    arrayOf(entry.assistantId.value)).use { assertTrue(it.moveToFirst()); assertEquals("TERMINAL", it.getString(0)) }
+            }
         } finally { f.dispose() }
     }
 

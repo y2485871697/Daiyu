@@ -230,6 +230,7 @@ internal class R08VirtualDisplayCatalogLeaf internal constructor(
             "initialize" -> state == "STARTED" && body.optBoolean("initialized") && body.optInt("displayId") > 0
             "input" -> state == "SUCCEEDED" && body.optBoolean("executed")
             "launch" -> state == "SUCCEEDED" && body.optBoolean("launched")
+            "handoff" -> state == "SUCCEEDED" && body.optBoolean("handedOff") && body.optBoolean("sourceEmpty")
             "release" -> state == "SUCCEEDED" && body.optBoolean("released")
             "status" -> state == "SUCCEEDED" && body.optBoolean("ready") && body.optString("session") == "active"
             "snapshot" -> state == "SUCCEEDED" && body.optString("format") == "png"

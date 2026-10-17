@@ -1,7 +1,7 @@
 package app.daiyu.android.ui
 
 internal enum class FeatureRoute {
-    SIDEBAR, MANAGE_CHATS, USAGE_STATS, CONVERSATIONS, MODEL_SETTINGS, BALANCE_SETTINGS, SKILLS, BACKUP, CONVERSATION_SEARCH, FOLDERS, CHAT, USER_MESSAGE, TERMINAL, LINUX_SETTINGS, BROWSER_SETTINGS, COMPRESSION_SETTINGS, GENERATION_SETTINGS, PET_SETTINGS, AUXILIARY_VISION_SETTINGS, RECONNECT_SETTINGS, TITLE_MODEL_SETTINGS
+    SIDEBAR, MANAGE_CHATS, USAGE_STATS, CONVERSATIONS, MODEL_SETTINGS, BALANCE_SETTINGS, SKILLS, BACKUP, CONVERSATION_SEARCH, FOLDERS, CHAT, USER_MESSAGE, TERMINAL, LINUX_SETTINGS, BROWSER_SETTINGS, COMPRESSION_SETTINGS, GENERATION_SETTINGS, PET_SETTINGS, AUXILIARY_VISION_SETTINGS, RECONNECT_SETTINGS, TITLE_MODEL_SETTINGS, GUI_SETTINGS
 }
 
 internal data class FeatureEntry(val id: String, val title: String, val route: FeatureRoute? = null)
@@ -62,7 +62,7 @@ internal object FeatureCatalog {
             FeatureEntry("P33", "技能管理", FeatureRoute.SKILLS),
             FeatureEntry("P34", "浏览器", FeatureRoute.BROWSER_SETTINGS),
             FeatureEntry("R06", "设备与 Root"),
-            FeatureEntry("R07", "无障碍操作"),
+            FeatureEntry("R07", "无障碍操作", FeatureRoute.GUI_SETTINGS),
             FeatureEntry("R08", "虚拟屏"),
             FeatureEntry("R09", "Android / Linux 终端", FeatureRoute.TERMINAL),
             FeatureEntry("R12", "备份与导入", FeatureRoute.BACKUP)

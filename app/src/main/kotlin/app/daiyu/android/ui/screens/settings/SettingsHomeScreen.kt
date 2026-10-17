@@ -73,7 +73,12 @@ private fun SettingsSearch(query: String, onQueryChange: (String) -> Unit) {
 
 @Composable
 private fun OriginalSettingsRow(entry: SettingsEntry, onClick: () -> Unit) {
-    SettingsRow(entry.title, onClick = onClick, leading = { SettingsIcon(entry.icon) })
+    SettingsRow(entry.title, onClick = onClick,
+        summary = when (entry.id) {
+            "accessibility" -> "查看服务与授权边界；进入设置不向模型授权"
+            "accessibility_keep" -> "仅用户显式请求系统重绑，不保证连接或保活"
+            else -> null
+        }, leading = { SettingsIcon(entry.icon) })
 }
 
 @Composable

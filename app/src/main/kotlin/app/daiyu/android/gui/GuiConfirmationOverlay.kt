@@ -85,7 +85,8 @@ internal class GuiConfirmationOverlay(
         if (disposed) return
         val epoch = ticket.next()
         panel.removeAllViews()
-        label(body(), "$message\n动作：$operation\n完整输入：${input ?: "（无）"}")
+        label(body(), "$message\n动作：$operation\n完整输入：${input ?: "（无）"}\n" +
+            "继续将读取整个有界 UI 树，而非仅所选节点；确认后整个有界观察和完整输入将发送给当前模型，可能进入任务或会话记录。请先移开敏感内容。")
         button(panel, "读取当前外部目标并选择") { if (ticket.current(epoch) && active()) readChoices() }
         cancelButton(epoch)
     }
@@ -128,7 +129,8 @@ internal class GuiConfirmationOverlay(
         label(body(), "确认唯一真实目标\n应用：${reference.packageName}\n窗口：${reference.windowId}\n" +
             "目标：${node?.let { "${it.className}\nviewId=${it.viewId}\n文字=${it.text}\n描述=${it.description}\nbounds=${it.bounds}" } ?: "该应用窗口的全局动作"}\n" +
             "动作：$operation\n完整输入（${input?.length ?: 0} UTF-16 字符）：\n${input ?: "（无）"}\n" +
-            "确认后同一有界观察及精确动作交给本次新任务；模型不可重新观察后沿用授权。10 秒过期，变更须重确认。")
+            "确认后整个有界观察（不只是所选节点）及完整输入将发送给当前模型，可能进入任务或会话记录。" +
+            "同一有界观察及精确动作交给本次新任务；模型不可重新观察后沿用授权。10 秒过期，变更须重确认。")
         var finalObservation: GuiObservation? = null
         var finalAction: GuiAction? = null
         button(panel, "确认以上精确动作并交给本次任务") {

@@ -58,7 +58,7 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         assertEquals(root, fixture.application.filesDir)
         awaitControl("controller ready") { controller.ready }
         assertNull(controller.problem)
-        browserSettings = BrowserSettingsStore(fixture.application)
+        browserSettings = controller.browserSettings
         browserSettings.save(BrowserSettings(BrowserAccess.READ_ONLY))
     }
 

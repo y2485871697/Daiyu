@@ -12,6 +12,7 @@ import androidx.compose.ui.test.*
 /** Real Main menu/mount/navigation and the retained production host; never opens a provider. */
 @Suppress("DEPRECATION")
 class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     private fun openVideo() {
         ui.onNodeWithContentDescription("附件").performClick()
         ui.onNodeWithText("视频").performClick()

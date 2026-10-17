@@ -113,6 +113,7 @@ internal fun DaiyuSettingsScreen(
     defaultReasoning: ReasoningEffort = ReasoningEffort.DEFAULT,
     defaultReasoningError: String? = null,
     onDefaultReasoningChange: ((ReasoningEffort) -> Unit)? = null,
+    engineeringUi: Boolean = false,
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -138,7 +139,8 @@ internal fun DaiyuSettingsScreen(
                 choosingDefaultReasoning = false
             }
         })
-    val groups = remember(query) { filterSettingsGroups(query) }
+    val catalogGroups = remember(engineeringUi) { SettingsCatalog.visibleGroups(engineeringUi) }
+    val groups = remember(query, catalogGroups) { filterSettingsGroups(query, catalogGroups) }
     val listState = rememberLazyListState()
     LaunchedEffect(section, query) { listState.scrollToItem(0) }
     val focus = LocalFocusManager.current
@@ -164,7 +166,7 @@ internal fun DaiyuSettingsScreen(
         }
         return
     }
-    val selectedGroup = SettingsCatalog.groups.find { it.id == section }
+    val selectedGroup = catalogGroups.find { it.id == section }
     val pageTitle = selectedGroup?.title ?: "设置"
     val back: () -> Unit = { if (section != null) section = null else onBack() }
     BackHandler(enabled = section != null) { section = null }
@@ -178,6 +180,7 @@ internal fun DaiyuSettingsScreen(
             "appearance" -> onOpenAppearance?.invoke()
             "haptics" -> onOpenHaptics?.invoke()
             "voice" -> onOpenVoice?.invoke()
+            "platform_tools" -> if (engineeringUi) onOpenPlatformTools?.invoke()
             "source" -> openProjectSource(context)
             "telegram", "qq", "relay_st", "relay_moyu" -> openRetainedSettingsLink(context, entry.id)
             "relay" -> {
@@ -252,7 +255,7 @@ internal fun DaiyuSettingsScreen(
                 item(key = "settings_categories_heading") { SettingsSectionTitle("全部设置") }
                 item(key = "settings_categories") {
                     SettingsCard {
-                        SettingsCatalog.groups.forEach { group ->
+                        catalogGroups.forEach { group ->
                             SettingsRow(group.title, summary = group.summary,
                                 onClick = { section = group.id }, leading = { SettingsIcon(group.entries.first().icon) })
                         }

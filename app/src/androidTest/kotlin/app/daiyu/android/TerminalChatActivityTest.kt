@@ -6,6 +6,7 @@ import java.util.concurrent.TimeUnit
 
 /** Exercises the mounted production composer, not a replacement approval-only composition. */
 class TerminalChatActivityTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     private fun invoke(target: MainActivity, name: String, vararg args: Any?): Any? =
         MainActivity::class.java.declaredMethods.single { it.name == name && it.parameterCount == args.size }
             .apply { isAccessible = true }.invoke(target, *args)

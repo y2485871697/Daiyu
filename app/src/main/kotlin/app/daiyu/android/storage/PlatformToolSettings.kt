@@ -6,12 +6,19 @@ import app.daiyu.android.platform.DeviceResultPolicy
 import app.daiyu.android.platform.PlatformReadTool
 import java.util.Collections
 
-/** Independent of provider credentials and the legacy battery/status switches. No migration grants. */
-internal class PlatformToolSettings(private val preferences: SharedPreferences) {
-    constructor(context: Context) : this(context.getSharedPreferences("platform-read-settings", Context.MODE_PRIVATE))
+/** Application capability policy; actual device access still checks live system authorization. */
+internal class PlatformToolSettings private constructor(private val preferences: SharedPreferences, private val productDefaults: Boolean) {
+    constructor(preferences: SharedPreferences) : this(preferences, false)
+    constructor(context: Context) : this(context.getSharedPreferences("platform-read-settings", Context.MODE_PRIVATE), true)
 
-    @Synchronized fun freeze(): FrozenPlatformToolSettings = FrozenPlatformToolSettings(
-        read(SELECTION), read(MODEL), read(HISTORY))
+    @Synchronized fun freeze(): FrozenPlatformToolSettings {
+        if (productDefaults) {
+            val all = PlatformReadTool.entries.toSet()
+            val privateTools = all.filterTo(linkedSetOf()) { it.toolName in DeviceResultPolicy.PRIVATE_TOOLS }
+            return FrozenPlatformToolSettings(all, privateTools, privateTools, allDeviceTools = true)
+        }
+        return FrozenPlatformToolSettings(read(SELECTION), read(MODEL), read(HISTORY))
+    }
 
     /** One explicit choice per action: selecting a capability never implies either outbound consent. */
     @Synchronized fun select(tool: PlatformReadTool, enabled: Boolean) = change(SELECTION, tool, enabled)
@@ -42,7 +49,7 @@ internal class PlatformToolSettings(private val preferences: SharedPreferences) 
 
 /** Captured once before preparation I/O; subsequent settings edits affect only the next run. */
 internal class FrozenPlatformToolSettings(selected: Set<PlatformReadTool>, model: Set<PlatformReadTool>,
-    history: Set<PlatformReadTool>) {
+    history: Set<PlatformReadTool>, val allDeviceTools: Boolean = false) {
     val platformAllowed: Set<PlatformReadTool> = Collections.unmodifiableSet(selected.toSet())
     private val modelAllowed = model.toSet()
     private val historyAllowed = history.toSet()

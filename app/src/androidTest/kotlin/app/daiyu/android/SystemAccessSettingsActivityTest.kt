@@ -10,6 +10,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 
 /** Real retained settings navigation. External intents are intercepted, never actually granted. */
 class SystemAccessSettingsActivityTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     private fun entry(title: String) {
         node("settings-search").performTextReplacement(title)
         reveal("settings-row:$title", "设置").performClick()

@@ -26,7 +26,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** The old FeatureHub entry contract now belongs to the retained Compose settings home. */
 class FeatureHubActivityTest : WiredActivityTestCase() {
-    private val entries get() = SettingsCatalog.entries
+    private val entries get() = SettingsCatalog.visibleGroups().flatMap { it.entries }
     private fun openHub() { openSettings() }
     private fun entry(id: String): SemanticsNodeInteraction {
         val item = entries.single { it.id == id }
@@ -35,7 +35,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     }
     fun testOriginalSettingsAppearOutsideExistingChatTreeWithoutStateLabels() {
         openHub()
-        assertEquals(38, entries.size)
+        assertEquals(33, entries.size)
         entries.forEach { item -> entry(item.id).assertIsEnabled().assertTextContains(item.title) }
         ui.onAllNodes(SemanticsMatcher("forbidden state marker") { semantics ->
             val texts = semantics.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text).orEmpty()

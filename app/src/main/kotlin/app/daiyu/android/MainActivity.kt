@@ -130,7 +130,8 @@ class MainActivity : ComponentActivity() {
     private var terminalPageOwner: Any? = null
     private val mcpSettings by lazy { app.daiyu.android.mcp.McpSettingsStore(applicationContext) }
     private var mcpSettingsPageOwner: app.daiyu.android.mcp.McpSettingsOwner? = null
-    private val browserSettings by lazy { app.daiyu.android.browser.BrowserSettingsStore(applicationContext) }
+    private val engineeringUi get() = (application as ChatApplication).engineeringUiForTests
+    private val browserSettings get() = controller.browserSettings
     private var titleSettingsPageOwner: app.daiyu.android.title.TitleModelSettingsEditor? = null
     private var compressionSettingsPageOwner: app.daiyu.android.context.CompressionSettingsEditor? = null
     private class GenerationSettingsVisit(val editor: GenerationSettingsEditor) {
@@ -729,6 +730,7 @@ class MainActivity : ComponentActivity() {
                 // Retain outstanding request tokens until their callback consumes them. Otherwise a
                 // late result could be confused with a second picker opened on a newer page visit.
             }
+            if (value != "backup") { backupImportVisit = null; pendingBackupImportResult = null; cancelRestorePreview() }
             if (value != "terminal") terminalPageOwner = null
             if (value != "linux-settings") {
                 linuxSettingsVisit = null
@@ -1038,6 +1040,9 @@ class MainActivity : ComponentActivity() {
     private var searchPage by mutableStateOf<SearchPage?>(null)
     private var configurationRestorePreview by mutableStateOf<ChatController.ConfigurationRestorePreview?>(null)
     private var restorePreviewText by mutableStateOf("")
+    private var backupImportVisit: Any? = null
+    private data class BackupImportResult(val visit: Any, val uri: Uri, val outcome: ChatController.BackupImportOutcome)
+    private var pendingBackupImportResult: BackupImportResult? = null
     private var backupBusy by mutableStateOf(false)
     private var editingSettings: EditingSettings? = null
     private var modelDraft by mutableStateOf<ModelSettingsDraftUi?>(null)
@@ -1413,6 +1418,7 @@ class MainActivity : ComponentActivity() {
                         top.yukonga.miuix.kmp.basic.TextButton(text = "保留会话网关",
                             modifier = Modifier.testTag("open-session-gateway"), onClick = { guard { openSessionGateway() } })
                         Box(Modifier.weight(1f)) { DaiyuSettingsScreen(
+                        engineeringUi = engineeringUi,
                         onBack = { returnToChat() }, onRoute = { route -> openSettingsFromPage(route) },
                         onOpenSubAgents = { retainedPage = "subagents" },
                         onOpenAssistants = { openAssistantPicker(global = true) },
@@ -1456,6 +1462,7 @@ class MainActivity : ComponentActivity() {
                     "models" -> modelDraft?.let { value ->
                         val identity = editingCatalogIdentity
                         if (identity == null) ModelSettingsScreen(
+                            engineeringUi = engineeringUi,
                             draft = value, onDraftChange = { changeModelDraft(it) },
                             onSave = { saveModelSettings(it) }, onFetchCatalog = {},
                             onBack = { returnToChat() }, errorText = modelError,
@@ -1463,6 +1470,7 @@ class MainActivity : ComponentActivity() {
                             requestOptionsUnavailable = editingSettings?.requestOptionsUnavailable == true,
                             catalogEnabled = false, enabled = !controller.dataBusy,
                         ) else key(modelEditingOwner) { ProviderCatalogSettingsScreen(
+                            engineeringUi = engineeringUi,
                             draft = value, onDraftChange = { changeModelDraft(it) },
                             onSave = { saveModelSettings(it) }, onBack = { returnToChat() },
                             providerIdentity = identity, persistence = controller.settings.modelCatalog,
@@ -1487,6 +1495,8 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     "backup" -> BackupScreen(
+                        engineeringUi = engineeringUi,
+                        onImport = { backupGuard { pickBackupAuto() } },
                         onBack = { returnToChat() },
                         onExportCompact = { backupGuard { pickBackup(true, false) } },
                         onExportComplete = { backupGuard { pickBackup(true, true) } },
@@ -1588,7 +1598,7 @@ class MainActivity : ComponentActivity() {
                                         if (imagePanelVisible) ImageComposerPanel()
                                         if (videoPanelVisible && !sidebarVisible) VideoComposerPanel()
                                         DictationComposerEntry()
-                                        ShizukuComposerEntry()
+                                        if (engineeringUi) ShizukuComposerEntry()
                                     }
                                 }
                             }
@@ -1966,7 +1976,7 @@ class MainActivity : ComponentActivity() {
         fun currentVoiceControls() = currentEditor() && voiceRequestEpoch == capturedVoiceEpoch &&
             cascadeVoice.operationToken == capturedCascadeToken && remoteVoice.operationToken == capturedRemoteToken &&
             speechHost.owner == capturedSpeechOwner
-        top.yukonga.miuix.kmp.basic.TextButton(text = "离线语音设置", modifier = Modifier.testTag("offline-speech-open"),
+        if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "离线语音设置", modifier = Modifier.testTag("offline-speech-open"),
             onClick = { if (activityUsable() && retainedPage == "chat" && !sidebarVisible) retainedPage = "offline-speech" })
         if (pack.enabled) top.yukonga.miuix.kmp.basic.TextButton(
             text = if (offline.listening) "取消离线听写" else "离线听写（本机麦克风）",
@@ -3919,6 +3929,7 @@ class MainActivity : ComponentActivity() {
         // ActivityResult can arrive before RESUMED. Do not open a provider until then.
         window.decorView.post {
             if (generationResumed() && generationInputsDelegate.isInitialized()) generationInputs.resume()
+            presentBackupImportResult()
         }
     }
     override fun onPause() {
@@ -4077,6 +4088,7 @@ class MainActivity : ComponentActivity() {
         retainedPage = "reconnect-settings"
     }
     private fun openBrowserSettings() {
+        check(engineeringUi)
         requireActivityUsable()
         browserSettingsPageOwner?.revoke()
         browserSettingsPageOwner = app.daiyu.android.browser.BrowserSettingsSaveOwner()
@@ -4150,7 +4162,7 @@ class MainActivity : ComponentActivity() {
             }
             FeatureRoute.BROWSER_SETTINGS -> openBrowserSettings()
             FeatureRoute.RECONNECT_SETTINGS -> openReconnectSettings()
-            FeatureRoute.GUI_SETTINGS -> { requireActivityUsable(); retainedPage = "gui-settings" }
+            FeatureRoute.GUI_SETTINGS -> { check(engineeringUi); requireActivityUsable(); retainedPage = "gui-settings" }
             FeatureRoute.TITLE_MODEL_SETTINGS -> {
                 requireActivityUsable()
                 titleSettingsPageOwner?.revoke()
@@ -4939,6 +4951,7 @@ class MainActivity : ComponentActivity() {
     private fun showOpenedBackup(uri: Uri) {
         if (lastOpenedBackupUri == uri.toString() && prompt?.backup == true) return
         lastOpenedBackupUri = uri.toString(); retainedPage = "backup"
+        if (!engineeringUi) { confirmBackupImportAuto(uri); return }
         prompt = ChoicePrompt("打开备份", listOf("完整中立备份（推荐）", "纯文本兼容备份"),
             { index -> backupGuard { confirmBackupImport(uri, index == 0) } }, backup = true)
     }
@@ -4966,7 +4979,7 @@ class MainActivity : ComponentActivity() {
                 val uri = openedBackupUri(open)
                 cancelDeferredOpenedBackup()
                 retainedPage = "backup"
-                val waiting = ConfirmPrompt("等待会话恢复", "恢复完成后再选择备份类型并确认导入；尚未读取文件。", "取消打开",
+                val waiting = ConfirmPrompt("等待会话恢复", "恢复完成后确认导入，尚未读取文件。", "取消打开",
                     action = { cancelDeferredOpenedBackup() }, backup = true)
                 deferredOpenedBackup = DeferredOpenedBackup(uri, waiting)
                 prompt = waiting
@@ -4997,6 +5010,47 @@ class MainActivity : ComponentActivity() {
             }, 105)
         } catch (failure: Exception) {
             pendingBackupRequest = null; exportPickerPending = false; conversationExport.take(); throw failure
+        }
+    }
+    @Suppress("DEPRECATION") private fun pickBackupAuto() {
+        checkBackupAvailable(); check(pendingBackupRequest == null)
+        cancelRestorePreview(); backupImportVisit = Any(); pendingBackupRequest = 107
+        try {
+            startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+                putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/json", "application/zip", "application/octet-stream", "text/plain"))
+            }, 107)
+        } catch (failure: Exception) { pendingBackupRequest = null; backupImportVisit = null; throw failure }
+    }
+    private fun confirmBackupImportAuto(uri: Uri, visit: Any = Any()) {
+        checkBackupAvailable(); cancelRestorePreview()
+        backupImportVisit = visit
+        prompt = ConfirmPrompt("导入备份", "导入会添加聊天记录，现有记录不会被覆盖。", "导入", action = {
+            backupGuard {
+                check(backupImportVisit === visit && retainedPage == "backup" &&
+                    lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED))
+                controller.importUserBackupAuto(uri) { outcome ->
+                    if (backupImportVisit !== visit || !activityUsable() || retainedPage != "backup") return@importUserBackupAuto
+                    if (outcome == null) { backupImportVisit = null; return@importUserBackupAuto }
+                    pendingBackupImportResult = BackupImportResult(visit, uri, outcome)
+                    presentBackupImportResult()
+                }
+            }
+        }, backup = true)
+    }
+    private fun presentBackupImportResult() {
+        val result = pendingBackupImportResult ?: return
+        if (!lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) return
+        pendingBackupImportResult = null
+        if (backupImportVisit !== result.visit || !activityUsable() || retainedPage != "backup") return
+        backupImportVisit = null
+        backupGuard {
+            if (result.outcome.kind == app.daiyu.android.backup.BackupImportSource.Kind.LEGACY) {
+                openLegacyLibrary(); legacyPage?.requestSource()?.result(result.uri)
+            } else if (result.outcome.hasConfiguration) {
+                previewConfigurationRestore()
+                if (configurationRestorePreview?.plan?.isNoOp == false) confirmConfigurationRestore()
+            }
         }
     }
     @Suppress("DEPRECATION") private fun pickBackup(exporting: Boolean, complete: Boolean) {
@@ -5058,7 +5112,7 @@ class MainActivity : ComponentActivity() {
             }
             return
         }
-        if (requestCode !in setOf(101, 102, 103, 104, 105, 106) || pendingBackupRequest != requestCode) return
+        if (requestCode !in setOf(101, 102, 103, 104, 105, 106, 107) || pendingBackupRequest != requestCode) return
         pendingBackupRequest = null
         if (requestCode == 106) {
             // Reference is deliberately memory-only: activity/process recreation fails closed
@@ -5091,6 +5145,10 @@ class MainActivity : ComponentActivity() {
         backupGuard {
             require(uri.scheme == "content") { "文件选择未返回content URI；原数据保留，请重新选择" }
             if (requestCode == 101 || requestCode == 103) controller.exportUserBackup(uri, complete)
+            else if (requestCode == 107) {
+                val visit = backupImportVisit
+                if (visit != null && retainedPage == "backup") confirmBackupImportAuto(uri, visit)
+            }
             else confirmBackupImport(uri, complete)
         }
     }
@@ -5125,7 +5183,7 @@ class MainActivity : ComponentActivity() {
         backupGuard {
             val preview = checkNotNull(configurationRestorePreview)
             check(!preview.plan.isNoOp)
-            prompt = ConfirmPrompt("恢复模型配置", "", "确认恢复", action = {
+            prompt = ConfirmPrompt("恢复模型配置", if (engineeringUi) "" else restorePreviewText, "确认恢复", action = {
                 backupGuard {
                     check(configurationRestorePreview === preview)
                     try { controller.restoreImportedConfiguration(preview, authorized = true) { success ->

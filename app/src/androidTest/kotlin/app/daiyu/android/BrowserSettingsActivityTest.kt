@@ -7,18 +7,11 @@ import app.daiyu.android.browser.BrowserSettingsStore
 import app.daiyu.android.browser.session.BrowserAccess
 
 class BrowserSettingsActivityTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     private lateinit var store: BrowserSettingsStore
-    private lateinit var originalSettings: BrowserSettings
-
-    override fun setUp() {
-        store = BrowserSettingsStore(instrumentation.targetContext)
-        originalSettings = store.snapshot()
-        store.save(BrowserSettings())
-        super.setUp()
-    }
-
-    override fun tearDown() {
-        try { super.tearDown() } finally { store.save(originalSettings) }
+    override fun createFixture(): RunControlFixture = super.createFixture().also {
+        store = it.controller.browserSettings
+        store.save(BrowserSettings(BrowserAccess.DISABLED))
     }
 
     private fun enterFromSettings() {
@@ -49,6 +42,16 @@ class BrowserSettingsActivityTest : WiredActivityTestCase() {
         assertEquals(BrowserAccess.DISABLED, store.snapshot().access)
         assertEquals(before, fixture.database.exportBackup())
         assertNull(fixture.controller.active)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPageSaveIsTheSameCeilingReadByController() {
+        enterFromSettings()
+        reveal("browser-access:READ_ONLY", "浏览器").performClick()
+        reveal("browser-save", "浏览器").performClick()
+        ui.waitUntil(5_000) { fixture.controller.browserSettings.snapshot().access == BrowserAccess.READ_ONLY }
+        assertSame(store, fixture.controller.browserSettings)
+        assertEquals(BrowserAccess.READ_ONLY, store.snapshot().access)
         assertEquals(0, fixture.opens.get())
     }
 

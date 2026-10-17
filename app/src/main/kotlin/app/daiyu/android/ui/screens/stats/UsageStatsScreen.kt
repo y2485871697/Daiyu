@@ -43,6 +43,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -82,19 +83,32 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
     val context = LocalContext.current
     var stats by remember { mutableStateOf(UsageStatsSnapshot(isLoading = true)) }
     var selectedTab by remember { mutableStateOf(UsageStatsTab.Overview) }
+    var loadFailed by remember { mutableStateOf(false) }
+    var loadAttempt by remember { mutableStateOf(0) }
 
-    LaunchedEffect(Unit) {
-        stats = withContext(Dispatchers.IO) {
-            try { load() }
+    LaunchedEffect(loadAttempt) {
+        loadFailed = false
+        stats = UsageStatsSnapshot(isLoading = true)
+        val loaded = withContext(Dispatchers.IO) {
+            try { Result.success(load()) }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-            catch (_: Exception) { UsageStatsSnapshot() }
+            catch (failure: Exception) { Result.failure(failure) }
         }
+        loadFailed = loaded.isFailure
+        stats = loaded.getOrDefault(UsageStatsSnapshot())
     }
 
     MiuixScaffoldPage(
         title = stringResource(R.string.stats_page_title),
         onBack = onBack,
     ) {
+        if (loadFailed) item(key = "load_error") {
+            Column(Modifier.padding(16.dp)) {
+                Text("暂时无法读取用量", modifier = Modifier.testTag("usage-error"))
+                top.yukonga.miuix.kmp.basic.TextButton(text = "重试", modifier = Modifier.testTag("usage-retry"), onClick = { loadAttempt++ })
+            }
+        }
+        if (loadFailed) return@MiuixScaffoldPage
         item(key = "tabs") {
             UsageStatsTabs(
                 selected = selectedTab,
@@ -112,7 +126,7 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
                         .padding(vertical = 48.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    InfiniteProgressIndicator()
+                    InfiniteProgressIndicator(modifier = Modifier.testTag("usage-loading"))
                 }
             }
         } else if (selectedTab == UsageStatsTab.Models) {
@@ -811,18 +825,20 @@ private fun RecordedUsagePane(
     Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Card {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(if (modelView) "历史提供方 / 模型未知" else "当前保留记录 · 实测用量",
+                Text(if (modelView) "未归属模型的用量" else "用量统计",
                     style = MiuixTheme.textStyles.headline1)
-                Text(if (projection == null) "统计读取不可用；— 不表示零用量。" else
-                    "仅计已持久化的每 request 最新 Usage 快照，不是终身统计或账单。" +
-                        "输入包含缓存读取，缓存不再加到总量；缺失不填零。",
-                    style = MiuixTheme.textStyles.body2)
-                if (modelView) Text("记录未保存历史提供方、模型及用量时间；不使用当前设置或子任务 profile 反推，不提供日期筛选。",
-                    style = MiuixTheme.textStyles.body2)
-                projection?.let { Text(it.coverageDescription, style = MiuixTheme.textStyles.body2) }
+                Text(when {
+                    projection == null -> "暂时无法读取用量"
+                    projection.combined.requestSnapshotCount == 0L -> "暂无已报告用量"
+                    else -> "仅统计已记录用量，未报告的数据以 — 显示。"
+                }, style = MiuixTheme.textStyles.body2)
+                if (projection != null && !projection.attributed.scanComplete)
+                    Text("部分记录尚未读取，仅显示已读取的用量。", style = MiuixTheme.textStyles.body2)
+                if (modelView && projection != null && projection.combined.requestSnapshotCount > 0L)
+                    Text("历史记录未包含模型信息", style = MiuixTheme.textStyles.body2)
             }
         }
-        if (projection != null) {
+        if (projection != null && projection.combined.requestSnapshotCount > 0L) {
             // Unknown historical model is one explicitly unattributed bucket, not today's model.
             if (modelView) RecordedSummaryCard("未归属历史模型 · 主请求 + 子任务", projection.combined)
             else {
@@ -839,7 +855,7 @@ private fun RecordedSummaryCard(title: String, summary: RecordedUsageSummary) {
     Card {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(title, style = MiuixTheme.textStyles.headline1)
-            ModelMetricRow("已记录 request 快照", formatStatCount(summary.requestSnapshotCount))
+            ModelMetricRow("已记录请求", formatStatCount(summary.requestSnapshotCount))
             // Values include per-field report coverage; independent partial fields cannot safely
             // produce a fresh-input, cache-hit-rate, total, average or cache-creation value.
             Text("输入（含缓存）：${formatReportedUsage(summary.input)}", style = MiuixTheme.textStyles.body2)

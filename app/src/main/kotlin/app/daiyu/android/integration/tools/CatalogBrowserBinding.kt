@@ -149,11 +149,13 @@ internal class CatalogBrowserBinding private constructor(
             privateRoot: Path,
             assistant: AssistantProfile,
             confirmed: BrowserRunAuthorization,
+            onDownloadCompleted: (app.daiyu.android.browser.download.BrowserCompletedDownload) -> Unit = {},
         ): CatalogBrowserBinding = create(assistant, confirmed) {
             AndroidHost(AndroidBrowserRunHost(context, confirmed.preview.grant, privateRoot,
                 cookieEnvPath = { _, _ -> error("browser_cookie_offload_disabled") },
                 cookieAuthorizeName = { _, _, _ -> false },
-                historyApproval = OpenMinisHistoryApproval.DENY))
+                historyApproval = OpenMinisHistoryApproval.DENY,
+                onDownloadCompleted = onDownloadCompleted))
         }
 
         internal fun create(

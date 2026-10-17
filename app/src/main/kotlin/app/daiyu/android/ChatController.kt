@@ -924,6 +924,33 @@ class ChatController internal constructor(private val application:Application,
         return true
     }
 
+    internal val browserDownloads = app.daiyu.android.browser.download.BrowserDownloadShelf()
+
+    internal fun completedBrowserDownloads(conversation: ConversationId) = browserDownloads.list(conversation.value)
+
+    /** Save is a separate UI action, not fetch approval or publication. The resolver receives
+     * only the user-selected content URI; no SAF-to-host-path translation is attempted.
+     */
+    internal fun saveBrowserDownload(conversation: ConversationId,
+        reference: app.daiyu.android.browser.download.BrowserCompletedDownload, uri: Uri,
+        assertUiOwner: () -> Unit,
+        resolver: android.content.ContentResolver = application.contentResolver) {
+        require(uri.scheme == "content") { "请选择文档目标" }
+        browserDownloads.assertOwned(conversation.value, reference)
+        assertUiOwner()
+        dataTask(failureNotice = "浏览器原件保存失败；目标可能不完整，未自动重试", work = {
+            check(conversationExists(conversation)) { "原会话已不存在" }
+            reference.saveOriginal(openDestination = {
+                resolver.openOutputStream(uri, "wt") ?: throw java.io.IOException("无法打开目标")
+            }, assertOwner = {
+                synchronized(this) { check(!closed) { "保存宿主已关闭" } }
+                browserDownloads.assertOwned(conversation.value, reference)
+                assertUiOwner()
+            })
+            "浏览器原件已保存；原字节及 SHA-256 校验通过"
+        })
+    }
+
     /** Explicit user-selected destination only. Revalidates the backup-owned reference and
      * exact hash-addressed original; never exports a private path or an execution capability.
      */
@@ -2240,7 +2267,7 @@ class ChatController internal constructor(private val application:Application,
                 pending.state != ControllerBrowserPreparation.State.PREVIEW || pending.childPlan != null ||
                 browserChildren.count { !it.drained } >= 8) return null
         }
-        val plan = try { ControllerChildBrowserPlan.prepare(pending, prompt, actions, writes) }
+        val plan = try { ControllerChildBrowserPlan.prepare(pending, prompt, actions, writes, browserDownloads) }
             catch (_: Exception) { return null }
         val attached = synchronized(this) {
             val token = preparation
@@ -2282,7 +2309,8 @@ class ChatController internal constructor(private val application:Application,
                     pending.state != ControllerBrowserPreparation.State.CONFIRMED) null else {
                     val root = ControllerBrowserPreparation.preparePrivateRootOnWorker(application)
                     val binding = if (preparationCancelled(token) || pending.isCancelled) null
-                        else pending.openOnWorker(application, root)
+                        else pending.openOnWorker(application, root, onDownloadCompleted =
+                            browserDownloads.recorder(pending.identity.conversationId.value, pending.preview.grant.owner))
                     if (binding == null) null else sendPrepared(token, pending.conversation, pending.text,
                         expectedDraftText = pending.text, browserPreparation = pending, browserBinding = binding)
                 }

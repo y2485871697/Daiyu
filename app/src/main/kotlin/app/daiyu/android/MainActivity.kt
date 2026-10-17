@@ -188,7 +188,7 @@ class MainActivity : ComponentActivity() {
         hapticsHost?.sync(selected?.id?.value, retainedPage == "chat" && !sidebarVisible,
             retainedPage == "haptics")
     }
-    private val retainedData by lazy { RetainedConversationData(controller.database, ContextService(this, controller.database)) }
+    private val retainedData by lazy { RetainedConversationData(controller.database, ContextService(applicationContext, controller.database)) }
     private val assistantStore get() = controller.assistantStore
     private val assistantAssets get() = controller.assistantAssets
     private val reasoningPreference get() = controller.reasoningPreference
@@ -737,6 +737,13 @@ class MainActivity : ComponentActivity() {
             syncHaptics()
         }
     private var paneState by mutableStateOf(ConversationPaneUiState(emptyList(), null, ""))
+    internal var paneSnapshotReader: (ConversationId?) -> RetainedConversationData.PaneSnapshot =
+        { activeConversationId -> retainedData.paneSnapshot(activeConversationId) }
+    private var paneRefreshSerial = 0L
+    private var paneRefreshPending = false
+    private var paneRefreshRunning = false
+    private var paneRefreshClosed = false
+    private var paneReadFailureReported = false
     private var chatState by mutableStateOf(ChatScreenState("代鱼"))
     private var interactiveModeEnabled by mutableStateOf(false)
     private var interactiveModeObservation: AutoCloseable? = null
@@ -3744,6 +3751,9 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        paneRefreshClosed = true
+        paneRefreshSerial++
+        paneRefreshPending = false
         revokePlatformActionVisit()
         taskLocationVisit?.let(::cancelTaskLocation)
         revokeLegacyLibrary()
@@ -3926,11 +3936,62 @@ class MainActivity : ComponentActivity() {
         imageHost.setVisible(retainedPage == "chat", selected?.id?.value)
         if (activityUsable()) refresh()
     }
-    private fun updatePane() {
-        if (!controller.ready || controller.dataBusy) return
-        val all = retainedData.summaries(controller.active)
-        paneState = paneState.copy(conversations = all.filter { it.folderId == paneState.selectedFolderId },
-            historyConversations = all, selectedConversationId = selected?.id?.value, folders = retainedData.folders())
+    private fun paneRefreshAllowed() = !paneRefreshClosed && activityUsable() &&
+        controller.ready && !controller.dataBusy &&
+        controller.problem?.startsWith("会话恢复失败") != true
+
+    private fun updatePane() = requestPaneRefresh(invalidate = true)
+
+    private fun requestPaneRefresh(invalidate: Boolean) {
+        if (invalidate) paneRefreshSerial++
+        paneRefreshPending = paneRefreshAllowed()
+        if (!paneRefreshPending || paneRefreshRunning) return
+        paneRefreshRunning = true
+        lifecycleScope.launch {
+            try {
+                while (paneRefreshPending && paneRefreshAllowed()) {
+                    paneRefreshPending = false
+                    val request = paneRefreshSerial
+                    val data = controller.dataRevision
+                    val title = controller.titleRevision
+                    val active = controller.active?.let { Triple(it.conversationId, it.id, it.runId) }
+                    val read = paneSnapshotReader
+                    val snapshot = try {
+                        withContext(Dispatchers.IO) { read(active?.first) }
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (!paneRefreshAllowed()) break
+                    val currentActive = controller.active?.let { Triple(it.conversationId, it.id, it.runId) }
+                    if (request != paneRefreshSerial || data != controller.dataRevision ||
+                        title != controller.titleRevision || active != currentActive) {
+                        paneRefreshPending = true
+                        continue
+                    }
+                    if (snapshot == null) {
+                        if (!paneReadFailureReported) {
+                            paneReadFailureReported = true
+                            toast("会话列表读取失败；原数据保留")
+                        }
+                        continue
+                    }
+                    paneReadFailureReported = false
+                    val currentPane = paneState
+                    val all = snapshot.conversations
+                    paneState = currentPane.copy(
+                        conversations = all.filter { it.folderId == currentPane.selectedFolderId },
+                        historyConversations = all,
+                        selectedConversationId = selected?.id?.value,
+                        folders = snapshot.folders,
+                    )
+                }
+            } finally {
+                paneRefreshRunning = false
+                paneRefreshPending = false
+            }
+        }
     }
     private fun retainedConversation(id: String) = controller.database.conversations().single { it.id.value == id }
     private fun openRetainedConversation(id: String) { val conversation = retainedConversation(id); dismissSidebar(); returnToChat(); select(conversation) }
@@ -4328,7 +4389,7 @@ class MainActivity : ComponentActivity() {
             }
             prepareMessageActionSnapshot()
             publishChat()
-            if (sidebarVisible || retainedPage == "manage") updatePane()
+            if (sidebarVisible || retainedPage == "manage") requestPaneRefresh(invalidate = false)
         }
     }
     private fun currentAssistantLabel(): String = try {

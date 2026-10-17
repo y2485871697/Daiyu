@@ -19,7 +19,17 @@ import java.time.format.FormatStyle
 
 /** Read-only projection of this application's records; never reads the old application's data. */
 internal class RetainedConversationData(private val database: ConversationDatabase, private val context: ContextService) {
-    fun summaries(active: Message?): List<ConversationSummaryUi> {
+    data class PaneSnapshot(
+        val conversations: List<ConversationSummaryUi>,
+        val folders: List<ConversationFolderUi>,
+    )
+
+    fun paneSnapshot(activeConversationId: ConversationId?): PaneSnapshot =
+        PaneSnapshot(summaryRows(activeConversationId), folders())
+
+    fun summaries(active: Message?): List<ConversationSummaryUi> = summaryRows(active?.conversationId)
+
+    private fun summaryRows(activeConversationId: ConversationId?): List<ConversationSummaryUi> {
         val today = LocalDate.now()
         return database.conversations().map { conversation ->
             val latest = database.messages(conversation.id, limit = 1).lastOrNull()?.second
@@ -29,7 +39,7 @@ internal class RetainedConversationData(private val database: ConversationDataba
                 preview = latest?.blocks?.filterIsInstance<MessageBlock.Text>()?.joinToString(" ") { it.text }?.take(160).orEmpty(),
                 timeLabel = date.format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT)),
                 updatedAtMillis = conversation.updatedAt, mode = ConversationModeUi.Chat,
-                isPinned = conversation.pinned, isActiveRun = active?.conversationId == conversation.id,
+                isPinned = conversation.pinned, isActiveRun = activeConversationId == conversation.id,
                 hasCompletionMarker = app.daiyu.android.storage.ConversationCompletionMarkers.read(
                     database.readableDatabase, conversation.id) != null,
                 folderId = conversation.folder.takeIf { it.isNotEmpty() }, isToday = date.toLocalDate() == today,

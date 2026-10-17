@@ -32,7 +32,7 @@ Required Notice: Copyright © 2026 蛮吉 (Mangi-11).
 
 | 直接依赖（精确声明） | 可复查真实来源 / 固定版本制品定位 | 当前边界 |
 |---|---|---|
-| `org.apache.commons:commons-compress:1.28.0` | <https://commons.apache.org/proper/commons-compress/>；<https://repo.maven.apache.org/maven2/org/apache/commons/commons-compress/1.28.0/> | ASF / Apache-2.0 的已登记来源；该制品 `META-INF/LICENSE.txt`、`NOTICE.txt` 及传递项原件仍须从实际制品保全，不能用 Gradle 的 Apache 文本替代 |
+| `org.apache.commons:commons-compress:1.28.0` | <https://commons.apache.org/proper/commons-compress/>；<https://repo.maven.apache.org/maven2/org/apache/commons/commons-compress/1.28.0/> | 已从精确版本 Maven JAR 保全 `META-INF/LICENSE.txt`、`NOTICE.txt`，随包路径 `maven/commons-compress-1.28.0/`；JAR与条目摘要见 `THIRD_PARTY/license-bundle/maven/origins.json`。传递项最终选择仍待真实 graph |
 | `org.tukaani:xz:1.12` | XZ for Java：<https://tukaani.org/xz/java.html>；<https://repo.maven.apache.org/maven2/org/tukaani/xz/1.12/> | 不与 native XZ Utils 混为一谈；实际版权/许可/public-domain 告知按此 Java 制品源包补，不猜全文 |
 | `dev.rikka.shizuku:api:13.1.5`、`dev.rikka.shizuku:provider:13.1.5` | <https://github.com/RikkaApps/Shizuku-API>；Maven Central `dev/rikka/shizuku/{api,provider}/13.1.5/` | 必须取这两个发布制品与适用源码/许可，不用 Shizuku app 根许可或 backend 授权替代；不声称传递项已解析或许可已随包 |
 | `top.yukonga.miuix.kmp:miuix-ui-android:0.9.4-rc01`、`miuix-blur-android:0.9.4-rc01`、`miuix-preference-android:0.9.4-rc01` | <https://github.com/compose-miuix-ui/miuix>；Maven Central `top/yukonga/miuix/kmp/<artifact>/0.9.4-rc01/` | 真实 RC 声明照录，不改成稳定版。KMP Android variant、传递 Compose 及各原许可/NOTICE 待实际解析；不凭项目名猜其它 UI/字体/图标来源 |
@@ -45,6 +45,14 @@ Required Notice: Copyright © 2026 蛮吉 (Mangi-11).
 | `org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0`、`kotlinx-coroutines-android:1.11.0` | <https://github.com/Kotlin/kotlinx.coroutines>；Maven Central `org/jetbrains/kotlinx/<artifact>/1.11.0/` | 实际 JVM/Android variant、版本仲裁和对应原许可/NOTICE 待解析；不把同版本 `coroutines-test`（测试用）算作生产直接项 |
 
 根 `build.gradle.kts` Kotlin/Compose 插件 `2.4.21` 与可能隐式标准库同样须按真实解析补齐运行库许可，不能只看 plugin 版本认定最终 stdlib。`debugImplementation androidx.compose.ui:ui-test-manifest:1.9.0` 可能进入 debug APK，debug 包审查须另计；JUnit、Robolectric、coroutines-test、JSON-java 与 androidTest 依赖不是此表中的 release 生产直接项。构建与 CI action 固定原件仍见 `THIRD_PARTY/task19/build-dependencies.md`、`ci-actions.json`；不把构建工具当成 APK runtime。
+
+## 已保全的 Maven 原件（不等于 resolved graph）
+
+`THIRD_PARTY/license-bundle/maven/origins.json` 保留四个精确 Maven 坐标、下载 URL、JAR 长度/SHA-256 与原 ZIP 条目的长度/SHA-256。维护时重新核对 JAR 及八份原文后逐字复制，不重排许可文本。
+
+- 直接生产声明 `org.apache.commons:commons-compress:1.28.0` 的完整 Apache-2.0 与 ASF 专属 NOTICE 随包位于 `maven/commons-compress-1.28.0/{LICENSE.txt,NOTICE.txt}`。
+- `commons-codec:commons-codec:1.19.0`、`commons-io:commons-io:2.20.0`、`org.apache.commons:commons-lang3:3.18.0` 为已取得原件的 POM 候选版本，相同两类原件随包位于各 `maven/<artifact>-<version>/`。这不声称它们已进入 APK 或已是最终仲裁版本；真实 runtime graph 仍需核对。
+- Maven 制品未内嵌 LICENSE/NOTICE 不自动表示缺少许可；本次不据空条目推断其它组件许可。
 
 ## 核验入口与不能证明的事项
 

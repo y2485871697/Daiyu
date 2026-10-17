@@ -44,14 +44,14 @@ class LinuxEnvironmentStoreTest : TestCase() {
             assertTrue(backend.shellArgv.contains("-0"))
             assertTrue(backend.shellArgv.contains("${spec.sharedMounts.keys.single()}:${spec.sharedMounts.values.single()}"))
             assertEquals(spec.sharedMounts, backend.sharedMounts)
-            assertEquals(spec.loader.path, backend.environment["PROOT_LOADER"])
+            assertEquals(requireNotNull(spec.loader).path, backend.environment["PROOT_LOADER"])
         }
         other.clearSelection()
         assertEquals("NOT_SELECTED", store.status().getString("state"))
     }
     fun testCorruptHelperOrMetadataNeverFallsBack() = fixture { root, spec ->
         val store = LinuxEnvironmentStore(File(root, "selection")).apply { select(spec) }
-        spec.proot.writeText("replaced helper")
+        requireNotNull(spec.proot).writeText("replaced helper")
         assertEquals("BROKEN", store.status().getString("state"))
         try { store.acquire(); fail("must refuse changed executable") } catch (expected: IllegalArgumentException) { }
         File(root, "selection/selected-linux.json").writeText("not json")

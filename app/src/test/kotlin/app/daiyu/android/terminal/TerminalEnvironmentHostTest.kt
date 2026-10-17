@@ -190,7 +190,7 @@ class TerminalEnvironmentHostTest {
     @Test fun replacementAtSamePathInvalidatesOriginalLease() = linuxFixture { root, spec ->
         val store = hostLinuxStore(File(root, "selection")).apply { select(spec) }
         store.acquire().use { lease ->
-            val original = spec.loader.toPath()
+            val original = requireNotNull(spec.loader).toPath()
             val moved = original.resolveSibling("retired-loader")
             Files.move(original, moved)
             Files.copy(moved, original)
@@ -251,8 +251,8 @@ class TerminalEnvironmentHostTest {
         val otherRoot = File(root, "other-guest").apply { mkdirs() }
         File(otherRoot, "bin").mkdirs()
         File(otherRoot, "bin/sh").writeText("other shell; never executed")
-        val otherProot = File(root, "other-proot").apply { writeBytes(spec.proot.readBytes()); setExecutable(true) }
-        val otherLoader = File(root, "other-loader").apply { writeBytes(spec.loader.readBytes()) }
+        val otherProot = File(root, "other-proot").apply { writeBytes(requireNotNull(spec.proot).readBytes()); setExecutable(true) }
+        val otherLoader = File(root, "other-loader").apply { writeBytes(requireNotNull(spec.loader).readBytes()) }
         val otherMount = File(root, "other-shared").apply { mkdirs() }
         val variants = listOf(
             spec.copy(distribution = "other-distro"),

@@ -77,6 +77,13 @@ static int exists(void) {
     char path[256]; snprintf(path,sizeof(path),"%s/%s",fake_parent,root_scope.name);
     struct stat value; return stat(path,&value)==0;
 }
+static void clean_failure_receipt(int fd) {
+    unsigned char bytes[128];
+    const char *receipt="DROOT0 guest=0 scope_clean=1";
+    ssize_t size=read(fd,bytes,sizeof(bytes));
+    assert(size==(ssize_t)(5+strlen(receipt)) && bytes[0]=='F' && be32(bytes+1)==strlen(receipt));
+    assert(memcmp(bytes+5,receipt,strlen(receipt))==0);
+}
 int main(void) {
     strcpy(fake_parent,"/tmp/daiyu-root-scope-test-XXXXXX");
     assert(mkdtemp(fake_parent));
@@ -84,10 +91,10 @@ int main(void) {
     int saved_stdout=dup(STDOUT_FILENO); assert(saved_stdout>=0);
     assert(dup2(output[1],STDOUT_FILENO)>=0); close(output[1]);
     root_mode=1;
-    fail_open=1; assert(root_create()<0 && errno==EMFILE && !exists());
-    fail_stat=1; assert(root_create()<0 && errno==EIO && !exists());
+    fail_open=1; assert(root_create()<0 && errno==EMFILE && !exists()); clean_failure_receipt(output[0]);
+    fail_stat=1; assert(root_create()<0 && errno==EIO && !exists()); clean_failure_receipt(output[0]);
     fail_open=1; interrupt_unlink=1;
-    assert(root_create()<0 && errno==EMFILE && !exists());
+    assert(root_create()<0 && errno==EMFILE && !exists()); clean_failure_receipt(output[0]);
     fail_open=1; fail_unlink=1;
     assert(root_create()<0 && errno==EBUSY && exists());
     unsigned char transcript[2048];

@@ -1,6 +1,9 @@
 package app.daiyu.android.terminal.install
 
 import android.content.Context
+import app.daiyu.android.terminal.LinuxExecutionMode
+import app.daiyu.android.terminal.requireProotFiles
+import app.daiyu.android.terminal.RootScopeLaunch
 import app.daiyu.android.terminal.LinuxBackend
 import app.daiyu.android.terminal.LinuxInstallation
 import app.daiyu.android.terminal.TerminalConfiguration
@@ -23,7 +26,7 @@ import java.security.MessageDigest
  * Files-only install transaction. Caller explicitly confirms a PreparedLinuxInstall and wires
  * operation cancellation. The app factory supplies the real bounded Android PTY probe runner
  * and bounded tar extraction; injected runners remain a host-test/audited integration seam.
- * No catalog writes, selection, chroot, profiles, shell fallback or implicit network requests.
+ * No catalog writes, selection, profiles, shell fallback or implicit network requests.
  */
 class RootlessLinuxInstaller internal constructor(
     private val privateRoot: File,
@@ -41,6 +44,8 @@ class RootlessLinuxInstaller internal constructor(
     },
     private val fileForce: (FileChannel) -> Unit = { it.force(true) },
     private val fileOps: FileOps = PosixFileOps,
+    private val executionMode: LinuxExecutionMode = LinuxExecutionMode.PROOT,
+    private val requireChrootTransport: () -> Unit = { RootScopeLaunch.requireTrustedTransport(); Unit },
 ) {
     private val owner = Any()
     // Strong references to unknown PTY resources; their writer locks/staging remain on disk.
@@ -59,9 +64,17 @@ class RootlessLinuxInstaller internal constructor(
         require(installation.sharedMounts.isEmpty()) { "linux_install_mounts_not_supported" }
         require(installation.guestWorkingDirectory == "/")
         cleanAbsolutePath(privateRoot)
-        listOf(installation.rootfs, installation.proot, installation.loader).forEach(::cleanAbsolutePath)
-        require(installation.prootSha256.matches(Regex("[a-f0-9]{64}")))
-        require(installation.loaderSha256.matches(Regex("[a-f0-9]{64}")))
+        require(installation.executionMode == executionMode) { "linux_install_mode_mismatch" }
+        cleanAbsolutePath(installation.rootfs)
+        if (executionMode == LinuxExecutionMode.PROOT) {
+            val helpers = installation.requireProotFiles()
+            listOf(helpers.executable, helpers.loader).forEach(::cleanAbsolutePath)
+            require(installation.prootSha256.matches(Regex("[a-f0-9]{64}")))
+            require(installation.loaderSha256.matches(Regex("[a-f0-9]{64}")))
+        } else {
+            require(installation.proot == null && installation.loader == null &&
+                installation.prootSha256.isEmpty() && installation.loaderSha256.isEmpty())
+        }
         val expected = File(File(File(privateRoot, installation.environmentId), installation.generation), "rootfs")
         require(installation.rootfs == expected) { "linux_install_target_outside_private_root" }
         return PreparedLinuxInstall(owner, artifact, mirror, installation)
@@ -149,7 +162,17 @@ class RootlessLinuxInstaller internal constructor(
      * never evidence of a dead process. No mkdir/fsync/probe/download/catalog mutation here.
      */
     internal fun recoverRequest(packaged: PackagedProotHelpers,
-                                artifacts: List<LinuxRootfsArtifact> = LinuxRootfsCatalog.artifacts): RecoveredLinuxInstall? {
+                                artifacts: List<LinuxRootfsArtifact> = LinuxRootfsCatalog.artifacts): RecoveredLinuxInstall? =
+        recoverRequest(packaged, packaged.abi, artifacts)
+
+    internal fun recoverChrootRequest(abi: String,
+        artifacts: List<LinuxRootfsArtifact> = LinuxRootfsCatalog.artifacts): RecoveredLinuxInstall? {
+        check(executionMode == LinuxExecutionMode.CHROOT)
+        return recoverRequest(null, abi, artifacts)
+    }
+
+    private fun recoverRequest(packaged: PackagedProotHelpers?, abi: String,
+                               artifacts: List<LinuxRootfsArtifact>): RecoveredLinuxInstall? {
         securePath(privateRoot)
         val journal = File(privateRoot, REQUEST)
         securePath(journal)
@@ -170,14 +193,22 @@ class RootlessLinuxInstaller internal constructor(
             line.substring(0, separator) to line.substring(separator + 1)
         }
         fun field(name: String) = checkNotNull(fields[name]) { "linux_install_request_field" }
-        val artifact = artifacts.singleOrNull { it.id == field("entry") && it.abi == packaged.abi }
+        val artifact = artifacts.singleOrNull { it.id == field("entry") && it.abi == abi }
             ?: error("linux_install_request_catalog_changed")
-        val installation = LinuxInstallation(artifact.distribution, field("environment"), field("generation"),
-            File(field("rootfs")), File(field("proot")), field("proot_sha256"),
-            File(field("loader")), field("loader_sha256"), "/", emptyMap())
-        check(installation.proot == packaged.proot && installation.prootSha256 == packaged.prootSha256 &&
-            installation.loader == packaged.loader && installation.loaderSha256 == packaged.loaderSha256) {
-            "linux_install_original_helpers_unavailable"
+        val installation = if (executionMode == LinuxExecutionMode.PROOT) {
+            val original = checkNotNull(packaged)
+            LinuxInstallation(artifact.distribution, field("environment"), field("generation"),
+                File(field("rootfs")), File(field("proot")), field("proot_sha256"),
+                File(field("loader")), field("loader_sha256"), "/", emptyMap()).also {
+                check(it.proot == original.proot && it.prootSha256 == original.prootSha256 &&
+                    it.loader == original.loader && it.loaderSha256 == original.loaderSha256) {
+                    "linux_install_original_helpers_unavailable"
+                }
+            }
+        } else {
+            check(field("execution_mode") == "chroot") { "linux_install_mode_mismatch" }
+            LinuxInstallation(artifact.distribution, field("environment"), field("generation"),
+                File(field("rootfs")), executionMode = LinuxExecutionMode.CHROOT)
         }
         val prepared = prepare(artifact, field("mirror"), installation)
         // Exact canonical comparison rejects changed hashes/URLs, duplicate/unknown fields,
@@ -394,17 +425,19 @@ class RootlessLinuxInstaller internal constructor(
     private fun probe(installation: LinuxInstallation, hostDirectory: File,
                       cancellation: LinuxInstallCancellation) {
         validateHelpers(installation, cancellation)
+        val helpers = if (installation.executionMode == LinuxExecutionMode.PROOT) installation.requireProotFiles() else null
+        val rootScope = if (installation.executionMode == LinuxExecutionMode.CHROOT)
+            RootScopeLaunch(installation.rootfs, File("/system/bin/su"), identityProbe = true) else null
         val linux = LinuxBackend(
             label = installation.distribution,
-            shellArgv = listOf(installation.proot.path, "-0", "-r", installation.rootfs.path,
+            shellArgv = rootScope?.guestArgv() ?: listOf(checkNotNull(helpers).executable.path, "-0", "-r", installation.rootfs.path,
                 "-w", "/", "/bin/sh"),
             identityArgv = emptyList(),
-            environment = mapOf("PROOT_LOADER" to installation.loader.path,
-                "PROOT_TMP_DIR" to hostDirectory.path, "HOME" to "/root",
-                "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"),
+            environment = mapOf("HOME" to "/root", "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin") +
+                (helpers?.let { mapOf("PROOT_LOADER" to it.loader.path, "PROOT_TMP_DIR" to hostDirectory.path) } ?: emptyMap()),
             expectedUid = 0,
             environmentId = installation.environmentId + ":" + installation.generation,
-            guestWorkingDirectory = "/", sharedMounts = emptyMap()
+            guestWorkingDirectory = "/", sharedMounts = emptyMap(), rootScope = rootScope
         )
         val result = runner.run(TerminalConfiguration(backend = "linux", root = false,
             workingDirectory = hostDirectory, linux = linux), "id -u", cancellation)
@@ -413,13 +446,20 @@ class RootlessLinuxInstaller internal constructor(
     }
 
     private fun validateHelpers(value: LinuxInstallation, cancellation: LinuxInstallCancellation) {
-        listOf(value.proot to value.prootSha256, value.loader to value.loaderSha256).forEach { (file, expected) ->
+        if (value.executionMode == LinuxExecutionMode.CHROOT) {
+            cancellation.check()
+            check(value.proot == null && value.loader == null && value.prootSha256.isEmpty() && value.loaderSha256.isEmpty())
+            requireChrootTransport()
+            return
+        }
+        val helpers = value.requireProotFiles()
+        listOf(helpers.executable to value.prootSha256, helpers.loader to value.loaderSha256).forEach { (file, expected) ->
             securePath(file)
             check(Files.isRegularFile(file.toPath(), NOFOLLOW_LINKS) && file.canRead())
             check(file.length() in 1..(64L * 1024 * 1024))
             check(hash(file, 64L * 1024 * 1024, cancellation).second == expected) { "linux_install_helper_hash" }
         }
-        check(value.proot.canExecute()) { "linux_install_proot_not_executable" }
+        check(helpers.executable.canExecute()) { "linux_install_proot_not_executable" }
     }
 
     private fun verifyArchive(artifact: LinuxRootfsArtifact, archive: File,
@@ -464,8 +504,11 @@ class RootlessLinuxInstaller internal constructor(
         append("mirror=${p.mirror.id}\nurl=${p.mirror.uri.toASCIIString()}\n")
         append("environment=${p.installation.environmentId}\ngeneration=${p.installation.generation}\n")
         append("rootfs=${p.targetRootfs.path}\n")
-        append("proot=${p.installation.proot.path}\nproot_sha256=${p.installation.prootSha256}\n")
-        append("loader=${p.installation.loader.path}\nloader_sha256=${p.installation.loaderSha256}\n")
+        if (p.installation.executionMode == LinuxExecutionMode.PROOT) {
+            val helpers = p.installation.requireProotFiles()
+            append("proot=${helpers.executable.path}\nproot_sha256=${p.installation.prootSha256}\n")
+            append("loader=${helpers.loader.path}\nloader_sha256=${p.installation.loaderSha256}\n")
+        } else append("execution_mode=chroot\n")
         append("cwd=/\nmounts=none\n")
     }.toByteArray(Charsets.UTF_8).also { require(it.size <= 16384) }
 
@@ -558,6 +601,10 @@ class RootlessLinuxInstaller internal constructor(
         /** Explicit extraction seam for audited integrations; never a SAF/shared-storage path. */
         fun forApp(context: Context, extraction: LinuxRootfsExtraction,
                    runner: LinuxInstallProbeRunner): RootlessLinuxInstaller = RootlessLinuxInstaller(
-            File(context.filesDir, "linux-installations"), extraction, runner)
+            File(context.filesDir.canonicalFile, "linux-installations"), extraction, runner)
+
+        internal fun forChroot(context: Context, runner: LinuxInstallProbeRunner) = RootlessLinuxInstaller(
+            File(context.filesDir.canonicalFile, "linux-chroot-installations"), TarLinuxRootfsExtraction(), runner,
+            executionMode = LinuxExecutionMode.CHROOT)
     }
 }

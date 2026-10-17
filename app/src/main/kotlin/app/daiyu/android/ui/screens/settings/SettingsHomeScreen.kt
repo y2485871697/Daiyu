@@ -33,6 +33,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.daiyu.android.delegation.ReasoningEffort
+import app.daiyu.android.ui.components.subagent.SubAgentThinkingEffortPickerDialog
 import app.daiyu.android.ui.FeatureRoute
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.icons.DaiyuIcon
@@ -78,7 +80,17 @@ private fun SettingsSearch(query: String, onQueryChange: (String) -> Unit) {
 }
 
 @Composable
-private fun OriginalSettingsRow(entry: SettingsEntry, onClick: () -> Unit) {
+private fun OriginalSettingsRow(entry: SettingsEntry, defaultReasoning: ReasoningEffort, defaultReasoningError: String?,
+    onDefaultReasoningToggle: ((Boolean) -> Unit)?, onClick: () -> Unit) {
+    if (entry.id == "default_reasoning" && onDefaultReasoningToggle != null) {
+        SettingsSwitchRow(entry.title, defaultReasoning !in setOf(ReasoningEffort.DEFAULT, ReasoningEffort.OFF),
+            enabled = defaultReasoningError == null, tag = "settings-row:${entry.title}",
+            summary = "与独立草稿共用；不改既有会话。关闭时由模型配置决定", onCheckedChange = onDefaultReasoningToggle)
+        if (defaultReasoningError != null) SettingsNote(defaultReasoningError, error = true)
+        top.yukonga.miuix.kmp.basic.TextButton(text = "选择默认推理强度",
+            modifier = Modifier.testTag("reasoning-default-select"), onClick = { onDefaultReasoningToggle(true) })
+        return
+    }
     SettingsRow(entry.title, onClick = onClick,
         summary = when (entry.id) {
             "accessibility" -> "查看服务与授权边界；进入设置不向模型授权"
@@ -99,6 +111,9 @@ internal fun DaiyuSettingsScreen(
     onOpenHaptics: (() -> Unit)? = null,
     onOpenPlatformTools: (() -> Unit)? = null,
     onOpenVoice: (() -> Unit)? = null,
+    defaultReasoning: ReasoningEffort = ReasoningEffort.DEFAULT,
+    defaultReasoningError: String? = null,
+    onDefaultReasoningChange: ((ReasoningEffort) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -108,6 +123,22 @@ internal fun DaiyuSettingsScreen(
     var query by rememberSaveable { mutableStateOf("") }
     var section by rememberSaveable { mutableStateOf<String?>(null) }
     var relayExpanded by rememberSaveable { mutableStateOf(false) }
+    var choosingDefaultReasoning by remember { mutableStateOf(false) }
+    val defaultReasoningToggle: ((Boolean) -> Unit)? = onDefaultReasoningChange?.let { change -> { enabled ->
+        if (visit.active && localPage == null && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            if (enabled) choosingDefaultReasoning = true else change(ReasoningEffort.DEFAULT)
+        }
+    } }
+    SubAgentThinkingEffortPickerDialog(show = choosingDefaultReasoning, effort = defaultReasoning,
+        options = ReasoningEffort.entries.filter { it !in setOf(ReasoningEffort.DEFAULT, ReasoningEffort.OFF) },
+        description = "为新会话显式选择默认强度；不修改既有会话或运行中的请求。关闭开关仅取消额外指定，不强制关闭模型推理。",
+        onDismiss = { choosingDefaultReasoning = false }, onEffortChange = { effort ->
+            if (visit.active && choosingDefaultReasoning && localPage == null &&
+                lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+                onDefaultReasoningChange?.invoke(effort)
+                choosingDefaultReasoning = false
+            }
+        })
     val groups = remember(query) { filterSettingsGroups(query) }
     val listState = rememberLazyListState()
     LaunchedEffect(section, query) { listState.scrollToItem(0) }
@@ -161,7 +192,7 @@ internal fun DaiyuSettingsScreen(
                 SettingsCard {
                     selectedGroup.entries.filter { relayExpanded || it.id !in setOf("relay_st", "relay_moyu") }
                         .forEach { entry ->
-                            OriginalSettingsRow(entry) { open(entry) }
+                            OriginalSettingsRow(entry, defaultReasoning, defaultReasoningError, defaultReasoningToggle) { open(entry) }
                         }
                 }
             }
@@ -185,7 +216,7 @@ internal fun DaiyuSettingsScreen(
                     group.entries.forEach { entry ->
                         item(key = "search_entry_${entry.id}") {
                             SettingsCard(Modifier.padding(bottom = 6.dp)) {
-                                OriginalSettingsRow(entry) { open(entry) }
+                                OriginalSettingsRow(entry, defaultReasoning, defaultReasoningError, defaultReasoningToggle) { open(entry) }
                             }
                         }
                     }

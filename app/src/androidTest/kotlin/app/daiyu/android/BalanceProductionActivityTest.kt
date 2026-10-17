@@ -31,36 +31,46 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
     }
 
     override fun setUp() {
-        val app = instrumentation.targetContext.applicationContext as ChatApplication
-        originalHost = app.balanceHost
-        testHost = BalanceRuntimeHost(factory = {
-            BalanceRuntime(ProviderBalanceStore(Memory()), BalanceQuery {
-                calls.incrementAndGet()
-                if (hold.get()) try {
-                    entered.complete(Unit)
-                    CompletableDeferred<Unit>().await()
-                } finally { cancelled.complete(Unit) }
-                if (fail.get()) BalanceResult.Failed(BalanceFailure.NETWORK)
-                else BalanceResult.Available(BalanceMoney("12.34".toBigDecimal(), "CNY"), 1234L)
+        try {
+            val app = instrumentation.targetContext.applicationContext as ChatApplication
+            originalHost = app.balanceHost
+            testHost = BalanceRuntimeHost(factory = {
+                BalanceRuntime(ProviderBalanceStore(Memory()), BalanceQuery {
+                    calls.incrementAndGet()
+                    if (hold.get()) try {
+                        entered.complete(Unit)
+                        CompletableDeferred<Unit>().await()
+                    } finally { cancelled.complete(Unit) }
+                    if (fail.get()) BalanceResult.Failed(BalanceFailure.NETWORK)
+                    else BalanceResult.Available(BalanceMoney("12.34".toBigDecimal(), "CNY"), 1234L)
+                })
             })
-        })
-        runtime = runBlocking {
-            testHost.get().also {
-                it.save(BalanceConfiguration("test-balance-account", "https://example.test", "balance-only-key",
-                    "", "CNY", BalanceOption(enabled = true, apiPath = "/balance", resultPath = "balance")))
+            runtime = runBlocking {
+                testHost.get().also {
+                    it.save(BalanceConfiguration("test-balance-account", "https://example.test", "balance-only-key",
+                        "", "CNY", BalanceOption(enabled = true, apiPath = "/balance", resultPath = "balance")))
+                }
             }
+            mainThread { app.balanceHost = testHost }
+            super.setUp()
+            ui.waitUntil(timeoutMillis = 5000) { runtime.state.value.successful != null }
+        } catch (failure: Throwable) {
+            try { cleanupFixture() } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
+            throw failure
         }
-        mainThread { app.balanceHost = testHost }
-        super.setUp()
-        ui.waitUntil(timeoutMillis = 5000) { runtime.state.value.successful != null }
     }
 
-    override fun tearDown() {
-        try { super.tearDown() }
-        finally {
-            mainThread { (instrumentation.targetContext.applicationContext as ChatApplication).balanceHost = originalHost }
-            testHost.close()
-        }
+    private fun restoreHost() {
+        try {
+            if (::originalHost.isInitialized) mainThread {
+                (instrumentation.targetContext.applicationContext as ChatApplication).balanceHost = originalHost
+            }
+        } finally { if (::testHost.isInitialized) testHost.close() }
+    }
+
+    override fun cleanupFixture() {
+        super.cleanupFixture()
+        restoreHost()
     }
 
     private fun openBalance() {

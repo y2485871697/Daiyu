@@ -52,6 +52,48 @@ class RootlessLinuxInstaller internal constructor(
     // Neither Activity/page disposal nor a new install request is evidence of termination.
     private val unknownProbes = java.util.concurrent.CopyOnWriteArrayList<LinuxInstallProbeUnknown>()
 
+    private class PendingCleanup(val prepared: PreparedLinuxInstall, val staging: File?,
+        val archive: File?, val lock: File, val receipt: LinuxInstallReceipt?, var failure: Throwable?) {
+        var lockReleased = false
+    }
+    private val pendingCleanups = java.util.concurrent.ConcurrentHashMap<File, PendingCleanup>()
+
+    private fun cleanupOwned(record: PendingCleanup) {
+        if (!record.lockReleased) {
+            record.staging?.let { deleteTreeWithoutFollowingLinks(it.toPath()) }
+            record.archive?.let { fileOps.deleteIfExists(it.toPath()) }
+            // Persist child cleanup before releasing the writer lease.
+            directorySync(record.lock.parentFile!!)
+            fileOps.deleteIfExists(record.lock.toPath())
+            record.lockReleased = true
+        }
+        // If this sync fails, a retry must not delete a new owner's replacement lock.
+        directorySync(record.lock.parentFile!!)
+    }
+
+    internal fun retryCleanup(prepared: PreparedLinuxInstall): LinuxInstallReceipt? {
+        check(prepared.owner === owner) { "linux_install_wrong_owner" }
+        val record = checkNotNull(pendingCleanups[prepared.targetRootfs]) { "linux_install_cleanup_not_retained" }
+        check(record.prepared === prepared) { "linux_install_cleanup_request_changed" }
+        securePath(record.lock.parentFile!!)
+        try { cleanupOwned(record) }
+        catch (failure: Exception) {
+            if (record.failure == null) record.failure = failure
+            throw LinuxInstallCleanupPending(record.receipt, record.failure, failure)
+        }
+        check(pendingCleanups.remove(prepared.targetRootfs, record))
+        return record.receipt
+    }
+
+    private fun finishCleanup(record: PendingCleanup) {
+        try { cleanupOwned(record) }
+        catch (failure: Exception) {
+            if (record.failure == null) record.failure = failure
+            pendingCleanups[record.prepared.targetRootfs] = record
+            throw LinuxInstallCleanupPending(record.receipt, record.failure, failure)
+        }
+    }
+
     /** Pure preparation; caller chooses the generation BEFORE obtaining consent. */
     fun prepare(artifact: LinuxRootfsArtifact, mirrorId: String,
                 installation: LinuxInstallation): PreparedLinuxInstall {
@@ -310,10 +352,13 @@ class RootlessLinuxInstaller internal constructor(
         var lockOwned = false
         var publicationAttempted = false
         var cleanupSafe = true
+        var receipt: LinuxInstallReceipt? = null
+        var originalFailure: Throwable? = null
         var staging: File? = null
         var archive: File? = null
         val lock = File(parent, ".install-lock")
         try {
+            check(!pendingCleanups.containsKey(prepared.targetRootfs)) { "linux_install_cleanup_pending" }
             secureDirectory(parent)
             // Cross-instance/process writer exclusion, fail-closed after an interrupted owner.
             // No automatic stale-lock removal: parent can recover after inspecting disk state.
@@ -352,22 +397,21 @@ class RootlessLinuxInstaller internal constructor(
             // "not installed". Reconcile the marker and shell from disk, never delete rootfs.
             directorySync(parent)
             check(inspectPublished(prepared) != null) { "linux_install_published_marker_invalid" }
-            return LinuxInstallReceipt(prepared.installation, directorySyncConfirmed = true)
+            return LinuxInstallReceipt(prepared.installation, directorySyncConfirmed = true).also { receipt = it }
         } catch (failure: Exception) {
+            originalFailure = failure
             if (failure is LinuxInstallProbeUnknown) {
                 cleanupSafe = false
                 unknownProbes.add(failure)
             }
             if (publicationAttempted && runCatching { inspectPublished(prepared) }.getOrNull() != null) {
-                return LinuxInstallReceipt(prepared.installation, directorySyncConfirmed = false)
+                return LinuxInstallReceipt(prepared.installation, directorySyncConfirmed = false).also { receipt = it }
             }
             throw failure
         } finally {
             // Never delete a published target, pre-existing rootfs, or another owner's staging.
-            if (cleanupSafe) {
-                staging?.let { runCatching { deleteTreeWithoutFollowingLinks(it.toPath()) } }
-                archive?.let { runCatching { Files.deleteIfExists(it.toPath()) } }
-                if (lockOwned) runCatching { Files.deleteIfExists(lock.toPath()); directorySync(parent) }
+            if (cleanupSafe && lockOwned) {
+                finishCleanup(PendingCleanup(prepared, staging, archive, lock, receipt, originalFailure))
             }
         }
     }
@@ -382,16 +426,22 @@ class RootlessLinuxInstaller internal constructor(
         val parent = prepared.targetRootfs.parentFile!!
         secureDirectory(parent)
         val lock = File(parent, ".install-lock")
+        check(!pendingCleanups.containsKey(prepared.targetRootfs)) { "linux_install_cleanup_pending" }
         fileOps.createPrivateDirectory(lock)
+        var receipt: LinuxInstallReceipt? = null
+        var originalFailure: Throwable? = null
         try {
             check(inspectPublished(prepared) != null) { "linux_install_not_published" }
             validateHelpers(prepared.installation, LinuxInstallCancellation())
             syncTree(prepared.targetRootfs, LinuxInstallCancellation())
             directorySync(parent)
             check(inspectPublished(prepared) != null) { "linux_install_published_marker_invalid" }
-            return LinuxInstallReceipt(prepared.installation, directorySyncConfirmed = true)
+            return LinuxInstallReceipt(prepared.installation, directorySyncConfirmed = true).also { receipt = it }
+        } catch (failure: Exception) {
+            originalFailure = failure
+            throw failure
         } finally {
-            runCatching { Files.deleteIfExists(lock.toPath()); directorySync(parent) }
+            finishCleanup(PendingCleanup(prepared, null, null, lock, receipt, originalFailure))
         }
     }
 
@@ -543,6 +593,7 @@ class RootlessLinuxInstaller internal constructor(
     private fun cleanAbsolutePath(file: File) = app.daiyu.android.terminal.LinuxPathSyntax.host(file.path)
 
     internal interface FileOps {
+        fun deleteIfExists(path: Path): Boolean = Files.deleteIfExists(path)
         fun createPrivateDirectory(directory: File)
         fun createPrivateStaging(parent: File): File
         fun isSymbolicLink(path: Path): Boolean = Files.isSymbolicLink(path)
@@ -576,12 +627,12 @@ class RootlessLinuxInstaller internal constructor(
         if (!Files.exists(path, NOFOLLOW_LINKS)) return
         Files.walkFileTree(path, object : SimpleFileVisitor<Path>() {
             override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-                Files.delete(file)
+                fileOps.deleteIfExists(file)
                 return FileVisitResult.CONTINUE
             }
             override fun postVisitDirectory(dir: Path, exc: java.io.IOException?): FileVisitResult {
                 if (exc != null) throw exc
-                Files.delete(dir)
+                fileOps.deleteIfExists(dir)
                 return FileVisitResult.CONTINUE
             }
         })

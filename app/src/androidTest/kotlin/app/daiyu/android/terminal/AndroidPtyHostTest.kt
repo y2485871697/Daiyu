@@ -40,6 +40,24 @@ class AndroidPtyHostTest : InstrumentationTestCase() {
         }
     }
 
+    fun testWrongContextPackageAndInstalledIdentityAreRejected() {
+        val wrongContext = object : ContextWrapper(context) {
+            override fun getPackageName() = "other.host.application"
+        }
+        expectRefusal("pty_helper_wrong_application") { AndroidPtyHost.helper(wrongContext) }
+        for (wrongUid in listOf(false, true)) {
+            val info = ApplicationInfo(context.applicationInfo).apply {
+                if (wrongUid) uid += 1 else packageName = "other.host.application"
+            }
+            val mismatched = object : ContextWrapper(context) {
+                override fun getPackageManager(): PackageManager = object : MockPackageManager() {
+                    override fun getApplicationInfo(packageName: String, flags: Int) = info
+                }
+            }
+            expectRefusal("pty_helper_wrong_application") { AndroidPtyHost.helper(mismatched) }
+        }
+    }
+
     fun testHelperIsExecutableImmutableInstalledPayload() {
         val executable = AndroidPtyHost.helper(context)
         val nativeDirectory = File(context.applicationInfo.nativeLibraryDir).canonicalFile

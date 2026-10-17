@@ -3517,14 +3517,88 @@ class MainActivity : ComponentActivity() {
         loadAcceptedHistory(receipt.conversation)
     }
 
+    private var refreshHistoryLoading = false
+    private var refreshHistoryPending = false
+    private var refreshHistoryRequestSerial = 0L
+    private var loadedWindowReader: (ConversationId, Long, Int) -> List<Pair<Long, Message>> = ::readLoadedWindow
+
+    private fun loadedHistoryOwner(id: ConversationId) = controller.active?.takeIf { it.conversationId == id }
+        ?.let { Triple(it.conversationId, it.id, it.runId) }
+
+    private fun loadRefreshedHistory(conversation: Conversation) {
+        refreshHistoryPending = true
+        if (refreshHistoryLoading || !activityUsable() || !controller.ready || controller.dataBusy ||
+            controller.problem?.startsWith("会话恢复失败") == true) return
+        refreshHistoryLoading = true
+        refreshHistoryPending = false
+        val id = conversation.id
+        val generation = editorGeneration
+        val request = ++refreshHistoryRequestSerial
+        val acceptedRequest = historyRequestSerial
+        val content = chatState.contentRevision
+        val data = controller.dataRevision
+        val owner = loadedHistoryOwner(id)
+        val first = shown.firstOrNull()?.first
+        val last = shown.lastOrNull()?.first
+        val count = shown.size
+        val newOwner = owner != null && shown.none {
+            Triple(it.second.conversationId, it.second.id, it.second.runId) == owner
+        }
+        val read = loadedWindowReader
+        lifecycleScope.launch {
+            try {
+                val rows = try {
+                    withContext(Dispatchers.IO) {
+                        read(id, if (newOwner || last == null) Long.MAX_VALUE else last + 1,
+                            if (count == 0) 50 else count + if (newOwner) 2 else 0)
+                            .filter { first == null || it.first >= first }
+                    }
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) { null }
+                if (!activityUsable() || !controller.ready || controller.dataBusy ||
+                    controller.problem?.startsWith("会话恢复失败") == true || selected?.id != id ||
+                    editorGeneration != generation || request != refreshHistoryRequestSerial ||
+                    acceptedRequest != historyRequestSerial) return@launch
+                if (refreshHistoryPending || content != chatState.contentRevision || data != controller.dataRevision ||
+                    owner != loadedHistoryOwner(id)) {
+                    refreshHistoryPending = true
+                    return@launch
+                }
+                if (rows == null) { toast("历史读取失败；原数据保留"); return@launch }
+                val active = controller.active?.takeIf { it.conversationId == id }
+                val currentOwner = loadedHistoryOwner(id)
+                shown = rows.map { entry ->
+                    if (active != null && Triple(entry.second.conversationId, entry.second.id, entry.second.runId) == currentOwner)
+                        entry.first to active else entry
+                }.toMutableList()
+                prepareMessageActionSnapshot()
+                publishChat()
+            } finally {
+                refreshHistoryLoading = false
+                if (refreshHistoryPending && activityUsable()) selected?.let(::loadRefreshedHistory)
+            }
+        }
+    }
+
     private fun loadAcceptedHistory(conversation: Conversation) {
         val generation = editorGeneration
         val request = ++historyRequestSerial
         val content = chatState.contentRevision
         val first = shown.firstOrNull()?.first
+        val data = controller.dataRevision
+        val owner = loadedHistoryOwner(conversation.id)
         lifecycleScope.launch {
-            val rows = withContext(Dispatchers.IO) {
-                try { readAcceptedWindow(conversation.id, first) } catch (_: Exception) { null }
+            val rows = try {
+                withContext(Dispatchers.IO) { readAcceptedWindow(conversation.id, first) }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) { null }
+            if (!activityUsable() || !controller.ready || controller.dataBusy ||
+                selected?.id != conversation.id || editorGeneration != generation || request != historyRequestSerial) return@launch
+            if (data != controller.dataRevision || owner != loadedHistoryOwner(conversation.id)) {
+                loadAcceptedHistory(conversation)
+                return@launch
             }
             applyAcceptedHistory(conversation, generation, request, content, rows)
         }
@@ -3553,7 +3627,11 @@ class MainActivity : ComponentActivity() {
         if (chatState.contentRevision != content) { loadAcceptedHistory(conversation); return }
         if (rows == null) { toast("消息已保存；历史加载失败"); return }
         val active = controller.active?.takeIf { it.conversationId == conversation.id }
-        shown = rows.map { if (active != null && it.second.id == active.id) it.first to active else it }.toMutableList()
+        val owner = loadedHistoryOwner(conversation.id)
+        shown = rows.map {
+            if (active != null && Triple(it.second.conversationId, it.second.id, it.second.runId) == owner)
+                it.first to active else it
+        }.toMutableList()
         prepareMessageActionSnapshot(); publishChat(); jumpToBottom()
     }
 
@@ -4382,21 +4460,18 @@ class MainActivity : ComponentActivity() {
             }
             controller.consumeDataNotice()?.let { toast(it) }
             controller.consumeTitleNotice()?.let { toast(it) }
-            selected?.let { conversation ->
-                if (shown.isEmpty()) shown = controller.database.messages(conversation.id).toMutableList()
-                else {
-                    // Refresh the loaded range, retaining the early-history window and history-hit owner.
-                    val first = shown.first().first
-                    val last = shown.last().first
-                    val active = controller.active?.takeIf { it.conversationId == conversation.id }
-                    val newOwner = active != null && shown.none { it.second.id == active.id }
-                    val persisted = readLoadedWindow(conversation.id, if (newOwner) Long.MAX_VALUE else last + 1,
-                        shown.size + if (newOwner) 2 else 0).filter { it.first >= first }
-                    shown = persisted.map { entry -> if (active != null && entry.second.id == active.id) entry.first to active else entry }.toMutableList()
-                }
+            // Keep the already-loaded streaming owner live while the single IO reader is outstanding.
+            val active = controller.active?.takeIf { it.conversationId == selected?.id }
+            if (active != null) {
+                val owner = Triple(active.conversationId, active.id, active.runId)
+                shown = shown.map { entry ->
+                    if (Triple(entry.second.conversationId, entry.second.id, entry.second.runId) == owner)
+                        entry.first to active else entry
+                }.toMutableList()
             }
             prepareMessageActionSnapshot()
             publishChat()
+            selected?.let(::loadRefreshedHistory)
             if (sidebarVisible || retainedPage == "manage") requestPaneRefresh(invalidate = false)
         }
     }

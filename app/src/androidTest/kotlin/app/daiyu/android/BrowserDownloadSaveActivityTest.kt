@@ -62,6 +62,7 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
     private lateinit var application: ChatApplication
     private lateinit var original: ChatController
     private lateinit var activity: MainActivity
+    private var recreationMonitor: Instrumentation.ActivityMonitor? = null
     private lateinit var root: File
     private lateinit var documents: Documents
     private lateinit var conversation: Conversation
@@ -123,16 +124,52 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
         }
     }
 
+    override fun runBare() {
+        try { super.runBare() }
+        catch (failure: Throwable) {
+            try { cleanupFixture() } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
+            throw failure
+        }
+    }
+
     override fun tearDown() {
-        try {
-            if (::documents.isInitialized) documents.releaseOpen?.countDown()
-            mainThread { if (::activity.isInitialized) activity.finish() }
-            if (::controller.isInitialized) ui.waitUntil(10_000) { !controller.dataBusy }
-            if (::original.isInitialized) mainThread { application.controller = original }
-            if (::controller.isInitialized) controller.close()
-            if (::fixture.isInitialized) fixture.deleteDatabase("conversations.db")
-            if (::root.isInitialized) root.deleteRecursively()
-        } finally { super.tearDown() }
+        try { cleanupFixture() } finally { super.tearDown() }
+    }
+
+    private fun cleanupFixture() {
+        var failure: Throwable? = null
+        fun step(action: () -> Unit) {
+            try { action() } catch (error: Throwable) {
+                if (failure == null) failure = error else if (failure !== error) failure?.addSuppressed(error)
+            }
+        }
+        if (::documents.isInitialized) documents.releaseOpen?.countDown()
+        takeRecreatedActivity()
+        var destroyed = !::activity.isInitialized
+        step {
+            if (::activity.isInitialized) {
+                mainThread { activity.finish() }
+                awaitControl("browser-save Activity destroyed") { activity.isDestroyed }
+                destroyed = true
+            }
+        }
+        if (!destroyed) throw checkNotNull(failure)
+        step { if (::controller.isInitialized) ui.waitUntil(10_000) { !controller.dataBusy } }
+        step { if (::original.isInitialized) mainThread { application.controller = original } }
+        var drained = !::controller.isInitialized
+        step { if (::controller.isInitialized) { controller.close(); drained = true } }
+        if (destroyed && drained) {
+            step { if (::fixture.isInitialized) fixture.deleteDatabase("conversations.db") }
+            step { if (::root.isInitialized) root.deleteRecursively() }
+        }
+        failure?.let { throw it }
+    }
+
+    private fun takeRecreatedActivity() {
+        val monitor = recreationMonitor ?: return
+        activity = checkNotNull(instrumentation.waitForMonitorWithTimeout(monitor, 10_000)) as MainActivity
+        instrumentation.removeMonitor(monitor)
+        recreationMonitor = null
     }
 
     private fun openListing() {
@@ -424,11 +461,14 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
     private fun recreateMain() {
         val monitor = instrumentation.addMonitor(MainActivity::class.java.name, null, false)
         try {
+            recreationMonitor = monitor
             mainThread { activity.recreate() }
-            activity = checkNotNull(instrumentation.waitForMonitorWithTimeout(monitor, 10_000)) as MainActivity
+            takeRecreatedActivity()
             instrumentation.waitForIdleSync()
             ui.waitUntil(10_000) { field("selectionReady") == true }
-        } finally { instrumentation.removeMonitor(monitor) }
+        } finally {
+            if (recreationMonitor !== monitor) instrumentation.removeMonitor(monitor)
+        }
     }
 
     fun testObsoleteStaticSaveVisitCannotBorrowReopenedListing() {
@@ -518,12 +558,15 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
                     .apply { isAccessible = true }.invoke(activity, state)
                 assertEquals(checkNotNull(pendingCode()) + 1, state.getInt("browser-save-next"))
                 assertFalse(state.keySet().any { it.contains("static", ignoreCase = true) })
+                recreationMonitor = monitor
                 activity.recreate() // request replacement while the exact original picker is still pending
             })
-            activity = checkNotNull(instrumentation.waitForMonitorWithTimeout(monitor, 10_000)) as MainActivity
+            takeRecreatedActivity()
             instrumentation.waitForIdleSync()
             ui.waitUntil(10_000) { field("selectionReady") == true }
-        } finally { instrumentation.removeMonitor(monitor) }
+        } finally {
+            if (recreationMonitor !== monitor) instrumentation.removeMonitor(monitor)
+        }
         assertNull(field("pendingStaticOriginal")); assertNull(field("staticGenerationVisit")); assertNull(pendingCode())
         mainThread { deliver(old) }
         assertEquals(0, documents.opens.get())

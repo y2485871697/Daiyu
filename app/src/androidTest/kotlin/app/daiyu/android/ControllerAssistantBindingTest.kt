@@ -172,9 +172,12 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         assertEquals(1,f.memory.reads.get()) // Disabled memory never performs the read.
     }
 
-    fun testPreparationFreezesGlobalProfileAndMemoryAndBlocksBindingRepair() {
-        val captured=AtomicReference<AssistantRunContext?>()
-        val f=fresh(factory={ _, assistant -> captured.set(assistant); port() })
+    fun testProfileChangedDuringCaptureRejectsWithoutOpeningAndRetainsComposerAndBinding() {
+        val factories=AtomicInteger(); val opened=AtomicInteger()
+        val f=fresh(factory={ _, _ ->
+            factories.incrementAndGet()
+            ModelPort { opened.incrementAndGet(); error("must never open") }
+        })
         val store=f.controller.assistantStore
         store.save(AssistantProfile("default","before","personality before",createdAt=12,enabledSkillIds=listOf("before")))
         store.save(AssistantProfile("other","after","different"))
@@ -188,18 +191,66 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         try {
             assertTrue(entered.await(10,TimeUnit.SECONDS))
             store.select("other")
+            // capture must reject a profile changed while its memory snapshot is being read.
             store.save(AssistantProfile("default","after","personality after",memoryEnabled=false,enabledSkillIds=listOf("after")))
             main { assertFalse(f.controller.bindConversationAssistant(existing.id,"default","other")) }
             assertEquals("composer must survive until accepted",f.database.draft())
         } finally { release.countDown(); worker.join(10000) }
         assertFalse(worker.isAlive); failure.get()?.let { throw it }
-        assertEquals("default",accepted.get()?.assistantId)
-        await(f) { f.controller.active==null }
-        val run=checkNotNull(captured.get())
-        assertEquals("before",run.name); assertEquals("personality before",run.prompt)
-        assertEquals("memory before",run.resolvedMemory); assertEquals(listOf("before"),run.enabledSkillIds)
+        assertNull(accepted.get()); assertNull(f.controller.active)
+        assertTrue(f.controller.problem!!.contains("助手配置或记忆读取失败"))
+        assertEquals("composer must survive until accepted",f.database.draft())
+        assertEquals(listOf(existing.id),f.database.conversations().map { it.id })
+        assertEquals("default",f.database.assistantId(existing.id))
+        assertTrue(f.database.messages(existing.id).isEmpty())
+        assertEquals(0,factories.get()); assertEquals(0,opened.get())
         assertEquals(1,f.memory.reads.get())
         assertEquals("other",store.selectedId.value)
+    }
+
+    fun testCompletedCaptureFreezesGlobalProfileAndMemoryAndBlocksBindingRepair() {
+        val entered=CountDownLatch(1); val release=CountDownLatch(1)
+        val captured=AtomicReference<AssistantRunContext?>()
+        val f=fresh(factory={ _, assistant ->
+            // This seam is reached only after capture's post-memory profile recheck succeeds.
+            captured.set(assistant); entered.countDown()
+            check(release.await(10,TimeUnit.SECONDS))
+            port()
+        })
+        val store=f.controller.assistantStore
+        store.save(AssistantProfile("default","before","personality before",createdAt=12,enabledSkillIds=listOf("before")))
+        store.save(AssistantProfile("other","after","different"))
+        val existing=f.database.create("default")
+        f.database.draft("composer must survive until accepted")
+        f.memory.load = { "memory before" }
+        val accepted=AtomicReference<Conversation?>(); val failure=AtomicReference<Throwable?>()
+        val worker=Thread { try { accepted.set(f.controller.send(null,"composer must survive until accepted")) } catch(t:Throwable) { failure.set(t) } }
+        worker.start()
+        try {
+            assertTrue(entered.await(10,TimeUnit.SECONDS))
+            store.select("other")
+            store.save(AssistantProfile("default","after","personality after",memoryEnabled=false,enabledSkillIds=listOf("after")))
+            f.memory.load = { "memory after" }
+            main { assertFalse(f.controller.bindConversationAssistant(existing.id,"default","other")) }
+            assertEquals("composer must survive until accepted",f.database.draft())
+        } finally { release.countDown(); worker.join(10000) }
+        assertFalse(worker.isAlive); failure.get()?.let { throw it }
+        val conversation=checkNotNull(accepted.get())
+        assertEquals("default",conversation.assistantId)
+        await(f) { f.controller.active==null }
+        val run=checkNotNull(captured.get())
+        assertEquals("default",run.assistantId)
+        assertEquals("before",run.name); assertEquals("personality before",run.prompt)
+        assertTrue(run.memoryEnabled)
+        assertEquals("memory before",run.resolvedMemory); assertEquals(listOf("before"),run.enabledSkillIds)
+        // Frozen core is not permission to read again after memory has been disabled.
+        try { checkNotNull(run.memoryReadPort).read(); fail("disabled memory read accepted") }
+        catch (_:AssistantMemoryUnavailable) {}
+        assertEquals(1,f.memory.reads.get())
+        assertEquals("other",store.selectedId.value)
+        assertEquals("default",f.database.assistantId(existing.id))
+        assertTrue(f.database.messages(existing.id).isEmpty())
+        assertEquals(RunStatus.COMPLETED,f.database.messages(conversation.id).last().second.status)
         assertEquals("",f.database.draft())
     }
 

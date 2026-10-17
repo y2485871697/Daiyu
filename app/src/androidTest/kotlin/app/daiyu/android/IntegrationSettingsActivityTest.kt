@@ -8,15 +8,21 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.*
+import androidx.lifecycle.lifecycleScope
 import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.model.ProviderRequestOptions
+import app.daiyu.android.model.catalog.CatalogCommitResult
+import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.skills.SkillBundle
 import app.daiyu.android.skills.SkillStore
 import app.daiyu.android.skills.SkillToolRegistry
+import app.daiyu.android.ui.screens.chat.conversation.LocalCatalogChatModelPickerSession
+import kotlinx.coroutines.Job
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 @Suppress("DEPRECATION")
@@ -84,17 +90,72 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     private fun finished(connection: AtomicReference<CatalogConnection>) {
         awaitControl("catalog finished") { connection.get()?.disconnected == true }; ui.waitForIdle()
     }
+    // Explicit setup/migration only. Opening or refreshing the chat picker must never register
+    // a provider or fetch a remote list. Match the active policy so only the model ID changes.
+    private fun seedChatPickerCatalog() {
+        val saved = fixture.settings.load()
+        val snapshot = fixture.settings.modelCatalogSnapshot()
+        assertEquals(CatalogCommitResult.COMMITTED, fixture.settings.modelCatalog.compareAndAppend(
+            snapshot.providerIdentity, snapshot.revision,
+            listOf("first", "second").map { CatalogModelParameters.fromCurrent(saved.copy(model = it)) },
+        ) { false })
+    }
+    private class PickerNetworkCalls {
+        val savedCredentials = AtomicInteger()
+        val connections = AtomicInteger()
+    }
+    private fun guardChatPickerNetwork(): PickerNetworkCalls {
+        val calls = PickerNetworkCalls()
+        fixture.controller.modelCatalog = app.daiyu.android.model.catalog.ModelCatalogService(
+            { calls.savedCredentials.incrementAndGet(); error("local picker must not load remote credentials") },
+            app.daiyu.android.model.catalog.RemoteModelFetcher {
+                calls.connections.incrementAndGet(); error("local picker must not open a remote connection")
+            })
+        return calls
+    }
+    private fun assertChatPickerOffline(calls: PickerNetworkCalls) {
+        assertEquals(0, calls.savedCredentials.get())
+        assertEquals(0, calls.connections.get())
+    }
+    private fun awaitChatPickerReady() {
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("chat-model-option:second").fetchSemanticsNodes().singleOrNull()?.config?.let {
+                it.getOrNull(SemanticsProperties.Disabled) == null
+            } == true
+        }
+        node("chat-model-picker").assertExists()
+        node("chat-model-option:second").assertIsEnabled()
+    }
+    // Retain the exact visit's capability, not an ID that could be resolved against a new visit.
+    private fun retainedChatPickerSelection(): () -> Unit {
+        val owner = checkNotNull(MainActivity::class.java.getDeclaredField("chatModelOwner")
+            .apply { isAccessible = true }.get(activity))
+        val session = MainActivity::class.java.getDeclaredField("chatModelSession")
+            .apply { isAccessible = true }.get(activity) as LocalCatalogChatModelPickerSession
+        val ticket = checkNotNull(session.selectionFor("second"))
+        val select = MainActivity::class.java.declaredMethods.single {
+            it.name == "selectChatModel" && it.parameterCount == 3
+        }.apply { isAccessible = true }
+        return { select.invoke(activity, ticket, owner, session); Unit }
+    }
     fun testChatModelButtonOpensPickerAndSelectionPreservesConfigurationAndDraft() {
-        val (_, _, connection) = catalogue()
+        seedChatPickerCatalog()
+        val calls = guardChatPickerNetwork()
         val before = fixture.settings.load()
         setDraft("切换模型时保留草稿")
         assertDraft("切换模型时保留草稿")
         val database = fixture.database.exportBackup()
+        val catalog = fixture.settings.localModelCatalogSnapshot()
         node("chat-model").performClick()
-        node("chat-model-picker").assertExists()
+        awaitChatPickerReady()
         node("page:模型设置").assertDoesNotExist()
-        finished(connection)
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-option:second").fetchSemanticsNodes().isNotEmpty() }
+        assertChatPickerOffline(calls)
+        node("chat-model-refresh").performClick()
+        awaitChatPickerReady()
+        assertEquals(catalog, fixture.settings.localModelCatalogSnapshot())
+        assertEquals(before, fixture.settings.load())
+        assertEquals(database, fixture.database.exportBackup())
+        assertChatPickerOffline(calls)
         node("chat-model-search").performTextReplacement("second")
         node("chat-model-option:first").assertDoesNotExist()
         node("chat-model-option:second").performClick()
@@ -104,77 +165,137 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         assertEquals(before.copy(model = "second"), fixture.settings.load())
         assertEquals(database, fixture.database.exportBackup())
         assertDraft("切换模型时保留草稿")
+        assertChatPickerOffline(calls)
         assertEquals(0, fixture.opens.get())
     }
     fun testOldPickerSelectionCannotBorrowReopenedPickerOwner() {
-        val (_, _, first) = catalogue()
+        seedChatPickerCatalog()
+        val calls = guardChatPickerNetwork()
         val before = fixture.settings.load()
-        node("chat-model").performClick(); finished(first)
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-option:second").fetchSemanticsNodes().isNotEmpty() }
+        setDraft("旧选择不得借用新页面")
+        val database = fixture.database.exportBackup()
+        node("chat-model").performClick(); awaitChatPickerReady()
         lateinit var stale: () -> Unit
-        mainThread {
-            val owner = MainActivity::class.java.getDeclaredField("chatModelOwner")
-                .apply { isAccessible = true }.get(activity)
-            val select = MainActivity::class.java.declaredMethods.single {
-                it.name == "selectChatModel" && it.parameterCount == 2
-            }.apply { isAccessible = true }
-            stale = { select.invoke(activity, "second", owner); Unit }
-        }
+        mainThread { stale = retainedChatPickerSelection() }
         ui.onNodeWithText("取消").performClick()
-        val (_, _, second) = catalogue()
-        node("chat-model").performClick(); finished(second)
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-option:second").fetchSemanticsNodes().isNotEmpty() }
+        mainThread { stale() }
+        node("chat-model-picker").assertDoesNotExist()
+        assertEquals(before, fixture.settings.load())
+        node("chat-model").performClick(); awaitChatPickerReady()
         mainThread { stale() }
         assertFalse(fixture.controller.dataBusy)
         assertEquals(before, fixture.settings.load())
         node("chat-model-picker").assertExists()
         node("chat-model-option:second").performClick()
         awaitControl("new picker selection") { !fixture.controller.dataBusy }
-        assertEquals("second", fixture.settings.load().model)
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
+        assertEquals(before.copy(model = "second"), fixture.settings.load())
+        assertEquals(database, fixture.database.exportBackup())
+        assertDraft("旧选择不得借用新页面")
+        assertChatPickerOffline(calls)
+        assertEquals(0, fixture.opens.get())
     }
     fun testDismissedChatModelPickerCannotReviveFromPendingCatalog() {
-        val (entered, release, connection) = catalogue(held = true)
+        seedChatPickerCatalog()
+        val calls = guardChatPickerNetwork()
         val before = fixture.settings.load()
-        node("chat-model").performClick()
-        assertTrue(entered.await(5, TimeUnit.SECONDS))
-        try { ui.onNodeWithText("取消").performClick() } finally { release.countDown() }
-        finished(connection)
-        node("chat-model-picker").assertDoesNotExist()
-        assertEquals(before, fixture.settings.load())
-        val (retryEntered, _, retryConnection) = catalogue()
-        node("chat-model").performClick()
-        assertTrue(retryEntered.await(5, TimeUnit.SECONDS))
-        finished(retryConnection)
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-option:second").fetchSemanticsNodes().isNotEmpty() }
-        node("chat-model-option:second").assertExists()
-        ui.onNodeWithText("取消").performClick()
-        assertEquals(before, fixture.settings.load())
+        setDraft("本地目录读取取消后保留草稿")
+        val database = fixture.database.exportBackup()
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val completed = CountDownLatch(1); val failure = AtomicReference<Throwable?>()
+        // Block the real local read with the same catalog lease used by Controller tests.
+        val holder = Thread {
+            try { fixture.settings.modelCatalog.configurationChange {
+                entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
+            } } catch (problem: Throwable) { failure.set(problem) }
+        }.apply { start() }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            mainThread {
+                val parent = activity.lifecycleScope.coroutineContext[Job]!!
+                val previousJobs = parent.children.toSet()
+                MainActivity::class.java.getDeclaredMethod("openChatModels")
+                    .apply { isAccessible = true }.invoke(activity)
+                val pending = parent.children.single { it !in previousJobs }
+                pending.invokeOnCompletion { completed.countDown() }
+            }
+            ui.onNodeWithText("正在读取模型目录…").assertExists()
+            ui.onNodeWithText("取消").performClick()
+            release.countDown()
+            holder.join(5_000)
+            assertFalse("local catalog lease released", holder.isAlive)
+            failure.get()?.let { throw it }
+            assertTrue("dismissed local read completed", completed.await(5, TimeUnit.SECONDS))
+            ui.waitForIdle()
+            node("chat-model-picker").assertDoesNotExist()
+            assertEquals(before, fixture.settings.load())
+            node("chat-model").performClick(); awaitChatPickerReady()
+            node("chat-model-option:second").assertExists()
+            ui.onNodeWithText("取消").performClick()
+            assertEquals(before, fixture.settings.load())
+            assertEquals(database, fixture.database.exportBackup())
+            assertDraft("本地目录读取取消后保留草稿")
+            assertChatPickerOffline(calls)
+            assertEquals(0, fixture.opens.get())
+        } finally { release.countDown(); holder.join(10_000) }
     }
     fun testChatModelPickerRejectsChangedSettingsAndRunningTask() {
-        val (_, _, connection) = catalogue()
+        seedChatPickerCatalog()
+        val calls = guardChatPickerNetwork()
         val before = fixture.settings.load()
-        node("chat-model").performClick(); finished(connection)
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-option:second").fetchSemanticsNodes().isNotEmpty() }
+        setDraft("拒绝过期选择时保留草稿")
+        val database = fixture.database.exportBackup()
+        node("chat-model").performClick(); awaitChatPickerReady()
         val changed = before.copy(model = "external-change")
         fixture.settings.save(changed)
         node("chat-model-option:second").performClick()
         awaitControl("chat model rejected") { !fixture.controller.dataBusy }
-        ui.waitUntil(5_000) { ui.onAllNodesWithText("切换未保存，请关闭后重新选择").fetchSemanticsNodes().isNotEmpty() }
+        val rejected = "切换未保存，请刷新本地目录后重新选择"
+        ui.waitUntil(5_000) { ui.onAllNodesWithText(rejected).fetchSemanticsNodes().isNotEmpty() }
         assertEquals(changed, fixture.settings.load())
-        ui.onNodeWithText("切换未保存，请关闭后重新选择").assertExists()
+        ui.onNodeWithText(rejected).assertExists()
+        node("chat-model-option:second").assertIsNotEnabled()
+        node("chat-model-refresh").performClick(); awaitChatPickerReady()
+        ui.onNodeWithText(rejected).assertDoesNotExist()
+        node("chat-model-list").performScrollToNode(hasTestTag("chat-model-option:external-change"))
+        node("chat-model-option:external-change").assertIsEnabled()
         ui.onNodeWithText("取消").performClick()
+        assertEquals(changed, fixture.settings.load())
+        assertEquals(database, fixture.database.exportBackup())
+        assertDraft("拒绝过期选择时保留草稿")
+        assertChatPickerOffline(calls)
+        assertEquals(0, fixture.opens.get())
         val session = fixture.session(holdSeconds = 120)
         setDraft("运行时不切模型"); node("chat-send").performClick()
         awaitTextSendResult(activity)
         assertTrue(session.entered.await(5, TimeUnit.SECONDS))
         val owner = checkNotNull(fixture.controller.active)
+        val runningDatabase = fixture.database.exportBackup()
+        val runningOpens = fixture.opens.get()
         try {
             node("chat-model").performClick()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-option:first").fetchSemanticsNodes().isNotEmpty() }
             node("chat-model-picker").assertExists()
+            node("chat-model-list").performScrollToNode(hasTestTag("chat-model-option:external-change"))
             node("chat-model-option:external-change").assertIsNotEnabled()
-            node("chat-model-refresh").assertIsNotEnabled()
+            val sessionField = MainActivity::class.java.getDeclaredField("chatModelSession")
+                .apply { isAccessible = true }
+            var previousSession: Any? = null
+            mainThread { previousSession = sessionField.get(activity) }
+            node("chat-model-refresh").assertIsEnabled().performClick()
+            ui.waitUntil(5_000) {
+                var replaced = false
+                mainThread { replaced = sessionField.get(activity)?.let { it !== previousSession } == true }
+                replaced
+            }
+            node("chat-model-list").performScrollToNode(hasTestTag("chat-model-option:external-change"))
+            node("chat-model-option:external-change").assertIsNotEnabled()
+            node("chat-model-refresh").assertIsEnabled()
             assertEquals(changed, fixture.settings.load())
             assertEquals(owner, fixture.controller.active)
+            assertEquals(runningDatabase, fixture.database.exportBackup())
+            assertEquals(runningOpens, fixture.opens.get())
+            assertChatPickerOffline(calls)
             ui.onNodeWithText("取消").performClick()
         } finally { fixture.controller.stop(owner) }
     }

@@ -40,6 +40,6 @@ class DeviceResultPolicy(
     companion object {
         /** Historical names retained so a recovered policy cannot accidentally treat them as public. */
         val PRIVATE_TOOLS = setOf("device_location", "query_notifications", "query_calendar", "query_contacts", "query_media", "query_files",
-            "search_apps", "search_media", "file_metadata", "read_text_file", "list_files", "calendar_events", "search_contacts", "app_notifications", "last_known_location")
+            "search_apps", "search_media", "file_metadata", "read_text_file", "list_files", "calendar_events", "search_contacts", "app_notifications", "last_known_location", "current_notifications", "notification_history")
     }
 }

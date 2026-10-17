@@ -32,7 +32,14 @@ class PlatformManifestBoundaryTest {
             "android.permission.WRITE_EXTERNAL_STORAGE", "android.permission.WRITE_CONTACTS", "android.permission.WRITE_CALENDAR",
             "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE", "android.permission.POST_NOTIFICATIONS") })
         val services = document.getElementsByTagName("service")
-        assertTrue((0 until services.length).none { (services.item(it) as org.w3c.dom.Element)
-            .getAttributeNS(android, "permission") == "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE" })
+        val listener = (0 until services.length).map { services.item(it) as org.w3c.dom.Element }
+            .single { it.getAttributeNS(android, "name") == ".platform.CrossAppNotificationListener" }
+        assertEquals("android.permission.BIND_NOTIFICATION_LISTENER_SERVICE", listener.getAttributeNS(android, "permission"))
+        assertEquals("true", listener.getAttributeNS(android, "exported"))
+        assertEquals("", listener.getAttributeNS(android, "process"))
+        val actions = listener.getElementsByTagName("action")
+        assertEquals(1, actions.length)
+        assertEquals("android.service.notification.NotificationListenerService",
+            (actions.item(0) as org.w3c.dom.Element).getAttributeNS(android, "name"))
     }
 }

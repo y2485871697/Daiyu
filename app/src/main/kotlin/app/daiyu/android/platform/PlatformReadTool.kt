@@ -24,15 +24,24 @@ enum class PlatformReadTool(val toolName: String, val capability: String, val de
     CONTACTS("search_contacts", "platform.contacts.read", "Search contact display names only (no numbers, photos or notes).", ToolSchema(listOf(
         ArgumentField("query", ArgumentType.Text(128, minimumLength = 1)), limitField()))),
     NOTIFICATIONS("app_notifications", "platform.notifications.read", "Read bounded active notifications posted by this app only, not other apps' notifications.", ToolSchema(listOf(limitField()))),
-    LAST_KNOWN_LOCATION("last_known_location", "platform.location.last_known.read", "Read the newest accessible existing LocationManager cache from a fixed set of at most three providers. Returns sample time, age and provider; never requests updates, wakes GPS or obtains a fresh fix. Requires foreground coarse OR fine permission and separate model AND history consent.", ToolSchema());
+    LAST_KNOWN_LOCATION("last_known_location", "platform.location.last_known.read", "Read the newest accessible existing LocationManager cache from a fixed set of at most three providers. Returns sample time, age and provider; never requests updates, wakes GPS or obtains a fresh fix. Requires foreground coarse OR fine permission and separate model AND history consent.", ToolSchema()),
+    CROSS_APP_NOTIFICATIONS("current_notifications", "platform.notifications.current.read", "Read bounded currently active cross-app notifications with live listener access, run grant and both private destination consents; not notification history.", ToolSchema(notificationFields())),
+    NOTIFICATION_HISTORY("notification_history", "platform.notifications.history.read", "Read only explicitly opt-in captured posted events, retained at most 7 days; optional start_ms/end_ms filter capture time. Missing history never means no recent notifications.", ToolSchema(notificationFields() + listOf(
+        ArgumentField("start_ms", ArgumentType.Integer(0, 4102444800000L), false),
+        ArgumentField("end_ms", ArgumentType.Integer(0, 4102444800000L), false))));
 
     fun definition() = ToolDefinition(toolName, 1, description, capability, ToolEffect.READ_ONLY, schema)
 }
 
 private fun limitField() = ArgumentField("limit", ArgumentType.Integer(1, 50), false)
+private fun notificationFields() = listOf(limitField(),
+    ArgumentField("package", ArgumentType.Text(256, minimumLength = 1), false),
+    ArgumentField("query", ArgumentType.Text(128), false))
 private fun uriField() = ArgumentField("uri", ArgumentType.Text(2048, minimumLength = 1))
 
 /** Injectable API boundary for host-only ownership tests. Production uses AndroidPlatformReads. */
 internal fun interface PlatformReadBackend {
     fun read(tool: PlatformReadTool, arguments: ToolArguments, cancelled: () -> Boolean): String
+    /** Live access fence for replay of sensitive cached receipts. No content reads. */
+    fun admission(tool: PlatformReadTool): String? = null
 }

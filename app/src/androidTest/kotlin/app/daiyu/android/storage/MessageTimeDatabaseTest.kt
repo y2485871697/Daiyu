@@ -68,7 +68,7 @@ class MessageTimeDatabaseTest : InstrumentationTestCase() {
         db.close()
         assertEquals(listOf(turn.first, done), rows(db, turn))
         assertEquals(listOf(turn.first, done), ContextService.read(db.readableDatabase, turn.first.conversationId))
-        assertEquals(17, db.readableDatabase.version)
+        assertEquals(18, db.readableDatabase.version)
     }
 
     fun testUnknownTimesRemainNullOnSaveRecoveryReopenAndTextImport() {
@@ -209,7 +209,7 @@ class MessageTimeDatabaseTest : InstrumentationTestCase() {
             listOf("message_video_inputs", "message_video_witnesses", "child_tasks", "child_task_commands").associateWith { snapshot(raw, it) }
         }
         assertFalse(before.getValue("message_video_inputs").isEmpty())
-        assertEquals(17, db.readableDatabase.version)
+        assertEquals(18, db.readableDatabase.version)
         assertEquals(originalRows, rows(db, turn))
         assertTrue(rows(db, turn).all { it.createdAt == null })
         before.forEach { (table, values) -> assertEquals(values, snapshot(db.readableDatabase, table)) }

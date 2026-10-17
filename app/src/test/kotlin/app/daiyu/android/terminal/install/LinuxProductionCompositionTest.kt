@@ -104,7 +104,9 @@ class LinuxProductionCompositionTest : TestCase() {
         assertEquals(LinuxExecutionMode.CHROOT, installed.executionMode)
         assertNull(installed.proot); assertNull(installed.loader)
         assertTrue(installed.rootfs.path.startsWith("/private/chroot/"))
-        val controller = LinuxSettingsController(catalog, LinuxSettingsAdmission(emptySet()), this,
+        val settingsWorker = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() +
+            kotlinx.coroutines.test.StandardTestDispatcher(testScheduler))
+        val controller = LinuxSettingsController(catalog, LinuxSettingsAdmission(emptySet()), settingsWorker,
             installation = first, chrootInstallation = second)
         val page = controller.enterPage(); runCurrent()
         assertFalse(page.prepareInstall("debian", "primary", LinuxExecutionMode.CHROOT))

@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 enum class VoiceControlPhase {
-    OFF, PERMISSION_REQUIRED, CONNECTING, LISTENING, SUBMITTING, WAITING_FOR_BODY,
+    OFF, PERMISSION_REQUIRED, CONNECTING, LISTENING, WAITING_FOR_FINAL, SUBMITTING, WAITING_FOR_BODY,
     SPEAKING, DRAINING, STOPPED
 }
 enum class VoiceControlStopReason {
@@ -34,6 +34,7 @@ class VoiceModeController(private val ports: VoiceControlPorts) : AutoCloseable 
         var playback: VoiceControlPlayback? = null
         var receiptSeen = false
         var finalSeen = false
+        var captureStopped = false
         var assistant: VoiceAssistantOwner? = null
         var bodyFinal = false
         var lastBody: String? = null
@@ -152,12 +153,19 @@ class VoiceModeController(private val ports: VoiceControlPorts) : AutoCloseable 
             if (!admitted(expected)) return
             val input = ports.recognize(round.token, object : VoiceControlPorts.RecognitionEvents {
                 override fun listening() = post {
-                    if (current(expected, round) && !round.finalSeen && admitted(expected)) publish(expected, VoiceControlPhase.LISTENING)
+                    if (current(expected, round) && !round.finalSeen && !round.captureStopped && admitted(expected))
+                        publish(expected, VoiceControlPhase.LISTENING)
+                }
+                override fun captureStopped() = post {
+                    if (current(expected, round) && !round.finalSeen && admitted(expected)) {
+                        round.captureStopped = true // One-shot input cannot start capturing again.
+                        publish(expected, VoiceControlPhase.WAITING_FOR_FINAL)
+                    }
                 }
                 override fun partial(text: String) = post {
                     if (current(expected, round) && !round.finalSeen && admitted(expected)) {
                         if (text.length > MAX_TEXT) end(expected, VoiceControlStopReason.RECOGNITION_FAILED)
-                        else publish(expected, VoiceControlPhase.LISTENING, text)
+                        else publish(expected, state.value.phase, text) // Text is not capture evidence.
                     }
                 }
                 override fun finalResult(text: String) = post { recognized(expected, round, text) }

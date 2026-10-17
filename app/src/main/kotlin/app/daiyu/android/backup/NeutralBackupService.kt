@@ -119,7 +119,8 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             ?: if (conversationId == null) store.exportBackup() else store.exportConversationBackup(conversationId)
         store.preflightBackup(text)
         val tables = JSONObject()
-        COLUMNS.forEach { (table, _) -> tables.put(table, readTable(db, table, conversationId)) }
+        columnsFor(3).forEach { (table, columns) -> tables.put(table,
+            if (table == "context_usage") BackupUsageCodec.export(db, conversationId?.value) else readTable(db, table, columns, conversationId)) }
         val config = if (configuration == null) readConfig(db) else projectConfiguration(configuration).first
         validateConfig(config)
         val hashes = mutableSetOf<String>()
@@ -201,7 +202,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val inventory = inventory(payload)
         payload.put("inventory", inventoryJson(inventory))
         val raw = payload.toString()
-        val result = JSONObject().put("format", "daiyu-neutral-complete").put("version", 2)
+        val result = JSONObject().put("format", "daiyu-neutral-complete").put("version", 3)
             .put("sha256", PrivateBlobs.digest(raw.toByteArray(Charsets.UTF_8))).put("payload", raw).toString()
         require(result.toByteArray(Charsets.UTF_8).size.toLong() <= MAX_PACKAGE)
         validate(result); result
@@ -223,7 +224,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             val duplicate = db.rawQuery("SELECT id FROM neutral_imports WHERE id=?", arrayOf(parsed.id)).use { it.moveToFirst() }
             if (duplicate) {
                 store.verifyRestoredBackup(db, parsed.payload.getString("text_backup"))
-                verifyImportedTables(db, parsed.payload.getJSONObject("tables"))
+                verifyImportedTables(db, parsed.payload.getJSONObject("tables"), parsed.version, parsed.columns)
                 verifyPrivateContents(parsed)
                 BackupGenerationCodec.verifyRestored(db, parsed.generation)
                 BackupChildTaskCodec.verifyRestored(db, parsed.children)
@@ -244,7 +245,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             if (video == null) store.importBackup(parsed.payload.getString("text_backup"))
             else store.importBackupForVideoAssets(db, parsed.payload.getString("text_backup"))
             parsed.bytes.forEach { (hash, bytes) -> require(blobs.put(bytes) == hash) }
-            COLUMNS.forEach { (table, columns) -> val rows = parsed.payload.getJSONObject("tables").getJSONArray(table)
+            parsed.columns.forEach { (table, columns) -> val rows = parsed.payload.getJSONObject("tables").getJSONArray(table)
                 repeat(rows.length()) { val row = rows.getJSONObject(it); val values = ContentValues()
                     columns.forEach { key -> when (val value = row.get(key)) {
                         JSONObject.NULL -> values.putNull(key)
@@ -269,6 +270,16 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                 store.completeVideoBackupWitnesses(db, parsed.payload.getString("text_backup"), parsed.videos.sidecars)
                 BackupVideoManifest.verifySidecars(db, parsed.videos.sidecars)
             }
+            val importedAt = System.currentTimeMillis()
+            check(db.insertOrThrow("neutral_imports", null, ContentValues().apply {
+                put("id", parsed.id); put("created", importedAt)
+            }) != -1L) { "备份导入标记未写入" }
+            // The last SQL write can run triggers too. In particular, reject typed receipt
+            // corruption before publishing owner asset batches; recheck all receipts below.
+            check(db.rawQuery("SELECT 1 FROM neutral_imports WHERE id=? AND created=?",
+                arrayOf(parsed.id, importedAt.toString())).use { it.moveToFirst() }) { "备份导入标记回执不匹配" }
+            verifyImportedTables(db, parsed.payload.getJSONObject("tables"), parsed.version, parsed.columns)
+            BackupChildTaskCodec.verifyRestored(db, parsed.children)
             // All package bytes/references were checked before the transaction; publish immutable
             // owner batches only after SQL collisions/config conflicts have passed. A later SQL
             // failure can leave harmless orphans, never delete/overwrite pre-existing assets.
@@ -287,15 +298,8 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                     BackupVideoManifest.verify(reference, destination.read(owner, reference))
                 }
             }
-            val importedAt = System.currentTimeMillis()
-            check(db.insertOrThrow("neutral_imports", null, ContentValues().apply {
-                put("id", parsed.id); put("created", importedAt)
-            }) != -1L) { "备份导入标记未写入" }
-            // The last SQL write can run triggers too; validate receipts only after it finishes.
-            check(db.rawQuery("SELECT 1 FROM neutral_imports WHERE id=? AND created=?",
-                arrayOf(parsed.id, importedAt.toString())).use { it.moveToFirst() }) { "备份导入标记回执不匹配" }
             store.verifyRestoredBackup(db, parsed.payload.getString("text_backup"))
-            verifyImportedTables(db, parsed.payload.getJSONObject("tables"))
+            verifyImportedTables(db, parsed.payload.getJSONObject("tables"), parsed.version, parsed.columns)
             verifyPrivateContents(parsed)
             BackupGenerationCodec.verifyRestored(db, parsed.generation)
             BackupChildTaskCodec.verifyRestored(db, parsed.children)
@@ -329,8 +333,9 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                 arrayOf(key, config.get(key).toString())).use { it.moveToFirst() }) { "备份配置回执不匹配" }
         }
     }
-    private fun verifyImportedTables(db: SQLiteDatabase, tables: JSONObject) {
-        COLUMNS.forEach { (table, columns) ->
+    private fun verifyImportedTables(db: SQLiteDatabase, tables: JSONObject, version: Long, schema: Map<String, List<String>>) {
+        BackupUsageCodec.verify(db, tables.getJSONArray("context_usage"), version)
+        schema.filterKeys { it != "context_usage" }.forEach { (table, columns) ->
             val rows = tables.getJSONArray(table)
             repeat(rows.length()) { index ->
                 val row = rows.getJSONObject(index)
@@ -343,18 +348,19 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
     private data class Parsed(val id: String, val payload: JSONObject, val bytes: Map<String, ByteArray>,
         val inventory: BackupInventory, val images: List<MessageImageReference>,
         val videos: BackupVideoManifest.Validated, val generation: BackupGenerationCodec.Validated,
-        val children: BackupChildTaskCodec.Validated)
+        val children: BackupChildTaskCodec.Validated, val version: Long, val columns: Map<String, List<String>>)
     private fun validate(text: String): Parsed {
         require(text.toByteArray(Charsets.UTF_8).size.toLong() <= MAX_PACKAGE)
         val envelope = objectOf(text); fields(envelope, setOf("format", "version", "sha256", "payload"))
         val version = integer(envelope, "version")
-        require(envelope.get("format") == "daiyu-neutral-complete" && version in 1L..2L)
+        require(envelope.get("format") == "daiyu-neutral-complete" && version in 1L..3L)
+        val schema = columnsFor(version)
         val raw = string(envelope, "payload"); val id = PrivateBlobs.digest(raw.toByteArray(Charsets.UTF_8))
         require(id == string(envelope, "sha256")) { "备份摘要不匹配" }
         val payload = objectOf(raw)
         val payloadFields = setOf("text_backup", "tables", "config", "blobs", "excluded", "inventory")
         fields(payload, payloadFields + listOf("message_images", "message_videos").filter { payload.has(it) } +
-            if (version == 2L) setOf("generation_history", "child_task_history") else emptySet())
+            if (version >= 2L) setOf("generation_history", "child_task_history") else emptySet())
         store.preflightBackup(string(payload, "text_backup"))
         val legacy = objectOf(string(payload, "text_backup"))
         require(legacy.getString("format") == "daiyu-neutral-text" && legacy.getInt("version") in 1..2)
@@ -364,8 +370,8 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         require(legacy.getInt("conversation_count") == conversations.length() && legacy.getInt("message_count") == messages.length())
         val conversationIds = uniqueIds(conversations, "id"); val messageIds = uniqueIds(messages, "id")
         repeat(messages.length()) { require(messages.getJSONObject(it).getString("conversation_id") in conversationIds) }
-        val tables = payload.getJSONObject("tables"); fields(tables, COLUMNS.keys)
-        COLUMNS.forEach { (table, columns) -> val rows = tables.getJSONArray(table); require(rows.length() <= 50000)
+        val tables = payload.getJSONObject("tables"); fields(tables, schema.keys)
+        schema.forEach { (table, columns) -> val rows = tables.getJSONArray(table); require(rows.length() <= 50000)
             val primary = columns.first(); uniqueIds(rows, primary)
             repeat(rows.length()) { fields(rows.getJSONObject(it), columns.toSet()) }
         }
@@ -403,31 +409,26 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             identity(string(row, "parent_id")); identity(string(row, "through_message"))
             require(string(row, "parent_revision").matches(Regex("[0-9a-f]{64}")))
         }
-        val usage = tables.getJSONArray("context_usage")
-        repeat(usage.length()) { val r = usage.getJSONObject(it)
-            fun n(key: String): Long? = if (r.isNull(key)) null else integer(r, key)
-            require(string(r, "branch_id") in conversationIds)
-            app.daiyu.android.domain.context.UsageRecord(string(r, "request_id"), string(r, "run_id"), string(r, "branch_id"), n("input_tokens"), n("output_tokens"), n("cached_tokens"), n("reasoning_tokens"))
-        }
+        BackupUsageCodec.validate(tables.getJSONArray("context_usage"), version, conversationIds, messages)
         val images = BackupImageManifest.validate(payload, imageReferences, bytes)
         images.forEach { used.add(it.sha256) }
         val videos = BackupVideoManifest.validate(
             if (payload.has("message_videos")) payload.getJSONObject("message_videos") else null, messages, bytes)
         videos.references.forEach { used.add(it.sha256) }
-        val generation = BackupGenerationCodec.validate(if (version == 2L) payload.getJSONObject("generation_history") else null, messages, bytes)
-        val children = BackupChildTaskCodec.validate(if (version == 2L) payload.getJSONObject("child_task_history") else null, messages)
+        val generation = BackupGenerationCodec.validate(if (version >= 2L) payload.getJSONObject("generation_history") else null, messages, bytes)
+        val children = BackupChildTaskCodec.validate(if (version >= 2L) payload.getJSONObject("child_task_history") else null, messages)
         generation.references.forEach { used.add(it.sha256) }
         require(used == bytes.keys) { "附件/归档/图片/视频/生成资产清单不一致" }
         validateConfig(payload.getJSONObject("config"))
         val excluded = payload.getJSONArray("excluded"); require(excluded.length() <= 20)
         repeat(excluded.length()) { require(excluded.get(it) is String && excluded.getString(it).length <= 200) }
         val inventory = inventory(payload)
-        val declared = payload.getJSONObject("inventory"); val expected = inventoryJson(inventory, version == 2L)
+        val declared = payload.getJSONObject("inventory"); val expected = inventoryJson(inventory, version >= 2L)
         fields(declared, expected.keys().asSequence().toSet())
         expected.keys().forEach { key -> require(declared.get(key) == expected.get(key) ||
             declared.get(key) is Number && expected.get(key) is Number &&
                 integer(declared, key) == integer(expected, key)) { "数量或字节清单不一致" } }
-        return Parsed(id, payload, bytes, inventory, images, videos, generation, children)
+        return Parsed(id, payload, bytes, inventory, images, videos, generation, children, version, schema)
     }
     private fun inventory(payload: JSONObject): BackupInventory {
         val legacy = objectOf(payload.getString("text_backup")); val tables = payload.getJSONObject("tables")
@@ -457,8 +458,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                 put("child_tasks", i.childTasks); put("child_commands", i.childCommands); put("child_requests", i.childRequests)
             }
         }
-    private fun readTable(db: SQLiteDatabase, table: String, conversationId: ConversationId?): JSONArray {
-        val columns = COLUMNS.getValue(table)
+    private fun readTable(db: SQLiteDatabase, table: String, columns: List<String>, conversationId: ConversationId?): JSONArray {
         val where = if (conversationId == null) "" else when (table) {
             "context_branches", "context_archives" -> " WHERE conversation_id=?"
             "context_usage" -> " WHERE branch_id=?"
@@ -518,10 +518,13 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         const val MAX_PACKAGE = 112L * 1024 * 1024
         private val BOOLEAN_KEYS = setOf("battery", "device-status")
         private val CONFIG_KEYS = setOf("endpoint", "model", "responses-path", "protocol") + BOOLEAN_KEYS
+        private fun columnsFor(version: Long): Map<String, List<String>> = LinkedHashMap(COLUMNS).apply {
+            put("context_usage", if (version >= 3) BackupUsageCodec.columns else BackupUsageCodec.legacyColumns)
+        }
         private val COLUMNS = linkedMapOf(
             "context_branches" to listOf("conversation_id", "parent_id", "through_message", "parent_revision"),
             "context_archives" to listOf("id", "conversation_id", "prefix_count", "revision", "summary", "blob_hash", "created", "active"),
-            "context_usage" to listOf("request_id", "run_id", "branch_id", "input_tokens", "output_tokens", "cached_tokens", "reasoning_tokens"),
+            "context_usage" to BackupUsageCodec.legacyColumns,
             "neutral_assets" to listOf("id", "message_id", "kind", "mime", "bytes", "blob_hash")
         )
     }

@@ -110,6 +110,78 @@ class VoiceModeControllerTest {
         assertEquals(id, f.revoked.single().id)
     }
 
+    @Test fun waitingForDelayedFinalIsActiveButNotListeningAndPartialsCannotRestartCapture() {
+        val f = Fake(); val c = VoiceModeController(f); c.start(profile)
+        val events = f.recognitions.single()
+        events.partial("before ready"); f.flush()
+        assertEquals(VoiceControlPhase.CONNECTING, c.state.value.phase)
+        events.listening(); f.flush()
+        assertEquals(VoiceControlPhase.LISTENING, c.state.value.phase)
+        events.captureStopped(); f.flush()
+        assertEquals(VoiceControlPhase.WAITING_FOR_FINAL, c.state.value.phase)
+        assertTrue(c.state.value.active)
+        assertEquals(0, f.inputs.single().closes) // Pending final task is still owned, not cancelled.
+        assertTrue(f.sends.isEmpty())
+        events.partial("tail hypothesis"); events.listening(); events.captureStopped(); f.flush()
+        assertEquals(VoiceControlPhase.WAITING_FOR_FINAL, c.state.value.phase)
+        assertEquals("tail hypothesis", c.state.value.transcript)
+        assertTrue(f.sends.isEmpty())
+        events.finalResult("actual final"); f.flush()
+        assertEquals(VoiceControlPhase.SUBMITTING, c.state.value.phase)
+        assertEquals("actual final", f.sends.single().text)
+        assertEquals(1, f.inputs.single().closes)
+        events.captureStopped(); events.listening(); events.partial("after final"); f.flush()
+        assertEquals(VoiceControlPhase.SUBMITTING, c.state.value.phase)
+        assertEquals("actual final", c.state.value.transcript)
+        c.close()
+    }
+
+    @Test fun captureStopDoesNotExtendRecognitionDeadlineOrChangeStopDrain() {
+        val f = Fake(); val c = VoiceModeController(f)
+        c.start(profile, VoiceControlLimits(recognitionMillis = 2000))
+        f.recognitions.single().listening(); f.flush()
+        f.advance(1000)
+        f.recognitions.single().captureStopped(); f.flush()
+        f.advance(1000)
+        assertEquals(VoiceControlStopReason.TIMEOUT, c.state.value.reason)
+        assertEquals(1, f.inputs.single().closes)
+        assertTrue(f.sends.isEmpty())
+        val next = c.start(profile)!!
+        val pending = f.recognitions.last()
+        pending.listening(); pending.captureStopped(); f.flush()
+        c.stop(next)
+        assertEquals(VoiceControlStopReason.USER, c.state.value.reason)
+        assertEquals(1, f.inputs.last().closes)
+        pending.finalResult("too late"); f.flush()
+        assertTrue(f.sends.isEmpty())
+    }
+
+    @Test fun oldStoppedAndListeningAreFencedAcrossPermitsAndAcrossTurns() {
+        val f = Fake(); val c = VoiceModeController(f)
+        val first = c.start(profile)!!
+        val oldPermit = f.recognitions.single()
+        c.stop(first)
+        val second = c.start(profile, VoiceControlLimits(maxTurns = 2))!!
+        oldPermit.listening(); oldPermit.captureStopped(); f.flush()
+        assertEquals(second, c.state.value.permitId)
+        assertEquals(VoiceControlPhase.CONNECTING, c.state.value.phase)
+        val oldTurn = f.recognitions.last()
+        oldTurn.listening(); f.flush()
+        oldPermit.captureStopped(); f.flush()
+        assertEquals(VoiceControlPhase.LISTENING, c.state.value.phase)
+        f.finishRecognition(); f.accept(owner)
+        f.body(owner, "Done", VoiceBodyStatus.COMPLETE)
+        f.outputs.single().drained(); f.flush()
+        assertEquals(2, c.state.value.turn)
+        oldTurn.captureStopped(); oldTurn.listening(); oldTurn.partial("old tail"); f.flush()
+        assertEquals(VoiceControlPhase.CONNECTING, c.state.value.phase)
+        assertEquals("", c.state.value.transcript)
+        f.recognitions.last().listening(); f.flush()
+        oldTurn.captureStopped(); f.flush()
+        assertEquals(VoiceControlPhase.LISTENING, c.state.value.phase)
+        c.close()
+    }
+
     @Test fun noAudioBeforePermissionAndOldGrantCannotStartLaterPermit() {
         val f = Fake(); f.entry = f.entry.copy(microphoneGranted = false); f.admissionValue = VoiceAdmission.PERMISSION_REQUIRED
         val c = VoiceModeController(f)

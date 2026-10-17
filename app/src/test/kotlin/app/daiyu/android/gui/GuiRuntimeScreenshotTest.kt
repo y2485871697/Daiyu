@@ -1,6 +1,8 @@
 package app.daiyu.android.gui
 
+import android.accessibilityservice.AccessibilityService
 import android.graphics.Rect
+import app.daiyu.android.tasksurface.TaskSurfaceSelfTarget
 import android.os.Looper
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
@@ -73,13 +75,18 @@ class GuiRuntimeScreenshotTest {
         var pkg = "external.app"
         var windowId = 7
         var displayId = 0
+        var active = true
+        var windowType = AccessibilityWindowInfo.TYPE_APPLICATION
+        var nodeActions = 0
         var label = "before"
         var missing = false
         var throwOnSubmit = false
+        var permissionEnabled = true
+        var screenUnlocked = true
         var rootReads = 0
         val callbacks = mutableListOf<Pair<(GuiCaptureFrame) -> Unit, (Int) -> Unit>>()
-        override fun enabled(current: GuiAccessibilityService) = true
-        override fun unlocked(current: GuiAccessibilityService) = true
+        override fun enabled(current: GuiAccessibilityService) = permissionEnabled
+        override fun unlocked(current: GuiAccessibilityService) = screenUnlocked
         override fun root(current: GuiAccessibilityService): AccessibilityNodeInfo? {
             rootReads++
             if (missing) return null
@@ -87,8 +94,8 @@ class GuiRuntimeScreenshotTest {
             // Android's hidden setters initialize real public-getter state; traversal/admission
             // still run unchanged. Only the platform source/capture and worker queue are controlled.
             ReflectionHelpers.callInstanceMethod<Unit>(window, "setId", ClassParameter.from(Int::class.javaPrimitiveType!!, windowId))
-            ReflectionHelpers.callInstanceMethod<Unit>(window, "setType", ClassParameter.from(Int::class.javaPrimitiveType!!, AccessibilityWindowInfo.TYPE_APPLICATION))
-            ReflectionHelpers.callInstanceMethod<Unit>(window, "setActive", ClassParameter.from(Boolean::class.javaPrimitiveType!!, true))
+            ReflectionHelpers.callInstanceMethod<Unit>(window, "setType", ClassParameter.from(Int::class.javaPrimitiveType!!, windowType))
+            ReflectionHelpers.callInstanceMethod<Unit>(window, "setActive", ClassParameter.from(Boolean::class.javaPrimitiveType!!, active))
             ReflectionHelpers.callInstanceMethod<Unit>(window, "setDisplayId", ClassParameter.from(Int::class.javaPrimitiveType!!, displayId))
             fun node(text: String): AccessibilityNodeInfo = AccessibilityNodeInfo.obtain().apply {
                 packageName = pkg; className = "View"; this.text = text
@@ -96,6 +103,8 @@ class GuiRuntimeScreenshotTest {
                 setBoundsInScreen(Rect(0, 0, 100, 100))
                 ReflectionHelpers.setField(this, "mWindowId", windowId)
                 shadowOf(this).setWindow(window)
+                shadowOf(this).setRefreshReturnValue(true)
+                shadowOf(this).setOnPerformActionListener { _, _ -> nodeActions++; true }
             }
             val root = node("root")
             shadowOf(root).addChild(node(label))
@@ -134,6 +143,269 @@ class GuiRuntimeScreenshotTest {
     private fun screenshot(observation: GuiObservation) = GuiRuntime.screenshot(session.lease, observation.observationId)
     private fun rejected(result: GuiResult<*>, code: String) { assertEquals(GuiResult.Rejected(code), result) }
     private fun assertDisposed(frame: Frame) { assertEquals(listOf("software", "hardware", "buffer"), frame.disposed) }
+
+    private fun openTarget(target: String?, token: TaskSurfaceSelfTarget? = null, surfaceOwner: Any? = null) {
+        session.close()
+        session = (GuiRuntime.openForUser(GuiOwner("target-session", "target-run"), target, token, surfaceOwner) as GuiResult.Value).value
+        assertTrue(session.approveReadsFromUser(GuiReadApproval(3, 1)) is GuiResult.Value)
+    }
+    private fun openSelf(owner: Any = Any(), current: () -> Boolean = { true }): TaskSurfaceSelfTarget {
+        val token = TaskSurfaceSelfTarget.foreground(service.packageName, owner, current)
+        platform.pkg = service.packageName
+        openTarget(service.packageName, token, owner)
+        return token
+    }
+    private fun assertNoActions() {
+        assertEquals(0, platform.nodeActions)
+        assertTrue(shadowOf(service).globalActionsPerformed.isEmpty())
+    }
+
+    @Test fun liveSelfTokenAllowsOnlyTheOwnApplicationTreeExactNodeActionAndScreenshot() {
+        openSelf()
+        val observation = observe(); val action = approve(observation)
+        assertEquals(service.packageName, observation.packageName)
+        assertTrue(session.validateExactActionFromUser(action) is GuiResult.Value)
+        val future = screenshot(observation); val frame = platform.success(); worker.runAll()
+        assertTrue(future.join() is GuiResult.Value); assertDisposed(frame)
+        assertEquals(GuiResult.Value("PLATFORM_ACTION_ACCEPTED_NOT_VERIFIED"), GuiRuntime.action(session.lease, action))
+        assertEquals(1, platform.nodeActions)
+        assertTrue(shadowOf(service).globalActionsPerformed.isEmpty())
+    }
+
+    @Test fun missingTargetRemainsExternalEvenWhenALiveSelfTokenWasSupplied() {
+        val owner = Any()
+        val token = TaskSurfaceSelfTarget.foreground(service.packageName, owner) { true }
+        openTarget(null, token, owner)
+        platform.pkg = service.packageName
+        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        platform.pkg = "external.app"
+        assertEquals("external.app", observe().packageName)
+        assertNoActions()
+    }
+
+    @Test fun ownPackageCannotOpenWithMissingWrongOwnerWrongPackageOrRevokedToken() {
+        session.close()
+        val owner = Any()
+        val valid = TaskSurfaceSelfTarget.foreground(service.packageName, owner) { true }
+        val wrongPackage = TaskSurfaceSelfTarget.foreground("another.app", owner) { true }
+        val ended = TaskSurfaceSelfTarget.foreground(service.packageName, owner) { false }
+        val guiOwner = GuiOwner("new", "run")
+        listOf(
+            null to owner, valid to null, valid to Any(), wrongPackage to owner, ended to owner,
+        ).forEach { (token, suppliedOwner) ->
+            rejected(GuiRuntime.openForUser(guiOwner, service.packageName, token, suppliedOwner), "SELF_APP_TARGET_LOST")
+        }
+        assertEquals(0, platform.rootReads)
+        assertNoActions()
+    }
+
+    @Test fun runtimeAlsoRejectsMalformedTrustedTargetsBeforeAcquiringOrReading() {
+        session.close()
+        listOf("", "external", "external..app", " external.app", "a." + "b".repeat(255)).forEach { target ->
+            rejected(GuiRuntime.openForUser(GuiOwner("target", "run"), target), "INVALID_TARGET_PACKAGE_NOT_EXECUTED")
+        }
+        assertEquals(0, platform.rootReads); assertNoActions()
+    }
+
+    @Test fun explicitExternalTargetMatchesExactlyAndDoesNotFallThroughToAnotherOrOwnPackage() {
+        openTarget("chosen.app")
+        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        platform.pkg = service.packageName
+        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        platform.pkg = "chosen.app"
+        val observation = observe()
+        platform.pkg = "external.app"
+        rejected(screenshot(observation).join(), "SCREENSHOT_TREE_UNVERIFIABLE")
+        rejected(GuiRuntime.validateExactTarget(session.lease, GuiAction(observation.observationId, GuiOperation.TAP, 1)),
+            "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun explicitExternalStillRequiresAnActiveDefaultDisplayApplication() {
+        openTarget("external.app")
+        platform.active = false
+        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        platform.active = true; platform.windowType = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY
+        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        platform.windowType = AccessibilityWindowInfo.TYPE_APPLICATION; platform.displayId = 1
+        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun selfPackageLossWithoutAnEventRefusesOldNodeAndScreenshotWithoutAnyFallback() {
+        openSelf()
+        val observation = observe(); val action = approve(observation)
+        platform.pkg = "external.app"
+        rejected(GuiRuntime.action(session.lease, action), "SELF_APP_TARGET_LOST")
+        rejected(screenshot(observation).join(), "SELF_APP_TARGET_LOST")
+        assertNull(session.lease.observation); assertTrue(session.lease.actions.isEmpty())
+        assertEquals(1, session.lease.screenshots)
+        // Returning to self does not resurrect the old node/id/approval.
+        platform.pkg = service.packageName
+        rejected(GuiRuntime.action(session.lease, action), "OBSERVATION_REQUIRED")
+        assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun selfPackageLossAfterAnEventReportsLossRatherThanExecutingAStaleNode() {
+        openSelf()
+        val observation = observe(); val action = approve(observation)
+        platform.pkg = "external.app"; GuiRuntime.changed(service)
+        rejected(GuiRuntime.action(session.lease, action), "SELF_APP_TARGET_LOST")
+        rejected(screenshot(observation).join(), "SELF_APP_TARGET_LOST")
+        assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun selfMissingInactiveOverlayAndOtherDisplayAllFailClosed() {
+        listOf<(Platform) -> Unit>(
+            { it.missing = true }, { it.active = false },
+            { it.windowType = AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }, { it.displayId = 1 },
+        ).forEach { loseTarget ->
+            platform.missing = false; platform.active = true
+            platform.windowType = AccessibilityWindowInfo.TYPE_APPLICATION; platform.displayId = 0
+            openSelf()
+            val observation = observe(); val action = approve(observation)
+            loseTarget(platform)
+            rejected(GuiRuntime.action(session.lease, action), "SELF_APP_TARGET_LOST")
+            rejected(screenshot(observation).join(), "SELF_APP_TARGET_LOST")
+            assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+        }
+    }
+
+    @Test fun selfTokenAndGuardedAdmissionAreRecheckedOnTheOriginalLease() {
+        val owner = Any()
+        var current = true
+        var admitted = true
+        val token = TaskSurfaceSelfTarget.foreground(service.packageName, owner) { current }.guardedBy { admitted }
+        platform.pkg = service.packageName
+        openTarget(service.packageName, token, owner)
+        val observation = observe(); val action = approve(observation)
+        admitted = false
+        rejected(GuiRuntime.action(session.lease, action), "SELF_APP_TARGET_LOST")
+        rejected(session.previewFromUser(), "SELF_APP_TARGET_LOST")
+        rejected(screenshot(observation).join(), "SELF_APP_TARGET_LOST")
+        admitted = true; current = false // run.end / original surface owner is no longer current
+        rejected(session.approveReadsFromUser(GuiReadApproval(1, 1)), "SELF_APP_TARGET_LOST")
+        assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun selfTokenDoesNotBypassScreenLockOrSystemPermissionRevocation() {
+        openSelf()
+        val observation = observe(); val action = approve(observation)
+        platform.screenUnlocked = false
+        rejected(GuiRuntime.action(session.lease, action), "SCREEN_LOCKED_NOT_EXECUTED")
+        rejected(screenshot(observation).join(), "SCREEN_LOCKED_NOT_EXECUTED")
+        platform.screenUnlocked = true; platform.permissionEnabled = false
+        rejected(GuiRuntime.action(session.lease, action), "SERVICE_PERMISSION_REVOKED_NOT_EXECUTED")
+        assertFalse(session.lease.valid)
+        rejected(screenshot(observation).join(), "SERVICE_DISCONNECTED_NOT_EXECUTED")
+        assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun selfLossWhileEncodingIsQueuedRejectsDeliveryButDrainsTheSameLease() {
+        openSelf()
+        val observation = observe(); val future = screenshot(observation)
+        val frame = platform.success()
+        platform.pkg = "external.app"
+        worker.runAll()
+        rejected(future.join(), "SELF_APP_TARGET_LOST"); assertDisposed(frame)
+        session.close(); assertTrue(session.releaseConfirmed)
+        assertNoActions()
+    }
+
+    @Test fun revokedSelfTokenBeforeCallbackDoesNotEncodeOrReleaseBeforeDisposal() {
+        var current = true
+        openSelf(current = { current })
+        val observation = observe(); val future = screenshot(observation)
+        current = false
+        val frame = platform.success()
+        rejected(future.join(), "SELF_APP_TARGET_LOST")
+        assertEquals(0, frame.encoded); assertDisposed(frame)
+        session.close(); assertTrue(session.releaseConfirmed); assertNoActions()
+    }
+
+    @Test fun selfTokenRevocationAfterEncodingStillRejectsMainThreadDelivery() {
+        var current = true
+        openSelf(current = { current })
+        val observation = observe(); val future = screenshot(observation); val frame = platform.success()
+        worker.runAll(deliver = false)
+        current = false
+        shadowOf(Looper.getMainLooper()).idle()
+        rejected(future.join(), "SELF_APP_TARGET_LOST"); assertDisposed(frame)
+        session.close(); assertTrue(session.releaseConfirmed); assertNoActions()
+    }
+
+    @Test fun selfGlobalActionsAreRejectedAtPreparationApprovalValidationAndExecution() {
+        openSelf()
+        val observation = observe()
+        listOf(GuiOperation.BACK, GuiOperation.HOME, GuiOperation.RECENTS, GuiOperation.NOTIFICATIONS).forEach { operation ->
+            val action = GuiAction(observation.observationId, operation)
+            val code = "SELF_APP_GLOBAL_ACTION_NOT_ALLOWED_NOT_EXECUTED"
+            rejected(session.approveExactActionFromUser(action), code)
+            rejected(session.validateExactActionFromUser(action), code)
+            rejected(GuiRuntime.action(session.lease, action), code)
+            rejected(session.prepareExactActionFromUser(operation, ownerCurrent = { true }, onConfirmed = { false }), code)
+        }
+        assertTrue(session.lease.actions.isEmpty()); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun defaultExternalGlobalRouteRemainsOrdinaryAndDoesNotAcquireASelfException() {
+        val observation = observe()
+        val action = GuiAction(observation.observationId, GuiOperation.BACK)
+        assertTrue(session.approveExactActionFromUser(action) is GuiResult.Value)
+        assertTrue(GuiRuntime.action(session.lease, action) is GuiResult.Value)
+        assertEquals(listOf(AccessibilityService.GLOBAL_ACTION_BACK), shadowOf(service).globalActionsPerformed)
+        assertEquals(0, platform.nodeActions)
+    }
+
+    @Test fun closeAndNewOwnerDoNotInheritSelfParametersAndOldLeaseCannotAffectTheNewOne() {
+        openSelf()
+        val old = session; val observation = observe(); val action = approve(observation)
+        openTarget(null)
+        val replacement = session
+        rejected(replacement.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        rejected(GuiRuntime.action(old.lease, action), "FOREGROUND_BUSY")
+        old.close() // must not clear a replacement lease's parameters
+        platform.pkg = "external.app"
+        assertEquals("external.app", observe().packageName)
+        assertNoActions()
+    }
+
+    @Test fun disconnectAndReconnectDoNotInheritSelfParametersOrReviveOldLease() {
+        openSelf()
+        val old = session; val observation = observe(); val action = approve(observation)
+        GuiRuntime.disconnected(service); GuiRuntime.connected(service)
+        rejected(GuiRuntime.action(old.lease, action), "GUI_AUTHORIZATION_REVOKED")
+        openTarget(null)
+        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        platform.pkg = "external.app"
+        assertEquals("external.app", observe().packageName)
+        assertNoActions()
+    }
+
+    @Test fun selfUnknownStillFencesOriginalSessionAndCannotOpenAReplacementLease() {
+        openSelf()
+        val observation = observe(); val action = approve(observation)
+        val reads = platform.rootReads
+        session.onCentralUnknown()
+        rejected(session.observe { false }, "GUI_PREVIOUS_OPERATION_UNCONFIRMED")
+        rejected(session.action(action) { false }, "GUI_PREVIOUS_OPERATION_UNCONFIRMED")
+        rejected(session.screenshot(observation.observationId) { false }, "GUI_PREVIOUS_OPERATION_UNCONFIRMED")
+        rejected(GuiRuntime.openForUser(GuiOwner("replacement", "run")), "FOREGROUND_BUSY")
+        assertEquals(reads, platform.rootReads); assertTrue(platform.callbacks.isEmpty()); assertNoActions()
+    }
+
+    @Test fun selfCloseWhileEncodingIsQueuedRetainsDrainAndDoesNotLeakNarrowParameters() {
+        openSelf()
+        val observation = observe(); val future = screenshot(observation); val frame = platform.success()
+        session.close(); assertFalse(session.releaseConfirmed)
+        rejected(GuiRuntime.openForUser(GuiOwner("replacement", "run")), "FOREGROUND_DRAIN_PENDING_NOT_EXECUTED")
+        worker.runAll()
+        rejected(future.join(), "GUI_AUTHORIZATION_REVOKED"); assertDisposed(frame)
+        assertTrue(session.releaseConfirmed)
+        openTarget(null)
+        rejected(session.previewFromUser(), "EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        assertNoActions()
+    }
 
     @Test fun windowChangesWithoutAnEventRefuseBeforePlatformSubmission() {
         val observation = observe(); platform.windowId++

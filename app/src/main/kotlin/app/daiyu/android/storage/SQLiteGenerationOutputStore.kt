@@ -272,7 +272,11 @@ class SQLiteGenerationOutputStore(
             result = action(db)
             db.setTransactionSuccessful()
         } finally {
-            db.endTransaction() // Commit may fail; never return a success before this completes.
+            try { db.endTransaction() }
+            catch (failure: Exception) {
+                // Failed native COMMIT may outlive Android's transaction stack.
+                try { db.close() } finally { throw failure }
+            }
         }
         return result
     }

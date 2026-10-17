@@ -1,7 +1,7 @@
 package app.daiyu.android.vd
 
 import android.test.InstrumentationTestCase
-import android.test.InstrumentationTestRunner
+import androidx.test.platform.app.InstrumentationRegistry
 import java.util.UUID
 
 /**
@@ -11,8 +11,8 @@ import java.util.UUID
  */
 class OwnerUninitializedShutdownLauncherTest : InstrumentationTestCase() {
     fun testExplicitLookupOnlyOwnerShutdownAndVerifiedExit() {
-        val runner = instrumentation as? InstrumentationTestRunner ?: return
-        if (runner.arguments.getString("r08RootShutdown") != "true") return
+        val args = InstrumentationRegistry.getArguments()
+        if (args.getString("r08RootShutdown") != "true") return
 
         val host = AndroidVirtualDisplayOwnerHost(instrumentation.targetContext)
         val generation = "r08_" + UUID.randomUUID().toString().replace("-", "")

@@ -24,6 +24,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -32,6 +33,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
@@ -44,6 +47,7 @@ import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.MarkdownBlock
@@ -106,7 +110,15 @@ private fun MarkdownInlineText(
     val body = remember(content, linkColor, openLink) {
         annotateMarkdownSpans(MarkdownText.renderInline(content), linkColor, openLink)
     }
-    BasicText(body, modifier, style)
+    val originalConfiguration = LocalViewConfiguration.current
+    val preciseLinkConfiguration = remember(originalConfiguration) {
+        object : ViewConfiguration by originalConfiguration {
+            override val minimumTouchTargetSize: DpSize = DpSize.Zero
+        }
+    }
+    CompositionLocalProvider(LocalViewConfiguration provides preciseLinkConfiguration) {
+        BasicText(body, modifier, style)
+    }
 }
 
 @Composable

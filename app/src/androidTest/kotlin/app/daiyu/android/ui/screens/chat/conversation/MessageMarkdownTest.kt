@@ -233,9 +233,11 @@ class MessageMarkdownTest : ComposeActivityTestCase() {
         code.forEach { assertTrue(text.getLinkAnnotations(it.start, it.end).isEmpty()) }
         assertTrue("composition must not open links", opened.isEmpty())
         clickCharacter(node, 3)
+        assertTrue("code '*' must not open links", opened.isEmpty())
         clickCharacter(node, 12)
+        assertTrue("code '[' must not open links", opened.isEmpty())
         clickCharacter(node, 5)
-        assertTrue("code and non-link text must not open links", opened.isEmpty())
+        assertTrue("non-link italic must not open links", opened.isEmpty())
         clickCharacter(node, 14)
         assertEquals(listOf("https://example.test"), opened.toList())
     }

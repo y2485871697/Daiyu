@@ -79,7 +79,7 @@ class RecoverySuiteTests(unittest.TestCase):
         prefix = kind + (api or "")
         if kind == "instrumentation":
             raw = transcript(selector, "0" if result == "passed" else "-1" if result == "failed" else "-3")
-            command = ["adb", "shell", "am", "instrument", "-w", "app.daiyu.android.test/android.test.InstrumentationTestRunner"]
+            command = ["adb", "shell", "am", "instrument", "-w", "app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner"]
         elif kind == "python":
             cls, method = selector.split("#")
             raw = f"{method} ({cls}.{method}) ... ok\n\nRan 1 test in 0.001s\n\nOK\n".encode()
@@ -260,6 +260,13 @@ class RecoverySuiteTests(unittest.TestCase):
         self.reject("wrong_instrumentation_command")
         source["api"] = "37"
         self.reject("invalid_api")
+
+    def test_old_or_other_runner_receipt_cannot_be_rebound(self):
+        source = self.add_source()
+        for runner in ('android.test.InstrumentationTestRunner', 'androidx.test.runner.OtherRunner'):
+            self.mutate_json(source, "receipt", lambda receipt: receipt.update(command=[
+                "adb", "shell", "am", "instrument", "-w", "app.daiyu.android.test/" + runner]))
+            self.reject("wrong_instrumentation_command")
 
     def test_exact_run_attempt_sha_repository_workflow(self):
         for key, value in (("id", 99), ("run_attempt", 1), ("head_sha", "b"*40),

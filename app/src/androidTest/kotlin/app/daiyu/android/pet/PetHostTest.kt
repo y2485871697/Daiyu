@@ -27,6 +27,10 @@ class PetHostTest : InstrumentationTestCase() {
         }
     }
     fun testOwnerDestroyClosesRuntimeCancelsModelAndRemovesMountedLayer() {
+        verifyOwnerDestroyClosesRuntimeCancelsModelAndRemovesMountedLayer()
+    }
+
+    private fun verifyOwnerDestroyClosesRuntimeCancelsModelAndRemovesMountedLayer() {
         instrumentation.runOnMainSync {
             val context = scopedContext(); val owner = Owner(); val mount = FrameLayout(context)
             owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
@@ -49,6 +53,10 @@ class PetHostTest : InstrumentationTestCase() {
         }
     }
     fun testPermissionStatusComesFromSystemAndNoUnownedOverlayIsCreated() {
+        verifyPermissionStatusComesFromSystemAndNoUnownedOverlayIsCreated()
+    }
+
+    private fun verifyPermissionStatusComesFromSystemAndNoUnownedOverlayIsCreated() {
         instrumentation.runOnMainSync {
             val context = scopedContext(); val owner = Owner(); val mount = FrameLayout(context)
             owner.registry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)

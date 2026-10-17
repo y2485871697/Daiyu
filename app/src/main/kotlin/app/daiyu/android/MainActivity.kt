@@ -59,6 +59,7 @@ import app.daiyu.android.assistants.AssistantSkill
 import app.daiyu.android.assistants.AssistantSelectionOwner
 import app.daiyu.android.context.ContextService
 import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceSettingsStore
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.delegation.ConversationSubAgentPreferences
 import app.daiyu.android.delegation.ReasoningEffort
@@ -544,9 +545,11 @@ class MainActivity : ComponentActivity() {
     private fun assistantOwnerMatches(owner: AssistantSelectionOwner): Boolean = activityUsable() &&
         owner.accepts(assistantSelectionOwner,selected?.id?.value,editorGeneration,assistantPicker)
     private var assistantEditingId by mutableStateOf<String?>(null)
+    private var assistantAvatarRevision by mutableStateOf(0L)
     private var collaborationOwner by mutableStateOf<String?>(null)
     private var collaborationVisible by mutableStateOf(false)
     private var thinkingPicker by mutableStateOf(false)
+    private val appearanceStore by lazy { AppearanceSettingsStore(this) }
     private var appearance by mutableStateOf(AppearanceSettings())
     // There are no application-owned notifications to refresh in the current host.
     private val iconNotifications = IconNotificationPort { }
@@ -592,6 +595,15 @@ class MainActivity : ComponentActivity() {
                 val chatPageState = rememberSaveableStateHolder()
                 val assistantProfiles by assistantStore.assistants.collectAsState()
                 val activeAssistant by assistantStore.selectedId.collectAsState()
+                var projectedAssistants by remember { mutableStateOf<List<AssistantDisplay>>(emptyList()) }
+                LaunchedEffect(assistantProfiles, assistantAvatarRevision) {
+                    val profiles = assistantProfiles
+                    val revision = assistantAvatarRevision
+                    val assets = assistantAssets
+                    val projected = withContext(Dispatchers.IO) { profiles.toAssistantDisplays(assets) }
+                    if (activityUsable() && assistantAvatarRevision == revision &&
+                        assistantStore.assistants.value == profiles) projectedAssistants = projected
+                }
                 LaunchedEffect(assistantProfiles, activeAssistant) { if (activityUsable()) publishChat() }
                 LaunchedEffect(sidebarVisible, retainedPage) {
                     if (sidebarVisible || retainedPage != "chat") focus.clearFocus()
@@ -846,10 +858,16 @@ class MainActivity : ComponentActivity() {
                         }
                         AssistantEditScreen(assistantId = id, onBack = { returnToChat() },
                             store = assistantStore, assets = assistantAssets, installedSkills = skills,
-                            onSaved = { refresh() })
+                            onSaved = { savedId ->
+                                if (activityUsable()) {
+                                    assistantAvatarRevision++
+                                    if (retainedPage == "assistant-edit" && assistantEditingId == savedId) refresh()
+                                }
+                            })
                     }
                     else -> ConversationSidePaneScaffold(
                         state = paneState, visible = sidebarVisible, backHandlerEnabled = true,
+                        assistants = projectedAssistants, selectedAssistantId = activeAssistant,
                         onOpen = { openSidebar() }, onDismiss = { dismissSidebar() },
                         onSearchChange = { paneState = paneState.copy(searchQuery = it) },
                         onConversationSelected = { id -> guard { openRetainedConversation(id) } },
@@ -873,7 +891,11 @@ class MainActivity : ComponentActivity() {
                             if (paneState.selectedFolderId == name) paneState = paneState.copy(selectedFolderId = null)
                             updatePane()
                         } },
-                        onSelectAssistant = {}, onEditAssistant = { openAssistantPicker() },
+                        onSelectAssistant = { id -> guard { assistantStore.select(id) } },
+                        onEditAssistant = { id -> guard {
+                            checkNotNull(assistantStore.read(id)) { "助手已不存在" }
+                            dismissSidebar(); assistantEditingId = id; retainedPage = "assistant-edit"
+                        } },
                         onOpenAssistants = { dismissSidebar(); openAssistantPicker(global = true) },
                         onOpenSettings = { dismissSidebar(); retainedPage = "settings" },
                         onOpenModelProviders = { dismissSidebar(); guard { modelSettings() } },
@@ -2231,7 +2253,7 @@ class MainActivity : ComponentActivity() {
         // Resolve the owner/window before leaving search, so a deleted hit keeps its source page.
         openRetainedConversation(hit.conversationId)
         shown = window
-        publishChat(); requestScroll(hit.ownerMessageId, false)
+        publishChat(); requestScroll(hit.messageId, false, hit.segmentIndex)
     }
     private fun toast(text: String) { Toast.makeText(this, text, Toast.LENGTH_LONG).show() }
     private fun guard(action: () -> Unit) {
@@ -2521,10 +2543,17 @@ class MainActivity : ComponentActivity() {
                 assistantLabel = if (controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && !shizukuWritesBlocked,
                 supplementAvailable = state?.phase == ExecutionPhase.PAUSED && supplementDraft.pending == null,
                 supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&
-                    supplementDraft.pending != null))
+                    supplementDraft.pending != null,
+                executionPhase = state?.phase,
+                hasAssistantOutput = controlOwner?.let { owner ->
+                    controller.active?.takeIf { it.id == owner.id && it.runId == owner.runId &&
+                        it.conversationId == owner.conversationId }?.let(::assistantOutputExists)
+                },
+                morphLoadingIndicator = appearance.morphLoadingIndicator,
+                morphLoadingBeforeResponseOnly = appearance.morphLoadingBeforeResponseOnly))
     }
-    private fun requestScroll(id: String? = null, follow: Boolean = true) {
-        chatState = chatState.copy(scrollRequest = ChatScrollRequest(++scrollSerial, id, follow))
+    private fun requestScroll(id: String? = null, follow: Boolean = true, segmentIndex: Int? = null) {
+        chatState = chatState.copy(scrollRequest = ChatScrollRequest(++scrollSerial, id, follow, segmentIndex))
     }
     private fun jumpToBottom() { requestScroll() }
     internal fun jumpToMessage(id: MessageId) {
@@ -2799,27 +2828,12 @@ class MainActivity : ComponentActivity() {
             }, backup = true)
         }
     }
-    private fun loadAppearance(): AppearanceSettings {
-        val preferences = getSharedPreferences("appearance-settings", MODE_PRIVATE)
-        return AppearanceSettings(themeMode = AppearanceThemeMode.fromPersistedValue(preferences.getString("theme", null)),
-            interfaceScale = preferences.getFloat("scale", 1f), messageTimestampsEnabled = preferences.getBoolean("timestamps", false),
-            monetEnabled = preferences.getBoolean("monet", false),
-            pureBlackEnabled = preferences.getBoolean("pure_black", false),
-            paletteStyle = app.daiyu.android.data.model.AppearancePaletteStyle.fromPersistedValue(preferences.getString("palette", null)),
-            accentColor = app.daiyu.android.data.model.AppearanceAccentColor.fromPersistedValue(preferences.getString("accent", null)),
-            blurEnabled = preferences.getBoolean("blur", true),
-            topBarBlurStyle = app.daiyu.android.data.model.AppearanceTopBarBlurStyle.fromPersistedValue(preferences.getString("blur_style", null)),
-        ).normalized()
-    }
+    private fun loadAppearance(): AppearanceSettings = appearanceStore.load()
     private fun saveAppearance(value: AppearanceSettings) { guard {
-        val normalized = value.normalized()
-        check(getSharedPreferences("appearance-settings", MODE_PRIVATE).edit().putString("theme", normalized.themeMode.persistedValue)
-            .putFloat("scale", normalized.interfaceScale).putBoolean("timestamps", normalized.messageTimestampsEnabled)
-            .putBoolean("monet", normalized.monetEnabled).putBoolean("pure_black", normalized.pureBlackEnabled)
-            .putString("palette", normalized.paletteStyle.persistedValue).putString("accent", normalized.accentColor.persistedValue)
-            .putBoolean("blur", normalized.blurEnabled).putString("blur_style", normalized.topBarBlurStyle.persistedValue).commit())
-        appearance = normalized
+        appearance = appearanceStore.save(value)
+        publishChat()
     } }
+
 }
 
 /** Activity-owned, main-thread-only policy. The factory never runs on enter/render/resume. */

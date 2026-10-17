@@ -59,20 +59,26 @@ internal class RetainedConversationData(private val database: ConversationDataba
         // A removed scope is a failed read, not an apparently successful search of some other scope.
         check(conversationId == null || conversations.size == 1) { "会话已不存在" }
         return buildList {
-            val seen = hashSetOf<Pair<String, String>>()
             for ((id, title) in conversations) {
                 // displayHistory binds WHERE conversation_id=? and includes old/segmented history.
                 val stored = context.displayHistory(id)
-                val owners = stored.flatMap { owner -> owner.historySegments.map { it.messageId.value to owner.id.value } }.toMap()
+                val owners = stored.flatMap { owner -> owner.historySegments.map {
+                    (owner.runId.value to it.messageId.value) to owner.id.value
+                } }.toMap()
+                val occurrences = mutableMapOf<Pair<String, String>, Int>()
                 for (message in MessageHistory.expand(stored)) {
+                    val identity = message.runId.value to message.id.value
+                    val segmentIndex = occurrences[identity] ?: 0
+                    occurrences[identity] = segmentIndex + 1
                     // Search explicit text/tool records, not serialized block IDs or protocol
                     // metadata. No image/attachment tables, asset paths or sidecar files are read.
                     val text = retainedSearchText(message.blocks)
                     val at = text.indexOf(needle, ignoreCase = true)
-                    if (at >= 0 && seen.add(id.value to message.id.value)) {
+                    if (at >= 0) {
                         add(MessageSearchHit(id.value, title, message.id.value,
                             text.substring((at - 36).coerceAtLeast(0), (at + needle.length + 80).coerceAtMost(text.length)),
-                            if (message.role == "user") "用户" else "助手", owners[message.id.value] ?: message.id.value))
+                            if (message.role == "user") "用户" else "助手",
+                            owners[identity] ?: message.id.value, segmentIndex))
                     }
                     if (size >= SEARCH_RESULT_LIMIT) return@buildList
                 }

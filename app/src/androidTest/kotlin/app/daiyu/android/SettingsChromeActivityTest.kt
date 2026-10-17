@@ -143,8 +143,14 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText("绿色").performClick()
         ui.runOnIdle { assertEquals(AppearanceAccentColor.GREEN, state.accentColor); assertTrue(state.monetEnabled) }
         reveal("settings-switch:消息时间戳", "外观与主题").performClick().assertIsOn()
-        reveal("settings-row:圆形加载指示器", "外观与主题").performClick()
-        ui.runOnIdle { assertTrue(state.morphLoadingIndicator) }
+        reveal("settings-switch:圆形加载指示器", "外观与主题").performClick().assertIsOff()
+        reveal("settings-switch:仅消息生成前", "外观与主题").performClick().assertIsOn()
+        ui.runOnIdle {
+            assertFalse(state.morphLoadingIndicator)
+            assertTrue(state.morphLoadingBeforeResponseOnly)
+        }
+        reveal("settings-switch:圆形加载指示器", "外观与主题").performClick().assertIsOn()
+        ui.runOnIdle { assertTrue(state.morphLoadingBeforeResponseOnly) }
         node("page:外观与主题").performScrollToIndex(0)
         capture("appearance-dark")
     }

@@ -38,7 +38,7 @@ internal object SubAgentModelPickerProjector {
     fun project(providers: List<SubAgentProvider>, selectedProviderId: String?, selectedModelId: String?): SubAgentModelPickerUiState {
         val groups = providers.filter { it.isEnabled }.mapNotNull { provider ->
             val seen = hashSetOf<String>()
-            val models = provider.models.filter { it.isEnabled && !it.supportsSpeechSynthesis && seen.add(it.modelId.lowercase()) }
+            val models = provider.models.filter { it.isEnabled && !it.supportsSpeechSynthesis && seen.add(it.id) }
                 .map { SubAgentModelOptionUi(it.id, provider.id, it.displayName.ifBlank { it.modelId }, it.supportsImageGeneration, it.supportsVideoGeneration) }
             models.takeIf { it.isNotEmpty() }?.let { SubAgentModelGroupUi(provider.id, provider.name, it) }
         }

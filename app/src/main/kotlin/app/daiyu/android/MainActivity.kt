@@ -193,6 +193,8 @@ class MainActivity : ComponentActivity() {
     private val assistantStore get() = controller.assistantStore
     private val assistantAssets get() = controller.assistantAssets
     private val reasoningPreference get() = controller.reasoningPreference
+    private val subAgentModelSource = app.daiyu.android.delegation.SavedCatalogSubAgentModelSource()
+    private var subAgentSourceRevision by mutableStateOf(0)
     private val subAgentRepository by lazy {
         ConversationSubAgentPreferences(getSharedPreferences("subagent_configuration", MODE_PRIVATE))
     }
@@ -1152,6 +1154,13 @@ class MainActivity : ComponentActivity() {
                         assistantStore.assistants.value == profiles) projectedAssistants = projected
                 }
                 LaunchedEffect(assistantProfiles, activeAssistant) { if (activityUsable()) publishChat() }
+                LaunchedEffect(retainedPage == "subagents" || collaborationVisible, subAgentSourceRevision, backupBusy) {
+                    if ((retainedPage == "subagents" || collaborationVisible) && !backupBusy &&
+                        lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+                        subAgentModelSource.refresh(controller.settings::localModelCatalogSnapshot,
+                            controller.settings::localModelCatalogProtocol)
+                    } else subAgentModelSource.clear()
+                }
                 LaunchedEffect(sidebarVisible, retainedPage) {
                     if (sidebarVisible || retainedPage != "chat") focus.clearFocus()
                 }
@@ -1520,7 +1529,8 @@ class MainActivity : ComponentActivity() {
                         onBack = { if (activityUsable() && retainedPage == "app-icon") retainedPage = "appearance" },
                     )
                     "subagents" -> SubAgentSettingsScreen(onBack = { returnToChat() },
-                        repositoryFactory = { subAgentRepository }, isCurrentRoute = retainedPage == "subagents")
+                        repositoryFactory = { subAgentRepository }, isCurrentRoute = retainedPage == "subagents",
+                        modelSource = subAgentModelSource)
                     "assistant-edit" -> assistantEditingId?.let { id ->
                         var skills by remember(id) { mutableStateOf(emptyList<AssistantSkill>()) }
                         LaunchedEffect(id) {
@@ -1679,7 +1689,7 @@ class MainActivity : ComponentActivity() {
                 ConversationCollaborationDialog(show = collaborationVisible, conversationId = owner,
                     onDismiss = { collaborationVisible = false; collaborationOwner = null }, taskRunning = controller.active != null || backupBusy,
                     ownerMatches = { activityUsable() && selected?.id?.value == owner && retainedPage == "chat" && !controller.dataBusy },
-                    repositoryFactory = { subAgentRepository })
+                    repositoryFactory = { subAgentRepository }, modelSource = subAgentModelSource)
                 // Saved independently for the standalone composer or this conversation.
                 // The preparation worker freezes it once; edits never mutate an active request.
                 val thinkingOwner = chatState.conversationKey
@@ -3893,6 +3903,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onResume() {
         super.onResume(); voiceForeground = true; speechHost.setForeground(true)
+        subAgentSourceRevision++
         refreshUnknownBranchOutcome()
         // Re-render fresh entry callbacks; none captured while backgrounded gains authority here.
         contextManagementEntryEpoch++
@@ -3933,6 +3944,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        subAgentModelSource.clear()
         revokePlatformActionVisit()
         // Pending location UI cannot survive backgrounding. An already handed-off external GUI
         // overlay MUST survive this pause so the user can switch to the actual target app.

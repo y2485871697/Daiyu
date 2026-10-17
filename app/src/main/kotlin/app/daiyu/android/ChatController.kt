@@ -3652,7 +3652,12 @@ class ChatController internal constructor(private val application:Application,
                 }
                 if (owner != null) owner.commit(save) else save()
             }
-            "模型设置已保存"
+            try {
+                settings.modelCatalogSnapshot()
+                "模型设置已保存"
+            } catch (_: Exception) {
+                "模型设置已保存；模型目录初始化失败，请重新打开模型设置"
+            }
         })
     }
     internal fun selectConfiguredModel(expected:ModelSettings,model:String,completed:(Boolean)->Unit) {

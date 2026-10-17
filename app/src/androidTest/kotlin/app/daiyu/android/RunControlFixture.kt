@@ -28,6 +28,8 @@ internal class RunControlFixture(base:Context,
     val database=ConversationDatabase(application)
     private val alias="app.daiyu.android.test.run-control.${UUID.randomUUID()}"
     val settings=ModelSettingsStore(application,alias)
+    internal val diagnosticsFile = java.io.File(application.cacheDir, "run-control-diagnostics-$alias/state.json")
+    internal val diagnostics = app.daiyu.android.diagnostics.DiagnosticLogStore(diagnosticsFile)
     // Never use AndroidTaskSurfaceStore here: UI fixtures must not read or change user preference.
     val taskSurfaces = isolatedTaskSurfaceStore(TaskSurfacePreference.FOREGROUND)
     val opens=AtomicInteger()
@@ -50,7 +52,7 @@ internal class RunControlFixture(base:Context,
             virtualDisplayFactory = virtualDisplayFactory, mcpTransport = mcpTransport, taskSurfaceStore = taskSurfaces,
             sessionModel = if (onSession == null) null else { provider, assistant, session ->
                 onSession(provider, assistant, session); factory(provider.asModelSettings())
-            })
+            }, diagnostics = diagnostics)
     }
     class Session(val text:String,held:Boolean,private val holdSeconds:Long=10,
         private val releaseOnCancel:Boolean=true) : ModelSession {
@@ -71,7 +73,9 @@ internal class RunControlFixture(base:Context,
     }
     override fun close() {
         synchronized(queued) {sessions.forEach {it.release.countDown()}}
+        if (diagnosticsFile.exists()) diagnostics.setEnabled(false)
         controller.stop();controller.close()
+        diagnosticsFile.parentFile?.deleteRecursively()
         application.getSharedPreferences("model-settings",0).edit().clear().commit()
         application.getSharedPreferences("conversation-ui",0).edit().clear().commit()
         database.runtimeLockFile.delete()

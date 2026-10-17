@@ -145,7 +145,8 @@ class ChatController internal constructor(private val application:Application,
     }, private val taskSurfaceStore: TaskSurfaceStore = AndroidTaskSurfaceStore.get(application),
     internal var platformSettings: PlatformToolSettings = PlatformToolSettings(application.getSharedPreferences("platform-read-settings", 0)),
     internal var browserSettings: app.daiyu.android.browser.BrowserSettingsStore =
-        app.daiyu.android.browser.BrowserSettingsStore(application.getSharedPreferences("browser-settings", 0))) {
+        app.daiyu.android.browser.BrowserSettingsStore(application.getSharedPreferences("browser-settings", 0)),
+    internal val diagnostics: app.daiyu.android.diagnostics.DiagnosticLogStore? = null) {
     // Voice credentials remain independent from chat settings.
     internal val voiceAccounts by lazy { app.daiyu.android.voice.account.VoiceAccountResources.forContext(application) }
     internal val voiceRuntime by lazy {
@@ -241,7 +242,8 @@ class ChatController internal constructor(private val application:Application,
     constructor(application:Application):this(application,ConversationDatabase(application),ModelSettingsStore(application),application.getSharedPreferences("conversation-ui",0),{ModelFactory.create(it)},
         assistantModel=AssistantModelFactory::create, sessionModel=AssistantModelFactory::create,
         platformSettings=PlatformToolSettings(application),
-        browserSettings=app.daiyu.android.browser.BrowserSettingsStore(application))
+        browserSettings=app.daiyu.android.browser.BrowserSettingsStore(application),
+        diagnostics=app.daiyu.android.diagnostics.DiagnosticLogStore(java.io.File(application.noBackupFilesDir, "diagnostics-v1/state.json")))
     val assistantStore: SqliteAssistantStore by lazy { SqliteAssistantStore(database) }
     internal val independentModels = IndependentModelSettings(application).also {
         it.onChanging = { independentConfigurationChanging() }
@@ -3256,7 +3258,18 @@ class ChatController internal constructor(private val application:Application,
         lifetime.busy=true
         executor.execute {
             val allowed=synchronized(this) {resources===lifetime && (allowStopped || !lifetime.fenced)}
+            if (allowed) diagnostics?.record(app.daiyu.android.diagnostics.DiagnosticEvent.RUN_SLICE_STARTED)
             val result=if(allowed) runCatching(work) else null
+            result?.fold(onSuccess = { slice ->
+                diagnostics?.record(when (slice) {
+                    is RunSlice.Suspended -> app.daiyu.android.diagnostics.DiagnosticEvent.RUN_WAITING_USER
+                    is RunSlice.Completed -> when (slice.message.status) {
+                        RunStatus.COMPLETED -> app.daiyu.android.diagnostics.DiagnosticEvent.RUN_COMPLETED
+                        RunStatus.INTERRUPTED -> app.daiyu.android.diagnostics.DiagnosticEvent.RUN_INTERRUPTED
+                        else -> app.daiyu.android.diagnostics.DiagnosticEvent.RUN_FAILED
+                    }
+                })
+            }, onFailure = { diagnostics?.record(app.daiyu.android.diagnostics.DiagnosticEvent.RUN_FAILED) })
             handler.post {synchronized(this) {
                 if(resources!==lifetime) return@synchronized
                 lifetime.busy=false
@@ -3815,6 +3828,7 @@ class ChatController internal constructor(private val application:Application,
         try {executor.execute {
             var value=failureNotice ?: if(importing) "导入失败；原会话保留，格式、校验或身份冲突" else "导出失败；目标文件可能不完整，原会话保留"
             var success=false
+            diagnostics?.record(app.daiyu.android.diagnostics.DiagnosticEvent.DATA_STARTED)
             try {
                 // Both backup importers append new identities or roll back on conflict; even
                 // an attempted/duplicate import must leave old owners and their gates untouched.
@@ -3829,6 +3843,8 @@ class ChatController internal constructor(private val application:Application,
                 }
             }
             finally {
+                diagnostics?.record(if (success) app.daiyu.android.diagnostics.DiagnosticEvent.DATA_COMPLETED
+                    else app.daiyu.android.diagnostics.DiagnosticEvent.DATA_FAILED)
                 val notice=value;val changed=success && importing
                 handler.post {
                     val committed=synchronized(this) {

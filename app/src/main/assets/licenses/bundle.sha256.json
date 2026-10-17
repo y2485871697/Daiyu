@@ -1,0 +1,149 @@
+{
+  "schema_version": 1,
+  "scope": "Source-tree byte inventory, not a resolved graph, upstream image binding or APK verification result.",
+  "licenses": [
+    {
+      "path": "app/src/main/assets/licenses/AGPL-3.0.txt",
+      "bytes": 34523,
+      "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0"
+    },
+    {
+      "path": "app/src/main/assets/licenses/GPL-3.0.txt",
+      "bytes": 35149,
+      "sha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986"
+    },
+    {
+      "path": "app/src/main/assets/licenses/NOTICE-proot.txt",
+      "bytes": 3034,
+      "sha256": "982c614c2f8b3c0e2671b33e4224efdafded70b94137b1797366380bc3ad3354"
+    },
+    {
+      "path": "app/src/main/assets/licenses/P32-voice-network-LICENSES.md",
+      "bytes": 14910,
+      "sha256": "8cf7db5a6f1fb3e3362b15b99d2c55e5754a1f2919b3cb2d9470ceeee6422acd"
+    },
+    {
+      "path": "app/src/main/assets/licenses/libandroid-shmem-0.7.txt",
+      "bytes": 1529,
+      "sha256": "0dd43abe17196b0224cb0b159819af798cd508a82a21e5870126fff4e899a7eb"
+    },
+    {
+      "path": "app/src/main/assets/licenses/linux-installer/NOTICE.md",
+      "bytes": 4055,
+      "sha256": "2ac512dac6ad59e9f77d32bc9d677a8df9c852a55f9dcbfa3e3bc8667716404f"
+    },
+    {
+      "path": "app/src/main/assets/licenses/openminis/NOTICE.md",
+      "bytes": 1572,
+      "sha256": "6467ae64081123ee1f223f2e8e0adbbbc6a925548d6a2df9f57613197d8d51db"
+    },
+    {
+      "path": "app/src/main/assets/licenses/proot-5.1.107.92.txt",
+      "bytes": 19106,
+      "sha256": "0ffa6454acbe7e410ac6f0007df83b9b3161fe55484c1f4b87487c0f2d228a6d"
+    },
+    {
+      "path": "app/src/main/assets/licenses/rikkahub/NOTICE.md",
+      "bytes": 1357,
+      "sha256": "daad4386d288edb084c54340284a42810da451f9bc19bb0049a0fb9d52a86a08"
+    },
+    {
+      "path": "app/src/main/assets/licenses/sherpa-ncnn/KISSFFT-COPYING",
+      "bytes": 246,
+      "sha256": "a2840585f8411be8e6826a31ef15ae65c950bd74a2437a73b013398a934ad0c6"
+    },
+    {
+      "path": "app/src/main/assets/licenses/sherpa-ncnn/KISSFFT-LICENSE",
+      "bytes": 1830,
+      "sha256": "4d6bcab46f27d6d0c878e8305d4bdcfe040d52bf6656b9771f04c9fb9902c0ed"
+    },
+    {
+      "path": "app/src/main/assets/licenses/sherpa-ncnn/LICENSE",
+      "bytes": 11359,
+      "sha256": "977fc8728d26a549f6c93539ec2b8c0800f0240b3dee9bc035c2568cc4237cfa"
+    },
+    {
+      "path": "app/src/main/assets/licenses/sherpa-ncnn/LICENSE-kaldi-native-fbank",
+      "bytes": 11359,
+      "sha256": "977fc8728d26a549f6c93539ec2b8c0800f0240b3dee9bc035c2568cc4237cfa"
+    },
+    {
+      "path": "app/src/main/assets/licenses/sherpa-ncnn/LICENSE-ncnn",
+      "bytes": 6427,
+      "sha256": "7c974bac98848df46be1af5bdaa3c3c9c01f6082a90f55caeb7f60c6208aa255"
+    },
+    {
+      "path": "app/src/main/assets/licenses/sherpa-ncnn/MODEL-CARD.md",
+      "bytes": 296,
+      "sha256": "d4be344e4c6481e17ea43302ba0bdb999eea93cd0dd4356be83ddcbcdf1cc3ca"
+    },
+    {
+      "path": "app/src/main/assets/licenses/sherpa-ncnn/NOTICE.md",
+      "bytes": 4180,
+      "sha256": "b3324122d7a8173c35e7ee2824315530a553816e54f569b0f497d247fb112d2e"
+    },
+    {
+      "path": "app/src/main/assets/licenses/source-index.md",
+      "bytes": 13633,
+      "sha256": "4a9ebd6ada00ac2a9eb271ba73bb258ee316079f72035d392ff37bf8b4176df3"
+    },
+    {
+      "path": "app/src/main/assets/licenses/talloc-2.4.3.txt",
+      "bytes": 7651,
+      "sha256": "da7eabb7bafdf7d3ae5e9f223aa5bdc1eece45ac569dc21b3b037520b4464768"
+    },
+    {
+      "path": "app/src/main/assets/licenses/virtual-display-owner/LICENSE",
+      "bytes": 4618,
+      "sha256": "d55cbdddb80acd777c322d120cbf69756908f77fbd6e8d9738fafa650a02af2f"
+    },
+    {
+      "path": "app/src/main/assets/licenses/virtual-display-owner/NOTICE.md",
+      "bytes": 3369,
+      "sha256": "162498e4e227c11e80afe3edefaeac47a6e8783450deaf25ea7630d7fe16b43e"
+    },
+    {
+      "path": "app/src/main/assets/licenses/whale-maid/LICENSE",
+      "bytes": 1093,
+      "sha256": "d6042093378d1388da1e96fd620b8138c3548721e1c08ebb94a6fee688d4e48c"
+    },
+    {
+      "path": "app/src/main/assets/licenses/whale-maid/NOTICE",
+      "bytes": 278,
+      "sha256": "a57d6718842deafe478ef498e594560ca927680b5934994e30db37225687cfe4"
+    }
+  ],
+  "local_image_evidence": [
+    {
+      "path": "app/src/main/assets/whale-maid/pet_sprite.png",
+      "bytes": 2487849,
+      "sha256": "37bc6c0487cf311f957cd277762f7b3a9191218ec0b8228852e42fa50465ded1"
+    },
+    {
+      "path": "app/src/main/assets/whale-maid/cupboard_bg.png",
+      "bytes": 4922,
+      "sha256": "299231b54c2217bc6ddeb69b3772636765f0a0e92d42d7a04ce8442376b6bb1d"
+    },
+    {
+      "path": "app/src/main/assets/whale-maid/rice_bowl.png",
+      "bytes": 16334,
+      "sha256": "fbe84824d71ccedf368bd2eaf2bbb2bb6cc30bd3b683ab271aac19f0265d82c6"
+    },
+    {
+      "path": "app/src/main/assets/whale-maid/rice_grain.png",
+      "bytes": 8143,
+      "sha256": "51d81f95defa78dae8a17f5854b2a7ce9b53742a94a726e5bb2d0d11a46c87bc"
+    },
+    {
+      "path": "app/src/main/assets/whale-maid/rice_pot.png",
+      "bytes": 16002,
+      "sha256": "c6f8d677be38d81ade303f3e830e2bbcc6d0f9c74be18e3da7aa361ba05decae"
+    },
+    {
+      "path": "app/src/main/assets/whale-maid/rice_spoon.png",
+      "bytes": 8907,
+      "sha256": "a64adb8209e7c7e99e273d3782da8dac96320a655f7e64b92fa2354c04d0cdee"
+    }
+  ],
+  "image_upstream_binding": "unresolved: local hashes identify bundled bytes only; upstream revision/path/transform not established"
+}

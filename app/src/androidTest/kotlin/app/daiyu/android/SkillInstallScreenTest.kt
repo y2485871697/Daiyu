@@ -94,7 +94,7 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
         ui.waitUntil(timeoutMillis = 10_000) {
             ui.onAllNodesWithTag("skills-compatibility:demo").fetchSemanticsNodes().isNotEmpty()
         }
-        node("skills-compatibility:demo").assertTextEquals("不兼容：依赖 MiniS 专属 Android CLI，Eta 无法运行")
+        node("skills-compatibility:demo").assertTextEquals("不兼容：依赖 MiniS 专属 Android CLI，代鱼无法运行")
         node("skills-confirm-install").assertIsNotEnabled()
         assertTrue(skills.user.list().isEmpty())
     }

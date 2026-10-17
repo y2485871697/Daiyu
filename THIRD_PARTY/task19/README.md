@@ -1,5 +1,7 @@
 # 19号第三方来源证据包
 
+> 本包原基线记录保留为历史。输入 af18af3 的当前随包组件、真实 runtime 声明、仓内许可原件/副本和待解析边界见 `THIRD_PARTY/license-bundle/source-index.md`；核验入口为 `scripts/verify_license_bundle.py`。早期“只有 Wrapper”“没有图片/JNI”“浏览器尚未编译”不适用于当前树。既有 Sherpa 完整许可保留，不在本次重新审理。未执行实际 APK 检查不宣称 APK 已核。
+
 本包补充 `docs/来源清单.md`，功能状态仍只由 `docs/重构清单.md` 记录。工作基线 `ae6e834a554ee85291e00b008e53d227d2ce0a1c`；这是19号独立来源交付，不代表所有第三方计划已迁入或整个应用发布审查已完成。
 
 ## 实际制品与计划保留分开

@@ -27,8 +27,8 @@ or invented here, and no third-party manifest or overall inventory is changed.
 
 `SkillCompatibilityChecker.kt` retains the supplied string-based `evaluate`
 algorithm, concatenation order, case folding, all marker arrays, branch priority,
-iOS word-boundary expression and Android/Termux exception. The original reason
-strings (including “Eta”) are intentionally unchanged. Its entry overload now
+iOS word-boundary expression and Android/Termux exception. The retained reason strings use the host display name “代鱼” instead of “Eta”;
+this presentation adaptation does not change the algorithm. Its entry overload now
 accepts the existing `SkillHeader` instead of the unavailable `SkillIndexEntry`,
 using the SKILL name as both local id and name. The local result type is the simple
 `available`/nullable `reason` value expected by that algorithm.
@@ -42,7 +42,7 @@ installed legacy and current skills do not depend on a new sidecar schema.
 
 The first three methods in `SkillCompatibilityCheckerTest` retain the supplied
 cases (MiniS Android CLI denial, HealthKit/Shortcut denial, portable hub/PDF
-acceptance), with only package adjustment. Added cases exercise every retained
+acceptance), with package adjustment and corresponding host-name reason assertions. Added cases exercise every retained
 marker, precedence, all adapter inputs, iOS boundary/Android exception and ordinary
 tool-name acceptance. No script executor or generic tool blacklist is added.
 The policy is a known-marker static screen, **not** execution or full platform

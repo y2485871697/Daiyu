@@ -14,6 +14,12 @@ https://github.com/AcidGr/dsh-web-whale-maid/tree/7389222e2176603b197076ab3823e4
 
 用户自研宠物行为与外源图片分开保留。此时只可称上游许可参照已核，不能称六图hash来源绑定完成。
 
+### af18af3 随包收口更新（不覆盖上述历史基线）
+
+当前工作树已经实际存在 `app/src/main/assets/whale-maid/` 六张同名 PNG 及完整 `LICENSE` / `NOTICE`，不再沿用“当前未迁入图片”的早期描述。其随件文字仍声明 adapted from AcidGr/dsh-web-whale-maid、MIT、DeepSeek Harness Desktop Pet Authors。仓内可读来源资料没有这六张图的**逐图上游原 path / hash / 导入 revision / 转换链**；既有 `7389222e...` 仍只是参照，不将其猜作实际导入版本，源码清单的 SHA 也不代替 PNG SHA。
+
+当前逐图本地 path、bytes、SHA-256 由显式维护入口 `scripts/verify_license_bundle.py --stage` 写入随包 `assets/licenses/bundle.sha256.json` 的 `local_image_evidence`，供后续源码树和指定 APK 原字节检查；这仅绑定本地制品，不补造上游源摘要。原 LICENSE/NOTICE 保持在图片目录，另原样随 `assets/licenses/whale-maid/` 集中保留。状态和缺项见 `THIRD_PARTY/license-bundle/source-index.md`；未查实际 APK 时不宣称 APK 已核。
+
 ## T05 MoneyBag02
 
 实际引入补丁0e82d4d7c772890d5e78288f4d5d916fe06f27c7，标题“使用RikkaHub同款MoneyBag02图标”；新增旧ui/icons/MoneyBag02.kt，24×24三组Compose ImageVector路径，无原库许可头。原证据：

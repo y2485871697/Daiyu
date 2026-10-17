@@ -1,5 +1,7 @@
 # T08：当前声明依赖与CI精确固定源
 
+> 下文“当前”指本包原 ae6e834 基线。af18af3 输入已真实声明 P32、压缩、Shizuku、Miuix、AndroidX、coroutines 等直接 runtime，当前固定坐标/来源及尚未取得的制品 NOTICE 边界见 `THIRD_PARTY/license-bundle/source-index.md`。未运行 Gradle 解析，不把此历史清单或新随包字节门禁当作 resolved graph；也不声称这些新增直接项的许可已全部进入 APK。
+
 基线ae6e834。范围是Git跟踪的Gradle声明和workflow直接uses；不是解析后的完整传递树、SBOM或APK内容审计。`declared-build-inputs.json`保留原始四份构建声明，`ci-actions.json`列8个完整40位SHA入口及固定raw许可文本摘要。
 
 ## 声明分类

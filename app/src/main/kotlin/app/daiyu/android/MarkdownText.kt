@@ -3,65 +3,87 @@ package app.daiyu.android
 import android.graphics.Typeface
 import android.text.SpannableStringBuilder
 import android.text.Spanned
+import android.text.style.StrikethroughSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
 import android.text.style.URLSpan
 import java.net.URI
 
+/** Android span adapter retained for callers/tests; Compose consumes the same parsed blocks. */
 object MarkdownText {
-    fun render(source: String): CharSequence {
-        val text = SpannableStringBuilder(source)
-        val styles = listOf(
-            Regex("```(?:[^\\n]*\\n)?([\\s\\S]*?)```") to { TypefaceSpan("monospace") },
-            Regex("`([^`\\n]+)`") to { TypefaceSpan("monospace") },
-            Regex("\\*\\*([^*\\n]+)\\*\\*") to { StyleSpan(Typeface.BOLD) },
-            Regex("(?<!\\*)\\*([^*\\n]+)\\*(?!\\*)") to { StyleSpan(Typeface.ITALIC) },
-        )
-        for ((pattern, span) in styles) {
-            text.matchesOutsideCode(pattern).asReversed().forEach { (offset, match) ->
-                val start = offset + match.range.first
-                val end = offset + match.range.last + 1
-                val content = match.groupValues[1]
-                text.replace(start, end, content)
-                text.setSpan(span(), start, start + content.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            }
-        }
-        text.matchesOutsideCode(Regex("\\[([^]\\n]+)]\\((https?://[^\\s)]+)\\)"))
-            .asReversed().forEach { (offset, match) ->
-                val start = offset + match.range.first
-                val end = offset + match.range.last + 1
-                val url = match.groupValues[2]
-                if (isSafeLink(url)) {
-                    val label = match.groupValues[1]
-                    text.replace(start, end, label)
-                    text.setSpan(URLSpan(url), start, start + label.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    internal data class HeadingSpan(val level: Int)
+    internal class CodeBlockSpan
+    internal class QuoteSpan
+    internal class RuleSpan
+
+    fun render(source: String): CharSequence = renderBlocks(MarkdownParser.parse(source))
+
+    internal fun renderInline(content: List<MarkdownInline>): Spanned = SpannableStringBuilder().apply {
+        appendInline(content)
+    }
+
+    internal fun renderBlocks(blocks: List<MarkdownBlock>): Spanned = SpannableStringBuilder().apply {
+        blocks.forEachIndexed { index, block ->
+            if (index > 0) append('\n')
+            val start = length
+            when (block) {
+                is MarkdownBlock.Paragraph -> appendInline(block.content)
+                is MarkdownBlock.Heading -> {
+                    appendInline(block.content); mark(HeadingSpan(block.level), start)
                 }
-            }
-        return text
-    }
-
-    private fun Spanned.matchesOutsideCode(pattern: Regex): List<Pair<Int, MatchResult>> {
-        // Match each gap separately: filtering whole-text matches after findAll can let
-        // a delimiter inside code consume a valid match outside it. This also keeps
-        // inline-code scanning out of fenced code. All offsets remain UTF-16 indices.
-        val snapshot = toString()
-        val matches = mutableListOf<Pair<Int, MatchResult>>()
-        var start = 0
-        fun collect(end: Int) {
-            if (start < end) {
-                pattern.findAll(snapshot.substring(start, end)).forEach { matches += start to it }
+                is MarkdownBlock.Code -> {
+                    append(block.text); mark(TypefaceSpan("monospace"), start); mark(CodeBlockSpan(), start)
+                }
+                is MarkdownBlock.Quote -> { append(renderBlocks(block.blocks)); mark(QuoteSpan(), start) }
+                is MarkdownBlock.Items -> block.items.forEachIndexed { itemIndex, item ->
+                    if (itemIndex > 0) append('\n')
+                    append(when (item.checked) {
+                        true -> "☑ "; false -> "☐ "
+                        null -> if (block.ordered) "${block.start + itemIndex}. " else "• "
+                    })
+                    append(renderBlocks(item.blocks))
+                }
+                is MarkdownBlock.Table -> {
+                    fun row(cells: List<List<MarkdownInline>>) {
+                        cells.forEachIndexed { cellIndex, cell ->
+                            if (cellIndex > 0) append("  |  ")
+                            appendInline(cell)
+                        }
+                    }
+                    row(block.header)
+                    block.rows.forEach { append('\n'); row(it) }
+                }
+                MarkdownBlock.Rule -> { append('―'); mark(RuleSpan(), start) }
             }
         }
-        getSpans(0, length, TypefaceSpan::class.java).sortedBy { getSpanStart(it) }.forEach {
-            collect(getSpanStart(it))
-            start = maxOf(start, getSpanEnd(it))
-        }
-        collect(length)
-        // Callers apply right to left; existing spans track preceding replacements.
-        return matches
     }
 
-    /** Keep the existing lowercase HTTP(S)-only syntax; never normalize an unsafe scheme. */
+    private fun SpannableStringBuilder.appendInline(nodes: List<MarkdownInline>) {
+        nodes.forEach { node ->
+            val start = length
+            when (node) {
+                is MarkdownInline.Text -> append(node.text)
+                is MarkdownInline.Code -> { append(node.text); mark(TypefaceSpan("monospace"), start) }
+                is MarkdownInline.Emphasis -> {
+                    appendInline(node.content)
+                    mark(StyleSpan((if (node.bold) Typeface.BOLD else 0) or
+                        (if (node.italic) Typeface.ITALIC else 0)), start)
+                }
+                is MarkdownInline.Strike -> { appendInline(node.content); mark(StrikethroughSpan(), start) }
+                is MarkdownInline.Link -> {
+                    appendInline(node.content)
+                    if (isSafeLink(node.destination)) mark(URLSpan(node.destination), start)
+                }
+                MarkdownInline.Break -> append('\n')
+            }
+        }
+    }
+
+    private fun SpannableStringBuilder.mark(span: Any, start: Int) {
+        if (length > start) setSpan(span, start, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+    }
+
+    /** Strict lowercase HTTP(S) only: no normalization, credentials, controls or backslashes. */
     internal fun isSafeLink(url: String): Boolean {
         if (!(url.startsWith("https://") || url.startsWith("http://")) ||
             url.any { it.isWhitespace() || it.isISOControl() || it == '\\' }) return false

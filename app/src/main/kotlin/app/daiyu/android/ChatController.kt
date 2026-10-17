@@ -2092,6 +2092,7 @@ class ChatController internal constructor(private val application:Application,
     internal fun sendImages(conversation:Conversation?, owner:ImageAttachmentOwner, draftRevision:Long,
         parts:List<ImageSendPart>, provider:ProviderSnapshot, expectedDraftText:String,
         route: ImageRoute = ImageRoute(provider, null),
+        identity: ImageSendIdentity? = null,
         complete:(ImageSendResult)->Unit):ImageSendHandle? {
         val snapshot=parts.toList()
         val (token, handle)=synchronized(this) {
@@ -2106,7 +2107,7 @@ class ChatController internal constructor(private val application:Application,
             var attempt:ControllerImageAttempt?=null
             val result=try {
                 attempt=ControllerImageAttempt(owner,draftRevision,snapshot,provider,handle,imageJournal,expectedDraftText,
-                    route.actual, route.auxiliaryGeneration)
+                    route.actual, route.auxiliaryGeneration, identity)
                 val replay=try {attempt.reserve(database)} catch (_:Exception) {attempt.unknown()}
                 if(replay!=null) replay else {
                     sendPrepared(token,conversation,"",imageAttempt=attempt)
@@ -2124,6 +2125,26 @@ class ChatController internal constructor(private val application:Application,
         }
         return handle
     }
+    /** Dedicated read-only receipt lane. Does not reserve preparation, read settings, create
+     * a model/identity, publish assets, resume a runner or call sendPrepared/sendImages.
+     */
+    internal fun readImageReceipt(frozen: FrozenImageSend): ImageSendResult = try {
+        imageRead {
+            ControllerImageAttempt(frozen.owner, frozen.revision, frozen.parts, null,
+                ImageSendHandle(frozen.owner, frozen.revision), imageJournal, frozen.text,
+                identity = frozen.identity).readReceipt(database)
+        }
+    } catch (_: Exception) {
+        ImageSendResult.Unknown(frozen.owner, frozen.revision, frozen.identity.userId, frozen.identity.assistantId)
+    }
+
+    /** Exact local receipt acknowledgement, never a request or SQLite mutation. */
+    internal fun confirmImageReceipt(frozen: FrozenImageSend, receipt: ImageSendResult.Accepted): Boolean = try {
+        ControllerImageAttempt(frozen.owner, frozen.revision, frozen.parts, null,
+            ImageSendHandle(frozen.owner, frozen.revision), imageJournal, frozen.text,
+            identity = frozen.identity).confirmReceipt(receipt)
+    } catch (_: Exception) { false }
+
     private fun sendPrepared(token:Preparation, conversation:Conversation?,text:String,
         withChildren:Boolean = false, imageAttempt:ControllerImageAttempt?=null,
         shizukuPreparation:ControllerShizukuPreparation?=null,

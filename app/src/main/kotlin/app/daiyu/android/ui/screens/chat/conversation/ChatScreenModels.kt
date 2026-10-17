@@ -111,6 +111,10 @@ data class ComposerUi(
     val controlOwnerKey: String? = null,
     val supplementAvailable: Boolean = false,
     val supplementPending: Boolean = false,
+    /** Ready owned images only; never file/folder/path strings or video approval. Idle only. */
+    val imageSendAvailable: Boolean = false,
+    /** A fenced/importing image draft must not silently fall through to text send. Editing is separate. */
+    val imageSendBlocked: Boolean = false,
     /** Actual runtime evidence, independent of pause-request/control-button projection. */
     val executionPhase: app.daiyu.android.domain.runtime.ExecutionPhase? = null,
     /** Null means the current owner's output is not available; never guess from RUNNING. */
@@ -119,5 +123,8 @@ data class ComposerUi(
     val morphLoadingBeforeResponseOnly: Boolean = false,
 )
 
-internal fun ComposerUi.textActionEnabled(): Boolean = enabled && text.isNotBlank() && !supplementPending &&
-    (phase == ComposerPhase.IDLE || (phase == ComposerPhase.PAUSED && supplementAvailable))
+internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !imageSendBlocked && !supplementPending && when (phase) {
+    ComposerPhase.IDLE -> text.isNotBlank() || imageSendAvailable
+    ComposerPhase.PAUSED -> text.isNotBlank() && supplementAvailable
+    ComposerPhase.RUNNING -> false
+}

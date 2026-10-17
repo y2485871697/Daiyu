@@ -35,6 +35,17 @@ internal sealed interface ImageSendResult {
         val userId: MessageId?, val assistantId: MessageId?) : ImageSendResult
 }
 
+/** Allocated once, before host persistence or enqueue. Recovery always supplies this identity. */
+internal data class ImageSendIdentity(val userId: MessageId, val assistantId: MessageId, val runId: RunId) {
+    companion object {
+        fun create() = ImageSendIdentity(MessageId(UUID.randomUUID().toString()),
+            MessageId(UUID.randomUUID().toString()), RunId(UUID.randomUUID().toString()))
+    }
+}
+
+internal data class FrozenImageSend(val owner: ImageAttachmentOwner, val revision: Long,
+    val text: String, val parts: List<ImageSendPart>, val identity: ImageSendIdentity)
+
 internal class ImageDraftChangedException : IllegalStateException("image_draft_changed")
 
 /** cancel wins only before the DB acceptance gate. It never undoes an accepted send. */
@@ -67,13 +78,17 @@ internal class ControllerImageAttempt(
     val owner: ImageAttachmentOwner,
     val revision: Long,
     parts: List<ImageSendPart>,
-    val provider: ProviderSnapshot,
+    private val sendingProvider: ProviderSnapshot?,
     val handle: ImageSendHandle,
     private val journal: SharedPreferences,
     val expectedDraftText: String = "",
-    val imageRoute: ProviderSnapshot = provider,
+    imageRoute: ProviderSnapshot? = sendingProvider,
     val auxiliaryGeneration: Long? = null,
+    identity: ImageSendIdentity? = null,
 ) {
+    val provider: ProviderSnapshot get() = checkNotNull(sendingProvider)
+    private val actualImageRoute = imageRoute
+    val imageRoute: ProviderSnapshot get() = checkNotNull(actualImageRoute)
     val parts = parts.toList()
     val images = this.parts.filterIsInstance<ImageSendPart.Image>().map { it.attachment }
     private val ownerKey = digest("${owner.conversationId.length}:${owner.conversationId}${owner.draftId}")
@@ -88,9 +103,11 @@ internal class ControllerImageAttempt(
             })
         })
     } }.toString())
-    var userId = MessageId(UUID.randomUUID().toString()); private set
-    var assistantId = MessageId(UUID.randomUUID().toString()); private set
-    var runId = RunId(UUID.randomUUID().toString()); private set
+    private val originalIdentity = identity
+    private val initialIdentity = identity ?: ImageSendIdentity.create()
+    var userId = initialIdentity.userId; private set
+    var assistantId = initialIdentity.assistantId; private set
+    var runId = initialIdentity.runId; private set
     var journaled = false; private set
     var commitAttempted = false; private set
     var result: ImageSendResult? = null
@@ -109,6 +126,7 @@ internal class ControllerImageAttempt(
             if (saved.getLong("revision") != revision || saved.getString("fingerprint") != fingerprint) {
                 return ImageSendResult.Unknown(owner, revision, null, null)
             }
+            if (originalIdentity != null && !matchesIdentity(saved)) return unknown()
             userId = MessageId(saved.getString("user")); assistantId = MessageId(saved.getString("assistant"))
             runId = RunId(saved.getString("run"))
             return reconcile(database)
@@ -149,7 +167,42 @@ internal class ControllerImageAttempt(
             app.daiyu.android.media.MessageImageOwner(owner.conversationId, userId.value), image.id,
             image.mime, image.bytes, image.sha256, image.width, image.height) }, createdAt)
 
-    private fun reconcile(database: ConversationDatabase): ImageSendResult = try {
+    private fun matchesIdentity(saved: JSONObject): Boolean = saved.getString("user") == userId.value &&
+        saved.getString("assistant") == assistantId.value && saved.getString("run") == runId.value
+
+    /** No reserve, UUID allocation, settings, model, asset publication, journal or database write.
+     * Missing rows, unreadable journals and contradictory receipts never permit a retry.
+     * A lost journal is recoverable from the host's durably frozen identity plus SQLite pair.
+     */
+    fun readReceipt(database: ConversationDatabase): ImageSendResult = try {
+        check(originalIdentity != null)
+        journal.getString(key, null)?.let { encoded ->
+            val saved = JSONObject(encoded)
+            check(saved.getLong("revision") == revision && saved.getString("fingerprint") == fingerprint &&
+                matchesIdentity(saved))
+        }
+        reconcile(database, confirmJournal = false)
+    } catch (_: Exception) { unknown() }
+
+    /** Local settlement AFTER an authoritative read, separate from the read-only query.
+     * Preserve a confirmed tombstone so a later, genuinely new revision is not fenced by this
+     * lost callback. A failed/contradictory acknowledgement grants no host consumption authority.
+     */
+    fun confirmReceipt(receipt: ImageSendResult.Accepted): Boolean = try {
+        check(originalIdentity != null && receipt.owner == owner && receipt.revision == revision &&
+            receipt.conversation.id.value == owner.conversationId && receipt.userId == userId &&
+            receipt.assistantId == assistantId && receipt.runId == runId && receipt.images == images)
+        val encoded = journal.getString(key, null)
+        val saved = if (encoded == null) JSONObject().put("revision", revision).put("fingerprint", fingerprint)
+            .put("user", userId.value).put("assistant", assistantId.value).put("run", runId.value)
+        else JSONObject(encoded).also {
+            check(it.getLong("revision") == revision && it.getString("fingerprint") == fingerprint && matchesIdentity(it))
+        }
+        saved.optBoolean("confirmed", false) ||
+            journal.edit().putString(key, saved.put("confirmed", true).toString()).commit()
+    } catch (_: Exception) { false }
+
+    private fun reconcile(database: ConversationDatabase, confirmJournal: Boolean = true): ImageSendResult = try {
         DatabaseTransactions { database.readableDatabase }.run { db ->
             val user = database.storedMessage(db, ConversationId(owner.conversationId), userId.value)
             val assistant = database.storedMessage(db, user.conversationId, assistantId.value)
@@ -161,7 +214,7 @@ internal class ControllerImageAttempt(
                 check(it.moveToFirst())
                 Conversation(user.conversationId, it.getString(0), it.getString(1), it.getLong(2), it.getString(3), it.getInt(4) != 0)
             }
-            accepted(conversation)
+            accepted(conversation, confirmJournal)
         }
     } catch (_: Exception) { unknown() }
 
@@ -170,11 +223,11 @@ internal class ControllerImageAttempt(
         commitAttempted = true
         return true
     }
-    fun accepted(conversation: Conversation): ImageSendResult.Accepted = ImageSendResult.Accepted(owner,
+    fun accepted(conversation: Conversation, confirmJournal: Boolean = true): ImageSendResult.Accepted = ImageSendResult.Accepted(owner,
         revision, conversation, userId, assistantId, runId, images.toList()).also {
         result = it
         // The SQLite receipt is authoritative even if this advisory tombstone update fails.
-        try { journal.getString(key, null)?.let { encoded ->
+        if (confirmJournal) try { journal.getString(key, null)?.let { encoded ->
             journal.edit().putString(key, JSONObject(encoded).put("confirmed", true).toString()).commit()
         } } catch (_:Exception) { }
     }

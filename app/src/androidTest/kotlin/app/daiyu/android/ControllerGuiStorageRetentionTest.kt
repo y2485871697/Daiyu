@@ -4,7 +4,10 @@ import android.app.Application
 import android.content.Context
 import android.os.Looper
 import android.test.InstrumentationTestCase
+import app.daiyu.android.context.*
 import app.daiyu.android.domain.*
+import app.daiyu.android.domain.context.CompressionPolicy
+import app.daiyu.android.domain.context.estimateTokens
 import app.daiyu.android.gui.*
 import app.daiyu.android.integration.tools.RunCatalogCloseResult
 import app.daiyu.android.storage.*
@@ -28,7 +31,8 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
         override fun getNoBackupFilesDir() = File(root, "no-backup").apply { mkdirs() }
     }
 
-    private inner class Fixture {
+    private inner class Fixture(val window: Long? = null, val input: String? = null,
+        private val beforePolicy: () -> Unit = {}) {
         val id = UUID.randomUUID().toString()
         val root = File(instrumentation.targetContext.cacheDir, "gui-storage-$id").apply { mkdirs() }
         val app = App(testContext(instrumentation.targetContext, "gui-storage-$id-"), root)
@@ -36,6 +40,10 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
         val alias = "app.daiyu.android.test.gui-storage.$id"
         val settings = ModelSettingsStore(app, alias)
         val opens = AtomicInteger()
+        val factories = AtomicInteger()
+        val modelInput = AtomicReference<List<Message>>()
+        lateinit var delivery: GuiConfirmedDelivery
+        val draft = "  exact GUI draft\nretained on unknown  "
         val modelEntered = CountDownLatch(1)
         val modelRelease = CountDownLatch(1)
         val ticket = ChatController.TextSendTicket()
@@ -48,7 +56,9 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
         init {
             settings.save(ModelSettings("https://example.invalid", "gui-storage", "synthetic-key", false))
             controller = ChatController(app, database, settings, app.getSharedPreferences("conversation-ui", 0), {
-                ModelPort {
+                factories.incrementAndGet()
+                ModelPort { history ->
+                    modelInput.set(history)
                     opens.incrementAndGet()
                     object : ModelSession {
                         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
@@ -59,23 +69,39 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
                         override fun cancel() { modelRelease.countDown() }
                     }
                 }
+            }, contextPreparationFactory = { context, service ->
+                if (window == null) ProductionContextPreparation.create(context, service)
+                else ContextPreparationCoordinator(service, {
+                    check(Looper.myLooper() !== Looper.getMainLooper())
+                    beforePolicy()
+                    CompressionSettings(contextWindowTokens = window, reserveTokens = 128)
+                }, CompressionPolicyResolver { snapshot ->
+                    CompressionPolicy(snapshot.automaticWithKnownWindow, snapshot.contextWindowTokens,
+                        snapshot.triggerPercent, snapshot.reserveTokens, 2)
+                }, SummaryModelResolver { error("No summary binding in this fixture") })
             })
             awaitControl("controller recovery ready") { controller.ready }
             assertNull(controller.problem)
         }
 
-        fun submit(): ControllerGuiEntry {
+        fun begin(): ControllerGuiEntry {
             val retained = AtomicReference<ControllerGuiEntry>()
             controlMain {
                 val (entry, delivery) = installConfirmedInput(this)
                 retained.set(entry)
+                this.delivery = delivery
                 assertTrue(controller.sendGui(entry, delivery, ticket) {
                     receipt.set(it); receiptReady.countDown()
                 })
             }
-            assertTrue("sendGui receipt", receiptReady.await(10, TimeUnit.SECONDS))
             return retained.get()
         }
+
+        fun awaitReceipt() {
+            assertTrue("sendGui receipt", receiptReady.await(10, TimeUnit.SECONDS))
+        }
+
+        fun submit(): ControllerGuiEntry = begin().also { awaitReceipt() }
 
         fun dispose() {
             modelRelease.countDown()
@@ -110,14 +136,15 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
         synchronized(controller) {
             check(controller.ready && controller.active == null && controller.guiEntry() == null)
             check(field(controller, "preparation") == null && field(controller, "resources") == null)
-            val text = "  exact GUI draft\nretained on unknown  "
+            val text = f.draft
             f.database.draft(text)
             val entry = ControllerGuiEntry(null, ChatController.TextSendOwner(null, 7, 11),
-                text, GuiOperation.HOME, null)
+                text, if (f.input == null) GuiOperation.HOME else GuiOperation.INPUT, f.input)
             val session = GuiRunSession(GuiLeaseGate.Lease(GuiOwner(entry.sessionId, entry.runId.value)))
             val observation = GuiObservation("confirmed-${f.id}", "test.external.application", 1,
                 1, 1, emptyList(), false)
-            val action = GuiAction(observation.observationId, entry.operation)
+            val action = GuiAction(observation.observationId, entry.operation,
+                nodeId = if (f.input == null) null else 4, text = f.input)
             val writes = setOf(action.effect(session.identity))
             GuiRunSession::class.java.getDeclaredField("frozenWrites").apply { isAccessible = true }
                 .set(session, writes)
@@ -137,6 +164,138 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
         assertTrue("physical catalog close receipt", done.await(5, TimeUnit.SECONDS))
         assertEquals(RunCatalogCloseResult.Drained, result.get())
         assertTrue(checkNotNull(entry.session).releaseConfirmed)
+    }
+
+    private fun assertRejectedBeforeCatalog(f: Fixture, entry: ControllerGuiEntry) {
+        assertTrue(f.receipt.get() is ChatController.TextSendResult.Rejected)
+        assertEquals(entry.editor, f.receipt.get().owner)
+        assertFalse(entry.accepted)
+        assertFalse(entry.persistenceUnknown)
+        assertNull(entry.catalog)
+        assertSame(f.delivery.session, entry.session)
+        awaitControl("original GUI session released and preparation cleared") {
+            checkNotNull(entry.session).releaseConfirmed && f.controller.guiEntry() == null &&
+                field(f.controller, "preparation") == null
+        }
+        controlMain {
+            assertNull(f.controller.active)
+            assertNull(field(f.controller, "resources"))
+            assertTrue((field(f.controller, "unacceptedTools") as Map<*, *>).isEmpty())
+        }
+        assertEquals(entry.text, f.database.draft())
+        assertTrue(f.database.conversations().isEmpty())
+        for (table in listOf("messages", "context_archives", "runtime_preparations")) {
+            f.database.readableDatabase.rawQuery("SELECT COUNT(*) FROM $table", null).use {
+                assertTrue(it.moveToFirst()); assertEquals("no durable acceptance or summary claim in $table", 0, it.getInt(0))
+            }
+        }
+        assertEquals(0, f.factories.get())
+        assertEquals(0, f.opens.get())
+        controlMain { f.controller.close() }
+        assertTrue("original preparation cleanup permits storage close", f.closeDone.await(10, TimeUnit.SECONDS))
+    }
+
+    fun testPlainDraftFitsButSameDraftWithConfirmedEvidenceRejectsBeforeAcceptanceOrModelOpen() {
+        val ordinary = Fixture(window = 1024)
+        try {
+            ordinary.database.draft(ordinary.draft)
+            controlMain {
+                assertTrue(ordinary.controller.sendText(null, 7, 11, ordinary.draft, ticket = ordinary.ticket) {
+                    ordinary.receipt.set(it); ordinary.receiptReady.countDown()
+                })
+            }
+            ordinary.awaitReceipt()
+            assertTrue(ordinary.receipt.get() is ChatController.TextSendResult.Accepted)
+            assertTrue(ordinary.modelEntered.await(5, TimeUnit.SECONDS))
+            assertTrue(estimateTokens(ordinary.modelInput.get()) <= 1024 - 128)
+            assertEquals(1, ordinary.modelInput.get().size)
+            assertEquals(listOf(ordinary.draft), ordinary.modelInput.get().single().blocks
+                .filterIsInstance<MessageBlock.Text>().map { it.text })
+            assertEquals(1, ordinary.opens.get())
+            controlMain { ordinary.controller.close() }
+            assertTrue("ordinary run drained", ordinary.closeDone.await(10, TimeUnit.SECONDS))
+        } finally { ordinary.dispose() }
+
+        // Full exact input is evidence, not part of the short editor draft; never truncate it to fit.
+        val fullInput = "  exact\n\"quoted\"\\input  " + "x".repeat(4000)
+        val gui = Fixture(window = 1024, input = fullInput)
+        try {
+            val entry = gui.submit()
+            val raw = Message(MessageId("estimate-only"), entry.conversationId, entry.runId, Message.USER_ROLE,
+                listOf(MessageBlock.Text("user", entry.text)), RunStatus.COMPLETED)
+            assertTrue(estimateTokens(listOf(raw)) <= 1024 - 128)
+            assertTrue(estimateTokens(listOf(GuiConfirmedModelPort.project(raw, gui.delivery))) > 1024 - 128)
+            assertEquals(fullInput, gui.delivery.action.text)
+            controlMain { assertTrue(gui.controller.problem?.contains("上下文超出发送预算") == true) }
+            assertRejectedBeforeCatalog(gui, entry)
+        } finally { gui.dispose() }
+    }
+
+    fun testWithinBudgetSendsOneFrozenEvidenceWithOriginalMessageAndProjectedCheckpoint() {
+        val fullInput = "  exact\n\"quoted\"\\input  " + "x".repeat(4000)
+        val f = Fixture(window = 8192, input = fullInput)
+        try {
+            val entry = f.submit()
+            assertTrue(f.receipt.get() is ChatController.TextSendResult.Accepted)
+            assertTrue(f.modelEntered.await(5, TimeUnit.SECONDS))
+            val sent = f.modelInput.get().single()
+            val persisted = ContextService(f.app, f.database).displayHistory(entry.conversationId)
+            val user = persisted.single { it.role == Message.USER_ROLE }
+            assertEquals(2, persisted.size)
+            assertEquals(entry.runId, user.runId)
+            assertEquals(entry.conversationId, user.conversationId)
+            assertEquals(listOf(MessageBlock.Text("user", entry.text)), user.blocks)
+            assertEquals(user.copy(blocks = sent.blocks), sent) // no second user/run identity
+            assertEquals(2, sent.blocks.size)
+            assertEquals(user.blocks.single(), sent.blocks.first())
+            val evidence = sent.blocks.filterIsInstance<MessageBlock.Text>().single { it.itemId == "gui_confirmed_action" }
+            assertEquals(f.delivery.modelContext(), evidence.text)
+            assertEquals(fullInput, org.json.JSONObject(f.delivery.actionArgumentsJson()).getString("text"))
+            assertEquals(f.delivery.observation.observationId,
+                org.json.JSONObject(f.delivery.actionArgumentsJson()).getString("observation_id"))
+            assertTrue(estimateTokens(listOf(sent)) <= 8192 - 128)
+            assertEquals("", f.database.draft())
+            assertEquals(1, f.factories.get())
+            assertEquals(1, f.opens.get())
+            f.database.readableDatabase.rawQuery("SELECT payload FROM runtime_checkpoints WHERE message_id=?",
+                arrayOf(entry.assistantId.value)).use { rows ->
+                assertTrue(rows.moveToFirst())
+                val history = RunCheckpointCodec.decode(rows.getString(0)).history
+                val retained = history.single { it.id == user.id }
+                assertEquals(sent, retained)
+                assertEquals(1, retained.blocks.filterIsInstance<MessageBlock.Text>().count { it.itemId == "gui_confirmed_action" })
+            }
+            assertSame(f.delivery.session, entry.session)
+            controlMain { f.controller.close() }
+            assertTrue("accepted original GUI owner drains", f.closeDone.await(10, TimeUnit.SECONDS))
+            assertCatalogDrained(entry)
+        } finally { f.dispose() }
+    }
+
+    fun testCancellationDuringGuiContextFreezeKeepsDraftAndReleasesOriginalSession() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val f = Fixture(window = 8192, beforePolicy = {
+            entered.countDown()
+            check(release.await(10, TimeUnit.SECONDS))
+        })
+        try {
+            val entry = f.begin()
+            assertTrue("context freeze entered", entered.await(5, TimeUnit.SECONDS))
+            controlMain { assertTrue(f.controller.cancelGui(entry)) }
+            release.countDown()
+            f.awaitReceipt()
+            assertRejectedBeforeCatalog(f, entry)
+        } finally { release.countDown(); f.dispose() }
+    }
+
+    fun testGuiContextPreparationFailureKeepsDraftAndReleasesOriginalSession() {
+        val f = Fixture(window = 8192, beforePolicy = { throw IllegalStateException("fixture policy failure") })
+        try {
+            val entry = f.submit()
+            controlMain { assertTrue(f.controller.problem?.contains("上下文或摘要准备失败") == true) }
+            assertRejectedBeforeCatalog(f, entry)
+        } finally { f.dispose() }
     }
 
     fun testDatabaseSendExceptionRetainsUnknownEntryAndStorageAfterPhysicalCatalogDrain() {

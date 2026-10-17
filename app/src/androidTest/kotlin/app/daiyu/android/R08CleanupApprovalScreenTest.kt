@@ -59,7 +59,7 @@ class R08CleanupApprovalScreenTest : ComposeActivityTestCase() {
     fun testShowingDoesNotDecideAndConfirmationOnlyAnswersOriginalRequestOnce() {
         val req = request("original-generation")
         mainThread { visible.value = req }
-        ui.onNodeWithText("已停止运行：额外收尾审批").assertExists()
+        ui.onNodeWithText("已停止运行：额外释放审批").assertExists()
         assertTrue(decisions.isEmpty())
         node("r08-cleanup-confirm").performClick()
         assertEquals(listOf(req to true), decisions)

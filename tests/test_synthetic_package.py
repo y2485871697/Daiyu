@@ -14,7 +14,7 @@ spec = importlib.util.spec_from_file_location('synthetic_package', ROOT / 'scrip
 package = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(package)
 APP = '''<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.daiyu.android.synthetic"><application android:name="app.daiyu.android.ChatApplication"><provider android:authorities="app.daiyu.android.synthetic.shizuku"/></application></manifest>'''
-TEST = '''<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.daiyu.android.synthetic.test"><instrumentation android:name="android.test.InstrumentationTestRunner" android:targetPackage="app.daiyu.android.synthetic"/></manifest>'''
+TEST = '''<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.daiyu.android.synthetic.test"><instrumentation android:name="androidx.test.runner.AndroidJUnitRunner" android:targetPackage="app.daiyu.android.synthetic"/></manifest>'''
 SIGNATURE = ('Number of signers: 1\nVerified using v2 scheme (APK Signature Scheme v2): true\n'
              'Signer #1 certificate SHA-256 digest: ' + package.verify_certificate.__globals__['EXPECTED_CERT'] + '\n')
 
@@ -41,6 +41,17 @@ class SyntheticPackageTests(unittest.TestCase):
             self.assertEqual(record, json.loads((root / 'synthetic-record.json').read_text()))
             self.assertEqual(2, len((root / 'SHA256SUMS').read_text().splitlines()))
 
+    def test_only_exact_androidx_runner_is_accepted_in_both_variants(self):
+        release = APP.replace('</application>', '<profileable android:shell="true"/></application>')
+        for variant, app in [('debug-synthetic', APP), ('release-synthetic', release)]:
+            package.verify_manifests(app, TEST, variant=variant)
+            for runner in ('android.test.InstrumentationTestRunner',
+                           'androidx.test.runner.OtherRunner',
+                           'androidx.test.runner.AndroidJUnitRunnerSubclass'):
+                with self.subTest(variant=variant, runner=runner), self.assertRaises(ValueError):
+                    package.verify_manifests(app, TEST.replace('androidx.test.runner.AndroidJUnitRunner', runner),
+                                            variant=variant)
+
     def test_production_package_wrong_target_shared_uid_and_authority_rejected(self):
         for app, tests in [
             (APP.replace('package="app.daiyu.android.synthetic"', 'package="app.daiyu.android"'), TEST),
@@ -49,7 +60,7 @@ class SyntheticPackageTests(unittest.TestCase):
                 'android:sharedUserId="app.daiyu.android" package="app.daiyu.android.synthetic"'), TEST),
             (APP.replace('app.daiyu.android.synthetic.shizuku', 'app.daiyu.android.shizuku'), TEST),
             (APP.replace('app.daiyu.android.ChatApplication', 'android.app.Application'), TEST),
-            (APP, TEST.replace('android.test.InstrumentationTestRunner', 'other.Runner')),
+            (APP, TEST.replace('androidx.test.runner.AndroidJUnitRunner', 'other.Runner')),
             (APP, TEST.replace('</manifest>', '<instrumentation/></manifest>')),
             (APP, TEST.replace('</manifest>', '<application><provider android:authorities="app.daiyu.android.provider"/></application></manifest>')),
             (APP, TEST.replace('package="app.daiyu.android.synthetic.test"', 'package="app.daiyu.android.test"')),
@@ -136,10 +147,14 @@ class SyntheticPackageTests(unittest.TestCase):
         self.assertTrue(manifest.is_file())
         sources = sorted((root / 'kotlin').rglob('*.kt'))
         names = {path.name for path in sources}
-        self.assertTrue({'ReleaseSyntheticPerformanceTest.kt', 'SyntheticFrameCollector.kt'} <= names)
+        self.assertTrue({'ReleaseSyntheticPerformanceTest.kt', 'SyntheticFrameCollector.kt', 'FullPerformanceDataset.kt'} <= names)
         entry = next(path for path in sources if path.name == 'ReleaseSyntheticPerformanceTest.kt').read_text()
         self.assertRegex(entry, r'class\s+ReleaseSyntheticPerformanceTest\s*:\s*InstrumentationTestCase\(\)')
         entries = [(path.name, name) for path in sources for name in
                    re.findall(r'^\s*fun\s+(test\w+)\s*\(\s*\)', path.read_text(), re.MULTILINE)]
         self.assertEqual([('ReleaseSyntheticPerformanceTest.kt',
-                           'testCollectRawFramesAndSyntheticInputUpperBounds')], entries)
+                           'testCollectRawFramesAndSyntheticInputUpperBounds'),
+                          ('ReleaseSyntheticPerformanceTest.kt',
+                           'testCollectFullScaleScrollInputAndBackendMigration')], entries)
+        self.assertIn('args.getString("daiyuFullPerformance") == "true"', entry)
+        self.assertIn('explicit_full_performance_opt_in_required', entry)

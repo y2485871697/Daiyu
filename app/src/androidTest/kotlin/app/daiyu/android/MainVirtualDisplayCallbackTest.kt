@@ -78,6 +78,7 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
                                         .put("missing", org.json.JSONArray())
                                 }
                                 "handoff" -> {
+                                    body.remove("displayId"); body.remove("uniqueId")
                                     handoffSends.incrementAndGet()
                                     val ids = request.getJSONObject("parameters").getJSONArray("taskIds")
                                     handedOffIds = (0 until ids.length()).map { ids.getInt(it) }

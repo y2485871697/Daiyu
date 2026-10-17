@@ -165,7 +165,15 @@ case "$*" in
  'shell am instrument '*)
   printf '%s\n' "$@" > smoke/instrumentation-args.txt
   [ "$#" -eq 8 ] && [ "$4" = -w ] && [ "$5" = -e ] && [ "$6" = class ] &&
-   [ "$7" = "$TEST_CLASSES" ] && [ "$8" = app.daiyu.android.test/android.test.InstrumentationTestRunner ] || exit 11
+   [ "$7" = "$TEST_CLASSES" ] && [ "$8" = app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner ] || exit 11
+  if [ "$CASE" = androidx-ok ]; then
+   printf 'INSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: class=app.daiyu.android.FirstTest\nINSTRUMENTATION_STATUS: test=testOne\nINSTRUMENTATION_STATUS: current=1\nINSTRUMENTATION_STATUS: numtests=1\nINSTRUMENTATION_STATUS_CODE: 1\n'
+   printf 'INSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: class=app.daiyu.android.FirstTest\nINSTRUMENTATION_STATUS: test=testOne\nINSTRUMENTATION_STATUS: current=1\nINSTRUMENTATION_STATUS: numtests=1\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_RESULT: stream=\nTime: 0.01\n'
+  fi
+  [ "$CASE" != status-skip ] || printf 'INSTRUMENTATION_STATUS_CODE: -3\n'
+  [ "$CASE" != status-ignore ] || printf 'INSTRUMENTATION_STATUS_CODE: -4\n'
+  [ "$CASE" != text-skip ] || printf 'skipped\n'
+  [ "$CASE" != text-ignore ] || printf 'ignored\n'
   summary="OK ($TEST_COUNT tests)"
   [ "$CASE" != terminal-before ] || printf 'INSTRUMENTATION_CODE: -1\n'
   case "$CASE" in
@@ -237,11 +245,19 @@ exit 0
         self.assertIn('phase=instrumentation budget=2400s', (self.root / 'smoke/stages.txt').read_text())
         args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
         self.assertEqual(args[3:7], ['-w', '-e', 'class', 'app.daiyu.android.FirstTest'])
+        self.assertEqual(args[7], 'app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner')
+
+    def test_androidx_junit3_status_frames_are_accepted_on_both_apis(self):
+        for api in (26, 37):
+            with self.subTest(api=api):
+                result = self.smoke(api=api, case='androidx-ok')
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                self.assertTrue((self.root / 'smoke/启动.png').is_file())
 
     def test_strict_shared_result_rejects_ambiguous_and_failed_protocol(self):
         for case in ('substring-ok', 'indented-ok', 'duplicate-ok', 'missing-terminal',
                      'terminal-conflict', 'duplicate-terminal', 'terminal-before',
-                     'after-terminal', 'status-fail'):
+                     'after-terminal', 'status-fail', 'status-skip', 'status-ignore', 'text-skip', 'text-ignore'):
             with self.subTest(case=case):
                 result = self.smoke(case=case)
                 self.assertNotEqual(result.returncode, 0)

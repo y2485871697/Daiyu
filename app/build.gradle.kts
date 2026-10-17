@@ -60,7 +60,7 @@ android {
         minSdk = 26
         targetSdk = 37
         proguardFiles("offline-speech-rules.pro")
-        testInstrumentationRunner = "android.test.InstrumentationTestRunner"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = 1
         versionName = "0.1.0"
         ndk {

@@ -37,7 +37,7 @@ def verify_manifests(app_xml, test_xml, variant='debug-synthetic'):
                 raise ValueError('synthetic_provider_identity_mismatch')
     runners = tests.findall('instrumentation')
     if len(runners) != 1 or runners[0].get(ANDROID + 'targetPackage') != APP_ID or \
-            runners[0].get(ANDROID + 'name') != 'android.test.InstrumentationTestRunner':
+            runners[0].get(ANDROID + 'name') != 'androidx.test.runner.AndroidJUnitRunner':
         raise ValueError('synthetic_instrumentation_mismatch')
 
 

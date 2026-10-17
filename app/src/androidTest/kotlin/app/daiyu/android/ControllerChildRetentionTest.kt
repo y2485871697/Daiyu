@@ -190,8 +190,20 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
         val original = f.controller.childTasks(f.conversation.id).single()
         val command = ChildTaskCommand("records-append-${f.id}", original, ChildTaskCommandKind.APPEND, f.profile.id, "review this additional constraint")
         f.database.draft(f.conversation.id, "keep this conversation draft")
+        val beforeCommand = System.currentTimeMillis()
         val accepted = f.controller.directChildTask(command) as ChildTaskCommandReceipt.Accepted
+        val afterCommand = System.currentTimeMillis()
         assertTrue(accepted.task.owner.parentRunId != original.owner.parentRunId)
+        val parentMessages = f.database.messages(f.conversation.id).map { it.second }
+            .filter { it.runId.value == accepted.task.owner.parentRunId }
+        assertEquals(2, parentMessages.size)
+        val commandUser = parentMessages.single { it.role == Message.USER_ROLE }
+        val commandAssistant = parentMessages.single { it.role == Message.ASSISTANT_ROLE }
+        assertTrue(checkNotNull(commandUser.createdAt) in beforeCommand..afterCommand)
+        assertEquals(commandUser.createdAt, commandAssistant.createdAt)
+        assertEquals(RunStatus.COMPLETED, commandAssistant.status)
+        assertTrue(commandAssistant.historySegments.isNotEmpty())
+        assertTrue(commandAssistant.historySegments.all { it.createdAt == commandAssistant.createdAt })
         f.database.readableDatabase.rawQuery("SELECT draft FROM conversations WHERE id=?", arrayOf(f.conversation.id.value)).use {
             assertTrue(it.moveToFirst()); assertEquals("keep this conversation draft", it.getString(0))
         }
@@ -213,6 +225,8 @@ class ControllerChildRetentionTest : InstrumentationTestCase() {
         assertEquals(original.revision + 1, preserved.revision)
         assertEquals(ChildTaskStatus.COMPLETED, rows.single { it.owner == accepted.task.owner }.status)
         assertEquals(accepted.task.owner, (f.controller.directChildTask(command) as ChildTaskCommandReceipt.Accepted).task.owner)
+        assertEquals(parentMessages, f.database.messages(f.conversation.id).map { it.second }
+            .filter { it.runId.value == accepted.task.owner.parentRunId })
         assertEquals(2, f.childOpens.get())
         assertEquals(ChildTaskCommandReceipt.Rejected("child_request_conflict"), f.controller.directChildTask(command.copy(instruction = "changed")))
     }

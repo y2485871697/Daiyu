@@ -18,7 +18,8 @@ internal class RunnerHistorySegments(initial: Message) {
             require(user.role == Message.USER_ROLE && user.status == RunStatus.COMPLETED && user.error == null &&
                 user.conversationId == message.conversationId && user.runId == message.runId &&
                 user.id != message.id && user.historySegments.isEmpty())
-            MessageHistorySegment(user.id, Message.USER_ROLE, user.blocks.toList(), user.protocolItems.toList())
+            MessageHistorySegment(user.id, Message.USER_ROLE, user.blocks.toList(), user.protocolItems.toList(),
+                createdAt = user.createdAt)
         }
         sealed = sealed + active(message, true) + segments
         blockStart = message.blocks.size
@@ -32,7 +33,8 @@ internal class RunnerHistorySegments(initial: Message) {
             if (kept.isEmpty() && items.isEmpty()) return null
             // Interrupted batches cannot replay protocol calls whose tools were never executed.
             val safeItems = if (completedToolsOnly && blocks.any { it is MessageBlock.Tool && it.result == null }) emptyList() else items
-            return MessageHistorySegment(message.id, Message.ASSISTANT_ROLE, kept.toList(), safeItems.toList())
+            return MessageHistorySegment(message.id, Message.ASSISTANT_ROLE, kept.toList(), safeItems.toList(),
+                createdAt = message.createdAt)
         }
         if (protocol.isEmpty()) return listOfNotNull(segment(message.blocks.drop(blockStart), emptyList()))
         check(protocolBlockEnd in blockStart..message.blocks.size)

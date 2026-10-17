@@ -2638,6 +2638,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         generationOutputs?.let { outputs ->
+            val originalStaticVisit = staticGenerationVisit
             androidx.compose.material3.AlertDialog(onDismissRequest = ::cancelGenerationOutputs,
                 title = { androidx.compose.material3.Text("已登记生成资产") },
                 text = {
@@ -2661,7 +2662,7 @@ class MainActivity : ComponentActivity() {
                             androidx.compose.material3.Text("静态 ${source.kind} · ${source.mimeType} · ${source.bytes} bytes · ${source.width}×${source.height}")
                             display.thumbnail?.let { bitmap -> androidx.compose.foundation.Image(bitmap = bitmap.asImageBitmap(),
                                 contentDescription = "分支静态生成图片", modifier = Modifier.fillMaxWidth()) }
-                            androidx.compose.material3.TextButton(onClick = { backupGuard { pickStaticGenerationOriginal(display.output) } }) {
+                            androidx.compose.material3.TextButton(onClick = { backupGuard { pickStaticGenerationOriginal(display.output, originalStaticVisit) } }) {
                                 androidx.compose.material3.Text("保存静态原件")
                             }
                         }
@@ -2817,10 +2818,11 @@ class MainActivity : ComponentActivity() {
         }) toast("静态原件暂不可读；请等待当前数据操作完成")
     }
 
-    @Suppress("DEPRECATION") private fun pickStaticGenerationOriginal(output: app.daiyu.android.storage.StaticGenerationOutput) {
+    @Suppress("DEPRECATION") private fun pickStaticGenerationOriginal(output: app.daiyu.android.storage.StaticGenerationOutput,
+        expectedVisit: java.util.concurrent.atomic.AtomicBoolean?) {
         check(pendingBackupRequest == null) { "文件选择尚未返回" }
-        val active = checkNotNull(staticGenerationVisit)
-        check(active.get() && activityUsable() && retainedPage == "chat" && !sidebarVisible &&
+        val active = checkNotNull(expectedVisit)
+        check(active === staticGenerationVisit && active.get() && activityUsable() && retainedPage == "chat" && !sidebarVisible &&
             selected?.id?.value == output.destination.conversationId) { "原会话访问已失效" }
         val extension = when (output.source.mimeType) {
             "image/png" -> "png"; "image/jpeg" -> "jpg"; "image/webp" -> "webp"

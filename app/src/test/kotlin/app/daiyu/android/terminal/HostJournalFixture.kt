@@ -16,6 +16,23 @@ internal fun hostJournal(directory: File, scope: String, limit: Int = 256, bindi
     OperationJournal(directory, scope, limit, binding, ::hostDirectorySync)
 
 
-internal fun hostLinuxStore(directory: File) = LinuxEnvironmentStore(directory, ::hostDirectorySync)
+internal fun hostLinuxStore(directory: File) = LinuxEnvironmentStore(directory, ::hostDirectorySync, ::hostLinuxFileKey)
 internal fun hostLinuxCatalog(directory: File, directorySync: (File) -> Unit = ::hostDirectorySync,
-    beforeApprovalGate: () -> Unit = {}) = TrustedLinuxCatalog(directory, directorySync, beforeApprovalGate)
+    beforeApprovalGate: () -> Unit = {}) = TrustedLinuxCatalog(directory, directorySync, beforeApprovalGate, fileKey = ::hostLinuxFileKey)
+
+// Windows metadata identity is modeled; Android and POSIX hosts retain the strict NIO key.
+internal object HostLinuxIdentity {
+    private data class Entry(val created: java.nio.file.attribute.FileTime, val token: String)
+    private val entries = mutableMapOf<java.nio.file.Path, Entry>()
+    @Synchronized fun read(path: java.nio.file.Path): Any? {
+        if (File.separatorChar != '\\') return strictLinuxFileKey(path)
+        val real = path.toRealPath()
+        val created = java.nio.file.Files.readAttributes(real,
+            java.nio.file.attribute.BasicFileAttributes::class.java).creationTime()
+        val old = entries[real]
+        return if (old != null && old.created == created) old.token
+            else Entry(created, java.util.UUID.randomUUID().toString()).also { entries[real] = it }.token
+    }
+    @Synchronized fun replaced(path: java.nio.file.Path) { entries.remove(path.toAbsolutePath().normalize()) }
+}
+internal fun hostLinuxFileKey(path: java.nio.file.Path): Any? = HostLinuxIdentity.read(path)

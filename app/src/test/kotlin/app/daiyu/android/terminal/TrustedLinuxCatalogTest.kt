@@ -26,7 +26,8 @@ class TrustedLinuxCatalogTest : TestCase() {
             val links = mutableSetOf<java.nio.file.Path>()
             linkModels[root] = links
             test(root, spec, TrustedLinuxCatalog(File(root, "catalog"), ::hostDirectorySync,
-                symbolicLink = { Files.isSymbolicLink(it) || it.toAbsolutePath().normalize() in links }))
+                symbolicLink = { Files.isSymbolicLink(it) || it.toAbsolutePath().normalize() in links },
+                fileKey = ::hostLinuxFileKey))
         }
         finally { linkModels.remove(root); root.deleteRecursively() }
     }

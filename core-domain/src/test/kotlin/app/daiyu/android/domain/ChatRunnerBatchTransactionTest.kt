@@ -25,7 +25,7 @@ class ChatRunnerBatchTransactionTest {
     }
     private open class Budget : TransportReconnectBudget {
         override fun check() {}
-        override fun setPaused(paused: Boolean) {}
+        override fun setPaused(paused: Boolean, revision: Long) {}
         override fun attach(disconnect: () -> Unit) = AutoCloseable {}
         override fun finish(status: String) {}
     }

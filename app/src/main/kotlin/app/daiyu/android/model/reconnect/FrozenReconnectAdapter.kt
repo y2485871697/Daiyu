@@ -37,7 +37,7 @@ class FrozenReconnectAdapter private constructor(
             object : app.daiyu.android.domain.runtime.TransportReconnectBudget {
                 override fun updateReason(reason: ModelFailure) = retained.updateReason(reason)
                 override fun check() = retained.check()
-                override fun setPaused(paused: Boolean) = retained.setPaused(paused)
+                override fun setPaused(paused: Boolean, revision: Long) = retained.setPaused(paused, revision)
                 override fun attach(disconnect: () -> Unit): AutoCloseable {
                     val scope = ReconnectTransportScope(disconnect)
                     retained.attach(scope)

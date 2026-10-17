@@ -603,7 +603,10 @@ class ControllerVirtualDisplaySessionTest {
             val auth = f.initialized()
             f.endpoint.handoffBody = body
             f.endpoint.confirmRelease = true
-            assertTrue(f.steps(auth, "handoff", "release").all { it.outcome is DispatchOutcome.Unknown })
+            val results = f.steps(auth, "handoff", "release")
+            assertEquals(2, results.size)
+            assertTrue(results[0].outcome is DispatchOutcome.Unknown)
+            assertEquals(DispatchOutcome.NotExecuted("batch_stopped_before_execution"), results[1].outcome)
             assertTrue(f.steps(auth, "handoff").single().outcome is DispatchOutcome.Unknown)
             assertEquals(1, f.endpoint.handoffIds.size)
             assertTrue(f.endpoint.releaseIds.isEmpty())

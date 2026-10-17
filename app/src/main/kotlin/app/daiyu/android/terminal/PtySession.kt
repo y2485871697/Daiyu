@@ -17,8 +17,9 @@ class PtySession internal constructor(
 ) : AutoCloseable {
     internal constructor(process: Process, journal: OperationJournal) : this(process, journal, false)
     private val readerFinished = CountDownLatch(1)
-    private var helloSeen = false
+    @Volatile private var helloSeen = false
     private var execErrorSeen = false
+    @Volatile private var execErrno: Int? = null
     private var truncationSeen = false
     @Volatile private var nativeScope: String? = null
     @Volatile private var rootDrained = false
@@ -106,6 +107,15 @@ class PtySession internal constructor(
             .put("pty", true).put("persistent_shell", true)
     }
 
+    internal fun startupDiagnostics(): JSONObject {
+        val exit = try { process.exitValue() } catch (_: Exception) { null }
+        return JSONObject().put("session_created", true)
+            .put("failure", failure ?: JSONObject.NULL).put("exec_errno", execErrno ?: JSONObject.NULL)
+            .put("launcher_exit", exit ?: JSONObject.NULL).put("scope_seen", nativeScope != null)
+            .put("hello_seen", helloSeen).put("reader_finished", readerFinished.count == 0L)
+            .put("protocol_broken", protocolBroken).put("root_drained", rootDrained)
+    }
+
     private fun pump() {
         fun publishReady() {
             if (helloSeen && (!rootScoped || nativeScope != null) && failure == null) {
@@ -163,6 +173,7 @@ class PtySession internal constructor(
                                 check(length == 4 && nativeScope != null && !execErrorSeen)
                                 execErrorSeen = true
                             }
+                            if (length == 4) execErrno = java.nio.ByteBuffer.wrap(bytes).int
                             failure = "pty_exec_failed"
                             ready.countDown()
                         }
@@ -264,7 +275,7 @@ class PtySession internal constructor(
             var startupCause: Exception? = null
             fun failed(error: String, cause: Throwable? = startupCause): IllegalStateException {
                 val owned = cleanup ?: return IllegalStateException(error, cause)
-                val failure = PtyStartupFailure(error, owned, cause)
+                val failure = PtyStartupFailure(error, owned, cause, created?.startupDiagnostics() ?: JSONObject().put("session_created", false))
                 try { owned.requestClose() } catch (close: Exception) { failure.addSuppressed(close) }
                 return failure
             }
@@ -303,11 +314,13 @@ class PtySession internal constructor(
                     check(session.rootScoped == (rootScope != null)) { "pty_protocol_mode_mismatch" }
                     if (!session.ready.await(3, TimeUnit.SECONDS) || !session.started || session.failure != null) {
                         JSONObject().put("ok", false).put("execution", "unknown").put("error", "pty_startup_unknown_not_replayed")
+                            .put("startup_diagnostics", session.startupDiagnostics())
                     } else JSONObject().put("ok", true).put("execution", "executed").put("session_scope", sessionScope)
                 } catch (error: Exception) {
                     startupCause = error
                     if (error is InterruptedException) Thread.currentThread().interrupt()
                     JSONObject().put("ok", false).put("execution", "unknown").put("error", "pty_startup_unknown_not_replayed")
+                        .put("startup_diagnostics", created?.startupDiagnostics() ?: JSONObject().put("session_created", false))
                 }
             } } catch (failure: Throwable) {
                 if (cleanup == null) throw failure

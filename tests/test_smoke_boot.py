@@ -164,8 +164,8 @@ case "$*" in
  'install '*) printf 'Success\n'; [ "$CASE" != install-fail ] || exit 7 ;;
  'shell am instrument '*)
   printf '%s\n' "$@" > smoke/instrumentation-args.txt
-  [ "$#" -eq 8 ] && [ "$4" = -w ] && [ "$5" = -e ] && [ "$6" = class ] &&
-   [ "$7" = "$TEST_CLASSES" ] && [ "$8" = app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner ] || exit 11
+  [ "$#" -eq 9 ] && [ "$4" = -w ] && [ "$5" = -r ] && [ "$6" = -e ] && [ "$7" = class ] &&
+   [ "$8" = "$TEST_CLASSES" ] && [ "$9" = app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner ] || exit 11
   if [ "$CASE" = androidx-ok ]; then
    printf 'INSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: class=app.daiyu.android.FirstTest\nINSTRUMENTATION_STATUS: test=testOne\nINSTRUMENTATION_STATUS: current=1\nINSTRUMENTATION_STATUS: numtests=1\nINSTRUMENTATION_STATUS_CODE: 1\n'
    printf 'INSTRUMENTATION_STATUS: id=AndroidJUnitRunner\nINSTRUMENTATION_STATUS: class=app.daiyu.android.FirstTest\nINSTRUMENTATION_STATUS: test=testOne\nINSTRUMENTATION_STATUS: current=1\nINSTRUMENTATION_STATUS: numtests=1\nINSTRUMENTATION_STATUS_CODE: 0\nINSTRUMENTATION_RESULT: stream=\nTime: 0.01\n'
@@ -244,8 +244,8 @@ exit 0
         self.assertIn('phase=instrumentation exit=0', (self.root / 'smoke/stages.txt').read_text())
         self.assertIn('phase=instrumentation budget=2400s', (self.root / 'smoke/stages.txt').read_text())
         args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
-        self.assertEqual(args[3:7], ['-w', '-e', 'class', 'app.daiyu.android.FirstTest'])
-        self.assertEqual(args[7], 'app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner')
+        self.assertEqual(args[3:8], ['-w', '-r', '-e', 'class', 'app.daiyu.android.FirstTest'])
+        self.assertEqual(args[8], 'app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner')
 
     def test_androidx_junit3_status_frames_are_accepted_on_both_apis(self):
         for api in (26, 37):
@@ -253,6 +253,23 @@ exit 0
                 result = self.smoke(api=api, case='androidx-ok')
                 self.assertEqual(result.returncode, 0, result.stderr.decode())
                 self.assertTrue((self.root / 'smoke/启动.png').is_file())
+
+    def test_pretty_ok_cannot_replace_the_raw_terminal_receipt(self):
+        output = self.root / 'pretty-or-raw.txt'
+        parser = ROOT / 'scripts/acceptance/instrumentation_result.py'
+        for raw in (False, True):
+            with self.subTest(raw=raw):
+                output.write_text('Time: 394.412\n\nOK (419 tests)\n\n' +
+                                  ('INSTRUMENTATION_CODE: -1\n' if raw else ''))
+                result = subprocess.run([os.sys.executable, str(parser), '--output', str(output),
+                                         '--expected-tests', '419'], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0 if raw else 2)
+                report = json.loads(result.stdout)
+                self.assertEqual(report['valid'], raw)
+                if raw:
+                    self.assertEqual(report['tests_passed'], 419)
+                else:
+                    self.assertEqual(report['error'], 'instrumentation_terminal_conflict')
 
     def test_strict_shared_result_rejects_ambiguous_and_failed_protocol(self):
         for case in ('substring-ok', 'indented-ok', 'duplicate-ok', 'missing-terminal',
@@ -300,7 +317,7 @@ exit 0
             'package app.daiyu.android.other\nclass SecondTest : android.test.InstrumentationTestCase() {\n fun testTwo() {}\n fun testThree() {}\n}\n'))
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
-        self.assertEqual(args[6], 'app.daiyu.android.FirstTest,app.daiyu.android.other.SecondTest')
+        self.assertEqual(args[7], 'app.daiyu.android.FirstTest,app.daiyu.android.other.SecondTest')
         self.assertEqual((self.root / 'smoke/instrumentation-targets.txt').read_text().splitlines()[0], '3')
 
     def test_java_only_classes_are_selected_on_both_apis(self):
@@ -313,7 +330,7 @@ exit 0
                     expected_classes=classes, reported_count=5)
                 self.assertEqual(result.returncode, 0, result.stderr.decode())
                 args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
-                self.assertEqual(args[3:7], ['-w', '-e', 'class', classes])
+                self.assertEqual(args[3:8], ['-w', '-r', '-e', 'class', classes])
                 self.assertEqual((self.root / 'smoke/instrumentation-targets.txt').read_text().splitlines(),
                                  ['5', classes])
 
@@ -324,7 +341,7 @@ exit 0
             expected_classes=classes, reported_count=5)
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
-        self.assertEqual(args[3:7], ['-w', '-e', 'class', classes])
+        self.assertEqual(args[3:8], ['-w', '-r', '-e', 'class', classes])
         self.assertEqual((self.root / 'smoke/instrumentation-targets.txt').read_text().splitlines(),
                          ['5', classes])
 

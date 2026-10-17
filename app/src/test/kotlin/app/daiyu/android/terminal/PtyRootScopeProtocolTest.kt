@@ -19,7 +19,7 @@ class PtyRootScopeProtocolTest {
     private fun status() = frame('X', byteArrayOf(0, 0, 0, 0))
     private fun drain(name: String = scope) = text('D', "DROOT1 scope=$name kill=1 populated=0 reaped=1 removed=1")
 
-    private class EndedProcess(bytes: ByteArray) : Process() {
+    private open class EndedProcess(bytes: ByteArray) : Process() {
         private val input = ByteArrayInputStream(bytes)
         private val output = ByteArrayOutputStream()
         var destroys = 0
@@ -155,4 +155,70 @@ class PtyRootScopeProtocolTest {
             assertTrue(session.awaitTermination(2_000))
         } finally { eof.countDown(); session.close(); session.awaitTermination(2_000); root.deleteRecursively() }
     }
+    @Test fun startupDiagnosticsDistinguishMissingProtocolExecFailureAndCleanRefusal() {
+        val refusal = text('F', "DROOT0 guest=0 scope_clean=1")
+        val cases = listOf(
+            ByteArray(0) to "pty_root_scope_drain_unknown",
+            (text('S', scope) + frame('E', byteArrayOf(0, 0, 0, 13))) to "pty_exec_failed",
+            refusal to "pty_root_scope_unavailable",
+            byteArrayOf('S'.code.toByte()) to "pty_protocol_unknown",
+        )
+        for ((bytes, expected) in cases) {
+            val root = Files.createTempDirectory("pty-startup-diagnostics-").toFile()
+            val process = EndedProcess(bytes)
+            val session = PtySession(process, hostJournal(root, "scope"), true)
+            try {
+                assertEquals(bytes.contentEquals(refusal), session.awaitTermination(2_000))
+                val state = session.startupDiagnostics()
+                assertEquals(expected, state.getString("failure"))
+                assertEquals(0, state.getInt("launcher_exit"))
+                assertTrue(state.getBoolean("reader_finished"))
+                assertFalse(state.getBoolean("hello_seen"))
+                assertEquals(expected == "pty_exec_failed", state.getBoolean("scope_seen"))
+                assertEquals(expected == "pty_protocol_unknown", state.getBoolean("protocol_broken"))
+                assertEquals(expected == "pty_root_scope_unavailable", state.getBoolean("root_drained"))
+                if (expected == "pty_exec_failed") assertEquals(13, state.getInt("exec_errno"))
+                else assertTrue(state.isNull("exec_errno"))
+                assertFalse(state.has("stdout"))
+                assertFalse(state.has("environment"))
+            } finally { session.close(); root.deleteRecursively() }
+        }
+    }
+
+    @Test fun failedOpenPersistsNumericDiagnosticsWithoutReleasingUnknownRoot() {
+        for (exitProbeFailure in listOf(false, true)) {
+            val root = Files.createTempDirectory("pty-open-diagnostics-").toFile()
+            val helper = root.resolve("helper").apply { writeText("helper"); check(setExecutable(true)) }
+            val su = root.resolve("su").apply { writeText("su"); check(setExecutable(true)) }
+            val launch = RootScopeLaunch(root.resolve("rootfs").apply { mkdir() }.canonicalFile, su.canonicalFile)
+            val process = object : EndedProcess(text('S', scope) + frame('E', byteArrayOf(0, 0, 0, 13))) {
+                override fun exitValue(): Int {
+                    if (exitProbeFailure) throw UnsupportedOperationException("diagnostic probe unavailable")
+                    return super.exitValue()
+                }
+            }
+            try {
+                try {
+                    PtySession.openBound(helper, launch.guestArgv(), emptyMap(), root,
+                        root.resolve("journal"), "failure", 24, 80, null,
+                        startProcess = { process },
+                        createJournal = { directory, name, binding -> hostJournal(directory, name, binding = binding) },
+                        rootScope = launch)
+                    fail("failed exec cannot become a successful open")
+                } catch (failure: PtyStartupFailure) {
+                    assertEquals("pty_startup_unknown_not_replayed", failure.message)
+                    assertEquals(13, checkNotNull(failure.diagnostics).getInt("exec_errno"))
+                    assertEquals(exitProbeFailure, failure.diagnostics.isNull("launcher_exit"))
+                    assertFalse(failure.cleanup.awaitTermination(2_000))
+                    val saved = org.json.JSONObject(root.resolve("journal/failure.json").readText())
+                        .getJSONObject("entries").getJSONObject("open").getJSONObject("result")
+                    assertEquals("unknown", saved.getString("execution"))
+                    assertFalse(saved.getBoolean("ok"))
+                    assertEquals(13, saved.getJSONObject("startup_diagnostics").getInt("exec_errno"))
+                    assertEquals(0, process.destroys)
+                }
+            } finally { root.deleteRecursively() }
+        }
+    }
+
 }

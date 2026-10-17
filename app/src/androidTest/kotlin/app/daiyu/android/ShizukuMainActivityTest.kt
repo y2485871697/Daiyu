@@ -29,8 +29,8 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         ui.onNodeWithTag("shizuku-text-enable").assertIsOn()
     }
 
-    private fun openEditor() {
-        setDraft(text)
+    private fun openEditor(seedDraft: Boolean = true) {
+        if (seedDraft) setDraft(text) else assertDraft(text)
         node("shizuku-text-entry").performClick()
         enableTextApproval()
         panelNode(hasSetTextAction() and hasText("精确 UID：0 或 2000（必选，无默认值）")).performTextReplacement("2000")
@@ -38,8 +38,8 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         panelNode(hasSetTextAction() and hasText("超时毫秒（1–120000）")).performTextReplacement("1234")
     }
 
-    private fun preview(): ControllerShizukuPreparation {
-        openEditor()
+    private fun preview(seedDraft: Boolean = true): ControllerShizukuPreparation {
+        openEditor(seedDraft)
         panelNode(hasText("预览命令及本次运行") and hasClickAction()).performClick()
         ui.waitUntil(5_000) { fixture.controller.shizukuPreparation() != null }
         val preparation = checkNotNull(fixture.controller.shizukuPreparation())
@@ -187,7 +187,7 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         assertDraft(text)
         mainThread { invokeOn(oldActivity, "acceptShizuku", oldEditor, p, fixture.database.create()) }
         assertDraft(text)
-        val next = preview()
+        val next = preview(seedDraft = false)
         openSettings()
         assertTrue(next.isCancelled())
         assertNull(fixture.controller.shizukuPreparation())

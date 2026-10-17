@@ -1,4 +1,4 @@
-import os,select,struct,subprocess,time,json,pathlib,hashlib,sys
+import os,select,struct,subprocess,time,json,pathlib,hashlib,sys,shlex
 if len(sys.argv)!=3: raise SystemExit('usage: verify_host.py /absolute/helper /absolute/report-directory')
 helper=pathlib.Path(sys.argv[1]).resolve()
 out=pathlib.Path(sys.argv[2]).resolve();out.mkdir(parents=True,exist_ok=True)
@@ -33,6 +33,8 @@ try:
     collect(lambda:b'STATE:/tmp:persisted\r\n' in output)
     send(b'R',struct.pack('>HH',31,99));send(b'W',b'stty size\n')
     collect(lambda:b'31 99\r\n' in output)
+    send(b'W',("printf '\\nNATIVE_PROBE:'; " + shlex.quote(str(helper)) + " --probe-tty\n").encode())
+    collect(lambda:b'NATIVE_PROBE:31 99\r\n' in output)
     send(b'W',b'sleep 20\n');time.sleep(.15);send(b'I');time.sleep(.1)
     send(b'W',b"printf '\\nAFTER_INTERRUPT\\n'\n")
     collect(lambda:b'\r\nAFTER_INTERRUPT\r\n' in output)
@@ -41,10 +43,14 @@ try:
     statuses=[struct.unpack('>I',d)[0] for t,d in events if t==b'X']
     assert statuses==[7<<8],statuses
     assert p.wait(timeout=3)==0
-    tests=['isatty 0/1/2','persistent cwd+export across writes','resize 31x99','foreground interrupt shell survives','exit status exact']
+    tests=['isatty 0/1/2','persistent cwd+export across writes','resize 31x99','native inherited slave dimensions 31x99','foreground interrupt shell survives','exit status exact']
 finally:
     if p.poll() is None:p.kill()
     p.wait(timeout=3)
+probe=subprocess.run([str(helper),'--probe-tty'],input=b'',capture_output=True,timeout=3)
+assert probe.returncode==69 and not probe.stdout,probe
+assert subprocess.run([str(helper),'--probe-tty','unexpected'],input=b'',capture_output=True,timeout=3).returncode==64
+tests.extend(['native TTY probe refuses pipes','native TTY probe rejects extra arguments'])
 # Reject oversized frames before allocation/dispatch, terminate the owned shell.
 p=subprocess.Popen([str(helper),'24','80','--','/bin/sh'],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
 try:

@@ -120,8 +120,9 @@ class AndroidPtyHostTest : InstrumentationTestCase() {
             assertEquals("pty_run_owner_mismatch", session.read(copied).getString("error"))
             val denied = session.write(copied, "denied", 1, "exit 99\n".toByteArray())
             assertEquals("not_executed", denied.getString("execution"))
+            val helper = AndroidPtyHost.helper(context).path.replace("'", "'\"'\"'")
             val delivery = session.write(owner.authorization, "probe", 1,
-                ("if [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; then stty size || exit 92; " +
+                ("if [ -t 0 ] && [ -t 1 ] && [ -t 2 ]; then '$helper' --probe-tty || exit 92; " +
                     "printf '\\nandroid-pty-live\\n'; exit 7; else exit 91; fi\n").toByteArray())
             assertTrue(delivery.getBoolean("helper_input_written"))
             assertEquals("unknown", delivery.getString("pty_delivery"))

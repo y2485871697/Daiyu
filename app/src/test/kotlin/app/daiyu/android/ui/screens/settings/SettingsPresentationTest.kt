@@ -11,7 +11,9 @@ class SettingsPresentationTest {
     fun retainedSettingsHaveUniqueIdsAndNineGroups() {
         val entries = SettingsCatalog.entries
         // Current inventory includes independent generation/vision, P05 and platform tools.
-        assertEquals(40, entries.size)
+        assertEquals(38, entries.size)
+        assertTrue(entries.none { it.id in setOf("permission_check", "accessibility_keep") })
+        assertTrue(entries.map { it.id }.containsAll(setOf("platform_tools", "accessibility", "voice", "donate")))
         assertEquals(app.daiyu.android.ui.FeatureRoute.BALANCE_SETTINGS, SettingsCatalog.entry("balance").route)
         assertEquals(entries.size, entries.map { it.id }.toSet().size)
         assertEquals(9, SettingsCatalog.groups.size)
@@ -31,7 +33,7 @@ class SettingsPresentationTest {
     @Test
     fun chatCommandsAreNotSettingsButtons() {
         val titles = SettingsCatalog.entries.map { it.title }.toSet()
-        assertTrue(titles.containsAll(setOf("模型提供商", "默认启用推理", "MCP 服务器", "权限检查", "导出日志")))
+        assertTrue(titles.containsAll(setOf("模型提供商", "默认启用推理", "MCP 服务器", "导出日志")))
         assertTrue(titles.intersect(setOf("发送消息", "暂停与继续", "停止回复", "追加与追问",
             "发送图片", "发送视频", "侧边栏", "聊天记录搜索", "搜索会话")).isEmpty())
     }

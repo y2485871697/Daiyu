@@ -32,39 +32,35 @@ class GuiSettingsActivityTest : WiredActivityTestCase() {
         node("gui-grant-screenshot").assertDoesNotExist()
         node("gui-freeze").assertDoesNotExist()
     }
-    fun testBothRealSettingsEntriesAndR07MetadataShareTheNavigationOnlyRoute() {
+    fun testRemainingSettingsEntryAndR07MetadataShareTheNavigationOnlyRoute() {
         assertEquals(FeatureRoute.GUI_SETTINGS, FeatureCatalog.groups.flatMap { it.entries }.single { it.id == "R07" }.route)
         val action = FeatureDetails.pages.getValue("R07").flatMap { it.controls }.single { it.id == "open" }
         assertEquals(FeatureControlKind.ACTION, action.kind)
         assertEquals(FeatureRoute.GUI_SETTINGS, action.route)
-        for (id in listOf("accessibility", "accessibility_keep")) {
-            assertEquals(FeatureRoute.GUI_SETTINGS, SettingsCatalog.entry(id).route)
-            assertEquals(SettingControl.PAGE, SettingsCatalog.entry(id).control)
-        }
-        assertFalse(SettingsCatalog.entry("accessibility_keep").title.contains("强制保持"))
+        assertEquals(FeatureRoute.GUI_SETTINGS, SettingsCatalog.entry("accessibility").route)
+        assertEquals(SettingControl.PAGE, SettingsCatalog.entry("accessibility").control)
+        assertFalse(SettingsCatalog.entries.any { it.id == "accessibility_keep" })
         setDraft("GUI 设置不提交此草稿")
         val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
-        for (id in listOf("accessibility", "accessibility_keep")) {
-            enterFromPermissions(id)
-            reveal("gui-status", page).assertExists()
-            reveal("gui-open-system", page).assertHasClickAction()
-            reveal("gui-rebind", page).assertTextContains("手动重新启用", substring = true)
-            reveal("gui-disclosure", page).assert(hasAnyDescendant(hasText("整个有界观察和完整输入将发送给当前模型", substring = true)))
-            reveal("gui-no-run", page).assertExists()
-            reveal("gui-refresh", page).performClick()
-            assertNoGuiPreparation()
-            assertEquals(before, fixture.database.exportBackup())
-            assertEquals(settings, fixture.settings.loadForEditing().settings)
-            backToPage(activity, "page:设置"); node("page:设置").assertExists()
-            backToChat(activity); assertDraft("GUI 设置不提交此草稿")
-        }
+        enterFromPermissions()
+        reveal("gui-status", page).assertExists()
+        reveal("gui-open-system", page).assertHasClickAction()
+        reveal("gui-rebind", page).assertTextContains("手动重新启用", substring = true)
+        reveal("gui-disclosure", page).assert(hasAnyDescendant(hasText("整个有界观察和完整输入将发送给当前模型", substring = true)))
+        reveal("gui-no-run", page).assertExists()
+        reveal("gui-refresh", page).performClick()
+        assertNoGuiPreparation()
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(settings, fixture.settings.loadForEditing().settings)
+        backToPage(activity, "page:设置"); node("page:设置").assertExists()
+        backToChat(activity); assertDraft("GUI 设置不提交此草稿")
     }
     fun testSearchEntryAndOldSettingsClickAfterRecreationCannotGrantOrOpenAnything() {
         setDraft("GUI 搜索与重建")
         openSettings()
         reveal("settings-search", "设置").performTextReplacement("无障碍")
-        val title = SettingsCatalog.entry("accessibility_keep").title
+        val title = SettingsCatalog.entry("accessibility").title
         reveal("settings-row:$title", "设置").assertExists()
         val stale = retainedClick(activity, "settings-row:$title")
         node("settings-row:$title").performClick()
@@ -85,7 +81,7 @@ class GuiSettingsActivityTest : WiredActivityTestCase() {
         val owner = checkNotNull(fixture.controller.active)
         setDraft("保留追加草稿")
         try {
-            enterFromPermissions("accessibility_keep")
+            enterFromPermissions("accessibility")
             reveal("gui-no-run", page).assertExists()
             mainThread {
                 assertNull(fixture.controller.guiEntry())

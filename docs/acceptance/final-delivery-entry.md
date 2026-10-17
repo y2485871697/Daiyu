@@ -33,7 +33,13 @@ smoke 与 cloud 共用 `scripts/acceptance/instrumentation_result.py`，不再�
 
 ## 2. 已接入 workflow 的最小接缝
 
-`.github/workflows/build.yml` 只增强既有 build/checks/smoke 模式的证据保留，不新增 dispatch、触发器、自动补构建、第二套 81 项清单或 workflow 内的最终汇总：
+`.github/workflows/build.yml` 保留既有 build/checks/smoke 模式，补充源码身份绑定与证据保留，不新增 dispatch、触发器、自动补构建、第二套 81 项清单或 workflow 内的最终汇总。
+
+完整构建的调度方应预先固定完整 40 位十六进制 `expected_sha`，并提供本次唯一的 `check_id`；build 的 run-name 为 `代鱼构建 {check_id}`，便于定向定位，但名称本身不能替代 run ID/attempt/head_sha 核对。build 在 checkout 后、Java/Gradle/SDK 安装及签名凭据使用前，立即运行 `python3 scripts/cooperation/cloud_checks.py --verify-revision-only`。该入口复用 checks 的身份校验，只读取 `git rev-parse HEAD`，不运行 Gradle 或创建检查报告；要求有效的 `GITHUB_SHA` 与 HEAD 完全相同，非空 `EXPECTED_SHA` 必须是完整 40hex 且与二者完全相同（不裁剪、不按短 SHA 或分支解析）。手动留空 `expected_sha` 可用，但仍须核对环境与实际 checkout，不能据此宣称绑定了外部预定 revision。若 main 在预定 SHA 后变化，必须失败并重新核定目标，不能静默改构建其他提交，也不会自动 checkout/重试预期 SHA。此绑定不改变 build gates、双 API smoke 或旧包补检语义。
+
+离线负测在 `tests/test_cloud_revision.py`，覆盖非法/不匹配/缺省空/匹配目标、环境与 HEAD 冲突、Git 读取失败、仅校验入口及 workflow 最早顺序；Git/Gradle 均 mock，不调度 CI。可由父集成执行 `python3 -B -m unittest discover -s tests -p 'test_cloud_revision.py' -v`，再运行完整 tests discovery；本次实现代理未运行这些测试。
+
+既有证据接缝如下：
 
 1. 完整 build 继续产生现有 `代鱼开发包`（APK、test APK、构建记录、签名证据、SHA256SUMS）。不重写记录。复制主 APK 至 delivery、核对签名后，在生成 SHA256SUMS 和上传开发包前，对**同一 delivery 主 APK**运行 `python3 scripts/verify_license_bundle.py --apk "delivery/代鱼-0.1.0-${short}.apk"`。失败阻断上传，不使用 `--stage` 自动修复许可输入；现有测试报告 always 上传、双 API smoke、checks 和签名功能保留。
 2. build/checks 用 `scripts/acceptance/record_tool_tests.py` 执行原有 unittest discovery 的 verbose 形式：build 为 `python3 -B -m unittest discover -s tests -v`，跨平台 checks 为 `python -B -m unittest discover -s tests -v`。采集器用相同 argv 真正启动子进程，stdout+stderr 不过滤、不重写，原字节保存到 `tool-evidence/unittest.log`，随后原样回显。子进程返回后才写 `tool-evidence/receipt.json`，包含当前 `GITHUB_SHA`、`GITHUB_RUN_ID`、`GITHUB_RUN_ATTEMPT`、实际 command 与真实整数 exit_code；返回相同退出码。启动失败/中断不补 success receipt，调用前清除旧 receipt。

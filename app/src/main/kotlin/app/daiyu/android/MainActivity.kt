@@ -674,6 +674,8 @@ class MainActivity : ComponentActivity() {
     private var generationFormRevision by mutableStateOf(0L)
     private var generationRequest: Any? = null
     private var generationOutputs by mutableStateOf<List<ChatController.GenerationAssetDisplay>?>(null)
+    private var historicalGenerationOutputs by mutableStateOf<List<ChatController.HistoricalGenerationAssetDisplay>?>(null)
+    private var pendingHistoricalOriginal: app.daiyu.android.backup.HistoricalGenerationOutput? = null
     private var generationOutputsRequest: Any? = null
     private var generationReceiptNotice by mutableStateOf<ChatController.GenerationReceiptNotice?>(null)
     private val supplementDraft = PausedSupplementDraft()
@@ -1831,6 +1833,23 @@ class MainActivity : ComponentActivity() {
                             if (meta.kind == app.daiyu.android.model.generation.GenerationKind.VIDEO)
                                 androidx.compose.material3.Text("原视频已通过私有读取校验；当前入口不提供视频播放或导出。")
                         }
+                        androidx.compose.material3.Text("备份导入的历史原件（独立只读存储，最多展示32项；完整备份仍包含全部记录）")
+                        val historical = historicalGenerationOutputs
+                        if (historical == null) androidx.compose.material3.Text("历史原件正在读取或不可用；不会重发请求。")
+                        else if (historical.isEmpty()) androidx.compose.material3.Text("暂无导入的历史生成原件。")
+                        historical?.forEach { display ->
+                            val history = display.history
+                            androidx.compose.material3.Text("历史 ${history.kind} · ${history.mimeType} · ${history.bytes} bytes · ${history.width}×${history.height}")
+                            display.thumbnail?.let { bitmap ->
+                                androidx.compose.foundation.Image(bitmap = bitmap.asImageBitmap(),
+                                    contentDescription = "备份中的历史生成图片", modifier = Modifier.fillMaxWidth())
+                            }
+                            if (history.kind == app.daiyu.android.model.generation.GenerationKind.VIDEO)
+                                androidx.compose.material3.Text("历史原视频已校验；可保存原文件，不恢复生成授权。")
+                            androidx.compose.material3.TextButton(onClick = {
+                                backupGuard { pickHistoricalGenerationOriginal(history) }
+                            }) { androidx.compose.material3.Text("保存历史原件") }
+                        }
                     }
                 }, confirmButton = { androidx.compose.material3.TextButton(onClick = ::cancelGenerationOutputs) {
                     androidx.compose.material3.Text("关闭")
@@ -1841,6 +1860,7 @@ class MainActivity : ComponentActivity() {
     private fun cancelGenerationOutputs() {
         generationOutputsRequest = null
         generationOutputs = null
+        historicalGenerationOutputs = null
     }
 
     private fun openGenerationOutputs() {
@@ -1852,13 +1872,40 @@ class MainActivity : ComponentActivity() {
         if (!controller.loadGenerationOutputs(conversation.id) { outputs ->
             if (activityUsable() && generationOutputsRequest === request && retainedPage == "chat" &&
                 !sidebarVisible && selected?.id == conversation.id && editorGeneration == generation) {
-                generationOutputsRequest = null
-                if (outputs == null) toast("生成资产读取失败或授权已撤销；未重试生成")
-                else generationOutputs = outputs
+                if (outputs == null) toast("活动生成资产读取失败或授权已撤销；未重试生成")
+                generationOutputs = outputs ?: emptyList()
             }
         }) {
             if (generationOutputsRequest === request) generationOutputsRequest = null
             toast("请等待当前数据操作完成")
+            return
+        }
+        if (!controller.loadHistoricalGenerationOutputs(conversation.id) { outputs ->
+            if (activityUsable() && generationOutputsRequest === request && retainedPage == "chat" &&
+                !sidebarVisible && selected?.id == conversation.id && editorGeneration == generation) {
+                historicalGenerationOutputs = outputs
+                if (outputs == null) toast("历史原件校验失败；未恢复授权或重发请求")
+            }
+        }) toast("历史原件暂不可读；请等待当前数据操作完成")
+    }
+
+    @Suppress("DEPRECATION") private fun pickHistoricalGenerationOriginal(
+        history: app.daiyu.android.backup.HistoricalGenerationOutput) {
+        check(pendingBackupRequest == null) { "文件选择尚未返回；请先完成或取消选择" }
+        check(selected?.id?.value == history.conversationId && activityUsable()) { "原会话已变化；请重新打开历史" }
+        val extension = when (history.mimeType) {
+            "image/png" -> "png"; "image/jpeg" -> "jpg"; "image/webp" -> "webp"
+            "video/mp4" -> "mp4"; "video/webm" -> "webm"
+            else -> throw IllegalArgumentException("不支持的历史原件类型")
+        }
+        pendingHistoricalOriginal = history; pendingBackupRequest = 106
+        try {
+            startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE); type = history.mimeType
+                putExtra(Intent.EXTRA_TITLE, "daiyu-historical-original.$extension")
+            }, 106)
+        } catch (failure: Exception) {
+            pendingHistoricalOriginal = null; pendingBackupRequest = null; throw failure
         }
     }
 
@@ -3110,8 +3157,22 @@ class MainActivity : ComponentActivity() {
     }
     @Suppress("DEPRECATION") override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode !in setOf(101, 102, 103, 104, 105) || pendingBackupRequest != requestCode) return
+        if (requestCode !in setOf(101, 102, 103, 104, 105, 106) || pendingBackupRequest != requestCode) return
         pendingBackupRequest = null
+        if (requestCode == 106) {
+            // Reference is deliberately memory-only: activity/process recreation fails closed
+            // and requires a fresh history selection rather than guessing a different asset.
+            val history = pendingHistoricalOriginal.also { pendingHistoricalOriginal = null }
+            if (resultCode != RESULT_OK) return
+            backupGuard {
+                val uri = data?.data
+                require(history != null && uri?.scheme == "content" && selected?.id?.value == history.conversationId) {
+                    "历史原件选择已失效；请重新打开原会话并选择保存"
+                }
+                controller.saveHistoricalGenerationOriginal(checkNotNull(history), checkNotNull(uri))
+            }
+            return
+        }
         if (requestCode == 105) {
             exportPickerPending = false
             val originalId = conversationExport.take()

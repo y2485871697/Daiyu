@@ -194,7 +194,7 @@ internal data class ControllerGenerationOutputMetadata(
 internal class ControllerGenerationOutputReader internal constructor(
     database: () -> SQLiteDatabase,
     owner: GenerationAssetOwner,
-    assets: MessageGenerationAssets,
+    private val assets: MessageGenerationAssets,
     private val fence: GenerationAssetFence,
 ) : AutoCloseable {
     private val store = SQLiteGenerationOutputStore(database, owner, assets)
@@ -214,6 +214,16 @@ internal class ControllerGenerationOutputReader internal constructor(
      */
     fun openOriginal(attempt: GenerationAttempt, outputIndex: Int): FileInputStream? = guarded {
         store.open(attempt, outputIndex)
+    }
+
+    /** Backup's selected scalar row is not authority by itself. Recheck the persisted attempt
+     * and exact registered slot, then verify every pending mapping field, bounded length, EOF
+     * and hash through this SAME locally retained reader's owner fence. No SQL spans asset I/O.
+     */
+    fun readBackup(reference: app.daiyu.android.storage.GenerationOutputReference): ByteArray = guarded {
+        val attempt = GenerationAttempt(reference.identity, reference.fingerprint, reference.protocol)
+        check(fence.admit { store.find(attempt, reference.outputIndex) } == reference)
+        app.daiyu.android.backup.MessageGenerationBackupAssets { assets }.read(reference)
     }
 
     private fun <T> guarded(action: () -> T): T = try {

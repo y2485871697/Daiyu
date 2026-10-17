@@ -20,7 +20,7 @@ SPEC.loader.exec_module(evidence)
 SPEC = importlib.util.spec_from_file_location("acceptance_cloud_report", BASE / "cloud_report.py")
 cloud = importlib.util.module_from_spec(SPEC)
 # Avoid collision with scripts/cooperation/evidence.py loaded by other tests.
-with patch.dict(sys.modules, {"evidence": evidence}):
+with patch.dict(sys.modules, {"evidence": evidence}), patch.object(sys, "path", [str(BASE), *sys.path]):
     SPEC.loader.exec_module(cloud)
 
 SHA = "a" * 40
@@ -270,7 +270,7 @@ class CloudReportTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.change_text(text)
                 self.reject()
-        self.change_text("OK (2 tests)\r\n")
+        self.change_text("OK (2 tests)\r\nINSTRUMENTATION_CODE: -1\r\n")
         self.assertTrue(self.verify()["cloud_regression_satisfied"])
 
     def test_failure_crash_cancel_timeout_and_contradictions_override_ok(self):
@@ -286,10 +286,27 @@ class CloudReportTests(unittest.TestCase):
                 self.reject()
         self.change_text("OK (2 tests)\nINSTRUMENTATION_CODE: -1\nINSTRUMENTATION_CODE: -1\n")
         self.reject("instrumentation_terminal_conflict")
-        self.change_text("OK (2 tests)\n")
+        self.change_text("OK (2 tests)\nINSTRUMENTATION_CODE: -1\n")
         for text in ("FATAL EXCEPTION: main\n", "process crashed\n", "error\n"):
             self.change_text(text, role="logcat")
             self.reject("negative_report_signal")
+
+    def test_mandatory_final_terminal_code_through_verify_and_file_cli(self):
+        cases = (
+            ("OK (2 tests)\n", "instrumentation_terminal_conflict"),
+            ("INSTRUMENTATION_CODE: -1\nOK (2 tests)\n", "instrumentation_not_terminal"),
+            ("OK (2 tests)\nINSTRUMENTATION_CODE: -1\nINSTRUMENTATION_STATUS_CODE: 0\n",
+             "instrumentation_not_terminal"),
+            ("OK (2 tests)\nINSTRUMENTATION_CODE: -1\ntrailing collector summary\n",
+             "instrumentation_not_terminal"),
+        )
+        for text, error in cases:
+            with self.subTest(text=text):
+                self.change_text(text)
+                self.reject(error)
+                code, report = self.file_cli()
+                self.assert_failed_report(code, report)
+                self.assertEqual(report["error"], error)
 
     def test_prefixed_protocol_markers_reject_through_verify_and_cli(self):
         # Rehash every layer: these must fail on protocol, not a stale digest.
@@ -372,7 +389,7 @@ class CloudReportTests(unittest.TestCase):
         path = self.root / "26/platform-tests.txt"
         path.write_bytes(b"OK (2 tests)\nforged\n")
         self.reject("artifact_digest_mismatch")
-        self.change_text("OK (2 tests)\n")
+        self.change_text("OK (2 tests)\nINSTRUMENTATION_CODE: -1\n")
         (self.root / "26/report.json").write_bytes(b"{}")
         self.reject("report_digest_mismatch")
         self.sync_reports()
@@ -429,7 +446,7 @@ class CloudReportTests(unittest.TestCase):
         self.reports["26"]["instrumentation"] = self.text_ref("26/platform-tests.txt")
         self.sync_reports()
         self.reject("invalid_report_encoding")
-        self.change_text("OK (2 tests)\n")
+        self.change_text("OK (2 tests)\nINSTRUMENTATION_CODE: -1\n")
         raw = b" " * (evidence.MAX_JSON_BYTES + 1)
         self.snapshot_path.write_bytes(raw)
         with self.assertRaisesRegex(evidence.InvalidEvidence, "file_too_large"):

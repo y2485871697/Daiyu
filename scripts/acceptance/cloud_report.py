@@ -9,11 +9,11 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
-import re
 import sys
 
 from evidence import (DIGEST, InvalidEvidence, SafeParser, artifact_path,
                       bounded_read, full_sha, load_json, require)
+from instrumentation_result import ResultError, instrumentation, report_text
 
 REPOSITORY = "y2485871697/Daiyu"
 WORKFLOW_ID = 383377276
@@ -23,12 +23,6 @@ MAX_TEXT_BYTES = 4 * 1024 * 1024
 # At most two report JSONs (2 MiB each) and four texts (4 MiB each).
 # Snapshot JSON itself is bounded by evidence.load_json (2 MiB).
 MAX_TOTAL_BYTES = 20 * 1024 * 1024
-NEGATIVE = re.compile(
-    r"\b(?:fail(?:ure|ures|ed)?|crash(?:ed|ing)?|fatal|exception|errors?|"
-    r"abort(?:ed)?|timed[ -]?out|timeout|cancel(?:led|ed)?|skipped|ignored)\b"
-    r"|\b[A-Za-z_$][\w$]*(?:Error|Exception)\b"
-    r"|INSTRUMENTATION_(?:FAILED|ABORTED)|shortMsg\s*=", re.IGNORECASE)
-OK = re.compile(r"OK \(([1-9][0-9]{0,8}) tests?\)\Z")
 
 
 def _object(value, keys, code):
@@ -69,60 +63,17 @@ def _ref(value):
 
 def _text(raw):
     try:
-        text = raw.decode("utf-8").replace("\r\n", "\n")
-    except UnicodeError:
-        raise InvalidEvidence("invalid_report_encoding") from None
-    require(text.strip() and all(c in "\n\t" or (ord(c) >= 32 and ord(c) != 127)
-                                 for c in text), "invalid_report_text")
-    require(not NEGATIVE.search(text), "negative_report_signal")
-    return text
+        return report_text(raw)
+    except ResultError as error:
+        raise InvalidEvidence(str(error)) from None
 
 
 def _instrumentation(raw, expected_tests):
-    """Inspect original am instrument -w text, not a derived passed flag.
-
-    Negative tokens are deliberately conservative (even 'errors: 0' is not
-    accepted). Optional Android protocol codes/counts must not contradict OK.
-    No rewriting, stripping ANSI sequences, or merging repeated runs is done.
-    """
-    text = _text(raw)
-    successes = []
-    terminal_codes = []
-    for line in text.split("\n"):
-        # Protocol markers anywhere in a line must be parsed, never hidden by
-        # indentation or a log prefix. Reject rather than normalize such input.
-        require("INSTRUMENTATION_" not in line
-                or (line.startswith("INSTRUMENTATION_") and line.count("INSTRUMENTATION_") == 1),
-                "unsupported_instrumentation_line")
-        match = OK.fullmatch(line)
-        if match:
-            successes.append(int(match[1]))
-        elif re.search(r"\bOK\b", line):
-            raise InvalidEvidence("ambiguous_instrumentation_ok")
-        if line.startswith("INSTRUMENTATION_CODE:"):
-            require(line == "INSTRUMENTATION_CODE: -1", "instrumentation_terminal_conflict")
-            terminal_codes.append(line)
-        elif line.startswith("INSTRUMENTATION_STATUS_CODE:"):
-            require(line in ("INSTRUMENTATION_STATUS_CODE: 0", "INSTRUMENTATION_STATUS_CODE: 1"),
-                    "instrumentation_status_conflict")
-        elif line.startswith("INSTRUMENTATION_STATUS: numtests="):
-            require(line == f"INSTRUMENTATION_STATUS: numtests={expected_tests}",
-                    "instrumentation_count_conflict")
-        elif line.startswith("INSTRUMENTATION_STATUS: current="):
-            count = line.partition("=")[2]
-            require(re.fullmatch(r"[1-9][0-9]{0,8}", count)
-                    and int(count) <= expected_tests, "instrumentation_count_conflict")
-        elif line.startswith("INSTRUMENTATION_RESULT:"):
-            require(line.startswith("INSTRUMENTATION_RESULT: stream="),
-                    "unsupported_instrumentation_result")
-        elif line.startswith("INSTRUMENTATION_"):
-            require(line.startswith(tuple("INSTRUMENTATION_STATUS: " + key + "="
-                                          for key in ("id", "class", "test", "stream"))),
-                    "unsupported_instrumentation_line")
-    require(len(successes) == 1 and successes[0] == expected_tests,
-            "instrumentation_unique_ok_required")
-    require(len(terminal_codes) <= 1, "instrumentation_terminal_conflict")
-    return successes[0]
+    """Shared with live smoke: one whole-line OK and mandatory final -1."""
+    try:
+        return instrumentation(raw, expected_tests)
+    except ResultError as error:
+        raise InvalidEvidence(str(error)) from None
 
 
 def verify(snapshot_path, snapshot_sha256, build_sha, run_id, attempt, evidence_root):

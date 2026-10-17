@@ -21,12 +21,20 @@ def verify(env, record, source_run, jobs, changed):
     if (record['source_sha'] != sha or str(record['run_id']) != run_id
             or str(record['attempt']) != '1' or record['application_id'] != 'app.daiyu.android'):
         raise ValueError('开发包记录与源run不符')
-    # Only validation tooling/docs may differ; never credit an old APK for app changes.
-    allowed = ('scripts/', 'tests/', 'docs/', '.github/workflows/')
-    if any(not path.startswith(allowed) for path in changed):
+    # Fail closed: scripts/ is NOT a validation-only directory. In particular,
+    # app/build.gradle.kts consumes prepare-speech-runtime.py when producing APKs.
+    # New tooling must be reviewed here before it can authorize old-APK reuse.
+    validation_files = {
+        'scripts/smoke_boot.sh', 'scripts/verify_smoke_source.py',
+        'scripts/adb_bounded.sh', 'scripts/install_bounded_adb.sh',
+        'scripts/verify_boundaries.py',
+    }
+    validation_dirs = ('scripts/acceptance/', 'tests/', 'docs/acceptance/')
+    if any(not isinstance(path, str) or '\\' in path
+           or any(part in ('', '.', '..') for part in path.split('/'))
+           or not (path in validation_files or path.startswith(validation_dirs))
+           for path in changed):
         raise ValueError('应用或构建输入已变化，不能复用旧开发包')
-    if any(path in ('scripts/prepare_signing.py', 'scripts/verify_signing.py') for path in changed):
-        raise ValueError('签名配置已变化')
 
 
 def main():

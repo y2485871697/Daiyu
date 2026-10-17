@@ -42,6 +42,9 @@ internal object BackupUsageCodec {
             require(requests.add(id(row, "request_id")))
             require(id(row, "branch_id") in conversations)
             tokens.forEach { if (!row.isNull(it)) require(number(row, it) >= 0) }
+            if (version >= 3 && text(row, "usage_source") != "LEGACY" &&
+                !row.isNull("input_tokens") && !row.isNull("cached_tokens"))
+                require(number(row, "cached_tokens") <= number(row, "input_tokens"))
             if (version < 3 || text(row, "usage_source") == "LEGACY") {
                 fun token(key: String): Long? = if (row.isNull(key)) null else number(row, key)
                 app.daiyu.android.domain.context.UsageRecord(text(row, "request_id"), text(row, "run_id"), text(row, "branch_id"),

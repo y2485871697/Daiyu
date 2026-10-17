@@ -1,5 +1,6 @@
 package app.daiyu.android.domain
 
+import app.daiyu.android.domain.runtime.RunnerOptions
 import org.junit.Assert.*
 import org.junit.Test
 

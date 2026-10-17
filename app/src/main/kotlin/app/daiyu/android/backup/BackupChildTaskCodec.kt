@@ -92,6 +92,8 @@ internal object BackupChildTaskCodec {
                 id(row, "request_owner"); id(row, "attempt_id"); require(text(row, "operation") in setOf("OPEN", "NEXT", "RESUME"))
                 require(number(row, "checkpoint_revision") > 0)
                 listOf("input_tokens", "output_tokens", "cached_tokens").forEach { if (!row.isNull(it)) require(number(row, it) >= 0) }
+                if (!row.isNull("input_tokens") && !row.isNull("cached_tokens"))
+                    require(number(row, "cached_tokens") <= number(row, "input_tokens"))
             }
             historyBudget("child_task", tasks) { text(it, "task_id") }
             return Validated(tasks, commands, usage)

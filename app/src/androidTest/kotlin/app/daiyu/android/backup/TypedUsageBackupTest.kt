@@ -38,7 +38,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         finally { super.tearDown() }
     }
     private fun parent(f: Fixture): Message {
-        val conversation = f.db.create().id; val run = RunId("run-${UUID.randomUUID()}")
+        val conversation = f.db.create("default").id; val run = RunId("run-${UUID.randomUUID()}")
         val assistant = Message(MessageId("assistant-${UUID.randomUUID()}"), conversation, run, "assistant",
             listOf(MessageBlock.Text("t", "answer")), RunStatus.RUNNING)
         f.db.send(Message(MessageId("user-${UUID.randomUUID()}"), conversation, run, "user",
@@ -202,9 +202,11 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
             editUsage(text, "title-zero") { it.put("usage_revision", "2") },
             editUsage(text, "title-zero") { it.put("usage_revision", 0) },
             editUsage(text, "title-zero") { it.put("input_tokens", -1) },
+            editUsage(text, "title-zero") { it.put("input_tokens", 1).put("cached_tokens", 2) },
             editUsage(text, "title-zero") { it.put("input_tokens", "0") },
             editUsage(text, "title-zero") { it.put("usage_state", "ADMITTED") },
             mutate(text) { it.getJSONObject("child_task_history").getJSONArray("usage").getJSONObject(0).put("usage_source", "TITLE") },
+            mutate(text) { it.getJSONObject("child_task_history").getJSONArray("usage").getJSONObject(0).put("input_tokens", 1).put("cached_tokens", 2) },
             mutate(text) { it.getJSONObject("child_task_history").getJSONArray("usage").getJSONObject(0).put("checkpoint_revision", 1.5) })
         val target = fresh(); val before = target.db.exportBackup()
         invalid.forEach { bad ->

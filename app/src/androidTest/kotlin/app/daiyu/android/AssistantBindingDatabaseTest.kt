@@ -30,6 +30,7 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         // Produce the complete predecessor schema, not a mock helper or onUpgrade invocation.
         val helper = database()
         val db = helper.writableDatabase
+        removePostV9ConversationSchemaForFixture(db)
         db.execSQL("ALTER TABLE conversations RENAME TO conversations_v10")
         db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0)")
         db.execSQL("INSERT INTO conversations VALUES('old','旧会话','旧草稿',7,'工作',1)")

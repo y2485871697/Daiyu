@@ -13,6 +13,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.voice.account.VoiceAccountResources
 import app.daiyu.android.voice.releaseOnMain
+import app.daiyu.android.voice.providers.DoubaoPersonalVoice
 import kotlinx.coroutines.launch
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -38,7 +39,7 @@ internal fun ProductionVoiceAccountPage(
         ActivityVoiceAccountPreviewHost.forContext(context, scope, frozen.speech()) { request ->
             active.get() && runtime.current(frozen, profile) && runCatching {
                 val selected = resources.voices.selected(request.voice.id, request.configuration)
-                selected != null && selected == request.voice
+                accountPreviewVoiceMatches(selected, request.voice)
             }.getOrDefault(false)
         }
     }
@@ -101,3 +102,9 @@ internal fun ProductionVoiceAccountPage(
         )
     }
 }
+
+internal fun accountPreviewVoiceMatches(
+    selected: DoubaoPersonalVoice?,
+    requested: DoubaoPersonalVoice,
+): Boolean = selected != null && selected.id == requested.id && selected.account == requested.account &&
+    selected.status == requested.status && selected.models == requested.models && selected.accepted == requested.accepted

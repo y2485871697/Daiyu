@@ -20,6 +20,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.Executor
 import java.util.concurrent.Executors
 import androidx.annotation.WorkerThread
+import app.daiyu.android.tasksurface.TaskSurfaceSelfTarget
 
 /** System-bound only. No root, shell, Shizuku, polling, hidden APIs, or automatic gestures. */
 class GuiAccessibilityService : AccessibilityService() {
@@ -138,10 +139,49 @@ internal object GuiRuntime {
     private var service: GuiAccessibilityService? = null
     private var generation = 0L
     private var confirmation: GuiConfirmationOverlay? = null
+    // Narrow parameters belong to the original gate lease, never to the process or a later owner.
+    private data class TargetBinding(val lease: GuiLeaseGate.Lease, val packageName: String?,
+        val selfTarget: TaskSurfaceSelfTarget?, val surfaceOwner: Any?)
+    private var targetBinding: TargetBinding? = null
+    private fun selfCurrent(target: TaskSurfaceSelfTarget?, owner: Any?, ownPackage: String): Boolean =
+        owner != null && try { target?.isCurrent(owner, ownPackage) == true } catch (_: Exception) { false }
+    private fun targetRejection(lease: GuiLeaseGate.Lease): GuiResult.Rejected? {
+        gate.rejection(lease)?.let { return it }
+        val binding = targetBinding?.takeIf { it.lease === lease }
+            ?: return GuiResult.Rejected("GUI_AUTHORIZATION_REVOKED")
+        if (binding.selfTarget != null &&
+            (binding.packageName != service!!.packageName ||
+                !selfCurrent(binding.selfTarget, binding.surfaceOwner, service!!.packageName))) return selfLost(lease)
+        return null
+    }
+    private fun selfLost(lease: GuiLeaseGate.Lease): GuiResult.Rejected {
+        gate.retireObservation(lease); clearNodes()
+        return GuiResult.Rejected("SELF_APP_TARGET_LOST")
+    }
+    private fun isSelfLease(lease: GuiLeaseGate.Lease): Boolean =
+        targetBinding?.let { it.lease === lease && it.selfTarget != null } == true
+    private fun operationRejection(lease: GuiLeaseGate.Lease, operation: GuiOperation): GuiResult.Rejected? {
+        targetRejection(lease)?.let { return it }
+        return if (isSelfLease(lease) && operation in setOf(GuiOperation.BACK, GuiOperation.HOME,
+                GuiOperation.RECENTS, GuiOperation.NOTIFICATIONS))
+            GuiResult.Rejected("SELF_APP_GLOBAL_ACTION_NOT_ALLOWED_NOT_EXECUTED") else null
+    }
+    // Check self-window loss before stale-generation errors, including changes without an event.
+    @Suppress("DEPRECATION")
+    private fun selfRootRejection(lease: GuiLeaseGate.Lease): GuiResult.Rejected? {
+        targetRejection(lease)?.let { return it }
+        if (!isSelfLease(lease)) return null
+        return when (val fetched = externalRoot(lease, service!!)) {
+            is GuiResult.Value -> { fetched.value.recycle(); null }
+            is GuiResult.Rejected -> fetched
+            is GuiResult.Unknown -> error("root admission cannot be unknown")
+        }
+    }
     internal fun showConfirmation(session: GuiRunSession, operation: GuiOperation, text: String?,
         ownerCurrent: () -> Boolean, onNotExecuted: (String) -> Unit, onRevoked: () -> Unit,
         deliver: (GuiConfirmedDelivery) -> Boolean): GuiResult<Unit> {
-        onMain(); gate.rejection(session.lease)?.let { return it }; screenRejection()?.let { return it }
+        onMain(); operationRejection(session.lease, operation)?.let { return it }; screenRejection()?.let { return it }
+        selfRootRejection(session.lease)?.let { return it }
         if (confirmation != null) return GuiResult.Rejected("CONFIRMATION_ALREADY_OPEN")
         val host = GuiConfirmationOverlay(service!!, session, operation, text, ownerCurrent, onNotExecuted, onRevoked, deliver)
         confirmation = host
@@ -170,13 +210,13 @@ internal object GuiRuntime {
     fun isConnected(): Boolean { onMain(); return service != null }
     fun connected(value: GuiAccessibilityService) {
         onMain(); confirmation?.revoke()
-        clearNodes(); service = value; generation++; gate.connect()
+        targetBinding = null; clearNodes(); service = value; generation++; gate.connect()
     }
     fun disconnected(value: GuiAccessibilityService) {
         onMain()
         if (service === value) {
             confirmation?.revoke()
-            clearNodes(); service = null; generation++; gate.disconnect()
+            targetBinding = null; clearNodes(); service = null; generation++; gate.disconnect()
         }
     }
     fun changed(value: GuiAccessibilityService) { onMain(); if (service === value) { generation++; clearNodes() } }
@@ -202,28 +242,47 @@ internal object GuiRuntime {
             return GuiResult.Rejected("SCREEN_LOCKED_NOT_EXECUTED")
         return null
     }
-    /** Called only in response to a trusted user operation, never from tool preparation. */
-    fun openForUser(owner: GuiOwner): GuiResult<GuiRunSession> {
+    /** Main-thread, trusted user callback only. Null target means external-only, not inferred self.
+     * An own-package target additionally needs the current task-surface token and its exact owner.
+     * This only narrows the original lease; all ordinary approvals/admission/drain rules still apply.
+     * No launch, settings change, virtual display, prompt or fallback is performed here. */
+    fun openForUser(owner: GuiOwner, targetPackage: String? = null,
+        selfTarget: TaskSurfaceSelfTarget? = null, surfaceOwner: Any? = null): GuiResult<GuiRunSession> {
         onMain(); screenRejection()?.let { return it }
+        if (targetPackage != null && !GuiUserActionRequest.validTargetPackage(targetPackage))
+            return GuiResult.Rejected("INVALID_TARGET_PACKAGE_NOT_EXECUTED")
+        val own = targetPackage == service!!.packageName
+        if (own && !selfCurrent(selfTarget, surfaceOwner, service!!.packageName))
+            return GuiResult.Rejected("SELF_APP_TARGET_LOST")
         if (captures.isNotEmpty() || closingLeases.isNotEmpty()) return GuiResult.Rejected("FOREGROUND_DRAIN_PENDING_NOT_EXECUTED")
         return when (val acquired = gate.acquire(owner)) {
-            is GuiResult.Value -> GuiResult.Value(GuiRunSession(acquired.value))
+            is GuiResult.Value -> {
+                targetBinding = TargetBinding(acquired.value, targetPackage,
+                    if (own) selfTarget else null, if (own) surfaceOwner else null)
+                GuiResult.Value(GuiRunSession(acquired.value))
+            }
             is GuiResult.Rejected -> acquired
             is GuiResult.Unknown -> acquired
         }
     }
     internal fun approveReads(lease: GuiLeaseGate.Lease, approval: GuiReadApproval): GuiResult<Unit> {
-        onMain(); return gate.approveReads(lease, approval)
+        onMain(); targetRejection(lease)?.let { return it }; return gate.approveReads(lease, approval)
     }
     internal fun approveAction(lease: GuiLeaseGate.Lease, action: GuiAction): GuiResult<Unit> {
-        onMain(); return gate.approveAction(lease, action, generation)
+        onMain(); operationRejection(lease, action.operation)?.let { return it }
+        selfRootRejection(lease)?.let { return it }
+        return gate.approveAction(lease, action, generation)
     }
-    internal fun approvedActions(lease: GuiLeaseGate.Lease): Set<GuiAction> { onMain(); return gate.approvedActions(lease) }
+    internal fun approvedActions(lease: GuiLeaseGate.Lease): Set<GuiAction> {
+        onMain(); if (targetRejection(lease) != null) return emptySet()
+        return gate.approvedActions(lease)
+    }
     private val captures = mutableMapOf<GuiLeaseGate.Lease, Int>()
     private val draining = mutableMapOf<GuiLeaseGate.Lease, () -> Unit>()
     private val closingLeases = mutableSetOf<GuiLeaseGate.Lease>()
     internal fun close(lease: GuiLeaseGate.Lease, onReleased: () -> Unit) {
         onMain(); closingLeases.add(lease)
+        if (targetBinding?.lease === lease) targetBinding = null
         lease.valid = false // fence even if overlay/node disposal fails; never manufacture a release
         if (!dismissConfirmation(lease)) return
         if (gate.ownsSlot(lease)) clearNodes()
@@ -244,32 +303,41 @@ internal object GuiRuntime {
         finishDrain(lease)
     }
 
-    /** Accessibility overlays and our Activity are never a valid external target. */
+    /** Default-display active application only. Self is a lease-local, live-token exception,
+     * never a global allow-own switch. An explicit external target must also match exactly. */
     @Suppress("DEPRECATION")
-    private fun externalRoot(current: GuiAccessibilityService): GuiResult<AccessibilityNodeInfo> {
+    private fun externalRoot(lease: GuiLeaseGate.Lease, current: GuiAccessibilityService): GuiResult<AccessibilityNodeInfo> {
+        targetRejection(lease)?.let { return it }
+        val binding = targetBinding!! // targetRejection proved the original lease owns these parameters
+        val self = isSelfLease(lease)
         val root = try { access.root(current) } catch (_: Exception) { null }
-            ?: return GuiResult.Rejected("NO_ACTIVE_EXTERNAL_WINDOW")
+            ?: return if (self) selfLost(lease) else GuiResult.Rejected("NO_ACTIVE_EXTERNAL_WINDOW")
         val valid = try {
             val window = root.window
             try {
                 val pkg = root.packageName?.toString().orEmpty()
-                pkg.isNotBlank() && pkg.length <= 256 && pkg != current.packageName &&
+                pkg.isNotBlank() && pkg.length <= 256 && (pkg != current.packageName || self) &&
+                    (binding.packageName == null || pkg == binding.packageName) &&
                     window != null && window.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION &&
                     window.isActive && (Build.VERSION.SDK_INT < 30 || window.displayId == Display.DEFAULT_DISPLAY)
             } finally { window?.recycle() }
         } catch (_: Exception) { false }
-        if (!valid) { root.recycle(); return GuiResult.Rejected("EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED") }
+        if (!valid) {
+            root.recycle()
+            return if (self) selfLost(lease) else GuiResult.Rejected("EXTERNAL_APPLICATION_ROOT_REQUIRED_NOT_EXECUTED")
+        }
         return GuiResult.Value(root)
     }
 
-    /** Reacquire the real external tree; do NOT publish a new observation/clear the approved one.
+    /** Reacquire the admitted application tree; do NOT publish a new observation/clear the approved one.
      * A bounded complete traversal must find exactly one matching target. No coordinate fallback. */
     @Suppress("DEPRECATION")
     internal fun validateExactTarget(lease: GuiLeaseGate.Lease, action: GuiAction): GuiResult<Unit> {
-        onMain(); gate.validateObservation(lease, action.observationId, generation)?.let { return it }
-        screenRejection()?.let { return it }
+        onMain(); operationRejection(lease, action.operation)?.let { return it }
+        screenRejection()?.let { return it }; selfRootRejection(lease)?.let { return it }
+        gate.validateObservation(lease, action.observationId, generation)?.let { return it }
         val observed = lease.observation!!
-        val fetched = externalRoot(service!!)
+        val fetched = externalRoot(lease, service!!)
         if (fetched !is GuiResult.Value) return fetched as GuiResult.Rejected
         val root = fetched.value
         if (root.windowId != observed.windowId || root.packageName?.toString() != observed.packageName) {
@@ -312,8 +380,8 @@ internal object GuiRuntime {
     /** Same admission, node/depth/child/text bounds for publishing and private verification.
      * Verification never retains nodes, consumes a read, publishes an ID, or changes approvals. */
     @Suppress("DEPRECATION")
-    private fun sampleTree(retain: Boolean): GuiResult<TreeSample> {
-        val fetched = externalRoot(service!!)
+    private fun sampleTree(lease: GuiLeaseGate.Lease, retain: Boolean): GuiResult<TreeSample> {
+        val fetched = externalRoot(lease, service!!)
         if (fetched !is GuiResult.Value) return fetched as GuiResult.Rejected
         val source = fetched.value
         val result = mutableListOf<GuiNode>()
@@ -361,13 +429,13 @@ internal object GuiRuntime {
     }
 
     internal fun observe(lease: GuiLeaseGate.Lease): GuiResult<GuiObservation> {
-        onMain(); gate.rejection(lease)?.let { return it }
+        onMain(); targetRejection(lease)?.let { return it }
         gate.retireObservation(lease); clearNodes()
         screenRejection()?.let { return it }
         val permit = gate.consumeRead(lease, screenshot = false)
         if (permit !is GuiResult.Value) return permit as GuiResult.Rejected
         val startGeneration = generation
-        val sampled = sampleTree(retain = true)
+        val sampled = sampleTree(lease, retain = true)
         if (sampled !is GuiResult.Value) { clearNodes(); return sampled as GuiResult.Rejected }
         val tree = sampled.value
         val observation = GuiObservation(UUID.randomUUID().toString(), tree.packageName, tree.windowId, startGeneration,
@@ -379,13 +447,17 @@ internal object GuiRuntime {
 
     /** Logical stability only, not physical atomicity of a platform frame and accessibility tree. */
     private fun validateScreenshot(lease: GuiLeaseGate.Lease, observationId: String): GuiResult.Rejected? {
-        onMain(); gate.validateObservation(lease, observationId, generation)?.let { return it }
-        screenRejection()?.let { return it }
+        onMain(); targetRejection(lease)?.let { return it }; screenRejection()?.let { return it }
+        selfRootRejection(lease)?.let { return it }
+        gate.validateObservation(lease, observationId, generation)?.let { return it }
         val binding = screenshotBinding?.takeIf { it.first == observationId }?.second
             ?: return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
         if (!binding.verifiable) return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
-        val sampled = sampleTree(retain = false)
-        if (sampled !is GuiResult.Value) return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
+        val sampled = sampleTree(lease, retain = false)
+        if (sampled !is GuiResult.Value) {
+            if (sampled is GuiResult.Rejected && sampled.code == "SELF_APP_TARGET_LOST") return sampled
+            return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
+        }
         val actual = sampled.value
         if (!actual.verifiable) return GuiResult.Rejected("SCREENSHOT_TREE_UNVERIFIABLE")
         if (actual.packageName != binding.packageName || actual.windowId != binding.windowId)
@@ -396,19 +468,11 @@ internal object GuiRuntime {
 
     @Suppress("DEPRECATION")
     internal fun action(lease: GuiLeaseGate.Lease, action: GuiAction): GuiResult<String> {
-        onMain(); gate.rejection(lease)?.let { return it }; screenRejection()?.let { return it }
-        gate.validateObservation(lease, action.observationId, generation)?.let { return it }
+        onMain(); operationRejection(lease, action.operation)?.let { return it }; screenRejection()?.let { return it }
         val current = service ?: return GuiResult.Rejected("SERVICE_DISCONNECTED_NOT_EXECUTED")
         val verified = validateExactTarget(lease, action)
         if (verified is GuiResult.Rejected) return verified
         val observed = lease.observation!!
-        try {
-            val active = current.rootInActiveWindow ?: return GuiResult.Rejected("NO_ACTIVE_WINDOW")
-            val sameWindow = try {
-                active.windowId == observed.windowId && active.packageName?.toString().orEmpty() == observed.packageName
-            } finally { active.recycle() }
-            if (!sameWindow) return GuiResult.Rejected("OBSERVATION_STALE")
-        } catch (_: Exception) { return GuiResult.Rejected("ACTIVE_WINDOW_UNAVAILABLE_NOT_EXECUTED") }
         val node = action.nodeId?.let { retained[it] }
         if (action.nodeId != null) {
             val original = observed.nodes.firstOrNull { it.id == action.nodeId }
@@ -425,6 +489,16 @@ internal object GuiRuntime {
                     return GuiResult.Rejected("NODE_STALE")
             } catch (_: Exception) { return GuiResult.Rejected("NODE_UNAVAILABLE_NOT_EXECUTED") }
         }
+        // Recheck active package/window and the live narrow token after node refresh, before delivery.
+        try {
+            val fetched = externalRoot(lease, current)
+            if (fetched !is GuiResult.Value) return fetched as GuiResult.Rejected
+            val active = fetched.value
+            val sameWindow = try {
+                active.windowId == observed.windowId && active.packageName?.toString().orEmpty() == observed.packageName
+            } finally { active.recycle() }
+            if (!sameWindow) return GuiResult.Rejected("OBSERVATION_STALE")
+        } catch (_: Exception) { return GuiResult.Rejected("ACTIVE_WINDOW_UNAVAILABLE_NOT_EXECUTED") }
         val consumed = gate.consumeAction(lease, action, generation)
         if (consumed is GuiResult.Rejected) return consumed
         // No coordinate/ancestor fallback or automatic retry when an advertised action is unsupported.
@@ -451,7 +525,8 @@ internal object GuiRuntime {
     internal fun screenshot(lease: GuiLeaseGate.Lease, observationId: String): CompletableFuture<GuiResult<GuiScreenshot>> {
         onMain()
         fun rejected(code: String) = CompletableFuture.completedFuture<GuiResult<GuiScreenshot>>(GuiResult.Rejected(code))
-        gate.rejection(lease)?.let { return rejected(it.code) }; screenRejection()?.let { return rejected(it.code) }
+        targetRejection(lease)?.let { return rejected(it.code) }; screenRejection()?.let { return rejected(it.code) }
+        selfRootRejection(lease)?.let { return rejected(it.code) }
         gate.validateObservation(lease, observationId, generation)?.let { return rejected(it.code) }
         if (Build.VERSION.SDK_INT < 30) return rejected("SCREENSHOT_UNSUPPORTED_API")
         validateScreenshot(lease, observationId)?.let { return rejected(it.code) }
@@ -472,7 +547,8 @@ internal object GuiRuntime {
                     try { frame.dispose(request) } catch (_: Exception) { /* reservation retained */ }
                 }
                 try {
-                    val rejection = gate.validateObservation(lease, observationId, generation) ?: screenRejection()
+                    val rejection = targetRejection(lease) ?: screenRejection() ?: selfRootRejection(lease) ?:
+                        gate.validateObservation(lease, observationId, generation)
                     if (future.isDone || rejection != null) {
                         if (rejection != null) future.complete(rejection)
                         dispose(); return@success

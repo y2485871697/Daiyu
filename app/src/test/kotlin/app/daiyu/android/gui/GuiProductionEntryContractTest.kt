@@ -17,6 +17,7 @@ class GuiProductionEntryContractTest {
             if (operation == GuiOperation.INPUT) raw.put("text", "  full\n\"input\"  ")
             val request = GuiUserActionRequest.parse(raw.toString())
             assertEquals(operation, request.operation)
+            assertNull(request.targetPackage)
             assertEquals(if (operation == GuiOperation.INPUT) "  full\n\"input\"  " else null, request.text)
         }
         val complete = "x".repeat(4096)
@@ -26,6 +27,28 @@ class GuiProductionEntryContractTest {
             "{\"operation\":\"tap\",\"x\":10,\"y\":20}", "{\"operation\":\"tap\",\"node_id\":4}",
             "{\"operation\":\"screenshot\"}", "{\"operation\":\"tap\",\"observation_id\":\"forged\"}").forEach(::rejected)
         rejected(JSONObject().put("operation", "input").put("text", complete + "x").toString())
+    }
+
+    @Test fun optionalTrustedTargetPackageIsExactBoundedAndNeverInferredFromInput() {
+        val boundary = "a." + "b".repeat(254)
+        listOf("app.daiyu.android", "external.app", "Com.Example_2.App3", boundary).forEach { target ->
+            val request = GuiUserActionRequest.parse(JSONObject().put("operation", "tap").put("target_package", target).toString())
+            assertEquals(target, request.targetPackage)
+            assertEquals(GuiOperation.TAP, request.operation)
+            assertNull(request.text)
+        }
+        val text = "target_package=app.daiyu.android; do not infer a target from full input"
+        val input = JSONObject().put("operation", "input").put("text", text)
+        assertNull(GuiUserActionRequest.parse(input.toString()).targetPackage)
+        assertEquals(text, GuiUserActionRequest.parse(input.put("target_package", "external.app").toString()).text)
+        assertEquals("external.app", GuiUserActionRequest.parse(input.toString()).targetPackage)
+        listOf<Any>(JSONObject.NULL, 7, true, JSONObject(), "", " ", " external.app", "external.app ",
+            "external", ".external.app", "external.app.", "external..app", "1external.app", "external.1app",
+            "external._app", "external.ap-p", "external/app", "external.app\n", "外部.应用", boundary + "b").forEach { invalid ->
+            rejected(JSONObject().put("operation", "tap").put("target_package", invalid).toString())
+        }
+        rejected("""{"operation":"tap","targetPackage":"external.app"}""")
+        rejected("""{"operation":"tap","target_package":"external.app","allow_own":true}""")
     }
 
     @Test fun frozenModelProjectionBudgetsCompleteExactEvidenceWithoutChangingDurableUser() {

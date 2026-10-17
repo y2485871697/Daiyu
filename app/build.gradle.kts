@@ -171,6 +171,12 @@ val hostTestJavaLauncher = extensions.getByType<org.gradle.jvm.toolchain.JavaToo
     .launcherFor { languageVersion.set(org.gradle.jvm.toolchain.JavaLanguageVersion.of(21)) }
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     javaLauncher.set(hostTestJavaLauncher)
+    doFirst {
+        val launcher = javaLauncher.get()
+        check(launcher.metadata.languageVersion.asInt() == 21)
+        logger.lifecycle("Test JVM: task={} version={}", path, launcher.metadata.languageVersion)
+    }
+    testLogging { events("started", "failed", "skipped") }
     if(System.getProperty("os.name").startsWith("Linux",ignoreCase=true)) {
         dependsOn(verifyHostPty)
         systemProperty("daiyu.pty.helper",hostPty.get().asFile.absolutePath)

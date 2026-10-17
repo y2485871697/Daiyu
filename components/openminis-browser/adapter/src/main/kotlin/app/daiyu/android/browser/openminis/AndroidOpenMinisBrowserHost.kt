@@ -50,7 +50,7 @@ class AndroidOpenMinisBrowserHost(
         sessions, ui, Dispatchers.Main,
         { lease, reject, live ->
             val application = context.applicationContext
-            val cache = application.cacheDir.canonicalFile
+            val cache = application.cacheDir.toPath().toRealPath().toFile()
             // Normalize the trusted app-cache alias before the pinned producer appends its filename.
             val browserContext = object : ContextWrapper(application) {
                 override fun getCacheDir() = cache

@@ -22,6 +22,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     private var selectedPaths: List<BackendPathIdentity>? = null
     @Volatile private var closed=false
     private val backendLock=Any()
+    private val probeCleanups = mutableListOf<BackendProbeCleanup>()
     private val sessions=mutableSetOf<String>()
     private val directory=File(this.context.filesDir,"terminal-jobs").apply { TerminalDurability.ensureDirectory(this) }
     // Fault seams for deterministic tests; not schema/model configurable.
@@ -30,6 +31,9 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     internal var beforeJobSave:(()->Unit)?=null
     internal var processStartReader: (Long) -> String? = { processStart(it) }
     internal var processPidReader: (Process) -> Long = { processPid(it) }
+    internal var daemonExecutable: () -> String? = {
+        listOf("/system/bin/setsid", "/system/xbin/setsid").firstOrNull { File(it).canExecute() }
+    }
     @Synchronized fun configure(sessionId:String, configuration:TerminalConfiguration, conversationOwnerId:String=sessionId) {
         check(scope==null) { "Registry configuration is immutable; create a new registry for a new run" }
         require(conversationOwnerId.matches(Regex("[A-Za-z0-9_-]{1,128}")))
@@ -66,7 +70,17 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         put(schema("terminal_stop","核实进程所有者后停止；丢失句柄拒绝按裸PID停止",true,fields("request_id" to "string","job_id" to "string"),listOf("request_id","job_id")))
         put(schema("terminal_close","关闭会话及普通任务；daemon仅同app进程独立于registry",true,fields("request_id" to "string","session_id" to "string"),listOf("request_id","session_id")))
     }
+    private val dispatchLifecycle = Any()
+    private var activeDispatches = 0
     fun execute(name:String,arguments:JSONObject):JSONObject {
+        synchronized(dispatchLifecycle) {
+            if (closed) return error("run_session_closed")
+            activeDispatches++
+        }
+        return try { executeInternal(name, arguments) }
+        finally { synchronized(dispatchLifecycle) { activeDispatches-- } }
+    }
+    private fun executeInternal(name:String,arguments:JSONObject):JSONObject {
         if(name !in names) return error("unknown_tool")
         if(scope==null) return error("run_session_not_configured")
         if (closed) return error("run_session_closed")
@@ -120,7 +134,10 @@ class TerminalRegistry(context: Context) : AutoCloseable {
                 selected?.let { if (fresh != it || paths != selectedPaths) throw BackendUnavailable("backend_identity_changed_not_executed") }
                 if (selected == null) { selected = fresh; selectedPaths = paths }
                 fresh
-            } catch(e:BackendUnavailable) { selectionError=e.code; throw e }
+            } catch(e:BackendUnavailable) {
+                e.cleanup?.let { synchronized(probeCleanups) { probeCleanups.add(it) } }
+                selectionError=e.code; throw e
+            }
         }
     }
     private fun open():JSONObject {
@@ -137,8 +154,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         val b=backend()
         val argv=if(mode=="daemon") {
             if(!b.daemonSupported) return error("daemon_not_supported_by_backend")
-            val executable=listOf("/system/bin/setsid","/system/xbin/setsid").firstOrNull { File(it).canExecute() }
-                ?: return error("daemon_detach_unavailable")
+            val executable=daemonExecutable() ?: return error("daemon_detach_unavailable")
             if(b.name!="android" || b.root) return error("daemon_detach_not_supported_for_selected_identity")
             listOf(executable,"-w","--")+b.shell
         } else b.shell
@@ -233,6 +249,10 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     private fun page(job:Job,offset:Long,limit:Int):JSONObject {
         val process=job.handle?.process; val running=process?.isAlive ?: false
         return readLog(job.log,offset,limit).put("job_id",job.id).put("backend",job.backend.name).put("uid",job.backend.uid).put("root",job.backend.root)
+            .put("host_uid",android.os.Process.myUid()).put("host_root",job.backend.root)
+            .put("guest_uid",if(job.backend.name.startsWith("linux:")) job.backend.uid else JSONObject.NULL)
+            .put("environment_id",job.backend.environmentId).put("mode",job.mode)
+            .put("lifetime",if(job.mode=="daemon") "independent_of_registry_only_while_same_app_process_lives" else "session")
             .put("state",if(process==null) job.state else if(running) "running" else "exited")
             .put("exit_code",if(process==null || running) JSONObject.NULL else process.exitValue())
             .put("execution",if(process==null) (if(job.state in setOf("start_failed", "cancelled_before_dispatch")) "not_executed" else "unknown") else if(running || job.unknown || !job.outputComplete) "unknown" else "executed")
@@ -295,6 +315,42 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         ordinary.forEach { synchronized(it) { it.cancelRequested=true } }
         ordinary.forEach { applyCancellation(it) }
     }
+    /** Host-only observation after close. Never starts/replays a command or reconstructs a handle.
+     * The retaining controller/session must check its ORIGINAL owner before invoking these APIs. */
+    internal fun inspectJob(id: String, offset: Long = 0, limit: Int = 16384): JSONObject =
+        poll(JSONObject().put("job_id", id).put("offset", offset).put("limit", limit))
+    internal fun inspectJobs(): JSONObject = listJobs()
+    internal fun stopOwnedJob(id: String): JSONObject = stop(id)
+
+    /** Worker-only physical drain of run-scoped jobs, not daemon lifetime or command success.
+     * Check active dispatches FIRST: a pending/late start must never be mistaken for no process.
+     * Output pumps are also resources; EOF/exit code alone does not prove their completion. */
+    internal fun awaitOrdinaryTermination(timeoutMillis: Long): Boolean {
+        require(timeoutMillis in 1..30000)
+        if (synchronized(dispatchLifecycle) { !closed || activeDispatches != 0 }) return false
+        val ordinary = synchronized(jobs) { jobs.values.filter { owns(it) && it.scope == scope && it.mode != "daemon" } }
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
+        for (cleanup in synchronized(probeCleanups) { probeCleanups.toList() }) {
+            val remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
+            if (remaining <= 0 || !cleanup.awaitTermination(remaining)) return false
+        }
+        for (job in ordinary) {
+            val handle = job.handle
+            if (handle == null) {
+                if (job.state !in setOf("start_failed", "cancelled_before_dispatch")) return false
+                continue
+            }
+            val remaining = deadline - System.nanoTime()
+            if (handle.process.isAlive && (remaining <= 0 || !handle.process.waitFor(remaining, TimeUnit.NANOSECONDS))) return false
+            val reader = job.reader
+            if (reader == null) return false
+            val left = deadline - System.nanoTime()
+            if (reader.isAlive && left > 0) TimeUnit.NANOSECONDS.timedJoin(reader, left)
+            if (reader.isAlive || !job.outputComplete) return false
+        }
+        return synchronized(dispatchLifecycle) { activeDispatches == 0 }
+    }
+
     /** Explicit trusted-host cleanup after run closure; unresolved journals remain intact. */
     fun retireCompletedScope(): JSONObject {
         if (!closed) return error("run_must_close_before_retirement")
@@ -350,7 +406,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         TerminalDurability.replace(file, bytes)
     }
     private fun identity(b:SelectedBackend)=JSONObject().put("ok",true).put("backend",b.name).put("uid",b.uid).put("root",b.root).put("working_directory",b.guestCwd ?: b.cwd.absolutePath)
-        .put("guest_uid", if(b.name.startsWith("linux:")) b.uid else JSONObject.NULL).put("host_root",b.root)
+        .put("guest_uid", if(b.name.startsWith("linux:")) b.uid else JSONObject.NULL).put("host_root",b.root).put("host_uid",android.os.Process.myUid())
         .put("environment_id",b.environmentId).put("shared_mounts",JSONObject(b.sharedMounts)).put("execution","not_executed")
     companion object {
         val names=setOf("terminal_open","terminal_exec","terminal_poll","terminal_stop","terminal_close","terminal_list")

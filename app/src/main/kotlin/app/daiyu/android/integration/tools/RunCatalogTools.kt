@@ -48,6 +48,7 @@ internal class RunCatalogTools(
     authorization: TaskAuthorization? = null,
     private val shizuku: CatalogShizukuBinding? = null,
     terminal: CatalogTerminalBinding? = null,
+    private val terminalJobs: TerminalJobSession? = null,
     private val browser: CatalogBrowserBinding? = null,
     private val observeBrowserClose: (CatalogBrowserBinding, (RunCatalogCloseResult) -> Unit) -> Unit = ::observeBrowserDrain,
     // Same-package failure injection; production always invokes the resource's own stop action.
@@ -74,10 +75,10 @@ internal class RunCatalogTools(
     @Volatile private var retainedVirtualDisplaySession = virtualDisplaySession
     private var virtualDisplaySessionDrained = false
     private val initialAuthorization: TaskAuthorization? = authorization ?: if (authorizationFactory != null || usesVirtualDisplaySession) {
-        terminal?.authorization // A pre-approved PTY already pins this exact object.
+        terminal?.authorization ?: terminalJobs?.authorization // Pre-approved terminal pins the exact object.
     } else run {
         require(shizuku == null) { "shizuku_task_authorization_required" }
-        require(terminal == null) { "terminal_task_authorization_required" }
+        require(terminal == null && terminalJobs == null) { "terminal_task_authorization_required" }
         require(browser == null) { "browser_task_authorization_required" }
         require(gui == null) { "gui_task_authorization_required" }
         require(generationFactory == null) { "generation_task_authorization_required" }
@@ -90,6 +91,11 @@ internal class RunCatalogTools(
         TerminalCatalogLeaf(it, capabilities, ledger, checkNotNull(initialAuthorization), conversationId, runId)
     }
     init {
+        require(terminal == null || terminalJobs == null) { "terminal_modes_conflict" }
+        terminalJobs?.let {
+            require(it.authorization === initialAuthorization && it.plan.conversationId == conversationId &&
+                it.plan.runId == runId && it.plan.sessionId == capabilities.sessionId) { "terminal_job_approval_mismatch" }
+        }
         require(virtualDisplaySession == null || virtualDisplaySessionFactory == null) { "virtual_display_session_ambiguous" }
         require(!usesVirtualDisplaySession || (virtualDisplayFactory == null && authorizationFactory == null)) {
             "virtual_display_session_factory_conflict"
@@ -170,6 +176,7 @@ internal class RunCatalogTools(
             children?.bind(owner, capabilities, authorization)
             shizuku?.commands?.bind(owner, capabilities, authorization)
             terminalLeaf?.bindOwner(owner)
+            terminalJobs?.bind(owner, capabilities, authorization)
             val boundBrowserTools = browser?.bindOwner(owner, authorization)?.tools ?: emptyList()
             createdBackground = backgroundFactory?.let { factory ->
                 createResource { factory(owner, capabilities, authorization) }
@@ -242,6 +249,7 @@ internal class RunCatalogTools(
                 background?.let { registry.register(it.tool()); registry.register(it.commandTool()) }
                 shizuku?.let { registry.register(it.commands.tool()) }
                 terminalLeaf?.registeredTools?.forEach { registry.register(it) }
+                terminalJobs?.tools(capabilities)?.forEach { registry.register(it) }
                 browserTools.forEach { registry.register(it) }
                 gui?.let { GuiScreenToolFactory.create(it).forEach { tool -> registry.register(tool) } }
                 generation?.registeredTools?.forEach { registry.register(it) }
@@ -366,6 +374,7 @@ internal class RunCatalogTools(
         val unknown = results.firstNotNullOfOrNull { it.outcome as? DispatchOutcome.Unknown }
         if (unknown != null) gui?.onCentralUnknown() // before any external feedback can throw
         terminalLeaf?.observeOutcomes(results)
+        terminalJobs?.observeOutcomes(results)
         unknown?.let {
             shizuku?.session?.markOutcomeUnknown(it.code.ifBlank { "dispatcher_outcome_unknown" })
         }
@@ -385,7 +394,7 @@ internal class RunCatalogTools(
             generation?.revokeAdmission()
             // Fence the terminal before stopping other resources; join is observed separately.
             // R08 close is revocation only. Never synthesize a release/shutdown operation.
-            claimStops(listOfNotNull(gui, browser, generation, virtualDisplay, retainedVirtualDisplaySession, terminalLeaf, shizuku, background, children, deviceResources, skills))
+            claimStops(listOfNotNull(gui, browser, generation, virtualDisplay, retainedVirtualDisplaySession, terminalLeaf, terminalJobs, shizuku, background, children, deviceResources, skills))
         }
         browser?.revoke()
         stopClaimed(resources)
@@ -506,7 +515,7 @@ internal class RunCatalogTools(
             else {
                 observationsStarted = true
                 registeringObservations = true
-                remainingObservations = 8
+                remainingObservations = 9
                 true
             }
         }
@@ -536,6 +545,10 @@ internal class RunCatalogTools(
             observeResourceClose(terminalLeaf) { done ->
                 if (terminalLeaf == null) done(RunCatalogCloseResult.Drained)
                 else terminalLeaf.observeClose(done)
+            }
+            observeResourceClose(terminalJobs) { done ->
+                if (terminalJobs == null) done(RunCatalogCloseResult.Drained)
+                else terminalJobs.observeClose(done)
             }
             observeResourceClose(browser) { done ->
                 if (browser == null) done(RunCatalogCloseResult.Drained)

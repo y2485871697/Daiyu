@@ -23,7 +23,8 @@ class LinuxSettingsApplication private constructor(
      * cannot return and then admit a previously checked open. Already admitted runs retain leases.
      */
     fun openLinux(reference: LinuxGenerationRef, conversationId: ConversationId? = null): Boolean =
-        admission.admit(reference) { terminalOwner.openLinux(reference, conversationId) }
+        LinuxRuntimePlatform.unavailableReason() == null &&
+            admission.admit(reference) { terminalOwner.openLinux(reference, conversationId) }
 
     /**
      * Worker-only, non-starting chat approval seam. Uses the SAME startup trust snapshot and
@@ -37,6 +38,7 @@ class LinuxSettingsApplication private constructor(
         hostWorkingDirectory: File,
     ): TerminalPtyLaunch.Linux {
         check(Looper.myLooper() != Looper.getMainLooper()) { "terminal_freeze_requires_worker" }
+        LinuxRuntimePlatform.requireSupported()
         return admission.freeze(reference) {
             terminalSelection.withSelection(reference) { store ->
                 TerminalPtyLaunch.Linux.freeze(store, reference, tempDirectory, hostWorkingDirectory)
@@ -56,10 +58,12 @@ class LinuxSettingsApplication private constructor(
             catalog: TrustedLinuxCatalog = TrustedLinuxCatalog(File(context.filesDir, "trusted-linux-catalog")),
         ): LinuxSettingsApplication {
             val snapshot = catalog.load()
-            val admission = LinuxSettingsAdmission(snapshot.map { LinuxGenerationRef(it.environmentId, it.generation) }.toSet())
+            val supported = LinuxRuntimePlatform.unavailableReason() == null
+            val admission = LinuxSettingsAdmission(if (supported)
+                snapshot.map { LinuxGenerationRef(it.environmentId, it.generation) }.toSet() else emptySet())
             // Host metadata is fixed for this entire owner lifetime. New approvals never replace it.
             val owner = TerminalUiOwner(TerminalEnvironmentHost.android(context.applicationContext, snapshot), admission::current)
-            val access = LinuxSettingsCatalogAdapter(catalog)
+            val access = LinuxSettingsCatalogAdapter(catalog) { LinuxRuntimePlatform.requireSupported(); Unit }
             val installation = app.daiyu.android.terminal.install.LinuxInstallCoordinator.android(context, access)
             val settings = LinuxSettingsController(access, admission, startupEntries = snapshot, installation = installation)
             val selection = TerminalTrustedLinuxSelection(File(context.filesDir, "user-terminal/linux-selection"), snapshot)

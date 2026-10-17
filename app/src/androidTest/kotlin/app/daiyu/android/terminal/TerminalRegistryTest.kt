@@ -47,6 +47,67 @@ class TerminalRegistryTest:InstrumentationTestCase() {
     }
     private fun open(registry:TerminalRegistry,id:String="open")=registry.execute("terminal_open",JSONObject().put("request_id",id)).getString("session_id")
     private fun command(session:String,id:String="exec",mode:String="async")=JSONObject().put("request_id",id).put("session_id",session).put("command","printf test").put("mode",mode)
+    fun testClosedOrdinaryScopeWaitsForActualOutputPumpNotJustExitCode() {
+        val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
+        val entered=CountDownLatch(1); val release=CountDownLatch(1)
+        val registry=fakeRegistry(isolatedContext(root),UUID.randomUUID().toString())
+        try {
+            registry.processStartReader={ "owned" }
+            registry.startProcess={ FakeProcess(object:InputStream() {
+                override fun read():Int { entered.countDown(); release.await(5,TimeUnit.SECONDS); return -1 }
+            }) }
+            val result=registry.execute("terminal_exec",command(open(registry)))
+            assertTrue(entered.await(5,TimeUnit.SECONDS))
+            registry.close()
+            assertFalse(registry.awaitOrdinaryTermination(1))
+            assertEquals(result.getString("job_id"),registry.inspectJob(result.getString("job_id")).getString("job_id"))
+            release.countDown()
+            assertTrue(registry.awaitOrdinaryTermination(2000))
+        } finally { release.countDown(); registry.close(); root.deleteRecursively() }
+    }
+    fun testCloseDuringPendingProcessStartCannotReportDrainedAndLateProcessIsOwned() {
+        val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
+        val entered=CountDownLatch(1); val release=CountDownLatch(1)
+        val registry=fakeRegistry(isolatedContext(root),UUID.randomUUID().toString())
+        val process=FakeProcess(waiting=CountDownLatch(1))
+        val failure=AtomicReference<Throwable>()
+        val session=open(registry)
+        registry.processStartReader={ "owned" }
+        registry.startProcess={ entered.countDown(); check(release.await(5,TimeUnit.SECONDS)); process }
+        val worker=Thread { try { registry.execute("terminal_exec",command(session)) } catch (caught:Throwable) { failure.set(caught) } }
+        try {
+            worker.start(); assertTrue(entered.await(5,TimeUnit.SECONDS))
+            registry.close(); assertFalse(registry.awaitOrdinaryTermination(1))
+            release.countDown(); worker.join(5000)
+            assertFalse(worker.isAlive); failure.get()?.let { throw it }
+            assertFalse(process.isAlive)
+            assertTrue(registry.awaitOrdinaryTermination(2000))
+        } finally { release.countDown(); worker.join(5000); registry.close(); root.deleteRecursively() }
+    }
+    fun testDaemonUsesSetsidPreservesLiveHandleAcrossRunCloseAndExplicitStopDoesNotInventDescendantExit() {
+        val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
+        val registry=fakeRegistry(isolatedContext(root),UUID.randomUUID().toString())
+        val process=FakeProcess(waiting=CountDownLatch(1))
+        try {
+            registry.daemonExecutable={ "/system/bin/setsid" } // fake Process only, never invoke it
+            registry.processStartReader={ "owned" }
+            registry.startProcess={ builder ->
+                assertEquals(listOf("/system/bin/setsid","-w","--","not-executed"),builder.command())
+                process
+            }
+            val result=registry.execute("terminal_exec",command(open(registry),mode="daemon"))
+            assertEquals("unknown",result.getString("execution"))
+            assertEquals("independent_of_registry_only_while_same_app_process_lives",result.getString("lifetime"))
+            val id=result.getString("job_id")
+            registry.close()
+            assertTrue(registry.awaitOrdinaryTermination(1000))
+            assertTrue(process.isAlive)
+            assertEquals("running",registry.inspectJob(id).getString("state"))
+            val stopped=registry.stopOwnedJob(id)
+            assertTrue(stopped.getBoolean("stopped"))
+            assertTrue(stopped.getString("stop_scope").contains("descendants not claimed stopped"))
+        } finally { process.destroy(); registry.close(); root.deleteRecursively() }
+    }
     fun testExpiredOpenReplayDoesNotRestoreClosedOrRestartedSession() {
         val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
         try {

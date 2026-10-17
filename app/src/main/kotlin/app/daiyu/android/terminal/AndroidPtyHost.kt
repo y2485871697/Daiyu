@@ -84,9 +84,12 @@ object AndroidPtyHost {
         sessionScope: String,
         rows: Int = 24,
         columns: Int = 80,
-    ): LinuxPtySession = LinuxPtySession.open(
-        owner, store, expected, helper(context), tempDirectory, hostWorkingDirectory,
-        journalDirectory, sessionScope, rows, columns,
-    )
+    ): LinuxPtySession {
+        LinuxRuntimePlatform.requireSupported()
+        return LinuxPtySession.open(
+            owner, store, expected, helper(context), tempDirectory, hostWorkingDirectory,
+            journalDirectory, sessionScope, rows, columns,
+        )
+    }
 
 }

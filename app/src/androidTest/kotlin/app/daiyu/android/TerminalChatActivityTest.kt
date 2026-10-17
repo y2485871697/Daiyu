@@ -28,6 +28,35 @@ class TerminalChatActivityTest : WiredActivityTestCase() {
         return pending
     }
 
+    fun testMountedAsyncJobApprovalUsesOriginalSendReceiptAndJobsResultEntry() {
+        setDraft("解释 job 日志；自然语言不是命令")
+        node("terminal-chat-entry").performClick()
+        node("terminal-mode-async").performClick()
+        node("terminal-exact-command").performTextReplacement("printf 'separate exact job'")
+        node("terminal-chat-editor").performScrollToNode(hasTestTag("terminal-prepare"))
+        node("terminal-prepare").performClick()
+        awaitControl("job preview") { fixture.controller.terminalJobPreparation() != null }
+        ui.waitForIdle()
+        val pending = checkNotNull(fixture.controller.terminalJobPreparation())
+        node("terminal-chat-editor").performScrollToNode(hasTestTag("terminal-job-confirm"))
+        node("terminal-job-confirm").performClick()
+        assertTrue(pending.isConfirmed)
+        assertEquals(0, fixture.opens.get())
+        assertTrue(fixture.database.conversations().isEmpty())
+        val session = fixture.session(holdSeconds = 120)
+        node("terminal-chat-editor").performScrollToNode(hasTestTag("terminal-job-send"))
+        node("terminal-job-send").performClick()
+        assertTrue(session.entered.await(10, TimeUnit.SECONDS))
+        awaitTextSendResult(activity)
+        assertDraft("")
+        node("terminal-jobs-entry").performClick()
+        node("terminal-jobs-panel").assertExists()
+        assertEquals(pending.plan.conversationId, fixture.database.conversations().single().id)
+        assertSame(pending.plan, fixture.controller.terminalJobRuns(pending.plan.conversationId).single().plan)
+        assertNull(fixture.controller.terminalJobRuns(pending.plan.conversationId).single().jobId)
+        session.release.countDown()
+    }
+
     fun testMountedConfirmationDoesNotSendAndExplicitSendClearsOnlyOnReceipt() {
         val pending = openAndConfirm()
         assertEquals(pending.draft.text, fixture.database.draft())

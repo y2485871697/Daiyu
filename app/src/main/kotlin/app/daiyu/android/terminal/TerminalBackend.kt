@@ -25,7 +25,24 @@ data class LinuxBackend(
     val sharedMounts: Map<String, String> = emptyMap(),
     val installationEntry: String = "settings://terminal/linux"
 )
-internal class BackendUnavailable(val code: String) : Exception(code)
+internal class BackendUnavailable(val code: String, val cleanup: BackendProbeCleanup? = null) : Exception(code)
+
+/** Failed identity probes also own real processes; a destroy request is not exit evidence. */
+internal class BackendProbeCleanup(private val process: Process, private val reader: Thread) {
+    fun requestClose() {
+        runCatching { process.destroy() }
+        runCatching { process.inputStream.close() }
+        runCatching { process.outputStream.close() }
+        runCatching { process.errorStream.close() }
+    }
+    fun awaitTermination(timeoutMillis: Long): Boolean {
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
+        if (process.isAlive && !process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)) return false
+        val left = deadline - System.nanoTime()
+        if (reader.isAlive && left > 0) TimeUnit.NANOSECONDS.timedJoin(reader, left)
+        return !process.isAlive && !reader.isAlive
+    }
+}
 internal data class SelectedBackend(val name: String, val uid: Int, val root: Boolean,
     val shell: List<String>, val environment: Map<String, String>, val cwd: File, val daemonSupported: Boolean,
     val environmentId: String = name, val guestCwd: String? = null, val sharedMounts: Map<String,String> = emptyMap()) {
@@ -58,6 +75,7 @@ internal object BackendSelection {
     }
 
     fun select(context: Context, config: TerminalConfiguration): SelectedBackend {
+        if (config.backend == "linux") LinuxRuntimePlatform.unavailableReason()?.let { throw BackendUnavailable(it) }
         // Owner configuration is still bounded; launcher selection remains explicit, never replaced.
         fun validEnvironment(values:Map<String,String>)=values.size<=128 && values.all { (k,v) ->
             k.matches(Regex("[A-Za-z_][A-Za-z0-9_]{0,127}")) && v.length<=8192 && !v.contains('\u0000')
@@ -139,6 +157,13 @@ internal object BackendSelection {
             val uid = synchronized(output) { output.toString("UTF-8").trim().toIntOrNull() }
             if (process.exitValue()!=0 || uid==null || uid<0) throw BackendUnavailable(error)
             return uid
-        } finally { process.destroy(); process.inputStream.close(); process.outputStream.close(); process.errorStream.close() }
+        } finally {
+            val cleanup = BackendProbeCleanup(process, reader)
+            cleanup.requestClose()
+            val exited = try { cleanup.awaitTermination(1500) }
+            catch (_: InterruptedException) { Thread.currentThread().interrupt(); false }
+            catch (_: Exception) { false }
+            if (!exited) throw BackendUnavailable("backend_probe_cleanup_unknown", cleanup)
+        }
     }
 }

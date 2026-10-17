@@ -23,8 +23,18 @@ data class LinuxBackend(
     val environmentId: String = label,
     val guestWorkingDirectory: String = "/",
     val sharedMounts: Map<String, String> = emptyMap(),
-    val installationEntry: String = "settings://terminal/linux"
+    val installationEntry: String = "settings://terminal/linux",
+    val rootScope: RootScopeLaunch? = null,
 )
+
+/** Fixed host transport for an explicitly selected installation, never model argv. */
+data class RootScopeLaunch internal constructor(val rootfs: File, val su: File) {
+    init {
+        require(rootfs.isAbsolute && rootfs == rootfs.canonicalFile && rootfs.isDirectory)
+        require(su.isAbsolute && su == su.canonicalFile && su.isFile && su.canExecute())
+    }
+    internal fun guestArgv(): List<String> = listOf("/system/bin/chroot", rootfs.path, "/bin/sh")
+}
 internal class BackendUnavailable(val code: String, val cleanup: BackendProbeCleanup? = null) : Exception(code)
 
 /** Failed identity probes also own real processes; a destroy request is not exit evidence. */
@@ -75,6 +85,9 @@ internal object BackendSelection {
     }
 
     fun select(context: Context, config: TerminalConfiguration): SelectedBackend {
+        if (config.backend == "linux" && config.linux?.rootScope != null) {
+            throw BackendUnavailable("linux_chroot_command_jobs_not_supported")
+        }
         if (config.backend == "linux") LinuxRuntimePlatform.unavailableReason()?.let { throw BackendUnavailable(it) }
         // Owner configuration is still bounded; launcher selection remains explicit, never replaced.
         fun validEnvironment(values:Map<String,String>)=values.size<=128 && values.all { (k,v) ->

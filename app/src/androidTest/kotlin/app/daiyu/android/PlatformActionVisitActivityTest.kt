@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
@@ -26,12 +27,26 @@ class PlatformActionVisitActivityTest : WiredActivityTestCase() {
     private fun sidebar() { host("setSidebarVisible", true); host("setSidebarVisible", false) }
     private fun route() { host("setRetainedPage", "settings"); host("setRetainedPage", "chat") }
     private fun pause() { instrumentation.callActivityOnPause(activity); instrumentation.callActivityOnResume(activity) }
+    private fun clickAction(tag: String) {
+        node(tag).assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+    }
     private fun preview(): ControllerPlatformActionPreparation {
-        node("platform-action-entry").performClick()
-        node("platform-action-media").performClick()
-        node("platform-action-preview").performClick()
+        clickAction("platform-action-entry")
+        clickAction("platform-action-media")
+        clickAction("platform-action-preview")
+        lateinit var pending: ControllerPlatformActionPreparation
+        mainThread {
+            pending = checkNotNull(fixture.controller.platformActionPreparation()) {
+                "production preview click did not create platform preparation"
+            }
+        }
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("platform-action-confirm")
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
         node("platform-action-confirm").assertExists()
-        return checkNotNull(fixture.controller.platformActionPreparation())
+        return pending
     }
     private fun assertUnsent() {
         assertDraft(text)
@@ -61,7 +76,7 @@ class PlatformActionVisitActivityTest : WiredActivityTestCase() {
     fun testApprovedButBlockedWorkerIsRevokedSynchronouslyBeforeDatabaseAcceptance() {
         setDraft(text)
         val old = preview()
-        node("platform-action-confirm").performClick()
+        clickAction("platform-action-confirm")
         assertTrue(entered.await(5, TimeUnit.SECONDS))
         mainThread { pause(); assertTrue(old.cancelled) }
         release.countDown()

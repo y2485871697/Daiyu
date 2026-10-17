@@ -1,7 +1,6 @@
 package app.daiyu.android
 
 import androidx.compose.runtime.State
-import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import app.daiyu.android.domain.*
 
@@ -20,23 +19,31 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         (MainActivity::class.java.getDeclaredField("shizukuEditor\$delegate")
             .apply { isAccessible = true }.get(target) as State<*>).value
 
+    private fun panelNode(matcher: SemanticsMatcher): SemanticsNodeInteraction {
+        val target = matcher and hasAnyAncestor(hasTestTag("shizuku-text-panel"))
+        ui.onNodeWithTag("shizuku-text-panel").performScrollTo()
+        ui.onNode(target).performScrollTo()
+        ui.onNodeWithTag("chat-extra-actions").performScrollToNode(target)
+        return ui.onNode(target).assertIsDisplayed().assertIsEnabled()
+    }
+
+    private fun enableTextApproval() {
+        panelNode(hasTestTag("shizuku-text-enable")).assertIsOff().performClick()
+        ui.onNodeWithTag("shizuku-text-enable").assertIsOn()
+    }
+
     private fun openEditor() {
         setDraft(text)
         node("shizuku-text-entry").performClick()
-        ui.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.ToggleableState) and
-            hasAnyAncestor(hasTestTag("shizuku-text-panel"))).performScrollTo()
-            .assertIsDisplayed().assertIsEnabled().performClick()
-        ui.onNode(hasSetTextAction() and hasText("精确 UID：0 或 2000（必选，无默认值）"))
-            .performScrollTo().performTextReplacement("2000")
-        ui.onNode(hasSetTextAction() and hasText("本次精确 shell 命令"))
-            .performScrollTo().performTextReplacement(command)
-        ui.onNode(hasSetTextAction() and hasText("超时毫秒（1–120000）"))
-            .performScrollTo().performTextReplacement("1234")
+        enableTextApproval()
+        panelNode(hasSetTextAction() and hasText("精确 UID：0 或 2000（必选，无默认值）")).performTextReplacement("2000")
+        panelNode(hasSetTextAction() and hasText("本次精确 shell 命令")).performTextReplacement(command)
+        panelNode(hasSetTextAction() and hasText("超时毫秒（1–120000）")).performTextReplacement("1234")
     }
 
     private fun preview(): ControllerShizukuPreparation {
         openEditor()
-        ui.onNodeWithText("预览命令及本次运行").performScrollTo().performClick()
+        panelNode(hasText("预览命令及本次运行") and hasClickAction()).performClick()
         ui.waitUntil(5_000) { fixture.controller.shizukuPreparation() != null }
         val preparation = checkNotNull(fixture.controller.shizukuPreparation())
         ui.waitUntil(5_000) {
@@ -56,13 +63,10 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         node("shizuku-text-entry").assertIsEnabled().performClick()
         assertNull(fixture.controller.shizukuPreparation())
         ui.onNodeWithText("本次精确 shell 命令").assertDoesNotExist()
-        ui.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.ToggleableState) and
-            hasAnyAncestor(hasTestTag("shizuku-text-panel"))).performScrollTo()
-            .assertIsDisplayed().assertIsEnabled().performClick()
-        ui.onNode(hasSetTextAction() and hasText("本次精确 shell 命令"))
-            .performScrollTo().performTextReplacement(command)
+        enableTextApproval()
+        panelNode(hasSetTextAction() and hasText("本次精确 shell 命令")).performTextReplacement(command)
         // Even with valid text/command/timeout, no UID was selected.
-        ui.onNodeWithText("预览命令及本次运行").performScrollTo().performClick()
+        panelNode(hasText("预览命令及本次运行") and hasClickAction()).performClick()
         assertNull(fixture.controller.shizukuPreparation())
         assertEquals(0, fixture.opens.get())
         assertEquals(text, fixture.database.draft())
@@ -78,7 +82,7 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText("拒绝 / 取消").performClick()
         ui.waitUntil(5_000) { fixture.controller.shizukuPreparation() == null }
         assertTrue(p.isCancelled())
-        node("shizuku-text-cancel").performScrollTo().performClick()
+        panelNode(hasTestTag("shizuku-text-cancel")).performClick()
         node("shizuku-text-panel").assertDoesNotExist()
         assertDraft(text)
         assertTrue(fixture.database.conversations().isEmpty())

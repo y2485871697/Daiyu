@@ -332,7 +332,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         fetch(); assertTrue(retryEntered.await(5, TimeUnit.SECONDS)); finished(retryConnection)
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-option:second").fetchSemanticsNodes().isNotEmpty() }
         node("provider-model-option:second").assertExists()
-        ui.onNodeWithText("取消").performClick(); backToChat(activity)
+        node("dialog-cancel").assertIsEnabled().performClick(); backToChat(activity)
         node("provider-model-selection").assertDoesNotExist()
         assertEquals(old, fixture.settings.load().model); assertEquals(before, fixture.settings.load())
     }

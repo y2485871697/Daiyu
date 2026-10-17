@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
 import java.util.concurrent.TimeUnit
 
 /** Exercises the mounted production composer, not a replacement approval-only composition. */
@@ -14,7 +15,8 @@ class TerminalChatActivityTest : WiredActivityTestCase() {
         node("terminal-chat-entry").performClick()
         node("terminal-exact-command").performTextReplacement("printf 'explicit bytes'\n")
         node("terminal-chat-editor").performScrollToNode(hasTestTag("terminal-prepare"))
-        node("terminal-prepare").performClick()
+        node("terminal-prepare").assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         awaitControl("production preview") { fixture.controller.terminalPreparation() != null }
         ui.waitForIdle()
         val pending = checkNotNull(fixture.controller.terminalPreparation())
@@ -34,7 +36,8 @@ class TerminalChatActivityTest : WiredActivityTestCase() {
         node("terminal-mode-async").performClick()
         node("terminal-exact-command").performTextReplacement("printf 'separate exact job'")
         node("terminal-chat-editor").performScrollToNode(hasTestTag("terminal-prepare"))
-        node("terminal-prepare").performClick()
+        node("terminal-prepare").assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         awaitControl("job preview") { fixture.controller.terminalJobPreparation() != null }
         ui.waitForIdle()
         val pending = checkNotNull(fixture.controller.terminalJobPreparation())

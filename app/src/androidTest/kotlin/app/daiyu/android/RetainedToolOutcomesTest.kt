@@ -62,7 +62,11 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
         assertNull(reader(stored, tool.copy(invocation = tool.invocation.copy(arguments = "{\"changed\":true}"))))
         assertNull(reader(stored, tool.copy(result = "changed result")))
         // A model/historical JSON string without matching trusted metadata keeps legacy presentation.
-        val historical = stored.copy(id = MessageId("untrusted-history"))
+        val historicalId = MessageId("untrusted-history")
+        val historical = stored.copy(id = historicalId,
+            historySegments = stored.historySegments.map { segment ->
+                if (segment.role == Message.ASSISTANT_ROLE) segment.copy(messageId = historicalId) else segment
+            })
         assertEquals(WorkStepState.OK, project(historical).workProcess!!.segments.first().steps.first().state)
     }
 

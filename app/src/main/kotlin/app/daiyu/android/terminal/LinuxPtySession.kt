@@ -7,7 +7,7 @@ import java.io.File
 /**
  * A run-bound PTY and its selected Linux generation. All inputs are trusted host values,
  * not model arguments. close() only fences operations and requests shutdown: the host must
- * keep this handle until awaitTermination() confirms that the helper Process has exited.
+ * keep this handle until awaitTermination() confirms the selected protocol's termination proof (root scope D plus launcher exit).
  * Do not use AutoCloseable.use as a substitute for that join.
  */
 class LinuxPtySession private constructor(
@@ -53,8 +53,17 @@ class LinuxPtySession private constructor(
             columns: Int = 80,
         ): LinuxPtySession = openConfigured(owner, store, expected, tempDirectory, hostWorkingDirectory) { configuration ->
             val backend = checkNotNull(configuration.linux)
-            PtyRunSession.open(owner, helper, backend.shellArgv, backend.environment + configuration.environment,
-                checkNotNull(configuration.workingDirectory), journalDirectory, sessionScope, rows, columns)
+            val root = backend.rootScope
+            if (root == null) {
+                check(backend.shellArgv.firstOrNull() != "/system/bin/chroot") { "linux_chroot_requires_root_scope" }
+                PtyRunSession.open(owner, helper, backend.shellArgv, backend.environment + configuration.environment,
+                    checkNotNull(configuration.workingDirectory), journalDirectory, sessionScope, rows, columns)
+            } else {
+                check(!configuration.root && backend.shellArgv == root.guestArgv()) { "linux_chroot_launch_mismatch" }
+                check(backend.guestWorkingDirectory == "/" && backend.sharedMounts.isEmpty()) { "linux_chroot_mapping_not_supported" }
+                PtyRunSession.openRootScope(owner, helper, root, backend.environment + configuration.environment,
+                    checkNotNull(configuration.workingDirectory), journalDirectory, sessionScope, rows, columns)
+            }
         }
 
         // Per-call test seam; production always invokes the real PtyRunSession.open above.

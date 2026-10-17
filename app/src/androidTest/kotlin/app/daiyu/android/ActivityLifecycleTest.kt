@@ -142,7 +142,13 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
         openSettings()
         reveal("settings-row:扩展", "设置").performClick()
         reveal("settings-row:鲸鱼女仆", "扩展").performClick()
-        instrumentation.waitForIdleSync()
+        ui.waitUntil(timeoutMillis = 5_000) {
+            var found = false
+            instrumentation.runOnMainSync {
+                found = current.window.decorView.findViewWithTag<android.view.View>("pet-settings-view") != null
+            }
+            found
+        }
         mainThread { assertNotNull(current.window.decorView.findViewWithTag<android.view.View>("pet-settings-view")) }
         backToChat(current) // Pet settings BackHandler returns to the actual SettingsHome.
         reveal("settings-row:模型功能", "设置").performClick()

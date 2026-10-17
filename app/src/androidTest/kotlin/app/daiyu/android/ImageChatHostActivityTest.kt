@@ -325,7 +325,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         val owner = oldHost.session.owner
         val ordered = oldHost.session.attachments.state.value.ready.map { it.attachment.id }
         val queue = ReceiptQueue()
-        val handlerField = ChatController::class.java.getDeclaredField("handler").apply { isAccessible = true }
+        val handlerField = ChatController::class.java.getDeclaredField("imageReceiptHandler").apply { isAccessible = true }
         val oldController = controller
         val originalHandler = handlerField.get(oldController)
         handlerField.set(oldController, queue)
@@ -402,7 +402,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         val oldHost = host()
         val oldOwner = oldHost.session.owner
         val queue = ReceiptQueue()
-        val handlerField = ChatController::class.java.getDeclaredField("handler").apply { isAccessible = true }
+        val handlerField = ChatController::class.java.getDeclaredField("imageReceiptHandler").apply { isAccessible = true }
         val oldController = controller
         val originalHandler = handlerField.get(oldController)
         handlerField.set(oldController, queue)
@@ -495,7 +495,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         val acceptedImages = host().session.attachments.state.value.ready.map { it.attachment }
         val conversationId = ConversationId(acceptedOwner.conversationId)
         val queue = ReceiptQueue()
-        val handlerField = ChatController::class.java.getDeclaredField("handler").apply { isAccessible = true }
+        val handlerField = ChatController::class.java.getDeclaredField("imageReceiptHandler").apply { isAccessible = true }
         val originalHandler = handlerField.get(controller)
         handlerField.set(controller, queue)
         try {
@@ -556,7 +556,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         setDraft("仅发送一次")
         pick(1); waitImages(1); authorize()
         val queue = ReceiptQueue()
-        val handlerField = ChatController::class.java.getDeclaredField("handler").apply { isAccessible = true }
+        val handlerField = ChatController::class.java.getDeclaredField("imageReceiptHandler").apply { isAccessible = true }
         val originalHandler = handlerField.get(controller)
         handlerField.set(controller, queue)
         try {

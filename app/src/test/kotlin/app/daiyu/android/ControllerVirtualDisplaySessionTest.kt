@@ -451,24 +451,45 @@ class ControllerVirtualDisplaySessionTest {
         } }
     }
 
-    @Test fun cleanupUnknownAndLostCompletionAreRetainedWithoutAnyReplayEvenAfterPhysicalExit() {
-        listOf(false, true).forEach { lostCompletion -> Fixture().use { f ->
-            f.initialized(); f.session.close()
-            val request = checkNotNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
-            f.session.answerCleanupFromUi(request, true)
-            f.endpoint.confirmRelease = lostCompletion
-            f.parent.lease.journal.failCleanupComplete = lostCompletion
-            assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNKNOWN,
-                f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
-            f.endpoint.confirmRelease = true
-            assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
-                f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
-            f.endpoint.drained()
-            assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
-            assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
-            assertEquals(1, f.endpoint.releaseIds.size)
-            assertEquals(0, f.parent.lease.releases.get())
-        } }
+    @Test fun recordedCleanupUnknownRetainsOutcomeButIndependentPhysicalExitReleasesLease() = Fixture().use { f ->
+        f.initialized(); f.session.close()
+        val request = checkNotNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+        assertTrue(f.session.answerCleanupFromUi(request, true))
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNKNOWN,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+        assertEquals(R08VirtualDisplayEvidence.UNKNOWN, f.parent.lease.journal.evidence.last().second)
+        assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
+        assertEquals(0, f.parent.lease.releases.get())
+        f.endpoint.confirmRelease = true
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+        f.endpoint.drained()
+        assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown,
+            f.work { f.session.observeCloseOnWorker(false) })
+        assertEquals(0, f.parent.lease.releases.get())
+        assertEquals(ControllerVirtualDisplaySession.CloseResult.Drained, f.observe())
+        assertEquals(ControllerVirtualDisplaySession.CloseResult.Drained, f.observe())
+        assertEquals(1, f.parent.lease.releases.get())
+        assertEquals(1, f.endpoint.releaseIds.size)
+        assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+        assertEquals(R08VirtualDisplayEvidence.UNKNOWN, f.parent.lease.journal.evidence.last().second)
+    }
+
+    @Test fun failedCleanupCompletionRemainsUnknownEvenAfterPhysicalExitWithoutReplay() = Fixture().use { f ->
+        f.initialized(); f.session.close()
+        val request = checkNotNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+        assertTrue(f.session.answerCleanupFromUi(request, true))
+        f.endpoint.confirmRelease = true
+        f.parent.lease.journal.failCleanupComplete = true
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNKNOWN,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+        f.endpoint.drained()
+        assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
+        assertNull(f.work { f.session.prepareInitializedCleanupOnWorker(true) })
+        assertEquals(1, f.endpoint.releaseIds.size)
+        assertEquals(0, f.parent.lease.releases.get())
     }
 
     @Test fun preexistingCleanupClaimIsLookupOnlyNeverReplayedWithNewOperationId() = Fixture().use { f ->
@@ -483,8 +504,10 @@ class ControllerVirtualDisplaySessionTest {
         assertEquals(0, f.endpoint.releaseIds.size)
         assertEquals(R08VirtualDisplayEvidence.UNKNOWN, f.parent.lease.journal.evidence.last().second)
         f.endpoint.drained()
-        assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())
-        assertEquals(0, f.parent.lease.releases.get())
+        assertEquals(ControllerVirtualDisplaySession.CloseResult.Drained, f.observe())
+        assertEquals(1, f.parent.lease.releases.get())
+        assertEquals(0, f.endpoint.releaseIds.size)
+        assertEquals(R08VirtualDisplayEvidence.UNKNOWN, f.parent.lease.journal.evidence.last().second)
     }
 
     @Test fun originalReleaseResultAndPendingFinalFeedbackFenceCleanup() {

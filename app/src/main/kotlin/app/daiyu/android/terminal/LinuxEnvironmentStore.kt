@@ -190,10 +190,14 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
         val protectedShellPaths = listOf(listOf("bin", "sh"), root.relativize(shell.toPath()).map { it.toString() })
         for (target in targets) require(protectedShellPaths.none { LinuxPathSyntax.contains(target, it) }) { "linux_bind_overrides_shell" }
         return (listOf(value.rootfs) + helperFiles + listOf(shell) + value.sharedMounts.keys.map(::File)).map { file ->
-            val real = file.toPath().toRealPath()
-            val key = fileKey(real)
-            check(key != null) { "linux_path_identity_unavailable" }
-            file.absolutePath + "\n" + real + "\n" + key
+            if (value.executionMode == LinuxExecutionMode.CHROOT && RootScopeLaunch.isFixedTransport(file)) {
+                "chroot-transport\n" + RootScopeLaunch.trustedTransportIdentity(file)
+            } else {
+                val real = file.toPath().toRealPath()
+                val key = fileKey(real)
+                check(key != null) { "linux_path_identity_unavailable" }
+                file.absolutePath + "\n" + real + "\n" + key
+            }
         }
     }
 

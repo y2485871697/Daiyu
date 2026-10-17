@@ -39,7 +39,21 @@
     "frame_over_16_7_ms_ratio_max": 0.05,
     "frame_over_50_ms_ratio_max": 0.01,
     "frame_duration_ms_max": 700,
-    "anr_count_max": 0
+    "anr_count_max": 0,
+    "stop_feedback_timing": {
+      "approval": {
+        "source": "explicit_user_choice",
+        "date": "2026-10-18",
+        "question_id": "question-001b2812-081f-4b18-ad71-6f4dd0ed57ee",
+        "option_id": "after_stop_recognized"
+      },
+      "start": "long_press_recognized_or_stop_request_received",
+      "end": "first_visible_stop_feedback",
+      "entry_point_must_be_fixed_before_collection": true,
+      "preserve_long_press_gesture": true,
+      "report_full_pointer_down_to_feedback_separately": true,
+      "gesture_recognition_wait_excluded_from_100ms_threshold": true
+    }
   },
   "AC-073": {
     "conversation_switches": 100,

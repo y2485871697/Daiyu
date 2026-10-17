@@ -135,7 +135,10 @@ class ChatController internal constructor(private val application:Application,
             app.daiyu.android.title.ConversationTitleModel.INSTRUCTIONS)
     }, private val titleSettingsOverride: app.daiyu.android.title.TitleModelSettingsStore? = null,
     private val contextManagementFactory: (android.content.Context, ContextService) -> ContextManagementBackend =
-        { context, service -> ContextManagementWorker.production(context, service) }) {
+        { context, service -> ContextManagementWorker.production(context, service) },
+    private val mcpTransport: (app.daiyu.android.mcp.McpServer) -> app.daiyu.android.mcp.McpHttpSession = {
+        app.daiyu.android.mcp.McpHttpSession(it)
+    }) {
     // Voice credentials remain independent from chat settings.
     internal val voiceAccounts by lazy { app.daiyu.android.voice.account.VoiceAccountResources.forContext(application) }
     internal val voiceRuntime by lazy {
@@ -270,6 +273,8 @@ class ChatController internal constructor(private val application:Application,
         var committing = false
         var persistenceUnconfirmed = false
         var browser: ControllerBrowserPreparation? = null
+        var mcp: ControllerMcpPreparation? = null
+        var mcpCatalog: RunCatalogTools? = null
         var terminal: ControllerTerminalPreparation? = null
         var terminalJob: ControllerTerminalJobPreparation? = null
         var terminalJobRun: TerminalJobSession? = null
@@ -414,7 +419,8 @@ class ChatController internal constructor(private val application:Application,
         }
         token?.cancellation?.cancel()
         token?.browser?.cancel()
-        if (token != null && !token.submitted && (token.browser != null || token.terminal != null || token.terminalJob != null ||
+        token?.mcp?.cancel()
+        if (token != null && !token.submitted && (token.browser != null || token.mcp != null || token.terminal != null || token.terminalJob != null ||
             synchronized(this) { virtualDisplayEntry?.submitted == false || guiEntry?.submitted == false })) finishPreparation(token)
     }
     internal fun bindConversationAssistant(owner: ConversationId, expected: String?, replacement: String): Boolean {
@@ -1422,6 +1428,7 @@ class ChatController internal constructor(private val application:Application,
         } ?: return false
         token.cancellation.cancel()
         token.browser?.cancel()
+        token.mcp?.cancel()
         return true
     }
     /** Optional entry point. Ordinary send()/sendImages() never grant Shizuku access.
@@ -1510,6 +1517,7 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     private fun finishPreparation(token: Preparation) {
+        if (token.mcpCatalog == null) token.mcp?.cancel()
         // Accepted READY belongs to RunResources until the first checkpoint (or final drain).
         // Clearing the editor preparation lane must NOT cancel the handoff.
         if (!token.summaryTransferred) closeSummaryPreparationSafely(token.summaryPreparation)
@@ -2106,6 +2114,84 @@ class ChatController internal constructor(private val application:Application,
     }
 
     /** Worker-only snapshot. Merely opening approval never creates a browser or calls a model. */
+    internal fun prepareMcpSend(conversation: Conversation?, editor: TextSendOwner, text: String,
+        serverId: String, tool: String, arguments: String): ControllerMcpPreparation? {
+        check(Looper.myLooper() != Looper.getMainLooper()) { "mcp_worker_required" }
+        val token = synchronized(this) {
+            if (!idleAvailable() || text.isBlank() || editor.conversationId != conversation?.id ||
+                editor.editorGeneration < 0 || editor.draftRevision < 0) return null
+            reservePreparation()
+        }
+        var pending: ControllerMcpPreparation? = null
+        try {
+            val binding = if (conversation == null) token.assistantId else database.assistantId(conversation.id)
+            val profile = assistantStore.read(checkNotNull(binding)) ?: error("mcp_assistant_missing")
+            val context = AssistantRunContext.capture(assistantStore, profile.id, assistantAssets)
+            check(assistantStore.read(profile.id) == profile)
+            val config = settings.load().also { it.validate() }
+            val store = app.daiyu.android.mcp.McpSettingsStore(application)
+            val frozen = store.snapshot()
+            val selection = app.daiyu.android.mcp.McpSelection(serverId, tool, arguments)
+            val scope = app.daiyu.android.mcp.McpRunScope(frozen, listOf(selection),
+                conversation?.id ?: ConversationId(UUID.randomUUID().toString()), RunId(UUID.randomUUID().toString()),
+                configurationCurrent = { store.isCurrent(frozen) }, transport = mcpTransport)
+            pending = ControllerMcpPreparation(conversation, editor, text, profile, ProviderSnapshot.capture(config),
+                selection, scope, MessageId(UUID.randomUUID().toString()))
+            synchronized(this) {
+                check(preparation === token && !closed && !token.revoked)
+                token.mcp = pending
+                token.browserContext = context
+            }
+            notifyChanged()
+            return pending
+        } catch (_: Exception) {
+            pending?.cancel()
+            problem = "MCP 准备失败或配置已变化；草稿保留，未连接服务器"
+            finishPreparation(token); notifyChanged(); return null
+        }
+    }
+    internal fun rejectMcp(pending: ControllerMcpPreparation) {
+        val token = synchronized(this) {
+            preparation?.takeIf { it.mcp === pending }?.also { it.revoked = true }
+        } ?: return
+        token.cancellation.cancel(); pending.cancel()
+        if (!token.submitted) finishPreparation(token)
+    }
+    internal fun sendMcp(pending: ControllerMcpPreparation, owner: TextSendOwner, text: String,
+        ticket: TextSendTicket, complete: (TextSendResult) -> Unit): Boolean {
+        val token = synchronized(this) {
+            val candidate = preparation ?: return false
+            if (candidate.mcp !== pending || candidate.submitted || candidate.revoked || closed ||
+                !pending.confirmed || owner != pending.editor || text != pending.text || pendingTextState != null) return false
+            candidate.submitted = true; candidate.textTicket = ticket
+            pendingTextState = TextSendState(ticket, owner, text)
+            candidate
+        }
+        try { executor.execute {
+            val saved = try {
+                val binding = if (pending.conversation == null) token.assistantId else database.assistantId(pending.conversation.id)
+                if (preparationCancelled(token) || !pending.confirmed || binding != pending.assistant.id ||
+                    assistantStore.read(pending.assistant.id) != pending.assistant ||
+                    settings.load() != pending.provider.asModelSettings()) null
+                else sendPrepared(token, pending.conversation, text, expectedDraftText = text, mcpPreparation = pending)
+            } catch (_: Exception) { null }
+            val result = when {
+                saved != null -> TextSendResult.Accepted(owner, saved)
+                token.persistenceUnconfirmed -> TextSendResult.Unknown(owner)
+                else -> TextSendResult.Rejected(owner)
+            }
+            synchronized(this) {
+                if (pendingTextState?.ticket === ticket) pendingTextState = pendingTextState?.copy(result = result)
+            }
+            finishPreparation(token)
+            handler.post { runCatching { complete(result) } }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { if (pendingTextState?.ticket === ticket) pendingTextState = null }
+            rejectMcp(pending); finishPreparation(token); return false
+        }
+        return true
+    }
+
     internal fun prepareBrowserSend(conversation: Conversation?, draft: BrowserDraftSnapshot,
                                    writes: List<String>): ControllerBrowserPreparation? {
         check(Looper.myLooper() != Looper.getMainLooper()) { "browser_prepare_requires_worker" }
@@ -2289,6 +2375,7 @@ class ChatController internal constructor(private val application:Application,
         shizukuPreparation:ControllerShizukuPreparation?=null,
         shizukuAuthorization:app.daiyu.android.domain.tools.TaskAuthorization?=null,
         expectedDraftText:String?=null,
+        mcpPreparation:ControllerMcpPreparation?=null,
         browserPreparation:ControllerBrowserPreparation?=null,
         browserBinding:CatalogBrowserBinding?=null,
         generation:GenerationEntry?=null,
@@ -2299,13 +2386,16 @@ class ChatController internal constructor(private val application:Application,
         virtualDisplay:ControllerVirtualDisplayEntry?=null,
         gui:ControllerGuiEntry?=null,
         videoAttempt:ControllerVideoAttempt?=null):Conversation? {
-        require(gui == null || (virtualDisplay == null && generation == null && shizukuPreparation == null &&
+        require(gui == null || (mcpPreparation == null && virtualDisplay == null && generation == null && shizukuPreparation == null &&
             shizukuAuthorization == null && browserPreparation == null && browserBinding == null &&
             imageAttempt == null && terminalRun == null && terminalJobRun == null && videoAttempt == null && !withChildren &&
             gui.session != null && gui.delivery?.session === gui.session && !gui.revoked))
+        require(mcpPreparation == null || (imageAttempt == null && shizukuPreparation == null &&
+            browserPreparation == null && browserBinding == null && generation == null &&
+            gui == null && terminalJobRun == null && shizukuAuthorization == null && terminalRun == null && virtualDisplay == null && videoAttempt == null && !withChildren && mcpPreparation.confirmed))
         require((terminalPreparation == null) == (terminalRun == null))
         require((terminalJobPreparation == null) == (terminalJobRun == null))
-        require(terminalJobRun == null || (terminalRun == null && imageAttempt == null &&
+        require(terminalJobRun == null || (mcpPreparation == null && terminalRun == null && imageAttempt == null &&
             shizukuPreparation == null && shizukuAuthorization == null && browserPreparation == null &&
             browserBinding == null && generation == null && virtualDisplay == null && gui == null && videoAttempt == null && !withChildren &&
             terminalJobRun.plan === terminalJobPreparation?.plan))
@@ -2359,11 +2449,11 @@ class ChatController internal constructor(private val application:Application,
             problem="子模型配置未绑定、已变更或不支持；草稿保留，未切换到主模型";notifyChanged();return null
         }
         val interactiveSnapshot = interactiveMode.snapshot()
-        val config=try {(terminalJobPreparation?.provider?.asModelSettings() ?: terminalPreparation?.provider?.asModelSettings() ?: browserPreparation?.provider?.asModelSettings() ?: settings.load()).also {it.validate()}} catch (_:CredentialUnavailableException) {
+        val config=try {(mcpPreparation?.provider?.asModelSettings() ?: terminalJobPreparation?.provider?.asModelSettings() ?: terminalPreparation?.provider?.asModelSettings() ?: browserPreparation?.provider?.asModelSettings() ?: settings.load()).also {it.validate()}} catch (_:CredentialUnavailableException) {
             problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
         } catch (_:Exception) {problem="请在模型设置里配置Responses地址、模型与密钥";notifyChanged();return null}
         val provider=try {
-            val selected=terminalJobPreparation?.provider ?: terminalPreparation?.provider ?: browserPreparation?.provider ?: imageAttempt?.provider ?: synchronized(this) {imageProvider}
+            val selected=mcpPreparation?.provider ?: terminalJobPreparation?.provider ?: terminalPreparation?.provider ?: browserPreparation?.provider ?: imageAttempt?.provider ?: synchronized(this) {imageProvider}
             if(imageAttempt!=null) require(selected?.asModelSettings()==config) {"stale_image_provider"}
             selected?.takeIf {it.asModelSettings()==config} ?: ProviderSnapshot.capture(config)
         } catch (_:Exception) {problem="图片模型配置已变化；草稿保留，未发起网络请求";notifyChanged();return null}
@@ -2386,9 +2476,9 @@ class ChatController internal constructor(private val application:Application,
             problem="错误重连配置无效或写入未确认；请重新保存，草稿保留，未启动聊天模型请求"
             notifyChanged(); return null
         }
-        val conversationId=gui?.conversationId ?: terminalJobPreparation?.identity?.conversationId ?: virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
+        val conversationId=mcpPreparation?.scope?.conversationId ?: gui?.conversationId ?: terminalJobPreparation?.identity?.conversationId ?: virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
-        val run=gui?.runId ?: terminalJobPreparation?.identity?.runId ?: virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
+        val run=mcpPreparation?.scope?.runId ?: gui?.runId ?: terminalJobPreparation?.identity?.runId ?: virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
         if (conversation == null) try { reasoningPreference.retainAccepted(conversationId.value, frozenReasoning) }
         catch (_: Exception) { problem="会话思考偏好保存未确认；草稿保留，未发起请求";notifyChanged();return null }
         // One acceptance candidate, including its media reconstruction and all run owners.
@@ -2397,7 +2487,7 @@ class ChatController internal constructor(private val application:Application,
         var user=try {imageAttempt?.prepare(imageAttachments.store,messageImageAssets,acceptedAt) ?:
             Message(videoAttempt?.userId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"user",listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED,createdAt=acceptedAt)
         } catch (_:Exception) {problem="图片冻结失败或模型不支持；草稿保留，未发起网络请求";notifyChanged();return null}
-        val assistant=Message(gui?.assistantId ?: terminalJobPreparation?.identity?.assistantMessageId ?: virtualDisplay?.assistantId ?: terminalRun?.preview?.identity?.assistantMessageId ?: videoAttempt?.assistantId ?: generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING,createdAt=acceptedAt)
+        val assistant=Message(mcpPreparation?.assistantMessageId ?: gui?.assistantId ?: terminalJobPreparation?.identity?.assistantMessageId ?: virtualDisplay?.assistantId ?: terminalRun?.preview?.identity?.assistantMessageId ?: videoAttempt?.assistantId ?: generation?.identity?.assistantMessageId ?: browserPreparation?.identity?.assistantMessageId ?: imageAttempt?.assistantId ?: MessageId(UUID.randomUUID().toString()),conversationId,run,"assistant",emptyList(),RunStatus.RUNNING,createdAt=acceptedAt)
         val physicalVideoHistory = try { ControllerVideoHistory(database).capture(conversationId) }
         catch (_: Exception) {
             problem="原视频来源无法确认；草稿保留，未启动模型请求";notifyChanged();return null
@@ -2405,7 +2495,7 @@ class ChatController internal constructor(private val application:Application,
         if (physicalVideoHistory.inputs.isNotEmpty() && (withChildren || imageAttempt != null ||
                 generation != null || terminalRun != null || terminalJobRun != null || virtualDisplay != null || gui != null ||
                 shizukuPreparation != null || shizukuAuthorization != null ||
-                browserPreparation != null || browserBinding != null)) {
+                mcpPreparation != null || browserPreparation != null || browserBinding != null)) {
             problem="当前专用批准不能与原视频历史混合发送；保留草稿，请使用原视频文本发送入口"
             notifyChanged(); return null
         }
@@ -2485,7 +2575,12 @@ class ChatController internal constructor(private val application:Application,
             val coordinator = contextPreparation
             val summary = checkNotNull(runtimeStore).summaryPreparation(conversationId, run, assistant.id, token.cancellation)
             token.summaryPreparation = summary
-            val frozen = coordinator.freeze(conversationId,listOf(user),token.cancellation, summaryUsage = summary.usagePort)
+            // Budget the exact confirmed GUI model input in the ORIGINAL preparation, including
+            // compression trigger and final admission. Only this projection enters Runner; user,
+            // draft CAS and database.send stay unchanged. No re-observe or second resource owner.
+            val modelUser = if (gui == null) user else app.daiyu.android.gui.GuiConfirmedModelPort.project(
+                user, checkNotNull(gui.delivery))
+            val frozen = coordinator.freeze(conversationId,listOf(modelUser),token.cancellation, summaryUsage = summary.usagePort)
             if (video == null) coordinator.prepare(frozen) else {
                 // A video run must not silently replace physical/retained history with a text summary.
                 // Keep the same policy/budget and acceptance revision, but send every physical row.
@@ -2589,6 +2684,7 @@ class ChatController internal constructor(private val application:Application,
                     (if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY,RunChildTasks.CAPABILITY)) +
                     (if (shizukuPreparation == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)) +
                     (if (browserBinding == null) emptySet() else setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY)) +
+                    (if (mcpPreparation == null) emptySet() else setOf(app.daiyu.android.mcp.McpRunScope.CAPABILITY)) +
                     (if (generation == null) emptySet() else setOf(RunGenerationTools.CAPABILITY)) +
                     (if (terminalRun == null) emptySet() else setOf(RunTerminalTools.CAPABILITY)) +
                     (if (terminalJobRun == null) emptySet() else setOf(TerminalJobSession.CAPABILITY)) +
@@ -2608,7 +2704,7 @@ class ChatController internal constructor(private val application:Application,
             // The SAME frozen authorization reaches Dispatcher and RunShizukuCommands.bind.
             val shizuku=shizukuPreparation?.open(shizukuAccess)
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
-                backgroundFactory, memoryContext=assistantContext,
+                backgroundFactory, memoryContext=assistantContext, mcp=mcpPreparation?.scope,
                 onCatalogReady = browserPreparation?.childPlan?.let { plan -> { realOwner: app.daiyu.android.domain.runtime.RunExecutionOwner,
                     grants: SessionCapabilities, task: app.daiyu.android.domain.tools.TaskAuthorization ->
                     plan.launch(application, realOwner, grants, task, toolLedger,
@@ -2617,7 +2713,7 @@ class ChatController internal constructor(private val application:Application,
                             ?: assistantModel?.invoke(provider, assistantContext) ?: model(config) },
                         onChanged = ::browserChildrenChanged)
                 } },
-                authorization=terminalJobRun?.authorization ?: terminalRun?.authorization ?: shizukuAuthorization ?: gui?.let {
+                authorization=mcpPreparation?.scope?.authorization ?: terminalJobRun?.authorization ?: terminalRun?.authorization ?: shizukuAuthorization ?: gui?.let {
                     app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value,
                         checkNotNull(it.delivery).writes)
                 } ?: browserPreparation?.childPlan?.parentAuthorization ?: browserBinding?.let {
@@ -2659,12 +2755,12 @@ class ChatController internal constructor(private val application:Application,
                     selection = assistantContext.enabledSkillIds.toSet())
             }
             preparingTools = tools
+            if (mcpPreparation != null) token.mcpCatalog = tools
             if (terminalRun != null || terminalJobRun != null) token.terminalCatalog = tools
             synchronized(this) { virtualDisplay?.catalog = tools; gui?.catalog = tools }
             generation?.catalog = tools
-            val runModel = if (gui == null) observedModel else app.daiyu.android.gui.GuiConfirmedModelPort(
-                observedModel, user.id, checkNotNull(gui.delivery))
-            val owned = ChatRunner(runModel, database, tools,
+            // GUI evidence is already frozen in preparedContext.messages; do not append it again.
+            val owned = ChatRunner(observedModel, database, tools,
                 RunnerOptions(reconnect=frozenReconnect.runnerPolicy(),
                     runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools,
                     onReasoning={ event -> publishReasoning(assistant,event) })) {
@@ -2706,7 +2802,7 @@ class ChatController internal constructor(private val application:Application,
         val mayCommit=synchronized(this) {
             if(preparation !== token || closed || token.revoked || token.committing ||
                 !auxiliaryCurrent() || token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true ||
-                browserPreparation?.isCancelled==true || (imageAttempt!=null && !imageAttempt.beginCommit())) false
+                mcpPreparation?.confirmed==false || browserPreparation?.isCancelled==true || (imageAttempt!=null && !imageAttempt.beginCommit())) false
             else { token.committing=true; true }
         }
         if (!mayCommit) { auxiliaryPort?.close(); closeUnacceptedTools(tools); return null }
@@ -2790,7 +2886,7 @@ class ChatController internal constructor(private val application:Application,
         val installed=synchronized(this) {
             if(closed || token.revoked || !auxiliaryCurrent() ||
                 token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true ||
-                browserPreparation?.isCancelled==true) false else {
+                mcpPreparation?.confirmed==false || browserPreparation?.isCancelled==true) false else {
                 if(imageAttempt!=null) imageProvider=provider
                 problem=null;active=assistant
                 token.admittedVoiceOwner = assistant // Exact admitted run, not a later current/history guess.

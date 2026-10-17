@@ -16,6 +16,7 @@ internal class RunControlFixture(base:Context,
     virtualDisplayFactory: ControllerVirtualDisplayFactory = ControllerVirtualDisplayFactory.REAL,
     onSession: ((app.daiyu.android.model.ProviderSnapshot, app.daiyu.android.assistants.AssistantRunContext,
         app.daiyu.android.model.sessiongateway.SessionGatewayContext) -> Unit)? = null,
+    mcpTransport: (app.daiyu.android.mcp.McpServer) -> app.daiyu.android.mcp.McpHttpSession = { app.daiyu.android.mcp.McpHttpSession(it) },
     beforeOpen: (List<Message>) -> Unit = {},
     beforeModel: () -> Unit = {}) : AutoCloseable {
     private class FixtureApplication(base:Context):Application() {init {attachBaseContext(base)}}
@@ -40,7 +41,7 @@ internal class RunControlFixture(base:Context,
             }
         }
         controller=ChatController(application,database,settings,application.getSharedPreferences("conversation-ui",0),factory,
-            virtualDisplayFactory = virtualDisplayFactory,
+            virtualDisplayFactory = virtualDisplayFactory, mcpTransport = mcpTransport,
             sessionModel = if (onSession == null) null else { provider, assistant, session ->
                 onSession(provider, assistant, session); factory(provider.asModelSettings())
             })

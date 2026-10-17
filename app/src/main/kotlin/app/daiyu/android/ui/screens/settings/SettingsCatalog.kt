@@ -31,7 +31,7 @@ internal object SettingsCatalog {
             SettingsEntry("pet", "鲸鱼女仆", DaiyuIcons.Pet, SettingControl.PAGE, FeatureRoute.PET_SETTINGS),
             SettingsEntry("assistants", "助手", DaiyuIcons.Assistant, SettingControl.PAGE),
             SettingsEntry("skills", "Skills", DaiyuIcons.Skills, SettingControl.PAGE, FeatureRoute.SKILLS),
-            SettingsEntry("mcp", "MCP 服务器", DaiyuIcons.Gateway, SettingControl.PAGE),
+            SettingsEntry("mcp", "MCP 服务器", DaiyuIcons.Gateway, SettingControl.PAGE, FeatureRoute.MCP_SETTINGS),
         )),
         SettingsGroup("general", "通用", "语音、外观、用量与数据备份", listOf(
             SettingsEntry("voice", "语音", DaiyuIcons.Voice, SettingControl.PAGE),

@@ -28,6 +28,31 @@ class GuiProductionEntryContractTest {
         rejected(JSONObject().put("operation", "input").put("text", complete + "x").toString())
     }
 
+    @Test fun frozenModelProjectionBudgetsCompleteExactEvidenceWithoutChangingDurableUser() {
+        val session = GuiRunSession(GuiLeaseGate.Lease(GuiOwner("session", "run")))
+        val observation = GuiObservation("approved", "external.app", 7, 2, 100, emptyList(), false)
+        val fullInput = "  exact\n\"quoted\"\\参数  " + "x".repeat(4000)
+        val action = GuiAction(observation.observationId, GuiOperation.INPUT, 4, fullInput)
+        val delivery = GuiConfirmedDelivery(session, observation, action, setOf(action.effect(session.identity)))
+        val user = Message(MessageId("user"), ConversationId("conversation"), RunId("run"),
+            Message.USER_ROLE, listOf(MessageBlock.Text("user", "  unchanged draft  ")), RunStatus.COMPLETED)
+        val projected = GuiConfirmedModelPort.project(user, delivery)
+        assertEquals(user.copy(blocks = projected.blocks), projected)
+        assertEquals(1, user.blocks.size)
+        assertEquals(2, projected.blocks.size)
+        assertSame(user.blocks.single(), projected.blocks.first())
+        assertEquals(MessageBlock.Text("gui_confirmed_action", delivery.modelContext()), projected.blocks.last())
+        assertEquals(fullInput, JSONObject(delivery.actionArgumentsJson()).getString("text"))
+        val originalCost = app.daiyu.android.domain.context.estimateTokens(listOf(user))
+        val modelCost = app.daiyu.android.domain.context.estimateTokens(listOf(projected))
+        assertEquals(originalCost + delivery.modelContext().toByteArray(Charsets.UTF_8).size, modelCost)
+        val policy = app.daiyu.android.domain.context.CompressionPolicy(contextTokens = 1024, reserveTokens = 128)
+        assertTrue(policy.fitsSendBudget(originalCost))
+        assertFalse(policy.fitsSendBudget(modelCost))
+        assertFalse(policy.copy(enabled = true).shouldCompress(originalCost))
+        assertTrue(policy.copy(enabled = true).shouldCompress(modelCost))
+    }
+
     @Test fun actualModelBoundaryUsesSameDeliveryAndDoesNotRewritePersistedUserOrOtherHistory() {
         val session = GuiRunSession(GuiLeaseGate.Lease(GuiOwner("session", "run")))
         val observation = GuiObservation("approved", "external.app", 7, 2, 100, emptyList(), false)

@@ -271,23 +271,24 @@ class VideoBackupDatabaseIntegrationTest : InstrumentationTestCase() {
         val importer = service(to, assets)
         importer.setNonSecretConfiguration(mapOf("battery" to true))
         val before = state(to)
-        var sawUncommittedRows = false
+        var sawOriginalPhase = false
         assets.beforeRestore = {
-            assertTrue(to.db.writableDatabase.inTransaction())
-            assertEquals(8, count(to, "messages")) // two old + six imported physical rows
-            assertEquals(4, count(to, "message_video_inputs"))
-            assertEquals(sidecars(source.fixture), sidecars(to))
-            assertEquals(1, count(to, "neutral_assets"))
-            assertEquals("backup-model", importer.importedConfiguration().getString("model"))
+            assertFalse(to.db.writableDatabase.inTransaction())
+            // Original publication precedes SQL: target tables/config/sidecars are still old.
+            assertEquals(before, state(to))
+            assertEquals(2, count(to, "messages"))
+            assertEquals(0, count(to, "message_video_inputs"))
+            assertEquals(0, count(to, "neutral_assets"))
+            assertFalse(importer.importedConfiguration().has("model"))
             assertEquals(0, count(to, "neutral_imports"))
-            sawUncommittedRows = true
+            sawOriginalPhase = true
         }
         if (lateMarkerFailure) {
             to.db.writableDatabase.execSQL("""CREATE TRIGGER reject_video_backup_marker BEFORE INSERT ON neutral_imports
                 BEGIN SELECT RAISE(ABORT,'injected final marker failure'); END""")
         } else assets.failRestore = true
         reject { importer.importPackage(text) }
-        assertTrue(sawUncommittedRows)
+        assertTrue(sawOriginalPhase)
         assertEquals(if (lateMarkerFailure) 4 else 1, assets.restoreCalls)
         assertEquals(before, state(to))
         preexisting.references.forEach { assertTrue(original.contentEquals(assets.read(it.owner, it))) }
@@ -309,6 +310,73 @@ class VideoBackupDatabaseIntegrationTest : InstrumentationTestCase() {
 
     fun testOriginalRestoreFailureRollsBackAllSqlAndKeepsExistingOriginals() = rollbackAtOriginalPublication(false)
     fun testFinalImportMarkerTriggerFailureRollsBackAllSqlAfterOriginalPublication() = rollbackAtOriginalPublication(true)
+
+    fun testUnrelatedCorruptStaticMetadataDoesNotBlockLegacyImportOrDuplicate() {
+        val from = fresh()
+        val owner = from.db.create("default").id
+        textTurn(from, owner, "clean-static-scope")
+        val current = NeutralBackupService(from.context, from.db).exportConversation(owner)
+        for (version in 1..4) {
+            // Empty extension tables need no column conversion for these older formats.
+            val envelope = JSONObject(current)
+            val data = payload(current)
+            val inventory = data.getJSONObject("inventory")
+            data.remove("static_generation_history"); inventory.remove("static_generation_outputs")
+            if (version < 4) {
+                data.remove("runtime_usage_history")
+                inventory.remove("runtime_usage_checkpoints"); inventory.remove("runtime_usage_requests")
+            }
+            if (version < 2) {
+                data.remove("generation_history"); data.remove("child_task_history")
+                listOf("generation_outputs", "generation_attempts", "child_tasks", "child_commands", "child_requests")
+                    .forEach { inventory.remove(it) }
+            }
+            val raw = data.toString()
+            val text = envelope.put("version", version).put("payload", raw)
+                .put("sha256", PrivateBlobs.digest(raw.toByteArray(Charsets.UTF_8))).toString()
+            val to = fresh()
+            val existing = to.db.create("default").id
+            textTurn(to, existing, "unrelated-static-scope")
+            val importer = NeutralBackupService(to.context, to.db)
+            val sql = to.db.writableDatabase
+            val dbVersion = sql.version
+            BackupHistoryRows.install(sql)
+            sql.insertOrThrow("neutral_backup_history", null, ContentValues().apply {
+                put("kind", StaticGenerationCodec.KIND); put("identity", "genstatic-v1-${"a".repeat(64)}")
+                put("owner_message_id", "answer-unrelated-static-scope"); put("payload", "{}")
+            })
+            // Also exceed the metadata bounds OUTSIDE the package scope, without a large
+            // Kotlin allocation or any claim that an original was read or verified.
+            sql.execSQL("INSERT INTO neutral_backup_history(kind,identity,owner_message_id,payload) " +
+                "VALUES(?,?,?,CAST(zeroblob(${BackupHistoryRows.MAX_METADATA_BYTES + 1}) AS TEXT))",
+                arrayOf(StaticGenerationCodec.KIND, "genstatic-v1-${"b".repeat(64)}", "answer-unrelated-static-scope"))
+            fun staticMetadataState(): List<String> = sql.rawQuery(
+                "SELECT kind,identity,owner_message_id,length(CAST(payload AS BLOB))," +
+                    "hex(substr(CAST(payload AS BLOB),1,16)) FROM neutral_backup_history ORDER BY identity", null).use { c ->
+                buildList { while (c.moveToNext()) add((0 until c.columnCount).joinToString("|") { c.getString(it) }) }
+            }
+            val unrelated = staticMetadataState()
+            reject { StaticGenerationCodec.read(sql) } // the corruption is real, not silently accepted
+            assertFalse(importer.importPackage(text).alreadyImported)
+            assertEquals(unrelated, staticMetadataState())
+            val committedText = to.db.exportBackup()
+            assertTrue(importer.importPackage(text).alreadyImported)
+            assertEquals(committedText, to.db.exportBackup())
+            assertEquals(unrelated, staticMetadataState())
+            assertEquals(dbVersion, sql.version)
+            // A corrupt/unexpected row on a package physical owner must STILL fail closed;
+            // legacy packages expect an empty static collection, not unchecked extra history.
+            sql.insertOrThrow("neutral_backup_history", null, ContentValues().apply {
+                put("kind", StaticGenerationCodec.KIND); put("identity", "genstatic-v1-${"c".repeat(64)}")
+                put("owner_message_id", "answer-clean-static-scope"); put("payload", "{}")
+            })
+            val damaged = staticMetadataState()
+            reject { importer.importPackage(text) }
+            assertEquals(damaged, staticMetadataState())
+            assertEquals(committedText, to.db.exportBackup())
+            assertEquals(1, count(to, "neutral_imports"))
+        }
+    }
 
     fun testDuplicateMarkerDoesNotHideMissingOrCorruptSidecarOrOriginal() {
         val source = source()

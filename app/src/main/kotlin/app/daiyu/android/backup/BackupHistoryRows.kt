@@ -73,7 +73,7 @@ internal object BackupHistoryRows {
         check(db.insertOrThrow(table, null, values) != -1L) { "备份历史未写入" }
         verify(db, table, row)
     }
-    private fun install(db: SQLiteDatabase) {
+    internal fun install(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS neutral_backup_history(kind TEXT NOT NULL,identity TEXT NOT NULL," +
             "owner_message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,payload TEXT NOT NULL,PRIMARY KEY(kind,identity))")
     }

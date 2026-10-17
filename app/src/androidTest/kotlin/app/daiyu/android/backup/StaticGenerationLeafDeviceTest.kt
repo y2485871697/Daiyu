@@ -124,6 +124,45 @@ class StaticGenerationLeafDeviceTest : InstrumentationTestCase() {
         assertEquals(attempts, count("generation_attempts")); assertEquals(outputs, count("generation_outputs"))
     }
 
+    fun testIndependentFortyMiBMetadataOperationsDoNotShareDatabaseLifetimeBudget() {
+        // Metadata/SQLite regression only: no original is allocated, opened or claimed verified.
+        fun metadataVideo(sha: String): StaticGenerationOutput {
+            val binding = GenerationAttemptBinding("metadata-source", "metadata-assistant", "metadata-run", "metadata-call", "generate_images")
+            val provenance = StaticGenerationProvenance("metadata-account", binding.operationId, "item", 0,
+                binding.conversationId, binding.assistantMessageId, binding.runId, binding.toolCallId, binding.toolName,
+                "b".repeat(64), GenerationProtocol.OPENAI_VIDEO_MULTIPART, "genasset-v1-${"c".repeat(64)}-$sha",
+                GenerationKind.VIDEO, "video/mp4", 40L * 1024 * 1024, sha, 32, 24, 1000)
+            return StaticGenerationOutput(provenance, destination())
+        }
+        val first = metadataVideo("e".repeat(64)); val second = metadataVideo("f".repeat(64))
+        val version = db.version
+        for (value in listOf(first, second)) {
+            assertEquals(40L * 1024 * 1024, StaticGenerationCodec.validateBatch(listOf(value)))
+            tx { StaticGenerationCodec.saveInTransaction(db, value, messages(value)) }
+        }
+        assertEquals(setOf(first, second), StaticGenerationCodec.read(db).toSet())
+        assertEquals(listOf(first), StaticGenerationCodec.read(db, first.destination.conversationId))
+        assertEquals(listOf(second), StaticGenerationCodec.readForOwners(db, setOf(second.destination.assistantMessageId)))
+        val multiChunkOwners = (0 until 400).map { "absent-owner-$it" }.toSet() + second.destination.assistantMessageId
+        assertEquals(listOf(second), StaticGenerationCodec.readForOwners(db, multiChunkOwners))
+        assertTrue(StaticGenerationCodec.readForOwners(db, emptySet()).isEmpty())
+        // The same two assets in ONE operation still exceed 64 MiB, even though metadata reads work.
+        rejects { StaticGenerationCodec.validateBatch(listOf(first, second)) }
+        rejects { StaticGenerationCodec.encodeSection(listOf(first, second)) }
+        tx { StaticGenerationCodec.saveInTransaction(db, first, messages(first)) }
+        val conflict = first.copy(source = first.source.copy(fingerprint = "d".repeat(64)))
+        assertEquals(first.identity, conflict.identity)
+        rejects { tx { StaticGenerationCodec.saveInTransaction(db, conflict, messages(first)) } }
+        // Physical owner equality must not be weakened by scoped reads or idempotent saves.
+        db.execSQL("UPDATE neutral_backup_history SET owner_message_id=? WHERE kind=? AND identity=?",
+            arrayOf(second.destination.assistantMessageId, StaticGenerationCodec.KIND, first.identity))
+        rejects { StaticGenerationCodec.find(db, first.identity) }
+        rejects { StaticGenerationCodec.readForOwners(db, setOf(second.destination.assistantMessageId)) }
+        rejects { tx { StaticGenerationCodec.saveInTransaction(db, first, messages(first)) } }
+        assertEquals(version, db.version)
+        assertEquals(0, count("generation_attempts")); assertEquals(0, count("generation_outputs"))
+    }
+
     fun testIgnoredAndMutatedRegistryReceiptsRollbackAndCleanOnlyThisDestination() {
         val source = source(); val value = StaticGenerationOutput(source.source, destination()); val store = assets()
         db.execSQL("CREATE TRIGGER leaf_ignore BEFORE INSERT ON neutral_backup_history WHEN NEW.kind='generation_static_output' BEGIN SELECT RAISE(IGNORE); END")

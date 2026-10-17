@@ -13,34 +13,52 @@ import app.daiyu.android.domain.ToolOutput
 import app.daiyu.android.domain.runtime.ReconnectPolicy
 import app.daiyu.android.model.ProviderProtocol
 
-/** One immutable run-local preference/capability decision for the CURRENT production models.
- * No Context/store/port/session is retained or re-read by this object. Normal sends are allowed;
- * a retryable failure explicitly explains why automatic recovery was unavailable. No retry loop,
- * attempt/callback gate or tool execution is implemented here. The optional observer delegates
- * original opens exactly once; it never opens a recovery request. */
+/** One immutable run-local preference/capability decision. Only the snapshot overload may
+ * authorize official Responses background streams. No preference re-read, open/repost recovery,
+ * attempt gate or tool execution lives here; Runner owns attempts and the original session. */
 class FrozenReconnectAdapter private constructor(
     val settings: ReconnectSettings,
     val capability: ReconnectCapability,
+    val responsesBackground: FrozenResponsesBackground? = null,
 ) {
     /** Retained total window from the FIRST failure, null = continuous, 0 = NONE.
      * It must NOT be assigned to ReconnectPolicy.delayMillis or converted into attempt counts. */
     val windowMillis: Long? = settings.duration.windowMillis
 
-    /** Production Responses/Messages do not implement ResumableModelSession. Keep Runner's
-     * compatible default even if the user requested reconnect; NEVER infer resume from protocol. */
-    fun runnerPolicy(): ReconnectPolicy = ReconnectPolicy()
+    /** Ordinary protocols keep the zero-retry default. The explicit frozen background contract
+     * installs the retained total-window algorithm, not a fabricated fixed attempt count. */
+    fun runnerPolicy(): ReconnectPolicy = runnerPolicyWithDiagnostics {}
+
+    internal fun runnerPolicyWithDiagnostics(emit: (ReconnectChanged) -> Unit): ReconnectPolicy {
+        if (!settings.enabled || responsesBackground == null) return ReconnectPolicy()
+        return ReconnectPolicy(delayMillis = 250, budgetFactory = app.daiyu.android.domain.runtime.TransportReconnectBudgetFactory { round, reason ->
+            val retained = ModelErrorReconnect(round, windowMillis, SystemReconnectTiming, emit, reason)
+            retained.start()
+            object : app.daiyu.android.domain.runtime.TransportReconnectBudget {
+                override fun updateReason(reason: ModelFailure) = retained.updateReason(reason)
+                override fun check() = retained.check()
+                override fun setPaused(paused: Boolean) = retained.setPaused(paused)
+                override fun attach(disconnect: () -> Unit): AutoCloseable {
+                    val scope = ReconnectTransportScope(disconnect)
+                    retained.attach(scope)
+                    return AutoCloseable { retained.detach(scope) }
+                }
+                override fun finish(status: String) = retained.finish(status)
+            }
+        })
+    }
 
     /** Append to the original fixed model failure message; do not replace auth/protocol errors
      * with a misleading reconnect error, and never include a server body or exception message.
      * This describes a failure only; it does not authorize a new request. */
     fun unavailableMessage(failure: ModelFailure): String? =
-        if (settings.enabled && failure in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT))
+        if (settings.enabled && !capability.supported && failure in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT))
             capability.userMessage else null
 
     /** Optional identity-scoped diagnostic bridge. Delegates every open/next/cancel EXACTLY once
      * and rethrows the original failure, preserving Runner classification/terminal/checkpoints.
      * The host must gate onUnavailable by the original run owner; callback failure is ignored.
-     * This wrapper deliberately does NOT implement ResumableModelSession for current transports. */
+     * Approved checkpointed sessions retain their exact capability; ordinary transports do not. */
     fun observeFailures(port: ModelPort, onUnavailable: (String) -> Unit): ModelPort {
         fun report(failure: ModelRequestException) {
             unavailableMessage(failure.failure)?.let { message ->
@@ -49,6 +67,8 @@ class FrozenReconnectAdapter private constructor(
         }
         fun session(open: () -> ModelSession): ModelSession {
             val retained = try { open() } catch (failure: ModelRequestException) { report(failure); throw failure }
+            if (responsesBackground != null && retained is app.daiyu.android.domain.CheckpointedResumableModelSession)
+                return retained // Preserve the exact original session and its acknowledgement API.
             return object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                     try { retained.next(outputs, sink) }
@@ -75,6 +95,12 @@ class FrozenReconnectAdapter private constructor(
     }
 
     companion object {
+        /** Freeze once before assembling model/media wrappers. Only this overload authorizes background. */
+        fun freeze(settings: ReconnectSettings, provider: app.daiyu.android.model.ProviderSnapshot): FrozenReconnectAdapter {
+            val background = FrozenResponsesBackground.freeze(settings, provider)
+            return FrozenReconnectAdapter(settings.copy(), if (background != null) ReconnectCapability.TRANSPORT_RESUME
+                else ReconnectCapabilities.forProtocol(provider.protocol), background)
+        }
         /** Call once with the exact run's frozen provider protocol, not a later active setting. */
         fun freeze(settings: ReconnectSettings, protocol: ProviderProtocol): FrozenReconnectAdapter =
             FrozenReconnectAdapter(settings.copy(), ReconnectCapabilities.forProtocol(protocol))

@@ -18,7 +18,7 @@ internal object RunCheckpointCodec {
     fun encode(value: RunCheckpoint): String {
         validate(value)
         fun messages(rows: List<Message>) = JSONArray(String(ArchiveCodec.encode(rows), Charsets.UTF_8))
-        return JSONObject().put("version", 6).put("message", messages(listOf(value.message)))
+        return JSONObject().put("version", if (value.transport == null) 6 else 7).put("message", messages(listOf(value.message)))
             .put("history", messages(value.history)).put("phase", value.phase.name)
             .put("tools", JSONArray().apply { value.tools.forEach { record -> put(JSONObject()
                 .put("id", record.invocation.id.value).put("name", record.invocation.name)
@@ -30,6 +30,8 @@ internal object RunCheckpointCodec {
             .put("request_unconfirmed", value.requestUnconfirmed).put("message_reconciled", value.messageReconciled)
             .put("owner", value.owner).put("revision", value.revision)
             .put("request", value.request?.let(::encodeRequest) ?: JSONObject.NULL)
+            .apply { value.transport?.let { put("transport", JSONObject().put("response_id", it.responseId)
+                .put("sequence", it.sequence).put("decoder_state", it.decoderState)) } }
             .put("usage_requests", JSONArray().apply { value.usageRequests.forEach { put(encodeRequest(it)) } })
             .put("usage", JSONArray().apply { value.usage.forEach { record -> put(JSONObject()
                 .put("request", encodeRequest(record.request)).put("source", record.source.name)
@@ -47,12 +49,18 @@ internal object RunCheckpointCodec {
         val value = parser.nextValue()
         require(value is JSONObject && parser.nextClean() == '\u0000')
         val version = integer(value, "version")
-        require(version in 1L..6L)
+        require(version in 1L..7L)
         val keys = arrayOf("version", "message", "history", "phase", "tools", "outputs", "supplements", "round",
             "request_unconfirmed", "message_reconciled", "owner", "revision")
         fields(value, *(when (version) { 1L -> keys; 2L -> keys + "pending"; 3L -> keys + arrayOf("pending", "request");
             4L, 5L -> keys + arrayOf("pending", "request", "usage")
-            else -> keys + arrayOf("pending", "request", "usage", "usage_requests") }))
+            6L -> keys + arrayOf("pending", "request", "usage", "usage_requests")
+            else -> keys + arrayOf("pending", "request", "usage", "usage_requests", "transport") }))
+        val transport = if (version < 7L || value.isNull("transport")) null else {
+            val row = value.getJSONObject("transport")
+            fields(row, "response_id", "sequence", "decoder_state")
+            TransportCheckpoint(string(row, "response_id"), integer(row, "sequence"), string(row, "decoder_state"))
+        }
         val pending = if (version == 1L || value.isNull("pending")) null else {
             val p = value.get("pending"); require(p is JSONObject)
             fields(p, "call_id")
@@ -89,11 +97,19 @@ internal object RunCheckpointCodec {
             (0 until outputs.length()).map { i -> val o = outputs.getJSONObject(i)
                 fields(o, "id", "output"); ToolOutput(ToolCallId(string(o, "id")), string(o, "output")) },
             messages("supplements"), round.toInt(), boolean(value, "request_unconfirmed"), boolean(value, "message_reconciled"),
-            string(value, "owner"), integer(value, "revision"), pending, request, usage, usageRequests).also(::validate)
+            string(value, "owner"), integer(value, "revision"), pending, request, usage, usageRequests, transport).also(::validate)
     }
     private fun validate(value: RunCheckpoint) {
         require(value.owner.isNotBlank() && value.owner.length <= 200 && value.revision in 1 until Long.MAX_VALUE)
         require(value.round in 0..100 && value.messageReconciled)
+        value.transport?.let { transport ->
+            require(value.request != null && value.request.operation != RequestOperation.OPEN)
+            require(transport.decoderState.length in 2..16_000_000)
+            val parser = JSONTokener(transport.decoderState)
+            val state = parser.nextValue()
+            require(state is JSONObject && parser.nextClean() == '\u0000')
+            require(string(state, "response_id") == transport.responseId && integer(state, "sequence") == transport.sequence)
+        }
         val m = value.message
         require(m.role == Message.ASSISTANT_ROLE)
         value.request?.let { require(value.phase == ExecutionPhase.TERMINAL || it.owner == value.owner) }

@@ -247,7 +247,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
             assertTrue(text.contains("historical answer"))
             val envelope=org.json.JSONObject(text)
             assertEquals(if(code==104) "daiyu-neutral-complete" else "daiyu-neutral-text",envelope.getString("format"))
-            assertEquals(if(code==104) 4 else 2,envelope.getInt("version"))
+            assertEquals(if(code==104) 5 else 2,envelope.getInt("version"))
             if(code==104) NeutralBackupService(fixtureApp,controller.database).preflight(text)
             else assertEquals(controller.database.exportBackup(),text)
             controller.database.conversations().forEach {controller.database.delete(it.id)}

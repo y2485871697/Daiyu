@@ -417,7 +417,10 @@ class ControllerVideoSendingTest {
             MessageBlock.Image(MessageImageReference(MessageImageOwner(ref.owner.conversationId, ref.owner.messageId),
                 ref.id, ref.mime, ref.bytes, ref.sha256, ref.width, ref.height))), RunStatus.COMPLETED)
         val reply = user.copy(id = MessageId("image-reply"), role = "assistant", blocks = emptyList(), status = RunStatus.RUNNING)
-        sendText(user, reply); db.save(reply.copy(status = RunStatus.COMPLETED))
+        sendText(user, reply)
+        // Exercise the non-user media prohibition with a real assistant wire row.
+        db.save(reply.copy(status = RunStatus.COMPLETED,
+            blocks = listOf(MessageBlock.Text("image-reply-text", "historical image reply"))))
         val request = request(conversation); db.draft(conversation.id, request.text)
         val attempt = ControllerVideoAttempt(request, journal); assertNull(attempt.reserve(db))
         val supported = ProviderSnapshot.capture(settings, settings.protocol, true)
@@ -437,22 +440,91 @@ class ControllerVideoSendingTest {
         ui.send(port.open(plan.history))
         val body = JSONObject(connection.sent.toString("UTF-8"))
         assertEquals("image + video instructions", body.getString("instructions"))
-        assertEquals(listOf("data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(png)),
-            inputMediaUrls(body, "input_image", "image_url"))
-        assertEquals(listOf("data:video/mp4;base64,AQID", "data:video/mp4;base64,BAUG"),
-            inputMediaUrls(body, "input_video", "video_url"))
+        assertInputMediaByHistory(body, plan,
+            imageUrls = mapOf((user.blocks.single() as MessageBlock.Image).reference to
+                "data:image/png;base64," + java.util.Base64.getEncoder().encodeToString(png)),
+            videoUrls = mapOf(MessageVideoOwner(conversation.id.value, prepared.user.id.value) to
+                listOf("data:video/mp4;base64,AQID", "data:video/mp4;base64,BAUG")))
         assertTrue(connection.sent.size() > 0)
     }
 
-    private fun inputMediaUrls(body: JSONObject, type: String, field: String): List<String> {
+    /** Match every wire row to its history owner, not a flattened user-only media list.
+     * These fixtures have completed text/image history, without tool or protocol replay.
+     * ResponsesRequest keeps text-only content as strings and appends each owner's videos
+     * after its ordered text/image blocks (FrozenMessageVideoPlan's documented contract).
+     */
+    private fun assertInputMediaByHistory(body: JSONObject, plan: ControllerVideoModelPlan,
+        videoUrls: Map<MessageVideoOwner, List<String>>,
+        imageUrls: Map<MessageImageReference, String> = emptyMap()) {
         val input = body.getJSONArray("input")
-        return (0 until input.length()).flatMap { index ->
-            val row = input.getJSONObject(index)
-            if (row.optString("role") != "user") return@flatMap emptyList<String>()
-            val content = row.optJSONArray("content") ?: return@flatMap emptyList<String>()
-            (0 until content.length()).map { content.getJSONObject(it) }
-                .filter { it.getString("type") == type }.map { it.getString(field) }
+        val history = MessageHistory.expand(plan.history)
+        assertEquals(videoUrls.keys, plan.inputs.map { it.owner }.toSet())
+        assertEquals(videoUrls.size, plan.inputs.size)
+        plan.inputs.forEach { source ->
+            assertEquals(videoUrls.getValue(source.owner).size, source.references.size)
+            source.references.forEach { assertEquals(source.owner, it.owner) }
         }
+        val seenImages = mutableSetOf<MessageImageReference>()
+        val seenVideoOwners = mutableSetOf<MessageVideoOwner>()
+        var wireIndex = 0
+        fun nextRow(message: Message): JSONObject {
+            val label = "input[$wireIndex] for ${message.id.value}"
+            val row = input.getJSONObject(wireIndex++)
+            assertEquals(label, setOf("role", "content"), row.keys().asSequence().toSet())
+            assertEquals(label, message.role, row.get("role"))
+            return row
+        }
+        history.forEach { message ->
+            assertTrue("fixture must not silently skip protocol replay", message.protocolItems.isEmpty())
+            assertEquals(RunStatus.COMPLETED, message.status)
+            when (message.role) {
+                Message.USER_ROLE -> {
+                    val owner = MessageVideoOwner(message.conversationId.value, message.id.value)
+                    val expectedBlocks = message.blocks.map { block ->
+                        when (block) {
+                            is MessageBlock.Text -> "input_text" to block.text
+                            is MessageBlock.Image -> {
+                                assertEquals(MessageImageOwner(owner.conversationId, owner.messageId), block.reference.owner)
+                                seenImages.add(block.reference)
+                                "input_image" to imageUrls.getValue(block.reference)
+                            }
+                            is MessageBlock.Tool -> error("Unexpected tool in payload fixture")
+                        }
+                    } + videoUrls[owner].orEmpty().map { "input_video" to it }
+                    if (owner in videoUrls) seenVideoOwners.add(owner)
+                    val row = nextRow(message)
+                    if (expectedBlocks.all { it.first == "input_text" }) {
+                        assertEquals(message.id.value, expectedBlocks.joinToString("\n") { it.second }, row.get("content"))
+                    } else {
+                        val content = row.getJSONArray("content")
+                        assertEquals("block count for ${message.id.value}", expectedBlocks.size, content.length())
+                        expectedBlocks.forEachIndexed { blockIndex, (type, value) ->
+                            val block = content.getJSONObject(blockIndex)
+                            val field = when (type) {
+                                "input_text" -> "text"
+                                "input_image" -> "image_url"
+                                "input_video" -> "video_url"
+                                else -> error("Unexpected fixture content type: $type")
+                            }
+                            val label = "${message.id.value} content[$blockIndex]"
+                            assertEquals(label, setOf("type", field), block.keys().asSequence().toSet())
+                            assertEquals(label, type, block.get("type"))
+                            assertEquals(label, value, block.get(field))
+                        }
+                    }
+                }
+                Message.ASSISTANT_ROLE -> message.blocks.forEach { block ->
+                    check(block is MessageBlock.Text) { "Unexpected non-text assistant fixture block" }
+                    val row = nextRow(message)
+                    assertTrue("Non-user rows must not contain input media", row.get("content") is String)
+                    assertEquals(message.id.value, block.text, row.get("content"))
+                }
+                else -> error("Unexpected history role in payload fixture: ${message.role}")
+            }
+        }
+        assertEquals("No extra rows, including non-user input media", wireIndex, input.length())
+        assertEquals(imageUrls.keys, seenImages)
+        assertEquals(videoUrls.keys, seenVideoOwners)
     }
 
     /** Synthetic UI driver for these existing payload tests, not a production auto-approval. */
@@ -514,13 +586,16 @@ class ControllerVideoSendingTest {
         val ready = ready(request); assertEquals(VideoDraftOutcome.ACCEPTED, commit(ready).outcome)
         // Drafts are gone; the ordinary text continuation must still read the accepted originals.
         request.videos.forEach { assets.remove(request.owner, it) }
-        db.save(ready.prepared.assistant.copy(status = RunStatus.COMPLETED))
+        // Exercise the non-user media prohibition for every open overload too.
+        db.save(ready.prepared.assistant.copy(status = RunStatus.COMPLETED,
+            blocks = listOf(MessageBlock.Text("video-reply-text", "historical video reply"))))
         val follow = ready.prepared.user.copy(id = MessageId("follow"), runId = RunId("follow-run"),
             blocks = listOf(MessageBlock.Text("follow", "plain text continuation")))
         val active = follow.copy(id = MessageId("follow-assistant"), role = "assistant", blocks = emptyList(), status = RunStatus.RUNNING)
         val baseline = adapter.preflightText(adapter.history.capture(follow.conversationId), provider, permission, follow) { false }
         sendText(follow, active)
         val rows = adapter.history.capture(follow.conversationId).rows.filterNot { it.id == active.id }
+        assertEquals(baseline.history, rows)
         val cap = permission
         var runtimeCancelled = false
         val connections = mutableListOf<Connection>()
@@ -547,8 +622,9 @@ class ControllerVideoSendingTest {
             val body = JSONObject(connection.sent.toString("UTF-8"))
             assertEquals("preserved assistant instructions", body.getString("instructions"))
             val wire = body.toString()
-            assertEquals(listOf("data:video/mp4;base64,AQID", "data:video/mp4;base64,BAUG"),
-                inputMediaUrls(body, "input_video", "video_url"))
+            assertInputMediaByHistory(body, baseline,
+                videoUrls = mapOf(MessageVideoOwner(ready.prepared.user.conversationId.value, ready.prepared.user.id.value) to
+                    listOf("data:video/mp4;base64,AQID", "data:video/mp4;base64,BAUG")))
             assertTrue(wire.contains("plain text continuation"))
             assertFalse(wire.contains("fixture-secret"))
         }

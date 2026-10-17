@@ -34,6 +34,23 @@ interface ResumableModelSession : ModelSession {
     val canResume: Boolean
     fun resume(sink: (ModelEvent) -> Unit)
 }
+/** Explicit acknowledgement: a stale gate returning Unit is NOT an acknowledgement. */
+enum class ModelDeliveryAck { ACCEPTED, REJECTED }
+data class TransportCheckpoint(val responseId: String, val sequence: Long, val decoderState: String) {
+    init { require(responseId.matches(Regex("resp_[A-Za-z0-9_-]{1,180}"))); require(sequence >= 0) }
+}
+data class ModelEventBatch(val events: List<ModelEvent>, val checkpoint: TransportCheckpoint)
+class ModelDeliveryRejectedException : IllegalStateException("Provider delivery was not accepted")
+
+/** Only the original process/session may use this interface. The checkpoint is evidence, never
+ * authority to open or recover a session after process death. A batch is one wire sequence;
+ * terminal batches include Usage AND ProtocolOutput before their cursor is acknowledged. */
+interface CheckpointedResumableModelSession : ResumableModelSession {
+    fun nextAcknowledged(outputs: List<ToolOutput>, sink: (ModelEventBatch) -> ModelDeliveryAck)
+    fun resumeAcknowledged(sink: (ModelEventBatch) -> ModelDeliveryAck)
+    /** Interrupt just the current read. Unlike cancel(), this does not revoke the session. */
+    fun disconnectTransport()
+}
 fun interface ModelPort {
     fun open(history: List<Message>): ModelSession
     fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = open(history)

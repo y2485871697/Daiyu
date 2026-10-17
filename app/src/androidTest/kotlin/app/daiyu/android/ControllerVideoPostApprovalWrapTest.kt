@@ -7,6 +7,9 @@ import app.daiyu.android.media.MessageImageAssetStore
 import app.daiyu.android.media.video.*
 import app.daiyu.android.model.ProviderSnapshot
 import app.daiyu.android.model.ResponsesModel
+import app.daiyu.android.model.reconnect.FrozenResponsesBackground
+import app.daiyu.android.model.reconnect.ReconnectSettings
+import app.daiyu.android.model.sessiongateway.SessionGatewayContext
 import app.daiyu.android.model.videos.*
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.storage.ModelSettings
@@ -87,9 +90,8 @@ class ControllerVideoPostApprovalWrapTest : InstrumentationTestCase() {
             val defaultPort = videos.wrap(provider, capability, conversation, assistant.id, baseline,
                 "frozen assistant instructions", { false }, postApproval = approval)
             val defaultSession = defaultPort.open(modelRows)
-            val delegate = defaultSession.javaClass.declaredFields.single {
-                ModelSession::class.java.isAssignableFrom(it.type)
-            }.apply { isAccessible = true }.get(defaultSession)
+            assertFalse(defaultSession is ResumableModelSession)
+            val delegate = underlyingResponsesSession(defaultSession)
             val capturedContext = delegate.javaClass.getDeclaredField("sessionContext").apply { isAccessible = true }
                 .get(delegate) as app.daiyu.android.model.sessiongateway.SessionGatewayContext
             assertEquals(conversation, capturedContext.conversationId); assertNull(capturedContext.project)
@@ -101,9 +103,15 @@ class ControllerVideoPostApprovalWrapTest : InstrumentationTestCase() {
             assertNull(runBlocking { approval.approve(premature) })
             val requests = mutableListOf<VideoPostRequest>()
             var connections = 0
+            var published: ControllerVideoModelPlan? = null
+            // Official background opt-in does not authorize the OpenRouter video endpoint.
+            val background = FrozenResponsesBackground.freeze(ReconnectSettings(responsesBackgroundEnabled = true), provider)
+            assertNull(background)
             val wrapped = videos.wrap(provider, capability, conversation, assistant.id, baseline, null, { false },
-                postApproval = approval, modelFactory = { p, _, c, a ->
+                postApproval = approval, onFrozenPlan = { published = it }, backgroundResume = background,
+                modelFactory = { p, _, c, a ->
                     assertSame(provider, p); assertSame(capability, c); assertSame(approval, a)
+                    assertNotNull(published) // Actual witness is published before the original factory.
                     ResponsesModel(settings, {
                         connections++
                         Connection(completed)
@@ -119,7 +127,9 @@ class ControllerVideoPostApprovalWrapTest : InstrumentationTestCase() {
                 { wrapped.open(modelRows, emptyList<ToolDefinition>(), suppliedImages) },
             )
             openers.forEachIndexed { index, open ->
+                published = null
                 val session = open()
+                assertFalse(session is ResumableModelSession)
                 val failure = AtomicReference<Throwable?>()
                 val worker = Thread {
                     try { session.next(emptyList()) {} } catch (caught: Throwable) { failure.set(caught) }
@@ -133,6 +143,7 @@ class ControllerVideoPostApprovalWrapTest : InstrumentationTestCase() {
                     failure.get()?.let { throw AssertionError("wrap transport failed", it) }
                     assertEquals(index + 1, connections)
                     assertNotSame(baseline.videos, requests.last().videoPlan)
+                    assertSame(checkNotNull(published).videos, requests.last().videoPlan)
                     assertEquals(1, requests.last().postNumber)
                     assertEquals(modelRows, requests.last().history)
                 } finally {
@@ -162,7 +173,112 @@ class ControllerVideoPostApprovalWrapTest : InstrumentationTestCase() {
         }
     }
 
-    private class Connection(private val events: String) : HttpsURLConnection(URL(OpenRouterVideoCapability.ENDPOINT)) {
+    fun testOfficialBackgroundConfiguresOriginalFactoryProductWithoutLosingContext() {
+        // Text-only physical history exercises this host hook. It does NOT grant official video
+        // support: the existing video capability remains restricted to OpenRouter.
+        val token = UUID.randomUUID().toString()
+        val base = testContext(instrumentation.targetContext, "background-wrap-$token-")
+        val directory = File(base.cacheDir, "background-wrap-$token").apply { check(mkdirs()) }
+        root = directory
+        val context = object : ContextWrapper(base) { override fun getFilesDir(): File = directory }
+        val database = ConversationDatabase(context).also { db = it }
+        try {
+            val conversation = database.create(database.selectedAssistantId()).id
+            val user = Message(MessageId("user-$token"), conversation, RunId("run-$token"), Message.USER_ROLE,
+                listOf(MessageBlock.Text("question", "describe")), RunStatus.COMPLETED)
+            val assistant = user.copy(id = MessageId("assistant-$token"), role = Message.ASSISTANT_ROLE,
+                status = RunStatus.RUNNING, blocks = emptyList())
+            database.send(user, assistant)
+            val settings = ModelSettings("https://api.openai.com/v1/responses", "fixture/model", "private-key", false)
+            val provider = ProviderSnapshot.capture(settings)
+            val background = checkNotNull(FrozenResponsesBackground.freeze(
+                ReconnectSettings(responsesBackgroundEnabled = true), provider))
+            val images = ControllerMessageImages(database, MessageImageAssetStore(File(directory, "images")))
+            val assets = VideoAssetStore(File(directory, "videos"), VideoAttachmentLimits(), VideoInspector { _, _, _ ->
+                error("No video inspection expected")
+            })
+            val videos = ControllerMessageVideos(database, assets, images)
+            val baseline = videos.preflight(videos.history.capture(conversation), provider, null, cancelled = { false })
+            val rows = listOf(user)
+            val suppliedImages = images.freeze(rows, provider)
+            val instructions = "frozen background instructions"
+            val sessionContext = SessionGatewayContext(conversation)
+            val defaultSession = videos.wrap(provider, null, conversation, assistant.id, baseline,
+                instructions, { false }, backgroundResume = background).open(rows)
+            try {
+                assertTrue(defaultSession is CheckpointedResumableModelSession)
+                val delegate = underlyingResponsesSession(defaultSession)
+                val captured = delegate.javaClass.getDeclaredField("sessionContext")
+                    .apply { isAccessible = true }.get(delegate) as SessionGatewayContext
+                assertEquals(conversation, captured.conversationId)
+                assertEquals(instructions, delegate.javaClass.getDeclaredField("assistantInstructions")
+                    .apply { isAccessible = true }.get(delegate))
+            } finally { defaultSession.cancel() } // No real network call.
+            var published: ControllerVideoModelPlan? = null
+            var factories = 0
+            val connections = mutableListOf<Connection>()
+            val port = videos.wrap(provider, null, conversation, assistant.id, baseline, instructions, { false },
+                onFrozenPlan = { published = it }, backgroundResume = background,
+                modelFactory = { actualProvider, actualInstructions, capability, approval ->
+                    factories++
+                    assertSame(provider, actualProvider); assertEquals(instructions, actualInstructions)
+                    assertNull(capability); assertNull(approval); assertNotNull(published)
+                    ResponsesModel(actualProvider.asModelSettings(), { url ->
+                        val stream = "data: {\"type\":\"response.created\",\"sequence_number\":0,\"response\":{\"id\":\"resp_wrap\",\"status\":\"in_progress\"}}\n\n" +
+                            "data: {\"type\":\"response.completed\",\"sequence_number\":1,\"response\":{\"id\":\"resp_wrap\",\"status\":\"completed\",\"output\":[]}}\n\n"
+                        Connection(stream, url).also { connections += it }
+                    }, actualProvider.imageInputSupported, actualInstructions, sessionContext = sessionContext)
+                })
+            val openers: List<() -> ModelSession> = listOf(
+                { port.open(rows) }, { port.open(rows, emptySet<ReadOnlyTool>()) },
+                { port.open(rows, emptyList<ToolDefinition>()) },
+                { port.open(rows, emptyList<ToolDefinition>(), suppliedImages) },
+            )
+            openers.forEachIndexed { index, open ->
+                published = null
+                val session = open()
+                try {
+                    assertEquals(index + 1, factories); assertEquals(index, connections.size)
+                    assertTrue(session is CheckpointedResumableModelSession)
+                    val delegate = underlyingResponsesSession(session)
+                    assertSame(sessionContext, delegate.javaClass.getDeclaredField("sessionContext")
+                        .apply { isAccessible = true }.get(delegate))
+                    assertEquals(instructions, delegate.javaClass.getDeclaredField("assistantInstructions")
+                        .apply { isAccessible = true }.get(delegate))
+                    val sequences = mutableListOf<Long>()
+                    (session as CheckpointedResumableModelSession).nextAcknowledged(emptyList()) {
+                        sequences += it.checkpoint.sequence; ModelDeliveryAck.ACCEPTED
+                    }
+                    assertEquals(listOf(0L, 1L), sequences)
+                    assertEquals(index + 1, connections.size)
+                    val connection = connections.last()
+                    assertEquals(settings.requestEndpoint(), connection.url.toString())
+                    assertEquals("POST", connection.requestMethod)
+                    val body = org.json.JSONObject(connection.sent.toString("UTF-8"))
+                    assertTrue(body.getBoolean("background")); assertTrue(body.getBoolean("stream"))
+                    assertFalse(body.getBoolean("store")); assertEquals(instructions, body.getString("instructions"))
+                } finally { session.cancel() }
+            }
+        } finally {
+            database.close(); db = null
+            context.deleteDatabase("conversations.db")
+            File(context.getDatabasePath("conversations.db").canonicalPath + ".runtime-owner").delete()
+            context.getSharedPreferences("daiyu-assistants", 0).edit().clear().commit()
+        }
+    }
+
+    private fun underlyingResponsesSession(session: ModelSession): Any {
+        var current: Any = session
+        // Both ResponsesModel.exposed and the host guard may retain an exact session wrapper.
+        while (current.javaClass.declaredFields.none { it.name == "sessionContext" }) {
+            current = current.javaClass.declaredFields.single {
+                ModelSession::class.java.isAssignableFrom(it.type)
+            }.apply { isAccessible = true }.get(current)
+        }
+        return current
+    }
+
+    private class Connection(private val events: String, url: URL = URL(OpenRouterVideoCapability.ENDPOINT)) : HttpsURLConnection(url) {
         val sent = ByteArrayOutputStream()
         override fun connect() {}
         override fun disconnect() {}

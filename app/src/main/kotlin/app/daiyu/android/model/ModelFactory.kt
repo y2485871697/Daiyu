@@ -28,6 +28,14 @@ object ModelFactory {
 
     fun create(settings: ModelSettings, session: SessionGatewayContext): ModelPort = create(snapshot(settings), session)
 
+    /** Explicit frozen native instructions for independently bound feature models.
+     * Uses the same provider implementations; never treats a system prompt as user history. */
+    fun create(snapshot: ProviderSnapshot, instructions: String): ModelPort = when (snapshot.protocol) {
+        ProviderProtocol.RESPONSES -> ResponsesModel(snapshot, instructions)
+        ProviderProtocol.MESSAGES -> MessagesModel(snapshot, instructions)
+        ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(snapshot.protocol.wireName)
+    }
+
     fun create(settings: ModelSettings, protocol: ProviderProtocol): ModelPort =
         create(ProviderSnapshot.capture(settings, protocol))
 

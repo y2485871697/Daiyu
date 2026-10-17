@@ -24,7 +24,7 @@ internal object SettingsCatalog {
             SettingsEntry("generation", "独立生成模型", DaiyuIcons.Vision, SettingControl.PAGE, FeatureRoute.GENERATION_SETTINGS),
             SettingsEntry("vision", "辅助视觉模型", DaiyuIcons.Vision, SettingControl.PAGE, FeatureRoute.AUXILIARY_VISION_SETTINGS),
             SettingsEntry("subagents", "子代理", DaiyuIcons.SubAgent, SettingControl.PAGE),
-            SettingsEntry("title_model", "标题模型", DaiyuIcons.Title, SettingControl.PAGE),
+            SettingsEntry("title_model", "标题模型", DaiyuIcons.Title, SettingControl.PAGE, FeatureRoute.TITLE_MODEL_SETTINGS),
             SettingsEntry("reconnect", "错误重连", DaiyuIcons.Reconnect, SettingControl.PAGE, FeatureRoute.RECONNECT_SETTINGS),
         )),
         SettingsGroup("extensions", "扩展", "助手、Skills、MCP 与鲸鱼女仆", listOf(

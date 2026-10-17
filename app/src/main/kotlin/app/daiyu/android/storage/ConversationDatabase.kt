@@ -12,7 +12,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 15), ConversationStore {
+class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conversations.db", null, 16), ConversationStore {
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
         db, assistantPreferences.getString(app.daiyu.android.assistants.LegacyAssistantCodec.KEY, null))
@@ -39,6 +39,7 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         installGenerationSchema(db)
         SQLiteMessageVideoStore.installSchema(db)
         ControllerVideoManifestWitness.installSchema(db)
+        app.daiyu.android.title.SqliteTitleCommitAdapter.installSchema(db)
     }
     private fun installGenerationSchema(db: SQLiteDatabase) {
         SQLiteGenerationAttemptStore.installSchema(db)
@@ -49,7 +50,9 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..14 && newVersion == 15) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..15 && newVersion == 16) { "不支持此数据库版本，保留原数据" }
+        // Install before the >=13 early return; do not rewrite timestamps or video witnesses.
+        app.daiyu.android.title.SqliteTitleCommitAdapter.installSchema(db)
         // No backfill: conversation.updated is not evidence of any message's creation time.
         // Existing-column check also supports old-schema test fixtures retaining newer columns.
         val hasMessageTime = db.rawQuery("PRAGMA table_info(messages)", null).use { c ->

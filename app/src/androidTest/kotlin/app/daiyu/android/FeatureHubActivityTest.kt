@@ -47,9 +47,9 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         setDraft("Gemini UI 草稿"); val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
         openHub()
-        val implemented = setOf("assistants", "subagents", "appearance", "haptics", "relay", "platform_tools", "permission_check")
+        val implemented = setOf("assistants", "subagents", "appearance", "haptics", "voice", "relay", "platform_tools", "permission_check")
         val unwired = entries.filter { it.route == null && it.localPage == null && it.id !in implemented }
-        assertEquals(15, unwired.size)
+        assertEquals(14, unwired.size)
         fun assertUnchanged() {
             assertEquals(before, fixture.database.exportBackup()); assertEquals(settings, fixture.settings.loadForEditing().settings)
             assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())

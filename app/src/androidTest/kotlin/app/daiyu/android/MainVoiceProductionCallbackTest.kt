@@ -36,6 +36,24 @@ class MainVoiceProductionCallbackTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    @Suppress("UNCHECKED_CAST")
+    fun testRemoteFinalCallbackPreservesCapturedReverseSelectionWithoutNetworking() {
+        setDraft("leftRIGHTtail")
+        setSelection(9, 4)
+        mainThread {
+            val target = app.daiyu.android.voice.DictationDraftTarget(null,
+                value("editorGeneration") as Long, value("draftRevision") as Long)
+            invoke("captureDictationDraft", target)
+            val host = (value("remoteVoice\$delegate") as Lazy<*>).value!!
+            val apply = host.javaClass.getDeclaredField("applyDraft").apply { isAccessible = true }
+                .get(host) as (app.daiyu.android.voice.DictationDraftTarget, String) -> Unit
+            apply(target, "middle")
+        }
+        assertDraft("leftmiddletail")
+        assertSelection(10, 10)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testNavigationRetiresCascadeAndPreparedSpeechEpochs() {
         var before = 0L
         var cascadeBefore = 0L

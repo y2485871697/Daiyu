@@ -614,7 +614,7 @@ class MainActivity : ComponentActivity() {
         set(value) {
             // Opening revokes even without a visit; closing cannot revive clicks rendered behind it.
             if (value != sidebarVisibleState) revokeContextManagementEntry()
-            if (value && !sidebarVisibleState) { revokeLegacyLibrary(); cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
+            if (value && !sidebarVisibleState) { revokePlatformActionVisit(); revokeLegacyLibrary(); cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
             sidebarVisibleState = value
         }
     private class ContextManagementVisit(val owner: ContextManagementOwner,
@@ -684,7 +684,7 @@ class MainActivity : ComponentActivity() {
         set(value) {
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
             if (value != retainedPageState && revokeContextManagementEntry()) editorGeneration++
-            if (value != retainedPageState) { cancelDeferredOpenedBackup(); revokeLegacyLibrary() }
+            if (value != retainedPageState) { revokePlatformActionVisit(); cancelDeferredOpenedBackup(); revokeLegacyLibrary() }
             if (value != "chat") cancelBrowserDownloadVisit()
             if (value != "reconnect-settings") {
                 reconnectSettingsPageOwner?.revoke()
@@ -741,7 +741,7 @@ class MainActivity : ComponentActivity() {
     @Volatile private var selected: Conversation? = null
         set(value) {
             if (field?.id != value?.id && revokeContextManagementEntry()) editorGeneration++
-            if (field?.id != value?.id) { cancelBrowserDownloadVisit(); cancelStaticGenerationVisit() }
+            if (field?.id != value?.id) { revokePlatformActionVisit(); cancelBrowserDownloadVisit(); cancelStaticGenerationVisit() }
             field = value
         }
     private var draft by mutableStateOf("")
@@ -789,12 +789,12 @@ class MainActivity : ComponentActivity() {
     }
     @Volatile private var editorGeneration = 0L
         set(value) {
-            if (field != value) { cancelBrowserDownloadVisit(); cancelStaticGenerationVisit(); revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { revokePlatformActionVisit(); cancelBrowserDownloadVisit(); cancelStaticGenerationVisit(); revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private var draftRevision = 0L
         set(value) {
-            if (field != value) { cancelGenerationEditor(); messageActionHost.invalidate(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { revokePlatformActionVisit(); cancelGenerationEditor(); messageActionHost.invalidate(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private data class PendingTextSend(val owner: ChatController.TextSendOwner, val text: String,
@@ -2051,6 +2051,8 @@ class MainActivity : ComponentActivity() {
                 onClick = ::openBrowserDownloadOutputs)
             BrowserDownloadOutputsSurface()
             TerminalComposerEntry()
+            // AC037 dedicated user-initiated actions; no default model WRITE advertisement.
+            PlatformActionComposerEntry(available && !hasImages)
             GenerationSurfaces()
             browserApproval?.let { pending ->
                 val observedState by produceState(pending.state, pending) {
@@ -2104,6 +2106,37 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    // AC037 isolated composer integration: compare the ORIGINAL owner/revision before approval
+    // and before editor clearing. The database consumes that exact draft in sendPrepared's CAS.
+    @Volatile private var platformActionVisit = Any()
+    private fun revokePlatformActionVisit() {
+        platformActionVisit = Any()
+        controller.platformActionPreparation()?.let(controller::rejectPlatformAction)
+    }
+    @Composable private fun PlatformActionComposerEntry(available: Boolean) {
+        val visit = platformActionVisit
+        val owner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+        val originalText = draft
+        fun current(expected: ChatController.TextSendOwner, text: String): Boolean =
+            platformActionVisit === visit && voiceForeground && activityUsable() && retainedPage == "chat" && !sidebarVisible && selectionReady &&
+                ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) == expected &&
+                draft == text && !imageHost.hasAttachments && videoHost.state.items.isEmpty() &&
+                !videoSending && pendingTextSend == null && shizukuEditor == null &&
+                browserApproval == null && generationApproval == null && terminalEditor == null &&
+                mcpApproval == null && !mcpPreparing && guiEditor == null && virtualDisplayEditor == null
+        app.daiyu.android.ui.PlatformActionApprovalHost(controller, selected, originalText, owner, visit,
+            enabled = available && current(owner, originalText), isCurrent = ::current,
+            onAccepted = { preview, saved ->
+                if (current(owner, originalText) && preview.conversation?.id == owner.conversationId &&
+                    preview.text == originalText && saved.id == preview.conversationId) {
+                    selected = saved; editorGeneration++; draftRevision++
+                    draft = ""; selectionStart = 0; selectionEnd = 0
+                    controller.preferences.edit().putString("selected", saved.id.value).apply()
+                    publishChat(); loadAcceptedHistory(saved)
+                }
+            })
     }
 
     private fun terminalDraft() = TerminalDraftSnapshot(
@@ -3506,6 +3539,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        revokePlatformActionVisit()
         revokeTerminalJobsVisit()
         val preserveLegacy = legacyPickerHop && retainedPage == "legacy-library" &&
             pendingLegacy != null
@@ -3553,6 +3587,7 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
     override fun onStop() {
+        revokePlatformActionVisit()
         revokeContextManagementEntry()
         revokeTerminalJobsVisit()
         invalidateMessageActionEditor()
@@ -3569,6 +3604,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        revokePlatformActionVisit()
         revokeLegacyLibrary()
         legacyLaunchersReady = false
         if (revokeContextManagementEntry()) editorGeneration++

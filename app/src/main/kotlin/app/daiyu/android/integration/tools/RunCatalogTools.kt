@@ -68,6 +68,7 @@ internal class RunCatalogTools(
     private val gui: GuiRunSession? = null,
     private val observeGuiClose: (GuiRunSession, (RunCatalogCloseResult) -> Unit) -> Unit = ::observeGuiDrain,
     private val mcp: app.daiyu.android.mcp.McpRunScope? = null,
+    private val platformAction: PlatformActionScope? = null,
     private val capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession
 ) : CatalogTool, ReceiptBatchToolExecutor, AutoCloseable {
     // No temporary owner or authorization for generation. Legacy read-only callers retain
@@ -103,6 +104,11 @@ internal class RunCatalogTools(
         }
         require(mcp == null || (authorization === mcp.authorization && authorizationFactory == null && !usesVirtualDisplaySession)) {
             "mcp_task_authorization_required"
+        }
+        require(platformAction == null || (authorization === platformAction.authorization &&
+            authorizationFactory == null && !usesVirtualDisplaySession &&
+            platformAction.conversationId == conversationId && platformAction.runId == runId)) {
+            "platform_task_authorization_required"
         }
         initialAuthorization?.let(::validateAuthorization)
         require(shizuku == null || (shizuku.session.sessionId == capabilities.sessionId && shizuku.session.runId == runId.value)) {
@@ -179,6 +185,7 @@ internal class RunCatalogTools(
             deviceResources?.bind(owner, authorization, capabilities)
             children?.bind(owner, capabilities, authorization)
             shizuku?.commands?.bind(owner, capabilities, authorization)
+            platformAction?.bind(owner, capabilities, authorization)
             terminalLeaf?.bindOwner(owner)
             terminalJobs?.bind(owner, capabilities, authorization)
             mcp?.bind(owner, capabilities, authorization)
@@ -253,6 +260,7 @@ internal class RunCatalogTools(
                 children?.let { registry.register(it.tool()) }
                 background?.let { registry.register(it.tool()); registry.register(it.commandTool()) }
                 shizuku?.let { registry.register(it.commands.tool()) }
+                platformAction?.tools()?.forEach { registry.register(it) }
                 terminalLeaf?.registeredTools?.forEach { registry.register(it) }
                 terminalJobs?.tools(capabilities)?.forEach { registry.register(it) }
                 browserTools.forEach { registry.register(it) }
@@ -371,6 +379,7 @@ internal class RunCatalogTools(
         fun unconfirmed() {
             gui?.onCentralUnknown() // missing final central feedback also fails closed, with no retry
             mcp?.markUnknown()
+            platformAction?.markUnknown()
             if (leaf != null || session != null) synchronized(closeLock) { recordCloseFailure("virtual_display_batch_unconfirmed") }
             // Do not invent results or finish a ticket when no final central result exists.
         }
@@ -385,6 +394,7 @@ internal class RunCatalogTools(
         unknown?.let {
             mcp?.markUnknown()
             shizuku?.session?.markOutcomeUnknown(it.code.ifBlank { "dispatcher_outcome_unknown" })
+            platformAction?.markUnknown()
         }
     }
     private fun beginDispatch(): Boolean = synchronized(closeLock) {
@@ -402,7 +412,7 @@ internal class RunCatalogTools(
             generation?.revokeAdmission()
             // Fence the terminal before stopping other resources; join is observed separately.
             // R08 close is revocation only. Never synthesize a release/shutdown operation.
-            claimStops(listOfNotNull(mcp, gui, browser, generation, virtualDisplay, retainedVirtualDisplaySession, terminalLeaf, terminalJobs, shizuku, background, children, deviceResources, skills))
+            claimStops(listOfNotNull(mcp, gui, browser, generation, virtualDisplay, retainedVirtualDisplaySession, terminalLeaf, terminalJobs, shizuku, platformAction, background, children, deviceResources, skills))
         }
         browser?.revoke()
         stopClaimed(resources)
@@ -523,7 +533,7 @@ internal class RunCatalogTools(
             else {
                 observationsStarted = true
                 registeringObservations = true
-                remainingObservations = 10
+                remainingObservations = 11
                 true
             }
         }
@@ -544,6 +554,10 @@ internal class RunCatalogTools(
             observeResourceClose(deviceResources) { done ->
                 if (deviceResources == null) done(RunCatalogCloseResult.Drained)
                 else deviceResources.closeWhenIdle { done(RunCatalogCloseResult.Drained) }
+            }
+            observeResourceClose(platformAction) { done ->
+                if (platformAction == null) done(RunCatalogCloseResult.Drained)
+                else platformAction.observeClose(done)
             }
             observeResourceClose(shizuku) { done ->
                 if (shizuku == null) done(RunCatalogCloseResult.Drained)

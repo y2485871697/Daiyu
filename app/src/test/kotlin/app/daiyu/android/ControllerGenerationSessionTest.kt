@@ -179,6 +179,104 @@ class ControllerGenerationSessionTest {
         assertEquals(GenerationToolsCloseResult.Drained, s.closeResult)
     }
 
+    private fun field(instance: Any, name: String): Any? = instance.javaClass.getDeclaredField(name)
+        .apply { isAccessible = true }.get(instance)
+
+    @Test fun sessionPairsRealTransportWithExactReviewedHostOwnerAndOneShotToken() {
+        val s = session(); val real = owner()
+        val task = s.bindOwner(real, editor, identity, "session")
+        val http = GenerationPublicNetworkHttp()
+        val io = AtomicInteger()
+        val resources = ControllerGenerationResources("account", { io.incrementAndGet(); error("no DB") },
+            { "account" }, File("unused-private-root"), downloadTransport = http)
+        var current = true
+        val grants = SessionCapabilities("session", setOf(RunGenerationTools.CAPABILITY))
+        val leaf = s.openLeaf(real, grants, task, resources, { current })
+        val auth = field(leaf, "downloadAuthorization") as GenerationDownloadAuthorization
+        val assetOwner = GenerationAssetOwner("account", GenerationAttemptBinding("conversation", "assistant",
+            "run", "original-call", RunGenerationTools.IMAGE_TOOL))
+        val url = "https://cdn.example/image.png?signature=synthetic-only"
+        try {
+            assertSame(resources, field(s, "resources"))
+            assertSame(leaf, field(s.token, "leaf"))
+            assertSame(http, field(leaf, "http"))
+            assertSame(http, resources.generationNetwork().http)
+            assertTrue(auth.allows(assetOwner, url))
+            for (denied in listOf("https://other.example/image.png", "https://sub.cdn.example/image.png",
+                "https://cdn.example.attacker.example/image.png", "http://cdn.example/image.png",
+                "https://user:secret@cdn.example/image.png", "https://127.0.0.1/image.png")) {
+                assertFalse(auth.allows(assetOwner, denied))
+            }
+            assertFalse(auth.allows(GenerationAssetOwner("foreign", assetOwner.binding), url))
+            assertFalse(auth.allows(GenerationAssetOwner("account", GenerationAttemptBinding("conversation",
+                "assistant", "foreign", "original-call", RunGenerationTools.IMAGE_TOOL)), url))
+            current = false
+            assertFalse(auth.allows(assetOwner, url))
+            current = true
+            assertTrue(auth.allows(assetOwner, url))
+            rejects { s.openLeaf(real, grants, task, resources, { true }) }
+            assertEquals(0, io.get())
+            s.revokeAdmission()
+            assertFalse(auth.allows(assetOwner, url))
+        } finally { s.cleanupOnWorker(0) }
+    }
+
+    @Test fun sessionWithoutTransportCannotBeEnabledByAllowPolicyAndExplicitDenyStillNarrows() {
+        for (injectTransport in listOf(false, true)) {
+            val s = session(); val real = owner()
+            val task = s.bindOwner(real, editor, identity, "session")
+            val io = AtomicInteger()
+            val resources = ControllerGenerationResources("account", { io.incrementAndGet(); error("no DB") },
+                { "account" }, File("unused-private-root"),
+                downloadTransport = if (injectTransport) GenerationPublicNetworkHttp() else null)
+            val leaf = s.openLeaf(real, SessionCapabilities("session", setOf(RunGenerationTools.CAPABILITY)),
+                task, resources, { true }, networkPolicy = if (injectTransport)
+                    ControllerGenerationResources.DENY_DOWNLOADS else GenerationDownloadAuthorization { _, _ -> true })
+            try {
+                val auth = field(leaf, "downloadAuthorization") as GenerationDownloadAuthorization
+                assertFalse(auth.allows(GenerationAssetOwner("account", GenerationAttemptBinding("conversation",
+                    "assistant", "run", "call", RunGenerationTools.IMAGE_TOOL)), "https://cdn.example/media"))
+                assertEquals(injectTransport, field(leaf, "http") is GenerationPublicNetworkHttp)
+                assertEquals(0, io.get())
+            } finally { s.cleanupOnWorker(0) }
+        }
+    }
+
+    @Test fun stoppedUnknownSessionRetainsRealPairedLeafAndRejectsDispatchWithoutResend() {
+        val drains = AtomicInteger(); val stops = AtomicInteger(); val io = AtomicInteger()
+        val s = session(stop = { stops.incrementAndGet() },
+            drain = { drains.incrementAndGet(); GenerationToolsCloseResult.Unknown("receipt_unconfirmed") })
+        val real = owner(); val token = s.token
+        val task = s.bindOwner(real, editor, identity, "session")
+        val http = GenerationPublicNetworkHttp()
+        val resources = ControllerGenerationResources("account", { io.incrementAndGet(); error("must not reach DB") },
+            { "account" }, File("unused-private-root"), downloadTransport = http)
+        val grants = SessionCapabilities("session", setOf(RunGenerationTools.CAPABILITY))
+        val leaf = s.openLeaf(real, grants, task, resources, { true })
+        val dispatcher = ToolDispatcher(ToolRegistry().apply { leaf.registeredTools.forEach { register(it) } }.snapshot(),
+            grants, ToolLedger(InMemoryToolLedgerStore()))
+        s.recordPersistence(identity, GenerationPersistenceReceipt.Unknown)
+        s.revokeAdmission(); s.cleanupOnWorker(0)
+        val unknown = s.closeResult
+        assertTrue(unknown is GenerationToolsCloseResult.Unknown)
+        for (callId in listOf("original-call", "attempted-new-call")) {
+            val result = dispatcher.dispatchOwned(task, listOf(ToolInvocation(ToolCallId(callId),
+                RunGenerationTools.IMAGE_TOOL, "{\"batch_id\":\"batch\"}")), real).single().outcome
+            assertEquals(DispatchOutcome.NotExecuted("generation_closed"), result)
+        }
+        s.cleanupOnWorker(0)
+        assertSame(unknown, s.closeResult)
+        assertSame(token, s.token)
+        assertSame(resources, field(s, "resources"))
+        assertSame(leaf, field(s, "leaf"))
+        assertSame(http, field(leaf, "http"))
+        rejects { s.bindOwner(real, editor, identity, "session") }
+        rejects { s.openLeaf(real, grants, task, resources, { true }) }
+        assertFalse(s.canRetire)
+        assertTrue(leaf.outcomes().isEmpty())
+        assertEquals(1, stops.get()); assertEquals(1, drains.get()); assertEquals(0, io.get())
+    }
+
     @Test fun unknownParentDrainIsStickyAndRetainsTokenAndNeverRetriesPaidWork() {
         val calls = AtomicInteger()
         val s = session { calls.incrementAndGet(); GenerationToolsCloseResult.Unknown("receipt_unconfirmed") }

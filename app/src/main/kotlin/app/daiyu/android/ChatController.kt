@@ -343,7 +343,8 @@ class ChatController internal constructor(private val application:Application,
         generationScope = accountScope
         return generationResources ?: ControllerGenerationResources(accountScope,
             { database.writableDatabase }, { generationScope },
-            File(application.filesDir, "media-message-generation")).also { retained ->
+            File(application.filesDir, "media-message-generation"),
+            downloadTransport = GenerationPublicNetworkHttp()).also { retained ->
             generationResources = retained
             // No existing gates/publications exist in a newly constructed resource, so these
             // seals need no wait. Every future fence inherits them before it can be returned.
@@ -1949,7 +1950,7 @@ class ChatController internal constructor(private val application:Application,
                         isCurrentOwner = { synchronized(this) {
                             generationEntry === generation && !closed &&
                                 resources?.let { !it.fenced && realOwner.owns(it.initial) } == true
-                        } }, networkPolicy = ControllerGenerationResources.DENY_DOWNLOADS)
+                        } })
                 }) { grants, authorization ->
                 SkillToolRegistry(application).captureForRun(grants, authorization,
                     selection = assistantContext.enabledSkillIds.toSet())

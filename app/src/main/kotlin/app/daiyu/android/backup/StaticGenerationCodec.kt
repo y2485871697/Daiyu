@@ -12,9 +12,9 @@ import app.daiyu.android.storage.StaticGenerationProvenance
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Leaf codec for a NEW readonly kind. No package-version change, migration, attempt tombstone,
- * live output registration, or automatic production hookup. The parent must integrate this
- * section into the future complete package (v4), never silently add it to current v3.
+/** Codec for a distinct read-only kind. Production branch and complete-package v5 use this
+ * same codec; v4 runtime_usage_history is unchanged. Schema installation belongs to the host's
+ * existing BackupHistoryRows.install, never to a copied helper or a live attempt registration.
  */
 internal object StaticGenerationCodec {
     const val KIND = "generation_static_output"
@@ -63,7 +63,13 @@ internal object StaticGenerationCodec {
     /** Call before any source read/allocation. These are leaf limits, NOT extra allowances:
      * parent must share its overall budget with images, video and other package contents.
      */
-    fun validateBatch(outputs: List<StaticGenerationOutput>): Long {
+    fun validateBatch(outputs: List<StaticGenerationOutput>): Long = validateRecords(outputs).also {
+        require(it <= NeutralBackupService.MAX_BYTES)
+    }
+
+    // Persisted metadata is bounded too, but the original-byte allowance belongs to ONE
+    // operation, not the lifetime collection of independent conversations in this database.
+    private fun validateRecords(outputs: List<StaticGenerationOutput>): Long {
         require(outputs.size <= BackupHistoryRows.MAX_ROWS)
         val identities = HashSet<String>(); val hashes = HashMap<String, Long>()
         var metadata = 0L
@@ -75,7 +81,7 @@ internal object StaticGenerationCodec {
             val previous = hashes.put(it.source.sha256, it.source.bytes)
             require(previous == null || previous == it.source.bytes)
         }
-        return hashes.values.sum().also { require(it <= NeutralBackupService.MAX_BYTES) }
+        return hashes.values.sum()
     }
 
     fun encodeSection(outputs: List<StaticGenerationOutput>): JSONObject {
@@ -125,9 +131,11 @@ internal object StaticGenerationCodec {
         check(db.inTransaction())
         validateDestination(value, messages)
         validatePersistedOwner(db, value)
+        // Hosts validate the complete operation with validateBatch BEFORE original I/O.
+        // This per-record writer must not charge unrelated durable assets to that budget.
+        validateBatch(listOf(value))
         val old = find(db, value.identity)
         if (old != null) { check(old == value); return }
-        validateBatch(read(db) + value)
         val values = ContentValues().apply {
             put("kind", KIND); put("identity", value.identity)
             put("owner_message_id", value.destination.assistantMessageId); put("payload", encode(value))
@@ -158,20 +166,43 @@ internal object StaticGenerationCodec {
         }
     }
 
-    /** Full collection, NOT a UI limit. Bounds are checked by SQL before materializing payloads. */
-    fun read(db: SQLiteDatabase, conversationId: String? = null): List<StaticGenerationOutput> {
-        if (!BackupHistoryRows.exists(db, "neutral_backup_history")) return emptyList()
-        val rows = BackupHistoryRows.read(db, "neutral_backup_history", listOf("kind", "identity", "owner_message_id", "payload"),
+    /** Full collection, NOT a UI limit. Bounds are checked by SQL before materializing payloads.
+     * Reading metadata does not reserve original bytes; exporting/copying still validates its batch.
+     */
+    fun read(db: SQLiteDatabase, conversationId: String? = null): List<StaticGenerationOutput> =
+        readPersisted(db,
             " WHERE kind=?" + if (conversationId == null) "" else " AND owner_message_id IN (SELECT id FROM messages WHERE conversation_id=?)",
-            if (conversationId == null) arrayOf(KIND) else arrayOf(KIND, conversationId))
+            if (conversationId == null) arrayOf(KIND) else arrayOf(KIND, conversationId)).also { outputs ->
+            require(conversationId == null || outputs.all { it.destination.conversationId == conversationId })
+        }
+
+    /** Exact physical package scope, including unexpected rows. Apply the owner predicate to
+     * BOTH the SQL bounds query and payload query, never decode unrelated rows then filter.
+     */
+    fun readForOwners(db: SQLiteDatabase, owners: Set<String>): List<StaticGenerationOutput> {
+        require(owners.size <= BackupHistoryRows.MAX_ROWS)
+        val outputs = mutableListOf<StaticGenerationOutput>()
+        // Stay below SQLite's bind-variable limit, even for a 50,000-message package.
+        owners.toList().chunked(400).forEach { batch ->
+            val rows = readPersisted(db, " WHERE kind=? AND owner_message_id IN (${batch.joinToString(",") { "?" }})",
+                (listOf(KIND) + batch).toTypedArray())
+            outputs.addAll(rows)
+            // Each SQL chunk and the accumulated metadata remain bounded, not just the last one.
+            validateRecords(outputs)
+        }
+        return outputs
+    }
+
+    private fun readPersisted(db: SQLiteDatabase, where: String, args: Array<String>): List<StaticGenerationOutput> {
+        val rows = BackupHistoryRows.read(db, "neutral_backup_history", listOf("kind", "identity", "owner_message_id", "payload"),
+            where, args)
         return rows.map { row ->
             decode(BackupHistoryRows.text(row, "payload")).also {
                 require(it.identity == BackupHistoryRows.text(row, "identity") &&
                     it.destination.assistantMessageId == BackupHistoryRows.text(row, "owner_message_id"))
-                require(conversationId == null || it.destination.conversationId == conversationId)
                 validatePersistedOwner(db, it)
             }
-        }.also { validateBatch(it) }
+        }.also { validateRecords(it) }
     }
 
     private fun validatePersistedOwner(db: SQLiteDatabase, value: StaticGenerationOutput) {

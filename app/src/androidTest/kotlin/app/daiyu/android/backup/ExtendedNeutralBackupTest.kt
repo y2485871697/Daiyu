@@ -107,7 +107,7 @@ class ExtendedNeutralBackupTest : InstrumentationTestCase() {
         val access = MessageGenerationBackupAssets { reference -> assertEquals(g.reference, reference); g.media }
         rejects { source.service().exportPackage() } // Unsupported full export is explicit, not a reference-only success.
         val exporter = source.service(access); val text = exporter.exportPackage()
-        assertEquals(4, JSONObject(text).getInt("version")); assertEquals(sourceText, source.db.exportBackup())
+        assertEquals(5, JSONObject(text).getInt("version")); assertEquals(sourceText, source.db.exportBackup())
         for (privateValue in listOf("provider.invalid", "SECRET_DO_NOT_EXPORT", "PRIVATE_AUTH_MATERIAL")) assertFalse(text.contains(privateValue))
         val inventory = exporter.preflight(text)
         assertEquals(1, inventory.generationOutputs); assertEquals(1, inventory.generationAttempts)
@@ -322,6 +322,7 @@ class ExtendedNeutralBackupTest : InstrumentationTestCase() {
         val current = source.service().exportPackage()
         val old = JSONObject(mutate(current) {
             it.remove("generation_history"); it.remove("child_task_history"); it.remove("runtime_usage_history")
+            it.remove("static_generation_history"); it.getJSONObject("inventory").remove("static_generation_outputs")
             it.getJSONObject("inventory").remove("runtime_usage_checkpoints")
             it.getJSONObject("inventory").remove("runtime_usage_requests")
             val inventory = it.getJSONObject("inventory")

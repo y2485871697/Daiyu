@@ -924,6 +924,102 @@ class ChatController internal constructor(private val application:Application,
         return true
     }
 
+    internal data class StaticGenerationAssetDisplay(val output: app.daiyu.android.storage.StaticGenerationOutput,
+        val thumbnail: android.graphics.Bitmap?)
+
+    internal fun loadStaticGenerationOutputs(conversation: ConversationId,
+        complete: (List<StaticGenerationAssetDisplay>?) -> Unit): Boolean {
+        synchronized(this) {
+            if (closed || !ready || dataBusy) return false
+            generationReaders++
+        }
+        try { executor.execute {
+            val result = runCatching {
+                synchronized(this) { check(conversation.value !in generationConversationPublicationSeals) }
+                neutralBackup.staticGenerationOutputs(conversation).take(32).map { output ->
+                    val source = output.source
+                    val bytes = neutralBackup.staticGenerationOriginal(output)
+                    val thumbnail = if (source.kind == GenerationKind.IMAGE) android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
+                        android.graphics.BitmapFactory.Options().apply { inSampleSize = Integer.highestOneBit((maxOf(source.width, source.height) / 512).coerceAtLeast(1)) }) else null
+                    StaticGenerationAssetDisplay(output, thumbnail)
+                }
+            }.getOrNull()
+            handler.post {
+                synchronized(this) { generationReaders--; if (closed) closeStorageWhenIdle() }
+                complete(result)
+            }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { generationReaders-- }; return false
+        }
+        return true
+    }
+
+    // Process-local receipts, deliberately independent of Activity/editor leases. Record BEFORE
+    // posting the completion: an obsolete host may discard UI callbacks, never this locator.
+    // Activity recreation retains these via the Application controller; process death does not.
+    private val pendingBranchOutcomes = mutableListOf<MessageActionResult.Unknown>()
+    internal fun pendingBranchOutcome(): MessageActionResult.Unknown? = synchronized(this) {
+        pendingBranchOutcomes.firstOrNull()
+    }
+    internal fun dismissBranchOutcome(receipt: MessageActionResult.Unknown) {
+        val removed = synchronized(this) {
+            val index = pendingBranchOutcomes.indexOfFirst { it === receipt }
+            if (index < 0) false else { pendingBranchOutcomes.removeAt(index); true }
+        }
+        if (removed) notifyChanged()
+    }
+
+    /** A read-only inspection of the T1 locator. Absence is NOT permission to repeat the branch. */
+    internal fun inspectBranch(locator: app.daiyu.android.context.BranchLocator, complete: (Boolean) -> Unit): Boolean {
+        synchronized(this) { if (closed || !ready || dataBusy) return false; generationReaders++ }
+        try { executor.execute {
+            val verified = runCatching {
+                check(conversationExists(locator.conversationId))
+                DatabaseTransactions { database.writableDatabase }.run { db ->
+                    check(db.rawQuery("SELECT 1 FROM context_branches WHERE conversation_id=?", arrayOf(locator.conversationId.value)).use { it.moveToFirst() })
+                    val messages = ContextService.read(db, locator.conversationId)
+                    check(messages.isNotEmpty() && messages.all { it.status == RunStatus.COMPLETED })
+                    messages.forEach { app.daiyu.android.storage.SQLiteMessageVideoStore.readVerified(db, it) }
+                }
+                val outputs = neutralBackup.staticGenerationOutputs(locator.conversationId)
+                check(outputs.map { it.identity }.toSet() == locator.staticIdentities.toSet())
+                outputs.forEach { neutralBackup.staticGenerationOriginal(it) }
+                true
+            }.getOrDefault(false)
+            handler.post {
+                synchronized(this) { generationReaders--; if (closed) closeStorageWhenIdle() }
+                complete(verified)
+            }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { generationReaders-- }; return false
+        }
+        return true
+    }
+
+    internal fun saveStaticGenerationOriginal(output: app.daiyu.android.storage.StaticGenerationOutput, uri: Uri,
+        visitActive: java.util.concurrent.atomic.AtomicBoolean,
+        resolver: android.content.ContentResolver = application.contentResolver) {
+        require(uri.scheme == "content") { "请选择文档目标" }
+        dataTask(failureNotice = "静态原件保存未确认；目标可能不完整，未重试", work = {
+            fun authorize() {
+                check(visitActive.get()) { "原会话访问已失效" }
+                synchronized(this) { check(!closed && output.destination.conversationId !in generationConversationPublicationSeals) }
+            }
+            authorize()
+            val bytes = neutralBackup.staticGenerationOriginal(output)
+            authorize()
+            resolver.openOutputStream(uri, "wt")?.use { destination ->
+                var offset = 0
+                while (offset < bytes.size) {
+                    authorize(); val count = minOf(8192, bytes.size - offset)
+                    destination.write(bytes, offset, count); offset += count
+                }
+                destination.flush()
+            } ?: throw java.io.IOException("无法打开目标")
+            "静态生成原件已保存；仅本地历史文件，未恢复执行授权"
+        })
+    }
+
     internal val browserDownloads = app.daiyu.android.browser.download.BrowserDownloadShelf()
 
     internal fun completedBrowserDownloads(conversation: ConversationId) = browserDownloads.list(conversation.value)
@@ -2499,7 +2595,7 @@ class ChatController internal constructor(private val application:Application,
         // sendPrepared runs on the preparation worker. Freeze once, AFTER the exact provider;
         // no settings IO on pause/continue/tool rounds, and no fallback on a corrupt/fenced store.
         val frozenReconnect = try {
-            app.daiyu.android.model.reconnect.FrozenReconnectAdapter.freeze(reconnectSettings.snapshot(), provider.protocol)
+            app.daiyu.android.model.reconnect.FrozenReconnectAdapter.freeze(reconnectSettings.snapshot(), requestProvider)
         } catch (_: Exception) {
             problem="错误重连配置无效或写入未确认；请重新保存，草稿保留，未启动聊天模型请求"
             notifyChanged(); return null
@@ -2640,7 +2736,8 @@ class ChatController internal constructor(private val application:Application,
         val preparedModel=try {
             if (video != null) messageVideos.wrap(provider, video.second, conversationId, assistant.id,
                 checkNotNull(videoPlan), assistantContext.systemPrompt, { video.first.isRevoked() },
-                checkNotNull(video.first.post), onFrozenPlan = video.first::onFrozenPlan) else {
+                checkNotNull(video.first.post), onFrozenPlan = video.first::onFrozenPlan,
+                backgroundResume = frozenReconnect.responsesBackground) else {
             // Capability preflight is against the actual image route, not the text/main provider.
             val imageHistory=(contextService.displayHistory(conversationId) + preparedContext.messages)
                 .distinctBy { it.id }
@@ -2659,9 +2756,13 @@ class ChatController internal constructor(private val application:Application,
                 preparationCancelled(token) || !auxiliaryCurrent() ||
                     imageAttempt?.handle?.isCancelled()==true || shizukuPreparation?.isCancelled()==true
             }
-            val delegate=sessionModel?.invoke(requestProvider,assistantContext,SessionGatewayContext(conversationId))
+            val assembledDelegate=sessionModel?.invoke(requestProvider,assistantContext,SessionGatewayContext(conversationId))
                 ?: assistantModel?.invoke(requestProvider,assistantContext)
                 ?: if(plan.hasImages && auxiliaryFrozen == null) imageModel(requestProvider) else model(requestConfig)
+            // Auxiliary vision owns a Unit-sink lifecycle and cannot acknowledge background batches.
+            val background = frozenReconnect.responsesBackground.takeIf { auxiliaryFrozen == null }
+            val delegate = if (background != null && assembledDelegate is app.daiyu.android.model.ResponsesModel)
+                assembledDelegate.withBackgroundResume(background) else assembledDelegate
             if (auxiliaryFrozen == null) messageImages.wrap(delegate,provider,conversationId)
             else {
                 ControllerAuxiliaryVision.create(delegate, auxiliarySelection,
@@ -2675,7 +2776,7 @@ class ChatController internal constructor(private val application:Application,
         }
         if(preparationCancelled(token)) { auxiliaryPort?.close(); return null }
         // The observer must be OUTSIDE the fully assembled video/image/auxiliary port. It is
-        // diagnostic only: no open/resume/repost or tool replay, and Runner still has 0 retries.
+        // diagnostic only: no open/resume/repost or tool replay; only approved background sessions resume.
         // Both assignment and callback reads of this original lifetime are under our monitor.
         var reconnectResources: RunResources? = null
         val observedModel = frozenReconnect.observeFailures(preparedModel) { message ->
@@ -3148,8 +3249,18 @@ class ChatController internal constructor(private val application:Application,
             finally {titleExecutor.shutdown();executor.shutdown();closeDone.countDown()}
         }
     }
+    private val staticGenerationAssets by lazy { app.daiyu.android.media.StaticGenerationAssets(
+        java.io.File(application.filesDir, "static-generation-assets")) }
+    private val staticGenerationBranch by lazy { app.daiyu.android.backup.StaticGenerationBranch(
+        staticGenerationAssets,
+        account = { checkNotNull(GenerationSettingsStore(application).readAccountScope()) },
+        liveOriginal = ::readGenerationBackup,
+        historicalOriginal = { neutralBackup.historicalGenerationOriginal(it) },
+        lookup = { neutralBackup.findStaticGeneration(it) },
+        cancelled = { synchronized(this) { closed } }) }
     private val messageActionStore by lazy { MessageActionStore(database, contextService, messageImageAssets,
-        app.daiyu.android.backup.MessageVideoBackupAssets(videoAttachments.store)) }
+        app.daiyu.android.backup.MessageVideoBackupAssets(videoAttachments.store), staticGenerationBranch,
+        cancelled = { synchronized(this) { closed } }) }
 
     /** Capture on the same serialized worker as persistence. Main must bind this snapshot to the
      * rendered conversation/editor owner, never acquire a fresh target from a stale callback. */
@@ -3231,6 +3342,14 @@ class ChatController internal constructor(private val application:Application,
                         MessageActionResult.Regenerated(prepared.conversation, outcome)
                     }
                 }
+            } catch (failure: app.daiyu.android.context.BranchRolledBack) {
+                MessageActionResult.Rejected("分支已确认未提交；原会话和原件保留，未重试")
+            } catch (failure: app.daiyu.android.context.BranchOutcomeUnknown) {
+                changed = true
+                MessageActionResult.Unknown("分支提交或原件发布未确认；仅核实目标，不要再次分支或重放工具",
+                    failure.locator.copy(staticIdentities = failure.locator.staticIdentities.toList())).also { receipt ->
+                    synchronized(this) { pendingBranchOutcomes.add(receipt) }
+                }
             } catch (failure: IllegalArgumentException) {
                 MessageActionResult.Rejected(failure.message ?: "消息身份或安全历史基线不匹配；未重放请求")
             } catch (_: Exception) {
@@ -3261,6 +3380,7 @@ class ChatController internal constructor(private val application:Application,
                 exportText = { db, scope -> database.exportBackupForVideoAssets(db, scope, videoAssets) },
                 restoreSidecars = { db, sidecars -> database.restoreVideoBackupSidecars(db, sidecars) }),
             generationAssets = app.daiyu.android.backup.BackupGenerationAssets(::readGenerationBackup))
+            .withStaticAssets(staticGenerationAssets)
     }
     internal class ConfigurationRestorePreview internal constructor(
         val plan:NonSecretRestorePlan, internal val metadata:String
@@ -3428,6 +3548,21 @@ class ChatController internal constructor(private val application:Application,
         return generationResources?.let { retained ->
             owners.map { retained.sealConversationPublicationAdmission(it) }
         }.orEmpty()
+    }
+
+    internal val legacyLibrary by lazy {
+        LegacyLibraryHost(application.contentResolver,
+            serviceFactory = { beforeCommit ->
+                app.daiyu.android.backup.legacy.LegacyImportService(
+                    database = { database.writableDatabase }, beforeCommit = beforeCommit)
+            },
+            gateway = LegacyLibraryHost.Gateway { work, completed ->
+                try {
+                    dataTask(failureNotice = "兼容库操作未确认；请重新读取历史核实，不自动重试。目标可能不完整。",
+                        completed = completed, work = { work(); "兼容库操作已结束，请查看资料库结果。" })
+                    true
+                } catch (_: Exception) { false }
+            })
     }
 
     @Synchronized internal fun dataTask(importing:Boolean=false,failureNotice:String?=null,

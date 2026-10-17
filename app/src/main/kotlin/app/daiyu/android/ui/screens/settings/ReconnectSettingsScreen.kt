@@ -69,6 +69,12 @@ internal fun ReconnectSettingsScreen(
                         }) else null,
                         trailing = { RadioButton(selected = draft.duration == duration, onClick = null, enabled = !busy) })
                 }
+                SettingsRow("官方 OpenAI Responses 后台可恢复模式（默认关闭）",
+                    summary = "启用会将新请求设为 background=true。服务端临时保留响应约10分钟；store=false 不等于零保留。仅核实的官方 endpoint 支持，兼容网关不支持。",
+                    tag = "reconnect-background", onClick = if (!busy) ({
+                        if (canAct()) draft = draft.copy(responsesBackgroundEnabled = !draft.responsesBackgroundEnabled)
+                    }) else null,
+                    trailing = { RadioButton(selected = draft.responsesBackgroundEnabled, onClick = null, enabled = !busy) })
                 SettingsRow("保存并回读", tag = "reconnect-save", onClick = if (!busy) ({
                     if (canAct()) {
                         val requested = draft

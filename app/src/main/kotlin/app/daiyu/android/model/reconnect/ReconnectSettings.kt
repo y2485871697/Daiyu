@@ -19,7 +19,8 @@ enum class ReconnectDurationPreset(val wireId: String, val windowMillis: Long?, 
 
 /** Global preference, captured once per run. The retained settings default is continuous;
  * this does NOT enable Runner retries or manufacture transport capability. NONE is explicit off. */
-data class ReconnectSettings(val duration: ReconnectDurationPreset = ReconnectDurationPreset.CONTINUOUS) {
+data class ReconnectSettings(val duration: ReconnectDurationPreset = ReconnectDurationPreset.CONTINUOUS,
+    val responsesBackgroundEnabled: Boolean = false) {
     val enabled: Boolean get() = duration != ReconnectDurationPreset.NONE
 }
 
@@ -30,10 +31,18 @@ class ReconnectSettingsException internal constructor() :
  * Missing preference preserves the retained continuous default; an unknown policy in version 1
  * is NONE, without rewriting the record. Invalid envelope/type/version is an explicit error. */
 object ReconnectSettingsCodec {
-    fun encode(settings: ReconnectSettings): String = "v1:${settings.duration.wireId}"
+    fun encode(settings: ReconnectSettings): String = if (!settings.responsesBackgroundEnabled)
+        "v1:${settings.duration.wireId}" else "v2:${settings.duration.wireId}:background"
 
     fun decode(raw: String?): ReconnectSettings {
         if (raw == null) return ReconnectSettings()
+        if (raw.startsWith("v2:")) {
+            val parts = raw.split(':')
+            if (parts.size != 3 || parts[2] != "background" || raw.length > 128) throw ReconnectSettingsException()
+            val duration = ReconnectDurationPreset.entries.singleOrNull { it.wireId == parts[1] }
+                ?: throw ReconnectSettingsException()
+            return ReconnectSettings(duration, true)
+        }
         if (raw.length !in 3..128 || !raw.startsWith("v1:") || raw.indexOf(':', 3) >= 0)
             throw ReconnectSettingsException()
         return ReconnectSettings(ReconnectDurationPreset.fromPersistedValue(raw.substring(3)))

@@ -16,6 +16,7 @@ internal fun BackupScreen(
     onExportComplete: () -> Unit,
     onImportCompact: () -> Unit,
     onImportComplete: () -> Unit,
+    onOpenLegacyLibrary: () -> Unit,
     restorePreviewText: String,
     onPreviewRestore: () -> Unit,
     onRestoreConfiguration: () -> Unit,
@@ -55,6 +56,13 @@ internal fun BackupScreen(
                     DaiyuIcon(DaiyuIcons.Folder, contentDescription = null,
                         tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
                 })
+            }
+        }
+        item(key = "legacy_library") {
+            SettingsSectionTitle("旧版资料")
+            SettingsCard {
+                SettingsRow("打开旧版兼容资料库", onClick = if (busy) null else onOpenLegacyLibrary)
+                SettingsNote("独立只读导入旧版 JSON / ZIP，不恢复历史执行授权；完整备份不包含此资料库。")
             }
         }
         item(key = "backup_restore_preview") {

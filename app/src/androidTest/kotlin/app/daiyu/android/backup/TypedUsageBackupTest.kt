@@ -159,7 +159,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val source = fresh(); val (p, _) = runtimeSeed(source)
         val physicalBefore = checkpointPayloads(source)
         val exported = source.service().exportPackage()
-        assertEquals(4, JSONObject(exported).getInt("version")); assertFalse(exported.contains("RUNTIME_PRIVATE_HISTORY"))
+        assertEquals(5, JSONObject(exported).getInt("version")); assertFalse(exported.contains("RUNTIME_PRIVATE_HISTORY"))
         assertEquals(2, runtime(exported).getJSONArray("checkpoints").length()); assertEquals(8, runtimeRows(exported).length())
         assertEquals(0L, runtimeRow(exported, "main-missing").getLong("has_usage"))
         assertEquals(1L, runtimeRow(exported, "main-null").getLong("has_usage"))
@@ -275,6 +275,18 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         }
     }
 
+    fun testV4RuntimeUsageRemainsCompatibleAfterV5StaticSectionAddition() {
+        val source = fresh(); runtimeSeed(source)
+        val current = source.service().exportPackage()
+        val old = JSONObject(mutate(current) { data ->
+            data.remove("static_generation_history"); data.getJSONObject("inventory").remove("static_generation_outputs")
+        }).put("version", 4).toString()
+        val target = fresh(); target.service().preflight(old)
+        assertFalse(target.service().importPackage(old).alreadyImported)
+        assertTrue(target.service().importPackage(old).alreadyImported)
+        assertEquals(runtime(current).toString(), runtime(target.service().exportPackage()).toString())
+    }
+
     fun testV19MigrationAndV3CompatibilityAndLegacyRequestFallback() {
         val source = fresh(); val p = parent(source)
         checkpoint(source, p, emptyList(), emptyList(), request("legacy-missing"))
@@ -290,6 +302,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         assertEquals(runtime(current).toString(), runtime(source.service().exportPackage()).toString())
         assertEquals(0L, runtimeRow(current, "legacy-missing").getLong("has_usage"))
         val old = JSONObject(mutate(current) { data ->
+            data.remove("static_generation_history"); data.getJSONObject("inventory").remove("static_generation_outputs")
             data.remove("runtime_usage_history"); data.getJSONObject("inventory").remove("runtime_usage_checkpoints")
             data.getJSONObject("inventory").remove("runtime_usage_requests")
         }).put("version", 3).toString()
@@ -308,7 +321,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
     fun testTypedManualAndChildRoundTripIsClosedStableAndDoesNotMutateSource() {
         val source = fresh(); val p = seed(source); val original = physical(source)
         val exported = source.service().exportPackage()
-        assertEquals(4, JSONObject(exported).getInt("version")); assertEquals(original, physical(source))
+        assertEquals(5, JSONObject(exported).getInt("version")); assertEquals(original, physical(source))
         assertEquals(exported, source.service().exportPackage())
         assertEquals(2, payload(exported).getJSONObject("child_task_history").getInt("version"))
         assertEquals(0L, row(exported, "title-zero").getLong("input_tokens"))
@@ -353,6 +366,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
             if (version == 2) children(source, p)
             val current = source.service().exportPackage()
             val oldPayload = mutate(current) { data ->
+                data.remove("static_generation_history"); data.getJSONObject("inventory").remove("static_generation_outputs")
                 data.remove("runtime_usage_history")
                 data.getJSONObject("inventory").remove("runtime_usage_checkpoints")
                 data.getJSONObject("inventory").remove("runtime_usage_requests")

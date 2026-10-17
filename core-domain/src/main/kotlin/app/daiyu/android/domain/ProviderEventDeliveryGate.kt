@@ -33,6 +33,16 @@ class ProviderEventDeliveryGate {
         }
     }
 
+    /** Nonblocking invalidation for pause/deadline; close() still drains before next attempt. */
+    fun expire() { closed = true }
+
+    /** Same gate, but closed delivery must explicitly reject rather than look like ACK. */
+    fun deliverAcknowledged(deliver: () -> ModelDeliveryAck): ModelDeliveryAck {
+        lock.lock()
+        try { return if (closed) ModelDeliveryAck.REJECTED else deliver() }
+        finally { lock.unlock() }
+    }
+
     /** 封闸；若已有回调在途，先等其结束。 */
     fun close() {
         lock.lock()

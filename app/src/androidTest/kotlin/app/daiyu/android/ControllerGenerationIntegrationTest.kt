@@ -616,6 +616,65 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
 
     private fun displayHash(output: ExistingOutput) = app.daiyu.android.context.PrivateBlobs.digest(output.png)
 
+    private fun branchThroughProduction(target: ChatController, conversation: ConversationId): Conversation {
+        val captured = CountDownLatch(1); val snapshot = AtomicReference<MessageActionSnapshot?>()
+        controlMain { assertTrue(target.loadMessageActionSnapshot(conversation) { snapshot.set(it); captured.countDown() }) }
+        assertTrue(captured.await(10, TimeUnit.SECONDS))
+        val done = CountDownLatch(1); val result = AtomicReference<MessageActionResult>()
+        controlMain { assertTrue(target.messageAction(MessageAction.BRANCH, checkNotNull(snapshot.get()).targets.values.first()) {
+            result.set(it); done.countDown()
+        }) }
+        assertTrue(done.await(15, TimeUnit.SECONDS)); assertTrue(result.get().toString(), result.get() is MessageActionResult.Branch)
+        return (result.get() as MessageActionResult.Branch).conversation
+    }
+    private fun staticThroughProduction(target: ChatController, conversation: ConversationId): ChatController.StaticGenerationAssetDisplay {
+        val done = CountDownLatch(1); val result = AtomicReference<List<ChatController.StaticGenerationAssetDisplay>?>()
+        controlMain { assertTrue(target.loadStaticGenerationOutputs(conversation) { result.set(it); done.countDown() }) }
+        assertTrue(done.await(15, TimeUnit.SECONDS)); return checkNotNull(result.get()).single()
+    }
+
+    fun testProductionLiveImageVideoAndImportedHistoryBranchUseSafeReadersWithoutNewAttempts() {
+        val image = existingOutput(); val video = existingOutput(GenerationKind.VIDEO)
+        fun count(database: ConversationDatabase, table: String) = database.readableDatabase.rawQuery("SELECT count(*) FROM $table", null)
+            .use { check(it.moveToFirst()); it.getInt(0) }
+        val credentialCount = credentialOpens.get(); forbidGenerationCredentials = true
+        val imageCopy = branchThroughProduction(controller, image.conversation.id)
+        val videoCopy = branchThroughProduction(controller, video.conversation.id)
+        val imageDisplay = staticThroughProduction(controller, imageCopy.id)
+        val videoDisplay = staticThroughProduction(controller, videoCopy.id)
+        assertEquals(image.owner.binding.operationId, imageDisplay.output.source.operationId)
+        assertEquals(video.owner.binding.operationId, videoDisplay.output.source.operationId)
+        assertNotNull(imageDisplay.thumbnail); assertEquals(GenerationKind.VIDEO, videoDisplay.output.source.kind)
+        assertEquals(2, count(fixture.database, "generation_attempts")); assertEquals(2, count(fixture.database, "generation_outputs"))
+        assertEquals(credentialCount, credentialOpens.get())
+        val file = File(fixture.application.cacheDir, "p37-production-${UUID.randomUUID()}.json")
+        val targetFiles = File(fixture.application.cacheDir, "p37-target-${UUID.randomUUID()}").apply { check(mkdirs()) }
+        val isolated = object : android.content.ContextWrapper(instrumentation.targetContext) { override fun getFilesDir() = targetFiles }
+        val target = RunControlFixture(isolated)
+        try {
+            awaitControl("P37 target ready") { target.controller.ready }
+            // Metadata is minted by the real settings codec with in-memory synthetic credential
+            // callbacks. Neither the branch nor its history reader opens any credential vault.
+            val memory = mutableMapOf<String, String>()
+            GenerationSettingsStore(target.application.getSharedPreferences(GenerationSettingsStore.METADATA_NAMESPACE, 0),
+                { memory.getValue(it) }, { id, key -> memory[id] = key }).save(GenerationSettingsValues(listOf(
+                    GenerationProfileSettings(label = "offline destination", kind = GenerationKind.IMAGE,
+                        protocol = GenerationProtocol.OPENAI_IMAGES_JSON, endpoint = "https://example.invalid/images/generations",
+                        model = "offline", apiKey = "synthetic-memory-only")), 0, false, emptySet()), null)
+            assertTrue(dataOperation { controller.exportUserBackup(Uri.fromFile(file), true) }.startsWith("完整中立备份已导出"))
+            assertEquals(5, org.json.JSONObject(file.readText()).getInt("version"))
+            assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("已导入"))
+            val historicalCopy = branchThroughProduction(target.controller, image.conversation.id)
+            val historicalDisplay = staticThroughProduction(target.controller, historicalCopy.id)
+            assertEquals(imageDisplay.output.source, historicalDisplay.output.source)
+            val again = branchThroughProduction(target.controller, historicalCopy.id)
+            assertEquals(historicalDisplay.output.source, staticThroughProduction(target.controller, again.id).output.source)
+            assertEquals(2, count(target.database, "generation_attempts")); assertEquals(0, count(target.database, "generation_outputs"))
+            assertEquals(4, app.daiyu.android.backup.StaticGenerationCodec.read(target.database.readableDatabase).size)
+            assertEquals(credentialCount, credentialOpens.get()); assertEquals(0, fixture.opens.get()); assertEquals(0, target.opens.get())
+        } finally { target.close(); file.delete(); targetFiles.deleteRecursively() }
+    }
+
     fun testCompleteBackupUsesManifestScopeNotSelectedRowsAndRejectsAlteredRegisteredMapping() {
         val output = existingOutput()
         val preferences = fixture.application.getSharedPreferences(GenerationSettingsStore.METADATA_NAMESPACE, 0)

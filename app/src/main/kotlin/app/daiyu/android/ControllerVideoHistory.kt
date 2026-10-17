@@ -8,6 +8,8 @@ import app.daiyu.android.media.video.VideoAssetStore
 import app.daiyu.android.model.ProviderSnapshot
 import app.daiyu.android.model.ResponsesModel
 import app.daiyu.android.model.images.FrozenMessageImagePlan
+import app.daiyu.android.model.reconnect.FrozenResponsesBackground
+import app.daiyu.android.model.reconnect.guardModelSession
 import app.daiyu.android.model.videos.*
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.storage.MessageVideoInputCodec
@@ -108,6 +110,15 @@ internal class ControllerVideoHistory(private val database: ConversationDatabase
     }
 }
 
+/** Keep this runtime guard testable without widening the ResponsesModel factory seam. */
+internal fun guardControllerVideoModelSession(session: ModelSession, runtimeCancelled: () -> Boolean): ModelSession =
+    guardModelSession(session) {
+        if (runtimeCancelled()) {
+            session.cancel()
+            throw InterruptedException("video_model_cancelled")
+        }
+    }
+
 internal class ControllerVideoModelPlan internal constructor(
     val history: List<Message>,
     val videos: FrozenMessageVideoPlan?,
@@ -184,6 +195,7 @@ internal class ControllerMessageVideos(
         assistantInstructions: String?, runtimeCancelled: () -> Boolean,
         postApproval: ControllerVideoPostApproval? = null,
         onFrozenPlan: (ControllerVideoModelPlan) -> Unit = {},
+        backgroundResume: FrozenResponsesBackground? = null,
         modelFactory: (ProviderSnapshot, String?, OpenRouterVideoCapability?, VideoPostApprovalProvider?) -> ResponsesModel = { p, i, c, a ->
             ResponsesModel(p, i, c, a,
                 sessionContext = app.daiyu.android.model.sessiongateway.SessionGatewayContext(conversation))
@@ -226,19 +238,13 @@ internal class ControllerMessageVideos(
             val approval = if (plan.videos != null) requireNotNull(postApproval) {
                 "video_post_approval_required"
             }.also { it.registerFrozenPlan(plan) } else null
-            val delegate = modelFactory(provider, assistantInstructions, capability, approval)
+            val original = modelFactory(provider, assistantInstructions, capability, approval)
+            // Configure the SAME assembled model context; never open a second session or bypass
+            // the actual frozen plan and its per-POST approval. A null token grants no capability.
+            val delegate = backgroundResume?.let(original::withBackgroundResume) ?: original
             val session = if (plan.videos != null) delegate.open(plan.history, definitions, plan.videos, plan.images)
                 else delegate.open(plan.history, definitions, plan.images)
-            return object : ModelSession {
-                private fun checkRuntime() {
-                    if (runtimeCancelled()) { session.cancel(); throw InterruptedException("video_model_cancelled") }
-                }
-                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
-                    checkRuntime()
-                    session.next(outputs) { event -> checkRuntime(); sink(event) }
-                }
-                override fun cancel() = session.cancel()
-            }
+            return guardControllerVideoModelSession(session, runtimeCancelled)
         }
         override fun open(history: List<Message>): ModelSession = open(history, provider.asModelSettings().enabledTools())
         override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = openPlan(history, tools.map {

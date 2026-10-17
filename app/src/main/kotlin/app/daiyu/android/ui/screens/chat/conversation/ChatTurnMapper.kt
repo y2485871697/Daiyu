@@ -121,6 +121,7 @@ object ChatTurnMapper {
             finalText = finalText,
             status = message.status,
             error = message.error,
+            reportedReasoning = message.reportedReasoning,
             content = mixedContent(message),
         )
     }

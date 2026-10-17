@@ -26,10 +26,12 @@ import javax.net.ssl.HttpsURLConnection
 internal class AuxiliaryVisionModelAdapter(
     private val binding: AuxiliaryModelBinding,
     private val connect: (URL) -> HttpsURLConnection = { it.openConnection() as HttpsURLConnection },
+    private val beginUsage: (() -> app.daiyu.android.model.usage.AuxiliaryUsageAttempt)? = null,
 ) : (AuxiliaryVisionRequest) -> String, AutoCloseable {
     private val lifecycle = Any()
     private var closed = false
     private var active: ModelSession? = null
+    private var activeUsage: app.daiyu.android.model.usage.AuxiliaryUsageAttempt? = null
 
     init {
         require(binding.snapshot.imageInputSupported == true) { "Auxiliary binding cannot read images" }
@@ -79,7 +81,10 @@ internal class AuxiliaryVisionModelAdapter(
                 else -> error("Unsupported auxiliary vision protocol")
             }
             // Never use open(history): it would inherit the provider's enabled tools.
-            port.open(history, emptyList<ToolDefinition>(), request.images).also { active = it }
+            val usage = beginUsage?.invoke()
+            activeUsage = usage
+            try { port.open(history, emptyList<ToolDefinition>(), request.images).also { active = it } }
+            catch (failure: Throwable) { usage?.close(); activeUsage = null; throw failure }
         }
         try {
             val text = linkedMapOf<String, String>()
@@ -104,7 +109,8 @@ internal class AuxiliaryVisionModelAdapter(
                         check(terminalText == null) { "Duplicate auxiliary terminal output" }
                         terminalText = completedText(event.items)
                     }
-                    is ModelEvent.ReasoningDelta, is ModelEvent.ReasoningFinal, is ModelEvent.Usage -> Unit
+                    is ModelEvent.Usage -> synchronized(lifecycle) { checkCancelled(); activeUsage?.observe(event) }
+                    is ModelEvent.ReasoningDelta, is ModelEvent.ReasoningFinal -> Unit
                 }
             }
             // A TextFinal can itself be a partial stream snapshot (notably Responses). Only a
@@ -125,7 +131,13 @@ internal class AuxiliaryVisionModelAdapter(
         } finally {
             // Real session cleanup, including sink failures, partial output and cancellation.
             try { session.cancel() } finally {
-                synchronized(lifecycle) { if (active === session) active = null }
+                synchronized(lifecycle) {
+                    if (active === session) {
+                        active = null
+                        activeUsage?.close()
+                        activeUsage = null
+                    }
+                }
             }
         }
     }
@@ -184,8 +196,12 @@ internal class AuxiliaryVisionModelAdapter(
 
     /** Sticky for this parent run. Safe to call from a different thread while next blocks. */
     fun cancel() {
-        val session = synchronized(lifecycle) { closed = true; active }
-        session?.cancel()
+        val (session, usage) = synchronized(lifecycle) {
+            closed = true
+            (active to activeUsage).also { activeUsage = null }
+        }
+        // A failed durable close must never prevent disconnecting a blocked transport.
+        try { usage?.close() } finally { session?.cancel() }
     }
 
     override fun close() = cancel()

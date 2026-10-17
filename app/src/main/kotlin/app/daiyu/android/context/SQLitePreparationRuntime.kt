@@ -53,12 +53,12 @@ internal class SQLitePreparationRuntime(
                     }
                     db.rawQuery("SELECT 1 FROM runtime_preparations WHERE conversation_id=? AND state IN ('ADMITTED','READY') LIMIT 1",
                         arrayOf(conversation.value)).use { check(!it.moveToFirst()) { "summary_preparation_already_active" } }
-                    db.insertOrThrow(TABLE, null, ContentValues().apply {
+                    check(db.insertOrThrow(TABLE, null, ContentValues().apply {
                         put("message_id", message.value); put("conversation_id", conversation.value); put("run_id", run.value)
                         put("owner", owner); put("process_owner", processOwner); put("revision", 1L); put("state", "ADMITTED")
                         put("request_id", request.requestId); put("request_owner", owner); put("attempt_id", request.attemptId)
                         put("has_usage", 0)
-                    })
+                    }) != -1L) { "summary_preparation_admission_not_persisted" }
                 }
                 admitted = true; revision = 1L
             }
@@ -129,12 +129,17 @@ internal class SQLitePreparationRuntime(
         }
         update(db, row, ContentValues().apply {
             put("state", "HANDED"); put("owner", checkpoint.owner); put("revision", row.revision + 1)
-            put("has_usage", 0); putNull("input_tokens"); putNull("output_tokens"); putNull("cached_tokens")
+            // Keep the report-presence bit as coverage evidence after transferring the tokens.
+            // HANDED+has_usage=0 remains a missing SUMMARY request, even if MAIN reports later.
+            putNull("input_tokens"); putNull("output_tokens"); putNull("cached_tokens")
         })
     }
 
     /** Later main-run snapshots cannot drop, change, or impersonate sealed summary usage. */
     fun preserve(prior: RunCheckpoint, next: RunCheckpoint) {
+        check(prior.usageRequests.all { old -> next.usageRequests.any {
+            it.owner == old.owner && it.requestId == old.requestId
+        } }) { "main_request_coverage_dropped" }
         check(prior.usage.filter { it.source == UsageRequestSource.SUMMARY } ==
             next.usage.filter { it.source == UsageRequestSource.SUMMARY }) { "summary_usage_changed_after_handoff" }
     }
@@ -170,8 +175,15 @@ internal class SQLitePreparationRuntime(
             "SELECT conversation_id,run_id,message_id,owner,process_owner,revision,state,request_id,request_owner,attempt_id," +
                 "has_usage,input_tokens,output_tokens,cached_tokens FROM $TABLE WHERE message_id=?", arrayOf(id)).use { c ->
             if (!c.moveToFirst()) null else {
+                require((listOf(0, 1, 2, 3, 4, 6, 7, 8, 9)).all {
+                    c.getType(it) == android.database.Cursor.FIELD_TYPE_STRING &&
+                        c.getString(it).isNotBlank() && c.getString(it).length <= 200
+                })
+                require(c.getType(5) == android.database.Cursor.FIELD_TYPE_INTEGER &&
+                    c.getType(10) == android.database.Cursor.FIELD_TYPE_INTEGER)
                 require(c.getLong(5) >= 1 && c.getString(6) in setOf("ADMITTED", "READY", "TERMINAL", "HANDED"))
-                require(c.getInt(10) in 0..1)
+                val hasUsage = c.getLong(10)
+                require(hasUsage in 0L..1L)
                 fun token(i: Int): Long? {
                     if (c.isNull(i)) return null
                     require(c.getType(i) == android.database.Cursor.FIELD_TYPE_INTEGER)
@@ -179,15 +191,18 @@ internal class SQLitePreparationRuntime(
                 }
                 val request = RequestCheckpoint(c.getString(7), c.getString(9), c.getString(8), RequestOperation.NEXT)
                 Row(c.getString(0), c.getString(1), c.getString(2), c.getString(3), c.getString(4), c.getLong(5), c.getString(6),
-                    request, if (c.getInt(10) == 0) null else ModelEvent.Usage(token(11), token(12), token(13)))
+                    request, if (hasUsage == 0L) null else ModelEvent.Usage(token(11), token(12), token(13)))
             }
         }
 
-        /** Bounded read in the SAME reader transaction; HANDED rows are deliberately excluded.
+        /** Bounded read in the SAME reader transaction. Only HANDED with a valid report-presence
+         * bit is excluded; malformed presence must reach strict per-row validation below.
+         * HANDED without a report remains missing SUMMARY coverage, not a zero snapshot.
          * Counts are preparation coverage, not fictitious assistant messages. */
         fun readUsage(db: SQLiteDatabase, conversationId: ConversationId?, limit: Int): PreparationUsageRead {
             check(db.inTransaction())
-            val filter = "p.state!='HANDED'" + if (conversationId == null) "" else " AND p.conversation_id=?"
+            val filter = "NOT (p.state='HANDED' AND typeof(p.has_usage)='integer' AND p.has_usage=1)" +
+                if (conversationId == null) "" else " AND p.conversation_id=?"
             val args = conversationId?.let { arrayOf(it.value) } ?: emptyArray()
             val from = " FROM $TABLE p JOIN conversations c ON c.id=p.conversation_id WHERE $filter"
             val total = db.rawQuery("SELECT COUNT(*)$from", args).use { it.moveToFirst(); it.getInt(0) }
@@ -196,11 +211,22 @@ internal class SQLitePreparationRuntime(
             db.rawQuery("SELECT p.message_id$from ORDER BY p.rowid DESC LIMIT ?", args + limit.toString()).use { c ->
                 while (c.moveToNext()) {
                     inspected++
-                    val row = try { requireNotNull(read(db, c.getString(0))) }
-                    catch (failure: IllegalArgumentException) { unreadable++; continue }
-                    if (row.usage == null) { missing++; continue }
-                    result.add(AttributedRequestUsage(row.conversation, row.run, row.message, row.run, row.message,
-                        UsageOrigin.Main, row.request, row.usage, UsageRequestSource.SUMMARY))
+                    try {
+                        val row = requireNotNull(read(db, c.getString(0)))
+                        // Validate identity even when Usage is missing. Conversion belongs INSIDE
+                        // the per-row boundary too; a malformed parent must not abort all stats.
+                        require(listOf(row.conversation, row.run, row.message, row.owner, row.process)
+                            .all { it.isNotBlank() && it.length <= 200 })
+                        if (row.usage == null) missing++ else result.add(AttributedRequestUsage(
+                            row.conversation, row.run, row.message, row.run, row.message,
+                            UsageOrigin.Main, row.request, row.usage, UsageRequestSource.SUMMARY))
+                    } catch (failure: Exception) {
+                        // Storage/cancellation is not row corruption and must still propagate.
+                        if (failure is android.database.sqlite.SQLiteException ||
+                            failure is java.util.concurrent.CancellationException) throw failure
+                        if (failure !is IllegalArgumentException && failure !is IllegalStateException) throw failure
+                        unreadable++
+                    }
                 }
             }
             return PreparationUsageRead(result, total, inspected, missing, unreadable)

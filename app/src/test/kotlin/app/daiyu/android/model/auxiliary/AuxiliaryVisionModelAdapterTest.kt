@@ -149,6 +149,36 @@ class AuxiliaryVisionModelAdapterTest {
     private fun complete(protocol: ProviderProtocol, text: String = "visible evidence", tool: Boolean = false) =
         if (protocol == ProviderProtocol.RESPONSES) responseComplete(text, tool) else messagesComplete(text, tool)
 
+    @Test fun realProviderUsageIsForwardedWithinOneAdmittedAttemptAndMissingReportStaysMissing() {
+        for (reported in listOf(false, true)) {
+            val selected = binding(settings(ProviderProtocol.RESPONSES))
+            val message = json("message").put("id", "answer").put("role", "assistant")
+                .put("content", JSONArray().put(json("output_text").put("text", "visible evidence")))
+            val response = JSONObject().put("status", "completed").put("output", JSONArray().put(message))
+            if (reported) response.put("usage", JSONObject().put("input_tokens", 12).put("output_tokens", 4)
+                .put("input_tokens_details", JSONObject().put("cached_tokens", 2)))
+            val wire = FakeConnection(frame(json("response.completed").put("response", response)))
+            val observations = mutableListOf<ModelEvent.Usage>()
+            var admitted = 0; var closed = 0
+            val adapter = AuxiliaryVisionModelAdapter(selected, {
+                assertEquals(1, admitted) // durable host admission precedes actual transport access
+                wire
+            }, beginUsage = {
+                admitted++
+                object : app.daiyu.android.model.usage.AuxiliaryUsageAttempt {
+                    private var ended = false
+                    override fun observe(usage: ModelEvent.Usage) { check(!ended); observations.add(usage) }
+                    override fun close() { if (!ended) { ended = true; closed++ } }
+                }
+            })
+            assertEquals("visible evidence", adapter(request(selected)))
+            adapter.close()
+            assertEquals(1, admitted); assertEquals(1, closed)
+            if (reported) assertEquals(ModelEvent.Usage(12, 4, 2), observations.last())
+            else assertTrue(observations.isEmpty()) // not a synthetic Usage(0,0,0)
+        }
+    }
+
     @Test fun bridgeUsesBothRealProtocolsNativeInstructionsFrozenSelectionAndNoTools() {
         protocols.forEach { protocol ->
             var editableSettings = settings(protocol)

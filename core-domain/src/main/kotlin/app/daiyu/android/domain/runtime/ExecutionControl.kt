@@ -21,7 +21,7 @@ data class RequestCheckpoint(val requestId: String, val attemptId: String,
 
 /** Latest cumulative snapshot received for one host request, not a billing receipt.
  * Resume replaces this same request's entire snapshot, including unknown fields. */
-enum class UsageRequestSource { MAIN, SUMMARY }
+enum class UsageRequestSource { MAIN, SUMMARY, AUXILIARY_VISION, TITLE, MANUAL_SUMMARY }
 
 data class RequestUsageCheckpoint(val request: RequestCheckpoint, val snapshot: ModelEvent.Usage,
     val source: UsageRequestSource = UsageRequestSource.MAIN)
@@ -48,7 +48,9 @@ data class RunCheckpoint(
     val revision: Long = 0,
     val pending: PendingToolCheckpoint? = null,
     val request: RequestCheckpoint? = null,
-    val usage: List<RequestUsageCheckpoint> = emptyList()
+    val usage: List<RequestUsageCheckpoint> = emptyList(),
+    /** Actual admitted main requests, including ones that never reported Usage. Not snapshots. */
+    val usageRequests: List<RequestCheckpoint> = emptyList()
 )
 
 /** save must durably commit before returning if durable=true. Implement with a transaction/WAL. */

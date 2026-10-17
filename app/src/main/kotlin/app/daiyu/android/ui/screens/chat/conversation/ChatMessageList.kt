@@ -176,6 +176,7 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
 @Composable
 internal fun AssistantTurn(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, imageLoader: MessageImageLoader? = null) {
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        ReportedReasoningCard(turn.listKey, turn.reportedReasoning)
         if (turn.content.isNotEmpty()) {
             // Splitting these blocks into a work card and a final answer would reorder images.
             MessageContent(turn.content, actions, imageLoader, markdown = true)

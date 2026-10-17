@@ -18,7 +18,7 @@ internal object RunCheckpointCodec {
     fun encode(value: RunCheckpoint): String {
         validate(value)
         fun messages(rows: List<Message>) = JSONArray(String(ArchiveCodec.encode(rows), Charsets.UTF_8))
-        return JSONObject().put("version", 5).put("message", messages(listOf(value.message)))
+        return JSONObject().put("version", 6).put("message", messages(listOf(value.message)))
             .put("history", messages(value.history)).put("phase", value.phase.name)
             .put("tools", JSONArray().apply { value.tools.forEach { record -> put(JSONObject()
                 .put("id", record.invocation.id.value).put("name", record.invocation.name)
@@ -30,6 +30,7 @@ internal object RunCheckpointCodec {
             .put("request_unconfirmed", value.requestUnconfirmed).put("message_reconciled", value.messageReconciled)
             .put("owner", value.owner).put("revision", value.revision)
             .put("request", value.request?.let(::encodeRequest) ?: JSONObject.NULL)
+            .put("usage_requests", JSONArray().apply { value.usageRequests.forEach { put(encodeRequest(it)) } })
             .put("usage", JSONArray().apply { value.usage.forEach { record -> put(JSONObject()
                 .put("request", encodeRequest(record.request)).put("source", record.source.name)
                 .put("input_tokens", record.snapshot.inputTokens ?: JSONObject.NULL)
@@ -46,17 +47,22 @@ internal object RunCheckpointCodec {
         val value = parser.nextValue()
         require(value is JSONObject && parser.nextClean() == '\u0000')
         val version = integer(value, "version")
-        require(version in 1L..5L)
+        require(version in 1L..6L)
         val keys = arrayOf("version", "message", "history", "phase", "tools", "outputs", "supplements", "round",
             "request_unconfirmed", "message_reconciled", "owner", "revision")
         fields(value, *(when (version) { 1L -> keys; 2L -> keys + "pending"; 3L -> keys + arrayOf("pending", "request");
-            else -> keys + arrayOf("pending", "request", "usage") }))
+            4L, 5L -> keys + arrayOf("pending", "request", "usage")
+            else -> keys + arrayOf("pending", "request", "usage", "usage_requests") }))
         val pending = if (version == 1L || value.isNull("pending")) null else {
             val p = value.get("pending"); require(p is JSONObject)
             fields(p, "call_id")
             PendingToolCheckpoint(ToolCallId(string(p, "call_id")))
         }
         val request = if (version < 3L || value.isNull("request")) null else decodeRequest(value.get("request"))
+        val usageRequests = if (version < 6L) emptyList() else {
+            val rows = value.getJSONArray("usage_requests"); require(rows.length() <= 10_000)
+            (0 until rows.length()).map { decodeRequest(rows.get(it)) }
+        }
         val usage = if (version < 4L) emptyList() else {
             val rows = value.getJSONArray("usage"); require(rows.length() <= 10_000)
             (0 until rows.length()).map { i ->
@@ -83,7 +89,7 @@ internal object RunCheckpointCodec {
             (0 until outputs.length()).map { i -> val o = outputs.getJSONObject(i)
                 fields(o, "id", "output"); ToolOutput(ToolCallId(string(o, "id")), string(o, "output")) },
             messages("supplements"), round.toInt(), boolean(value, "request_unconfirmed"), boolean(value, "message_reconciled"),
-            string(value, "owner"), integer(value, "revision"), pending, request, usage).also(::validate)
+            string(value, "owner"), integer(value, "revision"), pending, request, usage, usageRequests).also(::validate)
     }
     private fun validate(value: RunCheckpoint) {
         require(value.owner.isNotBlank() && value.owner.length <= 200 && value.revision in 1 until Long.MAX_VALUE)
@@ -91,6 +97,12 @@ internal object RunCheckpointCodec {
         val m = value.message
         require(m.role == Message.ASSISTANT_ROLE)
         value.request?.let { require(value.phase == ExecutionPhase.TERMINAL || it.owner == value.owner) }
+        require(value.usageRequests.size <= 10_000)
+        require(value.usageRequests.map { it.owner to it.requestId }.distinct().size == value.usageRequests.size)
+        value.usageRequests.forEach {
+            require(it.operation != RequestOperation.OPEN)
+            require(value.phase == ExecutionPhase.TERMINAL || it.owner == value.owner)
+        }
         require(value.usage.size <= 10_000)
         require(value.usage.map { it.request.owner to it.request.requestId }.distinct().size == value.usage.size)
         value.usage.forEach {

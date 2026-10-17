@@ -54,6 +54,27 @@ class AttributedUsageTest {
         rejected { row(origin = UsageOrigin.Child("child", "profile", "group")).copy(runId = "not-child") }
         rejected { row().copy(conversationId = "") }
     }
+    @Test fun conversationPreparationHasNoRunOrMessageAndIsNotMainOrChild() {
+        val origin = UsageOrigin.ConversationPreparation("conversation", "operation")
+        val manual = AttributedRequestUsage("conversation", null, null, null, null, origin,
+            RequestCheckpoint("manual-request", "attempt", "operation-owner", RequestOperation.NEXT),
+            ModelEvent.Usage(null, 0, 0), UsageRequestSource.MANUAL_SUMMARY)
+        val summary = aggregateAttributedUsage(listOf(row(), manual))
+        assertEquals(1L, summary.main.requestSnapshotCount)
+        assertEquals(0L, summary.child.requestSnapshotCount)
+        assertEquals(1L, summary.conversationPreparation.requestSnapshotCount)
+        assertNull(summary.conversationPreparation.input.reportedTokens)
+        assertEquals(0L, summary.conversationPreparation.output.reportedTokens)
+        assertEquals(2L, summary.combined.requestSnapshotCount)
+        rejected { manual.copy(runId = "history-run") }
+        rejected { manual.copy(parentMessageId = "last-assistant") }
+        rejected { manual.copy(source = UsageRequestSource.MAIN) }
+        rejected { manual.copy(conversationId = "foreign") }
+        rejected { row().copy(source = UsageRequestSource.MANUAL_SUMMARY) }
+        rejected { aggregateAttributedUsage(listOf(manual, manual.copy(snapshot = ModelEvent.Usage(1, 1)))) }
+        assertEquals(2L, aggregateAttributedUsage(listOf(manual,
+            manual.copy(origin = origin.copy(operationId = "another-operation")))).combined.requestSnapshotCount)
+    }
     @Test fun overflowIsNotWrapped() {
         try {
             aggregateAttributedUsage(listOf(row(value = ModelEvent.Usage(Long.MAX_VALUE, null)),

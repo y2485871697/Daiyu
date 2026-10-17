@@ -1,5 +1,7 @@
 # P21 / P10：权威用量统计的生产消费接线
 
+> 后续v17/Controller/视觉/typed标题及未知coverage修补见 [P21-v17-production-gaps.md](P21-v17-production-gaps.md)。本文“尚未接入”与旧record_source为历史状态；手动压缩仍是明确未覆盖项。
+
 ## 范围与证据
 
 任务给定基线为 `af18af3`；本实现代理没有 Git/Shell 权限，未独立核对 HEAD，不能生成提交哈希。实际改动已写入工作树，非仅提案；由主代理审核、定向验证并创建非空提交。

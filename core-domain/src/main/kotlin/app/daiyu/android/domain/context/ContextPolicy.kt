@@ -37,6 +37,10 @@ object ContextRevision {
                 m.historySegments.forEach { segment ->
                     field(segment.messageId.value); field(segment.role); blocks(segment.blocks)
                     field(segment.protocolItems.size.toString()); segment.protocolItems.forEach(::field)
+                    if (segment.reportedReasoning.isNotEmpty()) {
+                        field("reported_reasoning-v1"); field(segment.reportedReasoning.size.toString())
+                        segment.reportedReasoning.forEach { field(it.itemId); field(it.text) }
+                    }
                 }
             }
         }

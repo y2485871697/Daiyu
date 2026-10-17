@@ -14,7 +14,7 @@ import java.util.concurrent.CancellationException
 import javax.net.ssl.HttpsURLConnection
 
 /**
- * Opt-in, one-parent-run ModelPort decorator. Not wired into ChatController yet.
+ * Opt-in, one-parent-run ModelPort decorator. ChatController supplies the real usage admission factory.
  *
  * [authorizeHistory] receives a detached, UNEXPANDED snapshot on EVERY open, even a cache hit or
  * text-only request. The host must batch-check these original persisted owners/segments against
@@ -165,9 +165,10 @@ internal class ControllerAuxiliaryVision private constructor(
             authorizeHistory: (List<Message>) -> List<AuthorizedVisionObservation>,
             connect: (URL) -> HttpsURLConnection = { it.openConnection() as HttpsURLConnection },
             encoder: ImageInputEncoder = ImageInputEncoder(),
+            beginUsage: (() -> app.daiyu.android.model.usage.AuxiliaryUsageAttempt)? = null,
         ): ControllerAuxiliaryVision {
             val binding = selection.copy().resolve(frozenCandidates.toList())
-            val adapter = AuxiliaryVisionModelAdapter(binding, connect)
+            val adapter = AuxiliaryVisionModelAdapter(binding, connect, beginUsage)
             return ControllerAuxiliaryVision(main, AuxiliaryVisionBridge(binding, resolver, adapter, encoder),
                 adapter, authorizeHistory)
         }

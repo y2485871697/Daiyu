@@ -139,6 +139,10 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     /** Registry authorization and payload reads share one SQLite snapshot; no table writes. */
     internal fun <T> readQuery(query: () -> T): T = transactions.run { query() }
 
+    /** Uses the same helper/transaction source as archive publication and typed usage queries. */
+    internal fun manualSummaryUsage(lease: ContextManagementLease): ManualSummaryUsageOperation =
+        ManualSummaryUsageOperation(transactions, lease)
+
     /** Archive IDs are not capabilities. Resolve the persisted, still-existing conversation owner. */
     fun archiveOwner(archiveId: String): ConversationId? = transactions.run { db ->
         db.rawQuery("SELECT a.conversation_id FROM context_archives a JOIN conversations c ON c.id=a.conversation_id WHERE a.id=?",
@@ -325,9 +329,12 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         db.rawQuery("SELECT id FROM conversations WHERE id=?", arrayOf(id.value)).use { require(it.moveToFirst()) { "会话不存在" } }
     }
     fun recordUsage(record: UsageRecord) = transactions.run { db ->
-        val recorded = db.rawQuery("SELECT branch_id FROM context_usage WHERE request_id=?", arrayOf(record.requestId)).use { c ->
+        val recorded = db.rawQuery("SELECT branch_id,usage_source FROM context_usage WHERE request_id=?", arrayOf(record.requestId)).use { c ->
             val exists = c.moveToFirst()
-            if (exists) require(c.getString(0) == record.branchId) { "用量回执所属任务冲突" }
+            if (exists) {
+                require(c.getString(0) == record.branchId) { "用量回执所属任务冲突" }
+                require(c.getString(1) != "MANUAL_SUMMARY") { "manual_summary_requires_typed_operation" }
+            }
             exists
         }
         require(readUsage(db, record.branchId).none { it.requestId == record.requestId && it != record }) { "用量回执冲突" }
@@ -346,7 +353,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     fun usage(branchId: String, runId: String? = null): ContextUsageSnapshot = transactions.run { db ->
         RecordedContextUsageAdapter.read(db, branchId, runId)
     }
-    private fun readUsage(db: SQLiteDatabase, branch: String): List<UsageRecord> = db.rawQuery("SELECT request_id,run_id,branch_id,input_tokens,output_tokens,cached_tokens,reasoning_tokens FROM context_usage WHERE branch_id=?", arrayOf(branch)).use { c ->
+    private fun readUsage(db: SQLiteDatabase, branch: String): List<UsageRecord> = db.rawQuery("SELECT request_id,run_id,branch_id,input_tokens,output_tokens,cached_tokens,reasoning_tokens FROM context_usage WHERE branch_id=? AND usage_source!='MANUAL_SUMMARY'", arrayOf(branch)).use { c ->
         buildList { while (c.moveToNext()) { fun n(i: Int): Long? = if (c.isNull(i)) null else c.getLong(i)
             add(UsageRecord(c.getString(0), c.getString(1), c.getString(2), n(3), n(4), n(5), n(6))) } }
     }

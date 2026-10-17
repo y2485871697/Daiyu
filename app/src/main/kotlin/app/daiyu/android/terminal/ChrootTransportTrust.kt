@@ -6,30 +6,41 @@ import java.io.File
 
 /** Fixed system transports: inspect ownership/mode rather than su-specific access() hooks. */
 internal object ChrootTransportTrust {
-    internal data class Entry(val uid: Int, val mode: Int, val link: String? = null)
+    internal data class Entry(val uid: Int, val mode: Int, val link: String? = null,
+        val dev: Long = 0, val ino: Long = 0)
 
-    fun requireTrusted(file: File) {
+    fun requireTrusted(file: File) { identity(file) }
+
+    internal fun identity(file: File): String {
         require(android.os.Process.myUid() >= 10000)
-        requireTrusted(file) { path ->
+        return requireTrusted(file) { path ->
             val stat = Os.lstat(path.path)
             Entry(stat.st_uid, stat.st_mode,
-                if (OsConstants.S_ISLNK(stat.st_mode)) Os.readlink(path.path) else null)
+                if (OsConstants.S_ISLNK(stat.st_mode)) Os.readlink(path.path) else null,
+                stat.st_dev, stat.st_ino)
         }
     }
 
-    internal fun requireTrusted(file: File, read: (File) -> Entry) {
+    internal fun requireTrusted(file: File, read: (File) -> Entry): String {
         require(file.isAbsolute && file.toPath() == file.toPath().normalize())
+        val snapshot = StringBuilder()
+        fun readAndRecord(path: File): Entry = read(path).also { entry ->
+            for (part in listOf(path.path, entry.uid.toString(), entry.mode.toString(),
+                entry.dev.toString(), entry.ino.toString(), entry.link?.let { "1$it" } ?: "0")) {
+                snapshot.append(part.length).append(':').append(part)
+            }
+        }
         var links = 0
         fun inspect(input: File) {
             val path = input.toPath().normalize()
             require(path.isAbsolute)
             var current = path.root
-            val root = read(current.toFile())
+            val root = readAndRecord(current.toFile())
             require(root.uid == 0 && root.mode and 0xf000 == 0x4000 && root.mode and 0x12 == 0)
             val parts = path.map { it.toString() }
             for ((index, part) in parts.withIndex()) {
                 current = current.resolve(part)
-                val entry = read(current.toFile())
+                val entry = readAndRecord(current.toFile())
                 require(entry.uid == 0)
                 if (entry.mode and 0xf000 == 0xa000) {
                     require(++links <= 40)
@@ -47,5 +58,6 @@ internal object ChrootTransportTrust {
             require(parts.isNotEmpty())
         }
         inspect(file)
+        return snapshot.toString()
     }
 }

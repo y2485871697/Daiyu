@@ -90,6 +90,31 @@ class PlatformCatalogTest {
         }
     }
 
+    @Test fun cachedLocationRequiresItsOwnFrozenCapabilityAndCancelledOrUnauthorizedCallsNeverReachBackend() {
+        val location = PlatformReadTool.LAST_KNOWN_LOCATION
+        Fixture(enabled = setOf(PlatformReadTool.NETWORK)).use { f ->
+            assertFalse(f.catalog.available(f.capabilities).any { it.name == location.toolName })
+            assertEquals(DispatchOutcome.NotExecuted("capability_disabled"), f.dispatch(f.call(location)))
+            assertEquals(0, f.reads.get())
+        }
+        Fixture(enabled = setOf(location)).use { f ->
+            assertEquals(listOf(location.toolName), f.catalog.available(f.capabilities).map { it.name })
+            val call = f.call(location)
+            assertEquals(DispatchOutcome.NotExecuted("tool_run_authorization_mismatch"),
+                f.dispatch(call, TaskAuthorization("run", "run")))
+            assertEquals(DispatchOutcome.NotExecuted("tool_run_owner_mismatch"),
+                f.dispatcher.dispatchOwned(f.authorization, listOf(call), runnerOwner(f.message)).single().outcome)
+            assertTrue(f.dispatch(call, cancelled = { true }) is DispatchOutcome.NotExecuted)
+            assertEquals(0, f.reads.get())
+            assertTrue(f.dispatch(call) is DispatchOutcome.Confirmed)
+            assertTrue((f.dispatch(call) as DispatchOutcome.Confirmed).replayed)
+            assertEquals(1, f.reads.get())
+            f.resources.close()
+            assertEquals(DispatchOutcome.NotExecuted("run_closed"), f.dispatch(call))
+            assertEquals(1, f.reads.get())
+        }
+    }
+
     @Test fun schemasRejectUnknownFieldsAndBoundAllCollectionsAtFifty() {
         for (tool in PlatformReadTool.entries) {
             assertTrue(tool.schema.jsonSchema().contains("\"additionalProperties\":false"))

@@ -23,7 +23,8 @@ enum class PlatformReadTool(val toolName: String, val capability: String, val de
         ArgumentField("end_ms", ArgumentType.Integer(1, 4102444800000L)), limitField()))),
     CONTACTS("search_contacts", "platform.contacts.read", "Search contact display names only (no numbers, photos or notes).", ToolSchema(listOf(
         ArgumentField("query", ArgumentType.Text(128, minimumLength = 1)), limitField()))),
-    NOTIFICATIONS("app_notifications", "platform.notifications.read", "Read bounded active notifications posted by this app only, not other apps' notifications.", ToolSchema(listOf(limitField())));
+    NOTIFICATIONS("app_notifications", "platform.notifications.read", "Read bounded active notifications posted by this app only, not other apps' notifications.", ToolSchema(listOf(limitField()))),
+    LAST_KNOWN_LOCATION("last_known_location", "platform.location.last_known.read", "Read the newest accessible existing LocationManager cache from a fixed set of at most three providers. Returns sample time, age and provider; never requests updates, wakes GPS or obtains a fresh fix. Requires foreground coarse OR fine permission and separate model AND history consent.", ToolSchema());
 
     fun definition() = ToolDefinition(toolName, 1, description, capability, ToolEffect.READ_ONLY, schema)
 }

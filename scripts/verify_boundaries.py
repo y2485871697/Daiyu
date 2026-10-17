@@ -22,6 +22,7 @@ ANDROID = "{http://schemas.android.com/apk/res/android}"
 expected_permissions = {
     "INTERNET": None, "VIBRATE": None, "RECORD_AUDIO": None,
     "ACCESS_NETWORK_STATE": None, "ACCESS_WIFI_STATE": None,
+    "ACCESS_COARSE_LOCATION": None, "ACCESS_FINE_LOCATION": None,
     "BLUETOOTH": "30", "BLUETOOTH_CONNECT": None,
     "READ_CONTACTS": None, "READ_CALENDAR": None, "READ_EXTERNAL_STORAGE": "32",
     "READ_MEDIA_IMAGES": None, "READ_MEDIA_VIDEO": None, "READ_MEDIA_AUDIO": None,

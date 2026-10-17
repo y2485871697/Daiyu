@@ -49,7 +49,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         openHub()
         val implemented = setOf("assistants", "subagents", "appearance", "haptics", "relay", "platform_tools", "permission_check")
         val unwired = entries.filter { it.route == null && it.id !in implemented }
-        assertEquals(17, unwired.size)
+        assertEquals(16, unwired.size)
         fun assertUnchanged() {
             assertEquals(before, fixture.database.exportBackup()); assertEquals(settings, fixture.settings.loadForEditing().settings)
             assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())

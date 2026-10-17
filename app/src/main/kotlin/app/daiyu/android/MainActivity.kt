@@ -126,6 +126,8 @@ class MainActivity : ComponentActivity() {
     private var linuxSettingsVisit: Any? = null
     private var linuxSettingsPageOwner by mutableStateOf<app.daiyu.android.terminal.LinuxSettingsPageOwner?>(null)
     private var terminalPageOwner: Any? = null
+    private val mcpSettings by lazy { app.daiyu.android.mcp.McpSettingsStore(applicationContext) }
+    private var mcpSettingsPageOwner: app.daiyu.android.mcp.McpSettingsOwner? = null
     private val browserSettings by lazy { app.daiyu.android.browser.BrowserSettingsStore(applicationContext) }
     private var titleSettingsPageOwner: app.daiyu.android.title.TitleModelSettingsEditor? = null
     private var compressionSettingsPageOwner: app.daiyu.android.context.CompressionSettingsEditor? = null
@@ -325,7 +327,7 @@ class MainActivity : ComponentActivity() {
             expected != ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) ||
             imageHost.hasAttachments || imageHost.sending || videoSending || videoHost.state.items.isNotEmpty() ||
             shizukuWritesBlocked || terminalEditor != null || (virtualDisplayEditor != null || virtualDisplayPlanVisit != null) ||
-            browserApproval != null || browserPreparing || generationApproval != null ||
+            mcpApproval != null || mcpPreparing || browserApproval != null || browserPreparing || generationApproval != null ||
             (pending != null && !universalTickets.containsKey(pending.ticket)) ||
             (controllerTicket != null && !universalTickets.containsKey(controllerTicket))
         universalAdmissionSnapshot = when {
@@ -527,7 +529,7 @@ class MainActivity : ComponentActivity() {
         if (controller.ownsVideoUi(videoUi)) videoHost.detach()
     }
     private fun videoComposerAvailable() = terminalEditor == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null &&
-        shizukuEditor == null && browserApproval == null && generationApproval == null &&
+        shizukuEditor == null && mcpApproval == null && !mcpPreparing && browserApproval == null && generationApproval == null &&
         pendingTextSend == null && controller.textSendState() == null &&
         !imageHost.hasAttachments && !imageHost.busy && !shizukuWritesBlocked
     @Composable private fun VideoComposerPanel() {
@@ -612,7 +614,7 @@ class MainActivity : ComponentActivity() {
         set(value) {
             // Opening revokes even without a visit; closing cannot revive clicks rendered behind it.
             if (value != sidebarVisibleState) revokeContextManagementEntry()
-            if (value && !sidebarVisibleState) { revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor() }
+            if (value && !sidebarVisibleState) { revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
             sidebarVisibleState = value
         }
     private class ContextManagementVisit(val owner: ContextManagementOwner,
@@ -669,6 +671,9 @@ class MainActivity : ComponentActivity() {
                 linuxSettingsVisit = null
                 linuxSettingsPageOwner?.close()
                 linuxSettingsPageOwner = null
+            }
+            if (value != "mcp-settings") {
+                mcpSettingsPageOwner?.revoke(); mcpSettingsPageOwner = null
             }
             if (value != "browser-settings") {
                 browserSettingsPageOwner?.revoke()
@@ -774,6 +779,12 @@ class MainActivity : ComponentActivity() {
     private var guiEditor by mutableStateOf<ControllerGuiEntry?>(null)
     private var virtualDisplayEditor by mutableStateOf<ControllerVirtualDisplayEntry?>(null)
     private var virtualDisplayRequest by mutableStateOf<app.daiyu.android.vdapproval.VirtualDisplayApprovalRequest?>(null)
+    private var mcpApproval by mutableStateOf<ControllerMcpPreparation?>(null)
+    private var mcpPreparing by mutableStateOf(false)
+    private var mcpRequest: Any? = null
+    // One-way visit identity: returning to chat/resuming never restores an old input or preview.
+    private var mcpVisit: Any? = null
+    private var mcpInput: InputPrompt? = null
     private var browserApproval by mutableStateOf<ControllerBrowserPreparation?>(null)
     private var browserPreparing by mutableStateOf(false)
     private var browserRequest: Any? = null
@@ -1026,7 +1037,7 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
+                        "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
                         "pet-model-settings" -> retainedPage = "pet-settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
@@ -1206,6 +1217,11 @@ class MainActivity : ComponentActivity() {
                             }, ownerCurrent = {
                                 activityUsable() && reconnectSettingsPageOwner === page && retainedPage == "reconnect-settings"
                             }, saveOwner = page)
+                    } }
+                    "mcp-settings" -> mcpSettingsPageOwner?.let { page -> key(page) {
+                        app.daiyu.android.ui.screens.settings.McpSettingsScreen(mcpSettings, page,
+                            ownerCurrent = { activityUsable() && mcpSettingsPageOwner === page && retainedPage == "mcp-settings" },
+                            onBack = { if (mcpSettingsPageOwner === page) retainedPage = "settings" })
                     } }
                     "browser-settings" -> browserSettingsPageOwner?.let { page -> key(page) {
                         BrowserSettingsScreen(browserSettings,
@@ -1638,7 +1654,7 @@ class MainActivity : ComponentActivity() {
                 selectionStart = start; selectionEnd = end; publishChat()
             }
         },
-        onSend = { text -> if (editorMatches() && terminalEditor == null && text == draft && pendingTextSend == null && !shizukuWritesBlocked) guard {
+        onSend = { text -> if (editorMatches() && terminalEditor == null && !mcpPreparing && mcpApproval == null && text == draft && pendingTextSend == null && !shizukuWritesBlocked) guard {
             invalidateConfiguredVoice()
             dictationHost.invalidate()
             offlineHost.invalidate()
@@ -1862,6 +1878,17 @@ class MainActivity : ComponentActivity() {
                 top.yukonga.miuix.kmp.basic.TextButton(text = "Shizuku 权限设置",
                     modifier = Modifier.weight(1f).testTag("shizuku-settings-entry").heightIn(min = 48.dp),
                     onClick = { if (activityUsable()) retainedPage = "shizuku-settings" })
+            }
+            top.yukonga.miuix.kmp.basic.TextButton(
+                text = if (mcpPreparing) "正在冻结 MCP 本轮范围" else "MCP 本轮精确调用审批",
+                enabled = available && !mcpPreparing && mcpApproval == null && pendingTextSend == null,
+                modifier = Modifier.testTag("mcp-approval-entry").heightIn(min = 48.dp),
+                onClick = ::openMcpApproval)
+            mcpApproval?.let { pending ->
+                val visit = mcpVisit
+                app.daiyu.android.ui.McpApprovalHost(pending,
+                    onCancel = { if (mcpVisit === visit && mcpApproval === pending) cancelMcpEditor() },
+                    onApprove = { approveMcp(pending, visit) })
             }
             top.yukonga.miuix.kmp.basic.TextButton(
                 text = if (browserPreparing) "正在准备浏览器审批" else "浏览器操作审批",
@@ -2705,7 +2732,89 @@ class MainActivity : ComponentActivity() {
         else virtualDisplayRequest = null
     }
 
+    private fun mcpVisitCurrent(visit: Any?): Boolean = visit != null && mcpVisit === visit &&
+        activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible
+
+    private fun cancelMcpEditor() {
+        // Revoke BEFORE hiding UI/rejecting preparation; no callback may resurrect this visit.
+        mcpVisit = null
+        if (prompt === mcpInput) prompt = null
+        mcpInput = null
+        mcpRequest = null; mcpPreparing = false
+        val pending = mcpApproval
+        mcpApproval = null
+        pending?.let(controller::rejectMcp)
+    }
+
+    private fun approveMcp(pending: ControllerMcpPreparation, visit: Any?) {
+        // Both identities come from the rendered preview, never from whichever visit is current later.
+        if (!mcpVisitCurrent(visit) || mcpApproval !== pending) return
+        val owner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+        if (!imageHost.hasAttachments && videoHost.state.items.isEmpty() && !videoSending && pendingTextSend == null &&
+            pending.confirm(pending, owner, draft)) {
+            val submitted = PendingTextSend(owner, draft)
+            pendingTextSend = submitted
+            if (!controller.sendMcp(pending, owner, draft, submitted.ticket) { result ->
+                if (mcpApproval === pending && mcpVisit === visit) { mcpApproval = null; mcpVisit = null }
+                completeTextSend(submitted, result)
+            }) {
+                pendingTextSend = null; cancelMcpEditor()
+                toast("MCP 发送未受理；草稿保留")
+            } else if (mcpApproval === pending && mcpVisit === visit) { mcpApproval = null; mcpVisit = null }
+        } else { cancelMcpEditor(); toast("MCP 批准或草稿已过期；未发送") }
+    }
+
+    private fun openMcpApproval() {
+        if (videoHost.state.items.isNotEmpty() || videoSending || imageHost.hasAttachments ||
+            !activityUsable() || !voiceForeground || pendingTextSend != null || draft.isBlank() || retainedPage != "chat" || sidebarVisible) return
+        // Cancel competing editors BEFORE issuing the token; submission must not revoke/reissue it.
+        cancelShizukuEditor(); cancelBrowserEditor()
+        val visit = Any(); mcpVisit = visit
+        val owner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+        val original = draft
+        val conversation = selected
+        val input = InputPrompt("本轮 MCP 服务器、工具与完整参数", "{\"server\":\"my_server\",\"tool\":\"tool_name\",\"arguments\":{}}",
+            "先在 MCP 设置保存服务器。填写一个完整 JSON 对象；每轮只批准这个服务器/工具/参数，未知工具默认有副作用。此步骤不连接服务器。",
+            "冻结并审阅", { raw ->
+                if (!mcpVisitCurrent(visit) || mcpInput == null ||
+                    owner != ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) ||
+                    draft != original || imageHost.hasAttachments || videoHost.state.items.isNotEmpty() || videoSending || pendingTextSend != null) return@InputPrompt
+                mcpInput = null // Input is single-use even if its original action is retained.
+                val intent = try {
+                    app.daiyu.android.mcp.McpJson.objectValue(raw).also {
+                        require(it.keys().asSequence().toSet() == setOf("server", "tool", "arguments"))
+                        require(it.get("server") is String && it.get("tool") is String && it.get("arguments") is org.json.JSONObject)
+                    }
+                } catch (_: Exception) { cancelMcpEditor(); toast("MCP JSON 无效；未发送"); return@InputPrompt }
+                if (conversation == null) controller.database.draft(original) else controller.database.draft(conversation.id, original)
+                val request = Any(); mcpRequest = request; mcpPreparing = true
+                lifecycleScope.launch {
+                    var prepared: ControllerMcpPreparation? = null
+                    var retained = false
+                    try {
+                        withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
+                            prepared = controller.prepareMcpSend(conversation, owner, original,
+                                intent.getString("server"), intent.getString("tool"), intent.getJSONObject("arguments").toString())
+                        }
+                        if (mcpVisitCurrent(visit) && mcpRequest === request &&
+                            owner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) && draft == original) {
+                            mcpApproval = prepared; retained = prepared != null
+                            if (prepared == null) toast(controller.problem ?: "MCP 准备失败；草稿保留")
+                        }
+                    } finally {
+                        if (!retained) prepared?.let(controller::rejectMcp)
+                        if (mcpRequest === request) {
+                            mcpRequest = null; mcpPreparing = false
+                            if (!retained && mcpVisit === visit) mcpVisit = null
+                        }
+                    }
+                }
+            })
+        mcpInput = input; prompt = input
+    }
+
     private fun cancelBrowserEditor(preserveGenerationSelection: Boolean = false) {
+        cancelMcpEditor()
         cancelTerminalEditor()
         cancelVirtualDisplayEditor()
         if (!preserveGenerationSelection) cancelGenerationEditor()
@@ -2945,7 +3054,8 @@ class MainActivity : ComponentActivity() {
         fun valid() = activityUsable() && prompt === current
         when (current) {
             is InputPrompt -> DaiyuTextInputDialog(current.title, current.initial, current.hint, current.confirm,
-                onConfirm = { value -> if (valid()) { prompt = null; current.action(value) } }, onDismiss = { if (valid()) prompt = null })
+                onConfirm = { value -> if (valid()) { prompt = null; current.action(value) } },
+                onDismiss = { if (valid()) { if (current === mcpInput) cancelMcpEditor() else prompt = null } })
             is ChoicePrompt -> DaiyuChoiceSheet(current.title, current.options,
                 onSelect = { index -> if (valid()) { prompt = null; current.action(index) } }, onDismiss = { if (valid()) prompt = null })
             is ConfirmPrompt -> DaiyuConfirmDialog(current.title, current.message, current.confirm, current.destructive,
@@ -3122,6 +3232,8 @@ class MainActivity : ComponentActivity() {
         titleSettingsPageOwner = null
         compressionSettingsPageOwner?.revoke()
         compressionSettingsPageOwner = null
+        mcpSettingsPageOwner?.revoke()
+        mcpSettingsPageOwner = null
         browserSettingsPageOwner?.revoke()
         browserSettingsPageOwner = null
         hapticsHost?.close(); hapticsHost = null
@@ -3238,6 +3350,12 @@ class MainActivity : ComponentActivity() {
             FeatureRoute.SKILLS -> openSkillManagement()
             FeatureRoute.TERMINAL -> openTerminal()
             FeatureRoute.LINUX_SETTINGS -> openLinuxSettings()
+            FeatureRoute.MCP_SETTINGS -> {
+                requireActivityUsable()
+                mcpSettingsPageOwner?.revoke()
+                mcpSettingsPageOwner = app.daiyu.android.mcp.McpSettingsOwner()
+                retainedPage = "mcp-settings"
+            }
             FeatureRoute.BROWSER_SETTINGS -> openBrowserSettings()
             FeatureRoute.RECONNECT_SETTINGS -> openReconnectSettings()
             FeatureRoute.GUI_SETTINGS -> { requireActivityUsable(); retainedPage = "gui-settings" }
@@ -3723,7 +3841,7 @@ class MainActivity : ComponentActivity() {
                 imageSendBlocked = imageHost.busy || imageHost.hasAttachments && !imageHost.session.attachments.state.value.canSubmit,
                 modelLabel = if (controller.dataBusy) chatState.composer.modelLabel else savedModelLabel(),
                 reasoningLabel = try { reasoningPreference.snapshot(selected?.id?.value).displayName } catch (_: Exception) { "配置无效，需重存" },
-                assistantLabel = if (controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && !shizukuWritesBlocked,
+                assistantLabel = if (controller.dataBusy) chatState.composer.assistantLabel else currentAssistantLabel(), enabled = allowed && controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && !shizukuWritesBlocked && !mcpPreparing && mcpApproval == null,
                 supplementAvailable = state?.phase == ExecutionPhase.PAUSED && supplementDraft.pending == null,
                 supplementPending = supplementDraft.pending?.editor?.conversationId == selected?.id?.value &&
                     supplementDraft.pending != null,

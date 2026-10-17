@@ -97,20 +97,20 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         }
     }
 
-    fun testSearchUsesOriginalButtonsAndUnwiredTapIsANoOp() {
+    fun testSearchUsesOriginalButtonsAndMcpHasARealIndependentRoute() {
         val events = mutableListOf<String>()
         showHome(events)
         node("settings-search").performTextReplacement("MCP")
         val mcp = reveal("settings-row:MCP 服务器", "设置").assertIsEnabled().assertHasClickAction()
         mcp.performClick()
-        ui.runOnIdle { assertTrue(events.isEmpty()) }
+        ui.runOnIdle { assertEquals(listOf("MCP_SETTINGS"), events) }
         ui.onNodeWithText("待接入").assertDoesNotExist()
         node("settings-search-clear").performClick()
         node("settings-search").performTextReplacement("发送消息")
         ui.onNodeWithText("没有匹配的设置").assertExists()
         node("settings-search").performTextReplacement("Skills")
         reveal("settings-row:Skills", "设置").performClick()
-        ui.runOnIdle { assertEquals(listOf("SKILLS"), events) }
+        ui.runOnIdle { assertEquals(listOf("MCP_SETTINGS", "SKILLS"), events) }
     }
 
     fun testCategoryBackReturnsHomeAndKeepsOriginalReasoningEntry() {

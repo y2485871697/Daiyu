@@ -167,7 +167,7 @@ internal class TerminalJobHistoryReader(
      */
     private fun openDescriptor(path: String, directory: Boolean): ParcelFileDescriptor {
         val flags = OsConstants.O_RDONLY or LINUX_O_CLOEXEC or OsConstants.O_NOFOLLOW or
-            OsConstants.O_NONBLOCK or (if (directory) OsConstants.O_DIRECTORY else 0)
+            OsConstants.O_NONBLOCK
         val raw = Os.open(path, flags, 0)
         var adopted: ParcelFileDescriptor? = null
         try {

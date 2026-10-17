@@ -15,8 +15,12 @@ data class MessageHistorySegment(
     val messageId: MessageId,
     val role: String,
     val blocks: List<MessageBlock>,
-    val protocolItems: List<String> = emptyList()
-)
+    val protocolItems: List<String> = emptyList(),
+    /** Epoch milliseconds recorded when this message was accepted; null means unknown. */
+    val createdAt: Long? = null
+) {
+    init { require(createdAt == null || createdAt >= 0) }
+}
 
 data class Message(
     val id: MessageId,
@@ -27,8 +31,16 @@ data class Message(
     val status: RunStatus,
     val error: String? = null,
     val protocolItems: List<String> = emptyList(),
-    val historySegments: List<MessageHistorySegment> = emptyList()
+    val historySegments: List<MessageHistorySegment> = emptyList(),
+    /**
+     * Stable accepted-message time in epoch milliseconds, not last update/completion time.
+     * Callers creating a new accepted message record the clock once. Decoders and historical
+     * messages must use null when the original time is unknown; never invent a read-time value.
+     */
+    val createdAt: Long? = null
 ) {
+    init { require(createdAt == null || createdAt >= 0) }
+
     companion object {
         const val ASSISTANT_ROLE = "assistant"
         const val USER_ROLE = "user"
@@ -47,6 +59,7 @@ object MessageHistory {
         history.forEach(MessageImages::validate)
         if (history.none { it.historySegments.isNotEmpty() }) return history
         val supplements = validatedSupplements(history)
+        val originalRows = history.associateBy { it.key() }
 
         return history.flatMap { row ->
             if (row.historySegments.isNotEmpty()) {
@@ -57,6 +70,9 @@ object MessageHistory {
                         blocks = segment.blocks,
                         protocolItems = segment.protocolItems,
                         historySegments = emptyList(),
+                        // A supplement must never inherit its assistant owner's time.
+                        createdAt = segment.createdAt ?: originalRows[
+                            Key(row.conversationId, row.runId, segment.messageId)]?.createdAt,
                         status = if (segment.role == Message.USER_ROLE) RunStatus.COMPLETED else row.status,
                         error = if (segment.role == Message.USER_ROLE) null else row.error
                     )
@@ -82,8 +98,12 @@ object MessageHistory {
         val users = mutableSetOf<MessageId>()
         owner.historySegments.forEach { segment ->
             validateSegment(segment)
-            if (segment.role == Message.ASSISTANT_ROLE) require(segment.messageId == owner.id)
-            else require(segment.messageId != owner.id && users.add(segment.messageId))
+            if (segment.role == Message.ASSISTANT_ROLE) {
+                require(segment.messageId == owner.id)
+                require(segment.createdAt == null || owner.createdAt == null || segment.createdAt == owner.createdAt) {
+                    "Assistant history time must match its owner"
+                }
+            } else require(segment.messageId != owner.id && users.add(segment.messageId))
         }
     }
 
@@ -161,6 +181,9 @@ object MessageHistory {
                 }
                 require(row.blocks == segment.blocks && row.protocolItems == segment.protocolItems) {
                     "History supplement row does not match its history segment"
+                }
+                require(segment.createdAt == null || row.createdAt == null || segment.createdAt == row.createdAt) {
+                    "History supplement time does not match its row"
                 }
             }
         }

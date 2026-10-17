@@ -176,12 +176,27 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         return ArchivePage(page, if (end < messages.size) end.toInt() else null, messages.size)
     }
     /** Materializes a true conversation copy. All IDs/run IDs are remapped, original is unchanged. */
-    fun branch(id: ConversationId, through: MessageId): ConversationId = transactions.run { db ->
+    fun branch(id: ConversationId, through: MessageId,
+        copyAssets: ((List<Message>, List<Message>) -> List<Message>)? = null): ConversationId =
+        branchInternal(id, through, null, copyAssets)
+
+    /** Asset-capable local fork. No backup sidecar replacement, send, draft or upload authority. */
+    internal fun branchWithVideos(id: ConversationId, through: MessageId,
+        videos: app.daiyu.android.backup.BackupVideoAssets,
+        copyAssets: ((List<Message>, List<Message>) -> List<Message>)? = null): ConversationId =
+        branchInternal(id, through, videos, copyAssets)
+
+    private fun branchInternal(id: ConversationId, through: MessageId,
+        videos: app.daiyu.android.backup.BackupVideoAssets?,
+        copyAssets: ((List<Message>, List<Message>) -> List<Message>)?): ConversationId = transactions.run { db ->
         ensureIdle(db, id); verifyArchives(db, id)
-        check(!app.daiyu.android.storage.SQLiteMessageVideoStore.hasVideos(db, id.value)) {
+        check(videos != null || !app.daiyu.android.storage.SQLiteMessageVideoStore.hasVideos(db, id.value)) {
             "此操作尚不能重新绑定原视频，未修改会话"
         }
-        val original = read(db, id); val index = original.indexOfFirst { it.id == through }
+        val original = read(db, id)
+        // Verify independent witnesses, including known-empty rows; missing is never read-repaired.
+        val originalVideos = original.map { app.daiyu.android.storage.SQLiteMessageVideoStore.readVerified(db, it) }
+        val index = original.indexOfFirst { it.id == through }
         require(index >= 0 && original[index].status == RunStatus.COMPLETED) { "只能从已完成消息分支" }
         require(isHistoryClosedPrefix(original, index + 1)) { "截点分离历史所有者与补充消息；请选择闭合截点" }
         require(MessageHistory.expand(original.take(index + 1)).all { m ->
@@ -198,27 +213,75 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         fun remap(m: Message, oldId: MessageId): MessageId = ids.getOrPut(Triple(m.conversationId, m.runId, oldId)) {
             MessageId(UUID.randomUUID().toString())
         }
-        val copied = original.take(index + 1).map { m ->
+        val remapped = original.take(index + 1).map { m ->
             m.copy(id = remap(m, m.id), conversationId = copy,
                 runId = runs.getOrPut(m.runId) { RunId(UUID.randomUUID().toString()) },
                 historySegments = m.historySegments.map { it.copy(messageId = remap(m, it.messageId)) })
         }
+        val prefix = original.take(index + 1)
+        // Generation receipts are owner-bound, not transferable references. Never publish a
+        // seemingly successful branch which silently loses its registered originals.
+        prefix.forEach { m ->
+            require(!db.rawQuery("SELECT 1 FROM generation_outputs WHERE conversation_id=? AND assistant_id=? LIMIT 1",
+                arrayOf(id.value, m.id.value)).use { it.moveToFirst() }) {
+                "生成资产尚无安全的分支重绑定契约；原会话保留"
+            }
+        }
+        val hasImages = prefix.any { m -> (m.blocks + m.historySegments.flatMap { it.blocks }).any { it is MessageBlock.Image } }
+        require(!hasImages || copyAssets != null) { "图片分支需要原件复制适配；原会话保留" }
+        val copied = copyAssets?.invoke(prefix, remapped) ?: remapped
+        require(copied.size == remapped.size && copied.zip(remapped).all { (a, b) ->
+            a.id == b.id && a.conversationId == b.conversationId && a.runId == b.runId && a.role == b.role &&
+                a.historySegments.map { it.messageId to it.role } == b.historySegments.map { it.messageId to it.role }
+        }) { "分支身份映射不一致" }
         MessageHistory.expand(copied) // validate the complete remap before any message write
-        original.take(index + 1).zip(copied).forEach { (m, mapped) ->
+        val copiedVideos = prefix.indices.map { position ->
+            val source = prefix[position]
+            val mapped = copied[position]
+            originalVideos[position].map { input ->
+                require(input.owner.conversationId == source.conversationId.value)
+                val newId = checkNotNull(ids[Triple(source.conversationId, source.runId, MessageId(input.owner.messageId))])
+                val owner = app.daiyu.android.media.video.MessageVideoOwner(copy.value, newId.value)
+                val references = input.references.map { it.copy(owner = owner) }
+                val assets = checkNotNull(videos) { "视频分支需要私有原件复制适配" }
+                val contents = input.references.map { assets.read(input.owner, it) }
+                assets.restore(owner, references, contents)
+                app.daiyu.android.model.videos.MessageVideoInput(owner, references)
+            }.also { app.daiyu.android.storage.MessageVideoInputCodec.encode(mapped, it) }
+        }
+        prefix.zip(copied).forEachIndexed { position, (m, mapped) ->
             val messageId = mapped.id
-            db.insertOrThrow("messages", null, messageValues(mapped))
+            check(db.insertOrThrow("messages", null, messageValues(mapped)) != -1L)
+            // Insert the real remapped sidecar AND its witness once. Never overwrite an empty witness.
+            app.daiyu.android.storage.SQLiteMessageVideoStore.insert(db, mapped, copiedVideos[position])
             db.rawQuery("SELECT mime,bytes,blob_hash FROM neutral_assets WHERE message_id=?", arrayOf(m.id.value)).use { assets ->
                 while (assets.moveToNext()) {
                     blobs.read(assets.getString(2)) // Missing attachments abort the copy rather than silently losing them.
-                    db.insertOrThrow("neutral_assets", null, ContentValues().apply {
+                    check(db.insertOrThrow("neutral_assets", null, ContentValues().apply {
                         put("id", UUID.randomUUID().toString()); put("message_id", messageId.value); put("kind", "attachment")
                         put("mime", assets.getString(0)); put("bytes", assets.getLong(1)); put("blob_hash", assets.getString(2))
-                    })
+                    }) != -1L) { "分支附件未持久化" }
                 }
             }
         }
-        db.insertOrThrow("context_branches", null, ContentValues().apply { put("conversation_id", copy.value); put("parent_id", id.value)
-            put("through_message", through.value); put("parent_revision", ContextRevision.digest(original.take(index + 1))) })
+        check(db.insertOrThrow("context_branches", null, ContentValues().apply { put("conversation_id", copy.value); put("parent_id", id.value)
+            put("through_message", through.value); put("parent_revision", ContextRevision.digest(original.take(index + 1))) }) != -1L)
+        check(read(db, copy) == copied) { "分支消息持久回执不一致" }
+        copied.forEachIndexed { position, message ->
+            check(app.daiyu.android.storage.MessageVideoInputCodec.encode(message,
+                app.daiyu.android.storage.SQLiteMessageVideoStore.readVerified(db, message)) ==
+                app.daiyu.android.storage.MessageVideoInputCodec.encode(message, copiedVideos[position])) {
+                "分支视频持久回执不一致"
+            }
+        }
+        check(read(db, id) == original) { "分支改变了原会话；已回滚" }
+        original.forEachIndexed { position, message ->
+            check(app.daiyu.android.storage.MessageVideoInputCodec.encode(message,
+                app.daiyu.android.storage.SQLiteMessageVideoStore.readVerified(db, message)) ==
+                app.daiyu.android.storage.MessageVideoInputCodec.encode(message, originalVideos[position])) {
+                "分支改变了原视频元数据；已回滚"
+            }
+        }
         copy
     }
     /** Physical truncation makes paged UI and next model context agree. Optional user correction invalidates every summary. */

@@ -341,6 +341,7 @@ class ChatController internal constructor(private val application:Application,
     // Deletion also works before any generation settings/resource exists. These in-memory
     // seals are inherited by the first (and only) resource, never cleared by a later import.
     private val generationConversationPublicationSeals = mutableSetOf<String>()
+    private val generationRunPublicationSeals = mutableSetOf<Pair<String, String>>()
     // The only Resources constructor in the parent. Never reset this on stop, import, deletion
     // or reader close: its permanent owner gates belong to this actual account/DB lifetime.
     @Synchronized private fun retainGenerationResources(accountScope: String): ControllerGenerationResources {
@@ -354,6 +355,7 @@ class ChatController internal constructor(private val application:Application,
             // No existing gates/publications exist in a newly constructed resource, so these
             // seals need no wait. Every future fence inherits them before it can be returned.
             generationConversationPublicationSeals.forEach { retained.sealConversationPublicationAdmission(it) }
+            generationRunPublicationSeals.forEach { (conversation, run) -> retained.sealRunPublicationAdmission(conversation, run) }
         }
     }
     private val generationCleanup = ControllerGenerationCleanupQueue(workers = 2, capacity = 8)
@@ -2280,6 +2282,110 @@ class ChatController internal constructor(private val application:Application,
             finally {executor.shutdown();closeDone.countDown()}
         }
     }
+    private val messageActionStore by lazy { MessageActionStore(database, contextService, messageImageAssets,
+        app.daiyu.android.backup.MessageVideoBackupAssets(videoAttachments.store)) }
+
+    /** Capture on the same serialized worker as persistence. Main must bind this snapshot to the
+     * rendered conversation/editor owner, never acquire a fresh target from a stale callback. */
+    internal fun loadMessageActionSnapshot(owner: ConversationId,
+        complete: (MessageActionSnapshot?) -> Unit): Boolean {
+        synchronized(this) {
+            if (!idleAvailable() || hasLiveChildTasks()) return false
+            dataBusy = true
+        }
+        try { executor.execute {
+            val snapshot = runCatching { messageActionStore.snapshot(owner) }.getOrNull()
+            handler.post {
+                val deliver = synchronized(this) {
+                    dataBusy = false
+                    if (closed) { closeStorageWhenIdle(); false } else true
+                }
+                if (deliver) { complete(snapshot); dispatchChanged() }
+            }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { dataBusy = false }; return false
+        }
+        return true
+    }
+
+    /** Explicit gestures only. No old tool or model attempt is ever resumed by this API.
+     * Deletion seals the exact generation RUN before waiting on its publication barrier.
+     * Read fences are closed on the worker; unrelated runs retain their publication rights. */
+    internal fun messageAction(action: MessageAction, target: MessageActionTarget,
+        complete: (MessageActionResult) -> Unit): Boolean {
+        synchronized(this) {
+            if (!idleAvailable() || hasLiveChildTasks()) return false
+            if ((action == MessageAction.RETRY_STEP) != (target.toolCallId != null)) return false
+            dataBusy = true
+        }
+        notifyChanged()
+        try { executor.execute {
+            var changed = false
+            val result = try {
+                when (action) {
+                    MessageAction.EDIT_USER -> MessageActionResult.EditDraft(messageActionStore.originalUserText(target))
+                    MessageAction.BRANCH -> {
+                        val copy = messageActionStore.branch(target); changed = true
+                        MessageActionResult.Branch(copy)
+                    }
+                    MessageAction.DELETE_TURN -> {
+                        // Validate before even an in-memory revocation; deleteTurn repeats CAS
+                        // inside its final mutation transaction after the physical barrier.
+                        messageActionStore.validate(target)
+                        val revocation = synchronized(this) {
+                            generationRunPublicationSeals.add(target.conversationId.value to target.runId.value)
+                            generationResources?.sealRunPublicationAdmission(target.conversationId.value, target.runId.value)
+                        }
+                        revocation?.revokeOnWorker()
+                        closeGenerationOutputReaders(setOf(target.conversationId.value))
+                        messageActionStore.deleteTurn(target); changed = true
+                        MessageActionResult.Deleted
+                    }
+                    MessageAction.RETRY_STEP -> messageActionStore.rejectRetry(target)
+                    MessageAction.REGENERATE -> {
+                        val prepared = messageActionStore.prepareRegeneration(target); changed = true
+                        val token = synchronized(this) {
+                            if (closed) null else {
+                                // Retain the data reservation through result delivery as well
+                                // as normal preparation, so a late completion cannot clear a
+                                // newer operation's busy gate. sendPrepared owns this token.
+                                reservePreparation()
+                            }
+                        }
+                        val outcome = if (token == null) RegenerationSendOutcome.NOT_SENT else try {
+                            val saved = try { sendPrepared(token, prepared.conversation, prepared.text,
+                                expectedDraftText = prepared.text) } catch (_: Exception) { null }
+                            when {
+                                saved != null -> RegenerationSendOutcome.ACCEPTED
+                                token.persistenceUnconfirmed -> RegenerationSendOutcome.UNKNOWN
+                                else -> RegenerationSendOutcome.NOT_SENT
+                            }
+                        } finally { finishPreparation(token) }
+                        // Even UNKNOWN carries the exact new branch. Never re-prepare or resend.
+                        MessageActionResult.Regenerated(prepared.conversation, outcome)
+                    }
+                }
+            } catch (failure: IllegalArgumentException) {
+                MessageActionResult.Rejected(failure.message ?: "消息身份或安全历史基线不匹配；未重放请求")
+            } catch (_: Exception) {
+                // Includes commit/endTransaction errors: an exception is NOT proof of absence.
+                changed = true
+                MessageActionResult.Unknown("消息操作未确认；请刷新核实持久历史，未自动重试或重放工具")
+            }
+            handler.post {
+                val deliver = synchronized(this) {
+                    dataBusy = false
+                    if (changed) dataRevision++
+                    if (closed) { closeStorageWhenIdle(); false } else true
+                }
+                if (deliver) { complete(result); dispatchChanged() }
+            }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { dataBusy = false }; return false
+        }
+        return true
+    }
+
     internal fun skillManagement():SkillManagement = SkillManagement.create {SkillToolRegistry(application)}
     private val neutralBackup by lazy {
         val videoAssets = app.daiyu.android.backup.MessageVideoBackupAssets(videoAttachments.store)

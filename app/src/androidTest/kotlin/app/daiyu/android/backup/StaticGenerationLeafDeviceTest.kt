@@ -23,8 +23,7 @@ class StaticGenerationLeafDeviceTest : InstrumentationTestCase() {
     private lateinit var helper: ConversationDatabase
     private lateinit var root: File
     private val db get() = helper.writableDatabase
-    private val png get() = android.util.Base64.decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kF9sAAAAASUVORK5CYII=", android.util.Base64.DEFAULT)
+    private val png get() = app.daiyu.android.validDeviceTestPng()
     override fun setUp() {
         super.setUp()
         appContext = testContext(instrumentation.targetContext, "static-generation-leaf-${UUID.randomUUID()}-")

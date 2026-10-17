@@ -32,7 +32,7 @@ class UnitScopeTests(unittest.TestCase):
 
     def test_dual_module_reports_pass(self):
         self.write_reports(self.full_reports())
-        self.assertEqual(verify_xml(self.archive, 'unit'), {'tests_passed': 2})
+        self.assertEqual(verify_xml(self.archive, 'unit'), {'tests_passed': 2, 'tests_skipped': 0, 'skipped_tests': []})
 
     def test_missing_each_module_rejected(self):
         for report in self.full_reports():

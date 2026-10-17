@@ -11,6 +11,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -1527,23 +1528,29 @@ class MainActivity : ComponentActivity() {
                         onOpenPermissions = { dismissSidebar(); retainedPage = "settings" },
                     ) {
                         chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
-                            Column(Modifier.fillMaxSize().imePadding()) {
-                                DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
-                                    composer = projectedVoiceComposer()), chatActions(), modifier = Modifier.weight(1f), turnExtras = { id ->
-                                    QuestionExtras(id)
-                                    VoiceExtras(id)
-                                }, imageLoader = imageHost.historyLoader)
-                                pendingTextSend?.let { pending ->
-                                    top.yukonga.miuix.kmp.basic.TextButton(
-                                        text = "取消发送准备",
-                                        modifier = Modifier.testTag("text-send-cancel"),
-                                        onClick = { cancelPendingTextSend(pending) }
-                                    )
+                            BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
+                                val extrasMaxHeight = minOf(200.dp, maxHeight * 0.35f)
+                                Column(Modifier.fillMaxSize()) {
+                                    DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
+                                        composer = projectedVoiceComposer()), chatActions(), modifier = Modifier.weight(1f), turnExtras = { id ->
+                                        QuestionExtras(id)
+                                        VoiceExtras(id)
+                                    }, imageLoader = imageHost.historyLoader)
+                                    Column(Modifier.fillMaxWidth().heightIn(max = extrasMaxHeight)
+                                        .verticalScroll(rememberScrollState()).testTag("chat-extra-actions")) {
+                                        pendingTextSend?.let { pending ->
+                                            top.yukonga.miuix.kmp.basic.TextButton(
+                                                text = "取消发送准备",
+                                                modifier = Modifier.testTag("text-send-cancel"),
+                                                onClick = { cancelPendingTextSend(pending) }
+                                            )
+                                        }
+                                        if (imagePanelVisible) ImageComposerPanel()
+                                        if (videoPanelVisible && !sidebarVisible) VideoComposerPanel()
+                                        DictationComposerEntry()
+                                        ShizukuComposerEntry()
+                                    }
                                 }
-                                if (imagePanelVisible) ImageComposerPanel()
-                                if (videoPanelVisible && !sidebarVisible) VideoComposerPanel()
-                                DictationComposerEntry()
-                                ShizukuComposerEntry()
                             }
                         }
                     }
@@ -4036,10 +4043,10 @@ class MainActivity : ComponentActivity() {
     }
     internal fun select(conversation: Conversation?) {
         requireActivityUsable()
-        if (revokeContextManagementEntry()) editorGeneration++
-        fenceVideoRoute()
         check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null)) { "请等待本次发送结果" }
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
+        if (revokeContextManagementEntry()) editorGeneration++
+        fenceVideoRoute()
         val shizukuOwned = shizukuEditor != null || shizukuWritesBlocked
         cancelShizukuEditor()
         cancelBrowserEditor()

@@ -31,7 +31,14 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         failure?.let { throw it }
         instrumentation.waitForIdleSync()
     }
-    protected fun node(tag: String) = ui.onNodeWithTag(tag)
+    protected fun node(tag: String): SemanticsNodeInteraction {
+        val interaction = ui.onNodeWithTag(tag)
+        val found = ui.onAllNodesWithTag(tag).fetchSemanticsNodes().singleOrNull()
+        if (found != null && generateSequence(found.parent) { it.parent }.any {
+                it.config.getOrNull(SemanticsProperties.TestTag) == "chat-extra-actions"
+            }) interaction.performScrollTo()
+        return interaction
+    }
     protected fun reveal(tag: String, page: String = "模型设置"): SemanticsNodeInteraction {
         node("page:$page").performScrollToNode(hasTestTag(tag))
         return node(tag)
@@ -58,9 +65,14 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         reveal("settings-row:模型提供商", "设置").performClick()
     }
     protected fun openSettings() {
-        ui.onNodeWithContentDescription("打开侧边栏").performClick()
-        ui.onNodeWithContentDescription(instrumentation.targetContext.getString(R.string.route_settings)).performClick()
-        ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodesWithTag("page:设置").fetchSemanticsNodes().isNotEmpty() }
+        ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction())
+            .assertIsDisplayed().assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        val settings = ui.onNode(hasContentDescription(
+            instrumentation.targetContext.getString(R.string.route_settings)) and hasClickAction())
+        ui.waitUntil(timeoutMillis = 5_000) { settings.isDisplayed() }
+        settings.assertIsEnabled().performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodesWithTag("page:设置").fetchSemanticsNodes().size == 1 }
     }
     protected fun menu(label: String) {
         ui.onNodeWithContentDescription("更多").performSemanticsAction(SemanticsActions.OnClick) { it() }

@@ -127,6 +127,47 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         assertEquals(before, history(f, owner.id)); assertEquals(0, f.opens.get())
     }
 
+    fun testSnapshotReaderDoesNotBlockEditorAndCloseWaitsForQueuedRead() {
+        val f = fresh(); val owner = seed(f)
+        val executor = ChatController::class.java.getDeclaredField("executor").apply { isAccessible = true }
+            .get(f.controller) as java.util.concurrent.ExecutorService
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val callbacks = AtomicInteger()
+        executor.execute { entered.countDown(); check(release.await(15, TimeUnit.SECONDS)) }
+        await(entered)
+        val sql = f.db.writableDatabase
+        try {
+            main {
+                assertTrue(f.controller.loadMessageActionSnapshot(owner.id) { callbacks.incrementAndGet() })
+                assertFalse("automatic read must not occupy the editor write gate", f.controller.dataBusy)
+                f.controller.close()
+            }
+            assertTrue("queued reader retains its original database", sql.isOpen)
+        } finally { release.countDown() }
+        val closed = ChatController::class.java.getDeclaredField("closeDone").apply { isAccessible = true }
+            .get(f.controller) as CountDownLatch
+        await(closed)
+        assertFalse(sql.isOpen); assertEquals(0, callbacks.get()); assertEquals(0, f.opens.get())
+    }
+
+    fun testProductionBranchPreservesNullBindingAndRejectsTamperedNullReceipt() {
+        val f = fresh(); val owner = seed(f)
+        val sql = f.db.writableDatabase
+        sql.execSQL("UPDATE conversations SET assistant_id=NULL WHERE id=?", arrayOf(owner.id.value))
+        val before = history(f, owner.id)
+        val target = snapshot(f, owner.id).targets.getValue(before.first().id.value)
+        val copy = (action(f, MessageAction.BRANCH, target) as MessageActionResult.Branch).conversation
+        assertNull(f.db.assistantId(copy.id)); assertEquals(before, history(f, owner.id))
+        val count = f.db.conversations().size
+        sql.execSQL("CREATE TRIGGER corrupt_branch_binding AFTER INSERT ON conversations " +
+            "WHEN NEW.id <> '${owner.id.value}' BEGIN UPDATE conversations SET assistant_id='tampered' WHERE id=NEW.id; END")
+        try {
+            assertTrue(action(f, MessageAction.BRANCH, target) is MessageActionResult.Rejected)
+            assertEquals(count, f.db.conversations().size); assertNull(f.db.assistantId(owner.id))
+            assertEquals(before, history(f, owner.id)); assertEquals(0, f.opens.get())
+        } finally { sql.execSQL("DROP TRIGGER corrupt_branch_binding") }
+    }
+
     fun testBranchCopiesWholeRunAndDeleteDoesNotChangeCopy() {
         val f = fresh(); val owner = seed(f, n = 2, tool = true)
         val before = history(f, owner.id)
@@ -613,7 +654,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         f.db.send(Message(MessageId(UUID.randomUUID().toString()), conversation.id, run, Message.USER_ROLE,
             listOf(MessageBlock.Text("body", "offline static history")), RunStatus.COMPLETED), assistant)
         f.db.save(assistant.copy(status = RunStatus.COMPLETED))
-        val bytes = android.util.Base64.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kF9sAAAAASUVORK5CYII=", android.util.Base64.DEFAULT)
+        val bytes = app.daiyu.android.validDeviceTestPng()
         val hash = app.daiyu.android.context.PrivateBlobs.digest(bytes)
         val origin = GenerationAttemptBinding("deleted-origin", "deleted-owner", "origin-run", "origin-call", "generate_images")
         val source = StaticGenerationProvenance("offline-origin", origin.operationId, "offline-item", 0,

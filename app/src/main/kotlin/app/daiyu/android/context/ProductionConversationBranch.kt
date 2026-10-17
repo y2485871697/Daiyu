@@ -168,8 +168,11 @@ internal class ProductionConversationBranch(private val store: ConversationDatab
                 check(actual == copied)
                 actual.forEachIndexed { index, message -> check(SQLiteMessageVideoStore.readVerified(db, message) == copiedVideos[index]) }
                 values.keySet().forEach { key ->
-                    check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND $key IS ?",
-                        arrayOf(copy.value, values.getAsString(key))).use { it.moveToFirst() })
+                    val value = values.getAsString(key)
+                    val predicate = if (value == null) "$key IS NULL" else "$key IS ?"
+                    val args = if (value == null) arrayOf(copy.value) else arrayOf(copy.value, value)
+                    check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND $predicate",
+                        args).use { it.moveToFirst() })
                 }
                 check(db.rawQuery("SELECT 1 FROM context_branches WHERE conversation_id=? AND parent_id=? AND through_message=? AND parent_revision=?",
                     arrayOf(copy.value, id.value, through.value, ContextRevision.digest(snapshot.prefix))).use { it.moveToFirst() })

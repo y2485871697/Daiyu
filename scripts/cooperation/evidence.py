@@ -18,7 +18,8 @@ def configuration(repo):
              'app/build.gradle.kts', 'core-domain/build.gradle.kts',
              'gradle/wrapper/gradle-wrapper.properties', 'gradle/wrapper/gradle-wrapper.jar',
              'scripts/cooperation/checks_only.init.gradle', 'scripts/cooperation/cloud_checks.py',
-             'scripts/cooperation/pc_checks.ps1', 'scripts/cooperation/evidence.py', '.github/workflows/build.yml']
+             'scripts/cooperation/pc_checks.ps1', 'scripts/cooperation/evidence.py',
+             'scripts/cooperation/windows_unit_skips.json', '.github/workflows/build.yml']
     h = hashlib.sha256()
     for name in paths:
         h.update(name.encode() + b'\0' + Path(repo, name).read_bytes() + b'\0')
@@ -47,7 +48,7 @@ def validate_record(record, sha, config, scope):
         raise ValueError('known_check_failure')
 
 
-def verify_xml(archive, scope):
+def verify_xml(archive, scope, platform=None):
     with zipfile.ZipFile(archive) as z:
         for n in z.namelist():
             p = PurePosixPath(n.replace('\\', '/'))
@@ -58,16 +59,37 @@ def verify_xml(archive, scope):
                              if n.replace('\\', '/').split('/')[-1].startswith('TEST-') and n.endswith('.xml')]
             reports = [t for _, t in named_reports]
             if (not reports or any(t.tag != 'testsuite' for t in reports)
-                    or any(int(t.get(k, '0')) for t in reports for k in ('failures', 'errors', 'skipped'))
-                    or any(t.findall('.//failure') or t.findall('.//error') or t.findall('.//skipped') for t in reports)
+                    or any(int(t.get(k, '0')) for t in reports for k in ('failures', 'errors'))
+                    or any(t.findall('.//failure') or t.findall('.//error') for t in reports)
                     or any(len(t.findall('testcase')) != int(t.get('tests', '0')) for t in reports)):
                 raise ValueError('unit_report_failed_or_missing')
             for prefix in UNIT_REPORTS:
                 module = [t for name, t in named_reports if name.startswith(prefix + '/')]
                 if not module or sum(int(t.get('tests', '0')) for t in module) < 1:
                     raise ValueError('unit_module_report_missing')
+            allowed = read_json(Path(__file__).with_name('windows_unit_skips.json'))
+            skipped = []
+            seen = set()
+            for name, suite in named_reports:
+                nodes = suite.findall('testcase')
+                suite_skips = [c for c in nodes if c.find('skipped') is not None]
+                if (any(int(suite.get(k, '0')) < 0 for k in ('tests', 'failures', 'errors', 'skipped'))
+                        or int(suite.get('skipped', '0')) != len(suite_skips)
+                        or len(suite.findall('.//skipped')) != len(suite_skips)):
+                    raise ValueError('unit_report_failed_or_missing')
+                for case in suite_skips:
+                    identity = (case.get('classname', ''), case.get('name', ''))
+                    node = case.find('skipped')
+                    reason = (node.get('message', '') + '\n' + (node.text or '')).strip()
+                    if (platform != 'Windows' or not name.startswith(UNIT_REPORTS[1] + '/')
+                            or identity[1] not in allowed.get(identity[0], []) or not reason
+                            or identity in seen):
+                        raise ValueError('unit_report_failed_or_missing')
+                    seen.add(identity)
+                    skipped.append(dict(classname=identity[0], name=identity[1], reason=reason))
             count = sum(int(t.get('tests', '0')) for t in reports)
-            return {'tests_passed': count}
+            return {'tests_passed': count - len(skipped), 'tests_skipped': len(skipped),
+                    'skipped_tests': skipped}
         names = [n for n in z.namelist() if n.endswith('lint-results-debug.xml')]
         if len(names) != 1:
             raise ValueError('lint_report_missing')
@@ -78,6 +100,27 @@ def verify_xml(archive, scope):
         if any(i.get('severity') in ('Error', 'Fatal') for i in issues):
             raise ValueError('lint_report_failed')
         return {'lint_errors': 0, 'lint_warnings': sum(i.get('severity') == 'Warning' for i in issues)}
+
+
+def verify_unit_matrix(windows_archive, linux_archive):
+    windows = verify_xml(windows_archive, 'unit', platform='Windows')
+    verify_xml(linux_archive, 'unit', platform='Linux')
+    passed = set()
+    duplicates = set()
+    with zipfile.ZipFile(linux_archive) as z:
+        for name in z.namelist():
+            if not name.startswith(UNIT_REPORTS[1] + '/') or not PurePosixPath(name).name.startswith('TEST-') or not name.endswith('.xml'):
+                continue
+            for case in ET.fromstring(z.read(name)).findall('testcase'):
+                identity = (case.get('classname', ''), case.get('name', ''))
+                if identity in passed:
+                    duplicates.add(identity)
+                passed.add(identity)
+    for case in windows['skipped_tests']:
+        identity = (case['classname'], case['name'])
+        if identity not in passed or identity in duplicates:
+            raise ValueError('windows_skip_without_linux_execution')
+    return {'windows_skips_verified_on_linux': len(windows['skipped_tests'])}
 
 
 def verify_bundle(directory, sha, config, scope, receiving=False):
@@ -96,6 +139,7 @@ def verify_bundle(directory, sha, config, scope, receiving=False):
             complete = read_json(base / 'complete.json')
             if complete['source_sha'] != sha or complete['attempt'] != proof['attempt'] or scope not in complete['scopes'] or set(complete['platforms']) != {'ubuntu-26.04','windows-latest'}:
                 raise ValueError('cloud_matrix_not_complete')
+            matrix_directories = {}
             for platform in ('ubuntu-26.04', 'windows-latest'):
                 sibling = directory.parents[1] / f'github-{proof["run_id"]}-{proof["attempt"]}-{platform}' / scope
                 sibling_proof = read_json(sibling / 'proof.json')
@@ -105,6 +149,10 @@ def verify_bundle(directory, sha, config, scope, receiving=False):
                 member = verify_bundle(sibling, sha, config, scope, receiving=True)
                 if member['environment']['os'] != {'ubuntu-26.04': 'Linux', 'windows-latest': 'Windows'}[platform]:
                     raise ValueError('cloud_matrix_platform_mismatch')
+                matrix_directories[platform] = sibling
+            if scope == 'unit':
+                verify_unit_matrix(matrix_directories['windows-latest'] / 'reports.zip',
+                                   matrix_directories['ubuntu-26.04'] / 'reports.zip')
         artifact = read_json(base / (str(proof['artifact_id']) + '.json'))
         archive = base / (str(proof['artifact_id']) + '.zip')
         run = read_json(base / 'run.json')
@@ -154,7 +202,9 @@ def verify_bundle(directory, sha, config, scope, receiving=False):
     text = log.decode('utf-16') if log.startswith((b'\xff\xfe', b'\xfe\xff')) else log.decode('utf-8', errors='replace')
     if 'Configuration.setVisible' in text or 'Deprecated Gradle features' in text:
         raise ValueError('deprecation_remaining')
-    return dict(record, **verify_xml(directory / 'reports.zip', scope), origin=proof['origin'])
+    return dict(record, **verify_xml(directory / 'reports.zip', scope,
+                platform=record.get('environment', {}).get('os') if proof['origin'] == 'github' else None),
+                origin=proof['origin'])
 
 
 def coverage(state, sha, config):

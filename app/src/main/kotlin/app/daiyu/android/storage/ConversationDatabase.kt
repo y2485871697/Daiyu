@@ -580,9 +580,15 @@ class ConversationDatabase internal constructor(context: Context, private val af
     private fun verifyBackupRows(db: SQLiteDatabase, imported: List<Conversation>, restored: List<Message>,
         verifyVideoWitness: Boolean = true) {
         imported.forEach { c ->
-            check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND title=? AND draft=? AND updated=? AND folder=? AND pinned=? AND assistant_id IS ?",
-                arrayOf(c.id.value, c.title, c.draft, c.updatedAt.toString(), c.folder,
-                    if (c.pinned) "1" else "0", c.assistantId)).use { it.moveToFirst() }) { "备份会话回执不匹配" }
+            val args = mutableListOf(c.id.value, c.title, c.draft, c.updatedAt.toString(), c.folder,
+                if (c.pinned) "1" else "0")
+            val assistantId = c.assistantId
+            val assistant = if (assistantId == null) "assistant_id IS NULL" else {
+                args += assistantId
+                "assistant_id IS ?"
+            }
+            check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND title=? AND draft=? AND updated=? AND folder=? AND pinned=? AND $assistant",
+                args.toTypedArray()).use { it.moveToFirst() }) { "备份会话回执不匹配" }
         }
         restored.forEach { message ->
             check(storedMessage(db, message.conversationId, message.id.value, verifyVideoWitness) == message) { "备份消息回执不匹配" }

@@ -76,7 +76,7 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
     override fun setUp() {
         super.setUp()
         val id = UUID.randomUUID().toString()
-        root = File(instrumentation.targetContext.cacheDir, "browser-save-$id").apply { check(mkdir()) }
+        root = File(instrumentation.targetContext.cacheDir.canonicalFile, "browser-save-$id").apply { check(mkdir()) }
         val isolated = testContext(instrumentation.targetContext, "browser-save-$id-")
         val context = object : ContextWrapper(isolated) { override fun getFilesDir() = root }
         documents = Documents(root).apply {
@@ -382,8 +382,7 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
         assets.settle(lease, app.daiyu.android.media.StaticGenerationSettlement.COMMITTED)
         return output
     }
-    private val staticBytes get() = android.util.Base64.decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kF9sAAAAASUVORK5CYII=", android.util.Base64.DEFAULT)
+    private val staticBytes get() = app.daiyu.android.validDeviceTestPng()
     private fun field(name: String): Any? = MainActivity::class.java.getDeclaredField(name).apply {
         isAccessible = true
     }.get(activity)

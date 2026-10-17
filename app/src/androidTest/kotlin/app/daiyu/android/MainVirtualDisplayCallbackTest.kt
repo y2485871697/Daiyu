@@ -97,7 +97,7 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
 
     private fun prepare(text: String): ControllerVirtualDisplayEntry {
         setDraft(text)
-        node("vd-prepare-entry").assertIsEnabled().performClick()
+        node("vd-prepare-entry").assertIsDisplayed().assertIsEnabled().performClick()
         // Real R08 editor visit freezes inputs before the unchanged Controller prepare seam.
         node("r08-plan-freeze").assertExists().performClick()
         awaitControl("retained background location decision") {
@@ -143,9 +143,12 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
             assertNull(editor()); assertNull(fixture.controller.virtualDisplayEntry())
             assertEquals(1, gate.availablePermits())
         }
-        ui.onNodeWithTag("r08-add-TAP").performScrollTo().performClick()
-        ui.onNodeWithTag("r08-plan-2-x").performScrollTo().performTextReplacement("31")
-        ui.onNodeWithTag("r08-plan-2-y").performScrollTo().performTextReplacement("47")
+        node("r08-plan-rows").performScrollToNode(hasTestTag("r08-add-TAP"))
+        node("r08-add-TAP").assertIsDisplayed().performClick()
+        node("r08-plan-rows").performScrollToNode(hasTestTag("r08-plan-2-x"))
+        node("r08-plan-2-x").performTextReplacement("31")
+        node("r08-plan-rows").performScrollToNode(hasTestTag("r08-plan-2-y"))
+        node("r08-plan-2-y").performTextReplacement("47")
         node("r08-plan-freeze").performClick()
         mainThread {
             val entry = checkNotNull(editor())

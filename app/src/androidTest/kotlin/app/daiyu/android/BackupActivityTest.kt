@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicReference
  */
 @Suppress("DEPRECATION")
 class BackupActivityTest:ComposeActivityTestCase() {
+    override val engineeringUi = true
     private class Documents(private val directory:File):ContentProvider() {
         val opens=AtomicInteger()
         var deny=false

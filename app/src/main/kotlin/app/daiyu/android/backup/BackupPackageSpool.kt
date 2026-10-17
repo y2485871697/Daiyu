@@ -195,7 +195,7 @@ internal class BackupPackageSpool(parent: File) : Closeable {
     override fun close() {
         if (!closed) { closed = true; check(root.deleteRecursively()) { "备份暂存清理失败" } }
     }
-    private class JsonInput(private val input: Reader) {
+    private class JsonInput(private val input: Reader, private val probe: Boolean = false) {
         private var next = -2
         private fun peek(): Int { if (next == -2) next = input.read(); return next }
         private fun take(): Int = peek().also { next = -2 }
@@ -206,7 +206,8 @@ internal class BackupPackageSpool(parent: File) : Closeable {
             expect('{'); whitespace(); if (peek() == '}'.code) { take(); return }
             val keys = hashSetOf<String>()
             while (true) {
-                val key = string(); require(keys.add(key)) { "重复JSON字段" }
+                val key = string(if (probe) 512 else MAX_PACKAGE); require(keys.add(key)) { "重复JSON字段" }
+                if (probe) require(keys.size <= 50_000)
                 expect(':'); consume(key); whitespace()
                 when (take()) { '}'.code -> return; ','.code -> Unit; else -> error("备份JSON对象未结束") }
             }
@@ -258,15 +259,32 @@ internal class BackupPackageSpool(parent: File) : Closeable {
                 override fun close() = Unit
             }
         }
-        private fun string(): String {
+        fun string(limit: Long = MAX_PACKAGE): String {
             val result = StringBuilder()
             val text = quoted(); val block = CharArray(4096)
             while (true) {
                 val count = text.read(block); if (count < 0) break
-                require(result.length.toLong() + count <= MAX_PACKAGE)
+                require(result.length.toLong() + count <= limit)
                 result.append(block, 0, count)
             }
             return result.toString()
+        }
+        fun skip(depth: Int) {
+            require(depth <= 32); whitespace()
+            when (peek()) {
+                '"'.code -> { val text = quoted(); val block = CharArray(8192); while (text.read(block) >= 0) { } }
+                '{'.code -> fields { skip(depth + 1) }
+                '['.code -> {
+                    expect('['); whitespace()
+                    if (peek() == ']'.code) { take(); return }
+                    var count = 0
+                    while (true) {
+                        require(++count <= 50_000); skip(depth + 1); whitespace()
+                        when (take()) { ']'.code -> return; ','.code -> Unit; else -> error("备份JSON数组未结束") }
+                    }
+                }
+                else -> value(depth)
+            }
         }
         fun value(depth: Int): Any {
             require(depth <= 32); whitespace()
@@ -287,6 +305,17 @@ internal class BackupPackageSpool(parent: File) : Closeable {
         }
     }
     companion object {
+        /** Probe only selects a parser. The selected importer still validates the entire package. */
+        internal fun detectFormat(source: InputStream): String {
+            val parser = JsonInput(strictReader(LimitedInput(source, MAX_PACKAGE)), probe = true)
+            var format: String? = null
+            parser.fields { key ->
+                if (key == "format") format = parser.string(64)
+                else parser.skip(1)
+            }
+            parser.end()
+            return requireNotNull(format) { "缺少备份格式" }
+        }
         private const val MAX_BYTES = 64L * 1024 * 1024
         private const val MAX_PACKAGE = 112L * 1024 * 1024
         private fun digest(value: ByteArray) = hex(MessageDigest.getInstance("SHA-256").digest(value))

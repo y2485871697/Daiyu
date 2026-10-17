@@ -9,6 +9,7 @@ import app.daiyu.android.tasksurface.*
  * Successful external-app confirmation still requires a separate device acceptance run. */
 @Suppress("DEPRECATION")
 class GuiMainActivityTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     private fun invoke(name: String, vararg args: Any?): Any? =
         MainActivity::class.java.declaredMethods.single { it.name == name && it.parameterCount == args.size }
             .apply { isAccessible = true }.invoke(activity, *args)

@@ -6,6 +6,7 @@ import app.daiyu.android.voice.offline.OfflineSpeechPack
 
 /** Consent/navigation only: no model download, system recognizer, or permission grant. */
 class OfflineSpeechEntryActivityTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     fun testComposerExposesIndependentOfflineSettingsWithoutEnablingOrDownloading() {
         mainThread { OfflineSpeechPack.setEnabled(activity, false) }
         node("offline-speech-open").performClick()

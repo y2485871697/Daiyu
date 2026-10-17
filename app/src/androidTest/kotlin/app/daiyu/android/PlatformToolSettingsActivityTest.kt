@@ -12,17 +12,17 @@ import java.util.UUID
 
 /** UI callbacks are synthetic; no system prompts, provider reads or model requests. */
 class PlatformToolSettingsActivityTest : WiredActivityTestCase() {
-    fun testExplicitSettingsEntryAndPermissionCheckBothReachPlatformPageCallback() {
+    fun testEngineeringPermissionEntriesAreAbsentFromProductSettings() {
         val events = mutableListOf<String>()
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), false) {
             DaiyuSettingsScreen(onBack = {}, onRoute = {}, onOpenPlatformTools = { events.add("platform") })
         } } }
         ui.waitForIdle()
-        node("settings-search").performTextReplacement("平台只读")
-        reveal("settings-row:平台只读工具与私密出站", "设置").performClick()
-        node("settings-search").performTextReplacement("权限检查")
-        reveal("settings-row:权限检查", "设置").performClick()
-        ui.runOnIdle { assertEquals(listOf("platform", "platform"), events) }
+        for (title in listOf("平台只读工具与私密出站", "权限检查", "浏览器")) {
+            node("settings-search").performTextReplacement(title)
+            node("settings-row:$title").assertDoesNotExist()
+        }
+        ui.runOnIdle { assertTrue(events.isEmpty()) }
     }
 
     fun testLocationPermissionClicksNeverSelectToolOrGrantOutboundConsentAndStaleVisitIsInert() {

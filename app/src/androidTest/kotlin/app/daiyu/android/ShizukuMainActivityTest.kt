@@ -8,6 +8,7 @@ import app.daiyu.android.domain.*
  * Accepted UI receipts below are explicit DB fixtures, not a claim of real privileged transport.
  */
 class ShizukuMainActivityTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     private val text = "完整正文\n保留末尾空格  "
     private val command = "printf 'exact command\\n'; id"
     private fun invoke(name: String, vararg args: Any?): Any? = invokeOn(activity, name, *args)

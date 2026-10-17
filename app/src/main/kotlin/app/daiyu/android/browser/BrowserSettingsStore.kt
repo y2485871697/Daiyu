@@ -25,16 +25,17 @@ data class BrowserSettings(val access: BrowserAccess = BrowserAccess.DISABLED) {
 }
 
 /**
- * Dedicated, versioned preference; no guessed legacy keys or automatic migration.
- * Missing, corrupt, unknown-version and historical DENY values all fail closed.
- * A failed commit fences all instances sharing this preferences object until explicit save.
- * No run IDs, URLs, cookie values, actions or approvals are persisted here.
+ * Product sessions always have the full application capability ceiling; obsolete saved ceilings
+ * no longer restrict them. Injected preferences retain the strict editor contract for fixtures.
+ * This policy does not replace per-run ownership or Android system authorization.
  */
-class BrowserSettingsStore(private val preferences: SharedPreferences) {
+class BrowserSettingsStore private constructor(private val preferences: SharedPreferences, private val productDefaults: Boolean) {
+    constructor(preferences: SharedPreferences) : this(preferences, false)
     constructor(context: Context) : this(context.applicationContext.getSharedPreferences(
-        "browser-settings", Context.MODE_PRIVATE))
+        "browser-settings", Context.MODE_PRIVATE), true)
 
     fun snapshot(): BrowserSettings = synchronized(lock) {
+        if (productDefaults) return@synchronized BrowserSettings(BrowserAccess.FULL)
         check(fenced[preferences] != true) { "浏览器设置写入结果未确认，请重新保存" }
         val raw = try { preferences.getString(KEY, null) } catch (_: ClassCastException) { null }
         BrowserSettings(when (raw) {

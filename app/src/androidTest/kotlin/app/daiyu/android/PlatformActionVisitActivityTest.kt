@@ -9,6 +9,7 @@ import java.util.concurrent.TimeUnit
  * No device writes: every retained callback or blocked preparation must be rejected first. */
 @Suppress("DEPRECATION")
 class PlatformActionVisitActivityTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     private val entered = CountDownLatch(1)
     private val release = CountDownLatch(1)
     private val text = "  exact platform visit draft  "

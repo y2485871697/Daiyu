@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit
 /** Production Main navigation and real Controller preparation. No root, owner or transport is
  * opened by these tests. Accepted/lease behavior is covered by ControllerVirtualDisplayParentTest. */
 class VirtualDisplayMainActivityTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     internal override fun createFixture() = super.createFixture().also {
         check(it.taskSurfaces.save(app.daiyu.android.tasksurface.TaskSurfacePreference.BACKGROUND))
     }

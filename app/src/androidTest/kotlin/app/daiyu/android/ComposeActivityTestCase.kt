@@ -17,10 +17,20 @@ import org.junit.runners.model.Statement
 @Suppress("DEPRECATION")
 abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     protected val ui = createEmptyComposeRule()
+    protected open val engineeringUi: Boolean = false
     private fun runLegacy() = super.runBare()
     override fun runBare() {
-        ui.apply(object : Statement() { override fun evaluate() { runLegacy() } },
-            Description.createTestDescription(javaClass, name)).evaluate()
+        try {
+            instrumentation.runOnMainSync {
+                (instrumentation.targetContext.applicationContext as ChatApplication).engineeringUiForTests = engineeringUi
+            }
+            ui.apply(object : Statement() { override fun evaluate() { runLegacy() } },
+                Description.createTestDescription(javaClass, name)).evaluate()
+        } finally {
+            instrumentation.runOnMainSync {
+                (instrumentation.targetContext.applicationContext as ChatApplication).engineeringUiForTests = false
+            }
+        }
     }
     protected fun mainThread(action: () -> Unit) {
         var failure: Throwable? = null

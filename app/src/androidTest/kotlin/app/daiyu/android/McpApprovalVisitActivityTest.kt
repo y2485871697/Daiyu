@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 @Suppress("DEPRECATION")
 class McpApprovalVisitActivityTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     private lateinit var root: File
     private val transports = AtomicInteger()
     private val text = "  MCP visit draft remains exact  "

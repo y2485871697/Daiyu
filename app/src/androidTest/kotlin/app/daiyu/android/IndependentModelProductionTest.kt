@@ -49,6 +49,28 @@ class IndependentModelProductionTest : InstrumentationTestCase() {
         assertTrue("must fail closed", rejected)
     }
 
+    fun testDisableRemainsAvailableToStorageWhenEditingCannotReadOldConfiguration() {
+        val store = IndependentModelSettings(context)
+        for (slot in IndependentModelSettings.Slot.values()) {
+            store.save(slot, ModelSettings("https://independent.invalid", "recovery-api", "synthetic-key", false),
+                "pet-assistant", true, true)
+            val before = store.record(slot)
+            val generation = store.generation()
+            val raw = context.getSharedPreferences("independent-${slot.key}-model", 0)
+            check(raw.edit().putString("protocol", "invalid-test-protocol").putInt("endpoint", 7).commit())
+            reject { store.editing(slot) }
+            store.disable(slot)
+            val after = IndependentModelSettings(context).record(slot)
+            assertFalse(after.enabled)
+            assertEquals(before.providerId, after.providerId)
+            assertEquals(before.localModelId, after.localModelId)
+            assertTrue(after.revision > before.revision)
+            assertFalse(store.isCurrent(generation))
+            assertEquals(7, raw.getInt("endpoint", 0))
+            reject { store.freeze(slot) }
+        }
+    }
+
     fun testIndependentRealBindingsPersistCapabilitiesAndRejectAllIdMismatches() {
         val main = ModelSettingsStore(context, "main-test-${UUID.randomUUID()}")
         main.save(ModelSettings("https://main.invalid", "main-api", "main-key", false))

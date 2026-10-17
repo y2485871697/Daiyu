@@ -4,6 +4,7 @@ import android.text.InputType
 import android.widget.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.viewinterop.AndroidView
 import app.daiyu.android.assistants.AssistantProfile
 import app.daiyu.android.domain.pet.PetModelSelection
@@ -25,12 +26,34 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
     var problem by remember(slot) { mutableStateOf<String?>(null) }
     var saving by remember(slot) { mutableStateOf(false) }
     LaunchedEffect(slot) {
-        runCatching { withContext(Dispatchers.IO) { store.record(slot) to store.editing(slot).settings } }
-            .onSuccess { loaded = it }.onFailure { problem = "独立配置读取失败" }
+        try { loaded = withContext(Dispatchers.IO) { store.record(slot) to store.editing(slot).settings } }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { problem = "独立配置读取失败" }
     }
     val value = loaded
     if (value == null) {
-        androidx.compose.material3.Text(problem ?: "读取独立配置…")
+        app.daiyu.android.ui.components.MiuixScaffoldPage(
+            title = if (slot == IndependentModelSettings.Slot.PET) "桌宠独立模型" else "辅助视觉模型",
+            onBack = onBack, modifier = modifier,
+        ) {
+            item("status") { SettingsNote(problem ?: "读取独立配置…") }
+            if (problem != null) item("disable") {
+                top.yukonga.miuix.kmp.basic.TextButton(text = "停用独立配置", enabled = !saving,
+                    modifier = Modifier.testTag("independent-model-disable"), onClick = {
+                        if (!saving) {
+                            saving = true
+                            scope.launch {
+                                try {
+                                    withContext(Dispatchers.IO) { store.disable(slot) }
+                                    problem = "已停用并撤销旧请求授权"
+                                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                                catch (_: Exception) { problem = "停用未确认；请重试" }
+                                finally { saving = false }
+                            }
+                        }
+                    })
+            }
+        }
         return
     }
     AndroidView(modifier = modifier, factory = { context ->

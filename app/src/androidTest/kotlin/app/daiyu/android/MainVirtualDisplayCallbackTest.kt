@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * Source coverage only: this is not evidence of execution on an emulator or privileged device. */
 @Suppress("DEPRECATION")
 class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     private val leaseId = UUID.randomUUID().toString()
     private val gate = Semaphore(1)
     private val starts = AtomicInteger()

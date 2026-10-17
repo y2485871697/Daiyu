@@ -75,6 +75,11 @@ internal object SettingsCatalog {
             SettingsEntry("donate", "给煮波恰饭🍚", DaiyuIcons.Balance, SettingControl.ACTION),
         )),
     )
+    private val engineeringIds = setOf("platform_tools", "browser", "enhancements", "overlay", "accessibility")
+    fun visibleGroups(engineeringUi: Boolean = false): List<SettingsGroup> = if (engineeringUi) groups else
+        groups.mapNotNull { group ->
+            group.copy(entries = group.entries.filterNot { it.id in engineeringIds }).takeIf { it.entries.isNotEmpty() }
+        }
     val entries: List<SettingsEntry> = groups.flatMap { it.entries }
     fun entry(id: String): SettingsEntry = entries.single { it.id == id }
 }

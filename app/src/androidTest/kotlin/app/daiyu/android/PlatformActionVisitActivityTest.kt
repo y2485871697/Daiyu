@@ -65,7 +65,7 @@ class PlatformActionVisitActivityTest : WiredActivityTestCase() {
         assertTrue(entered.await(5, TimeUnit.SECONDS))
         mainThread { pause(); assertTrue(old.cancelled) }
         release.countDown()
-        awaitControl("platform preparation drained") { !fixture.controller.preparing }
+        awaitControl("platform preparation drained") { ChatController::class.java.getDeclaredField("preparation").apply { isAccessible = true }.get(fixture.controller) == null }
         assertUnsent()
     }
 }

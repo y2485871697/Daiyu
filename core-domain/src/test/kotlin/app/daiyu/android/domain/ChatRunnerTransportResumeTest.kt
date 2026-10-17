@@ -23,7 +23,7 @@ class ChatRunnerTransportResumeTest {
         var deadline = false
         @Volatile var disconnect: (() -> Unit)? = null
         val pauses = java.util.Collections.synchronizedList(mutableListOf<Boolean>())
-        override fun check() { checks++; check(!deadline) { "expired" } }
+        override fun check() { checks++; if (deadline) throw TransportReconnectDeadlineException() }
         override fun setPaused(paused: Boolean) { pauses.add(paused); if (paused) disconnect?.invoke() }
         override fun attach(disconnect: () -> Unit): AutoCloseable {
             this.disconnect = disconnect
@@ -73,6 +73,26 @@ class ChatRunnerTransportResumeTest {
             .mapNotNull { it.request?.attemptId }.distinct().size)
     }
 
+    @Test(timeout = 5000) fun reconnectDeadlineHasFixedTerminalMessageWithoutAnotherResume() {
+        for (lateSuccess in listOf(false, true)) {
+            var resumes = 0
+            var opens = 0
+            val failure = TransportReconnectDeadlineException(lateSuccess)
+            val session = object : Session() {
+                override fun resumeAcknowledged(sink: (ModelEventBatch) -> ModelDeliveryAck) {
+                    resumes++
+                    throw failure
+                }
+            }
+            val runtime = Runtime()
+            val result = runner(session, runtime, Budget()) { opens++ }.run(initial(), emptyList())
+            assertEquals(RunStatus.FAILED, result.status)
+            assertEquals(failure.userMessage, result.error)
+            assertEquals(1, opens)
+            assertEquals(1, resumes)
+        }
+    }
+
     @Test fun inFlightDeadlineRejectsLateTerminalBatchWithoutAck() {
         val budget = Budget()
         var terminalAck: ModelDeliveryAck? = null
@@ -83,7 +103,9 @@ class ChatRunnerTransportResumeTest {
             }
         }
         val runtime = Runtime()
-        assertEquals(RunStatus.FAILED,runner(session,runtime,budget).run(initial(),emptyList()).status)
+        val result = runner(session,runtime,budget).run(initial(),emptyList())
+        assertEquals(RunStatus.FAILED, result.status)
+        assertEquals(TransportReconnectDeadlineException().userMessage, result.error)
         assertNull(terminalAck)
         assertTrue(runtime.writes.none { it.transport?.sequence == 1L })
         assertTrue(runtime.writes.last().usage.isEmpty())

@@ -52,8 +52,12 @@ class TarLinuxRootfsExtractionTest : TestCase() {
     private class Fixture(val root: File) {
         val stage = File(root, "stage").apply { mkdir() }
         val archive = File(root, "archive")
+        val ops = HostTarRootfsFileOps(root.toPath())
+        fun extractor(maxExpandedBytes: Long = TarLinuxRootfsExtraction.MAX_EXPANDED_BYTES,
+                      maxEntries: Int = TarLinuxRootfsExtraction.MAX_ENTRIES) =
+            TarLinuxRootfsExtraction(maxExpandedBytes, maxEntries, ops)
         fun extract(payload: ByteArray, format: RootfsArchive = RootfsArchive.TAR_GZIP,
-                    strip: Int = 0, extractor: TarLinuxRootfsExtraction = TarLinuxRootfsExtraction(),
+                    strip: Int = 0, extractor: TarLinuxRootfsExtraction = extractor(),
                     token: LinuxInstallCancellation = LinuxInstallCancellation()) {
             archive.writeBytes(payload)
             val artifact = LinuxRootfsArtifact("test", "alpine", "test", "arm64-v8a", format,
@@ -85,12 +89,12 @@ class TarLinuxRootfsExtractionTest : TestCase() {
                 Item("usr/bin/tool", "inert executable", mode = 493),
                 Item("etc/config", "plain text", mode = 420)
             ), format), format)
-            assertEquals("inert executable", File(f.stage, "bin/sh").readText())
-            assertFalse(Files.readSymbolicLink(File(f.stage, "bin/sh").toPath()).isAbsolute)
+            assertEquals("inert executable", f.ops.readText(File(f.stage, "bin/sh").toPath()))
+            assertFalse(f.ops.readSymbolicLink(File(f.stage, "bin/sh").toPath()).isAbsolute)
             assertTrue(Files.isSameFile(File(f.stage, "chain-a").toPath(), File(f.stage, "usr/bin/tool").toPath()))
-            assertTrue(Files.getPosixFilePermissions(File(f.stage, "usr/bin/tool").toPath())
+            assertTrue(f.ops.permissions(File(f.stage, "usr/bin/tool").toPath())
                 .contains(PosixFilePermission.OWNER_EXECUTE))
-            assertFalse(Files.getPosixFilePermissions(File(f.stage, "etc/config").toPath())
+            assertFalse(f.ops.permissions(File(f.stage, "etc/config").toPath())
                 .contains(PosixFilePermission.OWNER_EXECUTE))
         }
     }
@@ -102,12 +106,12 @@ class TarLinuxRootfsExtractionTest : TestCase() {
             Item("dir/relative", type = '2', target = "../missing")
         ), RootfsArchive.TAR_GZIP))
         try {
-            assertEquals(".", Files.readSymbolicLink(File(f.stage, "root-link").toPath()).toString())
-            assertEquals("proc/not-mounted", Files.readSymbolicLink(File(f.stage, "dangling").toPath()).toString())
-            assertEquals("../missing", Files.readSymbolicLink(File(f.stage, "dir/relative").toPath()).toString())
+            assertEquals(f.stage.toPath().fileSystem.getPath("."), f.ops.readSymbolicLink(File(f.stage, "root-link").toPath()))
+            assertEquals(f.stage.toPath().fileSystem.getPath("proc/not-mounted"), f.ops.readSymbolicLink(File(f.stage, "dangling").toPath()))
+            assertEquals(f.stage.toPath().fileSystem.getPath("../missing"), f.ops.readSymbolicLink(File(f.stage, "dir/relative").toPath()))
         } finally {
             // Do not let recursive fixture cleanup traverse this intentional directory cycle.
-            Files.delete(File(f.stage, "root-link").toPath())
+            f.ops.delete(File(f.stage, "root-link").toPath())
         }
     }
 
@@ -118,7 +122,7 @@ class TarLinuxRootfsExtractionTest : TestCase() {
             Item("root/bin", type = '2', target = "/usr/bin")
         ), RootfsArchive.TAR_XZ), RootfsArchive.TAR_XZ, strip = 1)
         assertFalse(File(f.stage, "root").exists())
-        assertEquals("fixture", File(f.stage, "bin/tool").readText())
+        assertEquals("fixture", f.ops.readText(File(f.stage, "bin/tool").toPath()))
         assertTrue(Files.isSameFile(File(f.stage, "hard").toPath(), File(f.stage, "usr/bin/tool").toPath()))
     }
 
@@ -154,11 +158,11 @@ class TarLinuxRootfsExtractionTest : TestCase() {
         }
         fixture { f ->
             f.stage.delete()
-            Files.createSymbolicLink(f.stage.toPath(), f.root.toPath())
+            f.ops.createSymbolicLink(f.stage.toPath(), f.root.toPath())
             try {
                 rejected { f.extract(compressed(tar(Item("file", "data")), RootfsArchive.TAR_GZIP)) }
                 assertFalse(File(f.root, "file").exists())
-            } finally { Files.delete(f.stage.toPath()) }
+            } finally { f.ops.delete(f.stage.toPath()) }
         }
         fixture { f ->
             f.stage.delete()
@@ -194,18 +198,18 @@ class TarLinuxRootfsExtractionTest : TestCase() {
 
     fun testStripsPrivilegedModeBitsAndRetainsOrdinaryExecutableBits() = fixture { f ->
         f.extract(compressed(tar(Item("tool", "inert", mode = 4095)), RootfsArchive.TAR_GZIP))
-        val mode = (Files.getAttribute(File(f.stage, "tool").toPath(), "unix:mode") as Int) and 4095
+        val mode = f.ops.mode(File(f.stage, "tool").toPath())
         assertEquals(511, mode)
     }
 
     fun testByteEntryAndMetadataQuotasAndTruncation() {
         fixture { f ->
             rejected { f.extract(compressed(tar(Item("big", "x".repeat(8192))), RootfsArchive.TAR_GZIP),
-                extractor = TarLinuxRootfsExtraction(maxExpandedBytes = 1024)) }
+                extractor = f.extractor(maxExpandedBytes = 1024)) }
         }
         fixture { f ->
             rejected { f.extract(compressed(tar(Item("one"), Item("two")), RootfsArchive.TAR_GZIP),
-                extractor = TarLinuxRootfsExtraction(maxEntries = 1)) }
+                extractor = f.extractor(maxEntries = 1)) }
         }
         // A GNU metadata header is counted even though Commons hides it from nextTarEntry.
         fixture { f ->

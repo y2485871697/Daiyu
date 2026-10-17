@@ -23,7 +23,7 @@ class ControllerTerminalHistoryTest : InstrumentationTestCase() {
             val conversation = fixture.database.create("default")
             val plan = app.daiyu.android.integration.tools.TerminalJobPlan(conversation.id,
                 app.daiyu.android.domain.RunId(UUID.randomUUID().toString()),
-                app.daiyu.android.terminal.TerminalPtyLaunch.Android(listOf("/system/bin/sh"), emptyMap(), fixture.application.filesDir),
+                app.daiyu.android.integration.tools.TerminalPtyLaunch.Android(listOf("/system/bin/sh"), emptyMap(), fixture.application.filesDir),
                 "fixture bytes never executed", "async")
             val token = app.daiyu.android.domain.tools.TaskAuthorization(plan.sessionId, plan.runId.value, setOf(plan.effect))
             val session = app.daiyu.android.integration.tools.TerminalJobSession.approved(plan, token) {

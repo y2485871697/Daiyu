@@ -1,5 +1,6 @@
 package app.daiyu.android.voice.account
 
+import app.daiyu.android.testing.HostAtomicFileShadow
 import android.app.Application
 import app.daiyu.android.VoiceConfiguration
 import app.daiyu.android.voice.providers.DoubaoPersonalVoice
@@ -23,7 +24,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(application = Application::class, sdk = [34])
+@Config(application = Application::class, sdk = [34], shadows = [HostAtomicFileShadow::class])
 class PersonalVoicesTest {
     @get:Rule val folder = TemporaryFolder()
     private fun config(key: String = "voice-key", custom: Map<String, String> = emptyMap()) =

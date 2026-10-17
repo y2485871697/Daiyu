@@ -15,7 +15,11 @@ import java.nio.file.LinkOption.NOFOLLOW_LINKS
 internal fun initializeMediaRoot(root: File): File {
     val supplied = root.toPath().toAbsolutePath().normalize().toFile()
     if (Files.isSymbolicLink(supplied.toPath())) throw ImageAttachmentException(ImageAttachmentFailure.CORRUPT)
-    val anchored = supplied.canonicalFile
+    val parent = supplied.parentFile
+    val anchored = if (parent == null) supplied else {
+        require(parent.mkdirs() || parent.isDirectory)
+        File(parent.toPath().toRealPath().toFile(), supplied.name)
+    }
     checkMediaPath(anchored)
     require(anchored.mkdirs() || anchored.isDirectory)
     checkMediaPath(anchored)

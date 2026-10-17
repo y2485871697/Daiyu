@@ -129,6 +129,32 @@ public final class OwnerReceiptStore implements AutoCloseable {
     private static final Set<Path> LIVE_ROOTS = new HashSet<Path>();
     enum LifecyclePoint { LOCKED, CHANNEL_CLOSED }
     interface LifecycleFault { void at(LifecyclePoint point) throws IOException; }
+    interface PlatformPrimitives {
+        Set<PosixFilePermission> permissions(Path path) throws IOException;
+        void createPrivateDirectory(Path path) throws IOException;
+        FileChannel createPrivateFile(Path path) throws IOException;
+        boolean isSymbolicLink(Path path);
+        void syncDirectory(Path directory) throws IOException;
+    }
+    static final PlatformPrimitives STRICT = new PlatformPrimitives() {
+        public Set<PosixFilePermission> permissions(Path path) throws IOException {
+            return Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS);
+        }
+        public void createPrivateDirectory(Path path) throws IOException {
+            Files.createDirectory(path, PosixFilePermissions.asFileAttribute(DIR_MODE));
+        }
+        public FileChannel createPrivateFile(Path path) throws IOException {
+            return FileChannel.open(path, EnumSet.of(StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
+                    PosixFilePermissions.asFileAttribute(FILE_MODE));
+        }
+        public boolean isSymbolicLink(Path path) { return Files.isSymbolicLink(path); }
+        public void syncDirectory(Path directory) throws IOException {
+            try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+                channel.force(true);
+            }
+        }
+    };
+    private final PlatformPrimitives platform;
     private final Path root;
     private final UserPrincipal owner;
     private final WriteFault fault;
@@ -151,17 +177,23 @@ public final class OwnerReceiptStore implements AutoCloseable {
     // Test-only lifecycle fault injection; production always uses the no-op callback.
     OwnerReceiptStore(Path trustedPrivateRoot, WriteFault fault, LifecycleFault lifecycleFault)
             throws IOException {
-        if (trustedPrivateRoot == null || fault == null || lifecycleFault == null
+        this(trustedPrivateRoot, fault, lifecycleFault, STRICT);
+    }
+
+    OwnerReceiptStore(Path trustedPrivateRoot, WriteFault fault, LifecycleFault lifecycleFault,
+            PlatformPrimitives platform) throws IOException {
+        if (platform == null || trustedPrivateRoot == null || fault == null || lifecycleFault == null
                 || !trustedPrivateRoot.isAbsolute()
                 || !trustedPrivateRoot.equals(trustedPrivateRoot.normalize())) {
             throw failure(Error.UNSAFE_PATH);
         }
+        this.platform = platform;
         this.root = trustedPrivateRoot;
         this.fault = fault;
         this.lifecycleFault = lifecycleFault;
         checkAncestors(root);
         if (!Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)
-                || !Files.getPosixFilePermissions(root, LinkOption.NOFOLLOW_LINKS).equals(DIR_MODE)) {
+                || !platform.permissions(root).equals(DIR_MODE)) {
             throw failure(Error.UNSAFE_PATH);
         }
         owner = Files.getOwner(root, LinkOption.NOFOLLOW_LINKS);
@@ -173,9 +205,7 @@ public final class OwnerReceiptStore implements AutoCloseable {
             Path lock = root.resolve(".receipt.lock");
             if (!Files.exists(lock, LinkOption.NOFOLLOW_LINKS)) {
                 try {
-                    channel = FileChannel.open(lock, EnumSet.of(
-                            StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
-                            PosixFilePermissions.asFileAttribute(FILE_MODE));
+                    channel = platform.createPrivateFile(lock);
                 } catch (java.nio.file.FileAlreadyExistsException concurrentConstructor) {
                     // Another trusted process created it; validate before opening.
                 }
@@ -261,7 +291,7 @@ public final class OwnerReceiptStore implements AutoCloseable {
                 match(existing, wanted);
                 return new Reservation(existing, null);
             }
-            Files.createDirectory(directory, PosixFilePermissions.asFileAttribute(DIR_MODE));
+            platform.createPrivateDirectory(directory);
             syncDirectory(root);
             persist(wanted);
             return new Reservation(wanted, new Claim(this, wanted));
@@ -471,9 +501,7 @@ public final class OwnerReceiptStore implements AutoCloseable {
             if (Files.exists(pending, LinkOption.NOFOLLOW_LINKS)) throw failure(Error.INDETERMINATE_WRITE);
             byte[] bytes = encode(receipt);
             fault.at(WritePoint.BEFORE_WRITE);
-            try (FileChannel channel = FileChannel.open(pending, EnumSet.of(
-                    StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE),
-                    PosixFilePermissions.asFileAttribute(FILE_MODE))) {
+            try (FileChannel channel = platform.createPrivateFile(pending)) {
                 ByteBuffer buffer = ByteBuffer.wrap(bytes);
                 while (buffer.hasRemaining()) channel.write(buffer);
                 channel.force(true);
@@ -499,22 +527,17 @@ public final class OwnerReceiptStore implements AutoCloseable {
         if ((directory ? !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)
                        : !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
                 || !Files.getOwner(path, LinkOption.NOFOLLOW_LINKS).equals(owner)
-                || !Files.getPosixFilePermissions(path, LinkOption.NOFOLLOW_LINKS)
+                || !platform.permissions(path)
                         .equals(directory ? DIR_MODE : FILE_MODE)) throw failure(Error.UNSAFE_PATH);
     }
 
-    private static void checkAncestors(Path path) throws IOException {
+    private void checkAncestors(Path path) throws IOException {
         for (Path cursor = path; cursor != null; cursor = cursor.getParent()) {
-            if (Files.isSymbolicLink(cursor)) throw failure(Error.UNSAFE_PATH);
+            if (platform.isSymbolicLink(cursor)) throw failure(Error.UNSAFE_PATH);
         }
     }
 
-    private static void syncDirectory(Path directory) throws IOException {
-        try (FileChannel channel = FileChannel.open(directory, StandardOpenOption.READ,
-                LinkOption.NOFOLLOW_LINKS)) {
-            channel.force(true);
-        }
-    }
+    private void syncDirectory(Path directory) throws IOException { platform.syncDirectory(directory); }
 
     private static byte[] encode(Receipt receipt) throws IOException {
         ByteArrayOutputStream body = new ByteArrayOutputStream();

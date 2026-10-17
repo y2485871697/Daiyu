@@ -133,7 +133,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
     private fun pick(count: Int) {
         val clip = ClipData.newRawUri("image", Uri.parse("content://image-host/0"))
         repeat(count - 1) { clip.addItem(ClipData.Item(Uri.parse("content://image-host/${it + 1}"))) }
-        val result = Intent().setClipData(clip).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val result = Intent().apply { clipData = clip }.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         val monitor = instrumentation.addMonitor(IntentFilter(Intent.ACTION_GET_CONTENT).apply { addDataType("image/*"); addCategory(Intent.CATEGORY_OPENABLE) },
             Instrumentation.ActivityResult(Activity.RESULT_OK, result), true)
         try {

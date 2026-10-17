@@ -99,7 +99,7 @@ class ControllerPlatformActionSendTest : InstrumentationTestCase() {
         assertEquals(0, opens.get()); assertEquals(0, backendCalls.get())
         val saved = checkNotNull(confirm(preview))
         assertEquals(preview.conversationId, saved.id)
-        awaitControl("parent settled") { controller.active == null && !controller.preparing }
+        awaitControl("parent settled") { controller.active == null && ChatController::class.java.getDeclaredField("preparation").apply { isAccessible = true }.get(controller) == null }
         assertEquals("", db.draft()); assertEquals(1, opens.get()); assertEquals(1, backendCalls.get())
         assertTrue(definitions.get().any { it.name == PlatformActionKind.VOLUME.toolName && it.sideEffect })
         val rows = db.messages(saved.id).map { it.second }
@@ -115,19 +115,19 @@ class ControllerPlatformActionSendTest : InstrumentationTestCase() {
         val preview = prepare()
         db.draft("new draft must survive")
         assertNull(confirm(preview))
-        awaitControl("preparation released") { !controller.preparing }
+        awaitControl("preparation released") { ChatController::class.java.getDeclaredField("preparation").apply { isAccessible = true }.get(controller) == null }
         assertEquals("new draft must survive", db.draft())
         assertTrue(db.conversations().isEmpty()); assertEquals(0, opens.get()); assertEquals(0, backendCalls.get())
     }
     fun testRejectAndOrdinarySendDoNotInheritPlatformApproval() {
         val preview = prepare()
         controlMain { controller.rejectPlatformAction(preview) }
-        awaitControl("reject released") { !controller.preparing }
+        awaitControl("reject released") { ChatController::class.java.getDeclaredField("preparation").apply { isAccessible = true }.get(controller) == null }
         controlMain { assertFalse(controller.confirmPlatformAction(preview) {}) }
         assertEquals(text, db.draft()); assertEquals(0, opens.get()); assertEquals(0, backendCalls.get())
         val saved = controller.send(null, text)
         assertNotNull(saved)
-        awaitControl("ordinary settled") { controller.active == null && !controller.preparing }
+        awaitControl("ordinary settled") { controller.active == null && ChatController::class.java.getDeclaredField("preparation").apply { isAccessible = true }.get(controller) == null }
         assertFalse(definitions.get().any { it.name.startsWith("platform_set_") || it.name == "platform_media_key" })
         assertEquals(0, backendCalls.get())
     }

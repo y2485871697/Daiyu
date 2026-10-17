@@ -197,9 +197,9 @@ class BrowserChildProductionTest {
             if (unknown) assertTrue(first is DispatchOutcome.Unknown)
             else {
                 val receipt = JSONObject((first as DispatchOutcome.Confirmed).payload)
-                assertEquals(path.toString(), receipt.getString("filePath"))
+                assertEquals(path.toRealPath().toString(), receipt.getString("filePath"))
                 val summary = JSONObject(receipt.getString("text"))
-                assertEquals(path.toString(), summary.getString("path"))
+                assertEquals(path.toRealPath().toString(), summary.getString("path"))
                 assertEquals(native.body.size.toLong(), summary.getLong("size"))
                 assertEquals(MessageDigest.getInstance("SHA-256").digest(native.body).joinToString("") { "%02x".format(it) },
                     summary.getString("sha256"))

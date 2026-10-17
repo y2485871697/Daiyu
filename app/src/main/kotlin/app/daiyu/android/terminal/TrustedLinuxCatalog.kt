@@ -25,6 +25,7 @@ class TrustedLinuxCatalog internal constructor(
     private val directory: File,
     private val directorySync: (File) -> Unit,
     private val beforeApprovalGate: () -> Unit = {},
+    private val symbolicLink: (java.nio.file.Path) -> Boolean = Files::isSymbolicLink,
 ) {
     constructor(directory: File) : this(directory, TerminalDurability::syncDirectory)
 
@@ -130,7 +131,7 @@ class TrustedLinuxCatalog internal constructor(
         securePath(validationDirectory)
         securePath(File(validationDirectory, "selected-linux.json"))
         securePath(File(validationDirectory, "selected-linux.json.tmp"))
-        val store = validator ?: LinuxEnvironmentStore(validationDirectory).also { validator = it }
+        val store = validator ?: LinuxEnvironmentStore(validationDirectory, directorySync).also { validator = it }
         // select validates paths, readable shell containment, bind targets, known helper digests,
         // file identities and metadata limits. It does not execute any of these files.
         store.select(value)
@@ -206,6 +207,17 @@ class TrustedLinuxCatalog internal constructor(
         return bytes.toByteArray()
     }
 
+    /** Reject links in the catalog's ancestry; assume app-private, cooperating writers. */
+    private fun securePath(file: File) {
+        require(file.isAbsolute) { "linux_catalog_absolute_directory_required" }
+        require(file.toPath().normalize() == file.toPath()) { "linux_catalog_unsafe_path" }
+        var cursor: File? = file
+        while (cursor != null) {
+            check(!symbolicLink(cursor.toPath())) { "linux_catalog_symlink" }
+            cursor = cursor.parentFile
+        }
+    }
+
     companion object {
         private const val MAX_BYTES = 1024 * 1024
         private const val MAX_RECORDS = 256 // Includes tombstones; never recycle an old generation.
@@ -227,26 +239,8 @@ class TrustedLinuxCatalog internal constructor(
             v.sharedMounts.forEach { (host, guest) -> hostPath(host); guestPath(guest) }
         }
 
-        private fun cleanPath(path: String) {
-            require(path.length in 1..4096 && path.startsWith('/') && ':' !in path)
-            require(path.none { it.code < 32 || it.code == 127 })
-            require(path.split('/').none { it == "." || it == ".." })
-        }
-        private fun hostPath(path: String) {
-            cleanPath(path)
-            require(File(path).isAbsolute) // content:// is never converted/resolved as a File.
-        }
-        private fun guestPath(path: String) = cleanPath(path)
+        private fun hostPath(path: String) = LinuxPathSyntax.host(path)
+        private fun guestPath(path: String) = LinuxPathSyntax.guest(path)
 
-        /** Reject links in the catalog's ancestry; assume app-private, cooperating writers. */
-        private fun securePath(file: File) {
-            require(file.isAbsolute) { "linux_catalog_absolute_directory_required" }
-            require(file.toPath().normalize() == file.toPath()) { "linux_catalog_unsafe_path" }
-            var cursor: File? = file
-            while (cursor != null) {
-                check(!Files.isSymbolicLink(cursor.toPath())) { "linux_catalog_symlink" }
-                cursor = cursor.parentFile
-            }
-        }
     }
 }

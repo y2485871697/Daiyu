@@ -32,7 +32,7 @@ class SqliteTitleCommitAdapterTest : InstrumentationTestCase() {
         assertSame(db, sql)
         assertTrue(sql.inTransaction())
         assertEquals("生成标题", title(a))
-        sql.execSQL("INSERT INTO existing_parent_usage VALUES(?,?,?)", arrayOf(receipt.requestId, receipt.conversationId.value, receipt.usage?.inputTokens))
+        sql.execSQL("INSERT INTO existing_parent_usage VALUES(?,?,?)", arrayOf<Any?>(receipt.requestId, receipt.conversationId.value, receipt.usage?.inputTokens))
         receipts++
         if (failUsage) error("synthetic receipt failure")
     })

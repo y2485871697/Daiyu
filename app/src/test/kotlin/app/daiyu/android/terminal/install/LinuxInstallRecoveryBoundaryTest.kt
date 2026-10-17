@@ -1,5 +1,8 @@
 package app.daiyu.android.terminal.install
 
+import app.daiyu.android.terminal.hostLinuxCatalog
+import app.daiyu.android.terminal.hostDirectorySync
+import app.daiyu.android.terminal.hostLinuxStore
 import app.daiyu.android.terminal.LinuxInstallation
 import java.io.File
 import java.io.IOException
@@ -37,7 +40,7 @@ class LinuxInstallRecoveryBoundaryTest : TestCase() {
                 probeFailure?.let { throw it }
                 LinuxProbeResult(0, "0\n")
             }, LinuxArtifactDownload { _, _, destination, _ -> requests++; destination.writeBytes(payload) },
-            sync, { from, to -> moves++; Files.move(from.toPath(), to.toPath()); Unit }, force)
+            sync, { from, to -> moves++; Files.move(from.toPath(), to.toPath()); Unit }, force, fileOps = HostInstallFileOps)
     }
     private fun fixture(block: (Fixture) -> Unit) {
         val root = Files.createTempDirectory("linux-recovery-boundary").toFile()
@@ -50,7 +53,7 @@ class LinuxInstallRecoveryBoundaryTest : TestCase() {
             val prepared = first.prepare(f.artifact, "primary", f.installation)
             first.rememberRequest(prepared)
             assertTrue(first.install(first.approveDownloadAndInstall(prepared), LinuxInstallCancellation()).directorySyncConfirmed)
-            val catalog = app.daiyu.android.terminal.TrustedLinuxCatalog(File(f.root, "catalog"))
+            val catalog = app.daiyu.android.terminal.hostLinuxCatalog(File(f.root, "catalog"))
             val approval = catalog.freezeForApproval(f.installation)
             first.rememberRegistration(prepared, approval)
             catalog.approve(approval)

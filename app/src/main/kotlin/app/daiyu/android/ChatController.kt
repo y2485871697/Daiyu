@@ -115,6 +115,8 @@ class ChatController internal constructor(private val application:Application,
             voiceAccounts.voices.selected(config.voice, config.speech())
         }
     }
+    // The Activity editor and run preparation share this exact independent store instance.
+    internal val reconnectSettings = app.daiyu.android.model.reconnect.ReconnectSettingsStore(application)
     private val contextService by lazy { ContextService(application, database) }
     private val contextPreparation by lazy { contextPreparationFactory(application, contextService) }
 
@@ -1723,6 +1725,14 @@ class ChatController internal constructor(private val application:Application,
             if(imageAttempt!=null) require(selected?.asModelSettings()==config) {"stale_image_provider"}
             selected?.takeIf {it.asModelSettings()==config} ?: ProviderSnapshot.capture(config)
         } catch (_:Exception) {problem="图片模型配置已变化；草稿保留，未发起网络请求";notifyChanged();return null}
+        // sendPrepared runs on the preparation worker. Freeze once, AFTER the exact provider;
+        // no settings IO on pause/continue/tool rounds, and no fallback on a corrupt/fenced store.
+        val frozenReconnect = try {
+            app.daiyu.android.model.reconnect.FrozenReconnectAdapter.freeze(reconnectSettings.snapshot(), provider.protocol)
+        } catch (_: Exception) {
+            problem="错误重连配置无效或写入未确认；请重新保存，草稿保留，未启动聊天模型请求"
+            notifyChanged(); return null
+        }
         val conversationId=virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
         val run=virtualDisplay?.runId ?: terminalRun?.preview?.identity?.runId ?: videoAttempt?.runId ?: generation?.identity?.runId ?: browserPreparation?.identity?.runId ?: shizukuPreparation?.runId ?: imageAttempt?.runId ?: RunId(UUID.randomUUID().toString())
@@ -1876,6 +1886,21 @@ class ChatController internal constructor(private val application:Application,
             problem="图片历史读取、能力检查或模型初始化失败；草稿保留，未启动聊天模型请求";notifyChanged();return null
         }
         if(preparationCancelled(token)) { auxiliaryPort?.close(); return null }
+        // The observer must be OUTSIDE the fully assembled video/image/auxiliary port. It is
+        // diagnostic only: no open/resume/repost or tool replay, and Runner still has 0 retries.
+        // Both assignment and callback reads of this original lifetime are under our monitor.
+        var reconnectResources: RunResources? = null
+        val observedModel = frozenReconnect.observeFailures(preparedModel) { message ->
+            handler.post { synchronized(this) {
+                val original = reconnectResources
+                if (original != null && resources === original && !original.fenced && !closed &&
+                    runner === original.runner && active?.id == assistant.id &&
+                    active?.runId == run && active?.conversationId == conversationId) {
+                    problem = message
+                    notifyChanged()
+                }
+            } }
+        }
         var preparingTools: RunCatalogTools? = null
         var preparingDevices: RunDeviceResources? = null
         var preparingChildren: RunChildModels? = null
@@ -1957,8 +1982,9 @@ class ChatController internal constructor(private val application:Application,
             if (terminalRun != null) token.terminalCatalog = tools
             synchronized(this) { virtualDisplay?.catalog = tools }
             generation?.catalog = tools
-            val owned = ChatRunner(preparedModel, database, tools,
-                RunnerOptions(runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools,
+            val owned = ChatRunner(observedModel, database, tools,
+                RunnerOptions(reconnect=frozenReconnect.runnerPolicy(),
+                    runtimeStore=checkNotNull(runtimeStore), receiptBatchExecutor=tools,
                     onReasoning={ event -> publishReasoning(assistant,event) })) {
                 synchronized(this) {
                     if(!closed && active?.id==assistant.id && active?.runId==run && active?.conversationId==conversationId &&
@@ -2061,6 +2087,7 @@ class ChatController internal constructor(private val application:Application,
                 problem=null;active=assistant
                 token.admittedVoiceOwner = assistant // Exact admitted run, not a later current/history guess.
                 runner=owned;runTools=tools;resources=lifetime
+                reconnectResources=lifetime
                 generation?.let { it.runner=owned; it.catalog=tools }
                 enqueueSlice(lifetime,allowStopped=true) {
                     if(synchronized(this) {closed || token.revoked || lifetime.fenced}) {

@@ -42,6 +42,9 @@ class FeatureCatalogTest {
             "R09" to FeatureRoute.TERMINAL,
             "P34" to FeatureRoute.BROWSER_SETTINGS,
             "P09" to FeatureRoute.COMPRESSION_SETTINGS,
+            "P24" to FeatureRoute.PET_SETTINGS,
+            "P25" to FeatureRoute.AUXILIARY_VISION_SETTINGS,
+            "P26" to FeatureRoute.RECONNECT_SETTINGS,
             "P41" to FeatureRoute.USER_MESSAGE
         ), entries.mapNotNull { entry -> entry.route?.let { entry.id to it } }.toMap())
     }

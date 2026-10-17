@@ -122,6 +122,7 @@ class MainActivity : ComponentActivity() {
     }
     private var generationSettingsVisit by mutableStateOf<GenerationSettingsVisit?>(null)
     private var browserSettingsPageOwner: app.daiyu.android.browser.BrowserSettingsSaveOwner? = null
+    private var reconnectSettingsPageOwner by mutableStateOf<app.daiyu.android.model.reconnect.ReconnectSettingsSaveOwner?>(null)
     private var hapticsHost: app.daiyu.android.haptics.HapticsActivityHost? = null
     private fun syncHaptics() {
         hapticsHost?.sync(selected?.id?.value, retainedPage == "chat" && !sidebarVisible,
@@ -562,6 +563,11 @@ class MainActivity : ComponentActivity() {
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
+            // Revoke before any navigation work, not a later Compose disposal or IO callback.
+            if (value != "reconnect-settings") {
+                reconnectSettingsPageOwner?.revoke()
+                reconnectSettingsPageOwner = null
+            }
             if (value != retainedPageState) { stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationOutputs(); cancelVirtualDisplayEditor() }
             if (value != "generation-settings") {
                 generationSettingsVisit?.active?.set(false)
@@ -809,7 +815,7 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "compression-settings", "linux-settings", "pet-settings", "vision-settings" -> retainedPage = "settings"
+                        "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings" -> retainedPage = "settings"
                         "pet-model-settings" -> retainedPage = "pet-settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
@@ -954,6 +960,15 @@ class MainActivity : ComponentActivity() {
                         }, ownerCurrent = {
                             activityUsable() && compressionSettingsPageOwner === page && retainedPage == "compression-settings"
                         })
+                    } }
+                    "reconnect-settings" -> reconnectSettingsPageOwner?.let { page -> key(page) {
+                        ReconnectSettingsScreen(controller.reconnectSettings,
+                            onBack = {
+                                if (activityUsable() && reconnectSettingsPageOwner === page && retainedPage == "reconnect-settings")
+                                    retainedPage = "settings"
+                            }, ownerCurrent = {
+                                activityUsable() && reconnectSettingsPageOwner === page && retainedPage == "reconnect-settings"
+                            }, saveOwner = page)
                     } }
                     "browser-settings" -> browserSettingsPageOwner?.let { page -> key(page) {
                         BrowserSettingsScreen(browserSettings,
@@ -2280,6 +2295,8 @@ class MainActivity : ComponentActivity() {
     }
     override fun onDestroy() {
         invalidateMessageActionEditor()
+        reconnectSettingsPageOwner?.revoke()
+        reconnectSettingsPageOwner = null
         fenceVideoRoute()
         controller.detachVideoUi(videoUi)
         pendingTextSend?.let { controller.cancelTextSend(it.ticket) }
@@ -2332,6 +2349,12 @@ class MainActivity : ComponentActivity() {
         compressionSettingsPageOwner?.revoke()
         compressionSettingsPageOwner = app.daiyu.android.context.CompressionSettingsEditor(applicationContext)
         retainedPage = "compression-settings"
+    }
+    private fun openReconnectSettings() {
+        requireActivityUsable()
+        reconnectSettingsPageOwner?.revoke()
+        reconnectSettingsPageOwner = app.daiyu.android.model.reconnect.ReconnectSettingsSaveOwner()
+        retainedPage = "reconnect-settings"
     }
     private fun openBrowserSettings() {
         requireActivityUsable()
@@ -2399,6 +2422,7 @@ class MainActivity : ComponentActivity() {
             FeatureRoute.TERMINAL -> openTerminal()
             FeatureRoute.LINUX_SETTINGS -> openLinuxSettings()
             FeatureRoute.BROWSER_SETTINGS -> openBrowserSettings()
+            FeatureRoute.RECONNECT_SETTINGS -> openReconnectSettings()
             FeatureRoute.COMPRESSION_SETTINGS -> openCompressionSettings()
             FeatureRoute.GENERATION_SETTINGS -> openGenerationSettings()
             FeatureRoute.PET_SETTINGS -> retainedPage = "pet-settings"

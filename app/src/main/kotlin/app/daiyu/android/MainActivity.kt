@@ -683,6 +683,8 @@ class MainActivity : ComponentActivity() {
     private var modelEditingOwner by mutableStateOf<Any?>(null)
     private var chatModelPicker by mutableStateOf<ChatModelPickerState?>(null)
     private var chatModelSettings: ModelSettings? = null
+    private var chatModelSession: LocalCatalogChatModelPickerSession? = null
+    private var chatModelSelectionFailed = false
     private var chatModelCancelled = AtomicBoolean(false)
     private var chatModelOwner: Any? = null
     private var assistantPicker by mutableStateOf(false)
@@ -1122,12 +1124,18 @@ class MainActivity : ComponentActivity() {
                 }
                 chatModelPicker?.let { picker ->
                     val owner = chatModelOwner
-                    ChatModelPicker(picker, onSelect = { selectChatModel(it, owner) },
-                        onRefresh = { if (chatModelOwner === owner && owner != null) fetchChatModels() },
-                        onSettings = { if (chatModelOwner === owner && owner != null) {
-                            dismissChatModels(); guard { modelSettings() }
-                        } },
-                        onDismiss = { if (chatModelOwner === owner) dismissChatModels() })
+                    val session = chatModelSession
+                    val reload = { if (chatModelOwner === owner && owner != null) reloadChatModels(owner) }
+                    val settings = { if (chatModelOwner === owner && owner != null) {
+                        dismissChatModels(); guard { modelSettings() }
+                    } }
+                    val dismiss = { if (chatModelOwner === owner) dismissChatModels() }
+                    if (session == null) ChatModelPicker(picker, onSelect = {}, onRefresh = reload,
+                        onSettings = settings, onDismiss = dismiss)
+                    else LocalCatalogChatModelPicker(session, enabled = picker.enabled,
+                        loading = picker.loading, message = picker.message,
+                        onSelect = { selectChatModel(it, owner, session) }, onReload = reload,
+                        onSettings = settings, onDismiss = dismiss)
                 }
                 assistantSelectionOwner?.let { owner -> key(owner) {
                     AssistantPickerDialog(show = assistantPicker, store = assistantStore, assets = assistantAssets,
@@ -2637,7 +2645,9 @@ class MainActivity : ComponentActivity() {
         }
         trackShizukuPreparation()
         backupBusy = controller.dataBusy
-        chatModelPicker = chatModelPicker?.copy(enabled = controller.active == null && !controller.dataBusy && controller.ready)
+        chatModelPicker = chatModelPicker?.let { picker -> picker.copy(enabled = !picker.loading &&
+            !chatModelSelectionFailed && chatModelSettings != null && chatModelSession != null && controller.active == null &&
+            !controller.dataBusy && controller.ready) }
         controlOwner = controller.active?.takeIf { it.conversationId == selected?.id && it.status == RunStatus.RUNNING }
         if (controller.dataBusy) {
             if (prompt?.backup == true) prompt = null
@@ -2797,60 +2807,73 @@ class MainActivity : ComponentActivity() {
     private fun openChatModels() {
         requireActivityUsable()
         dismissChatModels()
-        chatModelOwner = Any()
-        val saved = try { controller.settings.load() } catch (_: Exception) { null }
-        chatModelSettings = saved
-        val current = saved?.model.orEmpty()
-        chatModelPicker = ChatModelPickerState(current,
-            if (current.isBlank()) emptyList() else listOf(ModelCatalogEntryUi(current)),
-            enabled = controller.active == null && !controller.dataBusy && controller.ready,
-            message = if (saved == null || saved.endpoint.isBlank() || saved.apiKey.isBlank()) "请先配置模型提供商" else null)
-        if (saved != null && saved.endpoint.isNotBlank() && saved.apiKey.isNotBlank()) fetchChatModels()
+        val owner = Any(); chatModelOwner = owner
+        reloadChatModels(owner)
     }
     private fun dismissChatModels() {
         chatModelCancelled.set(true)
-        chatModelPicker = null; chatModelSettings = null; chatModelOwner = null
+        chatModelPicker = null; chatModelSettings = null; chatModelSession = null; chatModelOwner = null
+        chatModelSelectionFailed = false
     }
-    private fun fetchChatModels() {
-        if (!activityUsable() || retainedPage != "chat") return
-        val picker = chatModelPicker ?: return
-        val saved = chatModelSettings ?: return
-        if (!picker.enabled || picker.loading || saved.endpoint.isBlank() || saved.apiKey.isBlank()) return
+    private fun reloadChatModels(owner: Any) {
+        if (!activityUsable() || retainedPage != "chat" || chatModelOwner !== owner) return
         chatModelCancelled.set(true)
         val cancelled = AtomicBoolean(false); chatModelCancelled = cancelled
-        chatModelPicker = picker.copy(loading = true, message = null)
-        val accepted = controller.fetchModelCatalog(saved, { cancelled.get() }) { models ->
-            if (activityUsable() && !cancelled.get() && chatModelCancelled === cancelled) {
-                chatModelPicker = chatModelPicker?.let { current ->
-                    val options = models.orEmpty().map { ModelCatalogEntryUi(it.id, it.displayName) }.toMutableList()
-                    if (current.current.isNotBlank() && options.none { it.id == current.current })
-                        options.add(0, ModelCatalogEntryUi(current.current))
-                    current.copy(models = options.distinctBy { it.id }, loading = false,
-                        message = when { models == null -> "获取失败，可刷新重试"; models.isEmpty() -> "服务商没有返回其他模型"; else -> null })
-                }
+        chatModelSession = null; chatModelSettings = null; chatModelSelectionFailed = false
+        chatModelPicker = ChatModelPickerState("", emptyList(), loading = true, enabled = false)
+        lifecycleScope.launch {
+            val (catalog, settings) = withContext(Dispatchers.IO) {
+                runCatching { controller.settings.localModelCatalogSnapshot() } to
+                    runCatching { controller.settings.load() }
             }
+            if (!activityUsable() || retainedPage != "chat" || chatModelOwner !== owner ||
+                cancelled.get() || chatModelCancelled !== cancelled) return@launch
+            val saved = settings.getOrNull()
+            chatModelSettings = saved
+            val snapshot = catalog.getOrNull()
+            val session = snapshot?.let { LocalCatalogChatModelPickerSession(it, saved?.model.orEmpty()) }
+            chatModelSession = session
+            val message = when {
+                catalog.isFailure -> "本地模型目录读取失败，请刷新或到模型设置核对"
+                snapshot == null -> "尚无本地模型目录，请到模型设置保存或导入"
+                saved == null -> "模型凭据或配置不可用；目录仅供查看，请到模型设置修复"
+                else -> session?.state?.message
+            }
+            chatModelPicker = (session?.state ?: ChatModelPickerState(saved?.model.orEmpty(), emptyList()))
+                .copy(loading = false, enabled = saved != null && session != null &&
+                    controller.active == null && !controller.dataBusy && controller.ready, message = message)
         }
-        if (!accepted) chatModelPicker = picker.copy(message = "当前不可查询，请稍后刷新")
     }
-    private fun selectChatModel(id: String, owner: Any?) {
-        if (owner == null || chatModelOwner !== owner) return
+    private fun selectChatModel(
+        ticket: app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>,
+        owner: Any?,
+        session: LocalCatalogChatModelPickerSession,
+    ) {
+        if (owner == null || chatModelOwner !== owner || chatModelSession !== session) return
         val picker = chatModelPicker ?: return
         val saved = chatModelSettings ?: return
         try {
             requireActivityUsable()
-            check(retainedPage == "chat" && controller.ready && controller.active == null && !controller.dataBusy)
-            require(picker.models.any { it.id == id })
-            controller.selectConfiguredModel(saved, id) { success ->
+            check(!chatModelSelectionFailed && picker.enabled && !picker.loading && retainedPage == "chat" && controller.ready &&
+                controller.active == null && !controller.dataBusy)
+            controller.selectConfiguredCatalogModel(saved, ticket) { success ->
                 if (activityUsable()) {
                     if (success) imageHost.configurationChanged()
-                    if (chatModelOwner === owner && retainedPage == "chat") {
+                    if (chatModelOwner === owner && chatModelSession === session && retainedPage == "chat") {
                         if (success) { dismissChatModels(); refresh() }
-                        else chatModelPicker = chatModelPicker?.copy(message = "切换未保存，请关闭后重新选择")
+                        else {
+                            chatModelSelectionFailed = true
+                            chatModelPicker = chatModelPicker?.copy(enabled = false,
+                                message = "切换未保存，请刷新本地目录后重新选择")
+                        }
                     }
                 }
             }
         } catch (_: Exception) {
-            chatModelPicker = picker.copy(message = "切换未保存，请关闭后重新选择")
+            if (chatModelOwner === owner && chatModelSession === session) {
+                chatModelSelectionFailed = true
+                chatModelPicker = picker.copy(enabled = false, message = "切换未保存，请刷新本地目录后重新选择")
+            }
         }
     }
 

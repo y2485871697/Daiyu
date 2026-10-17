@@ -25,8 +25,9 @@ internal interface CatalogRecordCodec<T> {
  * The host must own this instance and route ALL provider edits through [configurationChange].
  * This class does not read/save active ModelSettings, store credentials, or select a model.
  *
- * UUID allocation happens only at explicit host registration/migration [register]. Editing an
- * endpoint does not replace that identity. Deletion is durable; re-registration gets a new UUID.
+ * UUID allocation happens at explicit registration/migration [register] or account replacement
+ * [replaceRegisteredProvider]. A plain [configurationChange] only invalidates the revision.
+ * Deletion is durable; re-registration gets a new UUID.
  * Files for other host slots are not touched. A process monitor AND an OS lock serialize different
  * instances; atomic replacement is mandatory, with no non-atomic fallback. Old encoded records
  * are retained verbatim, so importing never re-encodes/customizes an existing model.
@@ -41,7 +42,7 @@ internal interface CatalogRecordCodec<T> {
 internal class FileSavedModelCatalogPersistence<T>(
     file: File,
     private val codec: CatalogRecordCodec<T>,
-) : SavedModelCatalogPersistence<T> {
+) : SavedModelCatalogPersistence<T>, SavedModelCatalogSelectionPersistence<T> {
     private val file = file.canonicalFile
     private val monitor = monitors.computeIfAbsent(this.file.path) { Any() }
     private data class EncodedModel(val id: String, val name: String, val record: String)
@@ -63,12 +64,57 @@ internal class FileSavedModelCatalogPersistence<T>(
         result
     }
 
-    fun current(): SavedModelCatalogSnapshot<T>? = exclusive {
+    override fun current(): SavedModelCatalogSnapshot<T>? = exclusive {
         readDocument()?.takeIf { it.identity != null }?.let(::snapshot)
     }
 
     override fun read(providerIdentity: String): SavedModelCatalogSnapshot<T>? = exclusive {
         readDocument()?.takeIf { it.identity == providerIdentity }?.let(::snapshot)
+    }
+
+    override fun <R> consumeSelection(
+        selection: CatalogModelSelection<T>,
+        change: (SavedCatalogModel<T>) -> R,
+    ): R = exclusive {
+        val old = readDocument()
+        check(old != null && old.identity == selection.providerIdentity && old.revision == selection.expectedRevision) {
+            "模型目录已变化，请重新打开选择器"
+        }
+        val encoded = old.models.singleOrNull { it.id == selection.record.id }
+        check(encoded != null) { "本地模型已删除" }
+        val record = SavedCatalogModel(encoded.id, encoded.name, codec.decode(encoded.record))
+        check(record == selection.record) { "本地模型记录已变化" }
+        // Invalidate BEFORE host writes, including no-op selection and failed host saves.
+        writeDocument(old.copy(revision = nextRevision(old.revision))) { false }
+        change(record)
+    }
+
+    /**
+     * Host save synchronization, NOT import. Only one record is re-encoded; every other record
+     * remains byte-for-byte intact. update receives the existing local UUID/name when present.
+     * Called inside configurationChange, after the host commit, with host compensation on failure.
+     */
+    fun updateRegisteredModel(id: String, update: (SavedCatalogModel<T>?) -> SavedCatalogModel<T>): Unit = exclusive {
+        val old = readDocument() ?: return@exclusive
+        if (old.identity == null) return@exclusive
+        val previous = old.models.singleOrNull { it.id == id }
+        val decoded = previous?.let { SavedCatalogModel(it.id, it.name, codec.decode(it.record)) }
+        val replacement = update(decoded).also { require(it.id == id) }
+        val encoded = encodeModels(listOf(replacement)).single()
+        if (previous == encoded) return@exclusive
+        val models = if (previous == null) old.models + encoded
+            else old.models.map { if (it.id == id) encoded else it }
+        writeDocument(old.copy(revision = nextRevision(old.revision), models = models)) { false }
+        Unit
+    }
+
+    /** A new connection/account in this host slot must never inherit the old account's records. */
+    fun replaceRegisteredProvider(initialModels: List<SavedCatalogModel<T>>): Unit = exclusive {
+        val old = readDocument() ?: return@exclusive
+        if (old.identity == null) return@exclusive
+        val next = Document(UUID.randomUUID().toString(), nextRevision(old.revision), encodeModels(initialModels))
+        writeDocument(next) { false }
+        Unit
     }
 
     override fun compareAndAppend(
@@ -105,7 +151,8 @@ internal class FileSavedModelCatalogPersistence<T>(
     /**
      * The host wraps save/select/restore (and local model edits) in this same boundary. Invalidate
      * BEFORE invoking the host mutation, so a crash or failed host save cannot revive an old fetch.
-     * A failed host save can conservatively advance the revision, but never changes old models.
+     * This boundary only advances revision; any explicit host record synchronization is separate.
+     * A failed host save can conservatively advance revision without making old tickets valid.
      * No lock inversion: acquire this boundary BEFORE the host's existing configuration lock.
      */
     fun <R> configurationChange(change: () -> R): R = exclusive {

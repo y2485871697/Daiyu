@@ -61,9 +61,10 @@ internal fun ChatModelPicker(
                 useLabelAsPlaceholder = true, singleLine = true,
                 modifier = Modifier.testTag("chat-model-search").fillMaxWidth())
             val status = when {
+                state.loading -> "正在读取模型目录…"
+                state.message != null -> state.message
                 !state.enabled -> "当前任务结束后可切换模型"
-                state.loading -> "正在获取模型…"
-                else -> state.message
+                else -> null
             }
             if (status != null) Text(status, Modifier.padding(vertical = 12.dp),
                 color = colors.onSurfaceVariantSummary, style = MiuixTheme.textStyles.footnote1)
@@ -94,8 +95,8 @@ internal fun ChatModelPicker(
                 Modifier.padding(vertical = 16.dp), color = colors.onSurfaceVariantSummary)
             Row(Modifier.fillMaxWidth().padding(top = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton(text = "模型设置", onClick = onSettings, enabled = state.enabled)
-                TextButton(text = "刷新", onClick = onRefresh, enabled = state.enabled && !state.loading,
+                TextButton(text = "模型设置", onClick = onSettings, enabled = !state.loading)
+                TextButton(text = "刷新", onClick = onRefresh, enabled = !state.loading,
                     modifier = Modifier.testTag("chat-model-refresh"))
                 TextButton(text = "取消", onClick = onDismiss)
             }

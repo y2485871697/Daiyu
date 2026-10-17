@@ -66,6 +66,8 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
     private lateinit var documents: Documents
     private lateinit var activity: MainActivity
     private val calls = AtomicInteger()
+    private lateinit var model: ModelPort
+    private var beforeFactory: () -> Unit = {}
     private val histories = java.util.concurrent.CopyOnWriteArrayList<List<Message>>()
 
     override fun setUp() {
@@ -86,7 +88,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         app = FixtureApplication(base, resolver)
         settings = ModelSettingsStore(app, alias)
         settings.save(ModelSettings("https://example.invalid", "not-in-a-capability-catalog", "fixture-key", false))
-        val model = object : ModelPort {
+        model = object : ModelPort {
             override fun open(history: List<Message>): ModelSession = error("lost image plan")
             override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession {
                 check(images is FrozenMessageImagePlan && images.hasImages)
@@ -100,7 +102,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             }
         }
         controller = ChatController(app, ConversationDatabase(app), settings, app.getSharedPreferences("conversation-ui", 0),
-            { error("text-only factory must not be used") }, { model })
+            { error("text-only factory must not be used") }, { beforeFactory(); model })
         awaitControl("image controller ready") { controller.ready }
         mainThread {
             val application = instrumentation.targetContext.applicationContext as ChatApplication
@@ -147,6 +149,57 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         ui.waitUntil(10_000) { ui.onAllNodesWithTag("dialog-confirm").fetchSemanticsNodes().isNotEmpty() }
         node("dialog-confirm").performClick()
         ui.waitUntil(10_000) { host().authorizationLabel.startsWith("已声明") }
+    }
+
+    fun testPureImageMainSendUsesRealImageDraftAndAcceptsExactlyOnce() {
+        assertDraft("")
+        pick(1); waitImages(1); authorize()
+        val owner = host().session.owner
+        node("chat-send").assertIsEnabled().performClick()
+        // Retained callbacks cannot enqueue a second send while the original is preparing.
+        mainThread { retainedControls(activity).onSend("") }
+        ui.waitUntil(10_000) { !host().sending && calls.get() == 1 && controller.active == null }
+        val conversation = controller.database.conversations().single()
+        assertEquals(owner.conversationId, conversation.id.value)
+        val rows = controller.database.messages(conversation.id).map { it.second }
+        assertEquals(2, rows.size)
+        val user = rows.single { it.role == Message.USER_ROLE }
+        assertEquals(1, user.blocks.size)
+        assertTrue(user.blocks.single() is MessageBlock.Image)
+        assertTrue(host().session.attachments.state.value.items.isEmpty())
+        assertDraft("")
+        node("chat-send").assertIsNotEnabled()
+        assertEquals(1, calls.get())
+    }
+
+    fun testCurrentPageCancelPreparationWinsBeforeCommitAndStaleAttemptCannotCancelNext() {
+        setDraft("取消前的草稿")
+        pick(1); waitImages(1); authorize()
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        beforeFactory = { entered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
+        val session = host().session
+        node("image-host-send").performClick()
+        assertTrue(entered.await(10, TimeUnit.SECONDS))
+        val oldAttempt = checkNotNull(session.attempt)
+        try { node("image-host-cancel").assertIsEnabled().performClick() }
+        finally { release.countDown() }
+        ui.waitUntil(10_000) { !host().sending }
+        assertDraft("取消前的草稿")
+        assertTrue(controller.database.conversations().isEmpty())
+        assertEquals(0, calls.get())
+        assertEquals(1, session.attachments.state.value.ready.size)
+        val nextEntered = CountDownLatch(1); val nextRelease = CountDownLatch(1)
+        beforeFactory = { nextEntered.countDown(); check(nextRelease.await(10, TimeUnit.SECONDS)) }
+        node("image-host-send").performClick()
+        assertTrue(nextEntered.await(10, TimeUnit.SECONDS))
+        try {
+            mainThread {
+                assertNull(host().cancelPreparation(session, oldAttempt))
+                assertFalse(checkNotNull(session.attempt).cancelled)
+            }
+        } finally { nextRelease.countDown() }
+        ui.waitUntil(10_000) { !host().sending && calls.get() == 1 && controller.active == null }
+        assertDraft("")
     }
 
     fun testRealPickerOrderedImportExplicitCapabilitySendAndHistoryRead() {
@@ -206,6 +259,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         assertEquals(before, controller.imageAttachments.store.list(owner))
         assertEquals(0, calls.get())
         node("image-host-send").assertIsNotEnabled()
+        node("chat-send").assertIsNotEnabled()
         mainThread { retainedControls(activity).onSend("不能重发") }
         assertEquals(0, calls.get())
         val revision = host().session.attachments.state.value.draft.revision
@@ -219,6 +273,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         assertEquals(owner, host().session.owner)
         assertTrue(host().session.uncertain)
         node("image-host-send").assertIsNotEnabled()
+        node("chat-send").assertIsNotEnabled()
         mainThread { retainedControls(activity).onSend("不能重发") }
         assertEquals(0, calls.get())
         controller.database.writableDatabase.execSQL("DROP TRIGGER fail_image_host")
@@ -255,10 +310,179 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             queued += android.os.Message.obtain(message)
             true
         }
+        fun discard() = synchronized(queued) { queued.clear(); hold = false }
         fun release() = synchronized(queued) {
             hold = false
             for (message in queued) super.sendMessageAtTime(message, android.os.SystemClock.uptimeMillis())
             queued.clear()
+        }
+    }
+
+    fun testLostReceiptNewControllerAndHostRecoverWithoutRepostOrClearingNewDraft() {
+        setDraft("原进程正文")
+        pick(2); waitImages(2); authorize()
+        val oldHost = host()
+        val owner = oldHost.session.owner
+        val ordered = oldHost.session.attachments.state.value.ready.map { it.attachment.id }
+        val queue = ReceiptQueue()
+        val handlerField = ChatController::class.java.getDeclaredField("handler").apply { isAccessible = true }
+        val oldController = controller
+        val originalHandler = handlerField.get(oldController)
+        handlerField.set(oldController, queue)
+        try {
+            node("chat-send").performClick()
+            val conversationId = ConversationId(owner.conversationId)
+            ui.waitUntil(10_000) { oldController.database.messages(conversationId).size == 2 && calls.get() == 1 && oldController.active == null }
+            val originalIdentity = checkNotNull(oldHost.session.frozen).identity
+            val rows = oldController.database.messages(conversationId)
+            mainThread { activity.finish() }
+            instrumentation.waitForIdleSync()
+            oldController.close()
+            queue.discard() // The old callback is lost, not delivered to the replacement host.
+            handlerField.set(oldController, originalHandler)
+            controller = ChatController(app, ConversationDatabase(app), settings,
+                app.getSharedPreferences("conversation-ui", 0),
+                { error("read-only recovery cannot create text models") },
+                { error("read-only recovery cannot create image models") })
+            awaitControl("replacement controller ready") { controller.ready }
+            mainThread { (instrumentation.targetContext.applicationContext as ChatApplication).controller = controller }
+            activity = startMain()
+            assertTrue(host() !== oldHost)
+            assertEquals(owner, host().session.owner)
+            assertEquals(originalIdentity, checkNotNull(host().session.frozen).identity)
+            assertTrue(host().fenced)
+            setDraft("原进程正文")
+            assertTrue(host().session.editorReplaced)
+            assertTrue(ImageHostDraftStore(controller.preferences).read().single { it.owner == owner }.editorReplaced)
+            val firstRebuiltHost = host()
+            mainThread { activity.finish() }
+            controller.close()
+            controller = ChatController(app, ConversationDatabase(app), settings,
+                app.getSharedPreferences("conversation-ui", 0),
+                { error("second recovery cannot create text models") },
+                { error("second recovery cannot create image models") })
+            awaitControl("second replacement controller ready") { controller.ready }
+            mainThread { (instrumentation.targetContext.applicationContext as ChatApplication).controller = controller }
+            activity = startMain()
+            assertTrue(host() !== firstRebuiltHost)
+            assertTrue(host().session.editorReplaced) // persisted across TWO real Controller/Host rebuilds
+            assertTrue(ImageHostDraftStore(controller.preferences).read().single { it.owner == owner }.editorReplaced)
+            val frozenRevision = checkNotNull(host().session.frozen).revision
+            // Force the documented collision; do not merely assume Activity counters happen to match.
+            val revisionField = MainActivity::class.java.getDeclaredField("draftRevision").apply { isAccessible = true }
+            mainThread { revisionField.setLong(activity, frozenRevision) }
+            assertEquals(frozenRevision, revisionField.getLong(activity))
+            assertEquals(frozenRevision, host().session.attachments.state.value.draft.revision)
+            assertDraft("原进程正文")
+            setSelection(1, 4)
+            mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.ATTACH_IMAGE) }
+            node("image-host-recover").assertIsEnabled().performClick()
+            ui.waitUntil(10_000) { !host().sending && !host().fenced }
+            assertDraft("原进程正文")
+            assertSelection(1, 4)
+            assertEquals("原进程正文", controller.database.draft())
+            assertNull(controller.preferences.getString("selected", null))
+            assertTrue(host().session.attachments.state.value.items.isEmpty())
+            assertEquals(rows, controller.database.messages(conversationId))
+            val user = rows.single { it.second.role == Message.USER_ROLE }.second
+            assertEquals(originalIdentity.userId, user.id)
+            assertEquals(ordered, user.blocks.filterIsInstance<MessageBlock.Image>().map { it.reference.id })
+            assertEquals(1, calls.get()); assertEquals(2, documents.opens.get())
+        } finally {
+            queue.discard()
+            handlerField.set(oldController, originalHandler)
+        }
+    }
+
+    fun testExistingConversationLostReceiptRecoveryThenUneditedPureImageUsesDurableNextOwner() {
+        val conversation = controller.database.create("default")
+        mainThread { activity.select(conversation) }
+        setDraft("已有会话中已接受的正文")
+        pick(1); waitImages(1); authorize()
+        val oldHost = host()
+        val oldOwner = oldHost.session.owner
+        val queue = ReceiptQueue()
+        val handlerField = ChatController::class.java.getDeclaredField("handler").apply { isAccessible = true }
+        val oldController = controller
+        val originalHandler = handlerField.get(oldController)
+        handlerField.set(oldController, queue)
+        try {
+            node("chat-send").performClick()
+            ui.waitUntil(10_000) {
+                oldController.database.messages(conversation.id).size == 2 && calls.get() == 1 && oldController.active == null
+            }
+            val frozen = checkNotNull(oldHost.session.frozen)
+            val originalRows = oldController.database.messages(conversation.id)
+            assertEquals("", oldController.database.conversations().single().draft)
+            mainThread { activity.finish() }
+            oldController.close()
+            queue.discard()
+            handlerField.set(oldController, originalHandler)
+            val recoveryFactories = AtomicInteger()
+            beforeFactory = { recoveryFactories.incrementAndGet(); error("recovery must not prepare or create models") }
+            controller = ChatController(app, ConversationDatabase(app), settings,
+                app.getSharedPreferences("conversation-ui", 0),
+                { error("image-only fixture") }, { beforeFactory(); model })
+            awaitControl("existing conversation replacement ready") { controller.ready }
+            mainThread { (instrumentation.targetContext.applicationContext as ChatApplication).controller = controller }
+            activity = startMain()
+            assertTrue(host() !== oldHost)
+            assertEquals(conversation.id.value, controller.preferences.getString("selected", null))
+            assertEquals(oldOwner, host().session.owner)
+            assertEquals(frozen, host().session.frozen)
+            assertDraft("") // SQLite accepted the text before its callback was lost.
+            val revisionField = MainActivity::class.java.getDeclaredField("draftRevision").apply { isAccessible = true }
+            assertEquals(frozen.revision, revisionField.getLong(activity))
+            node("image-host-recover").performClick()
+            ui.waitUntil(10_000) { !host().sending && !host().fenced }
+            assertDraft("")
+            assertEquals(frozen.revision, revisionField.getLong(activity)) // Main did NOT clear/increment it.
+            assertEquals(conversation.id.value, controller.preferences.getString("selected", null))
+            assertEquals(originalRows, controller.database.messages(conversation.id))
+            assertEquals(1, calls.get()); assertEquals(0, recoveryFactories.get())
+            val successor = host().session.owner
+            assertEquals(oldOwner.conversationId, successor.conversationId)
+            assertFalse(oldOwner.draftId == successor.draftId)
+            assertEquals(1L, host().session.generation)
+            val saved = ImageHostDraftStore(controller.preferences).read().single { it.conversation == conversation.id.value }
+            assertEquals(successor, saved.owner); assertEquals(1L, saved.generation)
+            assertFalse(saved.retired)
+
+            // Another real process-boundary equivalent proves that the successor is durable,
+            // not an Activity-only workaround. Do not edit the empty text before sending.
+            mainThread { activity.finish() }
+            controller.close()
+            beforeFactory = {}
+            controller = ChatController(app, ConversationDatabase(app), settings,
+                app.getSharedPreferences("conversation-ui", 0),
+                { error("image-only fixture") }, { beforeFactory(); model })
+            awaitControl("successor controller ready") { controller.ready }
+            mainThread { (instrumentation.targetContext.applicationContext as ChatApplication).controller = controller }
+            activity = startMain()
+            assertDraft("")
+            assertEquals(successor, host().session.owner)
+            assertEquals(frozen.revision, revisionField.getLong(activity))
+            pick(1); waitImages(1); authorize()
+            val newImage = host().session.attachments.state.value.ready.single().attachment
+            node("chat-send").performClick()
+            ui.waitUntil(10_000) { !host().sending && controller.active == null && calls.get() == 2 }
+            assertFalse(host().fenced)
+            assertDraft("")
+            val rows = controller.database.messages(conversation.id)
+            assertEquals(4, rows.size)
+            assertEquals(originalRows, rows.take(2))
+            val users = rows.map { it.second }.filter { it.role == Message.USER_ROLE }
+            assertEquals(2, users.size)
+            assertEquals(frozen.identity.userId, users.first().id)
+            assertFalse(frozen.identity.userId == users.last().id)
+            assertTrue(users.last().blocks.single() is MessageBlock.Image)
+            assertEquals(newImage.id, (users.last().blocks.single() as MessageBlock.Image).reference.id)
+            assertEquals(2, documents.opens.get())
+            assertEquals(2L, host().session.generation)
+            assertEquals(conversation.id.value, controller.preferences.getString("selected", null))
+        } finally {
+            queue.discard()
+            handlerField.set(oldController, originalHandler)
         }
     }
 
@@ -339,6 +563,10 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             node("image-host-send").performClick()
             ui.waitUntil(10_000) { controller.database.messages(conversation.id).size == 2 }
             assertTrue(host().sending)
+            node("image-host-cancel").assertIsEnabled().performClick()
+            assertTrue(host().sending) // No fabricated Rejected/Cancelled receipt after the gate.
+            assertFalse(checkNotNull(host().session.attempt).cancelled)
+            assertDraft("仅发送一次")
             val other = controller.database.create()
             mainThread {
                 // Leaving cancels the handle, but DB beginCommit has already won.

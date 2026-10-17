@@ -609,7 +609,7 @@ class MainActivity : ComponentActivity() {
         set(value) {
             // Opening revokes even without a visit; closing cannot revive clicks rendered behind it.
             if (value != sidebarVisibleState) revokeContextManagementEntry()
-            if (value && !sidebarVisibleState) { stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor() }
+            if (value && !sidebarVisibleState) { stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor() }
             sidebarVisibleState = value
         }
     private class ContextManagementVisit(val owner: ContextManagementOwner,
@@ -731,12 +731,12 @@ class MainActivity : ComponentActivity() {
     }
     private var editorGeneration = 0L
         set(value) {
-            if (field != value) { revokeContextManagementEntry(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private var draftRevision = 0L
         set(value) {
-            if (field != value) { messageActionHost.invalidate(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { cancelGenerationEditor(); messageActionHost.invalidate(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private data class PendingTextSend(val owner: ChatController.TextSendOwner, val text: String,
@@ -776,6 +776,87 @@ class MainActivity : ComponentActivity() {
     private var generationForm by mutableStateOf(app.daiyu.android.ui.GenerationApprovalForm())
     private var generationFormRevision by mutableStateOf(0L)
     private var generationRequest: Any? = null
+    private var generationVisit: Any? = null
+    private var generationInputPending by mutableStateOf(false)
+    private val generationInputsDelegate = lazy {
+        // A blocked provider must not retain this Activity across recreation.
+        val resolver = applicationContext.contentResolver
+        GenerationInputHost(current = ::generationInputIdentity,
+            read = { source, request ->
+                val cancellation = android.os.CancellationSignal()
+                request.onCancel { cancellation.cancel() }
+                try {
+                    GenerationInputImport.read(source, open = {
+                        val uri = Uri.parse(source)
+                        check(uri.scheme == "content")
+                        cancellation.throwIfCanceled()
+                        val descriptor = resolver.openAssetFileDescriptor(uri, "r", cancellation)
+                            ?: error("generation_input_unavailable")
+                        val stream = try { descriptor.createInputStream() }
+                        catch (failure: Exception) { descriptor.close(); throw failure }
+                        // Registration also closes a stream returned AFTER logical cancellation.
+                        request.onCancel { stream.close() }
+                        stream
+                    }, inspector = app.daiyu.android.media.AndroidImageInspector(),
+                        protocol = request.protocol, target = request.target, reference = request.reference,
+                        cancelled = { request.cancelled.get() || Thread.currentThread().isInterrupted })
+                } finally { request.clearCancellation() }
+            }, dispatch = { action -> runOnUiThread { action() } },
+            changed = { generationInputPending = it }, finished = { request, result ->
+                if (generationInputIdentity() == request.identity && generationResumed()) {
+                    result.fold(onSuccess = { input ->
+                        val replacedMask = request.target == GenerationInputTarget.REFERENCE && generationForm.mask != null
+                        generationForm = if (request.target == GenerationInputTarget.REFERENCE)
+                            generationForm.copy(references = listOf(input), mask = null)
+                        else generationForm.copy(mask = input)
+                        generationFormRevision++
+                        if (replacedMask) toast("原图已更新；旧 mask 已移除，请重新选择同尺寸 mask 并完整预览")
+                    }, onFailure = { toast("原图或 mask 无效、过大或不可读取；未发送请求，表单保留") })
+                }
+            })
+    }
+    private val generationInputs get() = generationInputsDelegate.value
+    private val generationInputPicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (generationInputsDelegate.isInitialized()) {
+            generationInputs.deliver(uri?.toString())
+            if (generationResumed()) generationInputs.resume()
+        }
+    }
+
+    private fun generationResumed() = activityUsable() &&
+        lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+
+    private fun generationInputIdentity(): GenerationInputIdentity? {
+        val entry = generationApproval ?: return null
+        val visit = generationVisit ?: return null
+        val profile = generationForm.profileId ?: return null
+        if (entry.submitted || entry.abandoned || controller.currentGenerationEntry() !== entry ||
+            retainedPage != "chat" || sidebarVisible || !selectionReady ||
+            selected?.id != entry.conversation?.id || editorGeneration != entry.editorGeneration ||
+            draftRevision != entry.initialEditor.revision || draft != entry.initialEditor.text ||
+            imageHost.hasAttachments || videoHost.state.items.isNotEmpty() || pendingTextSend != null) return null
+        return GenerationInputIdentity(entry, visit, selected?.id?.value, editorGeneration,
+            draftRevision, draft, generationFormRevision, profile,
+            GenerationFormInputs.ids(generationForm.references, generationForm.mask))
+    }
+
+    private fun pickGenerationInput(target: GenerationInputTarget) {
+        if (!generationResumed() || generationInputPending) return
+        val identity = generationInputIdentity() ?: return toast("请先选择本次生成专用配置")
+        val entry = generationApproval ?: return
+        val protocol = entry.settings.profiles.singleOrNull { it.id == identity.profileId }?.protocol ?: return
+        generationInputs.resume()
+        // Opening/cancelling a selection also invalidates any retained old preview callback.
+        generationFormRevision++
+        val frozen = generationInputIdentity() ?: return
+        val request = generationInputs.begin(frozen, protocol, target, generationForm.references.singleOrNull())
+            ?: return toast("此协议不支持该输入，或已有选择尚未结束；未发送请求")
+        try { generationInputPicker.launch(if (protocol == app.daiyu.android.model.generation.GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART) "image/png" else "image/*") }
+        catch (_: Exception) { generationInputs.launchFailed(request); toast("无法打开图片选择器；表单保留") }
+    }
+
+    private fun generationFormEditor() = GenerationEditorSnapshot(generationFormRevision, draft,
+        GenerationFormInputs.ids(generationForm.references, generationForm.mask))
     private var generationOutputs by mutableStateOf<List<ChatController.GenerationAssetDisplay>?>(null)
     private var historicalGenerationOutputs by mutableStateOf<List<ChatController.HistoricalGenerationAssetDisplay>?>(null)
     private var pendingHistoricalOriginal: app.daiyu.android.backup.HistoricalGenerationOutput? = null
@@ -1970,6 +2051,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun cancelGenerationEditor() {
+        if (generationInputsDelegate.isInitialized()) generationInputs.invalidate()
+        generationVisit = null
         generationRequest = null
         val entry = generationApproval
         generationApproval = null
@@ -2000,6 +2083,7 @@ class MainActivity : ComponentActivity() {
                     revision == draftRevision && text == draft && conversation?.id == selected?.id &&
                     retainedPage == "chat" && !sidebarVisible && !imageHost.hasAttachments && videoHost.state.items.isEmpty()) {
                     generationApproval = entry
+                    generationVisit = Any()
                     generationForm = app.daiyu.android.ui.GenerationApprovalForm(prompt = text,
                         maxPolls = entry?.settings?.maxPolls?.toString() ?: "4")
                     generationFormRevision = revision
@@ -2020,27 +2104,31 @@ class MainActivity : ComponentActivity() {
                     Column(Modifier.fillMaxWidth().heightIn(max = 620.dp)
                         .verticalScroll(rememberScrollState()).padding(16.dp)) {
                         androidx.compose.material3.Text(ControllerGenerationResources.DOWNLOAD_STATUS)
-                        androidx.compose.material3.Text("当前入口仅支持文本生成；原图和 mask 的安全导入尚未接线。生成配置保存不会启动请求。")
-                        app.daiyu.android.ui.GenerationApprovalHost(
+                        androidx.compose.material3.Text("原图 / mask 仅本地导入原字节（最多20MiB）；选择文件或保存配置不会发送请求。")
+                        if (generationInputPending) {
+                            androidx.compose.material3.Text("正在选择或校验输入；本次没有可执行的付费确认，请返回后重新完整预览。")
+                        } else app.daiyu.android.ui.GenerationApprovalHost(
                             identity = entry.identity,
-                            editor = GenerationEditorSnapshot(generationFormRevision, draft),
+                            editor = generationFormEditor(),
                             profiles = entry.settings.profiles,
                             downloads = entry.settings.downloads,
                             form = generationForm,
                             confirmationHandoff = entry.handoff,
                             onFormChange = { value ->
-                                if (!entry.submitted) { generationForm = value; generationFormRevision++ }
+                                if (!entry.submitted && generationResumed()) {
+                                    if (generationInputsDelegate.isInitialized()) generationInputs.invalidate()
+                                    generationForm = value; generationFormRevision++
+                                }
                             },
-                            onPickReference = { toast("此入口尚不支持安全导入原图；未修改草稿或发送请求") },
-                            onPickMask = { toast("此入口尚不支持安全导入 mask；未修改草稿或发送请求") },
+                            onPickReference = { pickGenerationInput(GenerationInputTarget.REFERENCE) },
+                            onPickMask = { pickGenerationInput(GenerationInputTarget.MASK) },
                             onConfirmed = {
-                                val valid = activityUsable() && generationApproval === entry &&
-                                    selected?.id == entry.conversation?.id && editorGeneration == entry.editorGeneration &&
-                                    draftRevision == entry.initialEditor.revision && draft == entry.initialEditor.text &&
-                                    !imageHost.hasAttachments && videoHost.state.items.isEmpty()
-                                val accepted = valid && controller.sendGeneration(entry,
-                                    GenerationEditorSnapshot(generationFormRevision, draft))
+                                val valid = generationResumed() && !generationInputPending &&
+                                    generationInputIdentity()?.entry === entry
+                                val accepted = valid && controller.sendGeneration(entry, generationFormEditor())
+                                generationVisit = null
                                 generationApproval = null
+                                if (!accepted) controller.abandonGeneration(entry)
                                 if (accepted) publishChat()
                                 else toast("本次生成未受理；草稿保留，请等待清理后重新预览")
                                 accepted
@@ -2397,10 +2485,10 @@ class MainActivity : ComponentActivity() {
         else virtualDisplayRequest = null
     }
 
-    private fun cancelBrowserEditor() {
+    private fun cancelBrowserEditor(preserveGenerationSelection: Boolean = false) {
         cancelTerminalEditor()
         cancelVirtualDisplayEditor()
-        cancelGenerationEditor()
+        if (!preserveGenerationSelection) cancelGenerationEditor()
         cancelGenerationOutputs()
         browserRequest = null
         browserPreparing = false
@@ -2741,6 +2829,13 @@ class MainActivity : ComponentActivity() {
         if (previousPreferredRefreshRate == null) previousPreferredRefreshRate = attributes.preferredRefreshRate
         requestedPreferredRefreshRate = rate; attributes.preferredRefreshRate = rate; window.attributes = attributes
     }
+    override fun onPostResume() {
+        super.onPostResume()
+        // ActivityResult can arrive before RESUMED. Do not open a provider until then.
+        window.decorView.post {
+            if (generationResumed() && generationInputsDelegate.isInitialized()) generationInputs.resume()
+        }
+    }
     override fun onPause() {
         controller.invalidateVideo(videoUi)
         videoDialog?.dismiss(); videoDialog = null
@@ -2753,7 +2848,10 @@ class MainActivity : ComponentActivity() {
         dictationHost.invalidate()
         offlineHost.invalidate()
         cancelShizukuEditor()
-        cancelBrowserEditor()
+        // Exempt ONLY the exact first external-picker hop. The approval UI is unmounted;
+        // all unrelated editors still revoke, and worker/background pauses cannot resume it.
+        val selectionOnly = generationInputsDelegate.isInitialized() && generationInputs.pause()
+        cancelBrowserEditor(preserveGenerationSelection = selectionOnly)
         speechHost.setForeground(false)
         refreshRateWindowResumed = false; window.decorView.removeCallbacks(refreshRateRequest)
         val previous = previousPreferredRefreshRate
@@ -2816,6 +2914,7 @@ class MainActivity : ComponentActivity() {
         interactiveModeObservation = null
         cancelShizukuEditor()
         cancelBrowserEditor()
+        if (generationInputsDelegate.isInitialized()) generationInputs.close()
         imageHost.close()
         speechHost.close()
         activityCallbacksAllowed = false; refreshRateWindowResumed = false

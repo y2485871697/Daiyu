@@ -65,7 +65,7 @@ class SessionGatewayMainSettingsTest : WiredActivityTestCase() {
         lateinit var owner: ModelSettingsSaveOwner
         lateinit var draft: SessionGatewayRule
         mainThread { owner = hostField("gatewayOwner") as ModelSettingsSaveOwner; draft = hostField("gatewayDraft") as SessionGatewayRule }
-        backToChat(activity) // gateway -> settings; revokes the visit even if later reopened.
+        backToPage(activity, "page:设置") // gateway -> settings; revokes the visit even if later reopened.
         mainThread { staleSave(owner, draft) }
         assertEquals(before, fixture.settings.load())
         node("open-session-gateway").performClick()

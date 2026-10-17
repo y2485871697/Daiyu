@@ -94,7 +94,7 @@ class ActivityTest : WiredActivityTestCase() {
         setDraft(unattached); setSelection(2, 4); node("chat-send").performClick()
         awaitTextSendResult(activity)
         assertDraft(unattached); assertSelection(2, 4); assertTrue(fixture.database.conversations().isEmpty())
-        val a = fixture.database.create(); val b = fixture.database.create()
+        val a = fixture.database.create("default"); val b = fixture.database.create("default")
         mainThread { activity.select(a) }; setDraft("A草稿"); setSelection(1, 2)
         val firstAEditor = retainedControls(activity)
         mainThread { activity.select(b) }; setDraft(" B草稿\n "); setSelection(0, 1)

@@ -107,10 +107,8 @@ class TerminalJobHistoryActivityTest : WiredActivityTestCase() {
         val (conversation, _) = seedHistory("paused history must not publish")
         val old = open(conversation)
         val record = (property(old, "getHistory") as List<TerminalJobHistoryReader.Record>).single()
-        mainThread {
-            invoke("terminalHistoryPage", old, record, 0L)
-            instrumentation.callActivityOnPause(activity)
-            instrumentation.callActivityOnResume(activity)
+        realPauseResume(activity, beforePause = { invoke("terminalHistoryPage", old, record, 0L) }) {
+            assertNull(invoke("getTerminalJobsVisit"))
         }
         awaitControl("paused history worker returned") { property(old, "getBusy") == false }
         assertEquals("", property(old, "getOutput"))

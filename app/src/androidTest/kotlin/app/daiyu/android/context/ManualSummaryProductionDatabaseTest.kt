@@ -203,7 +203,14 @@ class ManualSummaryProductionDatabaseTest : InstrumentationTestCase() {
             rejected { retained.observe(ModelEvent.Usage(8, 3, 0)) }
         })
         val worker = worker(wire)
-        rejected { worker.compress(lease, worker.snapshot(lease)) }
+        assertFalse("runner thread was already interrupted", Thread.currentThread().isInterrupted)
+        try {
+            rejected { worker.compress(lease, worker.snapshot(lease)) }
+            assertTrue("cancelled worker must preserve its interrupt", Thread.currentThread().isInterrupted)
+        } finally {
+            // This fixture ran the worker on the runner thread; consume only its deliberate interrupt.
+            Thread.interrupted()
+        }
         assertEquals("CANCELLED", text("SELECT terminal_reason FROM context_usage"))
         assertEquals(ModelEvent.Usage(8, 3, 0), read().requests.single().snapshot)
         assertEquals(1, wire.posts); assertTrue(wire.disconnected)

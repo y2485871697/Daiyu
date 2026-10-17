@@ -75,8 +75,10 @@ class ProviderModelSelectionDialogTest : WiredActivityTestCase() {
         node("provider-model-search").performTextReplacement("")
         node("provider-model-option:alpha").assertIsOn()
         node("provider-model-option:beta").assertIsOff()
-        node("dialog-confirm").performClick()
+        androidx.test.espresso.Espresso.closeSoftKeyboard()
+        node("dialog-confirm").assertIsEnabled().assertIsDisplayed().performClick()
         ui.runOnIdle {
+            assertEquals("one real confirmation callback", 1, confirmations.size)
             val result = confirmations.single()
             assertEquals(setOf("alpha"), result.selectedIds)
             assertEquals("host-provider", result.providerIdentity)

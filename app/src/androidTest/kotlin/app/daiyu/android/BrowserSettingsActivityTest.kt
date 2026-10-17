@@ -56,7 +56,7 @@ class BrowserSettingsActivityTest : WiredActivityTestCase() {
         enterFromSettings()
         val old = currentOwner()
         assertTrue(old.isActive)
-        backToChat(activity)
+        backToPage(activity, "page:设置")
         node("page:设置").assertExists()
         assertFalse(old.isActive)
         reveal("settings-row:工具", "设置").performClick()

@@ -63,7 +63,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
             reveal("settings-row:$title", "关于").performClick(); node("page:关于").assertExists()
             assertUnchanged()
         }
-        backToChat(activity); node("page:设置").assertExists()
+        backToPage(activity, "page:设置"); node("page:设置").assertExists()
         backToChat(activity); assertDraft("Gemini UI 草稿")
     }
     fun testConnectedModelEntryOpensTheExistingSettingsWithoutSaving() {
@@ -84,7 +84,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         assertNull(fixture.controller.active)
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(chatSettings, fixture.settings.loadForEditing().settings)
-        backToChat(activity); node("page:设置").assertExists()
+        backToPage(activity, "page:设置"); node("page:设置").assertExists()
         backToChat(activity); assertDraft("独立生成设置保留草稿")
     }
     fun testTaskSurfaceSearchAndCategoryOpenRealLocalPageWithoutSendingOrSaving() {
@@ -98,13 +98,13 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         node("settings-radio:前台执行").assertExists()
         node("settings-radio:后台执行").assertExists()
         node("settings-radio:每次运行询问").assertExists()
-        backToChat(activity); node("page:设置").assertExists()
+        backToPage(activity, "page:设置"); node("page:设置").assertExists()
         reveal("settings-search", "设置").performTextReplacement("")
         reveal("settings-row:工具", "设置").performClick()
         reveal("settings-row:Agent任务偏好", "工具").performClick()
         node("page:Agent任务偏好").assertExists()
-        backToChat(activity); node("page:工具").assertExists()
-        backToChat(activity); node("page:设置").assertExists()
+        backToPage(activity, "page:工具"); node("page:工具").assertExists()
+        backToPage(activity, "page:设置"); node("page:设置").assertExists()
         backToChat(activity); assertDraft("任务位置设置保留草稿")
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(settings, fixture.settings.loadForEditing().settings)
@@ -157,7 +157,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
             assertEquals(owner.id, fixture.controller.active!!.id)
             assertFalse(fixture.controller.runState(owner)!!.pauseRequested)
             assertEquals(1L, session.cancelled.count); assertEquals(1, fixture.opens.get())
-            backToChat(activity); node("page:设置").assertExists()
+            backToPage(activity, "page:设置"); node("page:设置").assertExists()
             backToChat(activity); assertDraft("保留追加草稿")
         } finally { session.release.countDown() }
         awaitControl("original finishes") { fixture.controller.active == null }; assertEquals(1, fixture.opens.get())

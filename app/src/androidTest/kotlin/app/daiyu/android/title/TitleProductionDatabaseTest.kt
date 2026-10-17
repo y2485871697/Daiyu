@@ -35,9 +35,11 @@ class TitleProductionDatabaseTest : InstrumentationTestCase() {
         super.tearDown()
     }
     private fun seed(): ConversationId {
-        val id = database.create().id
-        database.save(Message(MessageId("u-${id.value}"), id, run, "user", listOf(MessageBlock.Text("u", "synthetic question")), RunStatus.COMPLETED))
-        database.save(Message(MessageId("a-${id.value}"), id, run, "assistant", listOf(MessageBlock.Text("a", "synthetic answer")), RunStatus.COMPLETED))
+        val id = database.create(database.selectedAssistantId()).id
+        val user = Message(MessageId("u-${id.value}"), id, run, "user", listOf(MessageBlock.Text("u", "synthetic question")), RunStatus.COMPLETED)
+        val assistant = Message(MessageId("a-${id.value}"), id, run, "assistant", listOf(MessageBlock.Text("a", "synthetic answer")), RunStatus.RUNNING)
+        database.send(user, assistant)
+        database.save(assistant.copy(status = RunStatus.COMPLETED))
         return id
     }
     private fun adapter() = SqliteTitleCommitAdapter({ database.writableDatabase }, ParentTitleUsagePort { sql, r ->

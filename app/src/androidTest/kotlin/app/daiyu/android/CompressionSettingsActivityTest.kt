@@ -57,7 +57,7 @@ class CompressionSettingsActivityTest : WiredActivityTestCase() {
     fun testReturnRevokesOldPageAndReentryUsesNewOwner() {
         enter()
         val old = owner()
-        backToChat(activity)
+        backToPage(activity, "page:设置")
         node("page:设置").assertExists()
         assertNull(old.prepareLoad())
         reveal("settings-row:模型功能", "设置").performClick()

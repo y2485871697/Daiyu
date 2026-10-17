@@ -31,7 +31,7 @@ class TitleModelSettingsActivityTest : WiredActivityTestCase() {
     }
     fun testLeavingAndRecreatingPermanentlyRevokesVisitWithoutRestoringKeyDraft() {
         enter(); val first = owner()
-        backToChat(activity)
+        backToPage(activity, "page:设置")
         assertNull(first.prepareLoad())
         reveal("settings-row:模型功能", "设置").performClick()
         reveal("settings-row:标题模型", "模型功能").performClick()

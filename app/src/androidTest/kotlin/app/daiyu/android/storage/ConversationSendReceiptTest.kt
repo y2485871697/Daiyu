@@ -187,7 +187,7 @@ class ConversationSendReceiptTest : android.test.AndroidTestCase() {
     fun testPositiveInsertReceiptsCannotHideDeletedUserRow() {
         failureAndRetry(false,
             "AFTER INSERT ON messages WHEN NEW.role='assistant' BEGIN " +
-                "DELETE FROM messages WHERE conversation_id=NEW.conversation_id AND run_id=NEW.run_id AND role='user'; END")
+                "DELETE FROM messages WHERE conversation_id=NEW.conversation_id AND run_id=NEW.run_id AND role='user'; END", sqliteException = true)
     }
 
     fun testPositiveInsertReceiptMustStillBelongToRequestedRun() {

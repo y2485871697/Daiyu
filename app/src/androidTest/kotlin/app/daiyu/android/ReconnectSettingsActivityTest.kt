@@ -57,7 +57,7 @@ class ReconnectSettingsActivityTest : WiredActivityTestCase() {
         enter()
         val old = owner()
         assertTrue(old.isActive)
-        backToChat(activity)
+        backToPage(activity, "page:设置")
         node("page:设置").assertExists()
         assertFalse(old.isActive)
         reveal("settings-row:模型功能", "设置").performClick()

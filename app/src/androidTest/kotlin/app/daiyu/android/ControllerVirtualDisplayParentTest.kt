@@ -6,6 +6,7 @@ import android.test.InstrumentationTestCase
 import app.daiyu.android.domain.*
 import app.daiyu.android.integration.tools.*
 import app.daiyu.android.storage.*
+import app.daiyu.android.tasksurface.*
 import app.daiyu.android.vd.*
 import app.daiyu.android.vd.runtime.OwnerV2Contract
 import java.io.IOException
@@ -73,12 +74,14 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
     private inner class Fixture(val failRelease: Boolean = false, val late: Boolean = false,
                                 val executeStart: Boolean = false, val throwAfterRetain: Boolean = false,
                                 val askUser: Boolean = false, val initializedCleanup: Boolean = false,
-                                val loseCleanupReply: Boolean = false, val holdRunnerOnCancel: Boolean = false) {
+                                val loseCleanupReply: Boolean = false, val holdRunnerOnCancel: Boolean = false,
+                                val locationPreference: TaskSurfacePreference = TaskSurfacePreference.BACKGROUND) {
         val id = UUID.randomUUID().toString()
         val app = App(testContext(instrumentation.targetContext, "vd-parent-$id-"))
         val database = ConversationDatabase(app)
         val alias = "app.daiyu.android.test.vd.$id"
         val settings = ModelSettingsStore(app, alias)
+        val taskSurfaces = isolatedTaskSurfaceStore(locationPreference)
         val host = Host(initializedCleanup, loseCleanupReply)
         val root = app.cacheDir.canonicalFile.toPath().resolve("vd-parent-leases-$id")
         val gate = Semaphore(1)
@@ -125,7 +128,7 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
                         }
                     }
                 }
-            }, virtualDisplayFactory = ControllerVirtualDisplayFactory { _, owner, caps, writes, reads, parent, retention ->
+            }, taskSurfaceStore = taskSurfaces, virtualDisplayFactory = ControllerVirtualDisplayFactory { _, owner, caps, writes, reads, parent, retention ->
                 allocations.incrementAndGet()
                 factoryEntered.countDown()
                 check(factoryRelease.await(10, TimeUnit.SECONDS))
@@ -155,6 +158,23 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
                     listOf(R08VirtualDisplayRead("status")))))
                 assertNull(entry.get().session)
                 assertEquals(0, allocations.get())
+                assertFalse("direct send before frozen location cannot reach DB/model/factory",
+                    controller.sendVirtualDisplay(entry.get(), ticket) { error("unprepared callback") })
+            }
+            val location = entry.get().taskSurface
+            val decision = location.freezeOnWorker()
+            if (locationPreference == TaskSurfacePreference.ASK) {
+                assertSame(TaskSurfaceDecision.AskRequired, decision)
+                val adapter = checkNotNull(location.adapter)
+                val question = checkNotNull(adapter.askFromUser(location.request))
+                assertSame(entry.get(), location.request.owner)
+                assertNull(entry.get().owner); assertNull(entry.get().session)
+                assertEquals(1, gate.availablePermits()); assertEquals(0, allocations.get()); assertEquals(0, opens.get())
+                assertTrue(database.conversations().isEmpty())
+                assertTrue(adapter.answerFromUser(location.request, question, TaskSurface.BACKGROUND))
+            }
+            assertEquals(TaskSurface.BACKGROUND, location.ready(TaskSurface.BACKGROUND)?.surface)
+            controlMain {
                 assertTrue(controller.sendVirtualDisplay(entry.get(), ticket) {
                     receipt.set(it); receiptReady.countDown()
                 })
@@ -175,6 +195,26 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
             java.util.Collections.list(keys.aliases()).filter { it == alias || it.startsWith("$alias.") }
                 .forEach { keys.deleteEntry(it) }
         }
+    }
+
+    fun testLocationAnswerRetainsOriginalEntryAndDoesNotApproveWholePlan() {
+        val f = Fixture(locationPreference = TaskSurfacePreference.ASK)
+        try {
+            val entry = f.submit()
+            val adapter = entry.taskSurface.adapter
+            val request = f.approval(entry)
+            assertSame(entry, entry.taskSurface.request.owner)
+            assertSame(entry.owner, request.plan.owner)
+            assertNull(entry.authorization) // location choice is not the independent exact-plan grant
+            assertEquals(0, f.opens.get()); assertEquals(0, f.host.starts.get())
+            check(f.taskSurfaces.save(TaskSurfacePreference.FOREGROUND))
+            assertSame(adapter, entry.taskSurface.adapter)
+            assertEquals(TaskSurface.BACKGROUND, entry.taskSurface.ready(TaskSurface.BACKGROUND)?.surface)
+            controlMain { f.controller.cancelVirtualDisplay(entry) }
+            awaitControl("original location run ends only after catalog drain") { f.controller.virtualDisplayEntry() == null }
+            assertTrue(entry.taskSurface.decision() is TaskSurfaceDecision.NotExecuted)
+            assertEquals(1, f.gate.availablePermits())
+        } finally { f.dispose() }
     }
 
     fun testAcceptedCancellationKeepsReceiptAndReleasesOnlyAfterObservedDrain() {

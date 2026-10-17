@@ -22,6 +22,9 @@ data class ProviderRequestOptions(
         if (customBody.isNotEmpty()) {
             val body = parseBody()
             require(body.keys().asSequence().none { it in OWNED_FIELDS }) { "自定义请求体不能覆盖会话协议字段" }
+            if (protocol == ProviderProtocol.GEMINI) require(body.keys().asSequence().all { it in setOf("generationConfig", "safetySettings") }) {
+                "Gemini 自定义请求体仅支持 generationConfig 与 safetySettings"
+            }
             validateBodyOptions(body, protocol)
         }
         require(protocol == ProviderProtocol.RESPONSES || (speedMode == null && !codex)) {
@@ -36,8 +39,10 @@ data class ProviderRequestOptions(
         val merged = if (customBody.isEmpty()) base else RequestBodyMerge.merge(base, parseBody())
         if (protocol == ProviderProtocol.RESPONSES) GptServiceTier.apply(merged, speedMode, codex)
         validateBodyOptions(merged, protocol)
-        require(merged.has("model")) { "请求模型无效" }
-        require(merged.opt("stream") == true) { "请求必须使用流式响应" }
+        if (protocol != ProviderProtocol.GEMINI) {
+            require(merged.has("model")) { "请求模型无效" }
+            require(merged.opt("stream") == true) { "请求必须使用流式响应" }
+        }
         when (protocol) {
             ProviderProtocol.RESPONSES -> require(merged.opt("input") is JSONArray || merged.opt("input") is String) { "Responses 输入无效" }
             ProviderProtocol.MESSAGES -> {
@@ -45,6 +50,8 @@ data class ProviderRequestOptions(
                 val tokens = merged.opt("max_tokens")
                 require(tokens is Int && tokens > 0) { "Messages 输出上限无效" }
             }
+            ProviderProtocol.CHAT_COMPLETIONS -> require(merged.opt("messages") is JSONArray) { "Chat Completions 输入无效" }
+            ProviderProtocol.GEMINI -> require(merged.opt("contents") is JSONArray) { "Gemini 输入无效" }
             ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(protocol.wireName)
         }
         MessagesRequest.validateObject(merged, MessagesRequest.MAX_JSON_CONTAINER_DEPTH)
@@ -53,6 +60,16 @@ data class ProviderRequestOptions(
 
     /** Validate explicit options before persistence and again after merging. Never coerce JSON types. */
     private fun validateBodyOptions(body: JSONObject, protocol: ProviderProtocol) {
+        if (protocol == ProviderProtocol.GEMINI) {
+            require(!body.has("model") && !body.has("messages") && !body.has("stream")) { "Gemini 模型与流式选择由请求地址确定" }
+            if (body.has("generationConfig")) {
+                val config = body.opt("generationConfig")
+                require(config is JSONObject) { "Gemini generationConfig 必须为 JSON 对象" }
+                require(!config.has("thinkingConfig")) { "当前 Gemini 不支持 generationConfig.thinkingConfig；不会映射推理设置" }
+                require(!config.has("candidateCount") || config.opt("candidateCount") == 1) { "当前仅支持一个 Gemini 候选" }
+            }
+        }
+        if (protocol == ProviderProtocol.CHAT_COMPLETIONS && body.has("n")) require(body.opt("n") == 1) { "当前仅支持一个回复候选" }
         if (body.has("model")) {
             val model = body.opt("model") as? String
             require(model != null && model.isNotBlank() && model.length <= 200) { "请求模型无效" }
@@ -73,6 +90,8 @@ data class ProviderRequestOptions(
                 ProviderProtocol.MESSAGES -> require(tier is String && tier in setOf("auto", "standard_only")) {
                     "Messages 服务档位无效"
                 }
+                ProviderProtocol.CHAT_COMPLETIONS -> require(tier is String && tier.isNotBlank()) { "服务档位无效" }
+                ProviderProtocol.GEMINI -> throw IllegalArgumentException("Gemini 不支持 service_tier")
                 ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(protocol.wireName)
             }
         }
@@ -93,7 +112,8 @@ data class ProviderRequestOptions(
         private const val MAX_BODY_DEPTH = 64
         // History, advertised tools, and continuation state must match the local runner.
         private val OWNED_FIELDS = setOf("input", "messages", "tools", "stream", "store", "include",
-            "previous_response_id", "conversation", "background", "tool_choice", "parallel_tool_calls")
+            "previous_response_id", "conversation", "background", "tool_choice", "parallel_tool_calls",
+            "contents", "systemInstruction", "toolConfig", "stream_options", "candidateCount")
 
         internal fun decode(raw: String?): ProviderRequestOptions {
             if (raw == null) return ProviderRequestOptions()

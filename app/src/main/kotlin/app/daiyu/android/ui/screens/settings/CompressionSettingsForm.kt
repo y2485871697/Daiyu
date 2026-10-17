@@ -49,7 +49,7 @@ internal data class CompressionSettingsDraftUi(
 
     fun selectProtocol(protocol: ProviderProtocol): CompressionSettingsDraftUi =
         if (protocol == provider.protocol) this else copy(provider = provider.copy(protocol = protocol,
-            apiKey = "", responsesPath = if (protocol == ProviderProtocol.MESSAGES) "" else provider.responsesPath),
+            apiKey = "", responsesPath = if (protocol != ProviderProtocol.RESPONSES) "" else provider.responsesPath),
             protocolChangeAuthorized = false)
 
     override fun toString(): String = "CompressionSettingsDraftUi(binding=$binding, automatic=$automatic, provider=<redacted>)"

@@ -7,6 +7,8 @@ import java.util.Collections
 enum class ProviderProtocol(val wireName: String) {
     RESPONSES("responses"),
     MESSAGES("messages"),
+    CHAT_COMPLETIONS("chat_completions"),
+    GEMINI("gemini"),
     UNKNOWN("unknown")
 }
 

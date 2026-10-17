@@ -77,6 +77,22 @@ class ReasoningClosureTest : InstrumentationTestCase() {
         protocol = protocol)
     private fun preference(context: android.content.Context) = ConversationReasoningPreference(context.getSharedPreferences("conversation-ui", 0))
 
+    fun testResponsesGatewayCannotInjectReasoningAfterValidation() {
+        for (field in listOf("thinking", "reasoning_effort", "output_config")) {
+            var connects = 0
+            val config = settings(ProviderProtocol.RESPONSES).copy(requestOptions = ProviderRequestOptions(
+                sessionGateway = app.daiyu.android.model.sessiongateway.SessionGatewayRule(
+                    modelPattern = "^synthetic$", pathPattern = "/responses", keyField = field)))
+            val model = ResponsesModel(config, { connects++; Connection(responses()) }, null,
+                sessionContext = app.daiyu.android.model.sessiongateway.SessionGatewayContext(ConversationId("conversation")))
+            val user = Message(MessageId("u"), ConversationId("c"), RunId("r"), "user",
+                listOf(MessageBlock.Text("u", "question")), RunStatus.COMPLETED)
+            try { model.open(listOf(user)).next(emptyList()) {}; fail("gateway must reject unsupported reasoning") }
+            catch (_: IllegalArgumentException) {}
+            assertEquals(0, connects)
+        }
+    }
+
     fun testActualPreferenceRequestStreamDatabaseAndDisplayForBothProtocols() {
         for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES)) {
             val context = testContext(instrumentation.targetContext, "reasoning-${protocol.wireName}-")

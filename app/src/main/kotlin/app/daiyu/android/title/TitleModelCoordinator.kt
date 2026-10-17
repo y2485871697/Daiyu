@@ -209,13 +209,16 @@ class TitleModelCoordinator internal constructor(
     companion object {
         /** Fixed transport budget only; no caller-supplied body can override model/tools/prompt. */
         internal fun requestSnapshot(provider: ProviderSnapshot): ProviderSnapshot {
-            val field = when (provider.protocol) {
-                ProviderProtocol.RESPONSES -> "max_output_tokens"
-                ProviderProtocol.MESSAGES -> "max_tokens"
+            val limit = ConversationTitleModel.OUTPUT_LIMIT
+            val body = when (provider.protocol) {
+                ProviderProtocol.RESPONSES -> "{\"max_output_tokens\":$limit}"
+                ProviderProtocol.MESSAGES -> "{\"max_tokens\":$limit}"
+                ProviderProtocol.CHAT_COMPLETIONS -> "{\"max_completion_tokens\":$limit}"
+                ProviderProtocol.GEMINI -> "{\"generationConfig\":{\"maxOutputTokens\":$limit}}"
                 ProviderProtocol.UNKNOWN -> throw TitleModelUnavailableException()
             }
             return provider.asModelSettings().copy(requestOptions = ProviderRequestOptions(
-                customBody = "{\"$field\":${ConversationTitleModel.OUTPUT_LIMIT}}"),
+                customBody = body),
                 batteryEnabled = false, deviceStatusEnabled = false).requestSnapshot()
         }
     }

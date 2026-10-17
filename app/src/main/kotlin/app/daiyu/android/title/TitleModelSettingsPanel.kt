@@ -59,8 +59,12 @@ fun TitleModelSettingsPanel(
             label = { Text("独立密钥（重新保存需明确填写）") }, enabled = !busy, singleLine = true,
             visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
         Text("协议：${draft.protocol.wireName}")
-        OutlinedButton(onClick = { onDraftChange(draft.copy(protocol = ProviderProtocol.RESPONSES)) }, enabled = !busy) { Text("Responses") }
-        OutlinedButton(onClick = { onDraftChange(draft.copy(protocol = ProviderProtocol.MESSAGES, responsesPath = "")) }, enabled = !busy) { Text("Messages") }
+        listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI).forEach { protocol ->
+            OutlinedButton(onClick = {
+                if (protocol != draft.protocol) onDraftChange(draft.copy(protocol = protocol, apiKey = "",
+                    responsesPath = if (protocol == ProviderProtocol.RESPONSES) draft.responsesPath else "", protocolChangeAuthorized = false))
+            }, enabled = !busy) { Text(protocol.wireName) }
+        }
         if (draft.protocol == ProviderProtocol.RESPONSES) {
             OutlinedTextField(draft.responsesPath, { onDraftChange(draft.copy(responsesPath = it)) },
                 label = { Text("Responses 路径（可留空）") }, enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth())

@@ -44,7 +44,7 @@ internal fun ModelSettingsDraftUi.selectProtocol(selected: ProviderProtocol): Mo
     if (selected == protocol) this else copy(
         protocol = selected,
         apiKey = "",
-        responsesPath = if (selected == ProviderProtocol.MESSAGES) "" else responsesPath,
+        responsesPath = if (selected != ProviderProtocol.RESPONSES) "" else responsesPath,
         protocolChangeAuthorized = false,
     )
 
@@ -85,6 +85,12 @@ internal fun ModelSettingsScreen(
                 SettingsRadioRow("Anthropic Messages", draft.protocol == ProviderProtocol.MESSAGES, enabled = enabled) {
                     onDraftChange(draft.selectProtocol(ProviderProtocol.MESSAGES))
                 }
+                SettingsRadioRow("OpenAI Chat Completions", draft.protocol == ProviderProtocol.CHAT_COMPLETIONS, enabled = enabled) {
+                    onDraftChange(draft.selectProtocol(ProviderProtocol.CHAT_COMPLETIONS))
+                }
+                SettingsRadioRow("Google Gemini", draft.protocol == ProviderProtocol.GEMINI, enabled = enabled) {
+                    onDraftChange(draft.selectProtocol(ProviderProtocol.GEMINI))
+                }
                 if (draft.protocol != draft.savedProtocol) {
                     SettingsSwitchRow("重输密钥并绑定", draft.protocolChangeAuthorized, enabled = enabled) {
                         onDraftChange(draft.copy(protocolChangeAuthorized = it))
@@ -99,7 +105,7 @@ internal fun ModelSettingsScreen(
             SettingsCard {
                 SettingsTextField("Base URL", draft.endpoint, { onDraftChange(draft.copy(endpoint = it)) }, enabled = enabled)
                 SettingsTextField("Responses 路径", draft.responsesPath, { onDraftChange(draft.copy(responsesPath = it)) },
-                    hint = "/responses", enabled = enabled && draft.protocol != ProviderProtocol.MESSAGES)
+                    hint = "/responses", enabled = enabled && draft.protocol == ProviderProtocol.RESPONSES)
                 SettingsTextField("模型名", draft.model, { onDraftChange(draft.copy(model = it)) }, enabled = enabled)
                 SettingsTextField("API Key", draft.apiKey, { onDraftChange(draft.copy(apiKey = it)) }, password = true, enabled = enabled)
             }

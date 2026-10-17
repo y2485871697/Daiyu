@@ -629,7 +629,15 @@ class ConversationDatabase(context: Context) : SQLiteOpenHelper(context, "conver
             // Validate wire history without changing the imported status or the saved raw items.
             val owner=Message(MessageId("backup-validation"), ConversationId("backup-validation"),
                 RunId("backup-validation"), role, blocks, RunStatus.COMPLETED, protocolItems=rawItems)
-            MessagesRequest.replayHistory(owner, validateOnly = true)
+            when {
+                items.all { it.optJSONArray("content") != null && !it.has("parts") } -> MessagesRequest.replayHistory(owner, validateOnly = true)
+                items.all { it.optJSONArray("parts") != null } -> app.daiyu.android.model.NativeCompletionRequest.history(
+                    app.daiyu.android.model.ProviderProtocol.GEMINI, listOf(owner), allowPending = true)
+                items.all { !it.has("parts") && (it.opt("content") is String || it.isNull("content")) } ->
+                    app.daiyu.android.model.NativeCompletionRequest.history(
+                        app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS, listOf(owner), allowPending = true)
+                else -> throw IllegalArgumentException("文本备份包含不支持或混用的原生协议格式")
+            }
             return
         }
         repeat(array.length()) {i->

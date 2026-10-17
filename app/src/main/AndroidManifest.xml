@@ -31,6 +31,16 @@
     <application android:name=".ChatApplication" android:usesCleartextTraffic="false" android:dataExtractionRules="@xml/data_extraction_rules" android:allowBackup="false" android:fullBackupContent="false" android:label="@string/app_name"
         android:icon="@drawable/task17_launcher_f6f7f9_2491ff" android:roundIcon="@drawable/task17_launcher_f6f7f9_2491ff" android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:supportsRtl="true">
+        <!-- Only Android may bind this service; enabling it is an explicit system-settings action. -->
+        <service android:name=".gui.GuiAccessibilityService"
+            android:label="@string/gui_accessibility_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/gui_accessibility_service" />
+        </service>
         <provider android:name="rikka.shizuku.ShizukuProvider"
             android:authorities="${applicationId}.shizuku" android:multiprocess="false"
             android:enabled="true" android:exported="true"

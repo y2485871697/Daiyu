@@ -50,7 +50,8 @@ data class RunCheckpoint(
     val request: RequestCheckpoint? = null,
     val usage: List<RequestUsageCheckpoint> = emptyList(),
     /** Actual admitted main requests, including ones that never reported Usage. Not snapshots. */
-    val usageRequests: List<RequestCheckpoint> = emptyList()
+    val usageRequests: List<RequestCheckpoint> = emptyList(),
+    val transport: TransportCheckpoint? = null
 )
 
 /** save must durably commit before returning if durable=true. Implement with a transaction/WAL. */
@@ -119,11 +120,25 @@ interface ToolExecutionJournal {
     fun complete(message: Message, invocation: ToolInvocation, result: String)
 }
 
+/** Request-thread checks and asynchronous expiry share one retained first-failure budget. */
+interface TransportReconnectBudget {
+    fun updateReason(reason: ModelFailure) {}
+    fun check()
+    fun setPaused(paused: Boolean)
+    fun attach(disconnect: () -> Unit): AutoCloseable
+    fun finish(status: String)
+}
+fun interface TransportReconnectBudgetFactory {
+    fun create(round: Int, reason: ModelFailure): TransportReconnectBudget
+}
+
 /** Zero retries is the compatible default. Only transport resume, never open/repost, is retried. */
 data class ReconnectPolicy(
     val maxAttempts: Int = 0,
     val delayMillis: Long = 0,
-    val failures: Set<ModelFailure> = setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT)
+    val failures: Set<ModelFailure> = setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT),
+    /** Only checkpointed transport sessions use this; no attempt-count cap substitutes for it. */
+    val budgetFactory: TransportReconnectBudgetFactory? = null
 ) {
     init { require(maxAttempts in 0..20); require(delayMillis in 0..60_000) }
 }

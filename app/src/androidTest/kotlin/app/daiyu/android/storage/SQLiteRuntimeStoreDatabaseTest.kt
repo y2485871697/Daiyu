@@ -6,6 +6,12 @@ import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.testContext
 import java.util.UUID
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
 
 @Suppress("DEPRECATION")
 class SQLiteRuntimeStoreDatabaseTest:InstrumentationTestCase() {
@@ -106,6 +112,145 @@ class SQLiteRuntimeStoreDatabaseTest:InstrumentationTestCase() {
         assertEquals(replacement.usage,recovered.usage)
         assertEquals(RunStatus.INTERRUPTED,recovered.message.status)
     }
+    private fun payload(db:ConversationDatabase, id:MessageId):String = db.readableDatabase.rawQuery(
+        "SELECT payload FROM runtime_checkpoints WHERE message_id=?",arrayOf(id.value))
+        .use {check(it.moveToFirst());it.getString(0)}
+    private fun transport(sequence:Long, text:String="accepted") = TransportCheckpoint("resp_sqlite",sequence,
+        JSONObject().put("response_id","resp_sqlite").put("sequence",sequence)
+            .put("parts",JSONObject().put("m",JSONObject().put("0",text)))
+            .put("summaries",JSONObject()).put("calls",JSONArray()).put("chars",text.length).toString())
+
+    fun testTransportCheckpointRoundTripAndProcessRecoveryOnlyInterrupts() {
+        val db=fresh();val runtime=lease(db);val first=seed(db)
+        val request=RequestCheckpoint("request","post-attempt",first.owner,RequestOperation.NEXT)
+        val accepted=first.copy(message=first.message.copy(blocks=listOf(MessageBlock.Text("m","accepted")),
+            protocolItems=listOf("{\"type\":\"message\",\"id\":\"m\"}")),phase=ExecutionPhase.STREAMING,
+            request=request,requestUnconfirmed=true,usageRequests=listOf(request),
+            usage=listOf(RequestUsageCheckpoint(request,ModelEvent.Usage(10,2))),transport=transport(2))
+        runtime.commitCheckpoint(accepted)
+        val resumed=accepted.copy(revision=2,request=request.copy(attemptId="get-attempt",operation=RequestOperation.RESUME),
+            transport=transport(3))
+        runtime.commitCheckpoint(resumed)
+        val raw=payload(db,first.message.id)
+        assertEquals(7,JSONObject(raw).getInt("version"))
+        assertEquals(resumed,RunCheckpointCodec.decode(raw))
+        assertEquals(resumed,runtime.readCommittedCheckpoint(resumed))
+        assertEquals(resumed.message,db.messages(first.message.conversationId).last().second)
+        release(db,runtime)
+        // Reacquiring the OS lease is process recovery, NOT a transport-resume admission.
+        // Exercise the actual Runner -> ProcessRecovery entry with a model/tool trap.
+        val next=SQLiteRuntimeStore.acquire(db).also {stores+=it}
+        assertEquals(resumed,RunCheckpointCodec.decode(payload(db,first.message.id)))
+        var opens=0;var tools=0
+        val recovery=ChatRunner(ModelPort {opens++;error("recovery must not reconstruct a session")},
+            object:ConversationStore {override fun save(message:Message)=error("atomic recovery only")},
+            BatteryTool {tools++;error("recovery must not execute tools")},RunnerOptions(runtimeStore=next)){}
+        val recoveredMessage=recovery.recover(first) // Deliberately stale caller, latest SQLite row wins.
+        next.recoverPending()
+        val recovered=next.reconcileCheckpoint(first)
+        assertEquals(recovered.message,recoveredMessage);assertEquals(0,opens);assertEquals(0,tools)
+        assertEquals(ExecutionPhase.TERMINAL,recovered.phase)
+        assertEquals(RunStatus.INTERRUPTED,recovered.message.status)
+        assertEquals(resumed.message.blocks,recovered.message.blocks)
+        assertEquals(resumed.message.protocolItems,recovered.message.protocolItems)
+        assertEquals(resumed.transport,recovered.transport)
+        assertEquals(resumed.request,recovered.request)
+        assertEquals(resumed.usageRequests,recovered.usageRequests)
+        assertEquals(resumed.usage,recovered.usage)
+        assertEquals(3L,recovered.revision);assertTrue(recovered.owner!=resumed.owner)
+        assertEquals(recovered,RunCheckpointCodec.decode(payload(db,first.message.id)))
+        assertEquals(recovered,next.reconcileCheckpoint(first))
+        rejects {next.commitCheckpoint(resumed.copy(revision=3))}
+    }
+
+    fun testExistingV6CheckpointWithoutTransportSurvivesReopenAndRecovery() {
+        val db=fresh();val runtime=lease(db);val first=seed(db)
+        val request=RequestCheckpoint("old-request","old-attempt",first.owner,RequestOperation.NEXT)
+        val old=first.copy(phase=ExecutionPhase.STREAMING,request=request,requestUnconfirmed=true,
+            message=first.message.copy(blocks=listOf(MessageBlock.Text("m","v6 partial"))),
+            usageRequests=listOf(request),usage=listOf(RequestUsageCheckpoint(request,ModelEvent.Usage(4,1))))
+        runtime.commitCheckpoint(old)
+        val v6=JSONObject(payload(db,first.message.id))
+        assertEquals(6,v6.getInt("version"));assertFalse(v6.has("transport"))
+        assertEquals(old,RunCheckpointCodec.decode(v6.toString()))
+        release(db,runtime)
+        val next=lease(db)
+        val recovered=next.reconcileCheckpoint(first)
+        assertEquals(RunStatus.INTERRUPTED,recovered.message.status)
+        assertEquals(old.message.blocks,recovered.message.blocks)
+        assertEquals(old.request,recovered.request);assertEquals(old.usage,recovered.usage)
+        assertEquals(old.usageRequests,recovered.usageRequests);assertNull(recovered.transport)
+        val persisted=JSONObject(payload(db,first.message.id))
+        assertEquals(6,persisted.getInt("version"));assertFalse(persisted.has("transport"))
+        assertEquals(recovered,RunCheckpointCodec.decode(persisted.toString()))
+    }
+
+    fun testAcknowledgedTransportThenSupplementOpensFreshSessionWithoutOldCursor() {
+        val db=fresh();val runtime=lease(db);val first=seed(db)
+        val writes=CopyOnWriteArrayList<RunCheckpoint>()
+        val paused=CountDownLatch(1)
+        val admitted=CountDownLatch(1)
+        val resultOfAdmission=java.util.concurrent.atomic.AtomicReference<SupplementAdmission>()
+        // Keep the real SQLite codec/CAS/atomic supplement writer; a memory-only store would
+        // miss the invalid OPEN + previous transport checkpoint combination this guards.
+        val observed=object:AtomicSupplementRuntimeStore by runtime {
+            override fun commitCheckpoint(checkpoint:RunCheckpoint) {
+                runtime.commitCheckpoint(checkpoint)
+                writes.add(RunCheckpointCodec.decode(payload(db,first.message.id)))
+                if(checkpoint.phase==ExecutionPhase.PAUSED) paused.countDown()
+            }
+        }
+        val extra=first.history.single().copy(id=MessageId("extra-${first.message.runId.value}"),
+            blocks=listOf(MessageBlock.Text("u","additional question")))
+        var opens=0;var resumes=0
+        lateinit var runner:ChatRunner
+        val port=ModelPort { history ->
+            opens++
+            if(opens==1) object:CheckpointedResumableModelSession {
+                override val canResume=true
+                override fun next(outputs:List<ToolOutput>,sink:(ModelEvent)->Unit)=error("must use ACK")
+                override fun resume(sink:(ModelEvent)->Unit)=error("must not resume an abandoned session")
+                override fun resumeAcknowledged(sink:(ModelEventBatch)->ModelDeliveryAck) {resumes++;error("must not GET after supplement")}
+                override fun nextAcknowledged(outputs:List<ToolOutput>,sink:(ModelEventBatch)->ModelDeliveryAck) {
+                    assertEquals(ModelDeliveryAck.ACCEPTED,sink(ModelEventBatch(
+                        listOf(ModelEvent.TextDelta("m","accepted")),transport(1))))
+                    assertTrue(runner.pause())
+                }
+                override fun disconnectTransport() {}
+                override fun cancel() {}
+            } else {
+                assertEquals(2,opens)
+                assertTrue(MessageHistory.expand(history).any {it.id==extra.id})
+                object:ModelSession {
+                    override fun next(outputs:List<ToolOutput>,sink:(ModelEvent)->Unit) {sink(ModelEvent.TextFinal("m","fresh answer"))}
+                    override fun cancel() {}
+                }
+            }
+        }
+        runner=ChatRunner(port,object:ConversationStore {override fun save(message:Message)=error("atomic only")},
+            BatteryTool {error("no tools")},RunnerOptions(runtimeStore=observed)){}
+        val task=FutureTask {runner.run(first.message,first.history)}
+        val worker=Thread(task).apply {isDaemon=true;start()}
+        try {
+            assertTrue("ACKed run never reached paused boundary",paused.await(10,TimeUnit.SECONDS))
+            assertTrue(writes.any {it.transport?.sequence==1L})
+            assertTrue(runner.admitSupplement(extra) {resultOfAdmission.set(it);admitted.countDown()})
+            assertTrue(admitted.await(10,TimeUnit.SECONDS))
+            assertTrue(resultOfAdmission.get() is SupplementAdmission.Accepted)
+            assertTrue(runner.resume())
+            val answer=task.get(10,TimeUnit.SECONDS)
+            assertEquals(RunStatus.COMPLETED,answer.status)
+            assertEquals(2,opens);assertEquals(0,resumes)
+            val openWrites=writes.filter {it.request?.operation==RequestOperation.OPEN}
+            assertEquals(2,openWrites.size)
+            assertTrue(openWrites.all {it.transport==null})
+            assertTrue(openWrites.map {it.request!!.requestId}.distinct().size==2)
+            assertEquals(extra,db.messages(extra.conversationId).single {it.second.id==extra.id}.second)
+            val done=RunCheckpointCodec.decode(payload(db,first.message.id))
+            assertEquals(answer,done.message);assertNull(done.transport)
+        } finally {runner.stop();worker.join(10000);assertFalse("runner worker leaked",worker.isAlive)}
+    }
+
     fun testExistingTerminalWinsRecoveryAndDeleteCascades() {
         val db=fresh();val runtime=lease(db);val first=seed(db);runtime.commitCheckpoint(first)
         db.writableDatabase.update("messages",ContentValues().apply {put("status","COMPLETED")},"id=?",arrayOf(first.message.id.value))

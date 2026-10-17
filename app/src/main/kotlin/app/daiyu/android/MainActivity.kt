@@ -614,7 +614,7 @@ class MainActivity : ComponentActivity() {
         set(value) {
             // Opening revokes even without a visit; closing cannot revive clicks rendered behind it.
             if (value != sidebarVisibleState) revokeContextManagementEntry()
-            if (value && !sidebarVisibleState) { cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
+            if (value && !sidebarVisibleState) { revokeLegacyLibrary(); cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
             sidebarVisibleState = value
         }
     private class ContextManagementVisit(val owner: ContextManagementOwner,
@@ -630,13 +630,61 @@ class MainActivity : ComponentActivity() {
         contextManagementVisit = null
         return true
     }
+    private var legacyPage by mutableStateOf<LegacyLibraryHost.Page?>(null)
+    private var legacyVisit: java.util.concurrent.atomic.AtomicBoolean? = null
+    private data class LegacySelection(val code: Int, val deliver: (Uri?) -> Unit)
+    private var pendingLegacy: LegacySelection? = null
+    private var nextLegacyCode = 12000
+    private var legacyPickerHop = false
+    private var legacyLaunchersReady = false
+    private fun revokeLegacyLibrary() {
+        legacyVisit?.set(false); legacyVisit = null
+        legacyPage?.revoke(); legacyPage = null
+        legacyPickerHop = false
+        // Outstanding launcher slots remain tombstones until their exact callback drains.
+    }
+    private fun openLegacyLibrary() {
+        checkBackupAvailable()
+        revokeLegacyLibrary()
+        retainedPage = "legacy-library"
+        val active = java.util.concurrent.atomic.AtomicBoolean(true)
+        legacyVisit = active
+        legacyPage = controller.legacyLibrary.openPage { active.get() }
+    }
+    @Suppress("DEPRECATION")
+    private fun launchLegacyPicker(intent: Intent, deliver: (Uri?) -> Unit) {
+        if (!legacyLaunchersReady || pendingLegacy != null || pendingBackupRequest != null ||
+            !activityUsable() || retainedPage != "legacy-library" || nextLegacyCode !in 12000 until 14000) {
+            deliver(null); return
+        }
+        val selection = LegacySelection(nextLegacyCode++, deliver)
+        pendingLegacy = selection; legacyPickerHop = true
+        try { startActivityForResult(intent, selection.code) }
+        catch (_: Exception) {
+            if (pendingLegacy === selection) pendingLegacy = null
+            legacyPickerHop = false; selection.deliver(null)
+        }
+    }
+    private fun pickLegacySource(request: LegacyLibraryHost.SourcePicker) {
+        launchLegacyPicker(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/json", "application/zip", "application/octet-stream"))
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }, request::result)
+    }
+    private fun pickLegacyTarget(request: LegacyLibraryHost.SavePicker) {
+        launchLegacyPicker(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = request.mimeType
+            putExtra(Intent.EXTRA_TITLE, request.suggestedName)
+        }, request::result)
+    }
     private var retainedPageState by mutableStateOf("chat")
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
             if (value != retainedPageState && revokeContextManagementEntry()) editorGeneration++
-            if (value != retainedPageState) cancelDeferredOpenedBackup()
+            if (value != retainedPageState) { cancelDeferredOpenedBackup(); revokeLegacyLibrary() }
             if (value != "chat") cancelBrowserDownloadVisit()
             if (value != "reconnect-settings") {
                 reconnectSettingsPageOwner?.revoke()
@@ -693,7 +741,7 @@ class MainActivity : ComponentActivity() {
     @Volatile private var selected: Conversation? = null
         set(value) {
             if (field?.id != value?.id && revokeContextManagementEntry()) editorGeneration++
-            if (field?.id != value?.id) cancelBrowserDownloadVisit()
+            if (field?.id != value?.id) { cancelBrowserDownloadVisit(); cancelStaticGenerationVisit() }
             field = value
         }
     private var draft by mutableStateOf("")
@@ -741,7 +789,7 @@ class MainActivity : ComponentActivity() {
     }
     @Volatile private var editorGeneration = 0L
         set(value) {
-            if (field != value) { cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { cancelBrowserDownloadVisit(); cancelStaticGenerationVisit(); revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private var draftRevision = 0L
@@ -878,6 +926,21 @@ class MainActivity : ComponentActivity() {
     private var generationOutputs by mutableStateOf<List<ChatController.GenerationAssetDisplay>?>(null)
     private var historicalGenerationOutputs by mutableStateOf<List<ChatController.HistoricalGenerationAssetDisplay>?>(null)
     private var pendingHistoricalOriginal: app.daiyu.android.backup.HistoricalGenerationOutput? = null
+    private var staticGenerationOutputs by mutableStateOf<List<ChatController.StaticGenerationAssetDisplay>?>(null)
+    private var staticGenerationVisit: java.util.concurrent.atomic.AtomicBoolean? = null
+    private data class StaticSaveSelection(val requestCode: Int,
+        val output: app.daiyu.android.storage.StaticGenerationOutput,
+        val active: java.util.concurrent.atomic.AtomicBoolean, var pickerHopPending: Boolean = true)
+    private var pendingStaticOriginal: StaticSaveSelection? = null
+    private var unknownBranchOutcome by mutableStateOf<MessageActionResult.Unknown?>(null)
+    private fun refreshUnknownBranchOutcome() {
+        if (activityUsable() && voiceForeground) unknownBranchOutcome = controller.pendingBranchOutcome()
+    }
+    private fun dismissUnknownBranchOutcome(receipt: MessageActionResult.Unknown) {
+        if (!activityUsable() || !voiceForeground || unknownBranchOutcome !== receipt) return
+        controller.dismissBranchOutcome(receipt)
+        refreshUnknownBranchOutcome()
+    }
     // Memory-only, one-way capability for a chat/editor visit. Workers only read its
     // atomic cancellation flag, never route/sidebar/Compose state that can undergo ABA.
     private class BrowserDownloadVisit(val conversation: ConversationId, val generation: Long) {
@@ -1019,7 +1082,10 @@ class MainActivity : ComponentActivity() {
         interactiveModeObservation = controller.interactiveMode.observe { interactiveModeEnabled = it }
         appearance = loadAppearance()
         activityCallbacksAllowed = true
-        pendingBackupRequest = state?.getInt("pending-backup-request", 0)?.takeIf { it != 0 && it !in 14000..65534 }
+        nextLegacyCode = state?.getInt("legacy-next-code", 12000)?.coerceIn(12000, 14000) ?: 12000
+        pendingBackupRequest = state?.getInt("pending-backup-request", 0)?.takeIf {
+            it != 0 && it != 107 && it !in 12000..65534
+        }
         conversationExport = ConversationExportSelection(
             state?.getString("pending-conversation-export").takeIf { pendingBackupRequest == 105 })
         exportPickerPending = pendingBackupRequest == 105
@@ -1359,12 +1425,25 @@ class MainActivity : ComponentActivity() {
                             requestOptionsUnavailable = editingSettings?.requestOptionsUnavailable == true,
                         ) }
                     }
+                    "legacy-library" -> {
+                        val page = legacyPage
+                        if (page != null) LegacyLibraryScreen(page, ::pickLegacySource, ::pickLegacyTarget,
+                            onBack = { retainedPage = "backup" })
+                        else app.daiyu.android.ui.components.MiuixScaffoldPage("旧版兼容资料库",
+                            onBack = { retainedPage = "backup" }) {
+                            item("reopen") {
+                                top.yukonga.miuix.kmp.basic.TextButton("重新打开资料库",
+                                    onClick = { backupGuard { openLegacyLibrary() } })
+                            }
+                        }
+                    }
                     "backup" -> BackupScreen(
                         onBack = { returnToChat() },
                         onExportCompact = { backupGuard { pickBackup(true, false) } },
                         onExportComplete = { backupGuard { pickBackup(true, true) } },
                         onImportCompact = { backupGuard { pickBackup(false, false) } },
                         onImportComplete = { backupGuard { pickBackup(false, true) } },
+                        onOpenLegacyLibrary = { backupGuard { openLegacyLibrary() } },
                         restorePreviewText = restorePreviewText,
                         onPreviewRestore = { backupGuard { previewConfigurationRestore() } },
                         onRestoreConfiguration = { confirmConfigurationRestore() },
@@ -1462,6 +1541,7 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 PromptSurface()
+                UnknownBranchSurface()
                 VirtualDisplayR08Surfaces()
                 val vdEntry = virtualDisplayEditor
                 val vdRequest = virtualDisplayRequest
@@ -1617,7 +1697,9 @@ class MainActivity : ComponentActivity() {
                             })
                         } else toast(outcome.reason)
                     }
-                    is MessageActionResult.Unknown -> { shown.clear(); refresh(); toast(outcome.reason) }
+                    is MessageActionResult.Unknown -> {
+                        shown.clear(); refresh(); refreshUnknownBranchOutcome(); toast(outcome.reason)
+                    }
                 }
             } })
         return ChatScreenActions(
@@ -2366,6 +2448,30 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    // Mount outside chat/composer surfaces: a replacement foreground can inspect the exact
+    // locator without returning to the original conversation, draft or approval editor.
+    @Composable private fun UnknownBranchSurface() {
+        unknownBranchOutcome?.takeIf { voiceForeground }?.let { receipt ->
+            val locator = checkNotNull(receipt.locator)
+            // Back/outside clicks do not silently consume a controller-owned UNKNOWN receipt.
+            androidx.compose.material3.AlertDialog(onDismissRequest = {},
+                title = { androidx.compose.material3.Text("分支结果未确认") },
+                text = { androidx.compose.material3.Text("目标会话：${locator.conversationId.value}\n静态身份：${locator.staticIdentities.joinToString()}\n只读核实不会重新分支、生成或清理未知文件。此提示仅在当前进程保留，进程重启后请手动核实历史，不要重试。") },
+                confirmButton = { androidx.compose.material3.TextButton(modifier = Modifier.testTag("branch-unknown-inspect"), onClick = {
+                    if (activityUsable() && voiceForeground && controller.pendingBranchOutcome() === receipt) {
+                        if (!controller.inspectBranch(locator) { verified ->
+                            if (activityUsable() && voiceForeground && unknownBranchOutcome === receipt) toast(if (verified)
+                                "目标会话及静态原件已核实；未重试" else "目标尚不能完整核实；保留UNKNOWN，不要重试")
+                        }) toast("请等待当前数据操作完成；UNKNOWN仍保留，未重试")
+                    }
+                }) { androidx.compose.material3.Text("只读核实") } },
+                dismissButton = { androidx.compose.material3.TextButton(modifier = Modifier.testTag("branch-unknown-dismiss"),
+                    onClick = { dismissUnknownBranchOutcome(receipt) }) {
+                    androidx.compose.material3.Text("关闭（不重试）")
+                } })
+        }
+    }
+
     @Composable private fun GenerationSurfaces() {
         generationApproval?.let { entry ->
             androidx.compose.ui.window.Dialog(onDismissRequest = ::cancelGenerationEditor) {
@@ -2426,6 +2532,17 @@ class MainActivity : ComponentActivity() {
                             }
                             if (meta.kind == app.daiyu.android.model.generation.GenerationKind.VIDEO)
                                 androidx.compose.material3.Text("原视频已通过私有读取校验；当前入口不提供视频播放或导出。")
+                        }
+                        androidx.compose.material3.Text("分支静态生成原件（只读，最多展示32项；完整备份包含全部记录）")
+                        if (staticGenerationOutputs == null) androidx.compose.material3.Text("静态原件正在读取或不可用；不会重试分支。")
+                        staticGenerationOutputs?.forEach { display ->
+                            val source = display.output.source
+                            androidx.compose.material3.Text("静态 ${source.kind} · ${source.mimeType} · ${source.bytes} bytes · ${source.width}×${source.height}")
+                            display.thumbnail?.let { bitmap -> androidx.compose.foundation.Image(bitmap = bitmap.asImageBitmap(),
+                                contentDescription = "分支静态生成图片", modifier = Modifier.fillMaxWidth()) }
+                            androidx.compose.material3.TextButton(onClick = { backupGuard { pickStaticGenerationOriginal(display.output) } }) {
+                                androidx.compose.material3.Text("保存静态原件")
+                            }
                         }
                         androidx.compose.material3.Text("备份导入的历史原件（独立只读存储，最多展示32项；完整备份仍包含全部记录）")
                         val historical = historicalGenerationOutputs
@@ -2507,8 +2624,7 @@ class MainActivity : ComponentActivity() {
             "原会话已变化；请重新打开下载原件"
         }
         controller.browserDownloads.assertOwned(listing.visit.conversation.value, reference)
-        check(nextBrowserSaveRequestCode < 65535) { "文件选择次数已达上限；请重建页面" }
-        val selection = BrowserSaveSelection(nextBrowserSaveRequestCode++, listing.visit, reference)
+        val selection = BrowserSaveSelection(allocateOriginalSaveRequestCode(), listing.visit, reference)
         pendingBrowserDownload = selection
         pendingBackupRequest = selection.requestCode
         try {
@@ -2526,10 +2642,24 @@ class MainActivity : ComponentActivity() {
         check(browserDownloadVisitCurrent(selection.visit)) { "原会话已变化；本次保存已失效" }
     }
 
-    private fun cancelGenerationOutputs() {
+    // Shared with browser originals: never recycle a code or restore an original's authority.
+    // Only the monotonic next value is saved; legacy backup/input request ranges stay untouched.
+    private fun allocateOriginalSaveRequestCode(): Int {
+        check(nextBrowserSaveRequestCode in 14000..65534) { "文件选择次数已达上限；请重启应用" }
+        return nextBrowserSaveRequestCode++
+    }
+    private fun cancelStaticGenerationVisit() {
+        staticGenerationVisit?.set(false); staticGenerationVisit = null
+        pendingStaticOriginal?.let { if (pendingBackupRequest == it.requestCode) pendingBackupRequest = null }
+        pendingStaticOriginal = null
+    }
+    private fun cancelGenerationOutputs() = clearGenerationOutputs(false)
+    private fun clearGenerationOutputs(preserveStaticSelection: Boolean) {
+        if (!preserveStaticSelection) cancelStaticGenerationVisit()
         generationOutputsRequest = null
         generationOutputs = null
         historicalGenerationOutputs = null
+        staticGenerationOutputs = null
     }
 
     private fun openGenerationOutputs() {
@@ -2537,6 +2667,7 @@ class MainActivity : ComponentActivity() {
         if (!activityUsable() || !selectionReady || retainedPage != "chat" || sidebarVisible) return
         cancelGenerationOutputs()
         val request = Any().also { generationOutputsRequest = it }
+        val visit = java.util.concurrent.atomic.AtomicBoolean(true).also { staticGenerationVisit = it }
         val generation = editorGeneration
         if (!controller.loadGenerationOutputs(conversation.id) { outputs ->
             if (activityUsable() && generationOutputsRequest === request && retainedPage == "chat" &&
@@ -2556,6 +2687,33 @@ class MainActivity : ComponentActivity() {
                 if (outputs == null) toast("历史原件校验失败；未恢复授权或重发请求")
             }
         }) toast("历史原件暂不可读；请等待当前数据操作完成")
+        if (!controller.loadStaticGenerationOutputs(conversation.id) { outputs ->
+            if (visit.get() && activityUsable() && generationOutputsRequest === request && retainedPage == "chat" &&
+                !sidebarVisible && selected?.id == conversation.id && editorGeneration == generation) {
+                staticGenerationOutputs = outputs
+                if (outputs == null) toast("静态原件校验失败；未重试生成或分支")
+            }
+        }) toast("静态原件暂不可读；请等待当前数据操作完成")
+    }
+
+    @Suppress("DEPRECATION") private fun pickStaticGenerationOriginal(output: app.daiyu.android.storage.StaticGenerationOutput) {
+        check(pendingBackupRequest == null) { "文件选择尚未返回" }
+        val active = checkNotNull(staticGenerationVisit)
+        check(active.get() && activityUsable() && retainedPage == "chat" && !sidebarVisible &&
+            selected?.id?.value == output.destination.conversationId) { "原会话访问已失效" }
+        val extension = when (output.source.mimeType) {
+            "image/png" -> "png"; "image/jpeg" -> "jpg"; "image/webp" -> "webp"
+            "video/mp4" -> "mp4"; "video/webm" -> "webm"
+            else -> error("不支持的原件类型")
+        }
+        val selection = StaticSaveSelection(allocateOriginalSaveRequestCode(), output, active)
+        pendingStaticOriginal = selection; pendingBackupRequest = selection.requestCode
+        try { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE); type = output.source.mimeType
+            putExtra(Intent.EXTRA_TITLE, "daiyu-static-original.$extension")
+        }, selection.requestCode) } catch (failure: Exception) {
+            pendingStaticOriginal = null; pendingBackupRequest = null; throw failure
+        }
     }
 
     @Suppress("DEPRECATION") private fun pickHistoricalGenerationOriginal(
@@ -2910,12 +3068,12 @@ class MainActivity : ComponentActivity() {
         mcpInput = input; prompt = input
     }
 
-    private fun cancelBrowserEditor(preserveGenerationSelection: Boolean = false) {
+    private fun cancelBrowserEditor(preserveGenerationSelection: Boolean = false, preserveStaticSelection: Boolean = false) {
         cancelMcpEditor()
         cancelTerminalEditor()
         cancelVirtualDisplayEditor()
         if (!preserveGenerationSelection) cancelGenerationEditor()
-        cancelGenerationOutputs()
+        clearGenerationOutputs(preserveStaticSelection)
         browserRequest = null
         browserPreparing = false
         val pending = browserApproval
@@ -3219,6 +3377,7 @@ class MainActivity : ComponentActivity() {
 
         state.putBoolean("terminal-page", retainedPage == "terminal")
         state.putBoolean("balance-page", retainedPage == "balance-settings") // Route only, no balance credentials.
+        state.putInt("legacy-next-code", nextLegacyCode)
         state.putInt("pending-backup-request", pendingBackupRequest ?: 0)
         state.putString("pending-conversation-export", conversationExport.pendingConversationId)
         if (retainedPage == "conversation-export") {
@@ -3237,6 +3396,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onResume() {
         super.onResume(); voiceForeground = true; speechHost.setForeground(true)
+        refreshUnknownBranchOutcome()
         // Re-render fresh entry callbacks; none captured while backgrounded gains authority here.
         contextManagementEntryEpoch++
         if (selectionReady) publishChat() // Re-arm foreground read confirmation; never acknowledge on background refresh.
@@ -3261,12 +3421,18 @@ class MainActivity : ComponentActivity() {
     }
     override fun onPostResume() {
         super.onPostResume()
+        legacyLaunchersReady = true
         // ActivityResult can arrive before RESUMED. Do not open a provider until then.
         window.decorView.post {
             if (generationResumed() && generationInputsDelegate.isInitialized()) generationInputs.resume()
         }
     }
     override fun onPause() {
+        val preserveLegacy = legacyPickerHop && retainedPage == "legacy-library" &&
+            pendingLegacy != null
+        legacyPickerHop = false
+        if (!preserveLegacy) revokeLegacyLibrary()
+
         // The outstanding DocumentsUI needs this pause to return its one-shot result.
         // Once consumed, a copy owns only this visit's atomic flag: backgrounding
         // revokes it, even if a blocked provider has not returned (not a drain).
@@ -3279,6 +3445,7 @@ class MainActivity : ComponentActivity() {
             if (app.petSettingsNavigator === openPetSettings) app.petSettingsNavigator = null
         }
         voiceForeground = false
+        unknownBranchOutcome = null // unmount only; the controller receipt is not consumed
         stopCascadeVoice()
         invalidateConfiguredVoice()
         dictationHost.invalidate()
@@ -3287,7 +3454,15 @@ class MainActivity : ComponentActivity() {
         // Exempt ONLY the exact first external-picker hop. The approval UI is unmounted;
         // all unrelated editors still revoke, and worker/background pauses cannot resume it.
         val selectionOnly = generationInputsDelegate.isInitialized() && generationInputs.pause()
-        cancelBrowserEditor(preserveGenerationSelection = selectionOnly)
+        val staticPicker = pendingStaticOriginal
+        val preserveStatic = staticPicker != null && staticPicker.pickerHopPending &&
+            pendingBackupRequest == staticPicker.requestCode && staticPicker.active.get() &&
+            staticGenerationVisit === staticPicker.active && retainedPage == "chat" && !sidebarVisible &&
+            selected?.id?.value == staticPicker.output.destination.conversationId
+        // Only the first DocumentsUI hop survives. A later unrelated pause must revoke even
+        // when the picker never returned; a consumed save keeps only its original atomic visit.
+        staticPicker?.pickerHopPending = false
+        cancelBrowserEditor(preserveGenerationSelection = selectionOnly, preserveStaticSelection = preserveStatic)
         speechHost.setForeground(false)
         refreshRateWindowResumed = false; window.decorView.removeCallbacks(refreshRateRequest)
         val previous = previousPreferredRefreshRate
@@ -3315,6 +3490,8 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        revokeLegacyLibrary()
+        legacyLaunchersReady = false
         if (revokeContextManagementEntry()) editorGeneration++
         cancelDeferredOpenedBackup()
         revokeTerminalJobsVisit()
@@ -3796,6 +3973,7 @@ class MainActivity : ComponentActivity() {
         (if (controlTouchActive) controlTouchOwner else controlOwner)?.takeIf { it.conversationId == selected?.id }
     private fun refresh() {
         if (!activityUsable()) return
+        refreshUnknownBranchOutcome()
         offerDeferredOpenedBackup()
         settleGenerationReceipt()
         virtualDisplayCleanupVisit?.let { visit ->
@@ -4270,6 +4448,14 @@ class MainActivity : ComponentActivity() {
     }
     @Suppress("DEPRECATION") override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode in 12000 until 14000) {
+            val captured = pendingLegacy
+            if (captured?.code != requestCode) return
+            pendingLegacy = null
+            captured.deliver(data?.data.takeIf { resultCode == RESULT_OK })
+            return
+        }
+
         val browserSelection = pendingBrowserDownload
         if (browserSelection?.requestCode == requestCode && pendingBackupRequest == requestCode) {
             // Consume once, even on cancellation/invalid URI. Distinct request codes ensure a
@@ -4287,6 +4473,24 @@ class MainActivity : ComponentActivity() {
                     checkNotNull(uri), assertUiOwner = {
                         check(visit.active.get()) { "原会话已变化；本次保存已失效" }
                     })
+            }
+            return
+        }
+        val staticSelection = pendingStaticOriginal
+        if (staticSelection?.requestCode == requestCode && pendingBackupRequest == requestCode) {
+            // Consume before checking result/URI or starting work. Late, duplicate and cancelled
+            // callbacks cannot borrow a later selection, including across Activity recreation.
+            pendingStaticOriginal = null; pendingBackupRequest = null
+            staticSelection.pickerHopPending = false
+            if (resultCode != RESULT_OK) return
+            backupGuard {
+                val uri = data?.data
+                require(staticSelection.active.get() && staticGenerationVisit === staticSelection.active &&
+                    activityUsable() && retainedPage == "chat" && !sidebarVisible && uri?.scheme == "content" &&
+                    selected?.id?.value == staticSelection.output.destination.conversationId) {
+                    "静态原件选择已失效；未保存或重试"
+                }
+                controller.saveStaticGenerationOriginal(staticSelection.output, checkNotNull(uri), staticSelection.active)
             }
             return
         }

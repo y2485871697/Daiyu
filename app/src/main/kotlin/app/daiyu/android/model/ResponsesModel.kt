@@ -23,7 +23,18 @@ class ResponsesModel internal constructor(
     private val videoInputCapability: OpenRouterVideoCapability? = null,
     private val videoPostApprovalProvider: VideoPostApprovalProvider? = null,
     private val sessionContext: SessionGatewayContext? = null,
+    private val backgroundResume: app.daiyu.android.model.reconnect.FrozenResponsesBackground? = null,
 ) : ModelPort {
+    /** Preserve the assembled model/media/approval context; never bypass its approved open. */
+    fun withBackgroundResume(capability: app.daiyu.android.model.reconnect.FrozenResponsesBackground): ResponsesModel {
+        capability.requireMatches(settings)
+        return ResponsesModel(settings, connect, imageInputSupported, assistantInstructions,
+            videoInputCapability, videoPostApprovalProvider, sessionContext, capability)
+    }
+    private fun exposed(session: Session): ModelSession = if (backgroundResume != null) session else object : ModelSession {
+        override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) = session.next(outputs, sink)
+        override fun cancel() = session.cancel()
+    }
     internal constructor(settings: ModelSettings, connect: (URL) -> HttpsURLConnection) : this(settings, connect, null)
     constructor(settings: ModelSettings) : this(settings, { it.openConnection() as HttpsURLConnection }, null)
     internal constructor(snapshot: ProviderSnapshot, assistantInstructions: String? = null,
@@ -37,11 +48,11 @@ class ResponsesModel internal constructor(
         ToolDefinition(it.toolName, it.description, """{"type":"object","properties":{},"required":[],"additionalProperties":false}""")
     })
     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession =
-        Session(settings, history, connect, definitions.toList(), imageInputSupported, null, assistantInstructions,
-            sessionContext = sessionContext)
+        exposed(Session(settings, history, connect, definitions.toList(), imageInputSupported, null, assistantInstructions,
+            sessionContext = sessionContext, backgroundResume = backgroundResume))
     override fun open(history: List<Message>, definitions: List<ToolDefinition>, images: ModelImagePlan): ModelSession =
-        Session(settings, history, connect, definitions.toList(), imageInputSupported, images, assistantInstructions,
-            sessionContext = sessionContext)
+        exposed(Session(settings, history, connect, definitions.toList(), imageInputSupported, images, assistantInstructions,
+            sessionContext = sessionContext, backgroundResume = backgroundResume))
 
     /** Explicit OpenRouter extension only. Generic ModelPort/ModelFactory paths remain unchanged.
      * Pass the same run-local capability used to freeze videos to this model's constructor.
@@ -50,8 +61,8 @@ class ResponsesModel internal constructor(
      */
     fun open(history: List<Message>, definitions: List<ToolDefinition>, videos: FrozenMessageVideoPlan,
              images: ModelImagePlan? = null): ModelSession =
-        Session(settings, history, connect, definitions.toList(), imageInputSupported, images,
-            assistantInstructions, videoInputCapability, videos, videoPostApprovalProvider, sessionContext)
+        exposed(Session(settings, history, connect, definitions.toList(), imageInputSupported, images,
+            assistantInstructions, videoInputCapability, videos, videoPostApprovalProvider, sessionContext, backgroundResume))
 
     private class Session(
         private val settings: ModelSettings,
@@ -65,7 +76,93 @@ class ResponsesModel internal constructor(
         videos: FrozenMessageVideoPlan? = null,
         private val videoPostApprovalProvider: VideoPostApprovalProvider? = null,
         private val sessionContext: SessionGatewayContext? = null,
-    ) : ModelSession {
+        private val backgroundResume: app.daiyu.android.model.reconnect.FrozenResponsesBackground? = null,
+    ) : CheckpointedResumableModelSession {
+        private var decoder = ResponsesStream.State()
+        private var resumeAllowed = false
+        private var acknowledgedSink: ((ModelEventBatch) -> ModelDeliveryAck)? = null
+        override val canResume: Boolean get() = backgroundResume != null && !cancelled.get() && resumeAllowed && decoder.canResume
+        @Synchronized
+        override fun nextAcknowledged(outputs: List<ToolOutput>, sink: (ModelEventBatch) -> ModelDeliveryAck) {
+            check(backgroundResume != null)
+            acknowledgedSink = sink
+            try { next(outputs) {} } finally { acknowledgedSink = null }
+        }
+        override fun resume(sink: (ModelEvent) -> Unit) {
+            // A Unit consumer cannot authorize cursor advancement.
+            throw ModelDeliveryRejectedException()
+        }
+        @Synchronized
+        override fun resumeAcknowledged(sink: (ModelEventBatch) -> ModelDeliveryAck) {
+            checkCancelled()
+            check(canResume) { "Original response cannot be resumed" }
+            val id = requireNotNull(decoder.responseId)
+            val sequence = requireNotNull(decoder.acknowledgedSequence)
+            var conn: HttpsURLConnection? = null
+            try {
+                val url = settings.requestEndpoint() + "/$id?stream=true&starting_after=$sequence"
+                conn = connect(URL(url))
+                synchronized(postLock) { checkCancelled(); connection = conn }
+                conn.requestMethod = "GET"; conn.doOutput = false; conn.instanceFollowRedirects = false
+                conn.connectTimeout = 20_000; conn.readTimeout = 60_000
+                conn.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
+                conn.setRequestProperty("Accept", "text/event-stream")
+                checkCancelled()
+                val status = conn.responseCode
+                if (status !in 200..299) {
+                    resumeAllowed = false
+                    throw ModelRequestException(when(status) {
+                        401 -> ModelFailure.AUTHENTICATION
+                        403 -> ModelFailure.PERMISSION
+                        404, 405, 410 -> ModelFailure.ENDPOINT
+                        else -> ModelFailure.PROTOCOL
+                    })
+                }
+                if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", true) != true) {
+                    resumeAllowed = false
+                    throw ModelRequestException(ModelFailure.PROTOCOL)
+                }
+                val items = conn.inputStream.bufferedReader(Charsets.UTF_8).use {
+                    decoder.read(it, cancelled::get, prefix = ownItems.toList(), acknowledgedSink = sink)
+                }
+                acceptItems(items)
+                usable = true
+                resumeAllowed = false
+            } catch (failure: Exception) {
+                checkCancelled()
+                val classified = classify(failure)
+                if (classified !is ModelDeliveryRejectedException &&
+                    (classified as? ModelRequestException)?.failure !in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT)) resumeAllowed = false
+                throw classified
+            } finally {
+                synchronized(postLock) { if (connection === conn) connection = null }
+                try { conn?.disconnect() } catch (_: Exception) {}
+            }
+        }
+        private fun classify(failure: Exception): Exception = when(failure) {
+            is java.net.SocketTimeoutException -> ModelRequestException(ModelFailure.TIMEOUT)
+            is javax.net.ssl.SSLException -> ModelRequestException(ModelFailure.TLS)
+            is java.io.IOException -> ModelRequestException(ModelFailure.NETWORK)
+            is org.json.JSONException -> ModelRequestException(ModelFailure.PROTOCOL)
+            else -> failure
+        }
+        private fun acceptItems(items: List<String>) {
+            val calls = mutableSetOf<String>()
+            items.forEach { raw ->
+                val item = JSONObject(raw)
+                if (item.optString("type") == "function_call") {
+                    val id = item.opt("call_id") as? String ?: throw ModelRequestException(ModelFailure.PROTOCOL)
+                    if (id.isBlank() || !calls.add(id)) throw ModelRequestException(ModelFailure.PROTOCOL)
+                }
+                app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImageNode(item)
+                input.put(item); ownItems.add(raw)
+            }
+            pending = calls.toSet()
+        }
+        override fun disconnectTransport() {
+            val current = synchronized(postLock) { connection }
+            try { current?.disconnect() } catch (_: Exception) {}
+        }
         private val cancelled = AtomicBoolean(false)
         private val postLock = Any()
         private val historyIdentity = Any()
@@ -88,6 +185,9 @@ class ResponsesModel internal constructor(
         @Synchronized
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
             checkCancelled()
+            if (backgroundResume != null) check(acknowledgedSink != null) { "Background streaming requires an explicit checkpoint consumer" }
+            decoder = ResponsesStream.State()
+            resumeAllowed = false
             check(usable && (!started || pending.isNotEmpty())) { "Responses session cannot be replayed" }
             require(outputs.map { it.callId.value }.toSet() == pending && outputs.size == pending.size) {
                 "Tool outputs must match all pending tool calls exactly once"
@@ -102,6 +202,10 @@ class ResponsesModel internal constructor(
                 settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools), ProviderProtocol.RESPONSES),
                 assistantInstructions,
             )
+            if (backgroundResume != null) {
+                backgroundResume.requireMatches(settings)
+                request.put("background", true).put("stream", true).put("store", false)
+            } else require(!request.has("background") || request.opt("background") == false) { "Background mode requires explicit informed opt-in" }
             val finalUrl = settings.requestEndpoint()
             SessionGateway.applyResponses(request, finalUrl, settings.requestOptions.sessionGateway, sessionContext)
             ReasoningRequestPolicy.validate(request, ProviderProtocol.RESPONSES)
@@ -193,32 +297,24 @@ class ResponsesModel internal constructor(
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", ignoreCase = true) != true)
                     throw ModelRequestException(ModelFailure.PROTOCOL)
                 conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
-                    val items = ResponsesStream.read(reader, cancelled::get, deliver)
+                    resumeAllowed = backgroundResume != null
+                    val items = if (backgroundResume != null) decoder.read(reader, cancelled::get,
+                        prefix = ownItems.toList(), acknowledgedSink = requireNotNull(acknowledgedSink))
+                    else ResponsesStream.read(reader, cancelled::get, deliver)
                     checkCancelled()
-                    val calls = mutableSetOf<String>()
-                    items.forEach { raw ->
-                        val item = JSONObject(raw)
-                        if (item.optString("type") == "function_call") {
-                            val id = item.opt("call_id") as? String ?: throw ModelRequestException(ModelFailure.PROTOCOL)
-                            if (id.isBlank() || !calls.add(id)) throw ModelRequestException(ModelFailure.PROTOCOL)
-                        }
-                        app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImageNode(item)
-                        input.put(item); ownItems.add(raw)
-                    }
-                    deliver(ModelEvent.ProtocolOutput(ownItems.toList()))
+                    acceptItems(items)
+                    if (backgroundResume == null) deliver(ModelEvent.ProtocolOutput(ownItems.toList()))
+                    resumeAllowed = false
                     checkCancelled()
-                    pending = calls.toSet()
                 }
                 checkCancelled()
             } catch (failure: Exception) {
                 if (failure === deliveryFailure) throw failure
                 checkCancelled()
-                throw when (failure) {
-                    is java.net.SocketTimeoutException -> ModelRequestException(ModelFailure.TIMEOUT)
-                    is javax.net.ssl.SSLException -> ModelRequestException(ModelFailure.TLS)
-                    is java.io.IOException -> ModelRequestException(ModelFailure.NETWORK)
-                    else -> failure
-                }
+                val classified = classify(failure)
+                if (classified !is ModelDeliveryRejectedException &&
+                    (classified as? ModelRequestException)?.failure !in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT)) resumeAllowed = false
+                throw classified
             } finally {
                 post?.invalidate()
                 synchronized(postLock) {

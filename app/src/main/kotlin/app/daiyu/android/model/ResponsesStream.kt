@@ -20,14 +20,39 @@ internal object ResponsesStream {
             throw ModelRequestException(ModelFailure.PROTOCOL)
         }
     }
-    private fun decode(reader:BufferedReader, cancelled:()->Boolean, sink:(ModelEvent)->Unit):List<String> {
-        var output:List<String>?=null
-        var usage:ModelEvent.Usage?=null
-        val sequence=mutableSetOf<Long>()
-        val calls=linkedMapOf<String,ToolInvocation>()
-        val parts=mutableMapOf<String,java.util.SortedMap<Int,String>>()
-        val summaries=mutableMapOf<String,java.util.SortedMap<Int,String>>()
-        var chars=0
+    private fun decode(reader:BufferedReader, cancelled:()->Boolean, sink:(ModelEvent)->Unit):List<String> =
+        State().read(reader, cancelled, sink)
+
+    /** Retained by one original request across POST/GET. State advances only after ACK. */
+    class State {
+        var responseId: String? = null
+            private set
+        var acknowledgedSequence: Long? = null
+            private set
+        private var output:List<String>?=null
+        private var usage:ModelEvent.Usage?=null
+        private val calls=linkedMapOf<String,ToolInvocation>()
+        private val parts=mutableMapOf<String,java.util.SortedMap<Int,String>>()
+        private val summaries=mutableMapOf<String,java.util.SortedMap<Int,String>>()
+        private var chars=0
+        private var poisoned = false
+        val canResume: Boolean get() = !poisoned && output == null && responseId != null && acknowledgedSequence != null
+        private fun snapshot(sequence: Long): String = JSONObject().apply {
+            put("response_id", responseId); put("sequence", sequence); put("chars", chars)
+            fun map(source: Map<String, java.util.SortedMap<Int,String>>) = JSONObject().apply {
+                source.forEach { (id, values) -> put(id, JSONObject().apply { values.forEach { (k,v) -> put(k.toString(),v) } }) }
+            }
+            put("parts", map(parts)); put("summaries", map(summaries))
+            put("calls", org.json.JSONArray(calls.values.map { call -> JSONObject().put("id",call.id.value).put("name",call.name).put("arguments",call.arguments) }))
+            output?.let { put("output",org.json.JSONArray(it)) }
+        }.toString()
+
+        fun read(reader:BufferedReader, cancelled:()->Boolean, legacySink:(ModelEvent)->Unit = {},
+                 prefix: List<String>? = null,
+                 acknowledgedSink: ((ModelEventBatch)->ModelDeliveryAck)? = null):List<String> {
+        check(!poisoned && output == null)
+        val batch = mutableListOf<ModelEvent>()
+        val sink: (ModelEvent)->Unit = { event -> if (acknowledgedSink == null) legacySink(event) else batch.add(event) }
         fun text(event:JSONObject, value:String, final:Boolean) {
             val id=event.getString("item_id")
             val index=event.getInt("content_index")
@@ -70,7 +95,30 @@ internal object ResponsesStream {
             if(data=="[DONE]") return@read false
             val event=try {JSONObject(data)} catch (_:org.json.JSONException) {throw ModelRequestException(ModelFailure.PROTOCOL)}
             if(!event.has("type")) throw ModelRequestException(ModelFailure.PROTOCOL)
-            if(event.has("sequence_number") && !sequence.add(event.getLong("sequence_number"))) return@read true
+            val seq = if(event.has("sequence_number")) {
+                val raw = event.get("sequence_number")
+                checkProtocol(raw is Int || raw is Long)
+                (raw as Number).toLong()
+            } else null
+            if (seq != null && acknowledgedSequence != null && seq <= acknowledgedSequence!!) return@read true
+            if (acknowledgedSink != null) checkProtocol(seq != null && seq >= 0)
+            batch.clear()
+            val savedId = responseId
+            val savedCalls = LinkedHashMap(calls)
+            fun copy(source: Map<String,java.util.SortedMap<Int,String>>) = source.mapValues { java.util.TreeMap(it.value) }
+            val savedParts = copy(parts)
+            val savedSummaries = copy(summaries)
+            val savedChars = chars
+            val savedOutput = output
+            val savedUsage = usage
+            val response = event.optJSONObject("response")
+            if (acknowledgedSink != null && response != null && response.has("id")) {
+                val id = response.getString("id")
+                checkProtocol(id.matches(Regex("resp_[A-Za-z0-9_-]{1,180}")))
+                checkProtocol(responseId == null || responseId == id)
+                responseId = id
+            }
+            try {
             when(event.getString("type")) {
                 "response.reasoning_summary_text.delta" -> {
                     val delta=event.getString("delta");chars+=delta.length
@@ -129,17 +177,44 @@ internal object ResponsesStream {
                             sink(ModelEvent.TextFinal(item.getString("id"),full))
                         }
                     }
-                    output=(0 until out.length()).map {out.getJSONObject(it).toString()}
+                    output=(0 until out.length()).map {
+                        val item = out.getJSONObject(it)
+                        app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImageNode(item)
+                        item.toString()
+                    }
+                    // The terminal wire sequence is not ACKed before its derived tail events.
+                    usage?.let(sink)
+                    if (prefix != null) sink(ModelEvent.ProtocolOutput(prefix + checkNotNull(output)))
                 }
                 "response.failed","error" -> throw ModelRequestException(ModelFailure.REQUEST)
                 "response.incomplete" -> throw ModelRequestException(ModelFailure.INCOMPLETE)
             }
+            if (acknowledgedSink != null) {
+                val id = responseId ?: throw ModelRequestException(ModelFailure.PROTOCOL)
+                val checkpoint = TransportCheckpoint(id, checkNotNull(seq), snapshot(seq))
+                if (acknowledgedSink(ModelEventBatch(batch.toList(), checkpoint)) != ModelDeliveryAck.ACCEPTED)
+                    throw ModelDeliveryRejectedException()
+            }
+            acknowledgedSequence = seq ?: acknowledgedSequence
+            } catch (failure: Exception) {
+                if (failure is ModelDeliveryRejectedException) {
+                    // Explicit rejection is NOT an unknown commit. A paused/expired gate may
+                    // reject a decoded wire event; restore the last ACKed decoder state.
+                    responseId = savedId
+                    calls.clear(); calls.putAll(savedCalls)
+                    parts.clear(); parts.putAll(savedParts)
+                    summaries.clear(); summaries.putAll(savedSummaries)
+                    chars = savedChars; output = savedOutput; usage = savedUsage
+                } else {
+                    // Unknown/failed consumers cannot be replayed safely. Fail closed.
+                    poisoned = true
+                }
+                throw failure
+            }
             output==null
         }
         if(cancelled()) throw InterruptedException()
-        val confirmed = output ?: throw ModelRequestException(ModelFailure.INCOMPLETE)
-        usage?.let(sink)
-        if(cancelled()) throw InterruptedException()
-        return confirmed
+        return output ?: throw ModelRequestException(if (acknowledgedSink != null) ModelFailure.NETWORK else ModelFailure.INCOMPLETE)
+        }
     }
 }

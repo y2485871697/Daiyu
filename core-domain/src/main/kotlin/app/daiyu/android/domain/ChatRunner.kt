@@ -46,6 +46,12 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     private val pendingSupplements = java.util.ArrayDeque<PendingSupplement>()
     @Volatile private var execution = ExecutionState()
     @Volatile private var session: ModelSession? = null
+    @Volatile private var reconnectBudget: TransportReconnectBudget? = null
+    @Volatile private var transportInterruption: (() -> Unit)? = null
+    private var attemptDelivery: ProviderEventDeliveryGate? = null
+    @Volatile private var pauseEpoch = 0L
+    private fun retainsTransportOnPause(): Boolean =
+        session is CheckpointedResumableModelSession && options.reconnect.budgetFactory != null
     @Volatile private var identity: Message? = null
     private class WaitingSlice(
         val offer: BarrierOffer,
@@ -126,6 +132,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             Pair(session, boundaryWaiter)
         }
         captured.second?.let { LockSupport.unpark(it) }
+        reconnectBudget?.finish("stopped")
         cancelSession(captured.first)
     }
     /** Nonblocking control call. A tool already executing is allowed to finish its batch. */
@@ -133,15 +140,21 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         val captured = synchronized(terminalLock) {
             if (terminal || terminalReserved || stopped.get()) return false
             pauseRequested = true
+            pauseEpoch++
+            // Control-only invalidation is synchronous: a quick resume cannot revive this gate.
+            attemptDelivery?.expire()
             execution = execution.copy(pauseRequested = true)
             if (requestOpening || execution.phase == ExecutionPhase.STREAMING || execution.phase == ExecutionPhase.RECONNECTING) {
-                breakStream = true
-                generation++
-                Pair(session, boundaryWaiter)
-            } else Pair(null, boundaryWaiter)
+                if (!retainsTransportOnPause()) { breakStream = true; generation++ }
+                Triple(session, boundaryWaiter, transportInterruption)
+            } else Triple(null, boundaryWaiter, null)
         }
         captured.second?.let { LockSupport.unpark(it) }
-        cancelSession(captured.first)
+        val resumable = captured.first as? CheckpointedResumableModelSession
+        if (resumable != null && options.reconnect.budgetFactory != null) {
+            reconnectBudget?.setPaused(true)
+            captured.third?.invoke() ?: resumable.disconnectTransport()
+        } else cancelSession(captured.first)
         return true
     }
     /** Only explicit resume releases a paused boundary; supplements alone never do. */
@@ -152,6 +165,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             execution = execution.copy(pauseRequested = false)
             boundaryWaiter
         }
+        reconnectBudget?.setPaused(false)
         waiter?.let { LockSupport.unpark(it) }
         return true
     }
@@ -229,11 +243,22 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var current = initial
         val sourceHistory = history.toList()
         var modelHistory = sourceHistory
-        val segmentHistory = RunnerHistorySegments(initial)
+        var segmentHistory = RunnerHistorySegments(initial)
+        // The active session's small replayable history state lets a batch use a private
+        // projection without mutating the accepted segment accumulator.
+        var historyBase = initial
+        val historyReasoning = linkedMapOf<String, String>()
+        var historyProtocol: Pair<Message, List<String>>? = null
+        fun forkHistory(): RunnerHistorySegments = RunnerHistorySegments(historyBase).also { fork ->
+            historyReasoning.forEach { (id, text) -> fork.acceptReasoning(id, text, final = true) }
+            historyProtocol?.let { (message, items) -> fork.replaceSessionProtocol(message, items) }
+        }
         var outputs = emptyList<ToolOutput>()
         var round = 0
         var requestUnconfirmed = false
         var request: RequestCheckpoint? = null
+        var transportCheckpoint: TransportCheckpoint? = null
+        var stagingTransportBatch = false
         var usageRequests = emptyList<RequestCheckpoint>()
         var usage: List<RequestUsageCheckpoint> =
             (options.runtimeStore as? PreparationRuntimeStore)?.preparationUsage(initial).orEmpty()
@@ -248,9 +273,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (message.status != RunStatus.RUNNING) ExecutionPhase.TERMINAL else execution.phase,
                 records.values.toList(), outputs, supplements.toList(), round, requestUnconfirmed,
                 owner = owner, revision = revision + 1,
-                pending = if (message.status == RunStatus.RUNNING) pendingCheckpoint else null, request = request, usage = usageSnapshot, usageRequests = usageRequests)
+                pending = if (message.status == RunStatus.RUNNING) pendingCheckpoint else null, request = request, usage = usageSnapshot, usageRequests = usageRequests, transport = transportCheckpoint)
         }
         fun checkpoint(next: RunCheckpoint = snapshot()) {
+            if (stagingTransportBatch) return
             val runtime = options.runtimeStore ?: return
             try {
                 if (runtime is AtomicRuntimeStore) runtime.commitCheckpoint(next) else runtime.save(next)
@@ -287,6 +313,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         }
         fun apply(candidate: Message) {
             val next = segmentHistory.project(candidate)
+            if (stagingTransportBatch) { current = next; return }
             val runtime = options.runtimeStore
             try {
                 if (runtime is AtomicRuntimeStore) {
@@ -357,6 +384,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             }
             if (acceptedUsers != null) {
                 val sealed = segmentHistory.sealSession(current, acceptedUsers)
+                historyBase = sealed
+                historyReasoning.clear()
+                historyProtocol = null
+                segmentHistory = RunnerHistorySegments(sealed)
                 outputs = emptyList()
                 modelHistory = sourceHistory + sealed.copy(status = RunStatus.COMPLETED, error = null)
                 apply(sealed)
@@ -375,15 +406,17 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 val token = synchronized(terminalLock) {
                     if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
                     if (pauseRequested || supplements.isNotEmpty() || breakStream) null
-                    else { requestOpening = true; generation }
+                    else { requestOpening = true; generation to pauseEpoch }
                 } ?: continue
+                // A supplement starts a new provider session, never a resume of the old cursor.
+                transportCheckpoint = null
                 request = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.OPEN)
                 requestUnconfirmed = true
                 try {
                     checkpoint() // open may itself send a request; persist uncertainty first.
                     val admitted = synchronized(terminalLock) {
                         if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
-                        token == generation && !pauseRequested && supplements.isEmpty() && !breakStream
+                        token.first == generation && token.second == pauseEpoch && !pauseRequested && supplements.isEmpty() && !breakStream
                     }
                     if (!admitted) continue
                     val opened = try {
@@ -391,13 +424,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     } catch (failure: Exception) {
                         val invalidated = synchronized(terminalLock) {
                             if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
-                            token != generation || pauseRequested || supplements.isNotEmpty() || breakStream
+                            token.first != generation || token.second != pauseEpoch || pauseRequested || supplements.isNotEmpty() || breakStream
                         }
                         if (invalidated) continue
                         throw failure
                     }
                     val accept = synchronized(terminalLock) {
-                        if (stopped.get() || terminalReserved || terminal || token != generation ||
+                        if (stopped.get() || terminalReserved || terminal || token.first != generation || token.second != pauseEpoch ||
                             pauseRequested || supplements.isNotEmpty() || breakStream) false
                         else { session = opened; true }
                     }
@@ -415,15 +448,34 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (boundary()) { cancelSession(active); active = open() }
                 if (stopped.get()) throw InterruptedException()
                 val pending = mutableListOf<ToolInvocation>()
-                val repetition = ReasoningRepetitionGuard()
-                val reasoningRepetition = ReasoningRepetitionGuard()
+                var repetition = ReasoningRepetitionGuard()
+                var reasoningRepetition = ReasoningRepetitionGuard()
+                // Keep the exact append/reset order; rebuilding from final text would change
+                // the detector's stride, correction and body-progress semantics.
+                val guardEdits = mutableListOf<Pair<Boolean, String?>>()
+                fun appendGuard(reasoning: Boolean, text: String): Boolean {
+                    guardEdits.add(reasoning to text)
+                    return (if (reasoning) reasoningRepetition else repetition).append(text)
+                }
+                fun resetGuard(reasoning: Boolean) {
+                    guardEdits.add(reasoning to null)
+                    (if (reasoning) reasoningRepetition else repetition).reset()
+                }
+                fun restoreGuards(size: Int) {
+                    guardEdits.subList(size, guardEdits.size).clear()
+                    repetition = ReasoningRepetitionGuard()
+                    reasoningRepetition = ReasoningRepetitionGuard()
+                    guardEdits.forEach { (reasoning, text) ->
+                        val guard = if (reasoning) reasoningRepetition else repetition
+                        if (text == null) guard.reset() else guard.append(text)
+                    }
+                }
                 val responseText = linkedMapOf<String, String>()
                 val reasoningText = linkedMapOf<String, String>()
                 var reasoningBaseline: Map<String, String> = emptyMap()
                 var repetitiveSurface: String? = null
                 fun checkText(itemId: String, text: String, final: Boolean, reasoning: Boolean = false): Boolean {
                     val texts = if (reasoning) reasoningText else responseText
-                    val guard = if (reasoning) reasoningRepetition else repetition
                     val previous = texts[itemId].orEmpty()
                     val next = if (final) text else previous + text
                     fun uncounted(id: String, value: String): String {
@@ -433,12 +485,12 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     val before = uncounted(itemId, previous)
                     val after = uncounted(itemId, next)
                     val repetitive = if (after.startsWith(before)) {
-                        guard.append(after.substring(before.length))
+                        appendGuard(reasoning, after.substring(before.length))
                     } else {
-                        guard.reset()
+                        resetGuard(reasoning)
                         val corrected = LinkedHashMap(texts)
                         corrected[itemId] = next
-                        corrected.any { (id, value) -> guard.append(uncounted(id, value)) }
+                        corrected.any { (id, value) -> appendGuard(reasoning, uncounted(id, value)) }
                     }
                     if (repetitive) {
                         val surface = if (reasoning) "思考摘要" else "正文"
@@ -451,22 +503,24 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 }
                 fun bodyProgress(changed: Boolean) {
                     if (changed) {
-                        reasoningRepetition.reset()
+                        resetGuard(reasoning = true)
                         reasoningBaseline = reasoningText.toMap()
                     }
                 }
                 var textFloor = current.blocks.size
                 var sinkFailure: Exception? = null
                 var accepting = true
+                var attemptFence = 0L
                 val token = synchronized(terminalLock) {
                     if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
                     if (pauseRequested || supplements.isNotEmpty() || breakStream) null
-                    else { setPhase(ExecutionPhase.STREAMING); ++generation }
+                    else { attemptFence = pauseEpoch; setPhase(ExecutionPhase.STREAMING); ++generation }
                 }
                 if (token == null) {
                     if (boundary()) { cancelSession(active); active = open() }
                     continue
                 }
+                transportCheckpoint = null
                 request = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
                 usageRequests = usageRequests + checkNotNull(request)
                 requestUnconfirmed = true
@@ -489,22 +543,25 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             }.toList()
                             checkpoint(snapshot(usageSnapshot = nextUsage))
                             usage = nextUsage
-                            try { options.onUsage(event) } catch (_: Exception) { /* Observer failure cannot invalidate committed usage. */ }
+                            try { if (!stagingTransportBatch) options.onUsage(event) } catch (_: Exception) { /* Observer failure cannot invalidate committed usage. */ }
                         }
                         is ModelEvent.ReasoningDelta -> {
                             checkText(event.itemId, event.text, final = false, reasoning = true)
                             segmentHistory.acceptReasoning(event.itemId, event.text, final = false)
+                            historyReasoning[event.itemId] = historyReasoning[event.itemId].orEmpty() + event.text
                             apply(current)
-                            try { options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
+                            try { if (!stagingTransportBatch) options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
                         }
                         is ModelEvent.ReasoningFinal -> {
                             checkText(event.itemId, event.text, final = true, reasoning = true)
                             segmentHistory.acceptReasoning(event.itemId, event.text, final = true)
+                            historyReasoning[event.itemId] = event.text
                             apply(current)
-                            try { options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
+                            try { if (!stagingTransportBatch) options.onReasoning(event) } catch (_: Exception) { /* Observer failure cannot invalidate accepted reasoning. */ }
                         }
                         is ModelEvent.ProtocolOutput -> {
                             segmentHistory.replaceSessionProtocol(current, event.items)
+                            historyProtocol = current to event.items.toList()
                             apply(current.copy(protocolItems = event.items))
                         }
                         is ModelEvent.TextDelta -> {
@@ -543,6 +600,77 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     } catch (failure: Exception) { sinkFailure = failure; throw failure }
                     }
                 }
+                val acknowledgedSink: (ModelEventBatch) -> ModelDeliveryAck = { batch ->
+                    synchronized(eventLock) {
+                        fun currentAttempt(): Boolean = accepting && token == generation && attemptFence == pauseEpoch && !terminal &&
+                            !terminalReserved && !stopped.get() && !pauseRequested && !breakStream
+                        if (!currentAttempt()) ModelDeliveryAck.REJECTED
+                        else {
+                            val beforeCurrent = current
+                            val beforeHistory = segmentHistory
+                            val beforeReasoning = historyReasoning.toMap()
+                            val beforeProtocol = historyProtocol
+                            val beforeUsage = usage
+                            val beforeTransport = transportCheckpoint
+                            val beforeCalls = calls.toMap()
+                            val beforePending = pending.toList()
+                            val beforeRecords = records.toMap()
+                            val beforeResponseText = responseText.toMap()
+                            val beforeReasoningText = reasoningText.toMap()
+                            val beforeBaseline = reasoningBaseline
+                            val beforeSurface = repetitiveSurface
+                            val beforeFloor = textFloor
+                            val beforeGuardSize = guardEdits.size
+                            var committed = false
+                            try {
+                                check(options.runtimeStore is AtomicRuntimeStore && options.runtimeStore.durable) {
+                                    "Background resume requires an atomic durable checkpoint store"
+                                }
+                                reconnectBudget?.check()
+                                segmentHistory = forkHistory()
+                                stagingTransportBatch = true
+                                try { batch.events.forEach(sink) } finally { stagingTransportBatch = false }
+                                if (!currentAttempt()) throw ModelDeliveryRejectedException()
+                                reconnectBudget?.check()
+                                transportCheckpoint = batch.checkpoint
+                                checkpoint()
+                                committed = true
+                                // The successful atomic write is the ACK linearization point.
+                                // Pause/stop/deadline may fence later deliveries, not undo this ACK.
+                                try { publish(current) } catch (_: Exception) {}
+                                batch.events.forEach { event ->
+                                    try {
+                                        if (event is ModelEvent.Usage) options.onUsage(event)
+                                        if (event is ModelEvent.ReasoningDelta || event is ModelEvent.ReasoningFinal) options.onReasoning(event)
+                                    } catch (_: Exception) {}
+                                }
+                                ModelDeliveryAck.ACCEPTED
+                            } catch (failure: Exception) {
+                                if (!committed) {
+                                    current = beforeCurrent
+                                    segmentHistory = beforeHistory
+                                    historyReasoning.clear(); historyReasoning.putAll(beforeReasoning)
+                                    historyProtocol = beforeProtocol
+                                    usage = beforeUsage
+                                    transportCheckpoint = beforeTransport
+                                    calls.clear(); calls.putAll(beforeCalls)
+                                    pending.clear(); pending.addAll(beforePending)
+                                    records.clear(); records.putAll(beforeRecords)
+                                    responseText.clear(); responseText.putAll(beforeResponseText)
+                                    reasoningText.clear(); reasoningText.putAll(beforeReasoningText)
+                                    reasoningBaseline = beforeBaseline
+                                    repetitiveSurface = beforeSurface
+                                    textFloor = beforeFloor
+                                    restoreGuards(beforeGuardSize)
+                                }
+                                // An uncertain write or sink failure seals this run. Never retry
+                                // or issue a later checkpoint from a possibly dirty candidate.
+                                if (failure !is ModelDeliveryRejectedException) sinkFailure = failure
+                                throw failure
+                            }
+                        }
+                    }
+                }
                 var transportFailure: Exception? = null
                 try {
                     var attempt = 0
@@ -554,23 +682,72 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 if (stopped.get() || terminalReserved || terminal || token != generation) {
                                     throw InterruptedException()
                                 }
+                                if (pauseRequested || attemptFence != pauseEpoch) throw ModelDeliveryRejectedException()
                             }
                             val delivery = ProviderEventDeliveryGate()
-                            try {
-                                val attemptSink: (ModelEvent) -> Unit = { event -> delivery.deliver { sink(event) } }
-                                if (attempt == 0) active.next(outputs, attemptSink)
-                                else (active as ResumableModelSession).resume(attemptSink)
-                            } finally {
-                                // Drain the old attempt outside Runner locks before reconnecting.
-                                delivery.close()
+                            val checkpointed = active as? CheckpointedResumableModelSession
+                            val interrupt: () -> Unit = {
+                                delivery.expire()
+                                checkpointed?.disconnectTransport()
                             }
+                            synchronized(terminalLock) {
+                                if (stopped.get() || terminalReserved || terminal || token != generation) throw InterruptedException()
+                                if (pauseRequested || attemptFence != pauseEpoch) throw ModelDeliveryRejectedException()
+                                attemptDelivery = delivery
+                                transportInterruption = interrupt
+                            }
+                            var binding: AutoCloseable? = null
+                            try {
+                                binding = reconnectBudget?.attach(interrupt)
+                                reconnectBudget?.check()
+                                val attemptSink: (ModelEvent) -> Unit = { event -> delivery.deliver { sink(event) } }
+                                // attach/check may call outside code. Re-admit only while the
+                                // registered gate and the pre-checkpoint pause fence still match.
+                                synchronized(terminalLock) {
+                                    if (stopped.get() || terminalReserved || terminal || token != generation) throw InterruptedException()
+                                    if (pauseRequested || attemptFence != pauseEpoch || delivery.isClosed) throw ModelDeliveryRejectedException()
+                                }
+                                if (checkpointed != null) {
+                                    check(options.runtimeStore is AtomicRuntimeStore && options.runtimeStore.durable) {
+                                        "Background resume requires an atomic durable checkpoint store"
+                                    }
+                                    val batchSink: (ModelEventBatch) -> ModelDeliveryAck = { batch ->
+                                        delivery.deliverAcknowledged { acknowledgedSink(batch) }
+                                    }
+                                    if (attempt == 0) checkpointed.nextAcknowledged(outputs, batchSink)
+                                    else checkpointed.resumeAcknowledged(batchSink)
+                                } else if (attempt == 0) active.next(outputs, attemptSink)
+                                else (active as ResumableModelSession).resume(attemptSink)
+                                reconnectBudget?.check()
+                            } finally {
+                                synchronized(terminalLock) {
+                                    if (attemptDelivery === delivery) attemptDelivery = null
+                                    if (transportInterruption === interrupt) transportInterruption = null
+                                }
+                                // Drain even when releasing an external budget binding fails.
+                                try { binding?.close() } finally { delivery.close() }
+                            }
+                            reconnectBudget?.finish("succeeded")
                             break
                         } catch (failure: Exception) {
                             if (stopped.get() || breakStream || sinkFailure != null) throw failure
                             val resumable = active as? ResumableModelSession
                             val classified = (failure as? ModelRequestException)?.failure
-                            if (attempt >= options.reconnect.maxAttempts || classified !in options.reconnect.failures ||
-                                resumable?.canResume != true) throw failure
+                                ?: if (failure is ModelDeliveryRejectedException && active is CheckpointedResumableModelSession)
+                                    ModelFailure.NETWORK else null
+                            val factory = options.reconnect.budgetFactory.takeIf { active is CheckpointedResumableModelSession }
+                            val canResume = try { resumable?.canResume == true } catch (_: Exception) { false }
+                            if ((factory == null && attempt >= options.reconnect.maxAttempts) ||
+                                classified !in options.reconnect.failures || !canResume) throw failure
+                            if (factory != null) {
+                                if (reconnectBudget == null) reconnectBudget = factory.create(round, checkNotNull(classified))
+                                val budget = checkNotNull(reconnectBudget)
+                                budget.updateReason(checkNotNull(classified))
+                                budget.setPaused(pauseRequested)
+                                budget.check()
+                                if (pauseRequested) awaitPause()
+                                budget.check()
+                            }
                             synchronized(terminalLock) {
                                 if (stopped.get() || terminalReserved || breakStream) throw InterruptedException()
                                 setPhase(ExecutionPhase.RECONNECTING, ++attempt)
@@ -581,6 +758,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 // by stop/resume's unpark; unlike sleep it does not add stop latency.
                                 val deadline = System.nanoTime() + options.reconnect.delayMillis * 1_000_000L
                                 while (true) {
+                                    reconnectBudget?.check()
+                                    if (reconnectBudget != null && pauseRequested) awaitPause()
                                     val remaining = deadline - System.nanoTime()
                                     if (remaining <= 0L) break
                                     synchronized(terminalLock) {
@@ -594,9 +773,12 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                     }
                                 }
                             }
+                            reconnectBudget?.check()
+                            if (reconnectBudget != null && pauseRequested) awaitPause()
                             synchronized(terminalLock) {
                                 if (stopped.get() || terminalReserved || breakStream) throw InterruptedException()
                                 setPhase(ExecutionPhase.STREAMING, attempt)
+                                attemptFence = pauseEpoch
                             }
                             request = checkNotNull(request).copy(attemptId = UUID.randomUUID().toString(), operation = RequestOperation.RESUME)
                             usageRequests = usageRequests.map { if (it.requestId == request?.requestId) checkNotNull(request) else it }
@@ -606,6 +788,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     }
                 } catch (failure: Exception) { transportFailure = failure }
                 finally {
+                    try { reconnectBudget?.finish(if (stopped.get()) "stopped" else if (transportFailure != null) "failed" else "succeeded") }
+                    catch (failure: Exception) { if (transportFailure == null) transportFailure = failure }
+                    finally { reconnectBudget = null; transportInterruption = null }
                     // Fence after all currently executing callbacks, not merely after the
                     // transport returns. Late callbacks then observe accepting=false/token mismatch.
                     synchronized(eventLock) {
@@ -613,8 +798,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         synchronized(terminalLock) { generation++ }
                     }
                 }
-                if (stopped.get()) throw InterruptedException()
                 sinkFailure?.let { throw it }
+                if (stopped.get()) throw InterruptedException()
                 repetitiveSurface?.let { throw RepetitiveOutputException(it) }
                 if (breakStream) {
                     // A cancelled stream never confirms pending tools. Only accepted text is retained.

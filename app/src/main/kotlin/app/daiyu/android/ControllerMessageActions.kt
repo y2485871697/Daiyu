@@ -14,7 +14,7 @@ internal sealed interface MessageActionResult {
     data class Regenerated(val conversation: Conversation, val outcome: RegenerationSendOutcome) : MessageActionResult
     data class Rejected(val reason: String) : MessageActionResult
     /** Commit/receipt uncertain: refresh persisted history, NEVER automatically retry. */
-    data class Unknown(val reason: String) : MessageActionResult
+    data class Unknown(val reason: String, val locator: app.daiyu.android.context.BranchLocator? = null) : MessageActionResult
 }
 
 /** Activity-local owner lease. Keep one host per Activity and invalidate it on conversation /
@@ -40,6 +40,8 @@ internal class ControllerMessageActionHost(private val controller: ChatControlle
             val admitted = controller.messageAction(action, target) {
                 // Busy/stream notifications may legitimately re-render the SAME editor while
                 // work is in flight. Rebinding fences old gestures, not an admitted receipt.
+                // Branch UNKNOWN is already retained by the controller, outside this UI lease;
+                // do NOT relax the fence to deliver navigation/editor effects to an old host.
                 if (ownerEpoch === admittedOwner && isCurrent()) result(it)
             }
             if (!admitted) result(MessageActionResult.Rejected("请等待运行、恢复或数据操作结束后再操作消息"))

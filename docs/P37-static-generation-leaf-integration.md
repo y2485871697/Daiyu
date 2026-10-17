@@ -1,5 +1,7 @@
 # P37 静态生成目的端叶子：接口、接入顺序与未完成边界
 
+> 本文保留叶子提交时的范围和证据限度。后续生产接线见 [P37-static-generation-production.md](P37-static-generation-production.md)：基线完整包已是含 runtime_usage_history 的 v4，新静态节实际接入 **v5**，不是本文历史规划中的 v4。生产接线和新增测试源码尚需父代理构建/执行验收。
+
 ## 状态与范围
 
 本叶子仅新增 `media/StaticGenerationAssets.kt`、`storage/StaticGenerationOutput.kt`、`backup/StaticGenerationCodec.kt` 和独立测试源码。本实现**不是 P37 生产完成**，不开放现有分支入口，不修改 Controller、ContextService、MessageActionStore、数据库 helper/版本、Main、现有 backup 文件或唯一清单；不涉及 runtime-usage。

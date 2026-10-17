@@ -341,6 +341,230 @@ class BrowserDownloadSaveActivityTest : ComposeActivityTestCase() {
         assertFalse(documents.file(destination).exists())
     }
 
+    // Static originals deliberately reuse this real Activity/provider/browser fixture: these
+    // tests exercise the shared request-code allocator, not a parallel picker abstraction.
+    private fun seedStaticOriginal(): StaticGenerationOutput {
+        val credentials = mutableMapOf<String, String>()
+        val scope = app.daiyu.android.model.generation.GenerationSettingsStore(
+            fixture.getSharedPreferences(app.daiyu.android.model.generation.GenerationSettingsStore.METADATA_NAMESPACE, 0),
+            { credentials.getValue(it) }, { id, value -> credentials[id] = value }).save(
+            app.daiyu.android.model.generation.GenerationSettingsValues(listOf(
+                app.daiyu.android.model.generation.GenerationProfileSettings(label = "offline static save",
+                    kind = app.daiyu.android.model.generation.GenerationKind.IMAGE,
+                    protocol = app.daiyu.android.model.generation.GenerationProtocol.OPENAI_IMAGES_JSON,
+                    endpoint = "https://example.invalid/images/generations", model = "offline", apiKey = "in-memory-fixture")),
+                0, false, emptySet()), null).accountScope
+        val run = app.daiyu.android.domain.RunId(UUID.randomUUID().toString())
+        val tool = app.daiyu.android.domain.MessageBlock.Tool(app.daiyu.android.domain.ToolInvocation(
+            app.daiyu.android.domain.ToolCallId(UUID.randomUUID().toString()), "generate_images", "{}"), "static history only")
+        val assistant = app.daiyu.android.domain.Message(app.daiyu.android.domain.MessageId(UUID.randomUUID().toString()),
+            conversation.id, run, app.daiyu.android.domain.Message.ASSISTANT_ROLE, listOf(tool), app.daiyu.android.domain.RunStatus.RUNNING)
+        controller.database.send(assistant.copy(id = app.daiyu.android.domain.MessageId(UUID.randomUUID().toString()),
+            role = app.daiyu.android.domain.Message.USER_ROLE,
+            blocks = listOf(app.daiyu.android.domain.MessageBlock.Text("body", "offline original")),
+            status = app.daiyu.android.domain.RunStatus.COMPLETED), assistant)
+        controller.database.save(assistant.copy(status = app.daiyu.android.domain.RunStatus.COMPLETED))
+        val hash = app.daiyu.android.context.PrivateBlobs.digest(staticBytes)
+        val origin = GenerationAttemptBinding("origin-conversation", "origin-owner", "origin-run", "origin-call", "generate_images")
+        val output = StaticGenerationOutput(StaticGenerationProvenance("offline", origin.operationId, "origin-item", 0,
+            origin.conversationId, origin.assistantMessageId, origin.runId, origin.toolCallId, origin.toolName, "a".repeat(64),
+            app.daiyu.android.model.generation.GenerationProtocol.OPENAI_IMAGES_JSON, "genasset-v1-${"b".repeat(64)}-$hash",
+            app.daiyu.android.model.generation.GenerationKind.IMAGE, "image/png", staticBytes.size.toLong(), hash, 1, 1, 0),
+            StaticGenerationDestination(scope, conversation.id.value, assistant.id.value, run.value, tool.invocation.id.value, tool.invocation.name))
+        val assets = app.daiyu.android.media.StaticGenerationAssets(File(root, "static-generation-assets"))
+        val lease = assets.prepare(output, app.daiyu.android.media.StaticGenerationOriginalReader { staticBytes.inputStream() })
+        assets.publish(lease)
+        app.daiyu.android.context.DatabaseTransactions { controller.database.writableDatabase }.run { db ->
+            app.daiyu.android.backup.BackupHistoryRows.install(db)
+            app.daiyu.android.backup.StaticGenerationCodec.saveInTransaction(db, output,
+                app.daiyu.android.backup.staticMessageRows(app.daiyu.android.context.ContextService.read(db, conversation.id)))
+        }
+        assets.settle(lease, app.daiyu.android.media.StaticGenerationSettlement.COMMITTED)
+        return output
+    }
+    private val staticBytes get() = android.util.Base64.decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kF9sAAAAASUVORK5CYII=", android.util.Base64.DEFAULT)
+    private fun field(name: String): Any? = MainActivity::class.java.getDeclaredField(name).apply {
+        isAccessible = true
+    }.get(activity)
+    private fun openStaticListing() {
+        mainThread { MainActivity::class.java.getDeclaredMethod("openGenerationOutputs").apply {
+            isAccessible = true
+        }.invoke(activity) }
+        ui.waitUntil(10_000) {
+            ((field("staticGenerationOutputs\$delegate") as androidx.compose.runtime.State<*>).value as? List<*>)?.isNotEmpty() == true
+        }
+    }
+    private fun chooseStatic(output: StaticGenerationOutput, result: Int = Activity.RESULT_CANCELED,
+        uri: Uri? = destination, beforeReturn: () -> Unit = {}): Int {
+        openStaticListing()
+        var code = 0
+        val seen = CountDownLatch(1)
+        val monitor = object : Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
+                assertEquals(Intent.ACTION_CREATE_DOCUMENT, intent.action)
+                assertEquals("image/png", intent.type)
+                assertEquals("daiyu-static-original.png", intent.getStringExtra(Intent.EXTRA_TITLE))
+                code = checkNotNull(pendingCode()); assertTrue(code in 14000..65534)
+                assertNotNull(field("pendingStaticOriginal"))
+                beforeReturn(); seen.countDown()
+                return Instrumentation.ActivityResult(result, Intent().apply { if (uri != null) data = uri })
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        try {
+            mainThread { MainActivity::class.java.getDeclaredMethod("pickStaticGenerationOriginal", StaticGenerationOutput::class.java)
+                .apply { isAccessible = true }.invoke(activity, output) }
+            assertTrue(seen.await(5, TimeUnit.SECONDS))
+            instrumentation.waitForIdleSync()
+            ui.waitUntil(10_000) { pendingCode() == null && !controller.dataBusy }
+            return code
+        } finally { instrumentation.removeMonitor(monitor) }
+    }
+    private fun recreateMain() {
+        val monitor = instrumentation.addMonitor(MainActivity::class.java.name, null, false)
+        try {
+            mainThread { activity.recreate() }
+            activity = checkNotNull(instrumentation.waitForMonitorWithTimeout(monitor, 10_000)) as MainActivity
+            instrumentation.waitForIdleSync()
+            ui.waitUntil(10_000) { field("selectionReady") == true }
+        } finally { instrumentation.removeMonitor(monitor) }
+    }
+
+    fun testStaticAndBrowserShareMonotonicCodesAndStaleCancelDuplicateCannotSaveNewSelection() {
+        val output = seedStaticOriginal()
+        val browserCode = choose(Activity.RESULT_CANCELED)
+        val cancelled = chooseStatic(output)
+        assertTrue(cancelled > browserCode)
+        val second = chooseStatic(output, beforeReturn = {
+            val current = pendingCode()
+            deliver(cancelled); deliver(browserCode); deliver(cancelled)
+            assertEquals(current, pendingCode()); assertNotNull(field("pendingStaticOriginal"))
+        })
+        assertTrue(second > cancelled)
+        mainThread { deliver(second); deliver(cancelled) }
+        assertEquals(0, documents.opens.get())
+        val saved = chooseStatic(output, Activity.RESULT_OK)
+        assertTrue(saved > second)
+        assertEquals(1, documents.opens.get())
+        assertTrue(staticBytes.contentEquals(documents.file(destination).readBytes()))
+        val afterSave = chooseStatic(output, beforeReturn = {
+            val current = pendingCode(); deliver(saved); assertEquals(current, pendingCode())
+        })
+        assertTrue(afterSave > saved)
+        assertEquals(1, documents.opens.get()); assertEquals(0, modelCalls.get())
+        assertTrue(bytes.contentEquals(receipt.path.toFile().readBytes()))
+    }
+
+    fun testStaticPickerOnlyFirstHopSurvivesAndSecondUnrelatedPauseRevokesOutstandingVisit() {
+        val output = seedStaticOriginal()
+        var firstVisit: java.util.concurrent.atomic.AtomicBoolean? = null
+        chooseStatic(output, Activity.RESULT_OK, beforeReturn = {
+            firstVisit = field("staticGenerationVisit") as java.util.concurrent.atomic.AtomicBoolean
+            lifecycle("onPause")
+            assertTrue(firstVisit!!.get()); assertNotNull(pendingCode())
+            lifecycle("onResume")
+            lifecycle("onPause") // no picker result arrived: this is NOT the first external hop
+            assertFalse(firstVisit!!.get()); assertNull(pendingCode()); assertNull(field("pendingStaticOriginal"))
+            lifecycle("onResume")
+        })
+        assertEquals(0, documents.opens.get())
+        chooseStatic(output, Activity.RESULT_OK, beforeReturn = {
+            assertNotSame(firstVisit, field("staticGenerationVisit"))
+            lifecycle("onPause"); lifecycle("onResume") // a fresh pick gets exactly one fresh hop
+        })
+        assertEquals(1, documents.opens.get())
+        assertTrue(staticBytes.contentEquals(documents.file(destination).readBytes()))
+        mainThread { lifecycle("onPause"); lifecycle("onResume") }
+        assertNull(field("staticGenerationVisit")); assertEquals(0, modelCalls.get())
+    }
+
+    fun testStaticSavedStateRetainsOnlyNextCodeAndRecreationRejectsOldCallback() {
+        val output = seedStaticOriginal()
+        val state = android.os.Bundle()
+        val monitor = instrumentation.addMonitor(MainActivity::class.java.name, null, false)
+        val old: Int
+        try {
+            old = chooseStatic(output, beforeReturn = {
+                MainActivity::class.java.getDeclaredMethod("onSaveInstanceState", android.os.Bundle::class.java)
+                    .apply { isAccessible = true }.invoke(activity, state)
+                assertEquals(checkNotNull(pendingCode()) + 1, state.getInt("browser-save-next"))
+                assertFalse(state.keySet().any { it.contains("static", ignoreCase = true) })
+                activity.recreate() // request replacement while the exact original picker is still pending
+            })
+            activity = checkNotNull(instrumentation.waitForMonitorWithTimeout(monitor, 10_000)) as MainActivity
+            instrumentation.waitForIdleSync()
+            ui.waitUntil(10_000) { field("selectionReady") == true }
+        } finally { instrumentation.removeMonitor(monitor) }
+        assertNull(field("pendingStaticOriginal")); assertNull(field("staticGenerationVisit")); assertNull(pendingCode())
+        mainThread { deliver(old) }
+        assertEquals(0, documents.opens.get())
+        val next = chooseStatic(output, beforeReturn = {
+            val current = pendingCode(); deliver(old); assertEquals(current, pendingCode())
+        })
+        assertTrue(next > old)
+        assertEquals(0, documents.opens.get()); assertEquals(0, modelCalls.get())
+    }
+
+    fun testUnknownBranchIsOfferedToNewForegroundAndRecreatedActivityUntilExplicitDismiss() {
+        val output = seedStaticOriginal()
+        // Main may already have initialized messageActionStore while preparing its first
+        // rendered snapshot. Fault its actual retained asset dependency, not a replacement lazy.
+        val assets = (ChatController::class.java.getDeclaredField("staticGenerationAssets\$delegate").apply {
+            isAccessible = true
+        }.get(controller) as Lazy<*>).value
+        val publicationFault: () -> Unit = { throw java.io.IOException("Activity UNKNOWN fixture") }
+        app.daiyu.android.media.StaticGenerationAssets::class.java.getDeclaredField("afterAtomicMove").apply {
+            isAccessible = true
+        }.set(assets, publicationFault)
+        val loaded = CountDownLatch(1)
+        val snapshot = java.util.concurrent.atomic.AtomicReference<MessageActionSnapshot>()
+        mainThread { assertTrue(controller.loadMessageActionSnapshot(conversation.id) { snapshot.set(it); loaded.countDown() }) }
+        assertTrue(loaded.await(10, TimeUnit.SECONDS))
+        val obsolete = AtomicInteger()
+        mainThread {
+            val host = ControllerMessageActionHost(controller)
+            host.bind(snapshot.get(), { true }) { obsolete.incrementAndGet() }.onBranch(snapshot.get().targets.keys.first())
+            host.invalidate(); lifecycle("onPause"); page("settings")
+        }
+        ui.waitUntil(10_000) { !controller.dataBusy && controller.pendingBranchOutcome() != null }
+        val receipt = checkNotNull(controller.pendingBranchOutcome())
+        val locator = checkNotNull(receipt.locator)
+        assertEquals(0, obsolete.get())
+        mainThread { lifecycle("onResume") }
+        ui.waitForIdle()
+        assertSame(receipt, (field("unknownBranchOutcome\$delegate") as androidx.compose.runtime.State<*>).value)
+        assertEquals(conversation.id, (field("selected") as Conversation).id)
+        node("branch-unknown-inspect").performClick()
+        ui.waitUntil(10_000) { !controller.dataBusy }
+        assertSame(receipt, controller.pendingBranchOutcome())
+        recreateMain()
+        mainThread { page("settings") } // global surface must not depend on the composer being mounted
+        assertSame(receipt, (field("unknownBranchOutcome\$delegate") as androidx.compose.runtime.State<*>).value)
+        assertEquals(conversation.id, (field("selected") as Conversation).id)
+        val slot = locator.staticIdentities.single().removePrefix("genstatic-v1-")
+        val retainedOriginal = File(root, "static-generation-assets/generation-static-v1/$slot/original")
+        val retainedLease = File(root, "static-generation-assets/generation-static-v1/$slot.lease")
+        assertTrue(retainedOriginal.isFile); assertTrue(retainedLease.isFile)
+        node("branch-unknown-dismiss").performClick()
+        assertNull(controller.pendingBranchOutcome())
+        recreateMain()
+        assertNull((field("unknownBranchOutcome\$delegate") as androidx.compose.runtime.State<*>).value)
+        assertTrue(retainedOriginal.isFile); assertTrue(retainedLease.isFile)
+        assertEquals(1, controller.database.conversations().size)
+        val service = app.daiyu.android.backup.NeutralBackupService(fixture, controller.database)
+            .withStaticAssets(app.daiyu.android.media.StaticGenerationAssets(File(root, "static-generation-assets")))
+        assertTrue(staticBytes.contentEquals(service.staticGenerationOriginal(output)))
+        assertEquals(0, documents.opens.get()); assertEquals(0, modelCalls.get())
+    }
+
+    fun testStaticMissingAndNonContentUriDoNotOpenProvider() {
+        val output = seedStaticOriginal()
+        chooseStatic(output, Activity.RESULT_OK, uri = null)
+        chooseStatic(output, Activity.RESULT_OK, uri = Uri.fromFile(File(root, "not-content")))
+        assertEquals(0, documents.opens.get()); assertEquals(0, modelCalls.get())
+    }
+
     fun testCorruptSourceAndRevokedProviderNeverReportSaveSuccess() {
         receipt.path.toFile().writeBytes(bytes.copyOf().apply { this[0] = 99 })
         choose()

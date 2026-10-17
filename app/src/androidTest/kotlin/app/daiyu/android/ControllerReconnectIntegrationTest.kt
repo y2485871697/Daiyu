@@ -5,7 +5,17 @@ import android.content.Context
 import android.test.InstrumentationTestCase
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.RunnerOptions
+import app.daiyu.android.delegation.ReasoningEffort
+import app.daiyu.android.model.MessagesModel
 import app.daiyu.android.model.ProviderProtocol
+import app.daiyu.android.model.ResponsesModel
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.net.URL
+import java.security.cert.Certificate
+import javax.net.ssl.HttpsURLConnection
+import java.util.concurrent.CopyOnWriteArrayList
 import app.daiyu.android.model.reconnect.*
 import app.daiyu.android.storage.*
 import java.io.File
@@ -140,6 +150,128 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
             awaitControl("frozen run completes") { f.controller.active == null }
             assertEquals(if (initial == ReconnectDurationPreset.NONE) null else diagnostic(ProviderProtocol.MESSAGES),
                 f.controller.problem)
+        }
+    }
+
+    /** Concrete HTTPS facade only: even official-looking URLs never open a socket. */
+    private class LocalHttps(url: URL, events: String) : HttpsURLConnection(url) {
+        val sent = ByteArrayOutputStream()
+        private val incoming = events.byteInputStream()
+        override fun connect() {}
+        override fun disconnect() {}
+        override fun usingProxy() = false
+        override fun getCipherSuite() = "fixture"
+        override fun getLocalCertificates(): Array<Certificate>? = null
+        override fun getServerCertificates(): Array<Certificate> = emptyArray()
+        override fun getOutputStream() = sent
+        override fun getInputStream() = incoming
+        override fun getResponseCode() = 200
+        override fun getContentType() = "text/event-stream"
+    }
+    private fun wire(type: String, sequence: Int, body: JSONObject = JSONObject()) =
+        "data: ${body.put("type", type).put("sequence_number", sequence)}\n\n"
+    private fun partialWire() = wire("response.created", 0,
+        JSONObject().put("response", JSONObject().put("id", "resp_controller").put("status", "in_progress"))) +
+        wire("response.output_text.delta", 1,
+            JSONObject().put("item_id", "m").put("content_index", 0).put("delta", "a"))
+    private fun finalWire() = wire("response.output_text.delta", 2,
+        JSONObject().put("item_id", "m").put("content_index", 0).put("delta", "b")) +
+        wire("response.completed", 3, JSONObject().put("response", JSONObject()
+            .put("id", "resp_controller").put("status", "completed")
+            .put("output", JSONArray().put(JSONObject().put("id", "m").put("type", "message")
+                .put("role", "assistant").put("content", JSONArray().put(JSONObject()
+                    .put("type", "output_text").put("text", "ab")))))
+            .put("usage", JSONObject().put("input_tokens", 10).put("output_tokens", 2))))
+
+    fun testOfficialOptInUsesOriginalFactoryAndReasoningFrozenRequestForPostAndGet() {
+        val entered = CountDownLatch(1)
+        val assemble = CountDownLatch(1)
+        val configs = CopyOnWriteArrayList<ModelSettings>()
+        val connections = CopyOnWriteArrayList<LocalHttps>()
+        val f = fresh { config ->
+            configs.add(config)
+            entered.countDown(); check(assemble.await(10, TimeUnit.SECONDS))
+            // Return the real model UNCONFIGURED. The Controller must configure THIS factory
+            // product after freezing the actual reasoning-adjusted requestProvider.
+            ResponsesModel(config) { url ->
+                check(connections.size < 2) { "unexpected third transport; never use the network" }
+                LocalHttps(url, if (connections.isEmpty()) partialWire() else finalWire()).also(connections::add)
+            }
+        }
+        f.settings.save(f.settings.load().copy(endpoint = "https://api.openai.com/v1/responses"))
+        f.controller.reasoningPreference.set(null, ReasoningEffort.LOW)
+        f.controller.reconnectSettings.save(ReconnectSettings(ReconnectDurationPreset.WINDOW_30S, true))
+        f.db.draft("pending")
+        val accepted = AtomicReference<ChatController.TextSendResult>()
+        val done = CountDownLatch(1)
+        controlMain { assertTrue(f.controller.sendText(null, 1, 2, "pending") {
+            accepted.set(it); done.countDown()
+        }) }
+        try {
+            await(entered)
+            assertEquals("low", JSONObject(configs.single().requestOptions.customBody)
+                .getJSONObject("reasoning").getString("effort"))
+            f.controller.reconnectSettings.save(ReconnectSettings())
+            f.controller.reasoningPreference.set(null, ReasoningEffort.HIGH)
+            f.settings.save(f.settings.load().copy(endpoint = "https://later.invalid", model = "later-model"))
+        } finally { assemble.countDown() }
+        await(done)
+        assertTrue(accepted.get() is ChatController.TextSendResult.Accepted)
+        awaitControl("real background response completes") { f.controller.active == null }
+        assertNull(f.controller.problem)
+        assertEquals(1, configs.size)
+        assertEquals(listOf("POST", "GET"), connections.map { it.requestMethod })
+        val post = JSONObject(connections[0].sent.toString("UTF-8"))
+        assertTrue(post.getBoolean("background")); assertTrue(post.getBoolean("stream")); assertFalse(post.getBoolean("store"))
+        assertEquals("low", post.getJSONObject("reasoning").getString("effort"))
+        assertEquals("fixture", post.getString("model"))
+        assertEquals("https://api.openai.com/v1/responses", connections[0].url.toString())
+        assertEquals("https://api.openai.com/v1/responses/resp_controller?stream=true&starting_after=1",
+            connections[1].url.toString())
+        assertEquals(0, connections[1].sent.size())
+        val answer = f.db.messages(f.db.conversations().single().id).last().second
+        assertEquals(RunStatus.COMPLETED, answer.status)
+        assertEquals("ab", answer.blocks.filterIsInstance<MessageBlock.Text>().single().text)
+        val raw = f.db.readableDatabase.rawQuery("SELECT payload FROM runtime_checkpoints WHERE message_id=?",
+            arrayOf(answer.id.value)).use { it.moveToFirst(); it.getString(0) }
+        val checkpoint = RunCheckpointCodec.decode(raw)
+        assertEquals(3L, checkpoint.transport!!.sequence)
+        assertEquals(1, checkpoint.usageRequests.size)
+        assertEquals(app.daiyu.android.domain.runtime.RequestOperation.RESUME, checkpoint.request!!.operation)
+    }
+
+    fun testCustomEndpointMessagesAndDefaultOffNeverResumeOrReplaceInjectedFactory() {
+        val cases = listOf(
+            Triple(ProviderProtocol.RESPONSES, "https://gateway.invalid/v1/responses", true),
+            Triple(ProviderProtocol.MESSAGES, "https://api.anthropic.com/v1/messages", true),
+            Triple(ProviderProtocol.RESPONSES, "https://api.openai.com/v1/responses", false))
+        for ((protocol, endpoint, optIn) in cases) {
+            val factories = AtomicInteger()
+            val connections = CopyOnWriteArrayList<LocalHttps>()
+            val f = fresh(protocol) { config ->
+                factories.incrementAndGet()
+                val connect: (URL) -> HttpsURLConnection = { url ->
+                    check(connections.isEmpty()) { "ordinary session must not retry or GET" }
+                    LocalHttps(url, if (protocol == ProviderProtocol.RESPONSES) partialWire() else "")
+                        .also(connections::add)
+                }
+                if (protocol == ProviderProtocol.MESSAGES) MessagesModel(config, connect)
+                else ResponsesModel(config, connect)
+            }
+            f.settings.save(f.settings.load().copy(endpoint = endpoint))
+            if (optIn) f.controller.reconnectSettings.save(ReconnectSettings(ReconnectDurationPreset.WINDOW_30S, true))
+            else assertFalse(f.controller.reconnectSettings.snapshot().responsesBackgroundEnabled) // Untouched default.
+            assertTrue(send(f) is ChatController.TextSendResult.Accepted)
+            awaitControl("ordinary real transport fails once") { f.controller.active == null }
+            assertEquals(1, factories.get())
+            assertEquals(1, connections.size)
+            assertEquals("POST", connections.single().requestMethod)
+            val post = JSONObject(connections.single().sent.toString("UTF-8"))
+            assertFalse(post.optBoolean("background", false))
+            assertEquals(RunStatus.FAILED, f.db.messages(f.db.conversations().single().id).last().second.status)
+            val raw = f.db.readableDatabase.rawQuery("SELECT payload FROM runtime_checkpoints", null)
+                .use { it.moveToFirst(); it.getString(0) }
+            assertNull(RunCheckpointCodec.decode(raw).transport)
         }
     }
 

@@ -233,6 +233,72 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         assertEquals(0, results.get()); assertEquals(0, f.opens.get())
     }
 
+    fun testBranchUnknownSurvivesInvalidatedHostAndReplacementWithoutRetryOrCleanup() {
+        val f = fresh(configured = false); val seeded = staticFixture(f)
+        val before = history(f, seeded.conversation.id)
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val assets = app.daiyu.android.media.StaticGenerationAssets(File(f.app.filesDir, "static-generation-assets"),
+            app.daiyu.android.media.AndroidImageInspector(), AndroidVideoInspector(),
+            app.daiyu.android.media.ImageAttachmentLimits(maxImageBytes = app.daiyu.android.model.generation.GenerationRequestPlan.MAX_IMAGE_BYTES),
+            VideoAttachmentLimits(maxVideoBytes = app.daiyu.android.model.generation.GenerationRequestPlan.MAX_VIDEO_BYTES.toLong()),
+            afterAtomicMove = {
+                entered.countDown(); check(release.await(15, TimeUnit.SECONDS))
+                throw java.io.IOException("deterministic controller publication UNKNOWN")
+            })
+        // Replace only the existing lazy asset dependency before messageActionStore initialization.
+        // The real controller admission/catch/handler and real branch/rename still execute.
+        ChatController::class.java.getDeclaredField("staticGenerationAssets\$delegate").apply {
+            isAccessible = true
+        }.set(f.controller, lazyOf(assets))
+        val snapshot = snapshot(f, seeded.conversation.id)
+        val host = ControllerMessageActionHost(f.controller); val oldResults = AtomicInteger()
+        val newResults = AtomicInteger(); val done = CountDownLatch(1)
+        val observer: () -> Unit = {
+            if (!f.controller.dataBusy && f.controller.pendingBranchOutcome() != null) done.countDown()
+        }
+        main {
+            f.controller.observe(observer)
+            host.bind(snapshot, { true }) { oldResults.incrementAndGet() }.onBranch(snapshot.targets.keys.first())
+        }
+        try {
+            await(entered)
+            main {
+                host.invalidate()
+                ControllerMessageActionHost(f.controller).bind(snapshot, { true }) { newResults.incrementAndGet() }
+            }
+        } finally { release.countDown() }
+        await(done); main { f.controller.unobserve(observer) }
+        val receipt = checkNotNull(f.controller.pendingBranchOutcome())
+        val locator = checkNotNull(receipt.locator)
+        assertEquals(0, oldResults.get()); assertEquals(0, newResults.get())
+        assertTrue(locator.conversationId != seeded.conversation.id)
+        assertEquals(1, locator.staticIdentities.size)
+        assertFalse(f.db.conversations().any { it.id == locator.conversationId })
+        val slot = locator.staticIdentities.single().removePrefix("genstatic-v1-")
+        val original = File(f.app.filesDir, "static-generation-assets/generation-static-v1/$slot/original")
+        val lease = File(f.app.filesDir, "static-generation-assets/generation-static-v1/$slot.lease")
+        assertTrue(original.isFile); assertTrue(lease.isFile)
+        val inspected = CountDownLatch(1)
+        main { assertTrue(f.controller.inspectBranch(locator) { assertFalse(it); inspected.countDown() }) }
+        await(inspected)
+        assertSame(receipt, f.controller.pendingBranchOutcome()) // inspection never acknowledges UNKNOWN
+        main { f.controller.dismissBranchOutcome(receipt.copy()) }
+        assertSame(receipt, f.controller.pendingBranchOutcome()) // stale/value-equal prompt cannot dismiss
+        val second = action(f, MessageAction.BRANCH, snapshot.targets.values.first()) as MessageActionResult.Unknown
+        assertSame(receipt, f.controller.pendingBranchOutcome()) // a second result never overwrites the first
+        main { f.controller.dismissBranchOutcome(receipt) }
+        assertSame(second, f.controller.pendingBranchOutcome())
+        main { f.controller.dismissBranchOutcome(receipt) }
+        assertSame(second, f.controller.pendingBranchOutcome())
+        main { f.controller.dismissBranchOutcome(second) }
+        assertNull(f.controller.pendingBranchOutcome())
+        assertTrue(original.isFile); assertTrue(lease.isFile) // dismissal is not GC
+        assertEquals(before, history(f, seeded.conversation.id)); assertEquals(1, f.db.conversations().size)
+        assertTrue(seeded.bytes.contentEquals(staticBackup(f, seeded).staticGenerationOriginal(seeded.output)))
+        assertEquals(0, f.opens.get()); assertEquals(0, scalarCount(f, "generation_attempts"))
+        assertEquals(0, scalarCount(f, "generation_outputs"))
+    }
+
     fun testSameOwnerBusyRerenderDoesNotLoseAdmittedReceipt() {
         val f = fresh(); val owner = seed(f)
         val snapshot = snapshot(f, owner.id)
@@ -523,6 +589,205 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
             try { if (muxerStarted) muxer.stop() } finally { muxer.release() }
         }
         check(file.length() > 0)
+    }
+
+    private data class StaticFixture(val conversation: Conversation, val output: StaticGenerationOutput,
+        val assets: app.daiyu.android.media.StaticGenerationAssets, val bytes: ByteArray)
+
+    /** Offline imported-style evidence only. No completed tool is given a manufactured attempt. */
+    private fun staticFixture(f: Fixture): StaticFixture {
+        val credentials = mutableMapOf<String, String>()
+        val metadata = f.app.getSharedPreferences(app.daiyu.android.model.generation.GenerationSettingsStore.METADATA_NAMESPACE, 0)
+        val scope = app.daiyu.android.model.generation.GenerationSettingsStore(metadata,
+            { credentials.getValue(it) }, { id, value -> credentials[id] = value }).save(
+            app.daiyu.android.model.generation.GenerationSettingsValues(listOf(
+                app.daiyu.android.model.generation.GenerationProfileSettings(label = "offline fixture",
+                    kind = app.daiyu.android.model.generation.GenerationKind.IMAGE,
+                    protocol = app.daiyu.android.model.generation.GenerationProtocol.OPENAI_IMAGES_JSON,
+                    endpoint = "https://example.invalid/images/generations", model = "offline", apiKey = "synthetic-in-memory")),
+                0, false, emptySet()), null).accountScope
+        val conversation = f.db.create("default"); val run = RunId(UUID.randomUUID().toString())
+        val tool = MessageBlock.Tool(ToolInvocation(ToolCallId("static-call-${UUID.randomUUID()}"), "generate_images", "{}"), "historical only")
+        val assistant = Message(MessageId(UUID.randomUUID().toString()), conversation.id, run, Message.ASSISTANT_ROLE,
+            listOf(tool), RunStatus.RUNNING)
+        f.db.send(Message(MessageId(UUID.randomUUID().toString()), conversation.id, run, Message.USER_ROLE,
+            listOf(MessageBlock.Text("body", "offline static history")), RunStatus.COMPLETED), assistant)
+        f.db.save(assistant.copy(status = RunStatus.COMPLETED))
+        val bytes = android.util.Base64.decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+kF9sAAAAASUVORK5CYII=", android.util.Base64.DEFAULT)
+        val hash = app.daiyu.android.context.PrivateBlobs.digest(bytes)
+        val origin = GenerationAttemptBinding("deleted-origin", "deleted-owner", "origin-run", "origin-call", "generate_images")
+        val source = StaticGenerationProvenance("offline-origin", origin.operationId, "offline-item", 0,
+            origin.conversationId, origin.assistantMessageId, origin.runId, origin.toolCallId, origin.toolName,
+            "a".repeat(64), app.daiyu.android.model.generation.GenerationProtocol.OPENAI_IMAGES_JSON,
+            "genasset-v1-${"b".repeat(64)}-$hash", app.daiyu.android.model.generation.GenerationKind.IMAGE,
+            "image/png", bytes.size.toLong(), hash, 1, 1, 0)
+        val output = StaticGenerationOutput(source, StaticGenerationDestination(scope, conversation.id.value,
+            assistant.id.value, run.value, tool.invocation.id.value, tool.invocation.name))
+        val assets = app.daiyu.android.media.StaticGenerationAssets(File(f.app.filesDir, "static-generation-assets"))
+        val lease = assets.prepare(output, app.daiyu.android.media.StaticGenerationOriginalReader {
+            check(!f.db.writableDatabase.inTransaction()); bytes.inputStream()
+        })
+        assets.publish(lease)
+        DatabaseTransactions { f.db.writableDatabase }.run { db ->
+            app.daiyu.android.backup.BackupHistoryRows.install(db)
+            app.daiyu.android.backup.StaticGenerationCodec.saveInTransaction(db, output,
+                app.daiyu.android.backup.staticMessageRows(history(f, conversation.id)))
+        }
+        assets.settle(lease, app.daiyu.android.media.StaticGenerationSettlement.COMMITTED)
+        assertEquals(0, scalarCount(f, "generation_attempts")); assertEquals(0, scalarCount(f, "generation_outputs"))
+        return StaticFixture(conversation, output, assets, bytes)
+    }
+    private fun scalarCount(f: Fixture, table: String) = f.db.readableDatabase.rawQuery("SELECT count(*) FROM $table", null)
+        .use { check(it.moveToFirst()); it.getInt(0) }
+    private fun staticBackup(f: Fixture, seeded: StaticFixture) = app.daiyu.android.backup.NeutralBackupService(f.app, f.db).withStaticAssets(seeded.assets)
+
+    fun testProductionControllerStaticBranchAgainAndSourceDeletionAndV5DuplicateReverification() {
+        val f = fresh(configured = false); val seeded = staticFixture(f); val service = staticBackup(f, seeded)
+        val target = snapshot(f, seeded.conversation.id).targets.values.first()
+        val first = (action(f, MessageAction.BRANCH, target) as MessageActionResult.Branch).conversation
+        val second = (action(f, MessageAction.BRANCH, target) as MessageActionResult.Branch).conversation
+        assertEquals(MessageActionResult.Deleted, action(f, MessageAction.DELETE_TURN, target))
+        val sourceDirectory = File(File(f.app.filesDir, "static-generation-assets/generation-static-v1"), seeded.output.identity.removePrefix("genstatic-v1-"))
+        assertTrue(sourceDirectory.deleteRecursively()) // test-owned source fixture, never production GC
+        val nested = (action(f, MessageAction.BRANCH, snapshot(f, first.id).targets.values.first()) as MessageActionResult.Branch).conversation
+        for (conversation in listOf(first, second, nested)) {
+            val output = service.staticGenerationOutputs(conversation.id).single()
+            assertEquals(seeded.output.source, output.source)
+            assertTrue(seeded.bytes.contentEquals(service.staticGenerationOriginal(output)))
+            val done = CountDownLatch(1); val display = AtomicReference<List<ChatController.StaticGenerationAssetDisplay>?>()
+            main { assertTrue(f.controller.loadStaticGenerationOutputs(conversation.id) { display.set(it); done.countDown() }) }
+            await(done); assertNotNull(display.get()!!.single().thumbnail)
+        }
+        assertEquals(0, scalarCount(f, "generation_attempts")); assertEquals(0, scalarCount(f, "generation_outputs")); assertEquals(0, f.opens.get())
+        val text = service.exportPackage(); val envelope = org.json.JSONObject(text)
+        assertEquals(5, envelope.getInt("version")); assertEquals(3, service.preflight(text).staticGenerationOutputs)
+        val to = fresh(configured = false)
+        val importedAssets = app.daiyu.android.media.StaticGenerationAssets(File(to.app.filesDir, "static-generation-assets"))
+        val importer = app.daiyu.android.backup.NeutralBackupService(to.app, to.db).withStaticAssets(importedAssets)
+        assertFalse(importer.importPackage(text).alreadyImported); assertTrue(importer.importPackage(text).alreadyImported)
+        assertEquals(0, scalarCount(to, "generation_attempts")); assertEquals(0, scalarCount(to, "generation_outputs"))
+        val imported = importer.staticGenerationOutputs().first()
+        val original = File(File(to.app.filesDir, "static-generation-assets/generation-static-v1"), imported.identity.removePrefix("genstatic-v1-") + "/original")
+        assertTrue(original.delete())
+        assertTrue(runCatching { importer.importPackage(text) }.isFailure)
+        assertEquals(1, scalarCount(to, "neutral_imports")); assertEquals(0, to.opens.get())
+    }
+
+    fun testProductionExplicitStaticSaveChecksVisitBeforeAndAfterProviderOpenWithoutRetry() {
+        val f = fresh(configured = false); val seeded = staticFixture(f)
+        val destination = File(f.app.filesDir, "explicit-static-save.png")
+        val visits = java.util.concurrent.atomic.AtomicBoolean(false)
+        val opens = AtomicInteger(); var revokeOnOpen = false
+        val provider = object : android.content.ContentProvider() {
+            override fun onCreate() = true
+            override fun getType(uri: android.net.Uri) = "image/png"
+            override fun openFile(uri: android.net.Uri, mode: String): android.os.ParcelFileDescriptor {
+                opens.incrementAndGet(); if (revokeOnOpen) visits.set(false)
+                return android.os.ParcelFileDescriptor.open(destination, android.os.ParcelFileDescriptor.parseMode(mode))
+            }
+            override fun query(uri: android.net.Uri, projection: Array<out String>?, selection: String?, args: Array<out String>?, order: String?): android.database.Cursor? = null
+            override fun insert(uri: android.net.Uri, values: android.content.ContentValues?): android.net.Uri? = error("unused")
+            override fun delete(uri: android.net.Uri, selection: String?, args: Array<out String>?) = error("unused")
+            override fun update(uri: android.net.Uri, values: android.content.ContentValues?, selection: String?, args: Array<out String>?) = error("unused")
+        }
+        provider.attachInfo(f.app, android.content.pm.ProviderInfo().apply { authority = "p37-static-test"; exported = false })
+        val resolver = android.test.mock.MockContentResolver(f.app).apply { addProvider("p37-static-test", provider) }
+        fun save() {
+            val done = CountDownLatch(1)
+            val observer: () -> Unit = { if (!f.controller.dataBusy && f.controller.dataNotice != null) done.countDown() }
+            main {
+                f.controller.consumeDataNotice(); f.controller.observe(observer)
+                f.controller.saveStaticGenerationOriginal(seeded.output, android.net.Uri.parse("content://p37-static-test/original"), visits, resolver)
+            }
+            try { await(done) } finally { main { f.controller.unobserve(observer) } }
+        }
+        save(); assertEquals(0, opens.get()); assertFalse(destination.exists())
+        visits.set(true); revokeOnOpen = true
+        save(); assertEquals(1, opens.get()); assertEquals(0L, destination.length())
+        visits.set(true); revokeOnOpen = false
+        save(); assertEquals(2, opens.get()); assertTrue(seeded.bytes.contentEquals(destination.readBytes()))
+        assertEquals(0, f.opens.get()); assertEquals(0, scalarCount(f, "generation_attempts")); assertEquals(0, scalarCount(f, "generation_outputs"))
+    }
+
+    fun testNoStaticCapabilityBranchAndCompleteExportFailClosed() {
+        val f = fresh(configured = false); val seeded = staticFixture(f)
+        val plain = MessageActionStore(f.db, ContextService(f.app, f.db), MessageImageAssetStore(File(f.app.filesDir, "plain-static-images")))
+        val target = plain.snapshot(seeded.conversation.id).targets.values.first()
+        assertTrue(runCatching { plain.branch(target) }.isFailure)
+        assertTrue(runCatching { ContextService(f.app, f.db).branch(seeded.conversation.id, history(f, seeded.conversation.id).last().id) }.isFailure)
+        assertTrue(runCatching { app.daiyu.android.backup.NeutralBackupService(f.app, f.db).exportPackage() }.isFailure)
+        assertEquals(1, f.db.conversations().size); assertEquals(0, f.opens.get())
+    }
+
+    fun testProductionLastStaticWriteSourceTamperRollsBackEverything() {
+        val f = fresh(configured = false); val seeded = staticFixture(f)
+        val before = history(f, seeded.conversation.id)
+        f.db.writableDatabase.execSQL("CREATE TRIGGER p37_late_source AFTER INSERT ON neutral_backup_history " +
+            "WHEN NEW.kind='generation_static_output' AND NEW.identity<>'${seeded.output.identity}' BEGIN " +
+            "UPDATE neutral_backup_history SET payload=replace(payload,'image/png','image/jpeg') WHERE identity='${seeded.output.identity}'; END")
+        val result = action(f, MessageAction.BRANCH, snapshot(f, seeded.conversation.id).targets.values.first())
+        assertTrue(result is MessageActionResult.Rejected)
+        assertEquals(before, history(f, seeded.conversation.id)); assertEquals(1, f.db.conversations().size)
+        assertEquals(seeded.output, staticBackup(f, seeded).staticGenerationOutputs().single())
+        assertEquals(0, scalarCount(f, "generation_attempts")); assertEquals(0, scalarCount(f, "generation_outputs")); assertEquals(0, f.opens.get())
+    }
+
+    fun testProductionFullStaticSourceSetCasRejectsInsertionBetweenT1AndT2WithoutRetry() {
+        val f = fresh(configured = false); val seeded = staticFixture(f); val service = staticBackup(f, seeded)
+        val changed = java.util.concurrent.atomic.AtomicBoolean(false)
+        val reads = AtomicInteger()
+        val integration = app.daiyu.android.backup.StaticGenerationBranch(seeded.assets,
+            account = { seeded.output.destination.accountScope }, liveOriginal = { error("not live") },
+            historicalOriginal = { error("not backup history") }, lookup = { identity ->
+                check(!f.db.writableDatabase.inTransaction()); reads.incrementAndGet()
+                val selected = service.findStaticGeneration(identity)
+                if (changed.compareAndSet(false, true)) DatabaseTransactions { f.db.writableDatabase }.run { db ->
+                    app.daiyu.android.backup.StaticGenerationCodec.saveInTransaction(db,
+                        seeded.output.copy(source = seeded.output.source.copy(outputIndex = 1)),
+                        app.daiyu.android.backup.staticMessageRows(history(f, seeded.conversation.id)))
+                }
+                selected
+            })
+        val store = MessageActionStore(f.db, ContextService(f.app, f.db), MessageImageAssetStore(File(f.app.filesDir, "cas-images")),
+            staticGeneration = integration)
+        val failure = runCatching { store.branch(store.snapshot(seeded.conversation.id).targets.values.first()) }.exceptionOrNull()
+        assertTrue(failure is app.daiyu.android.context.BranchRolledBack)
+        assertEquals(1, reads.get()); assertEquals(1, f.db.conversations().size)
+        assertEquals(2, service.staticGenerationOutputs(seeded.conversation.id).size)
+        assertEquals(0, scalarCount(f, "generation_attempts")); assertEquals(0, scalarCount(f, "generation_outputs")); assertEquals(0, f.opens.get())
+    }
+
+    fun testProductionPublicationUnknownCarriesPreallocatedLocatorAndRetainsFiles() {
+        val f = fresh(configured = false); val seeded = staticFixture(f); val service = staticBackup(f, seeded)
+        val assets = app.daiyu.android.media.StaticGenerationAssets(File(f.app.filesDir, "unknown-static"),
+            app.daiyu.android.media.AndroidImageInspector(), AndroidVideoInspector(),
+            app.daiyu.android.media.ImageAttachmentLimits(maxImageBytes = app.daiyu.android.model.generation.GenerationRequestPlan.MAX_IMAGE_BYTES),
+            VideoAttachmentLimits(maxVideoBytes = app.daiyu.android.model.generation.GenerationRequestPlan.MAX_VIDEO_BYTES.toLong()),
+            afterAtomicMove = { throw java.io.IOException("offline publication fault") })
+        val integration = app.daiyu.android.backup.StaticGenerationBranch(assets,
+            account = { seeded.output.destination.accountScope }, liveOriginal = { error("not live") },
+            historicalOriginal = { error("not backup history") }, lookup = { identity ->
+                check(!f.db.writableDatabase.inTransaction()); service.findStaticGeneration(identity)
+            })
+        // Read the static SOURCE from its real store, while faulting only the destination store.
+        // The destination's source lookup alone cannot open another store's bytes, so copy the
+        // source fixture into this test-private store without adding any new SQL history.
+        run {
+            val normal = app.daiyu.android.media.StaticGenerationAssets(File(f.app.filesDir, "unknown-static"))
+            val lease = normal.prepare(seeded.output, app.daiyu.android.media.StaticGenerationOriginalReader { seeded.bytes.inputStream() })
+            normal.publish(lease); normal.settle(lease, app.daiyu.android.media.StaticGenerationSettlement.COMMITTED)
+        }
+        val store = MessageActionStore(f.db, ContextService(f.app, f.db), MessageImageAssetStore(File(f.app.filesDir, "unknown-images")),
+            staticGeneration = integration)
+        val failure = runCatching { store.branch(store.snapshot(seeded.conversation.id).targets.values.first()) }.exceptionOrNull()
+        assertTrue(failure is app.daiyu.android.context.BranchOutcomeUnknown)
+        val locator = (failure as app.daiyu.android.context.BranchOutcomeUnknown).locator
+        assertTrue(locator.conversationId != seeded.conversation.id); assertEquals(1, locator.staticIdentities.size)
+        assertFalse(f.db.conversations().any { it.id == locator.conversationId })
+        val slot = locator.staticIdentities.single().removePrefix("genstatic-v1-")
+        assertTrue(File(f.app.filesDir, "unknown-static/generation-static-v1/$slot/original").isFile)
+        assertTrue(File(f.app.filesDir, "unknown-static/generation-static-v1/$slot.lease").isFile)
+        assertEquals(0, scalarCount(f, "generation_attempts")); assertEquals(0, scalarCount(f, "generation_outputs")); assertEquals(0, f.opens.get())
     }
 
     override fun tearDown() {

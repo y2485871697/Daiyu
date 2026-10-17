@@ -1,5 +1,7 @@
 # P26 错误重连：独立配置、保留预算与冻结接缝
 
+> 后续实现：[官方 Responses 显式后台 transport-only resume](P26-responses-transport-resume.md)。本页“当前均不支持”描述保留为普通四协议/旧 protocol-only freeze 的边界；仅新文档中精确冻结、显式 opt-in 的官方入口例外。父接线与未运行测试范围以新文档为准。
+
 叶子阶段基线 `af18af3`；本次生产接线以父指定的 `a1415b4` 叶子成果为输入，**不重做已有 12 个叶子文件**。本阶段修改 MainActivity、ChatController、导航目录和定向测试，未修改 ConversationDatabase、`docs/重构清单.md`、CI、依赖或既有 Runner／attempt gate。所有新增／调整测试源码均**未编译、未运行**，留父最终统一单测／Lint／APK／双 API 批次；不声称通过。本代理仅有文件工具，无 shell／Git 提交能力，实际非空 commit 由父在现有 detached worktree 集成时创建，不预填 SHA、不建分支、不 push。
 
 ## 1. 已读取的冻结证据与保留范围

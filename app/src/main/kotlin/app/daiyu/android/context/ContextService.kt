@@ -189,6 +189,16 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         val page = messages.drop(offset).take(limit); val end = offset.toLong() + page.size
         return ArchivePage(page, if (end < messages.size) end.toInt() else null, messages.size)
     }
+    /** Production branch: authorization is repeated in T1 and after the last T2 write. */
+    internal fun branchWithStatic(id: ConversationId, through: MessageId,
+        videos: app.daiyu.android.backup.BackupVideoAssets?,
+        generation: app.daiyu.android.backup.StaticGenerationBranch?,
+        authorize: (SQLiteDatabase) -> Unit,
+        cancelled: () -> Boolean,
+        copyAssets: (List<Message>, List<Message>) -> List<Message>): BranchLocator =
+        ProductionConversationBranch(store, blobs, transactions, videos, generation, cancelled)
+            .branch(id, through, authorize, copyAssets)
+
     /** Materializes a true conversation copy. All IDs/run IDs are remapped, original is unchanged. */
     fun branch(id: ConversationId, through: MessageId,
         copyAssets: ((List<Message>, List<Message>) -> List<Message>)? = null): ConversationId =
@@ -244,7 +254,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                 "生成资产尚无安全的分支重绑定契约；原会话保留"
             }
             require(!hasBackupHistory || !db.rawQuery(
-                "SELECT 1 FROM neutral_backup_history WHERE kind='generation_output' AND owner_message_id=? LIMIT 1",
+                "SELECT 1 FROM neutral_backup_history WHERE kind IN ('generation_output','generation_static_output') AND owner_message_id=? LIMIT 1",
                 arrayOf(m.id.value)).use { it.moveToFirst() }) {
                 "只读生成原件尚无安全的分支映射契约；原会话和原件保留"
             }
@@ -407,7 +417,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                     }
             }.also { signal?.throwIfCanceled(); MessageHistory.expand(it); signal?.throwIfCanceled() }
         }
-        private fun messageValues(m: Message): ContentValues {
+        internal fun messageValues(m: Message): ContentValues {
             MessageHistoryCodec.validate(m)
             return ContentValues().apply { put("id", m.id.value); put("conversation_id", m.conversationId.value)
                 put("run_id", m.runId.value); put("role", m.role); put("blocks", ArchiveCodec.blocks(m.blocks).toString()); put("status", m.status.name)

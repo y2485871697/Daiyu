@@ -29,7 +29,9 @@ internal data class MessageActionSnapshot(val conversationId: ConversationId, va
  * on an unknown commit, and never share a message-owned image directory with a branch. */
 internal class MessageActionStore(private val database: ConversationDatabase,
     private val context: ContextService, private val images: MessageImageAssetStore,
-    private val videos: app.daiyu.android.backup.BackupVideoAssets? = null) {
+    private val videos: app.daiyu.android.backup.BackupVideoAssets? = null,
+    private val staticGeneration: app.daiyu.android.backup.StaticGenerationBranch? = null,
+    private val cancelled: () -> Boolean = { false }) {
     private val transactions = DatabaseTransactions { database.writableDatabase }
 
     fun snapshot(id: ConversationId): MessageActionSnapshot = transactions.run { db ->
@@ -75,14 +77,21 @@ internal class MessageActionStore(private val database: ConversationDatabase,
             .also { require(it.isNotBlank()) { "该用户消息没有可编辑文本；附件保持原样" } }
     }
 
-    fun branch(target: MessageActionTarget): Conversation = transactions.run { db ->
-        val history = authorize(db, target)
-        val end = history.indexOfLast { it.runId == target.runId } + 1
-        require(end > 0 && isHistoryClosedPrefix(history, end)) { "不能分离工具批次或补充消息" }
-        require(history.take(end).all { it.status == RunStatus.COMPLETED }) { "只能复制已完成的历史基线" }
-        val id = if (videos == null) context.branch(target.conversationId, history[end - 1].id, ::copyImages)
-            else context.branchWithVideos(target.conversationId, history[end - 1].id, videos, ::copyImages)
-        conversation(db, id)
+    fun branch(target: MessageActionTarget): Conversation {
+        // Do not wrap the two-phase ContextService entry in transactions.run: safe live readers
+        // reject an outer transaction, and acquiring their fence there reverses the lock order.
+        val through = transactions.run { db ->
+            val history = authorize(db, target)
+            val end = history.indexOfLast { it.runId == target.runId } + 1
+            require(end > 0 && isHistoryClosedPrefix(history, end)) { "不能分离工具批次或补充消息" }
+            require(history.take(end).all { it.status == RunStatus.COMPLETED }) { "只能复制已完成的历史基线" }
+            history[end - 1].id
+        }
+        val locator = context.branchWithStatic(target.conversationId, through, videos, staticGeneration,
+            authorize = { authorize(it, target) }, cancelled = cancelled, copyAssets = ::copyImages)
+        // Post-COMMIT presentation must not lose the already allocated UNKNOWN locator.
+        return try { transactions.run { conversation(it, locator.conversationId) } }
+        catch (failure: Exception) { throw app.daiyu.android.context.BranchOutcomeUnknown(locator, failure) }
     }
 
     /** Remove one COMPLETE physical run, not a UI fragment or an individual tool result.

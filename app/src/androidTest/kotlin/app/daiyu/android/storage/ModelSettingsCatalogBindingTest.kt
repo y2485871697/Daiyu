@@ -34,6 +34,23 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         try { root.deleteRecursively() } finally { super.tearDown() }
     }
 
+    fun testDirectoryProtocolReadDoesNotDecryptAnUnavailableCredential() {
+        store.save(initial)
+        val before = store.modelCatalogSnapshot()
+        raw.edit().putString("key", "malformed-private-ciphertext").commit()
+        val rawBefore = raw.all
+        assertEquals(app.daiyu.android.model.ProviderProtocol.RESPONSES, store.localModelCatalogProtocol())
+        assertEquals(before, store.localModelCatalogSnapshot())
+        assertEquals(rawBefore, raw.all)
+        var rejected = false
+        try { store.load() } catch (_: CredentialUnavailableException) { rejected = true }
+        assertTrue("execution still requires a readable credential", rejected)
+        raw.edit().putString("protocol", "not-a-protocol").commit()
+        rejected = false
+        try { store.localModelCatalogProtocol() } catch (_: IllegalStateException) { rejected = true }
+        assertTrue("unknown protocol is not a browsing fallback", rejected)
+    }
+
     fun testSaveSelectionAndRestoreFenceSamePersistentCatalog() {
         store.save(initial)
         val first = store.modelCatalogSnapshot()

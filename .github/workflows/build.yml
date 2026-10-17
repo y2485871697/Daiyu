@@ -163,6 +163,7 @@ jobs:
           cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk delivery/tests/platform-test.apk
           cp app/build/outputs/apk/debug/app-debug.apk "delivery/代鱼-0.1.0-${short}.apk"
           python3 scripts/verify_signing.py --apksigner "$ANDROID_HOME/build-tools/37.0.0/apksigner" --delivery delivery
+          python3 scripts/verify_license_bundle.py --apk "delivery/代鱼-0.1.0-${short}.apk"
           (cd delivery && sha256sum *.apk tests/*.apk > SHA256SUMS)
       - name: 上传测试报告
         if: always()

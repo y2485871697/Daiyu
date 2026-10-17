@@ -8,11 +8,14 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import struct
 import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+import warnings
 import zipfile
+import zlib
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = ROOT / "scripts/acceptance"
@@ -66,7 +69,18 @@ class FinalDeliveryTests(unittest.TestCase):
         record = {"source_sha": SHA, "run_id": "42", "attempt": "1", "application_id": "app.daiyu.android",
                   "certificate_sha256": final.verify_signing.EXPECTED_CERT, "signing": "daiyu-fixed",
                   "variant": "debug", "debuggable": True}
-        app = self.put("delivery/" + app_name, b"synthetic application APK, not installable")
+        # Copy the existing gate's repository inputs verbatim. Only the APK ZIP
+        # and provenance are synthetic; this is not real packaging evidence.
+        bundle = final.verify_license_bundle
+        self.license_records = bundle.verify_tree(ROOT)
+        inputs = (set(self.license_records) | {source for source, _ in bundle.COPIES}
+                  | set(bundle.PINNED) | {bundle.PROOT_ARTIFACTS}
+                  | {bundle.ASSETS + "whale-maid/" + suffix for suffix in ("LICENSE", "NOTICE")})
+        for name in inputs:
+            path = self.repo / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes((ROOT / name).read_bytes())
+        app = self.put("delivery/" + app_name, self.license_apk())
         test = self.put("delivery/tests/platform-test.apk", b"synthetic test APK, not installable")
         signature = ""
         for name in (app_name, "tests/platform-test.apk"):
@@ -88,6 +102,39 @@ class FinalDeliveryTests(unittest.TestCase):
         self.doc = {"schema_version": 1, "mode": "full_build", "build": copy.deepcopy(self.expected),
                     "check": copy.deepcopy(self.expected), "delivery": self.delivery,
                     "cloud": None, "business": None, "tool": None}
+
+    def license_apk(self, mutation=None, target="assets/native-sources/proot.tgz"):
+        bundle = final.verify_license_bundle
+        stream = io.BytesIO()
+        entries = {"assets/" + name[len(bundle.ASSETS):]: (self.repo / name).read_bytes()
+                   for name in self.license_records}
+        for suffix in ("LICENSE", "NOTICE"):
+            name = "whale-maid/" + suffix
+            entries["assets/" + name] = (self.repo / (bundle.ASSETS + name)).read_bytes()
+        with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for entry, data in entries.items():
+                if entry == target:
+                    if mutation == "omit":
+                        continue
+                    if mutation == "corrupt":
+                        data = bytes([data[0] ^ 1]) + data[1:]
+                    if mutation == "truncate":
+                        data = data[:-1]
+                archive.writestr(entry, data)
+                if entry == target and mutation == "duplicate":
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore", UserWarning)
+                        archive.writestr(entry, data)
+        return stream.getvalue()
+
+    def replace_app(self, raw):
+        # Repin every enclosing digest so failures are from the license gate,
+        # not from a stale APK/manifest/artifact SHA-256.
+        self.delivery["app"] = self.put(self.delivery["app"]["path"], raw)
+        self.delivery["sums"] = self.put("delivery/SHA256SUMS", (
+            self.delivery["app"]["sha256"] + "  " + self.members["app"] + "\n"
+            + self.delivery["test"]["sha256"] + "  tests/platform-test.apk\n").encode())
+        self.repack()
 
     def put(self, name, value):
         raw = value if isinstance(value, bytes) else json.dumps(value).encode()
@@ -231,6 +278,91 @@ class FinalDeliveryTests(unittest.TestCase):
         self.delivery["record"] = self.put("delivery/构建记录.json", record)
         self.repack()
         self.reject("delivery_record_mismatch")
+
+    def test_license_gate_receives_the_same_hashed_main_apk_stream_not_test_apk(self):
+        bundle = final.verify_license_bundle
+        checked_apk = bundle.verify_apk
+        seen = []
+
+        def inspect(root, stream, records):
+            self.assertEqual(root, self.repo)
+            self.assertTrue(hasattr(stream, "read"))
+            self.assertEqual(stream.tell(), 0)
+            self.assertEqual(sha256(stream.read()), self.delivery["app"]["sha256"])
+            stream.seek(0)
+            self.assertTrue(set(bundle.NATIVE_SOURCES) <= set(records))
+            seen.append(stream.name)
+            return checked_apk(root, stream, records)
+
+        with patch.object(bundle, "verify_tree", wraps=bundle.verify_tree) as tree, \
+                patch.object(bundle, "verify_apk", side_effect=inspect), \
+                patch.object(bundle, "stage", side_effect=AssertionError("no auto-fix")):
+            result = self.verify()
+        tree.assert_called_once_with(self.repo)
+        self.assertEqual(len(seen), 1)
+        self.assertEqual(result["apk_provenance"]["app_sha256"], self.delivery["app"]["sha256"])
+        self.assertFalse(result["final_acceptance_passed"])
+
+    def test_consistently_rehashed_apk_cannot_hide_missing_duplicate_size_or_hash_failures(self):
+        bundle = final.verify_license_bundle
+        targets = ["assets/" + name[len(bundle.ASSETS):] for name in bundle.NATIVE_SOURCES]
+        targets.append("assets/licenses/AGPL-3.0.txt")
+        for target in targets:
+            for mutation in ("omit", "duplicate", "truncate", "corrupt"):
+                with self.subTest(target=target, mutation=mutation):
+                    self.replace_app(self.license_apk(mutation, target))
+                    self.reject("apk_license_bundle_mismatch")
+        report = self.assert_cli(2)
+        self.assertFalse(report["valid"])
+        self.assertEqual(report["error"], "apk_license_bundle_mismatch")
+
+    def test_corrupt_deflate_entry_is_redacted_after_repinning_all_digests(self):
+        raw = bytearray(self.license_apk())
+        target = "assets/native-sources/proot.tgz"
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            info = archive.getinfo(target)
+            self.assertEqual(info.compress_type, zipfile.ZIP_DEFLATED)
+            name_size, extra_size = struct.unpack_from("<HH", raw, info.header_offset + 26)
+            offset = info.header_offset + 30 + name_size + extra_size
+        # Reserved DEFLATE block type; the ZIP directory and lengths stay valid.
+        raw[offset] = (raw[offset] & 0xf8) | 0x07
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            with self.assertRaises(zlib.error):
+                archive.read(target)
+        self.replace_app(bytes(raw))
+        self.reject("apk_license_bundle_mismatch")
+        report = self.assert_cli(2)
+        self.assertFalse(report["valid"])
+        self.assertEqual(report["error"], "apk_license_bundle_mismatch")
+
+    def test_corrupt_outer_archive_is_redacted_after_repinning(self):
+        stream = io.BytesIO()
+        with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for key, member in self.members.items():
+                archive.writestr(member, (self.root / self.delivery[key]["path"]).read_bytes())
+        raw = bytearray(stream.getvalue())
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            info = archive.getinfo(self.members["app"])
+            name_size, extra_size = struct.unpack_from("<HH", raw, info.header_offset + 26)
+            offset = info.header_offset + 30 + name_size + extra_size
+        raw[offset] = (raw[offset] & 0xf8) | 0x07
+        self.delivery["archive"] = self.put("build-artifact.zip", bytes(raw))
+        self.meta["digest"] = "sha256:" + self.delivery["archive"]["sha256"]
+        self.delivery["artifact"] = self.put("build-artifact.json", self.meta)
+        report = self.assert_cli(2)
+        self.assertFalse(report["valid"])
+        self.assertEqual(report["error"], "unreadable_or_invalid_input")
+
+    def test_invalid_main_zip_and_changed_repository_archive_fail_closed(self):
+        self.replace_app(b"not an APK ZIP, but all enclosing digests agree")
+        self.reject("apk_license_bundle_mismatch")
+        self.replace_app(self.license_apk())
+        path = self.repo / final.verify_license_bundle.NATIVE_SOURCES[0]
+        data = path.read_bytes()
+        path.write_bytes(bytes([data[0] ^ 1]) + data[1:])
+        self.reject("apk_license_bundle_mismatch")
+        report = self.assert_cli(2)
+        self.assertEqual(report["error"], "apk_license_bundle_mismatch")
 
     def test_old_recheck_keeps_both_identities_and_never_relabels_build(self):
         self.doc["mode"] = "old_apk_recheck"

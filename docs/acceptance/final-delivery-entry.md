@@ -2,7 +2,7 @@
 
 ## 结论边界与本次主路径
 
-入口：`scripts/acceptance/final_delivery.py`。它只调用既有 `source_gate.py`、`cloud_report.py`、`evidence.py`、`recovery_suite.py` 的读取/解析能力和既有签名/旧包复用策略；不执行 ledger 中的命令，不下载、调度 CI、运行测试、安装、编译或隐式补构建 APK。除源码门禁和旧包差异核对所需的只读 Git 外，不启动外部命令。
+入口：`scripts/acceptance/final_delivery.py`。它只调用既有 `source_gate.py`、`cloud_report.py`、`evidence.py`、`recovery_suite.py`、`verify_license_bundle.py` 的读取/解析能力和既有签名/旧包复用策略；不执行 ledger 中的命令，不下载、调度 CI、运行测试、安装、编译或隐式补构建 APK。除源码门禁和旧包差异核对所需的只读 Git 外，不启动外部命令。
 
 **本次最终验收以完整构建为主：BUILD_SHA = CHECK_SHA，BUILD_RUN = CHECK_RUN，BUILD_ATTEMPT = CHECK_ATTEMPT。** 三者必须分别通过 CLI 预先指定，并与 pin 住的 manifest、开发包构建记录、run/jobs、双 API 快照逐一一致。不以短 SHA、HEAD 推测值、最新 run 或最新 artifact 代替精确身份。
 
@@ -35,7 +35,7 @@ smoke 与 cloud 共用 `scripts/acceptance/instrumentation_result.py`，不再�
 
 `.github/workflows/build.yml` 只增强既有 build/checks/smoke 模式的证据保留，不新增 dispatch、触发器、自动补构建、第二套 81 项清单或 workflow 内的最终汇总：
 
-1. 完整 build 继续产生现有 `代鱼开发包`（APK、test APK、构建记录、签名证据、SHA256SUMS）。不重写记录。
+1. 完整 build 继续产生现有 `代鱼开发包`（APK、test APK、构建记录、签名证据、SHA256SUMS）。不重写记录。复制主 APK 至 delivery、核对签名后，在生成 SHA256SUMS 和上传开发包前，对**同一 delivery 主 APK**运行 `python3 scripts/verify_license_bundle.py --apk "delivery/代鱼-0.1.0-${short}.apk"`。失败阻断上传，不使用 `--stage` 自动修复许可输入；现有测试报告 always 上传、双 API smoke、checks 和签名功能保留。
 2. build/checks 用 `scripts/acceptance/record_tool_tests.py` 执行原有 unittest discovery 的 verbose 形式：build 为 `python3 -B -m unittest discover -s tests -v`，跨平台 checks 为 `python -B -m unittest discover -s tests -v`。采集器用相同 argv 真正启动子进程，stdout+stderr 不过滤、不重写，原字节保存到 `tool-evidence/unittest.log`，随后原样回显。子进程返回后才写 `tool-evidence/receipt.json`，包含当前 `GITHUB_SHA`、`GITHUB_RUN_ID`、`GITHUB_RUN_ATTEMPT`、实际 command 与真实整数 exit_code；返回相同退出码。启动失败/中断不补 success receipt，调用前清除旧 receipt。
 
    两文件随当前 run 的 `代鱼测试报告`（build）/`代鱼检查报告-${os}`（checks）在 `if: always()` 下上传，失败也保留。边界校验和原有检查仍在 unittest 后执行，不把工具负测当业务证据。审阅时将该 artifact 内的两文件原样归置到 `$REVIEW/tool/receipt.json` 与 `$REVIEW/tool/unittest.log`，不能重新生成 receipt 或强改身份。此 receipt 不自行认证采集或执行全集。
@@ -69,6 +69,16 @@ gh api "repos/y2485871697/Daiyu/actions/runs/$CHECK_RUN/attempts/$CHECK_ATTEMPT/
 ```
 
 不在本文提供未经审查的 ZIP 解包命令。使用既有受控采集过程将开发包成员原样置于 `$REVIEW/delivery/`，两个 smoke artifact 原样分别置于 `$REVIEW/cloud/26/`、`$REVIEW/cloud/37.2/`。最终入口验证 ZIP digest = metadata.digest，artifact 的 run/SHA/branch，创建时间落在指定 attempt 的 build job 起止区间，ZIP 内成员与本地 APK/记录/签名/SHA256SUMS 散列逐一一致，且 APK sums 与身份吻合。ZIP 不解包执行，路径/symlink/重复成员/加密/过大成员均拒绝。APK/ZIP 使用有界流式哈希（每文件1GiB），不是把大型 APK 一次读入内存。签名原文沿用 `verify_signing.verify_certificate`，**不声称离线摘要代替重新执行 apksigner 或可信编译来源证明**。
+
+### 主 APK 许可/源码归档字节门禁
+
+最终入口在完成既有 artifact、成员摘要、SHA256SUMS 和签名原文核对后，调用 `verify_license_bundle.verify_tree(repo_root)` 和 `verify_apk(repo_root, stream, records)`。主 APK 使用既有安全 regular-file 打开规则，并在**同一打开的流**上重新计算 manifest 中的 SHA-256，再回到流首进行 ZIP 检查；不会改查 test APK、固定 assets 合成 ZIP 或另一条未绑定摘要的路径。源码树或 APK 门禁失败统一返回脱敏 `apk_license_bundle_mismatch`、exit 2，不返回可审阅成功。
+
+除现有许可/NOTICE、图片字节与清单之外，`verify_tree` 直接复用 `THIRD_PARTY/proot/artifacts.json` 中四份 `native-sources/{proot,talloc,shmem,eta-native-build}.tgz` 的既有长度/SHA-256。四个记录必须完整且无重复，仓内归档必须匹配；`verify_apk` 复用原有资产入口检查，要求对应 `assets/native-sources/*.tgz` 各有**唯一** ZIP entry、长度和 SHA-256 匹配。维护模式也不能重算或覆盖该 proot 清单。归档不解包、不执行，不增加第二份归档摘要清单。
+
+这是实际提交审阅的主 APK 的有限字节门禁，不是 resolved runtime 依赖闭包、许可兼容性、完整对应源码或可信编译来源证明；不改变来源、作者、授权事实，也不补造缺失许可原文。CI 代码已接入不等于已有真实 APK 运行证据。新增负测仍是本地合成 ZIP 和受控仓内输入，不能拿其成功宣称真实 APK 已核。
+
+新增测试位于 `tests/test_license_bundle.py` 和 `tests/test_acceptance_final_delivery.py`，覆盖四份归档的仓内缺失/空/长度/hash、清单缺项/重复/非法记录，以及同一主 APK 即使重新 pin 全部外层摘要仍因归档缺失/重复/长度/hash 或许可不符而失败、非法 APK ZIP、仓内归档变更、同一已 hash 流调用、CLI 脱敏及 workflow 顺序。本次实现代理不能运行 shell、测试或真实 APK 构建，**测试已写但未运行，真实 APK 也未检查**，须由父集成另行执行并保存证据。
 
 ### 生成现有 cloud 格式（不引入新成功解析规则）
 

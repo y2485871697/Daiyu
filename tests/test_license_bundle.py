@@ -33,6 +33,11 @@ class LicenseBundleContractTest(unittest.TestCase):
                    self.read(BUNDLE.BUNDLE + "GPL-3.0.txt"))
         for name in BUNDLE.WHALE_FILES:
             self.write(name, b"\x89PNG\r\n\x1a\nfixture:" + name.encode())
+        native_records = []
+        for name in BUNDLE.NATIVE_SOURCES:
+            self.write(name, b"synthetic archive fixture: " + name.encode())
+            native_records.append({**BUNDLE.record(self.root, name), "source": "fixture-only"})
+        self.write(BUNDLE.PROOT_ARTIFACTS, json.dumps({"artifacts": native_records}).encode())
         self.records = BUNDLE.stage(self.root)
 
     def write(self, path, data):
@@ -52,7 +57,7 @@ class LicenseBundleContractTest(unittest.TestCase):
         operation(inventory)
         self.write(BUNDLE.INVENTORY, (json.dumps(inventory) + "\n").encode())
 
-    def make_apk(self, omit=None, corrupt=None, duplicate=None, extra=None):
+    def make_apk(self, omit=None, corrupt=None, duplicate=None, extra=None, truncate=None):
         file = self.root / "fixture.apk"
         with zipfile.ZipFile(file, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for name in self.records:
@@ -62,6 +67,8 @@ class LicenseBundleContractTest(unittest.TestCase):
                 data = self.read(name)
                 if entry == corrupt:
                     data = b"!" + data[1:]  # same length, different hash
+                if entry == truncate:
+                    data = data[:-1]
                 archive.writestr(entry, data)
                 if entry == duplicate:
                     with warnings.catch_warnings():
@@ -175,6 +182,52 @@ class LicenseBundleContractTest(unittest.TestCase):
             with self.assertRaises(BUNDLE.BundleError):
                 BUNDLE.verify_apk(self.root, self.make_apk(**arguments), self.records)
 
+    def test_native_source_tree_missing_empty_size_and_hash_changes_fail_without_repins(self):
+        manifest = self.read(BUNDLE.PROOT_ARTIFACTS)
+        for name in BUNDLE.NATIVE_SOURCES:
+            original = self.read(name)
+            for data in (None, b"", original[:-1], b"!" + original[1:]):
+                with self.subTest(name=name, data=data):
+                    if data is None:
+                        (self.root / name).unlink()
+                    else:
+                        self.write(name, data)
+                    self.assert_bad_tree("missing regular file|empty file|native-source SHA-256/length mismatch")
+                    with self.assertRaises(BUNDLE.BundleError):
+                        BUNDLE.stage(self.root)
+                    self.assertEqual(manifest, self.read(BUNDLE.PROOT_ARTIFACTS))
+                    self.write(name, original)
+
+    def test_native_source_manifest_exact_set_and_record_validation(self):
+        original = self.read(BUNDLE.PROOT_ARTIFACTS)
+        for operation in (
+            lambda rows: rows.pop(),
+            lambda rows: rows.append(rows[0]),
+            lambda rows: rows[0].update(path=BUNDLE.ASSETS + "native-sources/unknown.tgz"),
+            lambda rows: rows[0].update(bytes=True),
+            lambda rows: rows[0].update(sha256="bad"),
+        ):
+            manifest = json.loads(original)
+            operation(manifest["artifacts"])
+            self.write(BUNDLE.PROOT_ARTIFACTS, json.dumps(manifest).encode())
+            self.assert_bad_tree("inventory")
+        self.write(BUNDLE.PROOT_ARTIFACTS, original)
+
+    def test_apk_each_native_source_requires_unique_exact_size_and_hash(self):
+        for name in BUNDLE.NATIVE_SOURCES:
+            entry = "assets/" + name[len(BUNDLE.ASSETS):]
+            for mutation, message in (("omit", "missing/duplicate"), ("duplicate", "missing/duplicate"),
+                                      ("truncate", "size mismatch"), ("corrupt", "SHA-256 mismatch")):
+                with self.subTest(name=name, mutation=mutation):
+                    with self.assertRaisesRegex(BUNDLE.BundleError, message):
+                        BUNDLE.verify_apk(self.root, self.make_apk(**{mutation: entry}), self.records)
+
+    def test_cli_apk_rejects_missing_native_source_without_staging(self):
+        apk = self.make_apk(omit="assets/native-sources/proot.tgz")
+        with patch.object(BUNDLE, "ROOT", self.root), patch.object(BUNDLE, "stage", side_effect=AssertionError("no auto-fix")):
+            with redirect_stderr(io.StringIO()):
+                self.assertEqual(1, BUNDLE.main(["--apk", str(apk)]))
+
     def test_apk_cannot_be_used_with_maintenance_mode(self):
         with self.assertRaises(SystemExit), redirect_stderr(io.StringIO()):
             BUNDLE.main(["--stage", "--apk", "never-opened.apk"])
@@ -197,6 +250,19 @@ class RepositoryLicenseInventoryTest(unittest.TestCase):
         polyform = (ROOT / "docs/third-party/virtual-display-owner/LICENSE").read_text(encoding="utf-8")
         self.assertIn("Required Notice: Copyright © 2026 蛮吉 (Mangi-11).", polyform)
         self.assertIn("## Noncommercial Purposes", polyform)
+
+    def test_ci_gates_the_uploaded_main_apk_read_only_before_sums_and_upload(self):
+        workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        build = workflow.split("  build:\n", 1)[1].split("  smoke:\n", 1)[0]
+        gate = 'python3 scripts/verify_license_bundle.py --apk "delivery/代鱼-0.1.0-${short}.apk"'
+        self.assertEqual(build.count(gate), 1)
+        self.assertLess(build.index('cp app/build/outputs/apk/debug/app-debug.apk'), build.index(gate))
+        self.assertLess(build.index(gate), build.index('sha256sum *.apk tests/*.apk'))
+        self.assertLess(build.index(gate), build.index('- name: 上传开发包'))
+        self.assertNotIn("--stage", workflow)
+        self.assertNotIn("continue-on-error", build)
+        records = BUNDLE.verify_tree(ROOT)
+        self.assertTrue(set(BUNDLE.NATIVE_SOURCES) <= set(records))
 
     def test_compiled_openminis_subset_is_exactly_documented(self):
         gradle = (ROOT / "app/build.gradle.kts").read_text(encoding="utf-8")

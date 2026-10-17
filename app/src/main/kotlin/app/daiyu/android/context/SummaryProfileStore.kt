@@ -33,6 +33,26 @@ data class SummaryProfileSettings(
     }
 }
 
+/** Non-secret consent evidence only. Revision is new on EVERY save, including key-only saves.
+ * endpoint is the effective request URL, not an opaque binding or a credential-bearing snapshot. */
+internal data class SummaryProfileDescriptor(
+    val binding: SummaryModelBinding,
+    val revision: String,
+    val endpoint: String,
+    val apiModel: String,
+) {
+    init {
+        val url = java.net.URI(endpoint)
+        require(url.scheme.equals("https", ignoreCase = true) && !url.host.isNullOrBlank() &&
+            url.userInfo == null && url.query == null && url.fragment == null &&
+            (url.port == -1 || url.port in 1..65535))
+        require(apiModel.isNotBlank() && apiModel.length <= 200 && revision.isNotBlank())
+    }
+}
+
+internal class SummaryProfileChangedException :
+    IllegalStateException("摘要目标或 profile 版本已改变；未发起请求，请刷新并重新确认")
+
 enum class SummaryProfileUnavailableReason {
     MISSING, INCOMPLETE_SAVE, SAVE_UNCONFIRMED, INVALID_CONFIGURATION, BINDING_MISMATCH, CREDENTIAL_UNAVAILABLE,
 }
@@ -60,7 +80,11 @@ class SummaryProfileStore internal constructor(
         context.getSharedPreferences(METADATA_NAMESPACE, Context.MODE_PRIVATE),
         ModelSettingsStore(context, KEY_ALIAS_PREFIX, MODEL_NAMESPACE))
 
-    fun load(binding: SummaryModelBinding): SummaryProfileSettings = synchronized(lock) {
+    private data class Metadata(val binding: SummaryModelBinding, val identity: String,
+        val budgets: SummaryProfileBudgets, val descriptor: SummaryProfileDescriptor?)
+
+    // Metadata-only path: never calls ModelSettingsStore.load / keystore, even on failure.
+    private fun metadata(binding: SummaryModelBinding): Metadata {
         fenced[metadataNamespace]?.let { unavailable(it) }
         val raw = try { preferences.getString(KEY, null) }
             catch (_: Exception) { unavailable(SummaryProfileUnavailableReason.INVALID_CONFIGURATION) }
@@ -71,9 +95,13 @@ class SummaryProfileStore internal constructor(
         val savedBinding: SummaryModelBinding
         val budgets: SummaryProfileBudgets
         val identity: String
+        val descriptor: SummaryProfileDescriptor?
         try {
-            metadata.requireFields(setOf("version", "state", "binding", "identity", "budgets"))
-            require(metadata.configurationLong("version") == 1L && metadata.configurationString("state") == "ready")
+            val version = metadata.configurationLong("version")
+            require(version == 1L || version == 2L)
+            metadata.requireFields(setOf("version", "state", "binding", "identity", "budgets") +
+                if (version == 2L) setOf("revision", "endpoint", "apiModel") else emptySet())
+            require(metadata.configurationString("state") == "ready")
             savedBinding = decodeBinding(metadata.getJSONObject("binding"))
             identity = metadata.configurationString("identity")
             val values = metadata.getJSONObject("budgets")
@@ -81,14 +109,40 @@ class SummaryProfileStore internal constructor(
             budgets = SummaryProfileBudgets(values.configurationLong("window"), values.configurationLong("input"),
                 values.configurationInt("output"), values.configurationLong("reasoning"),
                 values.configurationLong("overhead"), values.configurationLong("deadlineMillis"))
+            descriptor = if (version == 2L) SummaryProfileDescriptor(savedBinding,
+                metadata.configurationString("revision").also { require(java.util.UUID.fromString(it).toString() == it) },
+                metadata.configurationString("endpoint"), metadata.configurationString("apiModel")) else null
         } catch (_: Exception) { unavailable(SummaryProfileUnavailableReason.INVALID_CONFIGURATION) }
         // Reject stale selection before any credential access.
         if (savedBinding != binding) unavailable(SummaryProfileUnavailableReason.BINDING_MISMATCH)
+        return Metadata(savedBinding, identity, budgets, descriptor)
+    }
+
+    internal fun descriptor(binding: SummaryModelBinding): SummaryProfileDescriptor = synchronized(lock) {
+        // Legacy records remain loadable by existing sends, but cannot authorize paid manual I/O.
+        metadata(binding).descriptor ?: unavailable(SummaryProfileUnavailableReason.INVALID_CONFIGURATION)
+    }
+
+    /** Compare and capture under the SAME save lock. A later save cannot retarget this candidate.
+     * The returned credential-bearing configuration stays on the worker, never in UI state. */
+    internal fun configuration(expected: SummaryProfileDescriptor): SummaryProviderConfiguration = synchronized(lock) {
+        val current = try { metadata(expected.binding).descriptor }
+            catch (_: SummaryProfileUnavailableException) { throw SummaryProfileChangedException() }
+        if (current != expected) throw SummaryProfileChangedException()
+        load(expected.binding).configuration()
+    }
+
+    fun load(binding: SummaryModelBinding): SummaryProfileSettings = synchronized(lock) {
+        val metadata = metadata(binding)
         val provider = try { loadModel() }
             catch (_: Exception) { unavailable(SummaryProfileUnavailableReason.CREDENTIAL_UNAVAILABLE) }
         if (provider.apiKey.isBlank()) unavailable(SummaryProfileUnavailableReason.CREDENTIAL_UNAVAILABLE)
-        if (providerIdentity(provider) != identity) unavailable(SummaryProfileUnavailableReason.BINDING_MISMATCH)
-        val profile = SummaryProfileSettings(savedBinding, provider, budgets)
+        if (providerIdentity(provider) != metadata.identity) unavailable(SummaryProfileUnavailableReason.BINDING_MISMATCH)
+        metadata.descriptor?.let {
+            if (provider.requestEndpoint() != it.endpoint || provider.model != it.apiModel)
+                unavailable(SummaryProfileUnavailableReason.BINDING_MISMATCH)
+        }
+        val profile = SummaryProfileSettings(metadata.binding, provider, metadata.budgets)
         try { profile.configuration() }
         catch (_: Exception) { unavailable(SummaryProfileUnavailableReason.INVALID_CONFIGURATION) }
         profile
@@ -102,8 +156,10 @@ class SummaryProfileStore internal constructor(
         requestOptionsReplacementAuthorized: Boolean = false) = synchronized(lock) {
         profile.configuration() // Validate all budgets, endpoint and tools BEFORE touching persisted state.
         val budgets = profile.budgets
-        val raw = JSONObject().put("version", 1).put("state", "ready")
+        val raw = JSONObject().put("version", 2).put("state", "ready")
             .put("binding", encodeBinding(profile.binding)).put("identity", providerIdentity(profile.provider))
+            .put("revision", java.util.UUID.randomUUID().toString())
+            .put("endpoint", profile.provider.requestEndpoint()).put("apiModel", profile.provider.model)
             .put("budgets", JSONObject().put("window", budgets.contextWindowTokens)
                 .put("input", budgets.inputBudgetTokens).put("output", budgets.maxOutputTokens)
                 .put("reasoning", budgets.reasoningReserveTokens).put("overhead", budgets.providerOverheadTokens)

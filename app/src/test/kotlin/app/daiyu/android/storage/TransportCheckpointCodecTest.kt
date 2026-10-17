@@ -42,10 +42,13 @@ class TransportCheckpointCodecTest {
         reject { RunCheckpointCodec.encode(original.copy(request = original.request!!.copy(operation = RequestOperation.OPEN))) }
         reject { RunCheckpointCodec.encode(original.copy(transport = original.transport!!.copy(sequence = 43))) }
         reject { RunCheckpointCodec.encode(original.copy(transport = original.transport!!.copy(decoderState = "{}"))) }
-        for (bad in listOf<Any>(42.0,"42",-1)) {
-            val json = JSONObject(RunCheckpointCodec.encode(original))
-            json.getJSONObject("transport").put("sequence",bad)
-            try { RunCheckpointCodec.decode(json.toString()); fail("must reject") } catch (_: Exception) {}
+        val encoded = RunCheckpointCodec.encode(original)
+        val cursorToken = "\"sequence\":42"
+        assertTrue(encoded.contains(cursorToken))
+        assertEquals(encoded.indexOf(cursorToken), encoded.lastIndexOf(cursorToken))
+        for (bad in listOf("42.0", "\"42\"", "-1")) {
+            val malformed = encoded.replace(cursorToken, "\"sequence\":$bad")
+            try { RunCheckpointCodec.decode(malformed); fail("must reject raw sequence=$bad") } catch (_: Exception) {}
         }
     }
 }

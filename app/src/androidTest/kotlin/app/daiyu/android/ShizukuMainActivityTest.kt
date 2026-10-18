@@ -3,6 +3,7 @@ package app.daiyu.android
 import androidx.compose.runtime.State
 import androidx.compose.ui.test.*
 import app.daiyu.android.domain.*
+import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 
 /** Real Activity + real approval host/controller. No device permission request or shell execution.
  * Accepted UI receipts below are explicit DB fixtures, not a claim of real privileged transport.
@@ -189,7 +190,19 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
         mainThread { invokeOn(oldActivity, "acceptShizuku", oldEditor, p, fixture.database.create()) }
         assertDraft(text)
         val next = preview(seedDraft = false)
-        openSettings()
+        // Invoke the real host route while the modal preview covers the chat toolbar.
+        ui.onNode(hasText(command) and hasAnyAncestor(isDialog())).assertExists()
+        mainThread {
+            assertSame(next, fixture.controller.shizukuPreparation())
+            assertFalse(next.isCancelled())
+            assertNotNull(editor())
+            retainedControls(activity).onMenuAction(ChatMenuAction.SETTINGS)
+            assertTrue(next.isCancelled())
+            assertNull(editor())
+        }
+        awaitUniqueTag("page:设置")
+        node("page:设置").assertIsDisplayed()
+        node("shizuku-text-panel").assertDoesNotExist()
         assertTrue(next.isCancelled())
         assertNull(fixture.controller.shizukuPreparation())
         assertEquals(0, fixture.opens.get())

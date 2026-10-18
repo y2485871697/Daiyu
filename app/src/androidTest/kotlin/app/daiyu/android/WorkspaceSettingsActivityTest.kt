@@ -112,7 +112,13 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
             node("workspace-file:0").assertDoesNotExist()
             ui.waitUntil(5_000) { ui.onAllNodesWithTag("workspace-browse:0").fetchSemanticsNodes().size == 1 }
             node("workspace-browse:0").performClick()
-            ui.waitUntil(5_000) { ui.onAllNodesWithText("local-only.txt").fetchSemanticsNodes().size == 1 }
+            ui.waitUntil(5_000) {
+                try {
+                    reveal("workspace-file:0", "工作区与文件")
+                        .assertTextContains("local-only.txt").assertIsDisplayed()
+                    true
+                } catch (_: AssertionError) { false }
+            }
             assertEquals(2, queries.get()); assertEquals(0, fixture.opens.get())
         } finally { release.countDown(); context.deleteSharedPreferences(name) }
     }

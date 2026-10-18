@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.onClick as semanticsClick
 import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.withResumed
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.platform.PlatformSettingsAccess
 import app.daiyu.android.ui.components.MiuixScaffoldPage
@@ -52,9 +53,10 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
     var revoking by remember { mutableStateOf<WorkspaceRevoke?>(null) }
     fun current() = visit.get() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     fun invalidateRead() { request?.set(true); request = null; listing = null; shownTree = null }
-    fun refresh() {
+    fun refresh(clearNotice: Boolean = true) {
         if (!current() || busy) return
-        invalidateRead(); revoking = null; grants = emptyList(); loaded = false; notice = null
+        invalidateRead(); revoking = null; grants = emptyList(); loaded = false
+        if (clearNotice) notice = null
         val token = AtomicBoolean(false); request = token
         scope.launch {
             try {
@@ -84,13 +86,19 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
                 try {
                     val accepted = withContext(Dispatchers.IO) { visit.get() && access.accept(data, tree) }
                     val values = withContext(Dispatchers.IO) { access.grants() }
-                    if (current() && epoch.get() == admittedEpoch) {
-                        grants = values; loaded = true
-                        notice = if (accepted) "已添加只读共享${if (tree) "目录" else "文件"}" else "未取得有效的持久只读授权，请重新选择"
+                    lifecycle.withResumed {
+                        if (current() && epoch.get() == admittedEpoch) {
+                            grants = values; loaded = true
+                            notice = if (accepted) "已添加只读共享${if (tree) "目录" else "文件"}" else "未取得有效的持久只读授权，请重新选择"
+                        }
                     }
                 } catch (cancelled: CancellationException) { throw cancelled }
-                catch (_: Exception) { if (current() && epoch.get() == admittedEpoch) notice = "共享未确认成功，请刷新并检查系统授权" }
-                finally { if (visit.get()) { busy = false; if (current() && (epoch.get() != admittedEpoch || !loaded)) refresh() } }
+                catch (_: Exception) {
+                    lifecycle.withResumed {
+                        if (current() && epoch.get() == admittedEpoch) notice = "共享未确认成功，请刷新并检查系统授权"
+                    }
+                }
+                finally { if (visit.get()) { busy = false; if (current() && (epoch.get() != admittedEpoch || !loaded)) refresh(clearNotice = false) } }
             }
         }
     }

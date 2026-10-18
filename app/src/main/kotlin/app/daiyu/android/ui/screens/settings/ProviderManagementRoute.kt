@@ -48,6 +48,7 @@ private fun ModelSettingsDraftUi.providerSettings(base: ModelSettings) = base.co
 @Composable
 internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: () -> Boolean,
     onBack: () -> Unit, engineeringUi: Boolean = false,
+    initialSlot: String? = null, pageTitleOverride: String? = null,
 ) {
     val repo = controller.providers
     val scope = rememberCoroutineScope()
@@ -139,13 +140,16 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             if (event == Lifecycle.Event.ON_PAUSE) {
                 resumed = false; permit.revoke(); closeDetail(); checkingRegistry = false
             } else if (event == Lifecycle.Event.ON_RESUME) {
-                permit = ProviderPagePermit(); resumed = true; refresh()
+                permit = ProviderPagePermit(); resumed = true
+                if (initialSlot == null) refresh() else open(initialSlot)
             }
         }
         lifecycle.addObserver(observer)
         onDispose { visit.set(false); permit.revoke(); detail?.live?.set(false); lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(Unit) { refresh() }
+    LaunchedEffect(Unit, initialSlot) {
+        if (initialSlot == null) refresh() else open(initialSlot)
+    }
     fun back() { if (detail != null || loading) { closeDetail(); refresh() } else { permit.revoke(); onBack() } }
     BackHandler { back() }
     val p = permit
@@ -200,14 +204,14 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 } else complete(false)
             })
         if (d.catalogIdentity == null) ModelSettingsScreen(draft, change, save, {}, { back() },
-            pageTitle = d.name, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
+            pageTitle = pageTitleOverride ?: d.name, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
             credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
             catalogEnabled = false, errorText = notice)
         else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
             createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
                 if (!live() || !enabled) false else controller.fetchModelCatalog(value.providerSettings(saved),
                     { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) deliver(it) }
-            }, pageTitle = d.name, twoTabs = true, ownerCurrent = live,
+            }, pageTitle = pageTitleOverride ?: d.name, twoTabs = true, ownerCurrent = live,
             enabled = enabled, engineeringUi = engineeringUi, errorText = notice,
             credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
             testConnection = connection, localModelActions = actions)

@@ -27,7 +27,7 @@ class ProviderRegistryTest {
         val file = stateFile()
         val first = ProviderRegistry(file).snapshot()
         assertEquals(0L, first.revision)
-        assertEquals(listOf(RegisteredProvider("primary", "主提供商", true)), first.providers)
+        assertEquals(listOf(RegisteredProvider("primary", "主模型服务商", true)), first.providers)
         assertEquals("primary", first.activeSlotId)
         assertEquals(first, ProviderRegistry(file).snapshot())
     }

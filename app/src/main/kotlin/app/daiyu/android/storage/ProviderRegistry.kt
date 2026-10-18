@@ -43,7 +43,7 @@ internal class ProviderRegistry(file: File) {
     private fun readOrCreate(): ProviderRegistrySnapshot {
         if (file.exists()) return read()
         val initial = freeze(ProviderRegistrySnapshot(0,
-            listOf(RegisteredProvider(PRIMARY, "主提供商", true)), PRIMARY))
+            listOf(RegisteredProvider(PRIMARY, "主模型服务商", true)), PRIMARY))
         write(initial)
         return initial
     }

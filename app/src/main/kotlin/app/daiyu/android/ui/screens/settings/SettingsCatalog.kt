@@ -75,13 +75,21 @@ internal object SettingsCatalog {
             SettingsEntry("donate", "给煮波恰饭🍚", DaiyuIcons.Balance, SettingControl.ACTION),
         )),
     )
-    /** Keep the complete settings inventory visible while the UI is being rebuilt. */
-    fun visibleGroups(engineeringUi: Boolean = false): List<SettingsGroup> = groups
+    private val hiddenEntryIds = setOf(
+        "balance", "generation", "platform_tools", "browser", "overlay", "enhancements", "accessibility",
+    )
+
+    // Retain underlying routes; remove only product entry points.
+    @Suppress("UNUSED_PARAMETER")
+    fun visibleGroups(engineeringUi: Boolean = false): List<SettingsGroup> = groups.mapNotNull { group ->
+        val entries = group.entries.filterNot { it.id in hiddenEntryIds }
+        group.copy(entries = entries).takeIf { entries.isNotEmpty() }
+    }
     val entries: List<SettingsEntry> = groups.flatMap { it.entries }
     fun entry(id: String): SettingsEntry = entries.single { it.id == id }
 }
 
-internal fun filterSettingsGroups(query: String, groups: List<SettingsGroup> = SettingsCatalog.groups): List<SettingsGroup> {
+internal fun filterSettingsGroups(query: String, groups: List<SettingsGroup> = SettingsCatalog.visibleGroups()): List<SettingsGroup> {
     val term = query.trim()
     if (term.isEmpty()) return groups
     return groups.mapNotNull { group ->

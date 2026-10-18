@@ -176,16 +176,19 @@ class BackupActivityTest:ComposeActivityTestCase() {
     }
     /** Monitor returns a platform ActivityResult to the actual startActivityForResult call. */
     private fun picker(code:Int,result:Int=Activity.RESULT_OK,uri:Uri?=null,beforeReturn:()->Unit={}) {
-        val exporting=code==101 || code==103
-        val complete=code==103 || code==104
+        // Product backup settings intentionally expose only complete export and automatic import.
+        // 101/102/104 remain accepted aliases for older test call sites, but all route through
+        // the two visible actions and their current request codes.
+        val actualCode = when (code) { 101, 103 -> 103; 102, 104 -> 107; else -> code }
+        val exporting = actualCode == 103
         val observed=CountDownLatch(1)
         val monitor=object:Instrumentation.ActivityMonitor() {
             override fun onStartActivity(intent:Intent):Instrumentation.ActivityResult? {
                 assertEquals(if(exporting) Intent.ACTION_CREATE_DOCUMENT else Intent.ACTION_OPEN_DOCUMENT,intent.action)
-                assertEquals("application/json",intent.type)
+                assertEquals(if (exporting) "application/json" else "*/*", intent.type)
                 assertTrue(intent.hasCategory(Intent.CATEGORY_OPENABLE))
-                assertEquals(code,pending())
-                if(exporting) assertEquals(if(complete) "daiyu-complete.json" else "daiyu-text.json",intent.getStringExtra(Intent.EXTRA_TITLE))
+                assertEquals(actualCode,pending())
+                if(exporting) assertEquals("daiyu-complete.json",intent.getStringExtra(Intent.EXTRA_TITLE))
                 beforeReturn();observed.countDown()
                 return Instrumentation.ActivityResult(result,if(uri==null) Intent() else Intent().setData(uri))
             }
@@ -193,8 +196,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
         instrumentation.addMonitor(monitor)
         try {
             click("备份与导入")
-            val action=if(exporting) {if(complete) "导出完整备份" else "导出精简备份"} else {if(complete) "导入完整备份" else "导入精简备份"}
-            reveal("settings-row:$action","备份与导入").performClick()
+            node(if (exporting) "backup-export" else "backup-import").performClick()
             assertTrue("SAF launch not observed",observed.await(5,TimeUnit.SECONDS))
             instrumentation.waitForIdleSync()
             main {assertNull("request must be consumed at callback",pending())}
@@ -232,7 +234,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
             }
         }
     }
-    fun testTextAndCompletePickerExportAndConfirmedImportReachController() {
+    fun testCompletePickerExportAndAutomaticImportReachController() {
         start()
         for(code in listOf(102,104)) {
             val uri=if(code==104) completeUri else textUri
@@ -247,10 +249,9 @@ class BackupActivityTest:ComposeActivityTestCase() {
             val text=provider.file(output).readText()
             assertTrue(text.contains("historical answer"))
             val envelope=org.json.JSONObject(text)
-            assertEquals(if(code==104) "daiyu-neutral-complete" else "daiyu-neutral-text",envelope.getString("format"))
-            assertEquals(if(code==104) 5 else 2,envelope.getInt("version"))
-            if(code==104) NeutralBackupService(fixtureApp,controller.database).preflight(text)
-            else assertEquals(controller.database.exportBackup(),text)
+            assertEquals("daiyu-neutral-complete", envelope.getString("format"))
+            assertEquals(5, envelope.getInt("version"))
+            NeutralBackupService(fixtureApp,controller.database).preflight(text)
             controller.database.conversations().forEach {controller.database.delete(it.id)}
             // Reset only revision for the second independent UI route; format fixtures stay tiny.
             main {setField("dataRevision",0L)}
@@ -263,7 +264,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
         val monitor=object:Instrumentation.ActivityMonitor() {
             override fun onStartActivity(intent:Intent):Instrumentation.ActivityResult? {
                 assertEquals(Intent.ACTION_CREATE_DOCUMENT,intent.action)
-                assertEquals("application/json",intent.type)
+                assertEquals(if (exporting) "application/json" else "*/*", intent.type)
                 assertTrue(intent.hasCategory(Intent.CATEGORY_OPENABLE))
                 assertEquals("daiyu-conversation.json",intent.getStringExtra(Intent.EXTRA_TITLE))
                 assertEquals(105,pending())

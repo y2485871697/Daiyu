@@ -1794,6 +1794,32 @@ class MainActivity : ComponentActivity() {
             } })
         fun currentChat() = editorMatches() && draftRevision == renderedDraftRevision && controller.ready &&
             !controller.dataBusy && voiceForeground && retainedPage == "chat" && !sidebarVisible
+        fun pathReferenceCurrent() = currentChat() &&
+            renderedContextEntryEpoch == contextManagementEntryEpoch && controller.active == null &&
+            !imageHost.busy && !imageHost.hasAttachments && videoHost.state.items.isEmpty() && !videoSending &&
+            !shizukuWritesBlocked && terminalEditor == null && virtualDisplayEditor == null &&
+            virtualDisplayPlanVisit == null && guiEditor == null && shizukuEditor == null &&
+            browserApproval == null && !browserPreparing && generationApproval == null &&
+            mcpApproval == null && !mcpPreparing
+        fun openPathReference() {
+            if (!pathReferenceCurrent() || prompt != null) return
+            val originalText = draft
+            prompt = InputPrompt("输入路径引用", "",
+                "仅将路径文字加入草稿，不读取文件或授予权限；之后点击发送才会交给模型。", "加入草稿", { raw ->
+                    if (!pathReferenceCurrent() || draft != originalText) return@InputPrompt
+                    if (raw.isBlank() || raw.length > 2048 || raw.any { it.code < 0x20 || it.code == 0x7f }) {
+                        toast("请输入不超过2048字符的单行路径引用；未修改草稿")
+                        return@InputPrompt
+                    }
+                    val reference = "路径引用（未读取）：$raw"
+                    val next = if (originalText.isEmpty()) reference else "$originalText\n$reference"
+                    updateDraft(next)
+                    if (draft == next) {
+                        selectionStart = next.length; selectionEnd = next.length
+                        publishChat(rowsChanged = false)
+                    } else toast("路径引用未加入；原草稿保留")
+                })
+        }
         fun requestDictation() {
             if (editorMatches() && terminalEditor == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null && !videoSending &&
                 draftRevision == renderedDraftRevision && voiceForeground &&
@@ -1897,6 +1923,7 @@ class MainActivity : ComponentActivity() {
                     imagePanelVisible = false; videoPanelVisible = true
                 }
             }
+            ChatMenuAction.ATTACH_PATH -> openPathReference()
             ChatMenuAction.INTERACTIVE_MODE -> if (currentChat())
                 controller.interactiveMode.setEnabled(!controller.interactiveMode.enabled)
             ChatMenuAction.CONTEXT_STATS, ChatMenuAction.COMPRESS_CONTEXT, ChatMenuAction.CONTEXT_SCOPE -> openContextPage()

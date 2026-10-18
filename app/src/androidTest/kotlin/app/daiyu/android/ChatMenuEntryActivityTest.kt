@@ -161,6 +161,129 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         assertNull(fixture.controller.active)
     }
 
+    private fun openPathReference(value: String): () -> Unit {
+        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.ATTACH_PATH) }
+        awaitUniqueTag("prompt-input")
+        node("prompt-input").performTextReplacement(value)
+        return retainedClick(activity, "dialog-confirm")
+    }
+
+    fun testPathReferenceRealAttachmentMenuCancelDoesNotReadGrantOrSend() {
+        selectDraft()
+        val before = fixture.database.exportBackup()
+        val settings = fixture.settings.load()
+        val grants = PlatformSafGrants(instrumentation.targetContext).grants()
+        ui.onNodeWithContentDescription("附件").performClick()
+        node("chat-attachment:ATTACH_PATH").performClick()
+        awaitUniqueTag("prompt-input")
+        node("prompt-input").performTextReplacement("content://not-granted.invalid/never-read")
+        node("dialog-cancel").performClick()
+        node("prompt-input").assertDoesNotExist()
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(settings, fixture.settings.load())
+        assertEquals(grants, PlatformSafGrants(instrumentation.targetContext).grants())
+        assertEquals(0, fixture.opens.get())
+        assertNull(fixture.controller.active)
+    }
+
+    fun testPathReferenceConfirmationAppendsLiteralTextOnceAndSurvivesRecreation() {
+        selectDraft()
+        val conversation = fixture.database.conversations().single()
+        val messages = fixture.database.messages(conversation.id)
+        val settings = fixture.settings.load()
+        val grants = PlatformSafGrants(instrumentation.targetContext).grants()
+        val raw = "/workspace/中文 空格/'\";not-a-command"
+        val expected = "menu draft stays unsent\n路径引用（未读取）：$raw"
+        val confirm = openPathReference(raw)
+        mainThread { confirm(); confirm() }
+        assertDraft(expected)
+        assertSelection(expected.length, expected.length)
+        app.daiyu.android.storage.ConversationDatabase(fixture.application).use { reopened ->
+            assertEquals(expected, reopened.conversations().single { it.id == conversation.id }.draft)
+            assertEquals(messages, reopened.messages(conversation.id))
+        }
+        activity = recreateActivity(activity)
+        awaitUniqueTag("chat-draft")
+        assertDraft(expected)
+        mainThread { confirm() }
+        assertDraft(expected)
+        assertEquals(messages, fixture.database.messages(conversation.id))
+        assertEquals(settings, fixture.settings.load())
+        assertEquals(grants, PlatformSafGrants(instrumentation.targetContext).grants())
+        assertEquals(0, fixture.opens.get())
+        assertNull(fixture.controller.active)
+    }
+
+    fun testPathReferenceRejectsBlankLongAndControlCharactersWithoutTruncation() {
+        selectDraft()
+        val before = fixture.database.exportBackup()
+        for (raw in listOf("  ", "x".repeat(2049), "a\nb", "a\tb", "a\u007fb")) {
+            mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.ATTACH_PATH) }
+            awaitUniqueTag("prompt-input")
+            // Invoke the actual host capability: a single-line widget may normalize control input.
+            mainThread {
+                val prompt = MainActivity::class.java.getDeclaredMethod("getPrompt")
+                    .apply { isAccessible = true }.invoke(activity)
+                MainActivity::class.java.declaredMethods.single { it.name == "confirmInputPrompt" }
+                    .apply { isAccessible = true }.invoke(activity, prompt, raw)
+            }
+            node("prompt-input").assertDoesNotExist()
+            assertDraft("menu draft stays unsent")
+            assertEquals(before, fixture.database.exportBackup())
+        }
+        assertEquals(0, fixture.opens.get())
+        assertNull(fixture.controller.active)
+    }
+
+    fun testPathReferenceOldMenuAndConfirmationStayRevokedAfterRealPauseResume() {
+        selectDraft()
+        val menu = retainedControls(activity).onMenuAction
+        val confirm = openPathReference("/never-read/pause")
+        val before = fixture.database.exportBackup()
+        realPauseResume(activity, atPause = { menu(ChatMenuAction.ATTACH_PATH) })
+        mainThread { confirm(); menu(ChatMenuAction.ATTACH_PATH) }
+        node("prompt-input").assertDoesNotExist()
+        assertDraft("menu draft stays unsent")
+        assertEquals(before, fixture.database.exportBackup())
+        val fresh = openPathReference("/fresh-after-resume")
+        mainThread { fresh() }
+        assertDraft("menu draft stays unsent\n路径引用（未读取）：/fresh-after-resume")
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPathReferenceDraftChangeRejectsOldConfirmation() {
+        selectDraft()
+        val confirm = openPathReference("/never-read/old-draft")
+        mainThread { retainedControls(activity).onTextChange("newer unsent draft") }
+        val changed = fixture.database.exportBackup()
+        mainThread { confirm() }
+        node("prompt-input").assertDoesNotExist()
+        assertDraft("newer unsent draft")
+        assertEquals(changed, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPathReferenceNavigationAndSameConversationReentryRejectOldCapabilities() {
+        selectDraft()
+        val conversation = fixture.database.conversations().single()
+        val menu = retainedControls(activity).onMenuAction
+        val confirm = openPathReference("/never-read/old-page")
+        mainThread { menu(ChatMenuAction.SETTINGS); confirm() }
+        awaitUniqueTag("page:设置")
+        backToChat(activity)
+        mainThread { menu(ChatMenuAction.ATTACH_PATH) }
+        node("prompt-input").assertDoesNotExist()
+        val second = openPathReference("/never-read/old-editor")
+        mainThread { activity.select(conversation) }
+        val reentered = fixture.database.exportBackup()
+        mainThread { second() }
+        node("prompt-input").assertDoesNotExist()
+        assertDraft("menu draft stays unsent")
+        assertEquals(reentered, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+        assertNull(fixture.controller.active)
+    }
+
     fun testSettingsVoiceRowEntersExistingConfiguration() {
         selectDraft()
         openSettings()

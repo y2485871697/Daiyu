@@ -45,6 +45,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
     var grants by remember(access) { mutableStateOf<List<Uri>>(emptyList()) }
     var loaded by remember(access) { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var privateOccupied by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var listing by remember { mutableStateOf<WorkspaceListing?>(null) }
     var shownTree by remember { mutableStateOf<Uri?>(null) }
@@ -54,7 +55,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
     fun current() = visit.get() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     fun invalidateRead() { request?.set(true); request = null; listing = null; shownTree = null }
     fun refresh(clearNotice: Boolean = true) {
-        if (!current() || busy) return
+        if (!current() || busy || privateOccupied) return
         invalidateRead(); revoking = null; grants = emptyList(); loaded = false
         if (clearNotice) notice = null
         val token = AtomicBoolean(false); request = token
@@ -103,13 +104,13 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
         }
     }
     fun pick(tree: Boolean) {
-        if (!current() || busy || pendingTree != null) return
+        if (!current() || busy || privateOccupied || pendingTree != null) return
         pendingTree = tree; revoking = null; invalidateRead()
         try { picker.launch(PlatformSettingsAccess.pickerIntent(tree)) }
         catch (_: Exception) { pendingTree = null; notice = "未能打开系统文件选择器" }
     }
     fun copy(uri: Uri) {
-        if (!current() || busy || !loaded) return
+        if (!current() || busy || privateOccupied || !loaded) return
         val available = uri in grants || listing?.files?.any { it.uri == uri } == true
         if (!available) return
         try {
@@ -122,7 +123,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
     if (revoke != null) app.daiyu.android.ui.components.DaiyuConfirmDialog(
         title = "撤销共享授权", confirmText = "撤销", destructive = true, message = "撤销后，本应用将无法再读取该目录或文件。不会删除原文件。",
         onDismiss = { if (revoking === revoke) revoking = null }, onConfirm = {
-            if (current() && !busy && loaded && revoke.uri in grants && revoking === revoke) {
+            if (current() && !busy && !privateOccupied && loaded && revoke.uri in grants && revoking === revoke) {
                 revoking = null; busy = true; invalidateRead()
                 val admittedEpoch = epoch.get()
                 scope.launch {
@@ -138,6 +139,11 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
         })
     val back: () -> Unit = { if (current()) { visit.set(false); revoking = null; invalidateRead(); onBack() } }
     BackHandler { back() }
+    val privatePanel = rememberPrivateWorkspacePanel(parentVisit = visit,
+        sharedBusy = { busy || pendingTree != null }, onOccupied = {
+            privateOccupied = it
+            if (!it && current() && !loaded) refresh(clearNotice = false)
+        })
     MiuixScaffoldPage(title = "工作区与文件", onBack = back, modifier = modifier) {
         item(key = "sharing") {
             SettingsNote("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。")
@@ -157,7 +163,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
                     SettingsRow(if (DocumentsContract.isTreeUri(uri)) "共享目录 ${index + 1}" else "共享文件 ${index + 1}",
                         summary = uri.toString(), tag = "workspace-grant:$index")
                     if (DocumentsContract.isTreeUri(uri)) WorkspaceButton("查看文件", tag = "workspace-browse:$index", onClick = {
-                        if (current() && !busy && loaded) {
+                        if (current() && !busy && !privateOccupied && loaded) {
                             invalidateRead(); notice = null
                             val token = AtomicBoolean(false); request = token
                             scope.launch {
@@ -172,7 +178,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
                     })
                     WorkspaceButton("复制引用", tag = "workspace-copy:$index", onClick = { copy(uri) })
                     WorkspaceButton("撤销共享", tag = "workspace-revoke:$index", onClick = {
-                        if (current() && !busy && loaded) revoking = WorkspaceRevoke(uri)
+                        if (current() && !busy && !privateOccupied && loaded) revoking = WorkspaceRevoke(uri)
                     })
                 }
             }
@@ -190,6 +196,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
                 }
             }
         }
+        item(key = "private-workspace") { privatePanel() }
     }
 }
 

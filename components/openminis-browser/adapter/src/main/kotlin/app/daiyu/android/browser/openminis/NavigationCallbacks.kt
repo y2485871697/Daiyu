@@ -37,8 +37,46 @@ internal class NavigationCallbacks(
     private var begunNanos = 0L
     private var budgetNanos = 0L
 
+    @Volatile var isManual: Boolean = false
+        private set
+
+    @Synchronized fun enterManual() {
+        check(phase == Phase.IDLE) { "BROWSER_OPENMINIS_NATIVE_ACTIVE" }
+        isManual = true
+    }
+
+    @Synchronized fun leaveManual() {
+        check(phase == Phase.IDLE) { "BROWSER_OPENMINIS_NATIVE_ACTIVE" }
+        isManual = false
+    }
+
+    @Synchronized fun manualOverride(url: String, mainFrame: Boolean): Boolean {
+        if (!isManual || !available()) return false
+        val key = permittedKey(url) ?: return false
+        if (!mainFrame) return true
+        if (phase == Phase.IDLE) {
+            if (key in used) return fail("BROWSER_OPENMINIS_NAVIGATION_URL_REUSE")
+            used += key
+            epochUrls += key
+            pending = key
+            directLoadSeen = true
+            begunNanos = 0L
+            budgetNanos = 0L
+            phase = Phase.AWAITING_START
+            return true
+        }
+        if (phase !in setOf(Phase.AWAITING_START, Phase.LOADING)) return fail("BROWSER_OPENMINIS_NAVIGATION_UNKNOWN")
+        if (key == pending) return true
+        if (key in used) return fail("BROWSER_OPENMINIS_NAVIGATION_URL_REUSE")
+        used += key
+        epochUrls += key
+        pending = key
+        return true
+    }
+
     @Synchronized
     fun begin(url: String, timeoutMillis: Long = 8_000): Boolean {
+        if (isManual) return false
         if (!available()) return false
         if (phase != Phase.IDLE) return fail("BROWSER_OPENMINIS_NAVIGATION_UNKNOWN")
         require(timeoutMillis in 1..60_000)
@@ -93,6 +131,7 @@ internal class NavigationCallbacks(
     fun onStarted(url: String?): Boolean {
         if (!available()) return false
         val key = permittedKey(url) ?: return false
+        if (isManual && phase == Phase.IDLE && !manualOverride(checkNotNull(url), true)) return false
         if (!directLoadSeen || phase !in setOf(Phase.AWAITING_START, Phase.LOADING)) {
             return fail("BROWSER_OPENMINIS_NAVIGATION_UNKNOWN")
         }
@@ -105,7 +144,7 @@ internal class NavigationCallbacks(
         if (key !in epochUrls) {
             // Some WebView redirect paths have a start without an override callback.
             if (phase != Phase.LOADING) return fail("BROWSER_OPENMINIS_NAVIGATION_UNKNOWN")
-            if (!approve(checkNotNull(url), "")) return false
+            if (!isManual && !approve(checkNotNull(url), "")) return false
             used += key
             epochUrls += key
         }
@@ -132,6 +171,17 @@ internal class NavigationCallbacks(
             return false
         }
         if (key != keyOf(visibleUrl)) return fail("BROWSER_OPENMINIS_NAVIGATION_UNKNOWN")
+        if (isManual) {
+            current = null
+            pending = null
+            epochUrls.clear()
+            started.clear()
+            directLoadSeen = false
+            begunNanos = 0L
+            budgetNanos = 0L
+            phase = Phase.IDLE
+            return true
+        }
         if (!approve(checkNotNull(url), title)) return false
         if (!available()) return false
         phase = Phase.FORWARDING
@@ -148,6 +198,7 @@ internal class NavigationCallbacks(
     /** Even an upstream 'success' from its timeout must not be published as confirmed. */
     @Synchronized
     fun returned(success: Boolean): Boolean {
+        if (isManual) return false
         if (!available()) return false
         if (!success || phase != Phase.FINISHED) return fail("BROWSER_OPENMINIS_NAVIGATION_UNKNOWN")
         current = null

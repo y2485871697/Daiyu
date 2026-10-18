@@ -282,4 +282,49 @@ class NavigationCallbacksTest {
         assertFalse(redirect.gate.allowOverride(a, true))
         assertFalse(redirect.finish(b))
     }
+    @Test fun manualNavigationNeverWritesUpstreamHistoryAndTaintsModelReuse() {
+        val h = Harness()
+        h.gate.enterManual()
+        assertFalse(h.gate.begin(b))
+        assertTrue(h.gate.manualOverride(a, true))
+        assertTrue(h.gate.onStarted(a))
+        assertTrue(h.finish(a))
+        assertEquals(NavigationCallbacks.Phase.IDLE, h.gate.phase)
+        assertTrue(h.approvals.isEmpty())
+        assertTrue(h.upstreamFinishes.isEmpty())
+        h.gate.leaveManual()
+        assertFalse(h.gate.begin(a))
+        assertEquals(listOf("BROWSER_OPENMINIS_NAVIGATION_URL_REUSE"), h.rejections)
+    }
+
+    @Test fun humanLinkAndRedirectStayManualWithoutApprovingModelHistory() {
+        val h = Harness()
+        h.gate.enterManual()
+        assertTrue(h.gate.onStarted(a))
+        assertTrue(h.gate.manualOverride(b, true))
+        assertTrue(h.gate.onStarted(b))
+        assertFalse(h.finish(a, b))
+        assertTrue(h.finish(b))
+        assertTrue(h.approvals.isEmpty())
+        assertTrue(h.upstreamFinishes.isEmpty())
+        h.gate.leaveManual()
+        h.load(c)
+        assertTrue(h.finish(c))
+        assertTrue(h.gate.returned(true))
+        assertEquals(listOf(c), h.upstreamFinishes)
+    }
+
+    @Test fun busyManualPageCannotBeReleasedAndRevokedPageCannotRearm() {
+        val h = Harness()
+        h.gate.enterManual()
+        assertTrue(h.gate.manualOverride(a, true))
+        try { h.gate.leaveManual(); fail("busy page released") } catch (_: IllegalStateException) { }
+        h.live = false
+        assertFalse(h.gate.onStarted(a))
+        h.live = true
+        assertFalse(h.finish(a))
+        assertFalse(h.gate.manualOverride(b, true))
+        assertTrue(h.upstreamFinishes.isEmpty())
+    }
+
 }

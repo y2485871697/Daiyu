@@ -29,6 +29,10 @@ class BrowserToolSessionTest {
         val closed = mutableListOf<BrowserTabLease>()
         var failCreate = false
         var failClose = false
+        var failRelease = false
+        override fun beforeReleaseTakeover(allocation: BrowserTabLease, lease: BrowserTabLease) {
+            if (failRelease) error("visible attachment still live")
+        }
         var failRebind = false
         val rebound = mutableListOf<Pair<BrowserTabLease, BrowserTabLease>>()
         override fun rebind(allocation: BrowserTabLease, lease: BrowserTabLease) {
@@ -477,4 +481,38 @@ class BrowserToolSessionTest {
         f.session.close()
         assertEquals(3, f.resources.closed.size)
     }
+    @Test fun rejectedVisibleReleaseKeepsTokenForExplicitCloseWithoutReadyWindow() {
+        val f = Fixture(main)
+        confirmed(call(f.session, "new_tab"))
+        val allocation = requireNotNull(f.session.currentTab)
+        val token = f.session.takeover(allocation)
+        f.resources.failRelease = true
+        throwsState { f.session.releaseTakeover(token) }
+        assertEquals(token.lease, f.session.currentTab)
+        val original = f.session.withTakenOverTab(token) { first, second ->
+            assertEquals(token.lease, second)
+            first
+        }
+        assertEquals(allocation, original)
+        rejected(call(f.session, "get_page_info"))
+        f.session.closeTab(token)
+        assertNull(f.session.currentTab)
+        assertEquals(listOf(allocation), f.resources.closed)
+        throwsState { f.session.withTakenOverTab(token) { _, _ -> fail("stale token") } }
+        f.session.close()
+    }
+
+    @Test fun visibleCapabilityRejectsOldAndForeignTokensAfterOriginalRelease() {
+        val f = Fixture(main)
+        val foreign = Fixture(child)
+        confirmed(call(f.session, "new_tab"))
+        val token = f.session.takeover(requireNotNull(f.session.currentTab))
+        throwsState { foreign.session.withTakenOverTab(token) { _, _ -> fail("foreign token") } }
+        val resumed = f.session.releaseTakeover(token)
+        assertNotEquals(token.lease, resumed)
+        throwsState { f.session.withTakenOverTab(token) { _, _ -> fail("consumed token") } }
+        f.session.close()
+        foreign.session.close()
+    }
+
 }

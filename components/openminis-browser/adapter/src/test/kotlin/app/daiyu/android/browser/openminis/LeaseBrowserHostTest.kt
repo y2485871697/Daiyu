@@ -37,6 +37,8 @@ class LeaseBrowserHostTest {
     private class Resource : BlankBrowserResource {
         var calls = 0
         var destroyed = 0
+        var admissionRevoked = false
+        override fun revokeAdmission() { admissionRevoked = true }
         var failDestroy = false
         var idle = true
         override val isIdle: Boolean get() = idle
@@ -520,4 +522,24 @@ class LeaseBrowserHostTest {
         assertTrue(f.host.closeStatus().successful)
         assertEquals(1, f.resources.single().destroyed)
     }
+    @Test fun takenOverResourceAdmissionIsRevokedBeforeQueuedNativeCleanup() {
+        val f = Fixture()
+        val lease = f.create()
+        val token = f.sessions.takeover(lease)
+        val resource = f.resources.single()
+        f.ui.now { f.host.withTakenOverResource(lease, token.lease) { assertSame(resource, it) } }
+        f.host.closeWithResult()
+        assertTrue(resource.admissionRevoked)
+        assertEquals(0, resource.destroyed)
+        // A still-valid registry token cannot resurrect an already-retired allocation.
+        f.sessions.publishTakenOver(token.lease) { }
+        try {
+            f.ui.now { f.host.withTakenOverResource(lease, token.lease) { fail("retired allocation") } }
+            fail("expected rejection")
+        } catch (_: IllegalStateException) { }
+        f.ui.drain()
+        assertEquals(1, resource.destroyed)
+        assertTrue(f.host.closeStatus().successful)
+    }
+
 }

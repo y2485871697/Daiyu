@@ -1,5 +1,8 @@
 package app.daiyu.android.integration.tools
 
+import android.view.ViewGroup
+import app.daiyu.android.browser.host.BrowserToolTakeoverToken
+import app.daiyu.android.browser.openminis.AndroidOpenMinisBrowserHost
 import android.content.Context
 import app.daiyu.android.assistants.AssistantProfile
 import app.daiyu.android.browser.BrowserRunAuthorization
@@ -28,17 +31,51 @@ internal class CatalogBrowserBinding private constructor(
     /** Deterministic lifecycle seam; production always wraps the actual Android run host below. */
     internal interface Host {
         val session: BrowserToolSession
+        val webHost: AndroidOpenMinisBrowserHost? get() = null
         fun closeWithResult(): BrowserCloseResult
         fun closeStatus(): BrowserCloseResult
     }
 
     private class AndroidHost(private val original: AndroidBrowserRunHost) : Host {
         override val session: BrowserToolSession get() = original.session
+        override val webHost: AndroidOpenMinisBrowserHost get() = original.webHost
         override fun closeWithResult() = original.closeWithResult()
         override fun closeStatus() = original.closeStatus()
     }
 
     val session: BrowserToolSession get() = host.session
+
+    internal val visibleSupported: Boolean get() = synchronized(lock) { !closed && host.webHost != null }
+
+    internal class VisibleAttachment(
+        private val navigateOriginal: (String) -> Unit,
+        private val loadingOriginal: () -> Boolean,
+        private val closeOriginal: () -> Unit,
+    ) : AutoCloseable {
+        private var closed = false
+        fun navigate(url: String) {
+            check(!closed) { "browser_visible_attachment_closed" }
+            navigateOriginal(url)
+        }
+        val isLoading: Boolean get() {
+            check(!closed) { "browser_visible_attachment_closed" }
+            return loadingOriginal()
+        }
+        override fun close() {
+            if (closed) return
+            closed = true
+            closeOriginal()
+        }
+    }
+
+    internal fun attachVisible(token: BrowserToolTakeoverToken, parent: ViewGroup): VisibleAttachment {
+        val originalWebHost = synchronized(lock) {
+            check(!closed && owner != null) { "browser_visible_owner_unavailable" }
+            checkNotNull(host.webHost) { "browser_visible_unsupported" }
+        }
+        val original = originalWebHost.attach(token, parent)
+        return VisibleAttachment({ original.navigate(it) }, { original.isLoading }, { original.close() })
+    }
     val requiredWrites: Set<WriteEffect> = java.util.Collections.unmodifiableSet(
         confirmed.preview.writes.map { it.effect }.toSet())
     /** Inherited task session for CHILD, not the resource pool/effect namespace. */

@@ -755,10 +755,31 @@ class MainActivity : ComponentActivity() {
             putExtra(Intent.EXTRA_TITLE, request.suggestedName)
         }, request::result)
     }
+    private var browserVisualVisit by mutableStateOf<ControllerBrowserVisual.Visit?>(null)
+    private fun closeBrowserVisualVisit() {
+        val original = browserVisualVisit
+        browserVisualVisit = null
+        original?.close()
+    }
+    private fun browserVisualPageCurrent(original: ControllerBrowserVisual.Visit): Boolean =
+        activityUsable() && voiceForeground && generationResumed() && retainedPage == "browser" &&
+            !sidebarVisible && browserVisualVisit === original && selected?.id == original.owner.conversationId
+
+    private fun openBrowserVisualPage() {
+        if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
+            !selectionReady || !controller.ready || controller.dataBusy || pendingTextSend != null ||
+            controller.textSendState() != null) return
+        closeBrowserVisualVisit()
+        val original = selected?.id?.let(controller::openBrowserVisual)
+        retainedPage = "browser"
+        browserVisualVisit = original
+    }
+
     private var retainedPageState by mutableStateOf("chat")
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
+            if (value != "browser") closeBrowserVisualVisit()
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
             if (value != retainedPageState && revokeContextManagementEntry()) editorGeneration++
             if (value != retainedPageState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelDeferredOpenedBackup(); revokeLegacyLibrary() }
@@ -826,6 +847,7 @@ class MainActivity : ComponentActivity() {
     private var interactiveModeObservation: AutoCloseable? = null
     @Volatile private var selected: Conversation? = null
         set(value) {
+            if (field?.id != value?.id) closeBrowserVisualVisit()
             if (field?.id != value?.id && revokeContextManagementEntry()) editorGeneration++
             if (field?.id != value?.id) { revokePlatformActionVisit(); cancelBrowserDownloadVisit(); cancelStaticGenerationVisit() }
             field = value
@@ -875,6 +897,7 @@ class MainActivity : ComponentActivity() {
     }
     @Volatile private var editorGeneration = 0L
         set(value) {
+            if (field != value) closeBrowserVisualVisit()
             if (field != value) { revokeChatReferencePick(); revokePlatformActionVisit(); cancelBrowserDownloadVisit(); cancelStaticGenerationVisit(); revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
@@ -1344,6 +1367,15 @@ class MainActivity : ComponentActivity() {
                         onBack = { returnToChat() },
                         onReady = { _, commands -> commands.close() }, // No run is owned by this permission page.
                     )
+                    "browser" -> {
+                        val original = browserVisualVisit
+                        key(original) {
+                            app.daiyu.android.ui.screens.browser.BrowserVisualScreen(original,
+                                ownerCurrent = { original != null && browserVisualPageCurrent(original) },
+                                onBack = { if (activityUsable() && retainedPage == "browser") returnToChat() },
+                                modifier = Modifier.fillMaxSize())
+                        }
+                    }
                     "terminal" -> terminalPageOwner?.let { page ->
                         val state by terminalProvider.state.collectAsStateWithLifecycle()
                         val ready = state as? app.daiyu.android.terminal.TerminalApplicationState.Ready
@@ -2028,6 +2060,7 @@ class MainActivity : ComponentActivity() {
             ChatMenuAction.SEARCH -> openSearch("message-search")
             ChatMenuAction.SETTINGS -> retainedPage = "settings"
             ChatMenuAction.OPEN_TERMINAL -> openTerminal()
+            ChatMenuAction.OPEN_BROWSER -> if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch) openBrowserVisualPage()
             ChatMenuAction.OPEN_WORKSPACE -> if (currentChat()) retainedPage = "chat-workspace"
             ChatMenuAction.CONVERSATION_ID -> selected?.let {
                 (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("会话 ID", it.id.value))
@@ -4103,6 +4136,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        closeBrowserVisualVisit()
         chatReferencePick?.let { request ->
             val preserve = request.live && request.firstPickerHop && !request.returned &&
                 chatReferenceAvailable() && chatReferenceMatches(request)
@@ -4182,6 +4216,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        closeBrowserVisualVisit()
         revokeChatReferencePick(); chatReferencePick = null
         modelSaveOwner?.revoke(); modelSaveOwner = null
         paneRefreshClosed = true

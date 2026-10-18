@@ -30,6 +30,9 @@ internal interface BlankBrowserResource {
     suspend fun execute(input: BrowserActionInput): BrowserActionResult
     /** UI only. Update callback/history lease, without replacing the page or manager. */
     fun rebind(lease: BrowserTabLease) {}
+    fun beforeReleaseTakeover() {}
+    /** Synchronous state-only fence before native teardown is queued; must not throw or wait. */
+    fun revokeAdmission() {}
     fun destroy()
 }
 
@@ -308,18 +311,33 @@ internal class LeaseBrowserHost(
 
     /** Trusted UI host only, never model-facing. Callback must not wait or perform commands.
      * The full token generation and original allocation must refer to the same idle page. */
-    fun withTakenOverResource(
-        allocation: BrowserTabLease, tokenLease: BrowserTabLease, block: (BlankBrowserResource) -> Unit,
-    ) {
+    fun <T> withTakenOverResource(
+        allocation: BrowserTabLease, tokenLease: BrowserTabLease,
+        requireIdle: Boolean = true, block: (BlankBrowserResource) -> T,
+    ): T {
         check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
-        sessions.publishTakenOver(tokenLease) {
+        return sessions.publishTakenOver(tokenLease) {
             val resource = synchronized(lock) {
                 val slot = slots[allocation] ?: error("BROWSER_OPENMINIS_RESOURCE_MISSING")
                 check(!slot.retired && slot.suspended && slot.lease == tokenLease) { "BROWSER_TAKEOVER_EXPIRED" }
                 check(slot.pending == null && slot.job == null) { "BROWSER_TAB_ACTIVE" }
-                checkNotNull(slot.resource).also { check(it.isIdle) { "BROWSER_OPENMINIS_NATIVE_ACTIVE" } }
+                checkNotNull(slot.resource).also {
+                    if (requireIdle) check(it.isIdle) { "BROWSER_OPENMINIS_NATIVE_ACTIVE" }
+                }
             }
             block(resource)
+        }
+    }
+
+    override fun beforeReleaseTakeover(allocation: BrowserTabLease, lease: BrowserTabLease) {
+        sessions.publishTakenOver(lease) {
+            val resource = synchronized(lock) {
+                val slot = slots[allocation] ?: error("BROWSER_OPENMINIS_RESOURCE_MISSING")
+                check(!slot.retired && slot.suspended && slot.lease == lease) { "BROWSER_TAKEOVER_EXPIRED" }
+                check(slot.pending == null && slot.job == null) { "BROWSER_TAB_ACTIVE" }
+                checkNotNull(slot.resource).also { check(it.isIdle) { "BROWSER_OPENMINIS_NATIVE_ACTIVE" } }
+            }
+            resource.beforeReleaseTakeover()
         }
     }
 
@@ -365,6 +383,7 @@ internal class LeaseBrowserHost(
             if (slot.retired) return
             slot.retired = true
             val resource = slot.resource
+            resource?.revokeAdmission()
             slot.resource = null
             pending = slot.pending
             slot.pending = null

@@ -27,22 +27,34 @@ class SettingsPresentationTest {
             assertTrue(filterSettingsGroups(removed).isEmpty())
         }
         assertTrue(entries.all { it.title.isNotBlank() && it.icon.name.isNotBlank() })
-        assertEquals(SettingsCatalog.groups, filterSettingsGroups("  "))
+        assertEquals(SettingsCatalog.visibleGroups(), filterSettingsGroups("  "))
     }
 
     @Test
-    fun productSettingsExposeCompleteInventoryInSearch() {
-        val groups = SettingsCatalog.visibleGroups()
-        val entries = groups.flatMap { it.entries }
-        assertEquals(SettingsCatalog.entries.size, entries.size)
-        assertTrue(entries.map { it.id }.containsAll(setOf(
-            "platform_tools", "browser", "enhancements", "overlay", "accessibility",
-            "task_surface", "linux", "voice", "donate",
-        )))
-        for (title in listOf("平台只读", "浏览器", "无障碍", "悬浮窗权限")) {
-            assertTrue(filterSettingsGroups(title, groups).isNotEmpty())
+    fun productSettingsHideRemovedEntriesInAllModes() {
+        val hiddenIds = setOf(
+            "balance", "generation", "platform_tools", "browser", "overlay", "enhancements", "accessibility",
+        )
+        val hiddenTitles = listOf(
+            "供应商余额", "独立生成模型", "平台只读", "浏览器", "悬浮窗权限", "Root 与系统增强", "无障碍",
+        )
+        for (engineeringUi in listOf(false, true)) {
+            val groups = SettingsCatalog.visibleGroups(engineeringUi = engineeringUi)
+            val entries = groups.flatMap { it.entries }
+            assertEquals(31, entries.size)
+            assertTrue(entries.none { it.id in hiddenIds })
+            assertTrue(groups.none { it.id == "permissions" })
+            assertTrue(entries.map { it.id }.containsAll(setOf(
+                "task_surface", "linux", "voice", "donate",
+            )))
+            for (title in hiddenTitles) {
+                assertTrue(filterSettingsGroups(title, groups).isEmpty())
+            }
         }
-        assertEquals(SettingsCatalog.groups, SettingsCatalog.visibleGroups(engineeringUi = true))
+        for (title in hiddenTitles) {
+            assertTrue(filterSettingsGroups(title).isEmpty())
+        }
+        assertEquals(SettingsCatalog.visibleGroups(), SettingsCatalog.visibleGroups(engineeringUi = true))
     }
 
     @Test
@@ -56,8 +68,8 @@ class SettingsPresentationTest {
     @Test
     fun searchMatchesOriginalTitlesAndPreservesTheirOrder() {
         assertEquals(listOf("mcp"), filterSettingsGroups(" McP ").flatMap { it.entries }.map { it.id })
-        assertEquals(SettingsCatalog.entries.filter { it.title.contains("模型") },
-            filterSettingsGroups("模型").flatMap { it.entries })
+        assertEquals(listOf("providers", "vision", "title_model"),
+            filterSettingsGroups("模型").flatMap { it.entries }.map { it.id })
         assertTrue(filterSettingsGroups("R03").isEmpty())
         assertTrue(filterSettingsGroups("not-a-setting").isEmpty())
     }

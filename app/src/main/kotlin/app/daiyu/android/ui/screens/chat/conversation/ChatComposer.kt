@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -73,7 +74,9 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         else -> "发送"
     }
     Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerHigh)) {
+        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
+            .background(colors.surfaceContainerHigh)
+            .border(1.dp, colors.outline.copy(alpha = 0.45f), RoundedCornerShape(18.dp))) {
             Column {
                 key(state.editorGeneration) {
                     val mountedGeneration = state.editorGeneration

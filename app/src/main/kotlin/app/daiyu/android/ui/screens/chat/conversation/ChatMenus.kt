@@ -63,9 +63,9 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
     val colors = MiuixTheme.colorScheme
     val maxHeight = minOf(336.dp, (LocalConfiguration.current.screenHeightDp * 0.55f).dp)
     DropdownMenu(expanded, onDismiss, modifier = Modifier.testTag("chat-overflow-menu")
-        .widthIn(min = 232.dp, max = 280.dp).heightIn(max = maxHeight),
-        shape = RoundedCornerShape(12.dp), containerColor = colors.surfaceContainer,
-        tonalElevation = 0.dp, shadowElevation = 3.dp, border = BorderStroke(1.dp, colors.outline)) {
+        .widthIn(min = 240.dp, max = 292.dp).heightIn(max = maxHeight),
+        shape = RoundedCornerShape(16.dp), containerColor = colors.surfaceContainer,
+        tonalElevation = 0.dp, shadowElevation = 5.dp, border = BorderStroke(1.dp, colors.outline.copy(alpha = 0.7f))) {
         groups.forEachIndexed { index, entries ->
             if (index > 0) HorizontalDivider(Modifier.padding(vertical = 4.dp), color = colors.outline)
             entries.forEach { entry -> ChatMenuItem(entry, onDismiss, onAction, Modifier.height(40.dp)) }

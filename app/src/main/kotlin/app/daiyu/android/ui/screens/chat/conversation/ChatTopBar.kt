@@ -36,9 +36,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.BalanceState?, actions: ChatScreenActions, modifier: Modifier = Modifier, assistantLabel: String = "助手",
     interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true) {
     var expanded by remember { mutableStateOf(false) }
-    Row(modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         ChatIconButton(DaiyuIcons.Menu, "打开侧边栏", actions.onOpenSidebar)
-        Column(Modifier.weight(1f).padding(horizontal = 4.dp)) {
+        Column(Modifier.weight(1f).padding(horizontal = 6.dp)) {
             Text(title.ifBlank { "新会话" }, Modifier.testTag("chat-title"),
                 color = MiuixTheme.colorScheme.onSurface,
                 style = MiuixTheme.textStyles.title3.copy(fontSize = 18.sp, fontWeight = FontWeight.SemiBold),

@@ -1,5 +1,9 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.ui.platform.testTag
+import top.yukonga.miuix.kmp.basic.TextButton
+import androidx.compose.runtime.key
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -48,6 +52,9 @@ internal fun <T> ProviderCatalogSettingsScreen(
     requestOptionsUnavailable: Boolean = false,
     testConnection: ModelConnectionTester? = null,
     localModelActions: LocalCatalogModelActions<T>? = null,
+    pageTitle: String = "模型设置",
+    twoTabs: Boolean = false,
+    ownerCurrent: () -> Boolean = { true },
 ) {
     val scope = rememberCoroutineScope()
     var state by remember(persistence) { mutableStateOf(CatalogImportSession.State()) }
@@ -56,23 +63,10 @@ internal fun <T> ProviderCatalogSettingsScreen(
     DisposableEffect(session, providerIdentity, draft, enabled) {
         onDispose { session.invalidate() }
     }
-    var managingLocal by remember(providerIdentity, persistence) { mutableStateOf(false) }
-    if (managingLocal && localModelActions != null) {
-        LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled, onBack = { managingLocal = false })
-        return
-    }
-    ModelSettingsScreen(
-        onManageLocalModels = localModelActions?.let { { session.invalidate(); managingLocal = true } },
-        engineeringUi = engineeringUi,
-        testConnection = testConnection?.let { test -> { value, cancelled, deliver ->
-            session.invalidate(); test(value, cancelled, deliver)
-        } },
-        draft = draft,
-        onDraftChange = { session.invalidate(); onDraftChange(it) },
-        onSave = { session.invalidate(); onSave(it) },
-        onBack = { session.invalidate(); onBack() },
-        onFetchCatalog = { value ->
-            if (enabled && !state.saving) {
+    var modelTab by remember(providerIdentity, persistence) { mutableStateOf(false) }
+    var localRevision by remember { mutableStateOf(0L) }
+    val fetch: (ModelSettingsDraftUi) -> Unit = { value ->
+            if (ownerCurrent() && enabled && !state.saving) {
                 scope.launch(start = CoroutineStart.UNDISPATCHED) {
                     // Install the token now, before any queued draft edit/disposal can invalidate it.
                     // begin suspends for the disk/OS-lock read; edits/disposal fence its result.
@@ -87,7 +81,47 @@ internal fun <T> ProviderCatalogSettingsScreen(
                     }
                 }
             }
-        },
+        }
+    val tabs: LazyListScope.() -> Unit = {
+        if (twoTabs) item(key = "provider-tabs") {
+            SettingsCard {
+                SettingsRadioRow("配置", !modelTab, enabled = !state.saving) {
+                    if (ownerCurrent()) { session.invalidate(); modelTab = false }
+                }
+                SettingsRadioRow("模型", modelTab, enabled = !state.saving) {
+                    if (ownerCurrent()) { session.invalidate(); modelTab = true }
+                }
+            }
+        }
+    }
+    var managingLocal by remember(providerIdentity, persistence) { mutableStateOf(false) }
+    if (managingLocal && localModelActions != null) {
+        LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled, onBack = { managingLocal = false })
+        return
+    }
+    if (twoTabs && modelTab && localModelActions != null) {
+        key(localRevision) { LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled && !state.saving,
+            onBack = onBack, pageTitle = pageTitle, headerContent = {
+                tabs()
+                item {
+                    TextButton(text = if (state.loading) "获取中" else "获取模型", enabled = enabled && !state.loading && !state.saving,
+                        modifier = Modifier.testTag("model-catalog-fetch"), onClick = { fetch(draft) })
+                    state.status?.let { SettingsNote(it) }
+                    errorText?.let { SettingsNote(it, error = true) }
+                }
+            }) }
+    } else ModelSettingsScreen(
+        pageTitle = pageTitle, headerContent = tabs, showCatalog = !twoTabs,
+        onManageLocalModels = localModelActions?.let { { session.invalidate(); managingLocal = true } },
+        engineeringUi = engineeringUi,
+        testConnection = testConnection?.let { test -> { value, cancelled, deliver ->
+            session.invalidate(); test(value, cancelled, deliver)
+        } },
+        draft = draft,
+        onDraftChange = { session.invalidate(); onDraftChange(it) },
+        onSave = { session.invalidate(); onSave(it) },
+        onBack = { session.invalidate(); onBack() },
+        onFetchCatalog = fetch,
         modifier = modifier,
         errorText = errorText,
         credentialUnavailable = credentialUnavailable,
@@ -108,6 +142,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
                     scope.launch {
                         val result = withContext(Dispatchers.IO) { session.performCommit(commit) }
                         session.completed(commit, result)
+                        localRevision++
                     }
                 }
             },

@@ -64,6 +64,13 @@ internal class FileSavedModelCatalogPersistence<T>(
         result
     }
 
+    /** Read a settings snapshot under the same lease used by every configuration mutation.
+     * Includes revisions of unregistered catalogs; reading never registers or advances it.
+     */
+    internal fun <R> readConfiguration(block: (Long) -> R): R = exclusive {
+        block(readDocument()?.revision ?: -1)
+    }
+
     override fun current(): SavedModelCatalogSnapshot<T>? = exclusive {
         readDocument()?.takeIf { it.identity != null }?.let(::snapshot)
     }
@@ -191,7 +198,9 @@ internal class FileSavedModelCatalogPersistence<T>(
      */
     fun <R> configurationChange(change: () -> R): R = exclusive {
         val old = readDocument()
-        if (old?.identity != null) writeDocument(old.copy(revision = nextRevision(old.revision))) { false }
+        val next = if (old == null) Document(null, 0, emptyList())
+            else old.copy(revision = nextRevision(old.revision))
+        writeDocument(next) { false }
         change()
     }
 

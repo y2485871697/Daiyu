@@ -49,6 +49,7 @@ internal fun ConversationCollaborationDialog(
     ownerMatches: () -> Boolean = { true },
     repositoryFactory: (() -> ConversationSubAgentPreferences)? = null,
     modelSource: SubAgentModelSource = SubAgentModelSource.Empty,
+    onAuthorizeSavedModel: (SubAgentProfile, SubAgentProvider, SubAgentModel) -> Unit = { _, _, _ -> },
 ) {
     if (!show) return
     val context = LocalContext.current.applicationContext
@@ -66,7 +67,7 @@ internal fun ConversationCollaborationDialog(
     DisposableEffect(editor) { onDispose { editor?.dispose() } }
     key(editor) {
         CompositionLocalProvider(LocalConversationSubAgentEditor provides editor) {
-            BoundConversationCollaborationDialog(show, enabled, onEnabledChange, onDismiss, taskRunning, ownerMatches, modelSource)
+            BoundConversationCollaborationDialog(show, enabled, onEnabledChange, onDismiss, taskRunning, ownerMatches, modelSource, onAuthorizeSavedModel)
         }
     }
 }
@@ -74,7 +75,8 @@ internal fun ConversationCollaborationDialog(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean, onEnabledChange: (Boolean) -> Unit,
-    onDismiss: () -> Unit, taskRunning: Boolean, ownerMatches: () -> Boolean, modelSource: SubAgentModelSource) {
+    onDismiss: () -> Unit, taskRunning: Boolean, ownerMatches: () -> Boolean, modelSource: SubAgentModelSource,
+    onAuthorizeSavedModel: (SubAgentProfile, SubAgentProvider, SubAgentModel) -> Unit) {
     if (!show || !ownerMatches()) return
     val editor = LocalConversationSubAgentEditor.current?.takeIf { ownerMatches() }
     val state = editor?.observe()
@@ -182,6 +184,15 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                             key(panelEditor, profile.id) {
                                                 SubAgentProfileRow(profile, providers, enabled = panelEnabled,
                                                     draftAllowed = latestOwnerMatches() && !latestTaskRunning && !latestChoosing, draftRetry = { editor.retry(); panelEditor.retry() })
+                                                val selectedProvider = providers.singleOrNull { it.id == profile.providerId && it.isEnabled }
+                                                val selectedModel = selectedProvider?.models?.singleOrNull { it.id == profile.modelId && it.isEnabled }
+                                                TextButton(modifier = Modifier.testTag("subagent-authorize-${profile.id}"),
+                                                    enabled = panelEnabled && profile.enabled && selectedProvider != null && selectedModel != null,
+                                                    onClick = {
+                                                        if (panelEnabled && panelEditor.enabled && latestOwnerMatches() && !latestTaskRunning &&
+                                                            !latestChoosing && selectedProvider != null && selectedModel != null)
+                                                            onAuthorizeSavedModel(profile, selectedProvider, selectedModel)
+                                                    }) { Text("授权此已保存模型") }
                                                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
                                             }
                                         }

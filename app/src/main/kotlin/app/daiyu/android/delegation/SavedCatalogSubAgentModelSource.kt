@@ -21,6 +21,15 @@ internal class SavedCatalogSubAgentModelSource : SubAgentModelSource {
         state.value = emptyList()
     }
 
+    suspend fun refreshAll(read: () -> List<SubAgentProvider>) {
+        clear()
+        val request = generation
+        val loaded = try { withContext(Dispatchers.IO) { read() } }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { emptyList() }
+        if (request == generation) state.value = loaded
+    }
+
     /** Called on the UI lane; blocking registry/credential work stays on IO. */
     suspend fun refresh(
         read: () -> SavedModelCatalogSnapshot<CatalogModelParameters>?,

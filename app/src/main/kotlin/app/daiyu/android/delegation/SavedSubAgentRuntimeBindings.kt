@@ -10,11 +10,20 @@ internal class SavedSubAgentRuntimeBindings(
     private val loadSettings: () -> ModelSettings,
     private val createModel: (ProviderSnapshot) -> ModelPort = ModelFactory::create
 ) {
-    private class Approval(val profile: SubAgentProfile, val saved: ProviderSnapshot, val child: ProviderSnapshot)
+    private class Approval(val profile: SubAgentProfile, val saved: ProviderSnapshot, val child: ProviderSnapshot,
+        val resolveSavedModel: ((String, String) -> ModelSettings)?)
     private val approvals = mutableMapOf<SubAgentConfigKey.Conversation, MutableMap<String, Approval>>()
 
     @Synchronized fun authorizeSavedModel(owner: SubAgentConfigKey.Conversation, profile: SubAgentProfile,
-        expectedApiModel: String, provider: SubAgentProvider) {
+        expectedApiModel: String, provider: SubAgentProvider, resolveSavedModel: (String, String) -> ModelSettings) =
+        authorize(owner, profile, expectedApiModel, provider, resolveSavedModel)
+
+    /** Legacy single-primary binding; never used by the multi-provider UI. */
+    @Synchronized fun authorizePrimaryModel(owner: SubAgentConfigKey.Conversation, profile: SubAgentProfile,
+        expectedApiModel: String, provider: SubAgentProvider) = authorize(owner, profile, expectedApiModel, provider, null)
+
+    private fun authorize(owner: SubAgentConfigKey.Conversation, profile: SubAgentProfile,
+        expectedApiModel: String, provider: SubAgentProvider, resolveSavedModel: ((String, String) -> ModelSettings)?) {
         val owned = approvals.getOrPut(owner) { linkedMapOf() }
         owned.remove(profile.id)
         require(profile.enabled && profile.role == "review" && profile.imageResolution == null) { "Only text review children are supported" }
@@ -26,7 +35,8 @@ internal class SavedSubAgentRuntimeBindings(
         require(selected.defaultReasoning == ReasoningEffort.OFF &&
             (profile.reasoning ?: selected.defaultReasoning) == ReasoningEffort.OFF && !selected.reasoningMandatory &&
             selected.reasoningEfforts.isEmpty()) { "Child reasoning policy is not supported yet" }
-        val saved = ModelFactory.snapshot(loadSettings())
+        val saved = ModelFactory.snapshot(resolveSavedModel?.invoke(profile.providerId, profile.modelId) ?: loadSettings())
+        if (resolveSavedModel != null) require(saved.model == expectedApiModel) { "Saved model record changed" }
         val options = saved.requestOptions
         val body = if (options.customBody.isEmpty()) org.json.JSONObject() else MessagesRequest.jsonObject(options.customBody, 64)
         require(!body.has("model") || body.get("model") == expectedApiModel) { "Saved custom model conflicts with child selection" }
@@ -37,7 +47,7 @@ internal class SavedSubAgentRuntimeBindings(
         val child = ModelFactory.snapshot(saved.asModelSettings().copy(model = expectedApiModel,
             batteryEnabled = false, deviceStatusEnabled = false, requestOptions = options.copy(speedMode = speed)))
         val detached = profile.copy(reasoningByModel = profile.reasoningByModel.toMap(), gptSpeedByModel = profile.gptSpeedByModel.toMap())
-        owned[profile.id] = Approval(detached, saved, child)
+        owned[profile.id] = Approval(detached, saved, child, resolveSavedModel)
     }
 
     @Synchronized fun freeze(owner: SubAgentConfigKey.Conversation, config: ConversationSubAgentConfig,
@@ -50,8 +60,12 @@ internal class SavedSubAgentRuntimeBindings(
             requireNotNull(approvals[owner]?.get(profile.id)) { "Child profile has no explicit saved-model binding" }
                 .also { require(profile == it.profile) { "Child profile changed after binding" } }
         }
-        val current = ModelFactory.snapshot(loadSettings())
-        require(selected.all { it.saved == current }) { "Saved model settings changed after binding" }
+        val current = try { selected.all { grant ->
+            val settings = grant.resolveSavedModel?.invoke(grant.profile.providerId, grant.profile.modelId) ?: loadSettings()
+            ModelFactory.snapshot(settings) == grant.saved
+        } } catch (_: Exception) { false }
+        if (!current) approvals.remove(owner)
+        require(current) { "Saved provider or model record changed after binding" }
         return selected.associate { grant ->
             val model = SubAgentParallelModel(grant.profile.providerId, grant.child.model)
             grant.profile.id to ChildModelDefinition(frozen.poolKey(owner, model), frozen.parallelLimit(model)) { runModel(grant.child) }

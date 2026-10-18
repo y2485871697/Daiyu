@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -77,6 +78,9 @@ internal fun ModelSettingsScreen(
     engineeringUi: Boolean = false,
     testConnection: ModelConnectionTester? = null,
     onManageLocalModels: (() -> Unit)? = null,
+    pageTitle: String = "模型设置",
+    headerContent: LazyListScope.() -> Unit = {},
+    showCatalog: Boolean = true,
 ) {
     val connection = rememberSettingsConnectionTest(draft, enabled, testConnection)
     val changeDraft: (ModelSettingsDraftUi) -> Unit = { connection.cancel(); onDraftChange(it) }
@@ -85,7 +89,8 @@ internal fun ModelSettingsScreen(
         it.endpoint == draft.endpoint && it.responsesPath == draft.responsesPath &&
             it.protocol == draft.protocol && it.apiKey == draft.apiKey && it.model == draft.model
     } == true
-    MiuixScaffoldPage(title = "模型设置", onBack = { connection.cancel(); onBack() }, modifier = modifier) {
+    MiuixScaffoldPage(title = pageTitle, onBack = { connection.cancel(); onBack() }, modifier = modifier) {
+        headerContent()
         item(key = "model_protocol") {
             SettingsSectionTitle("服务协议")
             SettingsCard {
@@ -172,10 +177,11 @@ internal fun ModelSettingsScreen(
                 connection.status?.let { SettingsNote(it) }
             }
         }
-        if (onManageLocalModels != null) item(key = "local_models") {
+        if (showCatalog && onManageLocalModels != null) item(key = "local_models") {
             SettingsCard { SettingsRow("本地模型", onClick = { if (enabled) { connection.cancel(); onManageLocalModels() } },
                 tag = "model-local-manage") }
         }
+        if (showCatalog) {
         item(key = "model_catalog") {
             SettingsSectionTitle("远端模型目录")
             SettingsCard {
@@ -205,6 +211,7 @@ internal fun ModelSettingsScreen(
                     }
                 }
             }
+        }
         }
         item(key = "model_save") {
             if (!errorText.isNullOrBlank()) SettingsNote(errorText, error = true)

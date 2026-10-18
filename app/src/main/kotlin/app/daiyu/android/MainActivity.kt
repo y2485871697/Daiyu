@@ -80,6 +80,7 @@ import app.daiyu.android.ui.actions.PausedSupplementDraft
 import app.daiyu.android.ui.actions.SupplementEditor
 import app.daiyu.android.ui.screens.conversation.ChildTaskRecordsScreen
 import app.daiyu.android.ui.screens.conversation.ConversationExportScreen
+import app.daiyu.android.storage.ProviderEditorSlot
 import app.daiyu.android.storage.EditingSettings
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.ui.FeatureRoute
@@ -780,6 +781,7 @@ class MainActivity : ComponentActivity() {
         get() = retainedPageState
         set(value) {
             if (value != "browser") closeBrowserVisualVisit()
+            if (value != "chat") revokeChildAuthorization()
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
             if (value != retainedPageState && revokeContextManagementEntry()) editorGeneration++
             if (value != retainedPageState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelDeferredOpenedBackup(); revokeLegacyLibrary() }
@@ -792,7 +794,7 @@ class MainActivity : ComponentActivity() {
             if (value != "models") { modelSaveOwner?.revoke(); modelSaveOwner = null }
             if (value != "session-gateway") {
                 gatewayOwner?.revoke(); gatewayOwner = null
-                gatewayEditing = null; gatewayDraft = null
+                gatewayEditing = null; gatewayProviderEditor = null; gatewayDraft = null
                 gatewayReplacementAuthorized = false; gatewayError = null
             }
             if (value != "generation-settings") {
@@ -847,7 +849,7 @@ class MainActivity : ComponentActivity() {
     private var interactiveModeObservation: AutoCloseable? = null
     @Volatile private var selected: Conversation? = null
         set(value) {
-            if (field?.id != value?.id) closeBrowserVisualVisit()
+            if (field?.id != value?.id) { closeBrowserVisualVisit(); revokeChildAuthorization() }
             if (field?.id != value?.id && revokeContextManagementEntry()) editorGeneration++
             if (field?.id != value?.id) { revokePlatformActionVisit(); cancelBrowserDownloadVisit(); cancelStaticGenerationVisit() }
             field = value
@@ -897,7 +899,7 @@ class MainActivity : ComponentActivity() {
     }
     @Volatile private var editorGeneration = 0L
         set(value) {
-            if (field != value) closeBrowserVisualVisit()
+            if (field != value) { closeBrowserVisualVisit(); revokeChildAuthorization() }
             if (field != value) { revokeChatReferencePick(); revokePlatformActionVisit(); cancelBrowserDownloadVisit(); cancelStaticGenerationVisit(); revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
@@ -1138,11 +1140,13 @@ class MainActivity : ComponentActivity() {
     private var modelEditingOwner by mutableStateOf<Any?>(null)
     private var modelSaveOwner: ModelSettingsSaveOwner? = null
     private var gatewayOwner by mutableStateOf<ModelSettingsSaveOwner?>(null)
+    private var gatewayProviderEditor: ProviderEditorSlot? = null
     private var gatewayEditing: EditingSettings? = null
     private var gatewayDraft by mutableStateOf<app.daiyu.android.model.sessiongateway.SessionGatewayRule?>(null)
     private var gatewayError by mutableStateOf<String?>(null)
     private var gatewayReplacementAuthorized by mutableStateOf(false)
     private var chatModelPicker by mutableStateOf<ChatModelPickerState?>(null)
+    private var chatModelProviderEditor: ProviderEditorSlot? = null
     private var chatModelSettings: ModelSettings? = null
     private var chatModelSession: LocalCatalogChatModelPickerSession? = null
     private var chatModelSelectionFailed = false
@@ -1163,6 +1167,12 @@ class MainActivity : ComponentActivity() {
         owner.accepts(assistantSelectionOwner,selected?.id?.value,editorGeneration,assistantPicker)
     private var assistantEditingId by mutableStateOf<String?>(null)
     private var assistantAvatarRevision by mutableStateOf(0L)
+    private var childModelSaveOwner: ModelSettingsSaveOwner? = null
+    private var childAuthorizationEpoch = 0L
+    private fun revokeChildAuthorization() {
+        childAuthorizationEpoch++
+        childModelSaveOwner?.revoke(); childModelSaveOwner = null
+    }
     private var collaborationOwner by mutableStateOf<String?>(null)
     private var collaborationVisible by mutableStateOf(false)
     private var thinkingPicker by mutableStateOf(false)
@@ -1243,8 +1253,7 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(retainedPage == "subagents" || collaborationVisible, subAgentSourceRevision, backupBusy) {
                     if ((retainedPage == "subagents" || collaborationVisible) && !backupBusy &&
                         lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
-                        subAgentModelSource.refresh(controller.settings::localModelCatalogSnapshot,
-                            controller.settings::localModelCatalogProtocol)
+                        subAgentModelSource.refreshAll(controller::savedSubAgentProviders)
                     } else subAgentModelSource.clear()
                 }
                 LaunchedEffect(sidebarVisible, retainedPage) {
@@ -1252,7 +1261,7 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
+                        "providers", "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
                         "pet-model-settings" -> retainedPage = "pet-settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
@@ -1570,6 +1579,10 @@ class MainActivity : ComponentActivity() {
                                 ownerCurrent = { host.isCurrentSettings(owner) && retainedPage == "haptics" })
                         } }
                     }
+                    "providers" -> ProviderManagementRoute(controller,
+                        ownerCurrent = { activityUsable() && voiceForeground && retainedPage == "providers" && !sidebarVisible },
+                        onBack = { if (activityUsable() && retainedPage == "providers") retainedPage = "settings" },
+                        engineeringUi = engineeringUi)
                     "models" -> modelDraft?.let { value ->
                         val connectionTest: app.daiyu.android.ui.screens.settings.ModelConnectionTester? = modelEditingOwner?.let { owner ->
                             { draft, cancelled, deliver -> requestModelConnectionTest(owner, draft, cancelled, deliver) }
@@ -1814,10 +1827,26 @@ class MainActivity : ComponentActivity() {
                         onDismiss = { if(assistantSelectionOwner===owner) assistantPicker = false })
                 } }
                 val owner = collaborationOwner
+                val authorizationEpoch = childAuthorizationEpoch
+                val authorizationGeneration = editorGeneration
                 ConversationCollaborationDialog(show = collaborationVisible, conversationId = owner,
-                    onDismiss = { collaborationVisible = false; collaborationOwner = null }, taskRunning = controller.active != null || backupBusy,
+                    onDismiss = { revokeChildAuthorization(); collaborationVisible = false; collaborationOwner = null }, taskRunning = controller.active != null || backupBusy,
                     ownerMatches = { activityUsable() && selected?.id?.value == owner && retainedPage == "chat" && !controller.dataBusy },
-                    repositoryFactory = { subAgentRepository }, modelSource = subAgentModelSource)
+                    repositoryFactory = { subAgentRepository }, modelSource = subAgentModelSource,
+                    onAuthorizeSavedModel = { profile, provider, chosen ->
+                        if (activityUsable() && voiceForeground && collaborationVisible && retainedPage == "chat" &&
+                            selected?.id?.value == owner && owner != null && editorGeneration == authorizationGeneration &&
+                            childAuthorizationEpoch == authorizationEpoch) {
+                            childModelSaveOwner?.revoke()
+                            val saveOwner = ModelSettingsSaveOwner(); childModelSaveOwner = saveOwner
+                            guard {
+                                controller.bindChildSavedModelAsync(ConversationId(owner), profile, chosen.modelId, provider, saveOwner) { success ->
+                                    if (childModelSaveOwner === saveOwner && activityUsable() && childAuthorizationEpoch == authorizationEpoch)
+                                        toast(if (success) "子模型已授权" else "授权未保存，请重新核对")
+                                }
+                            }
+                        }
+                    })
                 // Saved independently for the standalone composer or this conversation.
                 // The preparation worker freezes it once; edits never mutate an active request.
                 val thinkingOwner = chatState.conversationKey
@@ -3842,13 +3871,14 @@ class MainActivity : ComponentActivity() {
     }
     private fun declareImageSupport() {
         val generation = editorGeneration
-        imageHost.readSettings { saved ->
+        imageHost.readSettings { configuration ->
             if (!activityUsable() || retainedPage != "chat" || generation != editorGeneration) return@readSettings
-            if (saved == null) { toast("请先配置模型提供商"); return@readSettings }
+            if (configuration == null) { toast("请先配置模型提供商"); return@readSettings }
+            val saved = configuration.settings
             prompt = ConfirmPrompt("声明图片能力", "仅当你已确认当前提供商的精确模型“${saved.model}”支持图片输入时继续。" +
                 "此声明不通过模型名称推测能力，配置变更后失效。", "确认支持", action = {
                 if (activityUsable() && retainedPage == "chat" && generation == editorGeneration) {
-                    imageHost.authorize(saved) { ok -> toast(if (ok) "已授权当前模型的图片输入及图片历史续发" else "授权未生效；请检查配置后重试") }
+                    imageHost.authorize(configuration) { ok -> toast(if (ok) "已授权当前模型的图片输入及图片历史续发" else "授权未生效；请检查配置后重试") }
                 }
             })
         }
@@ -4136,6 +4166,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        revokeChildAuthorization()
         closeBrowserVisualVisit()
         chatReferencePick?.let { request ->
             val preserve = request.live && request.firstPickerHop && !request.returned &&
@@ -4216,6 +4247,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        revokeChildAuthorization()
         closeBrowserVisualVisit()
         revokeChatReferencePick(); chatReferencePick = null
         modelSaveOwner?.revoke(); modelSaveOwner = null
@@ -4235,7 +4267,7 @@ class MainActivity : ComponentActivity() {
         reconnectSettingsPageOwner?.revoke()
         reconnectSettingsPageOwner = null
         gatewayOwner?.revoke(); gatewayOwner = null
-        gatewayEditing = null; gatewayDraft = null
+        gatewayEditing = null; gatewayProviderEditor = null; gatewayDraft = null
         balanceLifecycle?.close(); balanceLifecycle = null
         cancelGuiEditor()
         fenceVideoRoute()
@@ -4866,7 +4898,7 @@ class MainActivity : ComponentActivity() {
         if(binding==null) "未绑定助手" else assistantStore.read(binding)?.name ?: "助手已删除，请重新绑定"
     } catch (_:Exception) { "助手不可用" }
     private fun savedModelLabel(): String = try {
-        (controller.settings.nonSecretConfiguration()["model"] as? String)?.ifBlank { "模型" } ?: "模型"
+        chatModelSettings?.model?.ifBlank { "模型" } ?: "模型"
     } catch (_: Exception) { "模型" }
     private fun readLoadedWindow(id: ConversationId, before: Long, count: Int): List<Pair<Long, Message>> {
         val result = mutableListOf<Pair<Long, Message>>()
@@ -4965,24 +4997,29 @@ class MainActivity : ComponentActivity() {
     }
     private fun dismissChatModels() {
         chatModelCancelled.set(true)
-        chatModelPicker = null; chatModelSettings = null; chatModelSession = null; chatModelOwner = null
+        chatModelProviderEditor = null; chatModelPicker = null; chatModelSettings = null; chatModelSession = null; chatModelOwner = null
         chatModelSelectionFailed = false
     }
     private fun reloadChatModels(owner: Any) {
         if (!activityUsable() || retainedPage != "chat" || chatModelOwner !== owner) return
         chatModelCancelled.set(true)
         val cancelled = AtomicBoolean(false); chatModelCancelled = cancelled
-        chatModelSession = null; chatModelSettings = null; chatModelSelectionFailed = false
+        chatModelProviderEditor = null; chatModelSession = null; chatModelSettings = null; chatModelSelectionFailed = false
         chatModelPicker = ChatModelPickerState("", emptyList(), loading = true, enabled = false)
         lifecycleScope.launch {
-            val (catalog, settings) = withContext(Dispatchers.IO) {
-                runCatching { controller.settings.localModelCatalogSnapshot() } to
-                    runCatching { controller.settings.load() }
-            }
+            val loaded = withContext(Dispatchers.IO) { runCatching {
+                val editor = controller.providers.activeEditor()
+                val catalog = runCatching { controller.providers.withEditor(editor) { it.localModelCatalogSnapshot() } }
+                val settings = runCatching { controller.providers.withEditor(editor) { it.load() } }
+                Triple(editor, catalog, settings)
+            } }
+            val catalog = loaded.getOrNull()?.second ?: Result.failure(IllegalStateException("未选择可用提供商"))
+            val settings = loaded.getOrNull()?.third ?: Result.failure(IllegalStateException("未选择可用提供商"))
             if (!activityUsable() || retainedPage != "chat" || chatModelOwner !== owner ||
                 cancelled.get() || chatModelCancelled !== cancelled) return@launch
             val saved = settings.getOrNull()
             chatModelSettings = saved
+            chatModelProviderEditor = loaded.getOrNull()?.first
             val snapshot = catalog.getOrNull()
             val session = snapshot?.let { LocalCatalogChatModelPickerSession(it, saved?.model.orEmpty()) }
             chatModelSession = session
@@ -5009,7 +5046,7 @@ class MainActivity : ComponentActivity() {
             requireActivityUsable()
             check(!chatModelSelectionFailed && picker.enabled && !picker.loading && retainedPage == "chat" && controller.ready &&
                 controller.active == null && !controller.dataBusy)
-            controller.selectConfiguredCatalogModel(saved, ticket) { success ->
+            controller.selectProviderCatalogModel(checkNotNull(chatModelProviderEditor), saved, ticket) { success ->
                 if (activityUsable()) {
                     if (success) imageHost.configurationChanged()
                     if (chatModelOwner === owner && chatModelSession === session && retainedPage == "chat") {
@@ -5038,13 +5075,17 @@ class MainActivity : ComponentActivity() {
         check(controller.ready && controller.active == null && !controller.dataBusy)
         gatewayOwner?.revoke()
         val owner = ModelSettingsSaveOwner()
-        gatewayOwner = owner; gatewayEditing = null; gatewayDraft = null
+        gatewayOwner = owner; gatewayEditing = null; gatewayProviderEditor = null; gatewayDraft = null
         gatewayReplacementAuthorized = false; gatewayError = null
         retainedPage = "session-gateway"
         lifecycleScope.launch {
-            val loaded = withContext(Dispatchers.IO) { runCatching { controller.settings.loadForEditing() } }
+            val loaded = withContext(Dispatchers.IO) { runCatching {
+                val editor = controller.providers.activeEditor()
+                editor to controller.providers.editing(editor)
+            } }
             if (!gatewayCurrent(owner)) return@launch
-            loaded.fold(onSuccess = { editing ->
+            loaded.fold(onSuccess = { (editor, editing) ->
+                gatewayProviderEditor = editor
                 gatewayEditing = editing
                 gatewayDraft = editing.settings.requestOptions.sessionGateway
                 if (editing.credentialUnavailable && !editing.requestOptionsUnavailable ||
@@ -5068,7 +5109,7 @@ class MainActivity : ComponentActivity() {
             require(!editing.requestOptionsUnavailable || gatewayReplacementAuthorized)
             value.validate() // Unknown retention/keySource may be saved, but never executed.
             val next = editing.settings.copy(requestOptions = editing.settings.requestOptions.copy(sessionGateway = value))
-            controller.saveModelSettings(next, false, gatewayReplacementAuthorized, editing, owner) { success ->
+            controller.saveProviderSettings(checkNotNull(gatewayProviderEditor), next, editing, false, gatewayReplacementAuthorized, owner) { success ->
                 if (success && activityUsable()) imageHost.configurationChanged()
                 if (gatewayCurrent(owner)) {
                     if (success) retainedPage = "settings"
@@ -5081,28 +5122,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun modelSettings() {
-        requireActivityUsable(); check(!controller.dataBusy)
-        if (controller.active != null) { toast("当前运行使用冻结配置，请结束后修改"); return }
-        editingCatalogIdentity = null
-        modelSaveOwner?.revoke(); modelSaveOwner = ModelSettingsSaveOwner()
-        val owner = Any(); modelEditingOwner = owner
-        val editing = controller.settings.loadForEditing(); editingSettings = editing
-        val saved = editing.settings
-        modelDraft = ModelSettingsDraftUi(protocol = saved.protocol, endpoint = saved.endpoint, responsesPath = saved.responsesPath,
-            apiKey = saved.apiKey, model = saved.model, batteryEnabled = saved.batteryEnabled, deviceStatusEnabled = saved.deviceStatusEnabled,
-            customBody = saved.requestOptions.customBody, speedMode = saved.requestOptions.speedMode, codex = saved.requestOptions.codex)
-        modelError = null; retainedPage = "models"
-        if (saved.endpoint.isNotBlank() && saved.model.isNotBlank()) lifecycleScope.launch {
-            val catalogResult = withContext(Dispatchers.IO) {
-                runCatching { controller.settings.modelCatalogSnapshot() }
-            }
-            if (activityUsable() && retainedPage == "models" && modelEditingOwner === owner && editingSettings === editing) {
-                catalogResult.fold(
-                    onSuccess = { editingCatalogIdentity = it.providerIdentity },
-                    onFailure = { modelError = "模型目录不可用；未启动导入，请检查配置或目录存储" },
-                )
-            }
-        }
+        requireActivityUsable()
+        retainedPage = "providers"
     }
     private fun changeModelDraft(value: ModelSettingsDraftUi) {
         if (activityUsable() && retainedPage == "models" && !controller.dataBusy) modelDraft = value

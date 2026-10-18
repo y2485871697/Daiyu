@@ -2663,15 +2663,16 @@ class MainActivity : ComponentActivity() {
     @Composable private fun TerminalJobsPanel() {
         val conversation = selected?.id ?: return
         val generation = editorGeneration
-        if (engineeringUi || controller.terminalJobRuns(conversation).isNotEmpty())
-        androidx.compose.material3.TextButton(modifier = Modifier.testTag("terminal-jobs-entry"), onClick = {
-            if (activityUsable() && retainedPage == "chat" && selected?.id == conversation && editorGeneration == generation) {
-                revokeTerminalJobsVisit()
-                val opened = TerminalJobsVisit(conversation, generation, controller.terminalJobRuns(conversation))
-                terminalJobsVisit = opened
-                refreshTerminalJobs(opened)
-            }
-        }) { androidx.compose.material3.Text("本会话终端 jobs / 日志 / 停止") }
+        if (engineeringUi || controller.terminalJobRuns(conversation).isNotEmpty()) {
+            androidx.compose.material3.TextButton(modifier = Modifier.testTag("terminal-jobs-entry"), onClick = {
+                if (activityUsable() && retainedPage == "chat" && selected?.id == conversation && editorGeneration == generation) {
+                    revokeTerminalJobsVisit()
+                    val opened = TerminalJobsVisit(conversation, generation, controller.terminalJobRuns(conversation))
+                    terminalJobsVisit = opened
+                    refreshTerminalJobs(opened)
+                }
+            }) { androidx.compose.material3.Text("本会话终端 jobs / 日志 / 停止") }
+        }
         val visit = terminalJobsVisit?.takeIf { it.conversation == conversation && it.editorGeneration == generation } ?: return
         Column(Modifier.fillMaxWidth().heightIn(max = 300.dp).verticalScroll(rememberScrollState())
             .testTag("terminal-jobs-panel")) {

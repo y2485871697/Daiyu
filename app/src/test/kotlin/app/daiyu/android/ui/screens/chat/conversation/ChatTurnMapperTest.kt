@@ -39,7 +39,7 @@ class ChatTurnMapperTest {
         assertEquals(listOf("First I search", "Then I check"), work.segments.map { it.narration })
         assertEquals(listOf("one", "two", "three"), work.segments.flatMap { it.steps }.map { it.id })
         assertEquals(listOf(2, 1), work.segments.map { it.steps.size })
-        assertTrue(work.segments.flatMap { it.steps }.all { it.state == WorkStepState.OK })
+        assertTrue(work.segments.flatMap { it.steps }.all { it.state == WorkStepState.UNKNOWN })
         assertEquals(6, original.blocks.size)
     }
 
@@ -48,23 +48,23 @@ class ChatTurnMapperTest {
             val turn = mapped(message(tool("one", null), status = status))
             val work = turn.workProcess!!
             assertEquals(status == RunStatus.RUNNING, work.running)
-            assertEquals(if (status == RunStatus.RUNNING) WorkStepState.PENDING else WorkStepState.FAILED,
+            assertEquals(if (status == RunStatus.RUNNING) WorkStepState.PENDING else WorkStepState.UNKNOWN,
                 work.segments.single().steps.single().state)
             assertEquals("", turn.finalText)
         }
     }
 
-    @Test fun errorPrefixesAndEmptyTerminalResultsFail() {
+    @Test fun errorPrefixesAndEmptyResultsWithoutReceiptsStayUnknown() {
         listOf("ERROR: not found", "  error timeout", "失败：访问被拒绝", "", "  ").forEach { result ->
             val turn = mapped(message(tool("one", result), text("a", "Done")))
-            assertEquals(WorkStepState.FAILED, turn.workProcess!!.segments.single().steps.single().state)
-            assertEquals("失败", turn.workProcess.summary)
+            assertEquals(WorkStepState.UNKNOWN, turn.workProcess!!.segments.single().steps.single().state)
+            assertEquals("结果未确认", turn.workProcess.summary)
         }
     }
 
     @Test fun structuredFailureNeedsTrustedReceiptFlagAndDoesNotParseArbitraryJson() {
         val original = message(tool("one", "{\"ok\":false,\"error\":\"permission_denied\"}"), text("answer", "done"))
-        assertEquals(WorkStepState.OK, mapped(original).workProcess!!.segments.single().steps.single().state)
+        assertEquals(WorkStepState.UNKNOWN, mapped(original).workProcess!!.segments.single().steps.single().state)
         val failed = ChatTurnMapper.map(listOf(original), confirmedToolError = { _, _ -> true })
             .single() as ChatTurnUi.Assistant
         assertEquals(WorkStepState.FAILED, failed.workProcess!!.segments.single().steps.single().state)

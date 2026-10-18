@@ -46,6 +46,8 @@ data class ChatScreenActions(
     val onDeleteTurn: (String) -> Unit = {},
     val onJumpPreviousUser: () -> Unit = {},
     val onRetryStep: (String) -> Unit = {},
+    /** Copies only the currently displayed safe projection; never retries a tool. Null hides it. */
+    val onCopyToolSummary: ((WorkStepUi) -> Unit)? = null,
     val onMenuAction: (ChatMenuAction) -> Unit = {},
     val onInteractiveModeChange: (Boolean) -> Unit = {},
     /** Measured visible completed turn keys after a frame, not merely selected/loaded history. */

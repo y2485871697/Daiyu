@@ -44,7 +44,7 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
         }
     }
     private fun project(message: Message) = ChatTurnMapper.map(listOf(message),
-        confirmedToolError = RetainedToolOutcomes.reader(database, listOf(message))).single() as ChatTurnUi.Assistant
+        toolState = RetainedToolOutcomes.stateReader(database, listOf(message))).single() as ChatTurnUi.Assistant
 
     fun testStructuredConfirmedErrorUsesDurableFlagNotModelJsonAndSurvivesReopen() {
         val json = "{\"ok\":false,\"error\":\"permission_denied\"}"
@@ -58,16 +58,20 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
         val tool = stored.blocks.filterIsInstance<MessageBlock.Tool>().first()
         val reader = RetainedToolOutcomes.reader(database, listOf(stored))
         assertEquals(true, reader(stored, tool))
+        assertNull(reader(stored.copy(role = Message.USER_ROLE), tool))
+        assertNull(reader(stored.copy(conversationId = ConversationId("other-chat")), tool))
+        assertNull(reader(stored, tool.copy(invocation = tool.invocation.copy(id = ToolCallId("other-call")))))
+        assertNull(reader(stored, tool.copy(invocation = tool.invocation.copy(name = "other-tool"))))
         assertNull(reader(stored.copy(runId = RunId("other-run")), tool))
         assertNull(reader(stored, tool.copy(invocation = tool.invocation.copy(arguments = "{\"changed\":true}"))))
         assertNull(reader(stored, tool.copy(result = "changed result")))
-        // A model/historical JSON string without matching trusted metadata keeps legacy presentation.
+        // A model/historical JSON string without matching trusted metadata stays unknown.
         val historicalId = MessageId("untrusted-history")
         val historical = stored.copy(id = historicalId,
             historySegments = stored.historySegments.map { segment ->
                 if (segment.role == Message.ASSISTANT_ROLE) segment.copy(messageId = historicalId) else segment
             })
-        assertEquals(WorkStepState.OK, project(historical).workProcess!!.segments.first().steps.first().state)
+        assertEquals(WorkStepState.UNKNOWN, project(historical).workProcess!!.segments.first().steps.first().state)
     }
 
     fun testUnknownIsNotTurnedIntoConfirmedErrorOrSuccess() {
@@ -76,7 +80,21 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
         assertNull(RetainedToolOutcomes.reader(database, listOf(stopped))(stopped, tool))
         val baseline = ChatTurnMapper.map(listOf(stopped)).single() as ChatTurnUi.Assistant
         assertEquals(baseline, project(stopped))
+        assertEquals(WorkStepState.UNKNOWN, project(stopped).workProcess!!.segments.flatMap { it.steps }.single().state)
+        database.close(); database = ConversationDatabase(scoped)
+        assertEquals(WorkStepState.UNKNOWN, project(database.messages(stopped.conversationId).last().second)
+            .workProcess!!.segments.flatMap { it.steps }.single().state)
         val snapshot = checkNotNull(SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, stopped.id.value))
         assertEquals(ToolDisposition.UNKNOWN, snapshot.tools.single().disposition)
     }
+    fun testNotExecutedRemainsNotExecutedAfterReopen() {
+        val done = run(listOf(DispatchOutcome.NotExecuted("cancelled_before_dispatch")), "not-executed")
+        database.close(); database = ConversationDatabase(scoped)
+        val stored = database.messages(done.conversationId).last().second
+        val step = project(stored).workProcess!!.segments.flatMap { it.steps }.single()
+        assertEquals(WorkStepState.NOT_EXECUTED, step.state)
+        val tool = stored.blocks.filterIsInstance<MessageBlock.Tool>().single()
+        assertNull(RetainedToolOutcomes.reader(database, listOf(stored))(stored, tool))
+    }
+
 }

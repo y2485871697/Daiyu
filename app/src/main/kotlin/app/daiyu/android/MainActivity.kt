@@ -2008,6 +2008,13 @@ class MainActivity : ComponentActivity() {
             }
         }
         return ChatScreenActions(
+        onCopyToolSummary = { requested ->
+            if (editorMatches() && voiceForeground && retainedPage == "chat" && !sidebarVisible) {
+                ToolCardPresentations.copySummary(chatState.turns, requested)?.let { summary ->
+                    getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("代鱼操作摘要", summary))
+                }
+            }
+        },
         onVisibleCompleted = completionReadAction(),
         onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
         onVoice = ::requestDictation, onContextClick = ::openContextPage,
@@ -4961,7 +4968,7 @@ class MainActivity : ComponentActivity() {
             contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
             turns = if (!rowsChanged) chatState.turns else ChatTurnMapper.map(shown.map { it.second }, timestamp = { message ->
                 MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
-            }, confirmedToolError = app.daiyu.android.ui.RetainedToolOutcomes.reader(controller.database, shown.map { it.second })), canJumpToPreviousUser = if (rowsChanged) shown.any { it.second.role == "user" } else chatState.canJumpToPreviousUser,
+            }, toolState = app.daiyu.android.ui.RetainedToolOutcomes.stateReader(controller.database, shown.map { it.second })), canJumpToPreviousUser = if (rowsChanged) shown.any { it.second.role == "user" } else chatState.canJumpToPreviousUser,
             statusText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中";
                 pendingTextSend != null -> "正在准备上下文并核实发送结果"; imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,

@@ -42,10 +42,7 @@ internal fun MessageContent(
                 }
                 is MessageContentUi.Image -> MessageImage(block.image, ++imageNumber, imageLoader)
                 is MessageContentUi.Tool -> {
-                    val detail = if (!block.result.isNullOrBlank() && block.arguments.isNotBlank()) {
-                        "参数：${block.arguments}\n结果：${block.result}"
-                    } else block.step.detail
-                    WorkStepRow(block.step.copy(detail = detail), actions.onRetryStep)
+                    key(block.step.owner, block.step.toolCallId) { WorkStepRow(block.step, actions.onCopyToolSummary) }
                 }
             }
         }

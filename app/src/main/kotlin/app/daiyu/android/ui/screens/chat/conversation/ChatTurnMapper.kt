@@ -11,6 +11,7 @@ object ChatTurnMapper {
     fun map(
         messages: List<Message>,
         confirmedToolError: (Message, MessageBlock.Tool) -> Boolean? = { _, _ -> null },
+        toolState: (Message, MessageBlock.Tool) -> WorkStepState? = { _, _ -> null },
         timestamp: (Message) -> String = { "" },
     ): List<ChatTurnUi> {
         // The host can pass either persisted owners or already-expanded history. Expansion
@@ -31,12 +32,12 @@ object ChatTurnMapper {
                     id = message.id.value,
                     text = message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n\n") { it.text },
                     timestamp = timestamp(message),
-                    content = mixedContent(message, confirmedToolError),
+                    content = mixedContent(message, confirmedToolError, toolState),
                     listKey = listKey,
                     ownerMessageId = databaseOwners[owner] ?: message.id.value,
                     segmentIndex = segment,
                 )
-                Message.ASSISTANT_ROLE -> mapAssistant(message, timestamp(message), confirmedToolError).copy(
+                Message.ASSISTANT_ROLE -> mapAssistant(message, timestamp(message), confirmedToolError, toolState).copy(
                     listKey = listKey,
                     ownerMessageId = databaseOwners[owner] ?: message.id.value,
                     segmentIndex = segment,
@@ -61,31 +62,36 @@ object ChatTurnMapper {
 
     /** Legacy text-only layout remains unchanged; mixed content is authoritative when set. */
     private fun mixedContent(message: Message,
-        confirmedToolError: (Message, MessageBlock.Tool) -> Boolean?): List<MessageContentUi> {
+        confirmedToolError: (Message, MessageBlock.Tool) -> Boolean?,
+        toolState: (Message, MessageBlock.Tool) -> WorkStepState?): List<MessageContentUi> {
         if (message.blocks.none { it is MessageBlock.Image }) return emptyList()
         val owner = MessageImageOwner(message.conversationId.value, message.id.value)
         return message.blocks.map { block -> when (block) {
             is MessageBlock.Text -> MessageContentUi.Text(block.itemId, block.text)
             is MessageBlock.Image -> MessageContentUi.Image(MessageImageUi(owner, block.reference))
             is MessageBlock.Tool -> MessageContentUi.Tool(
-                workStep(block, message.status, confirmedToolError(message, block)), block.invocation.arguments, block.result,
+                workStep(message, block, confirmedToolError(message, block), toolState(message, block)),
             )
         } }
     }
 
-    private fun workStep(block: MessageBlock.Tool, status: RunStatus, confirmedError: Boolean?) = WorkStepUi(
-        id = block.invocation.id.value,
-        name = block.invocation.name,
-        detail = block.result?.takeIf { it.isNotBlank() } ?: block.invocation.arguments,
-        state = when (confirmedError) {
-            true -> WorkStepState.FAILED
-            false -> WorkStepState.OK
-            null -> stepState(block.result, status)
-        },
-    )
+    private fun workStep(message: Message, block: MessageBlock.Tool, confirmedError: Boolean?, receipt: WorkStepState?): WorkStepUi {
+        val display = ToolCardPresentations.present(block.invocation.name, block.invocation.arguments, block.result)
+        return WorkStepUi(
+            id = block.invocation.id.value, name = display.title, detail = display.summary,
+            state = receipt ?: when (confirmedError) {
+                true -> WorkStepState.FAILED
+                false -> WorkStepState.OK
+                null -> if (message.status == RunStatus.RUNNING && block.result == null) WorkStepState.PENDING else WorkStepState.UNKNOWN
+            },
+            owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value),
+            toolName = block.invocation.name, category = display.category, sections = display.sections,
+        )
+    }
 
     private fun mapAssistant(message: Message, timestamp: String,
-        confirmedToolError: (Message, MessageBlock.Tool) -> Boolean?): ChatTurnUi.Assistant {
+        confirmedToolError: (Message, MessageBlock.Tool) -> Boolean?,
+        toolState: (Message, MessageBlock.Tool) -> WorkStepState?): ChatTurnUi.Assistant {
         val hasTools = message.blocks.any { it is MessageBlock.Tool }
         val lastText = message.blocks.indexOfLast { it is MessageBlock.Text }
         val finalText = if (hasTools) {
@@ -102,7 +108,7 @@ object ChatTurnMapper {
                         segments += WorkSegmentUi(narration = block.text)
                     }
                     is MessageBlock.Tool -> {
-                        val step = workStep(block, message.status, confirmedToolError(message, block))
+                        val step = workStep(message, block, confirmedToolError(message, block), toolState(message, block))
                         // Keep even trailing tools while reserving the last text for the final answer.
                         if (segments.isEmpty()) segments += WorkSegmentUi()
                         val previous = segments.last()
@@ -119,6 +125,8 @@ object ChatTurnMapper {
             } -> "失败"
             message.status == RunStatus.STOPPED -> "已停止"
             message.status == RunStatus.INTERRUPTED -> "已中断"
+            segments.any { it.steps.any { step -> step.state == WorkStepState.UNKNOWN } } -> "结果未确认"
+            segments.any { it.steps.any { step -> step.state == WorkStepState.NOT_EXECUTED } } -> "含未执行步骤"
             else -> "已完成"
         }
         return ChatTurnUi.Assistant(
@@ -129,17 +137,8 @@ object ChatTurnMapper {
             status = message.status,
             error = message.error,
             reportedReasoning = message.reportedReasoning,
-            content = mixedContent(message, confirmedToolError),
+            content = mixedContent(message, confirmedToolError, toolState),
         )
     }
 
-    private fun stepState(result: String?, status: RunStatus): WorkStepState {
-        if (result.isNullOrBlank()) {
-            return if (status == RunStatus.RUNNING) WorkStepState.PENDING else WorkStepState.FAILED
-        }
-        val normalized = result.trimStart()
-        return if (normalized.startsWith("error", ignoreCase = true) || normalized.startsWith("失败")) {
-            WorkStepState.FAILED
-        } else WorkStepState.OK
-    }
 }

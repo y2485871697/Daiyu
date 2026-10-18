@@ -79,14 +79,23 @@ data class WorkProcessUi(
 
 data class WorkSegmentUi(val narration: String? = null, val steps: List<WorkStepUi> = emptyList())
 
+data class WorkStepOwnerUi(val conversationId: String, val runId: String, val messageId: String)
+data class ToolDetailSectionUi(val title: String, val text: String)
+
 data class WorkStepUi(
     val id: String,
     val name: String,
     val detail: String,
     val state: WorkStepState = WorkStepState.PENDING,
-)
+    val owner: WorkStepOwnerUi? = null,
+    val toolName: String = name,
+    val category: String = "generic",
+    val sections: List<ToolDetailSectionUi> = emptyList(),
+) {
+    val toolCallId: String get() = id
+}
 
-enum class WorkStepState { PENDING, OK, FAILED }
+enum class WorkStepState { PENDING, OK, FAILED, UNKNOWN, NOT_EXECUTED }
 enum class ComposerPhase { IDLE, RUNNING, PAUSED }
 
 /** Null means no controllable owner. PAUSED is a UI projection of pauseRequested, never RunStatus. */

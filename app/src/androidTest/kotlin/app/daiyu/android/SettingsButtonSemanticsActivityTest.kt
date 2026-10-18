@@ -21,6 +21,7 @@ class SettingsButtonSemanticsActivityTest : WiredActivityTestCase() {
         assertEquals(packBefore.enabled, OfflineSpeechPack.state.value.enabled)
         assertEquals(packBefore.downloading, OfflineSpeechPack.state.value.downloading)
         assertEquals(before, fixture.database.exportBackup()); assertEquals(0, fixture.opens.get())
+        backToPage(activity, "voice-settings")
         backToPage(activity, "page:设置"); backToChat(activity)
         assertDraft("offline settings unsent")
     }

@@ -215,12 +215,22 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         dismissIme()
         repeat(8) {
             ui.waitForIdle()
-            mainThread { assertFalse(activity.isFinishing); assertFalse(activity.isDestroyed) }
-            if (ui.onAllNodesWithTag("chat-draft").fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1) {
+            var chatExposed = false
+            mainThread {
+                assertFalse(activity.isFinishing); assertFalse(activity.isDestroyed)
+                chatExposed = invokeHost(activity, "getRetainedPage") == "chat" &&
+                    invokeHost(activity, "getSidebarVisible") == false
+            }
+            if (chatExposed &&
+                ui.onAllNodesWithTag("chat-draft").fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1) {
                 node("chat-draft").assertIsDisplayed()
                 return
             }
             mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        }
+        mainThread {
+            assertEquals("chat", invokeHost(activity, "getRetainedPage"))
+            assertEquals(false, invokeHost(activity, "getSidebarVisible"))
         }
         awaitUniqueTag("chat-draft")
     }

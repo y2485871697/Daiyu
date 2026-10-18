@@ -12,8 +12,14 @@ import java.util.concurrent.CopyOnWriteArrayList
 class SystemAccessSettingsActivityTest : WiredActivityTestCase() {
     override val engineeringUi = true
     private fun entry(title: String) {
-        node("settings-search").performTextReplacement(title)
-        reveal("settings-row:$title", "设置").performClick()
+        when (title) {
+            "Root 与系统增强" -> openRetainedSettingsEntry("enhancements", "page:Root 与系统增强")
+            "悬浮窗权限" -> openRetainedSettingsEntry("overlay", "page:悬浮窗权限")
+            else -> {
+                reveal("settings-search", "设置").performTextReplacement(title)
+                reveal("settings-row:$title", "设置").performClick()
+            }
+        }
     }
     private fun intercept(action: () -> Unit): List<Intent> {
         val observed = CopyOnWriteArrayList<Intent>()

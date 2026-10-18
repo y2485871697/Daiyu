@@ -107,6 +107,7 @@ class ControllerRunControlTest:InstrumentationTestCase() {
             f.controller.close()
             assertNull(f.controller.runState(owner));assertFalse(f.controller.pause(owner));assertFalse(f.controller.resume(owner));assertFalse(f.controller.stop(owner))
         }
+        f.controller.close() // Off-main: wait for the already-requested worker/storage drain.
         val reopened=app.daiyu.android.storage.ConversationDatabase(f.application)
         try {
             assertEquals(RunStatus.STOPPED,reopened.messages(owner.conversationId).last().second.status)

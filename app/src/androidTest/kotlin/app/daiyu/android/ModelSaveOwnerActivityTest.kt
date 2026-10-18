@@ -23,7 +23,7 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
         val failure = AtomicReference<Throwable?>()
         val holder = Thread {
             try {
-                fixture.settings.modelCatalog.configurationChange {
+                fixture.settings.modelCatalog.readConfiguration {
                     entered.countDown(); check(released.await(10, TimeUnit.SECONDS))
                 }
             } catch (problem: Throwable) { failure.set(problem) }
@@ -58,11 +58,50 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
             awaitControl("revoked save drained") { !fixture.controller.dataBusy }
         }
         assertEquals(saved, fixture.settings.load())
+        awaitModelEditor()
         modelField("模型名").assertEditableText("resumed-explicit-model")
         reveal("model-save").performClick()
         awaitControl("explicit save completed") { !fixture.controller.dataBusy }
         awaitUniqueTag("chat-draft"); assertDraft("paused model save draft")
         assertEquals(saved.copy(model = "resumed-explicit-model"), fixture.settings.load())
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testRepeatedPauseWhileQueuedSaveDrainsRetainsDraftWithoutReauthorizingOldSave() {
+        val saved = fixture.settings.load()
+        openModels(); editModel("模型名", "twice-paused-model")
+        val save = retainedClick(activity, "model-save")
+        withHeldCatalog { release ->
+            controlMain { save(); assertTrue(fixture.controller.dataBusy) }
+            realPauseResume(activity, atPause = { assertTrue(fixture.controller.dataBusy) })
+            realPauseResume(activity, atPause = {
+                assertTrue(fixture.controller.dataBusy)
+                release()
+            })
+            awaitControl("twice-revoked save drained") { !fixture.controller.dataBusy }
+        }
+        assertEquals(saved, fixture.settings.load())
+        awaitModelEditor()
+        modelField("模型名").assertEditableText("twice-paused-model")
+        reveal("model-save").performClick()
+        awaitControl("explicit save after two pauses") { !fixture.controller.dataBusy }
+        awaitUniqueTag("chat-draft")
+        assertEquals(saved.copy(model = "twice-paused-model"), fixture.settings.load())
+        assertEquals(0, fixture.opens.get())
+    }
+    fun testPauseDuringRestoreReadKeepsDraftForNextResumedEditor() {
+        val saved = fixture.settings.load()
+        openModels(); editModel("模型名", "restore-read-paused-model")
+        withHeldCatalog { release ->
+            realPauseResume(activity)
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithText("正在读取提供商详情")
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+            }
+            realPauseResume(activity, atPause = { release() })
+        }
+        assertEquals(saved, fixture.settings.load())
+        awaitModelEditor()
+        modelField("模型名").assertEditableText("restore-read-paused-model")
         assertEquals(0, fixture.opens.get())
     }
     fun testLeavingPageRevokesAQueuedSaveWithoutChangingTheStoredConnection() {
@@ -81,14 +120,15 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
     }
     fun testAStaleModelEditorCannotOverwriteAChangedStoredConfiguration() {
         val original = fixture.settings.load(); openModels()
+        modelField("模型名").assertEditableText(original.model)
         val changed = original.copy(model = "concurrent-saved-model")
         fixture.settings.save(changed)
         editModel("模型名", "stale-editor-model")
         reveal("model-save").performClick()
         awaitControl("stale save rejected") { !fixture.controller.dataBusy }
         assertEquals(changed, fixture.settings.load())
-        node("page:模型设置").assertExists()
-        modelField("模型名").assertEditableText("stale-editor-model")
+        awaitUniqueTag("provider-management")
+        node("page:模型设置").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
 }

@@ -126,29 +126,39 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
         for (initial in listOf(ReconnectDurationPreset.NONE, ReconnectDurationPreset.WINDOW_5M)) {
             val entered = CountDownLatch(1)
             val assemble = CountDownLatch(1)
+            val opened = CountDownLatch(1)
+            val openSession = CountDownLatch(1)
             val session = FailingSession()
             val f = fresh(ProviderProtocol.MESSAGES) { config ->
                 assertEquals(ProviderProtocol.MESSAGES, config.protocol)
                 entered.countDown(); check(assemble.await(10, TimeUnit.SECONDS))
-                ModelPort { session }
+                ModelPort {
+                    opened.countDown(); check(openSession.await(10, TimeUnit.SECONDS))
+                    session
+                }
             }
             f.controller.reconnectSettings.save(ReconnectSettings(initial))
             f.db.draft("pending")
+            val accepted = AtomicReference<ChatController.TextSendResult>()
             val done = CountDownLatch(1)
             controlMain { assertTrue(f.controller.sendText(null, 1, 2, "pending") {
-                assertTrue(it is ChatController.TextSendResult.Accepted); done.countDown()
+                accepted.set(it); done.countDown()
             }) }
             try {
                 await(entered)
                 f.controller.reconnectSettings.save(ReconnectSettings(
                     if (initial == ReconnectDurationPreset.NONE) ReconnectDurationPreset.CONTINUOUS else ReconnectDurationPreset.NONE))
+                assemble.countDown(); await(done)
+                assertTrue(accepted.get() is ChatController.TextSendResult.Accepted)
+                await(opened)
+                // Change the provider only after durable acceptance; preparation rejects stale providers.
                 f.settings.save(ModelSettings("https://example.invalid", "new-provider", "synthetic-rebound-key", false),
                     protocolChangeAuthorized = true)
-                assemble.countDown(); await(done); await(session.entered)
+                openSession.countDown(); await(session.entered)
                 // A late damaged global record cannot change or abort this already-frozen run.
                 f.app.getSharedPreferences("daiyu-model-reconnect", 0).edit()
                     .putInt("reconnect-v1", 7).commit()
-            } finally { assemble.countDown(); session.release.countDown() }
+            } finally { assemble.countDown(); openSession.countDown(); session.release.countDown() }
             awaitControl("frozen run completes") { f.controller.active == null }
             assertEquals(if (initial == ReconnectDurationPreset.NONE) null else diagnostic(ProviderProtocol.MESSAGES),
                 f.controller.problem)
@@ -188,6 +198,8 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
     fun testOfficialOptInUsesOriginalFactoryAndReasoningFrozenRequestForPostAndGet() {
         val entered = CountDownLatch(1)
         val assemble = CountDownLatch(1)
+        val opened = CountDownLatch(1)
+        val openTransport = CountDownLatch(1)
         val configs = CopyOnWriteArrayList<ModelSettings>()
         val connections = CopyOnWriteArrayList<LocalHttps>()
         val f = fresh { config ->
@@ -197,6 +209,9 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
             // product after freezing the actual reasoning-adjusted requestProvider.
             ResponsesModel(config) { url ->
                 check(connections.size < 2) { "unexpected third transport; never use the network" }
+                if (connections.isEmpty()) {
+                    opened.countDown(); check(openTransport.await(10, TimeUnit.SECONDS))
+                }
                 LocalHttps(url, if (connections.isEmpty()) partialWire() else finalWire()).also(connections::add)
             }
         }
@@ -215,10 +230,11 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
                 .getJSONObject("reasoning").getString("effort"))
             f.controller.reconnectSettings.save(ReconnectSettings())
             f.controller.reasoningPreference.set(null, ReasoningEffort.HIGH)
+            assemble.countDown(); await(done)
+            assertTrue(accepted.get() is ChatController.TextSendResult.Accepted)
+            await(opened)
             f.settings.save(f.settings.load().copy(endpoint = "https://later.invalid", model = "later-model"))
-        } finally { assemble.countDown() }
-        await(done)
-        assertTrue(accepted.get() is ChatController.TextSendResult.Accepted)
+        } finally { assemble.countDown(); openTransport.countDown() }
         awaitControl("real background response completes") { f.controller.active == null }
         assertNull(f.controller.problem)
         assertEquals(1, configs.size)

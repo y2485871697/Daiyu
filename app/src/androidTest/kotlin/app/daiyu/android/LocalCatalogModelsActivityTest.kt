@@ -84,6 +84,9 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         reveal("local-model-delete:extra-local", "本地模型").performClick()
         val stale = checkNotNull(node("dialog-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
         realPauseResume(activity)
+        awaitModelEditor()
+        reveal("model-local-manage").assertIsEnabled().performClick()
+        awaitUniqueTag("page:本地模型")
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("local-model:extra-local").fetchSemanticsNodes().size == 1 }
         reveal("local-model-delete:extra-local", "本地模型").performClick()
         val before = fixture.settings.localModelCatalogSnapshot()

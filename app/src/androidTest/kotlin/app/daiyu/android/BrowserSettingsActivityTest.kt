@@ -16,8 +16,7 @@ class BrowserSettingsActivityTest : WiredActivityTestCase() {
 
     private fun enterFromSettings() {
         openSettings()
-        reveal("settings-row:工具", "设置").performClick()
-        reveal("settings-row:浏览器", "工具").performClick()
+        openRetainedSettingsEntry("browser", "page:浏览器")
         node("page:浏览器").assertExists()
         reveal("browser-saved", "浏览器").assertExists()
         ui.waitUntil(timeoutMillis = 5_000) {
@@ -62,8 +61,7 @@ class BrowserSettingsActivityTest : WiredActivityTestCase() {
         backToPage(activity, "page:设置")
         node("page:设置").assertExists()
         assertFalse(old.isActive)
-        reveal("settings-row:工具", "设置").performClick()
-        reveal("settings-row:浏览器", "工具").performClick()
+        openRetainedSettingsEntry("browser", "page:浏览器")
         val replacement = currentOwner()
         assertNotSame(old, replacement)
         assertTrue(replacement.isActive)

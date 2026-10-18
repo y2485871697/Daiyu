@@ -17,11 +17,9 @@ import java.util.concurrent.TimeUnit
 class GuiSettingsActivityTest : WiredActivityTestCase() {
     override val engineeringUi = true
     private val page = "无障碍与屏幕授权"
-    private fun enterFromPermissions(id: String = "accessibility") {
+    private fun enterRetainedGuiSettings() {
         openSettings()
-        reveal("settings-row:权限", "设置").performClick()
-        reveal("settings-row:${SettingsCatalog.entry(id).title}", "权限").performClick()
-        node("page:$page").assertExists()
+        openRetainedSettingsEntry("accessibility", "page:$page")
     }
     private fun assertNoGuiPreparation() {
         mainThread {
@@ -33,7 +31,7 @@ class GuiSettingsActivityTest : WiredActivityTestCase() {
         node("gui-grant-screenshot").assertDoesNotExist()
         node("gui-freeze").assertDoesNotExist()
     }
-    fun testRemainingSettingsEntryAndR07MetadataShareTheNavigationOnlyRoute() {
+    fun testRetainedGuiSettingsAndR07MetadataShareTheNavigationOnlyRoute() {
         assertEquals(FeatureRoute.GUI_SETTINGS, FeatureCatalog.groups.flatMap { it.entries }.single { it.id == "R07" }.route)
         val action = FeatureDetails.pages.getValue("R07").flatMap { it.controls }.single { it.id == "open" }
         assertEquals(FeatureControlKind.ACTION, action.kind)
@@ -44,7 +42,7 @@ class GuiSettingsActivityTest : WiredActivityTestCase() {
         setDraft("GUI 设置不提交此草稿")
         val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
-        enterFromPermissions()
+        enterRetainedGuiSettings()
         reveal("gui-status", page).assertExists()
         reveal("gui-open-system", page).assertHasClickAction()
         reveal("gui-rebind", page).assertTextContains("手动重新启用", substring = true)
@@ -57,15 +55,15 @@ class GuiSettingsActivityTest : WiredActivityTestCase() {
         backToPage(activity, "page:设置"); node("page:设置").assertExists()
         backToChat(activity); assertDraft("GUI 设置不提交此草稿")
     }
-    fun testSearchEntryAndOldSettingsClickAfterRecreationCannotGrantOrOpenAnything() {
+    fun testHiddenGuiSearchAndRetainedEntryAfterRecreationCannotGrantOrOpenAnything() {
         setDraft("GUI 搜索与重建")
         openSettings()
         reveal("settings-search", "设置").performTextReplacement("无障碍")
         val title = SettingsCatalog.entry("accessibility").title
-        reveal("settings-row:$title", "设置").assertExists()
-        val stale = retainedClick(activity, "settings-row:$title")
-        node("settings-row:$title").performClick()
-        node("page:$page").assertExists()
+        node("settings-row:$title").assertDoesNotExist()
+        ui.onNodeWithText("没有匹配的设置").assertExists()
+        val stale = retainedSettingsEntry("accessibility")
+        openRetainedSettingsEntry("accessibility", "page:$page")
         assertNoGuiPreparation()
         backToPage(activity, "page:设置"); node("page:设置").assertExists()
         activity = recreateActivity(activity)
@@ -82,7 +80,7 @@ class GuiSettingsActivityTest : WiredActivityTestCase() {
         val owner = checkNotNull(fixture.controller.active)
         setDraft("保留追加草稿")
         try {
-            enterFromPermissions("accessibility")
+            enterRetainedGuiSettings()
             reveal("gui-no-run", page).assertExists()
             mainThread {
                 assertNull(fixture.controller.guiEntry())

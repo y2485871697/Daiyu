@@ -17,6 +17,7 @@ import org.junit.runners.model.Statement
 @Suppress("DEPRECATION")
 abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     protected val ui = createEmptyComposeRule()
+    private var currentHost: MainActivity? = null
     protected open val engineeringUi: Boolean = false
     private fun runLegacy() = super.runBare()
     override fun runBare() {
@@ -63,9 +64,39 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         node(tag).assertExists()
     }
 
+    protected fun dismissIme() {
+        val host = checkNotNull(currentHost)
+        mainThread {
+            host.currentFocus?.clearFocus()
+            host.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+                .hideSoftInputFromWindow(host.window.decorView.windowToken, 0)
+        }
+        ui.waitUntil(5_000) {
+            var hidden = false
+            instrumentation.runOnMainSync {
+                hidden = androidx.core.view.ViewCompat.getRootWindowInsets(host.window.decorView)
+                    ?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) != true
+            }
+            hidden
+        }
+        ui.waitForIdle()
+    }
     protected fun reveal(tag: String, page: String = "模型设置"): SemanticsNodeInteraction {
+        dismissIme()
+        awaitUniqueTag("page:$page")
         node("page:$page").performScrollToNode(hasTestTag(tag))
-        return node(tag)
+        return node(tag).assertIsDisplayed()
+    }
+    protected fun retainedSettingsEntry(id: String, page: String = "设置"): () -> Unit {
+        val entry = app.daiyu.android.ui.screens.settings.SettingsCatalog.entry(id)
+        val open = checkNotNull(node("page:$page").fetchSemanticsNode().config.getOrNull(
+            app.daiyu.android.ui.screens.settings.RetainedSettingsEntryAction))
+        return { open(entry) }
+    }
+    protected fun openRetainedSettingsEntry(id: String, expectedTag: String) {
+        val open = retainedSettingsEntry(id)
+        mainThread { open() }
+        awaitUniqueTag(expectedTag)
     }
     protected fun editModel(label: String, text: String) { reveal("settings-field:$label").performTextReplacement(text) }
     protected fun modelField(label: String) = reveal("settings-field:$label")
@@ -87,6 +118,15 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     protected fun openModels() {
         openSettings()
         reveal("settings-row:模型提供商", "设置").performClick()
+        awaitModelEditor()
+    }
+    protected fun awaitModelEditor() {
+        awaitUniqueTag("page:模型设置")
+        reveal("settings-field:模型名")
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("settings-field:模型名").fetchSemanticsNodes()
+                .singleOrNull()?.config?.contains(SemanticsProperties.Disabled) == false
+        }
     }
     protected fun openSettings() {
         ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction())
@@ -154,16 +194,13 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                     else -> error("Unsupported prompt: ${prompt.javaClass.name}")
                 }
             }
-            "model-save" -> {
-                val draft = invokeHost(activity, "getModelDraft")!!;
-                { invokeHost(activity, "saveModelSettings", draft); Unit }
-            }
+            "model-save" -> checkNotNull(node(tag).fetchSemanticsNode()
+                .config.getOrNull(app.daiyu.android.ui.screens.settings.RetainedModelSaveAction))
             "chat-control" -> retainedControls(activity).onPrimaryTap
             else -> {
                 val title = tag.removePrefix("settings-row:")
-                val route = checkNotNull(app.daiyu.android.ui.screens.settings.SettingsCatalog.entries
-                    .single { it.title == title }.route);
-                { invokeHost(activity, "openSettingsFromPage", route); Unit }
+                val entry = app.daiyu.android.ui.screens.settings.SettingsCatalog.entries.single { it.title == title }
+                retainedSettingsEntry(entry.id)
             }
         }
     }
@@ -174,7 +211,19 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         try { return method.apply { isAccessible = true }.invoke(activity, *arguments) }
         catch (failure: java.lang.reflect.InvocationTargetException) { throw failure.targetException }
     }
-    protected fun backToChat(activity: MainActivity) = backToPage(activity, "chat-draft")
+    protected fun backToChat(activity: MainActivity) {
+        dismissIme()
+        repeat(8) {
+            ui.waitForIdle()
+            mainThread { assertFalse(activity.isFinishing); assertFalse(activity.isDestroyed) }
+            if (ui.onAllNodesWithTag("chat-draft").fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1) {
+                node("chat-draft").assertIsDisplayed()
+                return
+            }
+            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        }
+        awaitUniqueTag("chat-draft")
+    }
     protected fun backToPage(activity: MainActivity, expectedTag: String) {
         ui.waitForIdle()
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
@@ -257,6 +306,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             try {
                 ui.waitForIdle()
                 assertTrue(activity.isDestroyed)
+                currentHost = created
                 return created
             } catch (failure: Throwable) {
                 try {
@@ -271,6 +321,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         val activity = instrumentation.startActivitySync(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         try {
             ui.waitForIdle()
+            currentHost = activity
             return activity
         } catch (failure: Throwable) {
             try {

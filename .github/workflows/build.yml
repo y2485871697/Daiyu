@@ -369,7 +369,7 @@ jobs:
           ram-size: ${{ matrix.ram }}M
           cores: 4
           emulator-options: -memory ${{ matrix.ram }} -no-window -gpu swiftshader -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel
-          emulator-boot-timeout: 60
+          emulator-boot-timeout: 180
           pre-emulator-launch-script: |
             bash scripts/install_bounded_adb.sh
             cp "$ANDROID_AVD_HOME/test.ini" smoke/avd.ini

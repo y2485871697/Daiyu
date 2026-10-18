@@ -2,6 +2,7 @@ package app.daiyu.android
 
 import android.content.ContextWrapper
 import androidx.compose.ui.test.*
+import app.daiyu.android.ui.screens.settings.RetainedProviderConnectionTest
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
 import app.daiyu.android.data.model.AppearanceSettings
@@ -22,6 +23,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 class ModelConnectionActivityTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     private var directory: File? = null
     private val requests = AtomicInteger()
     internal override fun createFixture(): RunControlFixture {
@@ -98,20 +100,19 @@ class ModelConnectionActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
     fun testOldModelVisitCannotBorrowTheNewEqualDraftOwner() {
-        fun read(name: String): Any = checkNotNull(MainActivity::class.java.declaredMethods.single {
-            it.name == name && it.parameterCount == 0
-        }.apply { isAccessible = true }.invoke(activity))
+        fun connectionVisit() =
+            ui.onNode(SemanticsMatcher.keyIsDefined(RetainedProviderConnectionTest))
+                .fetchSemanticsNode().config[RetainedProviderConnectionTest]
         openModels()
-        lateinit var owner: Any; lateinit var oldDraft: ModelSettingsDraftUi
-        mainThread { owner = read("getModelEditingOwner"); oldDraft = read("getModelDraft") as ModelSettingsDraftUi }
+        val (oldDraft, oldRequest) = connectionVisit()
         backToChat(activity); openModels(); connect()
+        val (newDraft, newRequest) = connectionVisit()
+        assertEquals(oldDraft, newDraft)
+        assertNotSame(oldDraft, newDraft)
+        assertNotSame(oldRequest, newRequest)
         val callback: (ModelConnectionResult) -> Unit = { error("old visit must not receive a result") }
         var accepted = true
-        mainThread {
-            assertEquals(oldDraft, read("getModelDraft"))
-            val method = MainActivity::class.java.declaredMethods.single { it.name == "requestModelConnectionTest" }
-            accepted = method.apply { isAccessible = true }.invoke(activity, owner, oldDraft, { false }, callback) as Boolean
-        }
+        mainThread { accepted = oldRequest(newDraft, { false }, callback) }
         assertFalse(accepted); assertEquals(0, requests.get())
         testConnection(); awaitStatus("目录连接成功，返回 1 个模型"); assertEquals(1, requests.get())
     }

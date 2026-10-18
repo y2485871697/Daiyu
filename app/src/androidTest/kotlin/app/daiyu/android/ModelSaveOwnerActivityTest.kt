@@ -69,6 +69,7 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
     fun testRepeatedPauseWhileQueuedSaveDrainsRetainsDraftWithoutReauthorizingOldSave() {
         val saved = fixture.settings.load()
         openModels(); editModel("模型名", "twice-paused-model")
+        reveal("model-save").assertIsDisplayed().assertIsEnabled()
         val save = retainedClick(activity, "model-save")
         withHeldCatalog { release ->
             controlMain { save(); assertTrue(fixture.controller.dataBusy) }

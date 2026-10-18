@@ -4,6 +4,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -21,6 +23,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 import top.yukonga.miuix.kmp.basic.TextButton
+
+internal val RetainedProviderConnectionTest =
+    SemanticsPropertyKey<Pair<ModelSettingsDraftUi, ModelConnectionTester>>("RetainedProviderConnectionTest")
 
 private class ProviderPagePermit {
     val live = AtomicBoolean(true)
@@ -236,6 +241,9 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             if (!live() || !enabled) false else controller.testModelConnection(value.providerSettings(saved),
                 { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) deliver(it) }
         }
+        val connectionModifier = if (engineeringUi) Modifier.semantics {
+            this[RetainedProviderConnectionTest] = draft to connection
+        } else Modifier
         val actions = LocalCatalogModelActions<CatalogModelParameters>(saved.model,
             rename = { selection, name, requestCancelled, complete ->
                 if (live() && !requestCancelled()) controller.renameProviderCatalogModel(d.editor, selection, name,
@@ -262,6 +270,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 } else complete(false)
             })
         if (d.catalogIdentity == null) ModelSettingsScreen(draft, change, save, {}, { back() },
+            modifier = connectionModifier,
             pageTitle = pageTitleOverride ?: d.name, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
             credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
             catalogEnabled = false, errorText = notice)
@@ -269,7 +278,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
                 if (!live() || !enabled) false else controller.fetchModelCatalog(value.providerSettings(saved),
                     { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) deliver(it) }
-            }, pageTitle = pageTitleOverride ?: d.name,
+            }, modifier = connectionModifier, pageTitle = pageTitleOverride ?: d.name,
             // Keep the primary model route's established single-page controls and tags;
             // additional providers use the explicit 配置/模型 split.
             twoTabs = initialSlot != ProviderRegistry.PRIMARY, ownerCurrent = live,

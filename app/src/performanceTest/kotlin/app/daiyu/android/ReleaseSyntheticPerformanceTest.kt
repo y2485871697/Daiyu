@@ -71,6 +71,8 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
         check(Build.VERSION.SDK_INT >= 29)
         check(target.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0)
         check(target.applicationInfo.isProfileableByShell)
+        val diagnosticsMode = InstrumentationRegistry.getArguments().getString("daiyuDiagnostics") ?: "off"
+        require(diagnosticsMode in setOf("off", "on")) { "invalid_diagnostics_mode" }
         val application = target.applicationContext as ChatApplication
         val original = main { application.controller }
         val id = UUID.randomUUID().toString()
@@ -89,6 +91,8 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
         var cleanupFailed = false
         var frameReportWritten = false
         var stage = "initialization"
+        var memoryCollector: SyntheticMemoryCollector? = null
+        var memoryReport: File? = null
         var migrationReport: File? = null
         var migrationPackageFile: File? = null
         var scrollStart = 0L; var scrollEnd = 0L; var refreshRate = 0f; var preferredRate = 0f
@@ -102,9 +106,11 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
             ui.waitForIdle()
             awaitReady(original)
-            val activeFixture = PerformanceFixture(target, id, onConstructionCleanupFailure = { cleanupFailed = true }).also { fixture = it }
+            val activeFixture = PerformanceFixture(target, id, diagnosticsEnabled = diagnosticsMode == "on", onConstructionCleanupFailure = { cleanupFailed = true }).also { fixture = it }
             stage = "dataset_setup"
             awaitReady(activeFixture.controller)
+            val diagnosticState = checkNotNull(activeFixture.controller.diagnostics).load()
+            check(diagnosticState.loaded && !diagnosticState.unavailable && diagnosticState.enabled == (diagnosticsMode == "on"))
             val conversation = if (fullScale) {
                 val backup = app.daiyu.android.backup.NeutralBackupService(activeFixture.context, activeFixture.database)
                 val selected = FullPerformanceDataset.seed(activeFixture.database, backup)
@@ -167,6 +173,25 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
             assertTrue("raw frames missing", captured.frameCount > 0)
             assertEquals(0L, captured.overflow); assertEquals(0L, captured.droppedReports); assertEquals(20, inputs.size)
             if (fullScale) {
+                stage = "conversation_switch_memory"
+                val candidates = activeFixture.database.conversations().take(100)
+                check(candidates.size == 100)
+                val memory = SyntheticMemoryCollector().also { memoryCollector = it }
+                memory.sample("before_switches", 0)
+                repeat(100) { index ->
+                    val selected = candidates[index]
+                    val start = System.nanoTime()
+                    main { launched.select(selected) }
+                    ui.waitForIdle()
+                    check(main { activeFixture.controller.preferences.getString("selected", null) } == selected.id.value)
+                    memory.sample("switch_completed", index + 1, start)
+                }
+                // Take ten spaced post-switch observations; requesting GC does not prove stable recovery.
+                System.gc(); System.runFinalization()
+                repeat(10) { second -> Thread.sleep(1_000); memory.sample("post_gc_observation", second + 1) }
+                File(output.parentFile, "memory-$id.json").also { report ->
+                    memory.write(report, id, diagnosticsMode); memoryReport = report
+                }
                 stage = "backend_migration"
                 val targetFixture = PerformanceFixture(target, "$id-migration", createController = false,
                     onConstructionCleanupFailure = { cleanupFailed = true })
@@ -195,6 +220,14 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                 }
             }
             cleanup { collector?.close() }
+            cleanup {
+                if (memoryReport == null) memoryCollector?.let { memory ->
+                    File(output.parentFile, "memory-$id.json").also { report ->
+                        memory.write(report, id, diagnosticsMode, completed = false, failureStage = stage)
+                        memoryReport = report
+                    }
+                }
+            }
             var activitiesDestroyed = false
             var controllerRestored = !injected
             var fixtureCleanupAttempted = false
@@ -237,6 +270,9 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                         .put("fixture_cleanup_attempted", fixtureCleanupAttempted)
                         .put("fixture_resources_retained", fixture != null && (!activitiesDestroyed || !controllerRestored))
                         .put("cleanup_scope", "fixture_controller_databases_preferences_cache")
+                        .put("diagnostics_mode", diagnosticsMode)
+                        .put("diagnostics_state_verified", true)
+                        .put("memory_report", memoryReport?.name ?: JSONObject.NULL)
                         .put("backend_migration_report", migrationReport?.name ?: JSONObject.NULL)
                         .put("failure_class", primaryFailure?.javaClass?.name ?: JSONObject.NULL), inputs)
                     frameReportWritten = true
@@ -246,6 +282,10 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                 val status = File(output.parentFile, "status-$id.json")
                 status.writeText(JSONObject().put("schema", "daiyu.synthetic.performance.status.v1")
                     .put("collection_id", id).put("fixture_mode", if (fullScale) "full_scale" else "small_smoke")
+                    .put("diagnostics_mode", diagnosticsMode)
+                    .put("memory_report", memoryReport?.name ?: JSONObject.NULL)
+                    .put("memory_switch_samples", memoryCollector?.switchSamples ?: 0)
+                    .put("memory_post_gc_samples", memoryCollector?.postGcSamples ?: 0)
                     .put("collection_completed", complete).put("failure_stage", if (primaryFailure == null) JSONObject.NULL else stage)
                     .put("failure_class", primaryFailure?.javaClass?.name ?: JSONObject.NULL)
                     .put("cleanup_succeeded", !cleanupFailed)
@@ -274,6 +314,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
 }
 
 private class PerformanceFixture(private val base: Context, id: String, createController: Boolean = true,
+    diagnosticsEnabled: Boolean = false,
     private val onConstructionCleanupFailure: () -> Unit = {}) : AutoCloseable {
     private val prefix = "performance-$id-"
     private var controllerConstructionStarted = false
@@ -319,9 +360,12 @@ private class PerformanceFixture(private val base: Context, id: String, createCo
                 }).apply { check(save(TaskSurfacePreference.FOREGROUND)) }
                 val modelSettings = ModelSettingsStore(application, "app.daiyu.android.synthetic.performance.$id")
                 val uiPreferences = application.getSharedPreferences("conversation-ui", 0)
+                val diagnostics = app.daiyu.android.diagnostics.DiagnosticLogStore(
+                    File(application.noBackupFilesDir, "diagnostics-v1/state.json"))
+                diagnostics.setEnabled(diagnosticsEnabled)
                 controllerConstructionStarted = true
                 controller = ChatController(application, database, modelSettings, uiPreferences,
-                    { error("external_model_request_forbidden") }, taskSurfaceStore = surfaces)
+                    { error("external_model_request_forbidden") }, taskSurfaceStore = surfaces, diagnostics = diagnostics)
             }
         } catch (failure: Throwable) {
             try { close() } catch (cleanup: Throwable) {

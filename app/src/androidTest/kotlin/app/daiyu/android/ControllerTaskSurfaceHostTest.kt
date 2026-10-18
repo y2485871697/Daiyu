@@ -99,7 +99,7 @@ class ControllerTaskSurfaceHostTest : InstrumentationTestCase() {
                 f.controller.cancelGui(next)
             }
             assertNoAcceptance(f)
-        } finally { controlMain { f.close() } }
+        } finally { f.close() }
     }
 
     fun testGuiBackgroundPreferenceAndExplicitBackgroundAnswerNeverOpenForegroundBackend() {
@@ -127,7 +127,7 @@ class ControllerTaskSurfaceHostTest : InstrumentationTestCase() {
                 f.controller.cancelGui(asked)
             }
             assertNoAcceptance(f)
-        } finally { controlMain { f.close() } }
+        } finally { f.close() }
     }
 
     fun testSelfDoesNotConsumeAskAndPreferenceChangesNeverRefreezeOriginalRun() {
@@ -156,7 +156,7 @@ class ControllerTaskSurfaceHostTest : InstrumentationTestCase() {
             assertSame(route, external.taskSurface.adapter)
             controlMain { f.controller.cancelGui(external) }
             assertNoAcceptance(f)
-        } finally { controlMain { f.close() } }
+        } finally { f.close() }
     }
 
     fun testVdDirectSendRequiresOriginalBackgroundDecisionAndNeverConvertsForeground() {
@@ -193,7 +193,7 @@ class ControllerTaskSurfaceHostTest : InstrumentationTestCase() {
             }
             assertEquals(0, allocations.get())
             assertNoAcceptance(f)
-        } finally { controlMain { f.close() } }
+        } finally { f.close() }
     }
 
     fun testVdWholeSelfOrMixedPlanRejectsWithoutAskFactoryModelOrAcceptance() {
@@ -217,6 +217,6 @@ class ControllerTaskSurfaceHostTest : InstrumentationTestCase() {
             }
             assertEquals(0, allocations.get())
             assertNoAcceptance(f)
-        } finally { controlMain { f.close() } }
+        } finally { f.close() }
     }
 }

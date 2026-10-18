@@ -80,6 +80,10 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
 
     fun status(): JSONObject = synchronized(control) {
         try { runnerPins.admitted { } }
+        catch (_: LinuxRunnerGenerationUnknown) {
+            if (selectionPathIdentityUnavailable()) return@synchronized state("BROKEN").put("error", "linux_installation_unavailable")
+            return@synchronized state("RUNNER_UNKNOWN").put("error", "linux_runner_generation_unknown")
+        }
         catch (_: Exception) { return@synchronized state("RUNNER_UNKNOWN").put("error", "linux_runner_generation_unknown") }
         if (!selection.exists()) return@synchronized state("NOT_SELECTED")
         try {
@@ -99,15 +103,36 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
 
     fun acquire(expected: LinuxGenerationRef): Lease = acquireSelected(expected)
 
-    private fun acquireSelected(expected: LinuxGenerationRef?): Lease = synchronized(control) { runnerPins.admitted {
-        val installation = load() ?: throw IllegalStateException("linux_environment_not_selected")
-        check(expected == null || expected == LinuxGenerationRef(installation.environmentId, installation.generation)) {
-            "linux_generation_mismatch"
+    private fun acquireSelected(expected: LinuxGenerationRef?): Lease = try {
+        synchronized(control) { runnerPins.admitted {
+            val installation = load() ?: throw IllegalStateException("linux_environment_not_selected")
+            check(expected == null || expected == LinuxGenerationRef(installation.environmentId, installation.generation)) {
+                "linux_generation_mismatch"
+            }
+            val identities = validate(installation)
+            shared.leases++
+            Lease(installation, identities)
+        } }
+    } catch (unknown: LinuxRunnerGenerationUnknown) {
+        // A missing filesystem identity is a broken installation, not an unknown runner.
+        // Preserve the precise fail-closed error even when runner admission cannot inspect
+        // its own directory identity first.
+        if (selectionPathIdentityUnavailable()) throw IllegalStateException("linux_path_identity_unavailable", unknown)
+        throw unknown
+    }
+
+    private fun selectionPathIdentityUnavailable(): Boolean = synchronized(control) {
+        if (!selection.exists()) return@synchronized false
+        try {
+            val installation = load() ?: return@synchronized false
+            validate(installation)
+            false
+        } catch (failure: IllegalStateException) {
+            failure.message == "linux_path_identity_unavailable"
+        } catch (_: Exception) {
+            false
         }
-        val identities = validate(installation)
-        shared.leases++
-        Lease(installation, identities)
-    } }
+    }
 
     inner class Lease internal constructor(private val installation: LinuxInstallation, private val identities: List<String>) : AutoCloseable {
         private var closed = false

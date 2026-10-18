@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -16,10 +17,12 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.ui.components.MiuixScaffoldPage
+import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+import top.yukonga.miuix.kmp.window.WindowDialog
 
 /**
  * In-memory editing state only. Do not put this draft in saved state, logs or backups.
@@ -98,7 +101,9 @@ internal fun ModelSettingsScreen(
     val connection = rememberSettingsConnectionTest(draft, enabled, testConnection)
     val submit: () -> Unit = { connection.cancel(); onSave(draft) }
     val changeDraft: (ModelSettingsDraftUi) -> Unit = { connection.cancel(); onDraftChange(it) }
-    var bodyExpanded by remember { mutableStateOf(false) }
+    var responsesPathPicker by remember { mutableStateOf(false) }
+    var headersEditor by remember { mutableStateOf(false) }
+    var headersDraft by remember { mutableStateOf("") }
     val catalogIsCurrent = catalogForDraft?.let {
         it.endpoint == draft.endpoint && it.responsesPath == draft.responsesPath &&
             it.protocol == draft.protocol && it.apiKey == draft.apiKey && it.model == draft.model &&
@@ -135,8 +140,25 @@ internal fun ModelSettingsScreen(
             SettingsSectionTitle("连接与模型")
             SettingsCard {
                 SettingsTextField("Base URL", draft.endpoint, { changeDraft(draft.copy(endpoint = it)) }, enabled = enabled)
-                SettingsTextField("Responses 路径", draft.responsesPath, { changeDraft(draft.copy(responsesPath = it)) },
-                    hint = "/responses", enabled = enabled && draft.protocol == ProviderProtocol.RESPONSES)
+                if (draft.protocol == ProviderProtocol.RESPONSES) {
+                    val responsePaths = listOf("/v1/responses", "/responses")
+                    SettingsRow(
+                        title = "Responses 路径",
+                        summary = draft.responsesPath.ifBlank { "/v1/responses" },
+                        tag = "responses-path-select",
+                        onClick = if (enabled) ({ responsesPathPicker = true }) else null,
+                    )
+                    if (responsesPathPicker) DaiyuChoiceSheet(
+                        title = "Responses 路径",
+                        options = responsePaths,
+                        onSelect = { index ->
+                            changeDraft(draft.copy(responsesPath = responsePaths[index]))
+                            responsesPathPicker = false
+                        },
+                        onDismiss = { responsesPathPicker = false },
+                        engineeringUi = engineeringUi,
+                    )
+                }
                 if (draft.protocol == ProviderProtocol.MESSAGES) {
                     SettingsTextField("Anthropic 版本", draft.anthropicVersion,
                         { changeDraft(draft.copy(anthropicVersion = it)) },
@@ -144,8 +166,29 @@ internal fun ModelSettingsScreen(
                 }
                 SettingsTextField("模型名", draft.model, { changeDraft(draft.copy(model = it)) }, enabled = enabled)
                 SettingsTextField("API Key", draft.apiKey, { changeDraft(draft.copy(apiKey = it)) }, password = true, enabled = enabled)
-                SettingsTextField("自定义请求头", draft.customHeaders, { changeDraft(draft.copy(customHeaders = it)) },
-                    password = true, hint = "JSON 对象；加密保存，不覆盖鉴权或会话字段", enabled = enabled)
+                SettingsRow(
+                    title = "自定义请求头",
+                    summary = if (draft.customHeaders.isBlank()) "未设置" else "已设置",
+                    tag = "model-custom-headers",
+                    onClick = if (enabled) ({ headersDraft = draft.customHeaders; headersEditor = true }) else null,
+                )
+                if (headersEditor) WindowDialog(
+                    show = true,
+                    title = "自定义请求头",
+                    onDismissRequest = { headersEditor = false },
+                ) {
+                    Column {
+                        SettingsTextField("请求头 JSON", headersDraft,
+                            { headersDraft = it }, hint = "JSON 对象；加密保存，不覆盖鉴权或会话字段",
+                            password = true, multiline = true, enabled = enabled)
+                        TextButton(text = "应用到草稿", enabled = enabled,
+                            modifier = Modifier.testTag("model-custom-headers-apply"), onClick = {
+                                changeDraft(draft.copy(customHeaders = headersDraft))
+                                headersEditor = false
+                            })
+                        TextButton(text = "取消", onClick = { headersEditor = false })
+                    }
+                }
                 if (headersUnavailable) {
                     SettingsNote("原请求头不可用；请重新输入或明确清除", error = true)
                     SettingsSwitchRow("授权替换或清除请求头", draft.headersReplacementAuthorized, enabled = enabled) {
@@ -168,43 +211,7 @@ internal fun ModelSettingsScreen(
                     changeDraft(draft.copy(openAiWebSearchEnabled = it))
                 }
                 if (draft.openAiWebSearchEnabled) SettingsNote("仅用于 OpenAI 官方 Responses；由模型决定搜索，可能产生搜索费用。")
-                SettingsRow("自定义请求体", tag = "model-custom-body",
-                    summary = if (draft.customBody.isBlank()) "未设置" else "已设置",
-                    onClick = if (enabled) ({ bodyExpanded = !bodyExpanded }) else null)
-                if (engineeringUi || bodyExpanded) {
-                    SettingsTextField("自定义请求体", draft.customBody,
-                        { changeDraft(draft.copy(customBody = it)) }, multiline = true, enabled = enabled)
-                    RequestBodyFieldsEditor(draft, enabled, engineeringUi, changeDraft)
-                }
             }
-        }
-        if (draft.protocol != ProviderProtocol.RESPONSES &&
-            (draft.speedMode != null || draft.codex)) item(key = "model_clear_incompatible_options") {
-            SettingsCard {
-                SettingsRow("清除不兼容的请求档位", tag = "model-clear-incompatible-options",
-                    summary = "原请求档位仅适用于 Responses，清除后可保存当前协议",
-                    onClick = if (enabled) ({ changeDraft(draft.copy(speedMode = null, codex = false)) }) else null)
-            }
-        }
-        item(key = "model_speed") {
-            SettingsSectionTitle("服务档位")
-            SettingsCard {
-                listOf(
-                    null to "不指定",
-                    GptSpeedMode.NORMAL to "普通",
-                    GptSpeedMode.FAST to "快速",
-                    GptSpeedMode.ULTRA_FAST to "超快速",
-                ).forEach { (mode, title) ->
-                    SettingsRadioRow(title, draft.speedMode == mode, enabled = enabled) { changeDraft(draft.copy(speedMode = mode)) }
-                }
-                SettingsSwitchRow("Codex 档位", draft.codex, enabled = enabled) { changeDraft(draft.copy(codex = it)) }
-                if (requestOptionsUnavailable) {
-                    SettingsSwitchRow("授权替换策略", draft.requestOptionsReplacementAuthorized, enabled = enabled) {
-                        changeDraft(draft.copy(requestOptionsReplacementAuthorized = it))
-                    }
-                }
-            }
-            if (requestOptionsUnavailable) SettingsNote("原策略不可用", error = true)
         }
         if (testConnection != null) item(key = "model_connection_test") {
             SettingsCard {

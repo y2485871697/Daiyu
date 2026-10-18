@@ -61,6 +61,7 @@ internal fun DaiyuChatScreen(
     modifier: Modifier = Modifier,
     turnExtras: @Composable (String) -> Unit = {},
     imageLoader: MessageImageLoader? = null,
+    assistant: app.daiyu.android.ui.components.AssistantDisplay? = null,
 ) {
     Column(
         modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
@@ -80,6 +81,6 @@ internal fun DaiyuChatScreen(
         androidx.compose.runtime.key(state.conversationKey) {
             ChatMessageList(state.turns, state.canJumpToPreviousUser, actions, Modifier.weight(1f), state.scrollRequest, turnExtras, imageLoader)
         }
-        ChatComposer(state.composer, actions)
+        ChatComposer(state.composer, actions, assistant = assistant)
     }
 }

@@ -1,6 +1,13 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathMeasure
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import app.daiyu.android.ui.components.AssistantDisplay
+import app.daiyu.android.ui.components.AssistantAvatar
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -11,7 +18,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,7 +56,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifier: Modifier = Modifier) {
+internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifier: Modifier = Modifier, assistant: AssistantDisplay? = null) {
     val colors = MiuixTheme.colorScheme
     val currentEditorGeneration by rememberUpdatedState(state.editorGeneration)
     var attachments by remember { mutableStateOf(false) }
@@ -74,10 +80,42 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         else -> "发送"
     }
     Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-        Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp))
-            .background(colors.surfaceContainerHigh)
-            .border(1.dp, colors.outline.copy(alpha = 0.45f), RoundedCornerShape(18.dp))) {
-            Column {
+        ChatComposerSurface {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            ComposerChip(DaiyuIcons.Model, state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
+                Modifier.weight(1f).testTag("chat-model"),
+                onLongClick = { actions.onMenuAction(ChatMenuAction.SUB_AGENT) })
+            Row(Modifier.widthIn(min = 112.dp, max = 144.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
+                .combinedClickable(enabled = state.enabled, role = Role.Button, onClickLabel = "上下文统计", onClick = actions.onContextClick,
+                    onLongClick = { actions.onMenuAction(ChatMenuAction.CONTEXT_SCOPE) })
+                .padding(start = 8.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                val fraction = state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
+                Canvas(Modifier.size(16.dp)) {
+                    val path = Path().apply {
+                        moveTo(size.width * .5f, size.height * .48f)
+                        cubicTo(-size.width * .15f, -size.height * .25f, 0f, size.height * .9f, size.width * .5f, size.height * .55f)
+                        cubicTo(size.width * .02f, size.height * 1.35f, size.width * 1.1f, size.height * 1.18f, size.width * .5f, size.height * .48f)
+                        cubicTo(size.width * 1.15f, -size.height * .25f, size.width, size.height * .9f, size.width * .5f, size.height * .55f)
+                    }
+                    val stroke = Stroke(width = 1.5.dp.toPx())
+                    drawPath(path, colors.primary.copy(alpha = .24f), style = stroke)
+                    if (fraction != null) {
+                        val measure = PathMeasure().apply { setPath(path, false) }
+                        val progress = Path()
+                        measure.getSegment(0f, measure.length * fraction, progress)
+                        drawPath(progress, if (state.enabled) colors.primary else colors.disabledOnSurface, style = stroke)
+                    }
+                }
+                Text(if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}",
+                    modifier = Modifier.weight(1f),
+                    style = MiuixTheme.textStyles.footnote1, color = secondaryColor,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+                Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp).height(1.dp)
+                    .background(colors.primary.copy(alpha = 0.12f)))
                 key(state.editorGeneration) {
                     val mountedGeneration = state.editorGeneration
                     var editingValue by remember {
@@ -118,8 +156,13 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 Modifier.size(40.dp), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Attach))
                             ChatIconButton(DaiyuIcons.Reasoning, "推理强度，当前为 ${state.reasoningLabel}", actions.onOpenReasoning,
                                 Modifier.size(40.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Reasoning))
-                            ChatIconButton(DaiyuIcons.Assistant, "选择助手，当前为 ${state.assistantLabel}", actions.onOpenAssistant,
-                                Modifier.size(40.dp).testTag("chat-assistant"), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Assistant))
+                            Box(Modifier.size(40.dp).testTag("chat-assistant").clip(CircleShape)
+                                .combinedClickable(enabled = state.enabled, role = Role.Button,
+                                    onClickLabel = "选择助手", onClick = actions.onOpenAssistant)
+                                .semantics { contentDescription = "选择助手，当前为 ${state.assistantLabel}" },
+                                contentAlignment = Alignment.Center) {
+                                AssistantAvatar(assistant, 24.dp)
+                            }
                         }
                         key(state.controlOwnerKey) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -134,11 +177,9 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 else if (state.phase == ComposerPhase.IDLE) actions.onSend(state.text)
                                 else actions.onSupplement(state.text)
                             }, Modifier.size(48.dp).testTag(if (hasText || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
-                                .controlGesture(actions, primaryEnabled).background(
-                                if (!primaryEnabled) colors.disabledPrimaryButton
-                                else if (state.phase == ComposerPhase.PAUSED || (!hasText && state.phase == ComposerPhase.RUNNING)) colors.onSurface else colors.primary,
-                                CircleShape,
-                            ),
+                                .controlGesture(actions, primaryEnabled),
+                                containerColor = if (!primaryEnabled) colors.disabledPrimaryButton
+                                    else if (state.phase == ComposerPhase.PAUSED || (!hasText && state.phase == ComposerPhase.RUNNING)) colors.onSurface else colors.primary,
                                 enabled = primaryEnabled,
                                 tint = if (state.phase == ComposerPhase.PAUSED || (!hasText && state.phase == ComposerPhase.RUNNING)) colors.surface else colors.onPrimary,
                                 onLongClick = if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
@@ -156,29 +197,6 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         ChatVoiceModeMenu(voiceModes, { voiceModes = false }, actions.onMenuAction)
                     }
                 }
-            }
-        }
-        Row(Modifier.fillMaxWidth().padding(top = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            ComposerChip(DaiyuIcons.Model, state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
-                Modifier.weight(1f).testTag("chat-model"),
-                onLongClick = { actions.onMenuAction(ChatMenuAction.SUB_AGENT) })
-            Row(Modifier.widthIn(min = 112.dp, max = 144.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
-                .combinedClickable(enabled = state.enabled, role = Role.Button, onClickLabel = "上下文统计", onClick = actions.onContextClick,
-                    onLongClick = { actions.onMenuAction(ChatMenuAction.CONTEXT_SCOPE) })
-                .padding(start = 8.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                val fraction = state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
-                Canvas(Modifier.size(14.dp)) {
-                    val stroke = Stroke(width = 2.dp.toPx())
-                    drawArc(colors.outline, -90f, 360f, false, style = stroke)
-                    if (fraction != null) drawArc(if (state.enabled) colors.primary else colors.disabledOnSurface, -90f, fraction * 360f, false, style = stroke)
-                }
-                Text(if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}",
-                    modifier = Modifier.weight(1f),
-                    style = MiuixTheme.textStyles.footnote1, color = secondaryColor,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
-            }
         }
     }
     if (attachments) ChatAttachmentSheet({ attachments = false }, actions.onMenuAction)

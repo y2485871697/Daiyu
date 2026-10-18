@@ -18,6 +18,8 @@ internal fun ProductionUniversalVoicePanel(
     start: (VoiceControlProfile, VoiceControlLimits) -> Unit,
     openRequested: Boolean = false,
     onCloseRequest: () -> Unit = {},
+    showEntry: Boolean = true,
+    cascadeEntry: @Composable () -> Unit = {},
 ) {
     var locallyExpanded by remember { mutableStateOf(false) }
     val expanded = locallyExpanded || openRequested
@@ -30,7 +32,7 @@ internal fun ProductionUniversalVoicePanel(
     }
     var selected by remember(profiles) { mutableStateOf(profiles.firstOrNull()) }
     var limits by remember { mutableStateOf(VoiceControlLimits()) }
-    TextButton(text = if (expanded) "收起 UNIVERSAL 手动语音面板（结束本次）" else "打开 UNIVERSAL 手动持续语音面板",
+    if (showEntry) TextButton(text = if (expanded) "结束语音对话" else "语音对话",
         modifier = Modifier.testTag("voice-universal-open"), onClick = {
             if (expanded) state.permitId?.let { host.stop(it) }
             locallyExpanded = !expanded
@@ -47,6 +49,7 @@ internal fun ProductionUniversalVoicePanel(
                     onSelectProfile = { selected = it }, onLimitsChange = { limits = it },
                     onConfigureProfile = { locallyExpanded = false; onCloseRequest(); configure() }, onStart = start, onStop = host::stop,
                     modifier = Modifier.testTag("voice-universal-control"))
+                cascadeEntry()
                 TextButton(text = "关闭面板并结束本次", onClick = {
                     state.permitId?.let { host.stop(it) }; locallyExpanded = false; onCloseRequest()
                 })

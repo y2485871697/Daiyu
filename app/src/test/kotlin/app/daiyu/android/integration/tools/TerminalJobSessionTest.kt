@@ -204,7 +204,7 @@ class TerminalJobSessionTest {
         fun digest(file: File) = java.security.MessageDigest.getInstance("SHA-256").digest(file.readBytes())
             .joinToString("") { "%02x".format(it) }
         val spec = LinuxInstallation("fixture", "environment", "generation", rootfs, proot, digest(proot), loader, digest(loader))
-        val store = LinuxEnvironmentStore(File(root, "selection")).apply { select(spec) }
+        val store = hostLinuxStore(File(root, "selection")).apply { select(spec) }
         val launch = TerminalPtyLaunch.Linux.freeze(store, LinuxGenerationRef("environment", "generation"), root, root)
         try { test(root, store, TerminalJobPlan(message.conversationId, message.runId, launch, "printf 'fixed'", "async")) }
         finally { root.deleteRecursively() }

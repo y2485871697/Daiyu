@@ -115,9 +115,18 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         }
         ui.waitForIdle()
     }
-    protected fun openModels() {
+    protected fun openProviderManagement() {
         openSettings()
         reveal("settings-row:模型提供商", "设置").performClick()
+        awaitUniqueTag("provider-management")
+        ui.waitUntil(5_000) {
+            ui.onAllNodes(hasTestTag("provider-add") and isEnabled()).fetchSemanticsNodes().size == 1
+        }
+        reveal("provider-open-primary", "提供商").assertIsDisplayed().assertIsEnabled()
+    }
+    protected fun openModels() {
+        openProviderManagement()
+        reveal("provider-open-primary", "提供商").performClick()
         awaitModelEditor()
     }
     protected fun awaitModelEditor() {
@@ -171,7 +180,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     // Retain host capabilities or app-owned semantics, not ClickableNode wrappers.
     // Capture before navigation; never refetch a replacement callback after a visit changes.
     protected fun retainedClick(activity: MainActivity, tag: String): () -> Unit {
-        node(tag).assertExists()
+        if (tag == "model-save") reveal(tag) else node(tag).assertExists()
         return when (tag) {
             "platform-action-confirm" -> {
                 val action = checkNotNull(node(tag).fetchSemanticsNode()
@@ -235,11 +244,15 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         awaitUniqueTag("chat-draft")
     }
     protected fun backToPage(activity: MainActivity, expectedTag: String) {
+        dismissIme()
         ui.waitForIdle()
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
         ui.waitForIdle()
         mainThread { assertFalse(activity.isFinishing); assertFalse(activity.isDestroyed) }
-        awaitUniqueTag(expectedTag)
+        awaitUniqueTag(expectedTag) {
+            "retainedPage=${invokeHost(activity, "getRetainedPage")} sidebarVisible=${invokeHost(activity, "getSidebarVisible")}"
+        }
+        node(expectedTag).assertIsDisplayed()
     }
     /** Real framework pause/resume, retaining this Activity without onStop or recreation. */
     protected fun realPauseResume(original: MainActivity, beforePause: () -> Unit = {}, atPause: () -> Unit = {}) {

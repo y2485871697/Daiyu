@@ -247,6 +247,8 @@ final class OwnerIpcServer {
                     // never-initialized store closure. The watchdog bounds a stalled response.
                     if (completion.responseFinished()) stopAndQuit();
                 }
+                // A terminal reply must never enter another authenticated, unbounded read.
+                if (dispatcher.shouldStop()) return;
             }
         }
 

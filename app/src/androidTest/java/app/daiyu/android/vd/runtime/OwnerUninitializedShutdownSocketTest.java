@@ -36,8 +36,12 @@ public class OwnerUninitializedShutdownSocketTest extends InstrumentationTestCas
         final AtomicReference<Throwable> failure = new AtomicReference<>();
         final AtomicReference<String> marker = new AtomicReference<>();
         final AtomicInteger creates = new AtomicInteger();
+        final CountDownLatch terminalDispatchReached = new CountDownLatch(1);
+        final CountDownLatch allowTerminalDispatch = new CountDownLatch(1);
 
-        Fixture(int allowedUid) throws Exception {
+        Fixture(int allowedUid) throws Exception { this(allowedUid, false); }
+
+        Fixture(int allowedUid, boolean gateTerminalDispatch) throws Exception {
             root = Files.createTempDirectory(getInstrumentation().getTargetContext()
                     .getCacheDir().getCanonicalFile().toPath(), "r08_");
             Files.setPosixFilePermissions(root, PosixFilePermissions.fromString("rwx------"));
@@ -54,7 +58,20 @@ public class OwnerUninitializedShutdownSocketTest extends InstrumentationTestCas
                     if (Thread.currentThread() != thread) failure.set(new AssertionError("not owner looper"));
                     return coordinator.dispatch(r);
                 }
-                public boolean shouldStop() { return coordinator.shouldStop(); }
+                public boolean shouldStop() {
+                    boolean stop = coordinator.shouldStop();
+                    if (stop && gateTerminalDispatch && Thread.currentThread() == thread &&
+                            allowTerminalDispatch.getCount() != 0) {
+                        terminalDispatchReached.countDown();
+                        try {
+                            if (!allowTerminalDispatch.await(15, TimeUnit.SECONDS))
+                                failure.set(new AssertionError("terminal dispatch gate not released"));
+                        } catch (InterruptedException error) {
+                            Thread.currentThread().interrupt(); failure.set(error);
+                        }
+                    }
+                    return stop;
+                }
             };
             server = new OwnerIpcServer(name, allowedUid, TOKEN, handler, checked, () -> {
                 try {
@@ -81,6 +98,7 @@ public class OwnerUninitializedShutdownSocketTest extends InstrumentationTestCas
         }
 
         public void close() throws Exception {
+            allowTerminalDispatch.countDown();
             server.stop();
             thread.quitSafely();
             thread.join(10000);
@@ -162,6 +180,22 @@ public class OwnerUninitializedShutdownSocketTest extends InstrumentationTestCas
             Thread.sleep(20);
         }
         throw new AssertionError("rejected peer did not relinquish connection");
+    }
+
+    public void testTerminalShutdownClosesAuthenticatedClientWithoutAnotherFrame() throws Exception {
+        try (Fixture f = new Fixture(Process.myUid(), true); LocalSocket socket = f.connect()) {
+            send(socket, bound("receipt"));
+            assertFalse(receive(socket).getBoolean("found"));
+            try {
+                send(socket, wire("shutdown_uninitialized"));
+                assertTrue(receive(socket).getBoolean("ok"));
+                assertTrue(f.terminalDispatchReached.await(5, TimeUnit.SECONDS));
+                // Dispatch completion is still gated; the terminal reply must close, not read again.
+                assertEquals(-1, socket.getInputStream().read());
+            } finally { f.allowTerminalDispatch.countDown(); }
+            f.awaitTerminal();
+            assertEquals(0, f.creates.get());
+        }
     }
 
     public void testLostShutdownResponseStillCompletesButNeverCreatesDisplay() throws Exception {

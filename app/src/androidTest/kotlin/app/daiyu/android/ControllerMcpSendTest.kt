@@ -90,6 +90,29 @@ class ControllerMcpSendTest : InstrumentationTestCase() {
         controlMain { controller.rejectMcp(next) }
         assertUncommitted()
     }
+    fun testPolicySaveRevokesAlreadyConfirmedExactApprovalWithoutConnectingOrWriting() {
+        val pending = prepare()
+        controlMain {
+            assertTrue(pending.confirm(pending, owner, text))
+            assertTrue(pending.confirmed)
+        }
+        assertUncommitted()
+        val before = store.snapshot()
+        val server = before.servers.single()
+        val changed = server.withPolicy(catalog = server.catalog + McpRemoteTool("other", "unselected tool"))
+        val saved = store.save(listOf(changed), McpSettingsOwner(), before)
+        assertTrue(saved.servers.single().eligible("erase"))
+        assertFalse(store.isCurrent(before))
+        assertFalse(pending.scope.isCurrent())
+        assertFalse(pending.confirmed)
+        controlMain {
+            assertFalse(pending.confirm(pending, owner, text))
+            assertFalse(controller.sendMcp(pending, owner, text, ChatController.TextSendTicket()) { fail("stale approval callback") })
+            controller.rejectMcp(pending)
+        }
+        assertUncommitted()
+    }
+
     fun testOriginalDurableTicketPauseResumeAndStopDoNotReconnectMcpOrBroadenItsScope() {
         val pending = prepare()
         val first = fixture.session("late first", held = true, holdSeconds = 30)

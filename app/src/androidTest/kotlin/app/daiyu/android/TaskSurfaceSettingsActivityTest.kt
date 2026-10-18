@@ -1,5 +1,8 @@
 package app.daiyu.android
 
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import androidx.activity.compose.setContent
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
@@ -16,10 +19,26 @@ class TaskSurfaceSettingsActivityTest : WiredActivityTestCase() {
     fun testSaveFailureIsVisibleAndSuccessfulRetryPersistsOnlyTheSelectedBasePreference() {
         var record: String? = "task-surface-v1\nASK\n"
         var failWrite = true
+        val entered = AtomicReference<CountDownLatch>()
+        val release = AtomicReference<CountDownLatch>()
         val store = TaskSurfaceStore(object : TaskSurfacePersistence {
             override fun read() = record
-            override fun write(value: String) { check(!failWrite); record = value }
+            override fun write(value: String) {
+                entered.get().countDown()
+                check(release.get().await(10, TimeUnit.SECONDS)) { "test write gate was not released" }
+                check(!failWrite); record = value
+            }
         })
+        fun saveWithObservedBusyState() {
+            val gate = CountDownLatch(1)
+            entered.set(CountDownLatch(1)); release.set(gate)
+            try {
+                reveal("settings-row:保存任务位置", "Agent任务偏好").performClick()
+                awaitControl("preference persistence entered") { entered.get().count == 0L }
+                awaitUniqueTag("settings-row:正在保存…")
+            } finally { gate.countDown() }
+            awaitUniqueTag("settings-row:保存任务位置")
+        }
         val before = fixture.database.exportBackup()
         val modelSettings = fixture.settings.loadForEditing().settings
         mainThread {
@@ -35,7 +54,7 @@ class TaskSurfaceSettingsActivityTest : WiredActivityTestCase() {
                 ui.onAllNodesWithTag("settings-radio:后台执行").fetchSemanticsNodes().isNotEmpty()
         }
         reveal("settings-radio:后台执行", "Agent任务偏好").assertIsEnabled().performClick()
-        reveal("settings-row:保存任务位置", "Agent任务偏好").performClick()
+        saveWithObservedBusyState()
         val failure = "保存失败，未确认新偏好。后续执行将拒绝使用未确认的位置；请重试保存。"
         awaitControl("failed preference write fenced") { store.load() === TaskSurfaceSettings.Unavailable }
         ui.waitUntil(5_000) {
@@ -47,7 +66,7 @@ class TaskSurfaceSettingsActivityTest : WiredActivityTestCase() {
         assertEquals("task-surface-v1\nASK\n", record)
         assertSame(TaskSurfaceSettings.Unavailable, store.load())
         mainThread { failWrite = false }
-        reveal("settings-row:保存任务位置", "Agent任务偏好").performClick()
+        saveWithObservedBusyState()
         val success = "任务位置偏好已保存；当前运行的决定保持不变。"
         awaitControl("successful preference retry read back") {
             store.load() == TaskSurfaceSettings.Available(TaskSurfacePreference.BACKGROUND)

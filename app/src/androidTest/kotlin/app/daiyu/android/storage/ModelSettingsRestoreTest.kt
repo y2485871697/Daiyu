@@ -20,6 +20,8 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
     /** getAll, even without decrypting, counts as a credential read. Guard both reads and edits. */
     private inner class GuardedPreferences(val raw: SharedPreferences) : SharedPreferences by raw {
         var protectCredentials = true
+        var allowHeaderPresence = false
+        val headerPresence = mutableSetOf<String?>()
         var reads = mutableSetOf<String?>()
         var writes = mutableSetOf<String?>()
         var commits = 0
@@ -36,7 +38,13 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
             check(!protectCredentials) { "restore or gated load must not read all preferences" }
             return raw.all
         }
-        override fun contains(key: String?): Boolean { read(key); return raw.contains(key) }
+        override fun contains(key: String?): Boolean {
+            if (key == "request-headers" || key == "request-headers-iv") {
+                check(!protectCredentials || allowHeaderPresence) { "restore must not query header presence" }
+                headerPresence.add(key)
+            } else read(key)
+            return raw.contains(key)
+        }
         override fun getString(key: String?, defValue: String?): String? { read(key); return raw.getString(key, defValue) }
         override fun getBoolean(key: String?, defValue: Boolean): Boolean { read(key); return raw.getBoolean(key, defValue) }
         override fun edit(): SharedPreferences.Editor {
@@ -58,7 +66,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
                 }
             }
         }
-        fun resetObservations() { reads.clear(); writes.clear(); commits = 0 }
+        fun resetObservations() { reads.clear(); writes.clear(); headerPresence.clear(); commits = 0 }
     }
     private inner class Fixture {
         val prefix = "restore-test-${UUID.randomUUID()}"
@@ -87,6 +95,11 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
                 .putBoolean("device-status", true).commit())
         }
         fun material() = materialKeys.associateWith { raw.getString(it, null) }
+        fun editing(store: ModelSettingsStore = this.store): EditingSettings {
+            spy.allowHeaderPresence = true
+            return try { store.loadForEditing() } finally { spy.allowHeaderPresence = false }
+        }
+
     }
     private val fixtures = mutableListOf<Fixture>()
     private fun fresh() = Fixture().also { fixtures.add(it) }
@@ -153,7 +166,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
         val plan = f.store.prepareNonSecretRestore(JSONObject().put("endpoint", "").put("model", "").put("responses-path", ""))
         f.store.applyNonSecretRestore(plan, true)
         listOf("endpoint", "model", "responses-path").forEach { assertTrue(f.raw.contains(it)); assertEquals("", f.raw.getString(it, null)) }
-        assertTrue(f.raw.getBoolean(gate, false)); assertTrue(f.reopen().loadForEditing().credentialUnavailable)
+        assertTrue(f.raw.getBoolean(gate, false)); assertTrue(f.editing(f.reopen()).credentialUnavailable)
     }
 
     fun testRequiresExplicitAuthorizationAndStoreBoundPlan() {
@@ -222,7 +235,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
             assertEquals(material, f.material()); assertTrue(f.raw.getBoolean(gate, false))
             val reopened = f.reopen()
             rejected { reopened.load() }
-            val editing = reopened.loadForEditing()
+            val editing = f.editing(reopened)
             assertTrue(editing.credentialUnavailable); assertEquals("", editing.settings.apiKey)
             assertEquals(value, f.raw.getString(name, null)); assertEquals(emptySet<Any>(), editing.settings.enabledTools())
             assertTrue(f.spy.reads.intersect(materialKeys).isEmpty())
@@ -244,7 +257,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
     fun testOnlySuccessfulExplicitKeySaveClearsPersistentRebindGate() {
         val f = fresh(); f.save()
         f.store.applyNonSecretRestore(f.store.prepareNonSecretRestore(JSONObject().put("model", "restored")), true)
-        val editing = f.reopen().loadForEditing()
+        val editing = f.editing(f.reopen())
         rejected { f.save(editing.settings) }; assertTrue(f.raw.getBoolean(gate, false))
         val replacement = editing.settings.copy(apiKey = "explicit-replacement-key")
         f.save(replacement)
@@ -278,8 +291,8 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
             f.spy.outcomes.addAll(listOf(CommitOutcome.FALSE_AFTER_WRITE, compensation))
             rejected { f.store.applyNonSecretRestore(plan, true) }
             val reopened = f.reopen()
-            rejected { reopened.load() }; assertTrue(reopened.loadForEditing().credentialUnavailable)
-            assertEquals("", reopened.loadForEditing().settings.apiKey)
+            rejected { reopened.load() }; assertTrue(f.editing(reopened).credentialUnavailable)
+            assertEquals("", f.editing(reopened).settings.apiKey)
             val retry = reopened.prepareNonSecretRestore(JSONObject().put("battery", false))
             val commits = f.spy.commits
             rejected { reopened.applyNonSecretRestore(retry, true) }; assertEquals(commits, f.spy.commits)
@@ -297,7 +310,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
         rejected { f.save(f.settings.copy(apiKey = "failed-replacement")) }
         assertTrue(f.raw.getBoolean(gate, false))
         val reopened = f.reopen()
-        rejected { reopened.load() }; assertTrue(reopened.loadForEditing().credentialUnavailable)
+        rejected { reopened.load() }; assertTrue(f.editing(reopened).credentialUnavailable)
         val plan = reopened.prepareNonSecretRestore(JSONObject().put("model", "another-restore"))
         val commits = f.spy.commits
         rejected { reopened.applyNonSecretRestore(plan, true) }; assertEquals(commits, f.spy.commits)
@@ -314,7 +327,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
             f.spy.outcomes.add(outcome)
             rejected { f.save(f.settings.copy(apiKey = "replacement-not-committed")) }
             assertEquals(before, f.raw.all); assertTrue(f.raw.getBoolean(gate, false))
-            rejected { f.reopen().load() }; assertEquals("", f.reopen().loadForEditing().settings.apiKey)
+            rejected { f.reopen().load() }; assertEquals("", f.editing(f.reopen()).settings.apiKey)
             f.save(f.settings.copy(apiKey = "replacement-committed"))
             assertFalse(f.raw.contains(gate)); f.spy.protectCredentials = false
             assertEquals("replacement-committed", f.reopen().load().apiKey)
@@ -330,7 +343,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
             if(bad is String) edit.putString("protocol",bad) else edit.putBoolean("protocol",false)
             assertTrue(edit.commit());f.spy.protectCredentials=true;f.spy.resetObservations()
             rejected {f.reopen().load()}
-            val editing=f.reopen().loadForEditing()
+            val editing=f.editing(f.reopen())
             assertEquals(ProviderProtocol.UNKNOWN,editing.settings.protocol)
             assertEquals("",editing.settings.apiKey);assertTrue(editing.credentialUnavailable)
             assertTrue(f.spy.reads.intersect(materialKeys).isEmpty())
@@ -372,7 +385,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
         f.store.applyNonSecretRestore(plan,true)
         assertEquals(material,f.material());assertTrue(f.raw.getBoolean(gate,false))
         assertFalse(f.raw.getBoolean("battery",true));assertFalse(f.raw.getBoolean("device-status",true))
-        assertEquals(ProviderProtocol.MESSAGES,f.reopen().loadForEditing().settings.protocol)
+        assertEquals(ProviderProtocol.MESSAGES,f.editing(f.reopen()).settings.protocol)
         val legacy=f.store.prepareNonSecretRestore(JSONObject().put("model","legacy"))
         assertEquals("messages",legacy.after["protocol"])
         val empty=f.store.prepareNonSecretRestore(JSONObject())
@@ -397,7 +410,7 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
         assertEquals("messages",f.raw.getString("protocol",null));assertTrue(f.raw.getBoolean(gate,false))
         assertFalse(f.raw.getBoolean("battery",true));assertFalse(f.raw.getBoolean("device-status",true))
         rejected {f.reopen().load()}
-        val editing=f.reopen().loadForEditing()
+        val editing=f.editing(f.reopen())
         assertEquals("",editing.settings.apiKey);assertEquals(ProviderProtocol.MESSAGES,editing.settings.protocol)
         assertTrue(editing.credentialUnavailable)
         assertTrue(f.spy.reads.all {it in configKeys || it==gate || it=="request-options"})
@@ -457,6 +470,39 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
         assertEquals(envelope, envelope.keys.associateWith { f.raw.getString(it, null) })
         f.spy.protectCredentials = false
         assertEquals("kept-secret", JSONObject(f.store.load().customHeaders.encode()).getString("x-tenant"))
+    }
+
+    fun testRestoreNeverQueriesHeaderPresenceEvenWithMissingOrBrokenEnvelope() {
+        val states = listOf<Map<String, Any>>(
+            emptyMap(), mapOf("request-headers" to "cipher", "request-headers-iv" to "iv"),
+            mapOf("request-headers" to "cipher"), mapOf("request-headers-iv" to "iv"),
+            mapOf("request-headers" to true, "request-headers-iv" to "broken"))
+        for (headers in states) for (connectionChange in listOf(false, true)) {
+            val f = fresh(); f.seedConfiguration(); f.seedMaterial()
+            val editor = f.raw.edit()
+            headers.forEach { (key, value) ->
+                when (value) {
+                    is String -> editor.putString(key, value)
+                    is Boolean -> editor.putBoolean(key, value)
+                }
+            }
+            assertTrue(editor.commit())
+            f.spy.resetObservations()
+            val incoming = if (connectionChange) JSONObject().put("endpoint", "https://restored.invalid")
+                else JSONObject().put("battery", false)
+            val plan = f.store.prepareNonSecretRestore(incoming)
+            f.store.applyNonSecretRestore(plan, true)
+            assertTrue(f.spy.headerPresence.isEmpty())
+            assertEquals(headers, f.raw.all.filterKeys { it == "request-headers" || it == "request-headers-iv" })
+            assertTrue(f.spy.writes.none { it == "request-headers" || it == "request-headers-iv" })
+            if (connectionChange) {
+                val editing = f.editing()
+                assertTrue(editing.credentialUnavailable)
+                assertEquals(headers.isNotEmpty(), editing.headersUnavailable)
+                assertEquals("", editing.settings.apiKey)
+                assertTrue(editing.settings.customHeaders.isEmpty)
+            }
+        }
     }
 
 }

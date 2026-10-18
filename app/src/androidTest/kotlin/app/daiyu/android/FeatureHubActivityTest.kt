@@ -74,6 +74,9 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     fun testConnectedModelEntryOpensTheExistingSettingsWithoutSaving() {
         setDraft("原草稿"); val before = fixture.settings.loadForEditing().settings
         openHub(); entry("providers").performClick()
+        awaitUniqueTag("provider-management")
+        reveal("provider-open-primary", "提供商").assertIsEnabled().performClick()
+        awaitModelEditor()
         modelField("Base URL").assertEditableText(before.endpoint)
         modelField("模型名").assertEditableText(before.model)
         backToChat(activity); assertDraft("原草稿")

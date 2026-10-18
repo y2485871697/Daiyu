@@ -253,6 +253,25 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         assertDraft("provider navigation remains unsent")
     }
 
+    fun testMissingCatalogKeepsBothTabsWithoutRegisteringAProviderIdentity() {
+        val editor = fixture.controller.providers.editor(app.daiyu.android.storage.ProviderRegistry.PRIMARY)
+        assertNull(fixture.controller.providers.withEditor(editor) { it.localModelCatalogSnapshot() })
+        val before = fixture.settings.load()
+        val registry = fixture.controller.providers.snapshot()
+        openModels()
+        selectProviderTab("模型")
+        reveal("model-catalog-fetch").assertIsNotEnabled()
+        ui.onNodeWithText("本地模型目录尚不可用，请先保存配置。").assertExists()
+        assertNull(fixture.controller.providers.withEditor(editor) { it.localModelCatalogSnapshot() })
+        assertEquals(registry, fixture.controller.providers.snapshot())
+        assertEquals(before, fixture.settings.load())
+        selectProviderTab("配置")
+        modelField("模型名").assertEditableText(before.model)
+        backToPage(activity, "page:提供商")
+        assertNull(fixture.controller.providers.withEditor(editor) { it.localModelCatalogSnapshot() })
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testPrimaryProviderSuccessfulSaveStillReturnsDirectlyToChat() {
         setDraft("primary save remains unsent")
         openModels()

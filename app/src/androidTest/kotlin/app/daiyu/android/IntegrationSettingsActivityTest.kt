@@ -78,6 +78,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
                 .hide(WindowInsetsCompat.Type.ime())
         }
         ui.waitForIdle()
+        selectProviderTab("模型")
         reveal("model-catalog-fetch")
         ui.waitUntil(timeoutMillis = 5_000) {
             ui.onAllNodesWithTag("model-catalog-fetch").fetchSemanticsNodes().singleOrNull()?.config?.let {
@@ -315,6 +316,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         assertNull(connection.get().getRequestProperty("Authorization"))
         val imported = fixture.settings.modelCatalogSnapshot().models
         assertTrue(imported.any { it.id == "second" }); assertFalse(imported.any { it.id == "first" })
+        selectProviderTab("配置")
         modelField("模型名").assertEditableText("")
         editModel("模型名", "manual-model"); editModel("API Key", "new-key"); saveModel()
         awaitControl("model save") { !fixture.controller.dataBusy && fixture.settings.load().model == "manual-model" }
@@ -326,6 +328,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         openModels(); modelField("模型名").assertEditableText(old)
         fetch(); assertTrue(entered.await(5, TimeUnit.SECONDS))
         try {
+            selectProviderTab("配置")
             editModel("模型名", "changed"); modelField("模型名").assertEditableText("changed")
             editModel("模型名", old); modelField("模型名").assertEditableText(old)
         } finally { release.countDown() }
@@ -345,7 +348,10 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             openModels(); if (save) editModel("模型名", "")
             fetch(); assertTrue(entered.await(5, TimeUnit.SECONDS))
             try {
-                if (save) reveal("model-save").performClick() else backToChat(activity)
+                if (save) {
+                    selectProviderTab("配置")
+                    reveal("model-save").performClick()
+                } else backToChat(activity)
             } finally { release.countDown() }
             finished(connection)
             if (save) awaitControl("invalid model save") { !fixture.controller.dataBusy }

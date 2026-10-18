@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -39,6 +40,8 @@ private class ProviderDetail(
     val persistence: SavedModelCatalogPersistence<CatalogModelParameters>, val catalogIdentity: String?,
 ) {
     val live = AtomicBoolean(true)
+    val saveOwner = ModelSettingsSaveOwner()
+    fun revoke() { live.set(false); saveOwner.revoke() }
     var draft by mutableStateOf(editing.settings.providerDraft())
 }
 private class PausedProviderDraft(
@@ -89,7 +92,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     fun current(p: ProviderPagePermit) = visit.get() && p.live.get() && permit === p && resumed &&
         lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && ownerCheck()
     fun clearPrompts() { prompt = null; authentication = null; confirmation = null }
-    fun closeDetail() { serial++; loading = false; detail?.live?.set(false); detail = null; clearPrompts() }
+    fun closeDetail() { serial++; loading = false; detail?.revoke(); detail = null; clearPrompts() }
     fun refresh() {
         val p = permit
         if (!current(p)) return
@@ -177,7 +180,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             }
         }
         lifecycle.addObserver(observer)
-        onDispose { pausedDraft = null; visit.set(false); permit.revoke(); detail?.live?.set(false); lifecycle.removeObserver(observer) }
+        onDispose { pausedDraft = null; visit.set(false); permit.revoke(); detail?.revoke(); lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(resumed, permit, busy, initialSlot, pendingOpen) {
         if (pendingOpen && current(permit) && busy == null) {
@@ -188,6 +191,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         }
     }
     fun back() {
+        detail?.revoke()
         pausedDraft = null; pendingOpen = false
         if (detail != null || loading) {
             // The primary provider is entered as the app's model-settings page, not as a
@@ -234,12 +238,12 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     val ticket = Any(); busy = ticket
                     try {
                         controller.saveProviderSettings(d.editor, value.getOrThrow(), d.editing,
-                            submitted.protocolChangeAuthorized, submitted.requestOptionsReplacementAuthorized, p.save,
+                            submitted.protocolChangeAuthorized, submitted.requestOptionsReplacementAuthorized, d.saveOwner,
                             headersReplacementAuthorized = submitted.headersReplacementAuthorized) { success ->
                             if (busy === ticket) busy = null
                             if (live()) {
                                 if (success && d.editor.slotId == ProviderRegistry.PRIMARY) {
-                                    p.revoke(); onDetailBack()
+                                    d.revoke(); p.revoke(); onDetailBack()
                                 } else if (success) open(d.editor.slotId)
                                 else { closeDetail(); notice = "未保存，请重新打开详情核对。"; refresh() }
                             }
@@ -288,13 +292,38 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     } catch (_: Exception) { if (busy === ticket) busy = null; complete(false) }
                 } else complete(false)
             })
-        if (d.catalogIdentity == null) ModelSettingsScreen(draft, change, save, {}, { back() },
-            modifier = connectionModifier,
-            pageTitle = detailTitle, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
-            credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
-            headersUnavailable = d.editing.headersUnavailable,
-            catalogEnabled = false, errorText = notice)
-        else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
+        if (d.catalogIdentity == null) {
+            val twoTabs = initialSlot != ProviderRegistry.PRIMARY
+            var modelTab by remember { mutableStateOf(false) }
+            val tabs: LazyListScope.() -> Unit = {
+                if (twoTabs) item(key = "provider-tabs") {
+                    SettingsCard {
+                        SettingsRadioRow("配置", !modelTab, enabled = enabled) {
+                            if (live()) modelTab = false
+                        }
+                        SettingsRadioRow("模型", modelTab, enabled = enabled) {
+                            if (live()) modelTab = true
+                        }
+                    }
+                }
+            }
+            if (twoTabs && modelTab) {
+                MiuixScaffoldPage(detailTitle, onBack = { back() }) {
+                    tabs()
+                    item {
+                        TextButton(text = "获取模型", enabled = false,
+                            modifier = Modifier.testTag("model-catalog-fetch"), onClick = {})
+                        SettingsNote("本地模型目录尚不可用，请先保存配置。")
+                        notice?.let { SettingsNote(it, error = true) }
+                    }
+                }
+            } else ModelSettingsScreen(draft, change, save, {}, { back() },
+                modifier = connectionModifier, headerContent = tabs, showCatalog = !twoTabs,
+                pageTitle = detailTitle, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
+                credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
+                headersUnavailable = d.editing.headersUnavailable,
+                catalogEnabled = false, errorText = notice)
+        } else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
             createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
                 if (!live() || !enabled || requestCancelled() || d.draft !== value) false
                 else connectionSettings(value)?.let { settings ->
@@ -350,7 +379,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     val expected = registry
     val auth = authentication
     if (auth != null && expected != null) DaiyuChoiceSheet(
-        title = "认证方式", options = listOf("API Key", "OAuth"),
+        title = "认证方式", options = listOf("API Key", "OAuth"), engineeringUi = engineeringUi,
         onSelect = { selected ->
             if (authentication === auth && registry === expected && current(p) && enabled && selected == 0) {
                 authentication = null

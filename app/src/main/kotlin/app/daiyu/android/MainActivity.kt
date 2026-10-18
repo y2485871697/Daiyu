@@ -5201,9 +5201,7 @@ class MainActivity : ComponentActivity() {
     private fun showOpenedBackup(uri: Uri) {
         if (lastOpenedBackupUri == uri.toString() && prompt?.backup == true) return
         lastOpenedBackupUri = uri.toString(); retainedPage = "backup"
-        if (!engineeringUi) { confirmBackupImportAuto(uri); return }
-        prompt = ChoicePrompt("打开备份", listOf("完整中立备份（推荐）", "纯文本兼容备份"),
-            { index -> backupGuard { confirmBackupImport(uri, index == 0) } }, backup = true)
+        confirmBackupImportAuto(uri)
     }
     private fun cancelDeferredOpenedBackup() {
         val deferred = deferredOpenedBackup ?: return
@@ -5434,7 +5432,7 @@ class MainActivity : ComponentActivity() {
         backupGuard {
             val preview = checkNotNull(configurationRestorePreview)
             check(!preview.plan.isNoOp)
-            prompt = ConfirmPrompt("恢复模型配置", if (engineeringUi) "" else restorePreviewText, "确认恢复", action = {
+            prompt = ConfirmPrompt("恢复模型配置", restorePreviewText, "确认恢复", action = {
                 backupGuard {
                     check(configurationRestorePreview === preview)
                     try { controller.restoreImportedConfiguration(preview, authorized = true) { success ->

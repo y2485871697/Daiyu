@@ -34,64 +34,12 @@ internal fun BackupScreen(
             if (!statusText.isNullOrBlank()) SettingsNote(statusText)
             if (!errorText.isNullOrBlank()) SettingsNote(errorText, error = true)
         }
-        if (!engineeringUi) {
-            item(key = "backup_actions") {
-                SettingsCard {
-                    SettingsRow("导出备份", tag = "backup-export", onClick = if (busy) null else onExportComplete,
-                        leading = { SettingsIcon(DaiyuIcons.Export) })
-                    SettingsRow("导入备份", tag = "backup-import", onClick = if (busy) null else onImport,
-                        leading = { SettingsIcon(DaiyuIcons.Import) })
-                }
-            }
-        } else {
-            item(key = "backup_export") {
-                SettingsSectionTitle("导出备份")
-                SettingsCard {
-                    SettingsRow("导出精简备份", onClick = if (busy) null else onExportCompact, leading = {
-                            DaiyuIcon(DaiyuIcons.Export, contentDescription = null,
-                                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
-                        })
-                    SettingsRow("导出完整备份", onClick = if (busy) null else onExportComplete, leading = {
-                            DaiyuIcon(DaiyuIcons.Backup, contentDescription = null,
-                                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
-                        })
-                }
-            }
-            item(key = "backup_import") {
-                SettingsSectionTitle("导入备份")
-                SettingsCard {
-                    SettingsRow("导入精简备份", onClick = if (busy) null else onImportCompact, leading = {
-                        DaiyuIcon(DaiyuIcons.Import, contentDescription = null,
-                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
-                    })
-                    SettingsRow("导入完整备份", onClick = if (busy) null else onImportComplete, leading = {
-                        DaiyuIcon(DaiyuIcons.Folder, contentDescription = null,
-                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
-                    })
-                }
-            }
-            item(key = "legacy_library") {
-                SettingsSectionTitle("旧版资料")
-                SettingsCard {
-                    SettingsRow("打开旧版兼容资料库", onClick = if (busy) null else onOpenLegacyLibrary)
-                    SettingsNote("独立只读导入旧版 JSON / ZIP，不恢复历史执行授权；完整备份不包含此资料库。")
-                }
-            }
-            item(key = "backup_restore_preview") {
-                SettingsSectionTitle("恢复配置")
-                SettingsCard {
-                    SettingsRow("预览模型配置", onClick = if (busy) null else onPreviewRestore, leading = {
-                        DaiyuIcon(DaiyuIcons.Settings, contentDescription = null,
-                            tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
-                    })
-                    SettingsNote(restorePreviewText.ifBlank { "暂无配置" })
-                    if (canRestoreConfiguration) {
-                        SettingsRow("恢复配置", onClick = if (busy) null else onRestoreConfiguration, leading = {
-                            DaiyuIcon(DaiyuIcons.Reconnect, contentDescription = null,
-                                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
-                        })
-                    }
-                }
+        item(key = "backup_actions") {
+            SettingsCard {
+                SettingsRow("导出备份", tag = "backup-export", onClick = if (busy) null else onExportComplete,
+                    leading = { SettingsIcon(DaiyuIcons.Export) })
+                SettingsRow("导入备份", tag = "backup-import", onClick = if (busy) null else onImport,
+                    leading = { SettingsIcon(DaiyuIcons.Import) })
             }
         }
     }

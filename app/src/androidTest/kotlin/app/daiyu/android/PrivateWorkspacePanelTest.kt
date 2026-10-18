@@ -31,10 +31,15 @@ class PrivateWorkspacePanelTest : WiredActivityTestCase() {
             reveal("workspace-private-entry:sub", "私有文件测试").performClick()
             ui.waitUntil(5_000) { ui.onAllNodesWithTag("workspace-private-entry:sub/keep.txt").fetchSemanticsNodes().size == 1 }
             reveal("workspace-private-delete:sub/keep.txt", "私有文件测试").performClick()
-            ui.onNodeWithText("取消").performClick()
+            ui.onNodeWithText("删除私有文件").assertIsDisplayed()
+            awaitUniqueTag("dialog-cancel")
+            node("dialog-cancel").assertIsDisplayed().assertIsEnabled().performClick()
+            ui.onNodeWithText("删除私有文件").assertDoesNotExist()
             assertEquals("keep", File(sub, "keep.txt").readText())
             reveal("workspace-private-delete:sub/keep.txt", "私有文件测试").performClick()
-            ui.onNodeWithText("删除", useUnmergedTree = true).performClick()
+            ui.onNodeWithText("删除私有文件").assertIsDisplayed()
+            awaitUniqueTag("dialog-confirm")
+            node("dialog-confirm").assertIsDisplayed().assertIsEnabled().performClick()
             ui.waitUntil(5_000) { !File(sub, "keep.txt").exists() }
             ui.waitUntil(5_000) { ui.onAllNodesWithText("私有条目已删除").fetchSemanticsNodes().isNotEmpty() }
             reveal("workspace-private-parent", "私有文件测试").performClick()

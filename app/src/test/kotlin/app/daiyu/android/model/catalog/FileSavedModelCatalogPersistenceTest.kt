@@ -33,6 +33,35 @@ class FileSavedModelCatalogPersistenceTest {
         assertEquals(reopened, backend(file).register(listOf(record("ignored"))))
     }
 
+    @Test fun unregisteredConfigurationChangesHaveDurableMonotonicRevisions() {
+        val file = File(temporary.root, "unregistered.catalog")
+        val store = backend(file)
+        assertEquals(-1L, store.readConfiguration { it })
+        store.configurationChange { }
+        assertEquals(0L, backend(file).readConfiguration { it })
+        assertNull(store.current())
+        store.configurationChange { }
+        assertEquals(1L, backend(file).readConfiguration { it })
+        assertNull(store.current())
+        val registered = store.register(listOf(record("first")))
+        assertEquals(2L, registered.revision)
+        assertEquals(listOf(record("first")), registered.models)
+    }
+
+    @Test fun failedUnregisteredSaveAndTombstoneChangesStillInvalidateOldConfiguration() {
+        val file = File(temporary.root, "unregistered.catalog")
+        val store = backend(file)
+        assertThrows(IllegalStateException::class.java) { store.configurationChange { error("failed save") } }
+        assertEquals(0L, backend(file).readConfiguration { it })
+        assertNull(store.current())
+        val registered = store.register()
+        assertTrue(store.deleteProvider(registered.providerIdentity))
+        val before = store.readConfiguration { it }
+        store.configurationChange { }
+        assertEquals(before + 1, backend(file).readConfiguration { it })
+        assertNull(store.current())
+    }
+
     @Test fun configurationMutationInvalidatesOldSessionWithoutReplacingIdentityOrModels() {
         val store = backend(File(temporary.root, "primary.catalog"))
         val initial = store.register(listOf(record("old")))

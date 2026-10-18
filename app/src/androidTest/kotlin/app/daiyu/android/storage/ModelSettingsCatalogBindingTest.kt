@@ -34,6 +34,29 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         try { root.deleteRecursively() } finally { super.tearDown() }
     }
 
+    fun testInterruptedAccountSaveBlocksExecutionAndDirectoryUntilExplicitRecovery() {
+        store.save(initial)
+        append(importedModel("old-account-model"))
+        val old = checkNotNull(store.localModelCatalogSnapshot())
+        // Reproduce the durable post-preference/pre-catalog crash state without executing compensation.
+        check(raw.edit().putBoolean("catalog-configuration-pending", true).commit())
+        val reopened = ModelSettingsStore(context, prefix)
+        var rejected = false
+        try { reopened.load() } catch (_: CredentialUnavailableException) { rejected = true }
+        assertTrue(rejected)
+        assertTrue(reopened.loadForEditing().credentialUnavailable)
+        assertEquals("", reopened.loadForEditing().settings.apiKey)
+        rejectsSelection { reopened.localModelCatalogSnapshot() }
+        rejectsSelection { reopened.modelCatalogSnapshot() }
+        val replacement = initial.copy(apiKey = "explicitly-reentered-account-key")
+        reopened.save(replacement)
+        assertEquals(replacement, reopened.load())
+        assertFalse(raw.contains("catalog-configuration-pending"))
+        val fresh = checkNotNull(reopened.localModelCatalogSnapshot())
+        assertFalse(old.providerIdentity == fresh.providerIdentity)
+        assertEquals(listOf(initial.model), fresh.models.map { it.id })
+    }
+
     fun testDirectoryProtocolReadDoesNotDecryptAnUnavailableCredential() {
         store.save(initial)
         val before = store.modelCatalogSnapshot()

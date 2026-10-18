@@ -20,7 +20,7 @@ class SavedSubAgentRuntimeBindingsTest {
             snapshots.add(snapshot); ModelPort { error("no network") }
         }
         assertThrows(IllegalArgumentException::class.java) { bindings.freeze(owner, config) }
-        bindings.authorizeSavedModel(owner, profile, child.modelId, provider)
+        bindings.authorizePrimaryModel(owner, profile, child.modelId, provider)
         val frozen = bindings.freeze(owner, config)
         assertTrue(snapshots.isEmpty())
         assertThrows(IllegalArgumentException::class.java) { bindings.freeze(SubAgentConfigKey.Conversation("other"), config) }
@@ -47,7 +47,7 @@ class SavedSubAgentRuntimeBindingsTest {
             profile.copy(reasoning = ReasoningEffort.OFF) to provider.copy(models = listOf(child.copy(defaultReasoning = ReasoningEffort.HIGH, reasoningCanDisable = true)))
         )
         attempts.forEach { (p, source) ->
-            assertThrows(IllegalArgumentException::class.java) { bindings.authorizeSavedModel(owner, p, child.modelId, source) }
+            assertThrows(IllegalArgumentException::class.java) { bindings.authorizePrimaryModel(owner, p, child.modelId, source) }
         }
         assertEquals(0, loads)
     }
@@ -55,24 +55,53 @@ class SavedSubAgentRuntimeBindingsTest {
     @Test fun failedExplicitRebindRevokesPreviousGrantAndCustomModelCannotOverride() {
         var current = saved
         val bindings = SavedSubAgentRuntimeBindings({ current })
-        bindings.authorizeSavedModel(owner, profile, child.modelId, provider)
+        bindings.authorizePrimaryModel(owner, profile, child.modelId, provider)
         current = saved.copy(requestOptions = ProviderRequestOptions("""{"model":"unexpected"}"""))
-        assertThrows(IllegalArgumentException::class.java) { bindings.authorizeSavedModel(owner, profile, child.modelId, provider) }
+        assertThrows(IllegalArgumentException::class.java) { bindings.authorizePrimaryModel(owner, profile, child.modelId, provider) }
         current = saved
         assertThrows(IllegalArgumentException::class.java) { bindings.freeze(owner, config) }
         current = saved.copy(requestOptions = ProviderRequestOptions("""{"model":"exact-api-model"}"""))
-        bindings.authorizeSavedModel(owner, profile, child.modelId, provider)
+        bindings.authorizePrimaryModel(owner, profile, child.modelId, provider)
         assertEquals(setOf(profile.id), bindings.freeze(owner, config).keys)
         assertThrows(IllegalArgumentException::class.java) { bindings.freeze(owner, config.copy(profiles = listOf(profile.copy(modelId = "changed")))) }
         assertThrows(IllegalArgumentException::class.java) { bindings.freeze(owner, config.copy(enabled = false)) }
         bindings.clear(); assertThrows(IllegalArgumentException::class.java) { bindings.freeze(owner, config) }
     }
 
+    @Test fun multiProviderBindingNeverLoadsPrimaryAndRevokesObservedStaleGrant() {
+        var current = saved.copy(model = child.modelId)
+        var reads = 0
+        val bindings = SavedSubAgentRuntimeBindings({ error("primary fallback forbidden") })
+        val resolve: (String, String) -> ModelSettings = { providerId, localId ->
+            assertEquals(provider.id, providerId)
+            assertEquals(child.id, localId)
+            reads++
+            current
+        }
+        bindings.authorizeSavedModel(owner, profile, child.modelId, provider, resolve)
+        assertEquals(setOf(profile.id), bindings.freeze(owner, config).keys)
+        current = current.copy(apiKey = "replaced")
+        assertThrows(IllegalArgumentException::class.java) { bindings.freeze(owner, config) }
+        current = saved.copy(model = child.modelId)
+        assertThrows(IllegalArgumentException::class.java) { bindings.freeze(owner, config) }
+        bindings.authorizeSavedModel(owner, profile, child.modelId, provider, resolve)
+        assertEquals(setOf(profile.id), bindings.freeze(owner, config).keys)
+        assertTrue(reads >= 4)
+    }
+
+    @Test fun multiProviderResolverMustReturnTheSelectedApiModel() {
+        val bindings = SavedSubAgentRuntimeBindings({ error("primary fallback forbidden") })
+        assertThrows(IllegalArgumentException::class.java) {
+            bindings.authorizeSavedModel(owner, profile, child.modelId, provider) { _, _ -> saved }
+        }
+        assertThrows(IllegalArgumentException::class.java) { bindings.freeze(owner, config) }
+    }
+
     @Test fun providerApiPoolAndZeroLimitAreNotSplitByProfileId() {
         val bindings = SavedSubAgentRuntimeBindings({ saved })
         val second = profile.copy(id = "second")
-        bindings.authorizeSavedModel(owner, profile, child.modelId, provider)
-        bindings.authorizeSavedModel(owner, second, child.modelId, provider)
+        bindings.authorizePrimaryModel(owner, profile, child.modelId, provider)
+        bindings.authorizePrimaryModel(owner, second, child.modelId, provider)
         val pool = SubAgentParallelModel(provider.id, child.modelId)
         val configured = config.copy(profiles = listOf(profile, second), parallelLimits = mapOf(pool to 0))
         val frozen = bindings.freeze(owner, configured)

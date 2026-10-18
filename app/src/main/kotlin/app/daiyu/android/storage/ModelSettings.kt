@@ -80,6 +80,8 @@ class ModelSettingsStore internal constructor(
         File(context.filesDir, if (namespace == "model-settings") "model-catalog/primary.bin"
             else "model-catalog/$namespace.bin"), CatalogModelParametersCodec) }
     internal fun modelCatalogSnapshot(): SavedModelCatalogSnapshot<CatalogModelParameters> =
+        modelCatalog.readConfiguration {
+        checkCatalogConfiguration()
         modelCatalog.registerFrom {
             val editing = synchronized(lock) { editingWithoutCredential() }
             check(!editing.requestOptionsUnavailable) { "请求策略已损坏；请先明确修复再导入模型" }
@@ -88,11 +90,22 @@ class ModelSettingsStore internal constructor(
             check(current.protocol != ProviderProtocol.UNKNOWN) { "请先修复模型协议" }
             listOf(CatalogModelParameters.fromCurrent(current))
         }
+        }
     /** Read-only, network/credential-free. Does not resurrect a deleted provider or migrate defaults. */
-    internal fun localModelCatalogSnapshot(): SavedModelCatalogSnapshot<CatalogModelParameters>? = modelCatalog.current()
+    internal fun localModelCatalogSnapshot(): SavedModelCatalogSnapshot<CatalogModelParameters>? = modelCatalog.readConfiguration {
+        checkCatalogConfiguration()
+        modelCatalog.current()
+    }
+    internal fun checkCatalogConfiguration() = synchronized(lock) {
+        check(!catalogRecoveryRequired()) { "提供商保存未完成；请重新输入密钥并保存配置" }
+    }
+    private fun catalogRecoveryRequired(): Boolean = try {
+        preferences.getBoolean(CATALOG_PENDING, false)
+    } catch (_: Exception) { true }
 
     /** Directory browsing needs only the protocol, never key decryption or execution readiness. */
     internal fun localModelCatalogProtocol(): ProviderProtocol = synchronized(lock) {
+        check(!catalogRecoveryRequired()) { "提供商保存未完成；请重新输入密钥并保存配置" }
         readProtocol().also { check(it != ProviderProtocol.UNKNOWN) { "模型协议无效；请到模型设置重新选择" } }
     }
 
@@ -245,7 +258,7 @@ class ModelSettingsStore internal constructor(
     }.generateKey()
     private fun discardKey(alias:String) {try {keyStore().deleteEntry(alias)} catch (_:Exception) {}}
     fun loadForEditing():EditingSettings=synchronized(lock) {
-        if(preferences in failedStores || credentialRebindRequired() || readProtocol() == ProviderProtocol.UNKNOWN) return@synchronized editingWithoutCredential()
+        if(preferences in failedStores || credentialRebindRequired() || catalogRecoveryRequired() || readProtocol() == ProviderProtocol.UNKNOWN) return@synchronized editingWithoutCredential()
         val values=preferences.all
         var unavailable=false
         var optionsUnavailable = false
@@ -274,7 +287,7 @@ class ModelSettingsStore internal constructor(
     fun load():ModelSettings=synchronized(lock) {
         check(readProtocol() != ProviderProtocol.UNKNOWN) {"模型协议无效；请到模型设置重新选择"}
         check(preferences !in failedStores) {"模型设置存储不可用；请重新保存"}
-        if(credentialRebindRequired()) throw CredentialUnavailableException()
+        if(credentialRebindRequired() || catalogRecoveryRequired()) throw CredentialUnavailableException()
         val loaded=loadForEditing()
         if(loaded.credentialUnavailable) throw CredentialUnavailableException()
         loaded.settings
@@ -309,6 +322,7 @@ class ModelSettingsStore internal constructor(
         val alias="$keyAliasPrefix.$owner.${UUID.randomUUID()}"
         var committed=false
         var attempted=false
+        var catalogReplaced=false
         try {
             val cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,newKey(alias))
             val encrypted=Base64.encodeToString(cipher.doFinal(settings.apiKey.toByteArray(Charsets.UTF_8)),Base64.NO_WRAP)
@@ -324,12 +338,16 @@ class ModelSettingsStore internal constructor(
                     else putString("request-options", settings.requestOptions.encode())
                 }
                 .putString("key-owner",owner).putString("key-alias",alias).putString("iv",Base64.encodeToString(cipher.iv,Base64.NO_WRAP)).putString("key",encrypted)
+                .apply { if (connectionChanged) putBoolean(CATALOG_PENDING, true) }
                 .remove(REBIND_REQUIRED).commit()
             check(committed) {"模型设置保存失败"}
             // Still under catalog -> settings locks. A catalog failure compensates preferences below.
             // A connection/key change starts a fresh identity, even if wire model IDs happen to match.
-            if (connectionChanged) modelCatalog.replaceRegisteredProvider(listOf(CatalogModelParameters.fromCurrent(settings)))
-            else {
+            if (connectionChanged) {
+                modelCatalog.replaceRegisteredProvider(listOf(CatalogModelParameters.fromCurrent(settings)))
+                catalogReplaced = true
+                check(preferences.edit().remove(CATALOG_PENDING).commit()) { "提供商目录保存未确认" }
+            } else {
                 if (previousConnection.model != settings.model && !previousEditing.requestOptionsUnavailable) {
                     modelCatalog.updateRegisteredModel(previousConnection.model) {
                         CatalogModelParameters.updated(previousConnection, it)
@@ -338,6 +356,12 @@ class ModelSettingsStore internal constructor(
                 modelCatalog.updateRegisteredModel(settings.model) { CatalogModelParameters.updated(settings, it) }
             }
         } catch (_:Exception) {
+            if (catalogReplaced) {
+                failedStores.add(preferences)
+                // A published catalog must not be paired with compensated old credentials.
+                runCatching { preferences.edit().putBoolean(CATALOG_PENDING, true).commit() }
+                throw IllegalStateException("提供商保存未完成；请重新输入密钥并保存配置")
+            }
             if(!attempted) discardKey(alias)
             else {
                 val restored=try {
@@ -375,8 +399,9 @@ class ModelSettingsStore internal constructor(
         private val lock=Any()
         private val failedStores=java.util.Collections.newSetFromMap(java.util.WeakHashMap<SharedPreferences,Boolean>())
         private const val REBIND_REQUIRED = "credential-rebind-required"
+        private const val CATALOG_PENDING = "catalog-configuration-pending"
         private val configurationFields = listOf("endpoint", "model", "responses-path", "device-status", "battery", "protocol")
-        private val fields = configurationFields + listOf("request-options", "key-owner", "key-alias", "iv", "key", REBIND_REQUIRED)
+        private val fields = configurationFields + listOf("request-options", "key-owner", "key-alias", "iv", "key", REBIND_REQUIRED, CATALOG_PENDING)
 
         private fun putField(editor: SharedPreferences.Editor, name: String, values: Map<String, Any?>) {
             if(!values.containsKey(name)) editor.remove(name)

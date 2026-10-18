@@ -13,6 +13,7 @@ import app.daiyu.android.media.ImageAttachment
 import app.daiyu.android.media.ImageAttachmentException
 import app.daiyu.android.media.ImageAttachmentFailure
 import app.daiyu.android.media.ImageAttachmentOwner
+import app.daiyu.android.storage.ProviderRunConfiguration
 import app.daiyu.android.model.ProviderSnapshot
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.ui.screens.chat.attachments.*
@@ -88,7 +89,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
     private var lease = PreviewLease(controller, null)
     var historyLoader by mutableStateOf<MessageImageLoader?>(null); private set
     var draftLoader by mutableStateOf<ImageAttachmentPreviewLoader>(lease.draftLoader); private set
-    @Volatile private var authorizedSettings: ModelSettings? = null
+    @Volatile private var authorizedSettings: ProviderRunConfiguration? = null
     @Volatile private var capabilityGeneration = 0L
     private val capabilityLock = Mutex()
     var authorizationLabel by mutableStateOf("声明当前模型支持图片"); private set
@@ -210,17 +211,18 @@ internal class ImageChatHost private constructor(controller: ChatController) {
     }
 
     /** Called only after an explicit confirmation naming this exact saved model/configuration. */
-    fun authorize(saved: ModelSettings, complete: (Boolean) -> Unit) {
+    fun authorize(configuration: ProviderRunConfiguration, complete: (Boolean) -> Unit) {
+        val saved = configuration.settings
         val generation = capabilityGeneration
         io.launch {
             capabilityLock.withLock {
                 val accepted = try {
-                    generation == capabilityGeneration && controller.settings.load() == saved && controller.authorizeImageProvider(
-                        ProviderSnapshot.capture(saved, saved.protocol, imageInputSupported = true))
+                    generation == capabilityGeneration && controller.providers.isCurrentActive(configuration) && controller.authorizeImageProvider(
+                        ProviderSnapshot.capture(saved, saved.protocol, imageInputSupported = true), configuration)
                 } catch (_: Exception) { false }
                 withContext(Dispatchers.Main) {
                     if (!closed && generation == capabilityGeneration) {
-                        authorizedSettings = saved.takeIf { accepted }
+                        authorizedSettings = configuration.takeIf { accepted }
                         authorizationLabel = if (accepted) "已声明：${saved.model} 支持图片" else "配置已变化，请重新声明图片能力"
                         complete(accepted)
                     }
@@ -230,29 +232,18 @@ internal class ImageChatHost private constructor(controller: ChatController) {
     }
 
     /** Settings are read on IO and compared by complete value, never inferred from a model name. */
-    fun readSettings(complete: (ModelSettings?) -> Unit) {
+    fun readSettings(complete: (ProviderRunConfiguration?) -> Unit) {
         io.launch {
-            val saved = try { controller.settings.load() } catch (_: Exception) { null }
+            val saved = try { controller.providers.freezeActive() } catch (_: Exception) { null }
             withContext(Dispatchers.Main) { if (!closed && visible) complete(saved) }
         }
     }
 
     fun configurationChanged() {
-        val generation = ++capabilityGeneration
+        capabilityGeneration++
         authorizedSettings = null
         authorizationLabel = "声明当前模型支持图片"
-        // Also downgrade the Controller's history-continuation grant. Merely forgetting the UI
-        // grant would allow A -> B -> A settings changes to revive an old true snapshot.
-        io.launch {
-            capabilityLock.withLock {
-                try {
-                    val saved = controller.settings.load()
-                    if (generation == capabilityGeneration && authorizedSettings == null) {
-                        controller.authorizeImageProvider(ProviderSnapshot.capture(saved, saved.protocol, imageInputSupported = null))
-                    }
-                } catch (_: Exception) { /* Invalid settings already fail Controller preflight. */ }
-            }
-        }
+        controller.revokeImageProvider()
     }
 
     fun send(conversation: Conversation?, revision: Long, text: String,
@@ -280,14 +271,15 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         changed()
         io.launch {
             val request = try {
-                val saved = controller.settings.load()
+                val configuration = controller.providers.freezeActive()
+                val saved = configuration.settings
                 val main = ProviderSnapshot.capture(saved, saved.protocol,
-                    imageInputSupported = if (saved == authorizedSettings) true else null)
-                main to controller.captureImageRoute(main)
+                    imageInputSupported = if (configuration == authorizedSettings) true else null)
+                Triple(configuration, main, controller.captureImageRoute(main))
             } catch (_: Exception) { null }
             withContext(Dispatchers.Main) {
-                val provider = request?.first
-                val route = request?.second
+                val provider = request?.second
+                val route = request?.third
                 if (attempt.cancelled || target.abandoned || closed || !visible || !stillCurrent() || provider == null || route?.actual?.imageInputSupported != true) {
                     finish(target, attempt, ImageSendResult.Rejected(target.owner, revision,
                         if (attempt.cancelled) "图片准备已取消；未进入提交，草稿保留"
@@ -295,7 +287,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
                     return@withContext
                 }
                 attempt.handle = controller.sendImages(conversation, target.owner, revision, frozen.parts,
-                    provider, text, checkNotNull(route), frozen.identity) {
+                    provider, text, checkNotNull(route), frozen.identity, checkNotNull(request).first) {
                     finish(target, attempt, it)
                 }
                 if (attempt.handle == null) finish(target, attempt,
@@ -434,7 +426,8 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         if (closed) return
         closed = true; visible = false; visit++
         abandon(session); lease.close(); historyLoader = null
-        capabilityGeneration++ // A late declaration from the detached Activity cannot regrant.
+        capabilityGeneration++
+        controller.revokeImageProvider()
         authorizedSettings = null
         authorizationLabel = "声明当前模型支持图片"
         changed = {}; notice = {}; settled = { _, _ -> }

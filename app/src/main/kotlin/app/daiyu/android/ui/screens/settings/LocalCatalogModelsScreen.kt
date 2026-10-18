@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.foundation.lazy.LazyListScope
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -26,6 +27,7 @@ internal class LocalCatalogModelActions<T>(
     val currentModelId: String,
     val rename: (CatalogModelSelection<T>, String, () -> Boolean, (CatalogLocalEditResult) -> Unit) -> Unit,
     val delete: (CatalogModelSelection<T>, () -> Boolean, (CatalogLocalEditResult) -> Unit) -> Unit,
+    val select: ((CatalogModelSelection<T>, () -> Boolean, (Boolean) -> Unit) -> Unit)? = null,
 )
 
 @Composable
@@ -35,6 +37,8 @@ internal fun <T> LocalCatalogModelsScreen(
     actions: LocalCatalogModelActions<T>,
     enabled: Boolean,
     onBack: () -> Unit,
+    pageTitle: String = "本地模型",
+    headerContent: LazyListScope.() -> Unit = {},
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
@@ -118,7 +122,8 @@ internal fun <T> LocalCatalogModelsScreen(
             onConfirm = { if (deleting === selection && current() && matches(selection)) submit(selection, null) },
             onDismiss = { if (deleting === selection) deleting = null })
     }
-    MiuixScaffoldPage("本地模型", onBack = back) {
+    MiuixScaffoldPage(pageTitle, onBack = back) {
+        headerContent()
         item("catalog-state") {
             SettingsNote("更改显示名称不会改变API模型ID；当前模型需先切换后删除。")
             TextButton("刷新", enabled = request == null, onClick = { notice = null; reload() }, modifier = Modifier.testTag("local-model-refresh"))
@@ -132,6 +137,24 @@ internal fun <T> LocalCatalogModelsScreen(
                 SettingsCard {
                     SettingsRow(model.displayName, summary = model.id + if (model.id == actions.currentModelId) " · 当前模型" else "",
                         tag = "local-model:${model.id}")
+                    if (actions.select != null) TextButton("设为当前模型",
+                        enabled = enabled && request == null && model.id != actions.currentModelId,
+                        modifier = Modifier.testTag("local-model-select:${model.id}"), onClick = {
+                            if (current() && currentEnabled && request == null && selection != null && matches(selection) &&
+                                model.id != actions.currentModelId) {
+                                val token = AtomicBoolean(false); request = token
+                                val cancelled = { token.get() || !visit.get() }
+                                val complete: (Boolean) -> Unit = { success ->
+                                    if (current() && request === token && !token.get()) {
+                                        request = null
+                                        notice = if (success) "当前模型已切换" else "模型未切换，请刷新后重新选择"
+                                        reload()
+                                    }
+                                }
+                                try { actions.select.invoke(selection, cancelled, complete) }
+                                catch (_: Exception) { complete(false) }
+                            }
+                        })
                     TextButton("编辑名称", enabled = enabled && request == null, modifier = Modifier.testTag("local-model-rename:${model.id}"),
                         onClick = { if (current() && currentEnabled && request == null && selection != null && matches(selection)) editing = selection })
                     TextButton("删除", enabled = enabled && request == null && model.id != actions.currentModelId,

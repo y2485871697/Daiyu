@@ -27,6 +27,52 @@ class PrivateWorkspaceFilesTest : InstrumentationTestCase() {
         access.delete(entry)
         assertTrue(access.list().entries.isEmpty())
     }
+    fun testImportKeepsPartialBytesHiddenUntilCompleted() = fixture { files, access ->
+        val root = access.list().directory
+        val workspace = File(files, "workspace")
+        var observed = false
+        val input = object : ByteArrayInputStream(byteArrayOf(1, 2, 3)) {
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                if (pos > 0) {
+                    observed = true
+                    val staging = workspace.listFiles()!!.single()
+                    assertTrue(staging.name.startsWith(".workspace-import-"))
+                    assertEquals(3L, staging.length())
+                    assertTrue(access.list().entries.isEmpty())
+                }
+                return super.read(buffer, offset, length)
+            }
+        }
+        val name = access.importFile(root, "complete.bin", { input })
+        assertTrue(observed)
+        assertEquals(setOf(name), workspace.list()!!.toSet())
+        assertTrue(byteArrayOf(1, 2, 3).contentEquals(File(workspace, name).readBytes()))
+    }
+    fun testImportCollisionPreservesExistingTargetAndCleansStaging() = fixture { files, access ->
+        val root = access.list().directory
+        val workspace = File(files, "workspace")
+        var existing: File? = null
+        try {
+            access.importFile(root, "collision.bin", {
+                val token = workspace.list()!!.single().removePrefix(".workspace-import-")
+                existing = File(workspace, "$token-collision.bin").apply { writeText("keep") }
+                ByteArrayInputStream(byteArrayOf(1, 2, 3))
+            })
+            fail("existing target replaced")
+        } catch (error: android.system.ErrnoException) { assertEquals(android.system.OsConstants.EEXIST, error.errno) }
+        assertEquals("keep", checkNotNull(existing).readText())
+        assertEquals(setOf(checkNotNull(existing).name), workspace.list()!!.toSet())
+    }
+    fun testInputCloseCancellationDoesNotPublishOrLeaveStaging() = fixture { files, access ->
+        val root = access.list().directory
+        val cancelled = AtomicBoolean()
+        val input = object : ByteArrayInputStream(byteArrayOf(1, 2, 3)) {
+            override fun close() { cancelled.set(true); super.close() }
+        }
+        try { access.importFile(root, "cancel-on-close.bin", { input }, cancelled::get); fail("close cancellation ignored") }
+        catch (_: InterruptedException) { }
+        assertTrue(File(files, "workspace").list()!!.isEmpty())
+    }
     fun testLongUnicodeSourceNameRespectsFilesystemByteLimit() = fixture { _, access ->
         val name = access.importFile(access.list().directory, "汉".repeat(73) + ".txt", { ByteArrayInputStream(byteArrayOf(1)) })
         assertTrue(name.toByteArray(Charsets.UTF_8).size <= 255)

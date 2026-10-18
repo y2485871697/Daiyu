@@ -18,9 +18,9 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
         val size: Long, internal val identities: List<Identity>)
     data class Listing(val directory: Entry, val entries: List<Entry>, val truncated: Boolean)
 
-    fun list(directory: Entry? = null, cancelled: () -> Boolean = { false }): Listing {
+    fun list(directory: Entry? = null, cancelled: () -> Boolean = { false }): Listing = synchronized(publicationLock) {
         check(directory == null || directory.directory) { "workspace_not_directory" }
-        return pinned(directory, cancelled) { descriptor, chain ->
+        pinned(directory, cancelled) { descriptor, chain ->
             val relative = directory?.relative.orEmpty()
             val current = Entry(relative, relative.substringAfterLast('/').ifEmpty { "工作区" }, true, 0, chain)
             val entries = mutableListOf<Entry>()
@@ -71,22 +71,48 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
             val temporary = "$prefix/$STAGING$token"
             val finalName = "$token-$safeName"
             val target = "$prefix/$finalName"
+            var staged: Identity? = null
+            var reserved: Identity? = null
+            fun removeOwned(path: String, owned: Identity?) {
+                if (owned != null) runCatching {
+                    if (sameNode(identity(Os.lstat(path)), owned)) Os.remove(path)
+                }
+            }
             try {
                 val raw = Os.open(temporary,
                     OsConstants.O_WRONLY or OsConstants.O_CREAT or OsConstants.O_EXCL or OsConstants.O_NOFOLLOW, 384)
-                val held = try { ParcelFileDescriptor.dup(raw) } finally { Os.close(raw) }
-                ParcelFileDescriptor.AutoCloseOutputStream(held).use { destination ->
+                val held = try {
+                    staged = identity(Os.fstat(raw))
+                    ParcelFileDescriptor.dup(raw)
+                } finally { Os.close(raw) }
+                val completed = ParcelFileDescriptor.AutoCloseOutputStream(held).use { destination ->
                     active(cancelled)
                     openInput().use { source -> copy(source, destination, cancelled) }
                     destination.fd.sync()
                     active(cancelled)
-                    check(identity(Os.lstat(temporary)) == identity(Os.fstat(held.fileDescriptor))) { "workspace_entry_changed" }
-                    // link is create-only: a pre-existing destination is never replaced.
-                    Os.link(temporary, target)
-                    check(identity(Os.lstat(target)) == identity(Os.fstat(held.fileDescriptor))) { "workspace_entry_changed" }
+                    identity(Os.fstat(held.fileDescriptor)).also {
+                        check(identity(Os.lstat(temporary)) == it) { "workspace_entry_changed" }
+                    }
+                }
+                synchronized(publicationLock) {
+                    active(cancelled)
+                    check(identity(Os.lstat(temporary)) == completed) { "workspace_entry_changed" }
+                    // SELinux denies hard links. Lists share this short commit lock so they
+                    // cannot observe the empty name reserved exclusively for this import.
+                    try {
+                        val reservation = Os.open(target,
+                            OsConstants.O_WRONLY or OsConstants.O_CREAT or OsConstants.O_EXCL or OsConstants.O_NOFOLLOW, 384)
+                        try { reserved = identity(Os.fstat(reservation)) } finally { Os.close(reservation) }
+                        check(identity(Os.lstat(target)) == reserved) { "workspace_entry_changed" }
+                        Os.rename(temporary, target)
+                        reserved = null
+                    } finally { removeOwned(target, reserved) }
                 }
                 finalName
-            } finally { runCatching { Os.remove(temporary) } }
+            } finally {
+                removeOwned(temporary, staged)
+                removeOwned(target, reserved)
+            }
         }
     }
 
@@ -174,5 +200,6 @@ internal class PrivateWorkspaceFiles(private val paths: PrivateWorkspacePaths) {
         const val MAX_ENTRIES = 100
         const val MAX_FILE_BYTES = 256L * 1024 * 1024
         private const val STAGING = ".workspace-import-"
+        private val publicationLock = Any()
     }
 }

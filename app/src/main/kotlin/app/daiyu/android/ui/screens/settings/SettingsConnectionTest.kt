@@ -14,12 +14,18 @@ internal typealias ModelConnectionTester =
 internal data class SettingsConnectionTestUi(val running: Boolean, val status: String?,
     val start: () -> Unit, val cancel: () -> Unit)
 
+internal class SettingsConnectionDraftOwner(val draft: ModelSettingsDraftUi) {
+    override fun equals(other: Any?): Boolean = other is SettingsConnectionDraftOwner && draft === other.draft
+    override fun hashCode(): Int = System.identityHashCode(draft)
+}
+
 @Composable
 internal fun rememberSettingsConnectionTest(draft: ModelSettingsDraftUi, enabled: Boolean,
     tester: ModelConnectionTester?): SettingsConnectionTestUi {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val currentTester by rememberUpdatedState(tester)
-    val currentDraft by rememberUpdatedState(draft)
+    val draftOwner = SettingsConnectionDraftOwner(draft)
+    val currentDraftOwner by rememberUpdatedState(draftOwner)
     val currentEnabled by rememberUpdatedState(enabled)
     val visit = remember(lifecycle) { AtomicBoolean(true) }
     var request by remember { mutableStateOf<AtomicBoolean?>(null) }
@@ -30,7 +36,7 @@ internal fun rememberSettingsConnectionTest(draft: ModelSettingsDraftUi, enabled
         lifecycle.addObserver(observer)
         onDispose { visit.set(false); cancel(); lifecycle.removeObserver(observer) }
     }
-    DisposableEffect(draft, enabled, tester != null) {
+    DisposableEffect(draftOwner, enabled, tester != null) {
         onDispose { cancel() }
     }
     return SettingsConnectionTestUi(request != null, status, start = {
@@ -38,11 +44,11 @@ internal fun rememberSettingsConnectionTest(draft: ModelSettingsDraftUi, enabled
         if (visit.get() && invoke != null && currentEnabled && request == null &&
             lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
             val original = AtomicBoolean(false)
-            val frozen = currentDraft
+            val frozen = currentDraftOwner
             request = original; status = null
             val accepted = try {
-                invoke(frozen, original::get) { result ->
-                    if (visit.get() && request === original && !original.get() && currentEnabled && currentDraft == frozen &&
+                invoke(frozen.draft, original::get) { result ->
+                    if (visit.get() && request === original && !original.get() && currentEnabled && currentDraftOwner == frozen &&
                         lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
                         request = null; original.set(true); status = connectionTestMessage(result)
                     }

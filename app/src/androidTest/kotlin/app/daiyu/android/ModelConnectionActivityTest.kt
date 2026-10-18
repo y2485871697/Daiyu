@@ -116,6 +116,48 @@ class ModelConnectionActivityTest : WiredActivityTestCase() {
         assertFalse(accepted); assertEquals(0, requests.get())
         testConnection(); awaitStatus("目录连接成功，返回 1 个模型"); assertEquals(1, requests.get())
     }
+    fun testOldDraftCannotStartConnectionAfterVersionEditWithinSameVisit() {
+        val original = fixture.settings.load()
+        fixture.settings.save(original.copy(protocol = app.daiyu.android.model.ProviderProtocol.MESSAGES,
+            responsesPath = "", requestOptions = app.daiyu.android.model.ProviderRequestOptions(anthropicVersion = "2023-06-01")),
+            protocolChangeAuthorized = true)
+        openModels(); connect()
+        val retained = ui.onNode(SemanticsMatcher.keyIsDefined(RetainedProviderConnectionTest))
+            .fetchSemanticsNode().config[RetainedProviderConnectionTest]
+        editModel("Anthropic 版本", "2023-06-02")
+        var accepted = true
+        mainThread { accepted = retained.second(retained.first, { false }) { error("stale draft result") } }
+        assertFalse(accepted); assertEquals(0, requests.get())
+        testConnection(); awaitStatus("目录连接成功，返回 1 个模型")
+        assertEquals(1, requests.get()); assertEquals(0, fixture.opens.get())
+    }
+
+    fun testEqualFreshDraftCancelsOldRequestAndNewButtonUsesCurrentReference() {
+        val initial = ModelSettingsDraftUi(endpoint = "https://draft.invalid")
+        var draft by mutableStateOf(initial, referentialEqualityPolicy())
+        val latest = AtomicReference<SettingsConnectionTestUi>()
+        val seen = AtomicReference<ModelSettingsDraftUi>()
+        val cancellation = AtomicReference<() -> Boolean>()
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
+                    val state = rememberSettingsConnectionTest(draft, true) { value, cancelled, _ ->
+                        seen.set(value); cancellation.set(cancelled); requests.incrementAndGet(); true
+                    }
+                    SideEffect { latest.set(state) }
+                    top.yukonga.miuix.kmp.basic.Text(if (state.running) "testing" else "idle")
+                }
+            }
+        }
+        ui.waitForIdle(); mainThread { latest.get().start() }; ui.waitForIdle()
+        assertSame(initial, seen.get()); val oldCancelled = cancellation.get()
+        val equalFresh = initial.copy()
+        mainThread { draft = initial.copy(endpoint = "https://away.invalid"); draft = equalFresh }
+        ui.waitForIdle(); assertTrue(oldCancelled()); assertFalse(latest.get().running)
+        mainThread { latest.get().start() }
+        assertSame(equalFresh, seen.get()); assertEquals(2, requests.get())
+    }
+
     fun testDisposedConnectionUiCannotStartARequestAfterRemount() {
         val first = AtomicReference<SettingsConnectionTestUi>()
         val latest = AtomicReference<SettingsConnectionTestUi>()

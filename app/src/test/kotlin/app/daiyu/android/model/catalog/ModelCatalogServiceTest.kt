@@ -18,6 +18,32 @@ class ModelCatalogServiceTest {
         override fun getResponseCode() = 200
         override fun getInputStream() = """{"data":[{"id":"fixture"}]}""".byteInputStream()
     }
+    @Test fun savedAndDraftCataloguesAndConnectionTestUseTheConfiguredMessagesVersion() {
+        val connections = mutableListOf<Connection>()
+        val source = settings().copy(endpoint = "https://example.invalid/v1/messages", protocol = ProviderProtocol.MESSAGES,
+            requestOptions = ProviderRequestOptions("not-json", anthropicVersion = "2024-02-29"))
+        val service = ModelCatalogService({ source }, RemoteModelFetcher { url -> Connection(url).also { connections.add(it) } })
+        service.fetchSaved(); service.fetchDraft(source)
+        assertEquals(ModelConnectionResult.Connected(1), service.testDraft(source) { false })
+        assertEquals(3, connections.size)
+        for (connection in connections) {
+            assertEquals("2024-02-29", connection.getRequestProperty("anthropic-version"))
+            assertEquals("saved-key", connection.getRequestProperty("x-api-key"))
+            assertTrue(connection.closed)
+        }
+    }
+
+    @Test fun invalidVersionCannotStartADraftConnectionTest() {
+        var connects = 0
+        val service = ModelCatalogService({ error("no saved fallback") }, RemoteModelFetcher {
+            connects++; throw AssertionError("connection attempted")
+        })
+        val draft = settings().copy(endpoint = "https://example.invalid/v1/messages", protocol = ProviderProtocol.MESSAGES,
+            requestOptions = ProviderRequestOptions(anthropicVersion = "2023-02-29"))
+        assertEquals(ModelConnectionResult.Failed(RemoteModelFailure.REQUEST), service.testDraft(draft) { false })
+        assertEquals(0, connects)
+    }
+
     @Test fun savedLoadsOnceAndUsesOneFrozenCredentialAndEndpoint() {
         var reads = 0
         val connections = mutableListOf<Connection>()

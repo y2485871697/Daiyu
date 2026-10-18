@@ -19,6 +19,38 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class RemoteModelFetcherTest {
+    @Test fun requestOverloadsRetainVersionForAuthenticatedAndPublicAnthropicCatalogues() {
+        for (key in listOf("", "secret")) for (version in listOf(null, "2024-02-29")) for (explicitCancellation in listOf(false, true)) {
+            val connection = FakeConnection(200, """{"data":[{"id":"claude"}]}""")
+            val fetcher = RemoteModelFetcher { connection }
+            val request = RemoteModelRequest("https://example.invalid", key, RemoteModelProtocol.ANTHROPIC,
+                anthropicVersion = version)
+            val result = if (explicitCancellation) fetcher.fetch(request) { false } else fetcher.fetch(request)
+            assertEquals("claude", result.single().id)
+            assertEquals(version ?: "2023-06-01", connection.getRequestProperty("anthropic-version"))
+            assertEquals(1, connection.disconnectCalls)
+        }
+    }
+
+    @Test fun invalidOrCrossProtocolVersionNeverOpensCatalogueConnection() {
+        var connects = 0
+        val fetcher = RemoteModelFetcher { connects++; throw AssertionError("connection attempted") }
+        for ((protocol, version) in listOf(
+            RemoteModelProtocol.ANTHROPIC to "2023-02-29",
+            RemoteModelProtocol.ANTHROPIC to "2023-06-01\r\nX-Injected: yes",
+            RemoteModelProtocol.OPENAI to "2023-06-01",
+            RemoteModelProtocol.GEMINI to "2023-06-01")) {
+            try {
+                fetcher.fetch(RemoteModelRequest("https://example.invalid", "secret", protocol, anthropicVersion = version))
+                org.junit.Assert.fail("bad version must be rejected")
+            } catch (failure: RemoteModelException) {
+                assertEquals(RemoteModelFailure.REQUEST, failure.failure)
+                assertNull(failure.cause)
+            }
+        }
+        assertEquals(0, connects)
+    }
+
     @Test fun endpointDefaultsAreProtocolAwareAndSafe() {
         assertEquals(
             "https://example.invalid/v1/models",

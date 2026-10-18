@@ -35,6 +35,62 @@ class ProviderRequestWireTest {
         try { work(); fail("invalid policy must fail before connection") } catch (_: IllegalArgumentException) {}
     }
 
+    private fun versionMessagesSettings(version: String?) = settings.copy(
+        endpoint = "https://example.invalid/v1/messages", model = "claude-fixture",
+        protocol = ProviderProtocol.MESSAGES, requestOptions = ProviderRequestOptions(anthropicVersion = version))
+
+    @Test fun messagesVersionUsesDefaultOrConfiguredHeaderButNeverBodyField() {
+        val events = listOf(
+            JSONObject().put("type", "message_start").put("message", JSONObject().put("id", "msg")
+                .put("role", "assistant").put("content", JSONArray())),
+            JSONObject().put("type", "content_block_start").put("index", 0)
+                .put("content_block", JSONObject().put("type", "text").put("text", "ok")),
+            JSONObject().put("type", "content_block_stop").put("index", 0),
+            JSONObject().put("type", "message_delta").put("delta", JSONObject().put("stop_reason", "end_turn")),
+            JSONObject().put("type", "message_stop"))
+        val user = Message(MessageId("u"), ConversationId("c"), RunId("r"), "user",
+            listOf(MessageBlock.Text("u", "hi")), RunStatus.COMPLETED)
+        for (version in listOf(null, "2024-02-29")) {
+            val config = versionMessagesSettings(version)
+            val conn = Connection(events.joinToString("") { "event: ${it.getString("type")}\ndata: $it\n\n" })
+            var calls = 0
+            MessagesModel(config) { calls++; conn }.open(listOf(user)).next(emptyList()) {}
+            assertEquals(1, calls)
+            assertEquals(version ?: "2023-06-01", conn.getRequestProperty("anthropic-version"))
+            assertEquals("synthetic-key", conn.getRequestProperty("x-api-key"))
+            val body = conn.body()
+            assertEquals("claude-fixture", body.getString("model"))
+            assertEquals(1, body.getJSONArray("messages").length())
+            assertTrue(body.getBoolean("stream"))
+            assertFalse(body.has("anthropic_version"))
+            assertFalse(body.has("anthropic-version"))
+            assertTrue(conn.closed)
+        }
+    }
+
+    @Test fun invalidMessagesVersionFailsBeforeConnectionFactory() {
+        for (version in listOf("", " ", "2023-6-01", "2023-02-29", "2023-13-01", "2023-06-31",
+            "2023-06-01\r\nX-Injected: yes")) {
+            var calls = 0
+            expectRejected {
+                MessagesModel(versionMessagesSettings(version)) {
+                    calls++; throw AssertionError("connection attempted")
+                }.open(emptyList()).next(emptyList()) {}
+            }
+            assertEquals(0, calls)
+        }
+    }
+
+    @Test fun anthropicVersionOnResponsesFailsBeforeConnectionFactory() {
+        var calls = 0
+        expectRejected {
+            ResponsesModel(settings.copy(requestOptions = ProviderRequestOptions(anthropicVersion = "2023-06-01"))) {
+                calls++; throw AssertionError("connection attempted")
+            }.open(emptyList()).next(emptyList()) {}
+        }
+        assertEquals(0, calls)
+    }
+
     @Test fun responsesCustomEndpointAndKeyStayInBodyWithoutChangingConfiguration() {
         val custom = """{"endpoint":"https://body.invalid/v1/responses","key":"body-key","apiKey":"body-api-key","metadata":{"enabled":false,"attempt":7,"labels":["fixture"],"optional":null}}"""
         val config = settings.copy(requestOptions = ProviderRequestOptions(custom))

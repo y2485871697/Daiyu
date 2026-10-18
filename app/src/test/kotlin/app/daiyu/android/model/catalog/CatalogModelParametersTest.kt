@@ -13,6 +13,21 @@ import java.io.File
 class CatalogModelParametersTest {
     @get:Rule val temporary = TemporaryFolder()
 
+    @Test fun anthropicVersionRoundTripsThroughCatalog() {
+        val options = ProviderRequestOptions(anthropicVersion = "2023-06-01")
+        val source = ModelSettings("https://example.invalid", "model", "synthetic-key", false,
+            protocol = app.daiyu.android.model.ProviderProtocol.MESSAGES, requestOptions = options)
+        val migrated = CatalogModelParameters.fromCurrent(source)
+        val decoded = CatalogModelParametersCodec.decode(CatalogModelParametersCodec.encode(migrated.settings))
+        assertEquals(options, decoded.requestOptions)
+        assertEquals(source, decoded.applyTo(source.copy(requestOptions = ProviderRequestOptions()), source.model))
+        val file = File(temporary.root, "anthropic-version-catalog")
+        val saved = FileSavedModelCatalogPersistence(file, CatalogModelParametersCodec).register(listOf(migrated))
+        val reopened = FileSavedModelCatalogPersistence(file, CatalogModelParametersCodec).current()
+        assertEquals(saved, reopened)
+        assertEquals(options, reopened!!.models.single().settings.requestOptions)
+    }
+
     @Test fun unavailablePolicyCannotPersistFallbackDefaultsDuringMigration() {
         val file = File(temporary.root, "catalog")
         val store = FileSavedModelCatalogPersistence(file, CatalogModelParametersCodec)

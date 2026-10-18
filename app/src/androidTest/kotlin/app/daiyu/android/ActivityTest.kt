@@ -185,20 +185,45 @@ class ActivityTest : WiredActivityTestCase() {
         } finally { release.countDown(); from.close(); source.deleteDatabase("conversations.db") }
     }
 
+    fun testMessagesVersionSavesExactlyAndReopens() {
+        val original = fixture.settings.load()
+        val initial = original.copy(protocol = ProviderProtocol.MESSAGES, responsesPath = "",
+            requestOptions = original.requestOptions.copy(speedMode = null, codex = false, anthropicVersion = "2023-06-01"))
+        fixture.settings.save(initial, protocolChangeAuthorized = true)
+        openModels(); modelField("Anthropic 版本").assertEditableText("2023-06-01")
+        editModel("Anthropic 版本", "2023-06-02"); saveModel()
+        val saved = initial.copy(requestOptions = initial.requestOptions.copy(anthropicVersion = "2023-06-02"))
+        assertEquals(saved, fixture.settings.load())
+        openModels(); modelField("Anthropic 版本").assertEditableText("2023-06-02")
+        for (invalid in listOf(" ", " 2023-06-02 ")) {
+            editModel("Anthropic 版本", invalid); saveModel()
+            assertEquals(saved, fixture.settings.load())
+            modelField("Anthropic 版本").assertEditableText(invalid)
+        }
+        editModel("Anthropic 版本", ""); saveModel()
+        assertEquals(saved.copy(requestOptions = saved.requestOptions.copy(anthropicVersion = null)), fixture.settings.load())
+        openModels(); modelField("Anthropic 版本").assertEditableText("")
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testProtocolSelectionClearsCredentialRequiresRebindAndSurvivesReopen() {
         val config = fixture.settings.load().copy(responsesPath = "/responses")
         fixture.settings.save(config)
         setDraft("协议切换保留草稿"); openModels()
         reveal("settings-radio:Anthropic Messages").performClick()
         modelField("API Key").assertEditableText(""); modelField("Responses 路径").assertEditableText("").assertIsNotEnabled()
+        modelField("Anthropic 版本").assertEditableText("")
+        editModel("Anthropic 版本", "2023-06-02")
         editModel("API Key", "synthetic-messages-key"); saveModel()
         assertEquals(config, fixture.settings.load())
         reveal("settings-switch:重输密钥并绑定").performClick(); saveModel()
         val messages = fixture.settings.load()
         assertEquals(ProviderProtocol.MESSAGES, messages.protocol); assertEquals("synthetic-messages-key", messages.apiKey)
         assertEquals("", messages.responsesPath)
+        assertEquals("2023-06-02", messages.requestOptions.anthropicVersion)
         assertTrue(app.daiyu.android.model.ModelFactory.create(messages) is app.daiyu.android.model.MessagesModel)
         openModels(); reveal("settings-radio:Anthropic Messages").assertIsSelected()
+        modelField("Anthropic 版本").assertEditableText("2023-06-02")
         reveal("settings-radio:OpenAI Responses").assertIsEnabled().performClick()
         reveal("settings-radio:OpenAI Responses").assertIsSelected()
         reveal("settings-radio:Anthropic Messages").assertIsNotSelected()

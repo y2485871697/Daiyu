@@ -40,6 +40,7 @@ internal data class ModelSettingsDraftUi(
     val savedProtocol: ProviderProtocol = protocol,
     val protocolChangeAuthorized: Boolean = false,
     val requestOptionsReplacementAuthorized: Boolean = false,
+    val anthropicVersion: String = "",
 ) {
     override fun toString(): String = "ModelSettingsDraftUi(protocol=$protocol, model=$model, apiKey=<redacted>, customBody=<redacted>)"
 }
@@ -55,6 +56,7 @@ internal fun ModelSettingsDraftUi.selectProtocol(selected: ProviderProtocol): Mo
         apiKey = "",
         responsesPath = if (selected != ProviderProtocol.RESPONSES) "" else responsesPath,
         protocolChangeAuthorized = false,
+        anthropicVersion = if (selected == ProviderProtocol.MESSAGES) anthropicVersion else "",
     )
 
 /**
@@ -92,7 +94,8 @@ internal fun ModelSettingsScreen(
     var bodyExpanded by remember { mutableStateOf(false) }
     val catalogIsCurrent = catalogForDraft?.let {
         it.endpoint == draft.endpoint && it.responsesPath == draft.responsesPath &&
-            it.protocol == draft.protocol && it.apiKey == draft.apiKey && it.model == draft.model
+            it.protocol == draft.protocol && it.apiKey == draft.apiKey && it.model == draft.model &&
+            it.anthropicVersion == draft.anthropicVersion
     } == true
     MiuixScaffoldPage(title = pageTitle, onBack = { connection.cancel(); onBack() }, modifier = modifier) {
         headerContent()
@@ -126,6 +129,11 @@ internal fun ModelSettingsScreen(
                 SettingsTextField("Base URL", draft.endpoint, { changeDraft(draft.copy(endpoint = it)) }, enabled = enabled)
                 SettingsTextField("Responses 路径", draft.responsesPath, { changeDraft(draft.copy(responsesPath = it)) },
                     hint = "/responses", enabled = enabled && draft.protocol == ProviderProtocol.RESPONSES)
+                if (draft.protocol == ProviderProtocol.MESSAGES) {
+                    SettingsTextField("Anthropic 版本", draft.anthropicVersion,
+                        { changeDraft(draft.copy(anthropicVersion = it)) },
+                        hint = "留空使用 2023-06-01；格式 YYYY-MM-DD", enabled = enabled)
+                }
                 SettingsTextField("模型名", draft.model, { changeDraft(draft.copy(model = it)) }, enabled = enabled)
                 SettingsTextField("API Key", draft.apiKey, { changeDraft(draft.copy(apiKey = it)) }, password = true, enabled = enabled)
             }

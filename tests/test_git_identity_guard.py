@@ -62,11 +62,12 @@ class GitIdentityGuardTest(unittest.TestCase):
 
     def check_hook(self, data, success, env=None):
         p = subprocess.run(["sh", str(self.hook), "origin", "unused-local-test-remote"],
-                           cwd=self.root, input=data, text=True, encoding="utf-8",
+                           cwd=self.root, input=data.encode("utf-8"),
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env or self.env)
-        self.assertEqual(p.returncode == 0, success, p.stderr)
+        stderr = p.stderr.decode("utf-8")
+        self.assertEqual(p.returncode == 0, success, stderr)
         if not success:
-            self.assertIn("Git identity guard:", p.stderr)
+            self.assertIn("Git identity guard:", stderr)
         return p
 
     def install(self, success=True, env=None, cwd=None):

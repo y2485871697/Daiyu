@@ -84,4 +84,83 @@ class PrivateWorkspaceFilesTest : InstrumentationTestCase() {
         try { access.delete(selected); fail("nonempty directory deleted") } catch (_: Exception) { }
         assertEquals("keep", File(child, "keep.txt").readText())
     }
+    fun testListingCapsCandidatesIncludingHiddenStaging() = fixture { files, access ->
+        access.list()
+        val workspace = File(files, "workspace")
+        val limit = 100
+        assertEquals(limit, PrivateWorkspaceFiles.MAX_ENTRIES)
+        val expected = (0 until limit).map { "entry-$it.txt" }.toSet()
+        expected.forEach { assertTrue(File(workspace, it).createNewFile()) }
+        val exact = access.list()
+        assertEquals(limit, exact.entries.size)
+        assertEquals(expected, exact.entries.map { it.name }.toSet())
+        assertFalse(exact.truncated)
+        assertTrue(File(workspace, "one-more.txt").createNewFile())
+        val over = access.list()
+        assertEquals(limit, over.entries.size); assertTrue(over.truncated)
+        workspace.listFiles()!!.forEach { assertTrue(it.delete()) }
+        repeat(limit + 1) { assertTrue(File(workspace, ".workspace-import-test-$it").createNewFile()) }
+        val hidden = access.list()
+        assertTrue(hidden.entries.isEmpty()); assertTrue(hidden.truncated)
+    }
+    fun testActualImportByteLimitRemovesStagingAndDoesNotPublish() = fixture { files, access ->
+        val root = access.list().directory
+        val cap = 256L * 1024 * 1024
+        assertEquals(cap, PrivateWorkspaceFiles.MAX_FILE_BYTES)
+        var supplied = 0L; var closed = false
+        val input = object : java.io.InputStream() {
+            override fun read(): Int {
+                if (supplied == cap + 1) return -1
+                supplied++; return 0
+            }
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                if (length == 0) return 0
+                val remaining = cap + 1 - supplied
+                if (remaining == 0L) return -1
+                val count = minOf(length.toLong(), remaining).toInt()
+                java.util.Arrays.fill(buffer, offset, offset + count, 0.toByte())
+                supplied += count; return count
+            }
+            override fun close() { closed = true }
+        }
+        try { access.importFile(root, "too-large.bin", { input }); fail("actual byte limit ignored") }
+        catch (error: IllegalStateException) { assertEquals("workspace_file_too_large", error.message) }
+        assertEquals(cap + 1, supplied); assertTrue(closed)
+        assertTrue(access.list().entries.isEmpty())
+        assertTrue(File(files, "workspace").list()!!.isEmpty())
+    }
+    fun testStreamFailuresCleanImportStagingAndPreserveExportSource() = fixture { files, access ->
+        val root = access.list().directory
+        val workspace = File(files, "workspace")
+        val inputFailure = java.io.IOException("injected input failure")
+        var firstByteRead = false; var inputClosed = false
+        val input = object : java.io.InputStream() {
+            override fun read(): Int {
+                if (firstByteRead) throw inputFailure
+                firstByteRead = true; return 7
+            }
+            override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+                if (length == 0) return 0
+                buffer[offset] = read().toByte(); return 1
+            }
+            override fun close() { inputClosed = true }
+        }
+        try { access.importFile(root, "broken.bin", { input }); fail("input failure ignored") }
+        catch (error: java.io.IOException) { assertSame(inputFailure, error) }
+        assertTrue(firstByteRead); assertTrue(inputClosed); assertTrue(workspace.list()!!.isEmpty())
+        val bytes = byteArrayOf(1, 2, 3)
+        val name = access.importFile(root, "keep.bin", { ByteArrayInputStream(bytes) })
+        val entry = access.list().entries.single()
+        val outputFailure = java.io.IOException("injected output failure")
+        var outputAttempted = false; var outputClosed = false
+        val output = object : java.io.OutputStream() {
+            override fun write(value: Int) { outputAttempted = true; throw outputFailure }
+            override fun close() { outputClosed = true }
+        }
+        try { access.exportFile(entry, { output }); fail("output failure ignored") }
+        catch (error: java.io.IOException) { assertSame(outputFailure, error) }
+        assertTrue(outputAttempted); assertTrue(outputClosed)
+        assertTrue(bytes.contentEquals(File(workspace, name).readBytes()))
+        assertEquals(setOf(name), workspace.list()!!.toSet())
+    }
 }

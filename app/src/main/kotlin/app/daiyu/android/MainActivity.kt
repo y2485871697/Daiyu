@@ -912,6 +912,7 @@ class MainActivity : ComponentActivity() {
         var selectedTaskIds by mutableStateOf<Set<Int>>(emptySet())
         var busy by mutableStateOf(false)
         var observationStarted by mutableStateOf(false)
+        var shutdownStarted by mutableStateOf(false)
     }
     // Workers read only this atomic owner, never Compose state or the current text editor.
     private val currentCleanupOwner = AtomicReference<R08CleanupUiOwner?>(null)
@@ -3373,10 +3374,10 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun prepareVirtualDisplayTaskHandoff(visit: VirtualDisplayCleanupVisit) {
+    private fun prepareVirtualDisplayTaskHandoff(visit: VirtualDisplayCleanupVisit, keepNone: Boolean = false) {
         val tasks = visit.tasks ?: return
-        if (!cleanupVisitCurrent(visit) || visit.busy || visit.request != null || visit.selectedTaskIds.isEmpty()) return
-        val selected = tasks.candidateTaskIds.filter { it in visit.selectedTaskIds }
+        if (!cleanupVisitCurrent(visit) || visit.busy || visit.request != null || (!keepNone && visit.selectedTaskIds.isEmpty())) return
+        val selected = if (keepNone) emptyList() else tasks.candidateTaskIds.filter { it in visit.selectedTaskIds }
         visit.busy = true
         lifecycleScope.launch {
             val request = try {
@@ -3391,6 +3392,23 @@ class MainActivity : ComponentActivity() {
                     visit.request = request
                     visit.status = "选择已冻结；请核对完整 Handoff → 条件 Release 参数和授权。"
                 } else visit.status = "交付审批未冻结；原状态已改变或选择不可用，不自动重试。"
+            } else closeVirtualDisplayCleanup(visit)
+        }
+    }
+
+    private fun shutdownVirtualDisplayUninitialized(visit: VirtualDisplayCleanupVisit) {
+        if (!cleanupVisitCurrent(visit) || visit.busy || visit.shutdownStarted || visit.request != null) return
+        visit.shutdownStarted = true
+        visit.busy = true
+        lifecycleScope.launch {
+            val confirmed = try {
+                withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) { visit.adapter.shutdownUninitializedOnWorker() }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { false }
+            if (cleanupVisitCurrent(visit)) {
+                visit.busy = false
+                visit.status = if (confirmed) "未初始化 owner 的关闭请求已确认；尚未证明物理退出，请单独核实副屏停止。"
+                    else "未执行或结果未确认，保留原记录，不自动重试。"
             } else closeVirtualDisplayCleanup(visit)
         }
     }
@@ -3415,6 +3433,10 @@ class MainActivity : ComponentActivity() {
                     "所选非空任务已确认交付，Release 已确认；请单独核实 owner 物理退出。"
                 ControllerVirtualDisplaySession.CleanupResult.DELIVERED_RETAINED ->
                     "所选任务已确认交付；Release 未确认或未发送，保留原 owner、journal 和 lease，不补发。"
+                ControllerVirtualDisplaySession.CleanupResult.CLEANED_AND_RELEASED ->
+                    "未交付任务；清理与 Release 已确认，请单独核实 owner 物理退出。"
+                ControllerVirtualDisplaySession.CleanupResult.CLEANED_RETAINED ->
+                    "未交付任务；清理已确认，Release 未确认或未发送，保留原记录，不补发。"
                 ControllerVirtualDisplaySession.CleanupResult.UNKNOWN ->
                     "收尾 UNKNOWN；保留原身份、journal 和 lease，不重发、不重连。"
                 ControllerVirtualDisplaySession.CleanupResult.UNAVAILABLE,
@@ -3451,6 +3473,12 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.testTag("vd-cleanup-observe-tasks")) {
                                 androidx.compose.material3.Text("显式观察原副屏可交付任务（只读）")
                             }
+                            androidx.compose.material3.TextButton(onClick = { shutdownVirtualDisplayUninitialized(visit) },
+                                enabled = !visit.busy && !visit.shutdownStarted,
+                                modifier = Modifier.testTag("vd-cleanup-shutdown-uninitialized")) {
+                                androidx.compose.material3.Text("查证未初始化并仅关闭原 owner 进程")
+                            }
+                            androidx.compose.material3.Text("仅适用于从未尝试初始化的原 owner：认证查询后关闭，不初始化、不 Release、不 kill；UNKNOWN 不重发。")
                             visit.tasks?.let { tasks ->
                                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
                                     tasks.candidateTaskIds.forEach { id ->
@@ -3466,6 +3494,10 @@ class MainActivity : ComponentActivity() {
                                     enabled = !visit.busy && visit.selectedTaskIds.isNotEmpty(),
                                     modifier = Modifier.testTag("vd-cleanup-freeze-delivery")) {
                                     androidx.compose.material3.Text("冻结所选任务交付审批")
+                                }
+                                androidx.compose.material3.TextButton(onClick = { prepareVirtualDisplayTaskHandoff(visit, keepNone = true) },
+                                    enabled = !visit.busy, modifier = Modifier.testTag("vd-cleanup-freeze-empty")) {
+                                    androidx.compose.material3.Text("不交付任何任务：申请清理 owned 任务 → 条件 Release")
                                 }
                             }
                         }

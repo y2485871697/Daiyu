@@ -348,15 +348,16 @@ internal class ControllerVirtualDisplaySession internal constructor(
      * only a subsequent physical observation can do so. Local initialized=false is NOT proof:
      * the authenticated lookup must independently establish that initialization never happened.
      */
-    fun shutdownUninitializedOnceOnWorker(): Boolean {
+    fun shutdownUninitializedOnceOnWorker(parentDrained: Boolean,
+        admissionStillValid: () -> Boolean = { true }): Boolean {
         worker()
         val target = synchronized(lock) {
-            if (!closed || binding || releasing || released || shutdownClaimed || cleanupBusy || batchCallbacks != 0 ||
+            if (!closed || !parentDrained || !admissionStillValid() || binding || releasing || released || shutdownClaimed || cleanupBusy || batchCallbacks != 0 ||
                 batchTickets.isNotEmpty()) return false
             val current = handle ?: return false
             val prepared = plan ?: return false
             val state = leaf?.heldState() ?: return false
-            if (!state.startAttempted || state.activeExecutions != 0 || state.pendingFinalOutcomes != 0 ||
+            if (!state.revoked || !state.startAttempted || state.activeExecutions != 0 || state.pendingFinalOutcomes != 0 ||
                 state.initialized) return false
             val shutdown = current.uninitializedShutdown ?: return false
             shutdownClaimed = true
@@ -371,7 +372,7 @@ internal class ControllerVirtualDisplaySession internal constructor(
         finally { synchronized(lock) { shutdownBusy = false } }
     }
 
-    enum class CleanupResult { NOT_APPROVED, UNAVAILABLE, CONFIRMED, UNKNOWN, DELIVERED_AND_RELEASED, DELIVERED_RETAINED }
+    enum class CleanupResult { NOT_APPROVED, UNAVAILABLE, CONFIRMED, UNKNOWN, DELIVERED_AND_RELEASED, DELIVERED_RETAINED, CLEANED_AND_RELEASED, CLEANED_RETAINED }
 
     internal class RetainedTasks internal constructor(val displayId: Int, candidateIds: List<Int>) {
         val candidateTaskIds: List<Int> = java.util.Collections.unmodifiableList(candidateIds.toList())
@@ -444,12 +445,12 @@ internal class ControllerVirtualDisplaySession internal constructor(
         return synchronized(lock) {
             if (tasksObservation !== originalTasks || cleanupDecision != null ||
                 cleanupAttempted || !taskHandoffAvailable(parentDrained) || !admissionStillValid()) return null
-            cleanupRequest?.let { return if (it.deliversTasks && it.selectedTaskIds == selected) it else null }
-            if (selected.isEmpty() || selected.distinct().size != selected.size ||
+            cleanupRequest?.let { return if (it.hasHandoff && it.selectedTaskIds == selected) it else null }
+            if (selected.distinct().size != selected.size ||
                 selected.size > 256 || selected.any { it !in originalTasks.candidateTaskIds }) return null
             val original = checkNotNull(plan)
             val prepared = R08VirtualDisplayPlan.prepare(original.owner, capabilities, original.generation,
-                listOf(R08VirtualDisplayWrite("host_handoff_tasks", R08VirtualDisplayAction.HandoffTasks(selected)),
+                listOf(R08VirtualDisplayWrite("host_handoff_tasks", if (selected.isEmpty()) R08VirtualDisplayAction.Handoff else R08VirtualDisplayAction.HandoffTasks(selected)),
                     R08VirtualDisplayWrite("host_cleanup_release", R08VirtualDisplayAction.Release)))
             R08CleanupApprovalRequest(prepared).also { cleanupRequest = it }
         }
@@ -465,7 +466,7 @@ internal class ControllerVirtualDisplaySession internal constructor(
         worker()
         return synchronized(lock) {
             if (cleanupDecision != null || cleanupAttempted || !cleanupAvailable(parentDrained) ||
-                cleanupRequest?.deliversTasks == true) return null
+                cleanupRequest?.hasHandoff == true) return null
             cleanupRequest ?: run {
                 val original = checkNotNull(plan)
                 val releasePlan = R08VirtualDisplayPlan.prepare(original.owner, capabilities, original.generation,
@@ -502,7 +503,7 @@ internal class ControllerVirtualDisplaySession internal constructor(
             // Adapter supplies only an atomic UI-visit validity read here: no host locks or I/O.
             // Invalidation before this admission does not consume the journal/send attempt;
             // after admission the in-flight operation cannot be undone or safely replayed.
-            if (cleanupAttempted || !(if (original.deliversTasks) taskHandoffAvailable(parentDrained)
+            if (cleanupAttempted || !(if (original.hasHandoff) taskHandoffAvailable(parentDrained)
                     else cleanupAvailable(parentDrained)) || !admissionStillValid())
                 return CleanupResult.UNAVAILABLE
             val prepared = original.review.plan
@@ -514,13 +515,15 @@ internal class ControllerVirtualDisplaySession internal constructor(
             Triple(checkNotNull(lease).journal, checkNotNull(handle).endpoint, prepared)
         }
         var outcomeRecorded = false
-        var delivered = false
+        var handoffCompleted = false
+        fun retainedAfterHandoff() = if (original.cleanupOnly) CleanupResult.CLEANED_RETAINED else CleanupResult.DELIVERED_RETAINED
+        fun completedAfterHandoff() = if (original.cleanupOnly) CleanupResult.CLEANED_AND_RELEASED else CleanupResult.DELIVERED_AND_RELEASED
         var releaseClaimed = false
         try {
             for (step in target.third.writes) {
                 if (!admissionStillValid()) {
                     outcomeRecorded = true
-                    return if (delivered) CleanupResult.DELIVERED_RETAINED else CleanupResult.UNAVAILABLE
+                    return if (handoffCompleted) retainedAfterHandoff() else CleanupResult.UNAVAILABLE
                 }
                 val invocation = if (step.operation == "handoff") "host-handoff-tasks-v1" else "host-cleanup-release-v1"
                 val intent = target.third.intent(invocation, step)
@@ -531,7 +534,7 @@ internal class ControllerVirtualDisplaySession internal constructor(
                     if (!admissionStillValid()) {
                         target.first.complete(intent, R08VirtualDisplayEvidence.NOT_EXECUTED)
                         outcomeRecorded = true
-                        return if (delivered) CleanupResult.DELIVERED_RETAINED else CleanupResult.UNAVAILABLE
+                        return if (handoffCompleted) retainedAfterHandoff() else CleanupResult.UNAVAILABLE
                     }
                     val reply = target.second.execute(intent.operationId, intent.operation, JSONObject(intent.canonicalParameters))
                     val body = reply.payloadCopy()
@@ -541,24 +544,24 @@ internal class ControllerVirtualDisplaySession internal constructor(
                         body.optJSONObject("receipt")?.optString("state") == "SUCCEEDED"
                     confirmed = success && if (step.operation == "release") body!!.opt("released") == true
                     else body!!.opt("handedOff") == true && body.opt("sourceEmpty") == true &&
-                        body.opt("cleanupOnly") == false &&
+                        body.opt("cleanupOnly") == original.selectedTaskIds.isEmpty() &&
                         body.optJSONArray("keptTaskIds")?.toString() == step.parameters().getJSONArray("taskIds").toString()
                 }
                 target.first.complete(intent, if (confirmed) R08VirtualDisplayEvidence.CONFIRMED else R08VirtualDisplayEvidence.UNKNOWN)
                 outcomeRecorded = true
-                if (!confirmed) return if (delivered) CleanupResult.DELIVERED_RETAINED else CleanupResult.UNKNOWN
+                if (!confirmed) return if (handoffCompleted) retainedAfterHandoff() else CleanupResult.UNKNOWN
                 if (step.operation == "handoff") {
-                    delivered = true
+                    handoffCompleted = true
                     synchronized(lock) { handoffConfirmed = true }
                 }
             }
-            return if (delivered) CleanupResult.DELIVERED_AND_RELEASED else CleanupResult.CONFIRMED
+            return if (handoffCompleted) completedAfterHandoff() else CleanupResult.CONFIRMED
         } catch (_: Exception) {
             // A lost claim or completion is never replayed, even after a successful wire reply.
         } finally {
             synchronized(lock) {
                 if (!outcomeRecorded) uncertain = true
-                if (delivered && !releaseClaimed && outcomeRecorded) {
+                if (handoffCompleted && !releaseClaimed && outcomeRecorded) {
                     cleanupRequest = null
                     cleanupApproval = null
                     cleanupDecision = null
@@ -567,7 +570,7 @@ internal class ControllerVirtualDisplaySession internal constructor(
                 cleanupBusy = false
             }
         }
-        return if (delivered) CleanupResult.DELIVERED_RETAINED else CleanupResult.UNKNOWN
+        return if (handoffCompleted) retainedAfterHandoff() else CleanupResult.UNKNOWN
     }
 
     private fun maintenanceAvailable(parentDrained: Boolean): Boolean {

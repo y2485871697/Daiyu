@@ -241,7 +241,6 @@ class ControllerVirtualDisplaySessionTest {
         assertSame(tasks, (f.work { f.session.observeTasksOnceOnWorker(true) } as
             ControllerVirtualDisplaySession.TasksResult.Observed).tasks)
         assertEquals(1, f.endpoint.executed.count { it.second == "status" })
-        assertNull(f.work { f.session.prepareTaskHandoffOnWorker(tasks, emptyList(), true) })
         assertNull(f.work { f.session.prepareTaskHandoffOnWorker(tasks, listOf(12, 12), true) })
         assertNull(f.work { f.session.prepareTaskHandoffOnWorker(tasks, listOf(34), true) })
         val request = checkNotNull(f.work { f.session.prepareTaskHandoffOnWorker(tasks, listOf(23), true) })
@@ -256,6 +255,48 @@ class ControllerVirtualDisplaySessionTest {
             .put("receipt", JSONObject().put("state", "SUCCEEDED"))
         assertTrue(f.session.answerCleanupFromUi(request, true))
         return request
+    }
+
+    @Test fun explicitEmptyHandoffCleansWithoutClaimingTaskDelivery() = Fixture().use { f ->
+        val tasks = retainedTasks(f)
+        val request = checkNotNull(f.work { f.session.prepareTaskHandoffOnWorker(tasks, emptyList(), true) })
+        assertTrue(request.hasHandoff)
+        assertTrue(request.cleanupOnly)
+        assertFalse(request.deliversTasks)
+        assertEquals(emptyList<Int>(), request.selectedTaskIds)
+        assertEquals("{\"taskIds\":[]}", request.review.plan.writes.first().parameters().toString())
+        assertEquals(listOf("status"), f.endpoint.executed.map { it.second })
+        f.endpoint.handoffBody = JSONObject().put("ok", true).put("handedOff", true).put("sourceEmpty", true)
+            .put("cleanupOnly", true).put("keptTaskIds", org.json.JSONArray())
+            .put("receipt", JSONObject().put("state", "SUCCEEDED"))
+        f.endpoint.confirmRelease = true
+        assertTrue(f.session.answerCleanupFromUi(request, true))
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.CLEANED_AND_RELEASED,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+        assertEquals(listOf("status", "handoff", "release"), f.endpoint.executed.map { it.second })
+        assertEquals(0, f.parent.lease.releases.get())
+    }
+
+    @Test fun emptyHandoffRequiresCleanupReceiptBeforeRelease() = Fixture().use { f ->
+        val tasks = retainedTasks(f)
+        val request = checkNotNull(f.work { f.session.prepareTaskHandoffOnWorker(tasks, emptyList(), true) })
+        f.endpoint.handoffBody = JSONObject().put("ok", true).put("handedOff", true).put("sourceEmpty", true)
+            .put("cleanupOnly", false).put("keptTaskIds", org.json.JSONArray())
+            .put("receipt", JSONObject().put("state", "SUCCEEDED"))
+        assertTrue(f.session.answerCleanupFromUi(request, true))
+        assertEquals(ControllerVirtualDisplaySession.CleanupResult.UNKNOWN,
+            f.work { f.session.releaseInitializedOnceOnWorker(request, true) })
+        assertTrue(f.endpoint.releaseIds.isEmpty())
+    }
+
+    @Test fun shutdownRequiresParentDrainAndLiveVisitBeforeConsumingLookup() = Fixture().use { f ->
+        f.dispatch(f.approve()); f.session.close()
+        assertFalse(f.work { f.session.shutdownUninitializedOnceOnWorker(false) })
+        assertFalse(f.work { f.session.shutdownUninitializedOnceOnWorker(true) { false } })
+        assertEquals(0, f.shutdown.lookups)
+        assertTrue(f.work { f.session.shutdownUninitializedOnceOnWorker(true) })
+        assertEquals(1, f.shutdown.lookups)
+        assertEquals(0, f.parent.lease.releases.get())
     }
 
     @Test fun selectedTasksAreFrozenAndDeliveredBeforeReleaseWithoutReopeningOriginalAuthorization() = Fixture().use { f ->
@@ -849,8 +890,8 @@ class ControllerVirtualDisplaySessionTest {
     @Test fun explicitUninitializedShutdownIsLookupGatedOnceAndNotDrainEvidence() = Fixture().use { f ->
         f.dispatch(f.approve()); f.session.close()
         assertEquals(0, f.shutdown.lookups)
-        assertTrue(f.work { f.session.shutdownUninitializedOnceOnWorker() })
-        assertFalse(f.work { f.session.shutdownUninitializedOnceOnWorker() })
+        assertTrue(f.work { f.session.shutdownUninitializedOnceOnWorker(true) })
+        assertFalse(f.work { f.session.shutdownUninitializedOnceOnWorker(true) })
         assertEquals(1, f.shutdown.lookups)
         assertEquals(1, f.shutdown.shutdowns)
         assertEquals(0, f.endpoint.initializations)
@@ -863,9 +904,9 @@ class ControllerVirtualDisplaySessionTest {
     @Test fun uninitializedLookupUnknownNeverSendsShutdownOrRetries() = Fixture().use { f ->
         f.dispatch(f.approve()); f.session.close()
         f.shutdown.proof = ControllerVirtualDisplaySession.UninitializedEvidence.UNKNOWN
-        assertFalse(f.work { f.session.shutdownUninitializedOnceOnWorker() })
+        assertFalse(f.work { f.session.shutdownUninitializedOnceOnWorker(true) })
         f.shutdown.proof = ControllerVirtualDisplaySession.UninitializedEvidence.PROVEN_UNINITIALIZED
-        assertFalse(f.work { f.session.shutdownUninitializedOnceOnWorker() })
+        assertFalse(f.work { f.session.shutdownUninitializedOnceOnWorker(true) })
         assertEquals(1, f.shutdown.lookups)
         assertEquals(0, f.shutdown.shutdowns)
         assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown, f.observe())

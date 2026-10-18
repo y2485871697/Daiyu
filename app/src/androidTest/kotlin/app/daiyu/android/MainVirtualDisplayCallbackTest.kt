@@ -468,6 +468,54 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         awaitDrain()
     }
 
+    fun testRealMainExplicitEmptyHandoffCleansWithoutClaimingTaskDelivery() {
+        val (entry, original) = initializedCleanupEntry()
+        val beforeObserve = observations.get()
+        val messages = fixture.database.messages(entry.conversationId)
+        node("vd-cleanup-entry").assertIsEnabled().performClick()
+        assertEquals(0, taskObservations.get())
+        assertEquals(0, handoffSends.get())
+        node("vd-cleanup-observe-tasks").assertIsEnabled().performClick()
+        awaitUniqueTag("vd-delivery-task-23")
+        node("vd-delivery-task-12").assertIsOff()
+        node("vd-delivery-task-23").assertIsOff()
+        node("vd-cleanup-freeze-delivery").assertIsNotEnabled()
+        node("vd-cleanup-freeze-empty").assertIsEnabled().performClick()
+        awaitUniqueTag("r08-cleanup-confirm")
+        mainThread {
+            val visit = checkNotNull(invokeMain("getVirtualDisplayCleanupVisit"))
+            val request = visit.javaClass.getDeclaredMethod("getRequest").apply { isAccessible = true }
+                .invoke(visit) as app.daiyu.android.vdapproval.R08CleanupApprovalRequest
+            assertTrue(request.hasHandoff)
+            assertTrue(request.cleanupOnly)
+            assertFalse(request.deliversTasks)
+            assertTrue(request.selectedTaskIds.isEmpty())
+            assertSame(original.plan.owner, request.review.plan.owner)
+            assertEquals(original.plan.generation, request.review.plan.generation)
+        }
+        assertEquals(1, taskObservations.get())
+        assertEquals(0, handoffSends.get())
+        assertEquals(0, cleanupSends.get())
+        node("r08-cleanup-confirm").performClick()
+        awaitControl("empty task cleanup confirmed without task delivery or physical observation") {
+            val visit = invokeMain("getVirtualDisplayCleanupVisit") ?: return@awaitControl false
+            val status = visit.javaClass.getDeclaredMethod("getStatus").apply { isAccessible = true }
+                .invoke(visit) as String
+            status.startsWith("未交付任务；清理与 Release 已确认")
+        }
+        assertTrue(handedOffIds.isEmpty())
+        assertEquals(1, handoffSends.get())
+        assertEquals(1, cleanupSends.get())
+        assertEquals(1, starts.get())
+        assertEquals(beforeObserve, observations.get())
+        assertEquals(0, gate.availablePermits())
+        assertSame(entry, fixture.controller.virtualDisplayEntry())
+        assertEquals(messages, fixture.database.messages(entry.conversationId))
+        physicalUnknown.set(false)
+        mainThread { assertTrue(fixture.controller.observeVirtualDisplayClose(entry)) }
+        awaitDrain()
+    }
+
     fun testRealMainClosingFrozenDeliveryNeverSendsAndStaleConfirmationCannotGrant() {
         val (entry, _) = initializedCleanupEntry()
         val beforeObserve = observations.get()

@@ -470,6 +470,14 @@ internal class RunCatalogTools(
         return original.prepareInitializedCleanupOnWorker(parentDrained = true)
     }
 
+    internal fun shutdownVirtualDisplayUninitializedOnWorker(original: ControllerVirtualDisplaySession,
+        parentDrained: Boolean, admissionStillValid: () -> Boolean = { true }): Boolean {
+        check(android.os.Looper.getMainLooper()?.thread !== Thread.currentThread()) { "virtual_display_worker_required" }
+        if (!parentDrained || !virtualDisplayCleanupLocallyDrained(original)) return false
+        return original.shutdownUninitializedOnceOnWorker(parentDrained = true,
+            admissionStillValid = admissionStillValid)
+    }
+
     internal fun observeVirtualDisplayTasksOnWorker(original: ControllerVirtualDisplaySession,
         parentDrained: Boolean): ControllerVirtualDisplaySession.TasksResult {
         check(android.os.Looper.getMainLooper()?.thread !== Thread.currentThread()) { "virtual_display_worker_required" }

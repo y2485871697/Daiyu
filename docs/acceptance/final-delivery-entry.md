@@ -202,3 +202,15 @@ bash -n scripts/smoke_boot.sh
 ```
 
 实现代理本次仅编辑分配工作树，未运行测试、CI、构建、APK 安装或收集命令；实际执行结果与非空 Git 提交由主代理独立核实/执行。本文件所有示例命令均为操作说明，不是已有验收证据。
+
+## 定向 smoke 复验（开发反馈，不计入正式全量）
+
+`代鱼构建` 的 `mode=smoke` 可选填 `smoke_classes`：逗号分隔的完整测试类名，例如 `app.daiyu.android.OwnerUninitializedShutdownSocketTest,app.daiyu.android.ModelConnectionActivityTest`。不接受短类名、方法选择器、通配符、空项、空白或未知类；合法重复项去重。精确空串或不传仍执行原全量。非 smoke 模式传非空过滤在各 job 的首个步骤失败，不执行 checkout、SDK 准备或编译。
+
+定向路径沿用原 Kotlin/Java 源码发现、按全量方法数均衡的四分片及现有 `-e class` runner，再在原分片内取请求类交集，不重排归属。仅减少 instrumentation 测试量，不减少原 API 矩阵或模拟器数量。合法的空交集记录 `filtered-empty-shard`，跳过 instrumentation 及其结果解析，不制造 `OK (0 tests)`；仍执行独立应用启动、UI 和截图检查。全局参数错误在任何 adb 调用及退出诊断 trap 注册前失败。
+
+原 `instrumentation-shards.json` 结构和全量 inventory 不变；额外的 `selection.json` 记录 full/targeted、规范化请求类、实际选择类、预期方法数及分片身份，并以 SHA-256 关联 inventory。非空片严格解析 instrumentation 成功后才写 completed 和原输出摘要；失败时保留 planned 与真实阶段/原文，planned 不表示成功或尚未执行。空片不生成 instrumentation 原文或成功结果 JSON；每次执行先移除这几项旧产物。
+
+非空过滤一律将 run 标题、smoke job 及其两个证据 artifact 名加 `-filtered`，即使恰好请求全部类也保持定向身份。归一化必须保留 GitHub 实际 job 名，不能剥去后缀；现有 cloud verifier 对正式 job 名精确匹配，因此即使八片均成功，也以 `job_api_mismatch` 拒绝定向运行作为正式全量。selection sidecar 供定向审阅，现有 cloud schema 不消费它，也不因增加此文件而提升可信采集结论；旧完整 v1/v2 证据保持兼容。
+
+既有 `source_run_id`、`source_sha`、`expected_sha` 及 APK 身份/摘要/祖先/严格变更白名单保持原规则。workflow、清单或生产/构建输入改变仍不能复用旧包；本入口不授权拿旧 APK 验证新的应用修复，也不自动触发构建。正式交付仍须准确候选 SHA 的全量双 API×四分片、业务/实机及性能验收。

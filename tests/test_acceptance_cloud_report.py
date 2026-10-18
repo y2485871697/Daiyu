@@ -384,6 +384,10 @@ class CloudReportTests(unittest.TestCase):
         self.assertIs(report["trusted_collection"], False)
         self.assertEqual(report["acceptance_items_credited"], 0)
 
+    def test_filtered_job_rejected_by_legacy_report_too(self):
+        self.snapshot['jobs'][0]['name'] += '-filtered'
+        self.reject('job_api_mismatch')
+
     def test_digest_chain_all_layers_and_recheck_after_mutation(self):
         self.assertTrue(self.verify()["cloud_regression_satisfied"])
         path = self.root / "26/platform-tests.txt"
@@ -548,6 +552,26 @@ class ShardedCloudTests(unittest.TestCase):
 
     def verify(self):
         return self.fixture.verify()
+
+    def test_filtered_job_cannot_satisfy_full_eight_shard_matrix(self):
+        self.assertTrue(self.verify()['cloud_regression_satisfied'])
+        self.assertEqual(len(self.snapshot['jobs']), 8)
+        for job in self.snapshot['jobs']:
+            original = job['name']
+            try:
+                with self.subTest(api=job['api'], shard=job['shard_index']):
+                    job['name'] = original + '-filtered'
+                    with self.assertRaisesRegex(evidence.InvalidEvidence, '^job_api_mismatch$'):
+                        self.verify()
+            finally:
+                job['name'] = original
+        self.assertTrue(self.verify()['cloud_regression_satisfied'])
+        for job in self.snapshot['jobs']:
+            job['name'] += '-filtered'
+        code, report = self.fixture.file_cli()
+        self.assertEqual(code, 2)
+        self.assertEqual(report['error'], 'job_api_mismatch')
+        self.assertFalse(report['cloud_regression_satisfied'])
 
     def test_all_eight_and_missing_one_or_six_are_incomplete(self):
         result = self.verify()

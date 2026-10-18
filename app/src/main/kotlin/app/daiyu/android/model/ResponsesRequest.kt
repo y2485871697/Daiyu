@@ -37,6 +37,7 @@ internal object ResponsesRequest {
                 if (message.protocolItems.isNotEmpty()) {
                     val items = message.protocolItems.map { raw ->
                         val item = JSONObject(raw)
+                        ResponsesSearchProtocol.validateItem(item)
                         require(item.has("type") || item.optJSONArray("content") == null ||
                             item.optString("role") !in setOf("user", "assistant")) {
                             "Messages 协议历史不能用于 Responses"
@@ -87,12 +88,13 @@ internal object ResponsesRequest {
         return MessagesRequest.validateObject(body, MessagesRequest.MAX_JSON_CONTAINER_DEPTH)
     }
 
-    fun body(model: String, input: JSONArray, tools: List<ToolDefinition>): JSONObject {
+    fun body(model: String, input: JSONArray, tools: List<ToolDefinition>, webSearchEnabled: Boolean = false): JSONObject {
         val schemas = JSONArray()
         tools.forEach { definition ->
             schemas.put(JSONObject().put("type", "function").put("name", definition.name).put("description", definition.description)
                 .put("parameters", JSONObject(definition.parameters)).put("strict", false))
         }
+        if (webSearchEnabled) schemas.put(JSONObject().put("type", "web_search"))
         return JSONObject().put("model", model).put("input", input).put("stream", true).put("store", false)
             .put("include", JSONArray().put("reasoning.encrypted_content"))
             .also { if (schemas.length() > 0) it.put("tools", schemas) }

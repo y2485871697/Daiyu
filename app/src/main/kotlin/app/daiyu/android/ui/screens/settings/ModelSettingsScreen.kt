@@ -43,6 +43,7 @@ internal data class ModelSettingsDraftUi(
     val anthropicVersion: String = "",
     val customHeaders: String = "",
     val headersReplacementAuthorized: Boolean = false,
+    val openAiWebSearchEnabled: Boolean = false,
 ) {
     override fun toString(): String = "ModelSettingsDraftUi(protocol=$protocol, model=$model, apiKey=<redacted>, customBody=<redacted>)"
 }
@@ -61,6 +62,7 @@ internal fun ModelSettingsDraftUi.selectProtocol(selected: ProviderProtocol): Mo
         protocolChangeAuthorized = false,
         headersReplacementAuthorized = false,
         anthropicVersion = if (selected == ProviderProtocol.MESSAGES) anthropicVersion else "",
+        openAiWebSearchEnabled = false,
     )
 
 /**
@@ -100,7 +102,8 @@ internal fun ModelSettingsScreen(
     val catalogIsCurrent = catalogForDraft?.let {
         it.endpoint == draft.endpoint && it.responsesPath == draft.responsesPath &&
             it.protocol == draft.protocol && it.apiKey == draft.apiKey && it.model == draft.model &&
-            it.anthropicVersion == draft.anthropicVersion && it.customHeaders == draft.customHeaders
+            it.anthropicVersion == draft.anthropicVersion && it.customHeaders == draft.customHeaders &&
+            it.openAiWebSearchEnabled == draft.openAiWebSearchEnabled
     } == true
     MiuixScaffoldPage(title = pageTitle, onBack = { connection.cancel(); onBack() }, modifier = modifier) {
         headerContent()
@@ -160,6 +163,11 @@ internal fun ModelSettingsScreen(
         }
         item(key = "model_advanced") {
             SettingsCard {
+                SettingsSwitchRow("原生网页搜索", draft.openAiWebSearchEnabled,
+                    enabled = enabled && draft.protocol == ProviderProtocol.RESPONSES) {
+                    changeDraft(draft.copy(openAiWebSearchEnabled = it))
+                }
+                if (draft.openAiWebSearchEnabled) SettingsNote("仅用于 OpenAI 官方 Responses；由模型决定搜索，可能产生搜索费用。")
                 SettingsRow("自定义请求体", tag = "model-custom-body",
                     summary = if (draft.customBody.isBlank()) "未设置" else "已设置",
                     onClick = if (enabled) ({ bodyExpanded = !bodyExpanded }) else null)

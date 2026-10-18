@@ -152,6 +152,9 @@ internal object ResponsesStream {
                     val response=event.getJSONObject("response")
                     checkProtocol(response.getString("status")=="completed")
                     val out=response.getJSONArray("output")
+                    try {
+                        for (i in 0 until out.length()) ResponsesSearchProtocol.validateItem(out.getJSONObject(i))
+                    } catch (_: IllegalArgumentException) { throw ModelRequestException(ModelFailure.PROTOCOL) }
                     val confirmed=mutableSetOf<String>()
                     for(i in 0 until out.length()) {
                         val item=out.getJSONObject(i)
@@ -173,8 +176,9 @@ internal object ResponsesStream {
                                 val part=content.getJSONObject(j)
                                 when(part.getString("type")) {"output_text"->part.getString("text");"refusal"->part.getString("refusal");else->""}
                             }
-                            checkProtocol(full.length<=2_000_000)
-                            sink(ModelEvent.TextFinal(item.getString("id"),full))
+                            val displayed = ResponsesSearchProtocol.displayText(item, full)
+                            checkProtocol(displayed.length<=2_000_000)
+                            sink(ModelEvent.TextFinal(item.getString("id"),displayed))
                         }
                     }
                     output=(0 until out.length()).map {

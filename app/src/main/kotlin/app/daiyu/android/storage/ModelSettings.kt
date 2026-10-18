@@ -44,8 +44,9 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
         "ModelSettings(protocol=${protocol.wireName}, endpoint=$endpoint, model=$model, apiKey=<redacted>, batteryEnabled=$batteryEnabled, " +
             "responsesPath=$responsesPath, deviceStatusEnabled=$deviceStatusEnabled, requestOptions=$requestOptions)"
     fun validate() {
-        requestEndpoint()
+        val resolvedEndpoint = requestEndpoint()
         requestOptions.validate(protocol)
+        if (requestOptions.openAiWebSearchEnabled) app.daiyu.android.model.ResponsesSearchProtocol.requireEndpoint(resolvedEndpoint)
         require(model.isNotBlank() && model.length<=200 && apiKey.isNotBlank() && apiKey.length<=8192) {"请填写模型和密钥"}
         require(!apiKey.contains('\n') && !apiKey.contains('\r')) {"密钥含非法换行"}
     }

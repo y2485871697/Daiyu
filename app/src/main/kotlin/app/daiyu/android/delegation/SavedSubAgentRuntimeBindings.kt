@@ -45,7 +45,7 @@ internal class SavedSubAgentRuntimeBindings(
         if (speed != null || options.codex) require(saved.protocol == ProviderProtocol.RESPONSES && selected.supportsGptSpeed &&
             GptServiceTier.isGptSpeedModel(expectedApiModel)) { "Child GPT policy is unsupported" }
         val child = ModelFactory.snapshot(saved.asModelSettings().copy(model = expectedApiModel,
-            batteryEnabled = false, deviceStatusEnabled = false, requestOptions = options.copy(speedMode = speed)))
+            batteryEnabled = false, deviceStatusEnabled = false, requestOptions = options.copy(speedMode = speed, openAiWebSearchEnabled = false)))
         val detached = profile.copy(reasoningByModel = profile.reasoningByModel.toMap(), gptSpeedByModel = profile.gptSpeedByModel.toMap())
         owned[profile.id] = Approval(detached, saved, child, resolveSavedModel)
     }

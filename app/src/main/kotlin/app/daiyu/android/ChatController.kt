@@ -3141,8 +3141,11 @@ class ChatController internal constructor(private val application:Application,
                     grants: SessionCapabilities, task: app.daiyu.android.domain.tools.TaskAuthorization ->
                     plan.launch(application, realOwner, grants, task, toolLedger,
                         checkNotNull(runtimeStore).childTasks, browserChildCapacity,
-                        model = { sessionModel?.invoke(provider, assistantContext, SessionGatewayContext(conversationId))
-                            ?: assistantModel?.invoke(provider, assistantContext) ?: model(config) },
+                        model = {
+                            val childProvider = provider.withoutNativeSearch()
+                            sessionModel?.invoke(childProvider, assistantContext, SessionGatewayContext(conversationId))
+                                ?: assistantModel?.invoke(childProvider, assistantContext) ?: model(childProvider.asModelSettings())
+                        },
                         onChanged = ::browserChildrenChanged)
                 } },
                 authorization=platformAction?.scope?.authorization ?: mcpPreparation?.scope?.authorization ?: terminalJobRun?.authorization ?: terminalRun?.authorization ?: shizukuAuthorization ?: gui?.let {

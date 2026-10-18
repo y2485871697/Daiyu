@@ -50,7 +50,8 @@
     "staleSelectionAndMismatchedOwnerNeverLaunchOrLeak",
     "commitUnknownFailureKeepsGenerationAndOriginalCleanupFailure",
     "publicOpenReleasesOnDefinitePreProcessFailure",
-    "startupCleanupSharesSingleFlightAndCloseDoesNotReleaseDuringWait"
+    "startupCleanupSharesSingleFlightAndCloseDoesNotReleaseDuringWait",
+    "unstartedFailureTransfersOriginalPinWhenSettlementMustRetry"
   ],
   "app.daiyu.android.terminal.LinuxSettingsApplicationFreezeTest": [
     "onlyExistingMatchingTrustedSelectionCanProduceNonStartingPinnedLaunch"

@@ -13,12 +13,14 @@ data class ProviderRequestOptions(
     val codex: Boolean = false,
     val sessionGateway: SessionGatewayRule = SessionGatewayRule(),
     val anthropicVersion: String? = null,
+    val openAiWebSearchEnabled: Boolean = false,
 ) {
     override fun toString(): String =
         "ProviderRequestOptions(customBody=<redacted>, speedMode=$speedMode, codex=$codex)"
 
     fun validate(protocol: ProviderProtocol) {
         sessionGateway.validate()
+        require(!openAiWebSearchEnabled || protocol == ProviderProtocol.RESPONSES) { "原生网页搜索仅用于 OpenAI Responses" }
         if (anthropicVersion != null) {
             require(protocol == ProviderProtocol.MESSAGES) { "Anthropic 版本仅用于 Messages" }
             val date = if (Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}").matches(anthropicVersion)) {
@@ -44,7 +46,7 @@ data class ProviderRequestOptions(
     }
 
     internal fun apply(base: JSONObject, protocol: ProviderProtocol): JSONObject {
-        if (customBody.isEmpty() && speedMode == null && !codex && anthropicVersion == null) return base
+        if (customBody.isEmpty() && speedMode == null && !codex && anthropicVersion == null && !openAiWebSearchEnabled) return base
         validate(protocol)
         val merged = if (customBody.isEmpty()) base else RequestBodyMerge.merge(base, parseBody())
         if (protocol == ProviderProtocol.RESPONSES) GptServiceTier.apply(merged, speedMode, codex)
@@ -110,7 +112,10 @@ data class ProviderRequestOptions(
     internal fun encode(): String = JSONObject().put("custom_body", customBody)
         .put("speed_mode", speedMode?.name ?: JSONObject.NULL).put("codex", codex)
         .put("session_gateway", sessionGateway.toJson())
-        .also { if (anthropicVersion != null) it.put("anthropic_version", anthropicVersion) }.toString()
+        .also {
+            if (anthropicVersion != null) it.put("anthropic_version", anthropicVersion)
+            if (openAiWebSearchEnabled) it.put("openai_web_search_enabled", true)
+        }.toString()
 
     private fun parseBody(): JSONObject = try {
         MessagesRequest.jsonObject(customBody, MAX_BODY_DEPTH)
@@ -133,7 +138,7 @@ data class ProviderRequestOptions(
                 val value = MessagesRequest.jsonObject(raw, 3)
                 val keys = value.keys().asSequence().toSet()
                 val legacyKeys = setOf("custom_body", "speed_mode", "codex")
-                require(keys.containsAll(legacyKeys) && keys.all { it in legacyKeys + setOf("session_gateway", "anthropic_version") })
+                require(keys.containsAll(legacyKeys) && keys.all { it in legacyKeys + setOf("session_gateway", "anthropic_version", "openai_web_search_enabled") })
                 val body = value.get("custom_body") as? String ?: error("body")
                 val codex = value.get("codex") as? Boolean ?: error("codex")
                 val speed = value.get("speed_mode")
@@ -142,7 +147,9 @@ data class ProviderRequestOptions(
                     SessionGatewayRule.fromJson(value.getJSONObject("session_gateway")) else SessionGatewayRule()
                 val version = if (value.has("anthropic_version"))
                     value.get("anthropic_version") as? String ?: error("version") else null
-                ProviderRequestOptions(body, mode, codex, rule, version)
+                val search = if (value.has("openai_web_search_enabled"))
+                    value.get("openai_web_search_enabled") as? Boolean ?: error("web search") else false
+                ProviderRequestOptions(body, mode, codex, rule, version, search)
             } catch (_: Exception) {
                 throw IllegalStateException("模型请求配置无效；请重新保存")
             }

@@ -200,7 +200,7 @@ class ResponsesModel internal constructor(
                 input.put(item); ownItems.add(item.toString())
             }
             val request = ResponsesRequest.withAssistantInstructions(
-                settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools), ProviderProtocol.RESPONSES),
+                settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools, settings.requestOptions.openAiWebSearchEnabled), ProviderProtocol.RESPONSES),
                 assistantInstructions,
             )
             if (backgroundResume != null) {

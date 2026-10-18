@@ -296,6 +296,41 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
         } finally { fresh.close() }
     }
 
+    fun testDamagedListKeepsGlobalToggleButRejectsRevisionSensitiveActions() {
+        val root = java.io.File(instrumentation.targetContext.cacheDir, "damaged-skills-${java.util.UUID.randomUUID()}")
+        val prefs = "damaged-skills-${java.util.UUID.randomUUID()}"
+        val context = object : android.content.ContextWrapper(instrumentation.targetContext) {
+            override fun getFilesDir() = root
+            override fun getSharedPreferences(name: String, mode: Int) = super.getSharedPreferences("$prefs-$name", mode)
+        }
+        val blocked = java.io.File(root, "agent-builtin-skills-v1/installed")
+        check(blocked.parentFile!!.mkdirs()); blocked.writeText("not a directory")
+        val registry = app.daiyu.android.skills.SkillToolRegistry(context)
+        val page = ControlledPage { SkillManagement.create { registry } }
+        try {
+            mainThread { page.controller.refresh() }; page.finishNext()
+            val entry = SkillManagement.Entry("user:demo",
+                app.daiyu.android.skills.InstalledSkill("demo", "demo", "old", true, "user", null), false)
+            mainThread {
+                assertTrue(page.controller.state!!.entriesUnavailable)
+                assertTrue(page.controller.globalConfirmed); assertFalse(page.controller.confirmed)
+                page.controller.setEnabled(entry, false); page.controller.prepareRemoval(entry)
+                assertEquals(0, page.worker.pending)
+                page.controller.setGlobalEnabled(false)
+            }
+            page.finishNext()
+            mainThread {
+                assertFalse(page.controller.state!!.enabled)
+                assertTrue(page.controller.globalConfirmed); assertFalse(page.controller.confirmed)
+            }
+            assertFalse(app.daiyu.android.skills.SkillToolRegistry(context).enabled)
+            assertEquals("not a directory", blocked.readText())
+        } finally {
+            page.close(); root.deleteRecursively()
+            instrumentation.targetContext.deleteSharedPreferences("$prefs-runtime-skills-v1-settings")
+        }
+    }
+
     private class QueuedWorker : AbstractExecutorService() {
         private val tasks = LinkedBlockingQueue<Runnable>()
         @Volatile private var stopped = false
@@ -316,14 +351,14 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
         override fun awaitTermination(timeout: Long, unit: TimeUnit) = isTerminated()
     }
 
-    private inner class ControlledPage {
+    private inner class ControlledPage(managementFactory: () -> SkillManagement = { skills.manager }) {
         val worker = QueuedWorker()
         private val callbacks = LinkedBlockingQueue<() -> Unit>()
         lateinit var controller: SkillManagementPageState
         init {
             mainThread {
                 controller = SkillManagementPageState(
-                    managementFactory = { skills.manager }, worker = worker,
+                    managementFactory = managementFactory, worker = worker,
                     postToMain = { callbacks.add(it); Unit },
                 )
             }

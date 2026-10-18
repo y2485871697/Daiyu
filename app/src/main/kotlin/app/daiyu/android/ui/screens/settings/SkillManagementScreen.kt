@@ -112,7 +112,7 @@ internal fun SkillManagementScreen(
                 SettingsRow("启用技能", trailing = {
                     SkillSwitch(
                         checked = state?.enabled ?: false,
-                        enabled = switchesEnabled,
+                        enabled = !controller.busy && controller.globalConfirmed,
                         label = "启用技能",
                         modifier = Modifier.testTag("skills-global"),
                         onCheckedChange = controller::setGlobalEnabled,
@@ -498,6 +498,8 @@ internal class SkillManagementPageState(
         private set
     var confirmed by mutableStateOf(false)
         private set
+    var globalConfirmed by mutableStateOf(false)
+        private set
     var error by mutableStateOf<String?>(null)
         private set
 
@@ -595,7 +597,8 @@ internal class SkillManagementPageState(
             result to runCatching { management.snapshot() }
         }) { (result, refreshed) ->
             removal = null
-            refreshed.fold(onSuccess = { state = it; confirmed = !it.entriesUnavailable }, onFailure = { confirmed = false })
+            refreshed.fold(onSuccess = { state = it; globalConfirmed = true; confirmed = !it.entriesUnavailable },
+                onFailure = { globalConfirmed = false; confirmed = false })
             installMessage = when (result) {
                 is SkillManagement.RemovalResult.Removed -> if (result.cleanupPending)
                     "删除已提交，清理待完成；请刷新，不要重复删除。" else "技能已删除，当前运行保留原正文快照。"
@@ -638,7 +641,8 @@ internal class SkillManagementPageState(
 
     private fun finishInstall(result: SkillManagement.InstallResult, refreshed: Result<SkillManagement.State>, operation: String = "安装") {
         inspection = null; preview = null; localPreview = null; selected = emptySet()
-        refreshed.fold(onSuccess = { state = it; confirmed = !it.entriesUnavailable }, onFailure = { confirmed = false })
+        refreshed.fold(onSuccess = { state = it; globalConfirmed = true; confirmed = !it.entriesUnavailable },
+                onFailure = { globalConfirmed = false; confirmed = false })
         installMessage = when (result) {
             is SkillManagement.InstallResult.Installed -> if (result.cleanupPending)
                 "${operation}已提交，清理待完成；请刷新，不要重复提交。" else "${operation}成功，新运行可见；当前运行保持原快照。"
@@ -678,7 +682,7 @@ internal class SkillManagementPageState(
                 busy = false; installing = false
                 result.fold(onSuccess = accept, onFailure = { failure ->
                     if (writing) {
-                        inspection = null; preview = null; localPreview = null; removal = null; reinstall = null; selected = emptySet(); confirmed = false
+                        inspection = null; preview = null; localPreview = null; removal = null; reinstall = null; selected = emptySet(); globalConfirmed = false; confirmed = false
                         installMessage = "修改结果未知，请刷新核对；不会自动重试。离页不代表回滚。"
                     } else {
                         error = when (failure.message) {
@@ -700,7 +704,7 @@ internal class SkillManagementPageState(
     }
 
     fun setGlobalEnabled(enabled: Boolean) {
-        if (!confirmed) return
+        if (!globalConfirmed) return
         load { management.setGlobalEnabled(enabled) }
     }
 
@@ -721,11 +725,13 @@ internal class SkillManagementPageState(
                 result.fold(
                     onSuccess = { freshState ->
                         state = freshState
+                        globalConfirmed = true
                         confirmed = !freshState.entriesUnavailable
                         error = null
                     },
                     onFailure = { failure ->
                         // Keep the old values visible, but never write using unconfirmed revisions.
+                        globalConfirmed = false
                         confirmed = false
                         error = if (failure is SkillConflict) "技能版本已变化，请刷新" else "操作结果未确认，请刷新"
                     },

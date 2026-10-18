@@ -15,7 +15,7 @@ import java.util.concurrent.atomic.AtomicReference
 @Suppress("DEPRECATION")
 class ControllerModelPreparationTest : InstrumentationTestCase() {
     private val expectedBaseCatalog = setOf("get_battery_status", "context_usage", "ask_user",
-        "assistant_memory_read", "assistant_memory_search")
+        "skills_list", "skills_read", "skills_read_resource", "assistant_memory_read", "assistant_memory_search")
     private class FixtureApplication(base: Context) : Application() {
         private val privateFiles=File(base.cacheDir,"controller-model-files-${UUID.randomUUID()}").apply {check(mkdirs() || isDirectory)}
         init { attachBaseContext(base) }
@@ -395,7 +395,12 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         assertTrue(probe.definitions.single {it.name=="skills_list"}.description.contains(old.revision))
         val outputs=probe.returned.single();assertEquals(3,outputs.size)
         val index=org.json.JSONObject(outputs[0].output);assertTrue(index.getBoolean("ok"))
-        assertEquals(old.revision,index.getJSONArray("skills").getJSONObject(0).getString("revision"))
+        val listed = index.getJSONArray("skills")
+        val demo = (0 until listed.length()).map { listed.getJSONObject(it) }.single { it.getString("id") == "user:demo" }
+        assertEquals(old.revision, demo.getString("revision"))
+        val ids = (0 until listed.length()).map { listed.getJSONObject(it).getString("id") }
+        assertEquals(4, ids.size)
+        assertEquals(setOf("builtin:self-improving-agent", "builtin:skill-creator", "builtin:skill-installer", "user:demo"), ids.toSet())
         val body=org.json.JSONObject(outputs[1].output);assertTrue(body.getBoolean("ok"));assertFalse(body.getBoolean("executable"))
         assertTrue(body.getString("content").endsWith("old-body"));assertFalse(body.getString("content").contains("new-body"))
         val resource=org.json.JSONObject(outputs[2].output);assertFalse(resource.getBoolean("ok"));assertEquals("skill_conflict",resource.getString("error"))

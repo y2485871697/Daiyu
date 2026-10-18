@@ -19,3 +19,5 @@ internal interface SavedModelCatalogSelectionPersistence<T> {
     fun current(): SavedModelCatalogSnapshot<T>?
     fun <R> consumeSelection(selection: CatalogModelSelection<T>, change: (SavedCatalogModel<T>) -> R): R
 }
+
+internal enum class CatalogLocalEditResult { APPLIED, STALE, CANCELLED, CURRENT_MODEL, FAILED }

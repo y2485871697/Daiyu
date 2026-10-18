@@ -3706,6 +3706,39 @@ class ChatController internal constructor(private val application:Application,
             "模型已切换"
         })
     }
+    internal fun renameConfiguredCatalogModel(
+        ticket: app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>,
+        name: String, cancelled: () -> Boolean,
+        completed: (app.daiyu.android.model.catalog.CatalogLocalEditResult) -> Unit,
+    ) = editConfiguredCatalogModel(cancelled, completed) { settings.renameCatalogModel(ticket, name, cancelled) }
+
+    internal fun deleteConfiguredCatalogModel(
+        ticket: app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>,
+        cancelled: () -> Boolean,
+        completed: (app.daiyu.android.model.catalog.CatalogLocalEditResult) -> Unit,
+    ) = editConfiguredCatalogModel(cancelled, completed) { settings.deleteCatalogModel(ticket, cancelled) }
+
+    private fun editConfiguredCatalogModel(
+        cancelled: () -> Boolean,
+        completed: (app.daiyu.android.model.catalog.CatalogLocalEditResult) -> Unit,
+        change: () -> app.daiyu.android.model.catalog.CatalogLocalEditResult,
+    ) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        if (cancelled()) { completed(app.daiyu.android.model.catalog.CatalogLocalEditResult.CANCELLED); return }
+        var result = app.daiyu.android.model.catalog.CatalogLocalEditResult.FAILED
+        dataTask(failureNotice = "本地模型修改未保存", completed = { success ->
+            completed(if (success) result else app.daiyu.android.model.catalog.CatalogLocalEditResult.FAILED)
+        }, work = {
+            result = change()
+            when (result) {
+                app.daiyu.android.model.catalog.CatalogLocalEditResult.APPLIED -> "本地模型已更新"
+                app.daiyu.android.model.catalog.CatalogLocalEditResult.STALE -> "目录已变化，请重新选择模型"
+                app.daiyu.android.model.catalog.CatalogLocalEditResult.CANCELLED -> "本地模型修改已取消"
+                app.daiyu.android.model.catalog.CatalogLocalEditResult.CURRENT_MODEL -> "请先切换当前模型，再删除此模型"
+                app.daiyu.android.model.catalog.CatalogLocalEditResult.FAILED -> throw java.io.IOException("local_catalog_edit_failed")
+            }
+        })
+    }
     internal fun exportUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver) {
         dataTask(work={
             if(complete) {

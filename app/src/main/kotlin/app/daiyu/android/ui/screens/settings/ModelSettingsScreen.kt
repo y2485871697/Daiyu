@@ -76,6 +76,7 @@ internal fun ModelSettingsScreen(
     enabled: Boolean = true,
     engineeringUi: Boolean = false,
     testConnection: ModelConnectionTester? = null,
+    onManageLocalModels: (() -> Unit)? = null,
 ) {
     val connection = rememberSettingsConnectionTest(draft, enabled, testConnection)
     val changeDraft: (ModelSettingsDraftUi) -> Unit = { connection.cancel(); onDraftChange(it) }
@@ -170,6 +171,10 @@ internal fun ModelSettingsScreen(
                     modifier = Modifier.testTag("model-connection-test").fillMaxWidth().padding(12.dp))
                 connection.status?.let { SettingsNote(it) }
             }
+        }
+        if (onManageLocalModels != null) item(key = "local_models") {
+            SettingsCard { SettingsRow("本地模型", onClick = { if (enabled) { connection.cancel(); onManageLocalModels() } },
+                tag = "model-local-manage") }
         }
         item(key = "model_catalog") {
             SettingsSectionTitle("远端模型目录")

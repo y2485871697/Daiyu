@@ -29,7 +29,7 @@ internal class RunControlFixture(base:Context,
     private val filesRoot = (filesRoot ?: java.io.File(base.cacheDir, "run-control-files-$fixtureId")).apply { check(mkdirs()) }
     val application:Application=FixtureApplication(object : android.content.ContextWrapper(
         testContext(base,"run-control-$fixtureId-")) {
-        override fun getFilesDir() = filesRoot
+        override fun getFilesDir() = this@RunControlFixture.filesRoot
     })
     val database=ConversationDatabase(application)
     private val alias="app.daiyu.android.test.run-control.${UUID.randomUUID()}"

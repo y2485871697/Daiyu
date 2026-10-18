@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
 import android.os.Handler
 import android.os.Looper
 import androidx.compose.foundation.background
@@ -68,6 +71,18 @@ internal fun SkillManagementScreen(
     // The controller and its factory belong to this page visit, not to recompositions.
     val controller = remember { SkillManagementPageState(managementFactory) }
     var details by remember { mutableStateOf<SkillManagement.Entry?>(null) }
+    val context = LocalContext.current
+    var pickerRequest by remember { mutableStateOf<SkillManagementPageState.LocalPick?>(null) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val request = pickerRequest
+        pickerRequest = null
+        if (request != null) controller.receiveLocalPick(request, uri?.let { selected ->
+            {
+                require(selected.scheme == "content") { "invalid_document_uri" }
+                context.contentResolver.openInputStream(selected) ?: error("document_unavailable")
+            }
+        })
+    }
     DisposableEffect(controller) {
         controller.refresh()
         onDispose { controller.dispose() }
@@ -119,6 +134,14 @@ internal fun SkillManagementScreen(
                     )
                     Button(onClick = controller::inspect, enabled = !controller.busy && controller.url.isNotBlank(),
                         modifier = Modifier.testTag("skills-inspect")) { Text("检查仓库") }
+                    Button(onClick = {
+                        val request = controller.beginLocalPick()
+                        if (request != null) {
+                            pickerRequest = request
+                            try { picker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) }
+                            catch (_: Exception) { pickerRequest = null; controller.receiveLocalPick(request, null) }
+                        }
+                    }, enabled = !controller.busy, modifier = Modifier.testTag("skills-import-zip")) { Text("从本地 ZIP 导入") }
                     if (controller.busy) Text("正在处理，请稍候…", color = colors.onSurfaceVariantSummary)
                     Text("仅安装静态技能资源，不执行脚本；安装后供新运行使用。", color = colors.onSurfaceVariantSummary)
                     controller.installMessage?.let { Text(it, color = colors.onSurface) }
@@ -202,6 +225,7 @@ internal fun SkillManagementScreen(
     controller.inspection?.let { inspection ->
         SkillInstallSheet(controller, inspection)
     }
+    controller.localPreview?.let { local -> LocalSkillInstallSheet(controller, local) }
     details?.let { entry ->
         SkillDetailsSheet(entry = entry, onDismiss = { details = null },
             canRemove = switchesEnabled && !entry.builtin,
@@ -216,6 +240,35 @@ internal fun SkillManagementScreen(
             dismissButton = { TextButton(onClick = controller::cancelRemoval, enabled = !controller.busy) { Text("取消") } })
     }
 
+}
+
+@Composable
+private fun LocalSkillInstallSheet(controller: SkillManagementPageState, preview: SkillManagement.LocalPreview) {
+    val colors = MiuixTheme.colorScheme
+    var approved by remember(preview) { mutableStateOf(false) }
+    val change = preview.change
+    AlertDialog(onDismissRequest = { if (!controller.installing) controller.cancelInstall() },
+        title = { Text("确认本地技能导入") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("${change.candidate.name}\n${change.candidate.description}", color = colors.onSurface)
+                Text("包 SHA-256：${preview.archiveSha256}\n新版本：${change.candidate.incomingRevision}", color = colors.onSurface)
+                Text(if (preview.compatible) "兼容性静态检查通过；仅导入静态资源，不执行脚本。"
+                    else "不兼容：${change.compatibility.reason}", color = if (preview.compatible) colors.onSurfaceVariantSummary else colors.error)
+                change.previousRevision?.let { old ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked = approved, enabled = !controller.busy, onCheckedChange = { approved = it },
+                            modifier = Modifier.testTag("skills-local-replace"))
+                        Text("批准替换 user:${change.candidate.name}\n旧版本：$old", color = colors.onSurface)
+                    }
+                }
+                Text("确认安装预览时冻结的包内容，当前运行保持原快照。", color = colors.onSurfaceVariantSummary)
+            }
+        },
+        confirmButton = { TextButton(onClick = { controller.installLocal(preview, preview.replacements) },
+            enabled = !controller.busy && preview.compatible && (change.previousRevision == null || approved),
+            modifier = Modifier.testTag("skills-confirm-local-install")) { Text("确认导入") } },
+        dismissButton = { TextButton(onClick = controller::cancelInstall, enabled = !controller.installing) { Text("取消") } })
 }
 
 @Composable
@@ -447,10 +500,38 @@ internal class SkillManagementPageState(
     var removal by mutableStateOf<SkillManagement.Removal?>(null)
         private set
     private var flowGeneration = 0L
+    class LocalPick internal constructor()
+    private var pendingPick: LocalPick? = null
+    var localPreview by mutableStateOf<SkillManagement.LocalPreview?>(null)
+        private set
+
+    fun beginLocalPick(): LocalPick? {
+        if (!active || busy) return null
+        cancelInstall()
+        installMessage = null
+        removal = null
+        worker.execute { runCatching { management.cancelRemoval() } }
+        return LocalPick().also { pendingPick = it; busy = true }
+    }
+
+    fun receiveLocalPick(request: LocalPick, openStream: (() -> java.io.InputStream)?) {
+        if (!active || pendingPick !== request) return
+        pendingPick = null; busy = false
+        if (openStream != null) flow({ management.previewLocalZip(openStream) }) { localPreview = it }
+    }
+
+    fun installLocal(approved: SkillManagement.LocalPreview, replacements: Map<String, String>) {
+        if (!active || busy || localPreview !== approved) return
+        val ticket = owner.ticket() ?: return
+        installing = true
+        flow(ticket = ticket, operation = {
+            management.installLocalZip(approved, replacements) to runCatching { management.snapshot() }
+        }) { (result, refreshed) -> finishInstall(result, refreshed) }
+    }
 
     fun prepareRemoval(entry: SkillManagement.Entry) {
         if (!confirmed || !active || busy) return
-        inspection = null; preview = null; selected = emptySet(); installMessage = null
+        inspection = null; preview = null; localPreview = null; selected = emptySet(); installMessage = null
         flow({ management.previewRemoval(entry.id, entry.skill.revision) }) { removal = it }
     }
 
@@ -482,7 +563,7 @@ internal class SkillManagementPageState(
 
     fun inspect() {
         if (!active || busy) return
-        inspection = null; preview = null; removal = null; selected = emptySet(); installMessage = null
+        inspection = null; preview = null; localPreview = null; removal = null; selected = emptySet(); installMessage = null
         val input = url.trim()
         flow({ management.inspect(input) }) { inspection = it }
     }
@@ -506,23 +587,27 @@ internal class SkillManagementPageState(
             val result = management.install(approvedPreview, replacements)
             result to runCatching { management.snapshot() }
         }) { (result, refreshed) ->
-            inspection = null; preview = null; selected = emptySet()
-            refreshed.fold(onSuccess = { state = it; confirmed = !it.entriesUnavailable }, onFailure = { confirmed = false })
-            installMessage = when (result) {
-                is SkillManagement.InstallResult.Installed -> if (result.cleanupPending)
-                    "安装已提交，清理待完成；请刷新，不要重复安装。" else "安装成功，新运行可见；当前运行保持原快照。"
-                is SkillManagement.InstallResult.Rejected -> "安装未获确认（${result.code}），请刷新后重新检查和预览。"
-                SkillManagement.InstallResult.Unknown -> "安装结果未知，请刷新核对；不会自动重装。离页不代表回滚。"
-            }
-            if (refreshed.isFailure) error = "列表读取失败，请刷新核对；不要重复提交安装。"
+            finishInstall(result, refreshed)
         }
+    }
+
+    private fun finishInstall(result: SkillManagement.InstallResult, refreshed: Result<SkillManagement.State>) {
+        inspection = null; preview = null; localPreview = null; selected = emptySet()
+        refreshed.fold(onSuccess = { state = it; confirmed = !it.entriesUnavailable }, onFailure = { confirmed = false })
+        installMessage = when (result) {
+            is SkillManagement.InstallResult.Installed -> if (result.cleanupPending)
+                "安装已提交，清理待完成；请刷新，不要重复安装。" else "安装成功，新运行可见；当前运行保持原快照。"
+            is SkillManagement.InstallResult.Rejected -> "安装未获确认（${result.code}），请刷新后重新检查和预览。"
+            SkillManagement.InstallResult.Unknown -> "安装结果未知，请刷新核对；不会自动重装。离页不代表回滚。"
+        }
+        if (refreshed.isFailure) error = "列表读取失败，请刷新核对；不要重复提交安装。"
     }
 
     fun cancelInstall() {
         if (!active || installing) return
         flowGeneration++
         busy = false
-        inspection = null; preview = null; selected = emptySet(); error = null
+        inspection = null; preview = null; localPreview = null; pendingPick = null; selected = emptySet(); error = null
         worker.execute { runCatching { management.cancelInstall() } }
     }
 
@@ -547,7 +632,7 @@ internal class SkillManagementPageState(
                 busy = false; installing = false
                 result.fold(onSuccess = accept, onFailure = { failure ->
                     if (writing) {
-                        inspection = null; preview = null; removal = null; selected = emptySet(); confirmed = false
+                        inspection = null; preview = null; localPreview = null; removal = null; selected = emptySet(); confirmed = false
                         installMessage = "修改结果未知，请刷新核对；不会自动重试。离页不代表回滚。"
                     } else {
                         error = when (failure.message) {
@@ -603,6 +688,7 @@ internal class SkillManagementPageState(
         // Revoke synchronously without waiting for management's network/storage lock.
         // Queued tickets now fail admission; an already admitted write may finish.
         if (!owner.revoke()) return
+        pendingPick = null; localPreview = null
         worker.execute {
             if (managementDelegate.isInitialized()) runCatching { management.cancelInstall(); management.cancelRemoval() }
         }

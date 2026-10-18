@@ -254,6 +254,9 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
     }
 
     fun testSeparateFixturesNeverShareThePrimaryCatalog() {
+        assertNotNull(fixture.application.filesDir)
+        assertTrue(fixture.application.filesDir.isAbsolute)
+        assertTrue(fixture.application.filesDir.isDirectory)
         fixture.settings.modelCatalogSnapshot()
         RunControlFixture(instrumentation.targetContext).use { other ->
             awaitControl("second isolated controller ready") { other.controller.ready }

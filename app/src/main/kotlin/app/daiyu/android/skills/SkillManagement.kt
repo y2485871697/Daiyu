@@ -45,7 +45,7 @@ class SkillManagement private constructor(private val registry: SkillToolRegistr
     fun previewRemoval(id: String, revision: String): Removal {
         workerOnly()
         return synchronized(this) {
-            pendingRemoval = null
+            pendingRemoval = null; inspected = null; pending = null; pendingLocal = null
             val state = registry.managementState()
             check(!state.entriesUnavailable) { "skills_unavailable" }
             val entry = state.entries.singleOrNull { it.id == id } ?: throw SkillConflict(id, null)
@@ -99,13 +99,64 @@ class SkillManagement private constructor(private val registry: SkillToolRegistr
         object Unknown : InstallResult()
     }
 
+    class LocalPreview internal constructor(val archiveSha256: String, val change: Change) {
+        val compatible: Boolean get() = change.compatibility.available
+        val replacements: Map<String, String> = java.util.Collections.unmodifiableMap(
+            change.previousRevision?.let { mapOf("user:${change.candidate.name}" to it) } ?: emptyMap())
+    }
+    private data class PendingLocal(val preview: LocalPreview, val bundle: SkillBundle)
+    private var pendingLocal: PendingLocal? = null
+
+    fun previewLocalZip(openStream: () -> java.io.InputStream): LocalPreview {
+        workerOnly()
+        return synchronized(this) {
+            inspected = null; pending = null; pendingLocal = null; pendingRemoval = null
+            val archive = LocalSkillZipImport.read(openStream)
+            val checked = registry.previewForManagement(archive.bundle)
+            val state = registry.managementState()
+            check(!state.entriesUnavailable) { "skills_unavailable" }
+            require(state.entries.none { it.builtin && it.skill.name == checked.header.name }) { "builtin_conflict" }
+            val candidate = Candidate("", checked.header.name, checked.header.description, checked.revision)
+            LocalPreview(archive.sha256, Change(candidate,
+                state.entries.singleOrNull { it.id == "user:${candidate.name}" }?.skill?.revision,
+                checked.compatibility)).also { pendingLocal = PendingLocal(it, archive.bundle) }
+        }
+    }
+
+    /** Installs the privately frozen bytes, not a reopened provider URI or a caller-owned bundle. */
+    fun installLocalZip(preview: LocalPreview, approvedReplacements: Map<String, String>): InstallResult {
+        workerOnly()
+        return synchronized(this) {
+            val prepared = pendingLocal
+            if (prepared?.preview !== preview) return@synchronized InstallResult.Rejected("stale_preview")
+            pendingLocal = null
+            if (!preview.compatible) return@synchronized InstallResult.Rejected("skill_incompatible")
+            if (approvedReplacements != preview.replacements) return@synchronized InstallResult.Rejected("replacement_approval_required")
+            try {
+                InstallResult.Installed(frozen(registry.installForManagement(listOf(prepared.bundle),
+                    preview.replacements.mapKeys { it.key.removePrefix("user:") },
+                    mapOf(preview.change.candidate.name to preview.change.candidate.incomingRevision))))
+            } catch (committed: SkillCleanupPending) {
+                InstallResult.Installed(frozen(committed.installedSkills), cleanupPending = true)
+            } catch (_: SkillIncompatible) {
+                InstallResult.Rejected("skill_incompatible")
+            } catch (_: SkillConflict) {
+                InstallResult.Rejected("skill_conflict")
+            } catch (_: SkillToolRegistry.ManagementBuiltinConflict) {
+                InstallResult.Rejected("builtin_conflict")
+            } catch (_: Exception) {
+                InstallResult.Unknown
+            }
+        }
+    }
+
     private var inspected: Inspection? = null
     private var pending: Preview? = null
 
     fun inspect(url: String): Inspection {
         workerOnly()
         return synchronized(this) {
-            inspected = null; pending = null
+            inspected = null; pending = null; pendingLocal = null; pendingRemoval = null
             SkillInvocationValidation.validate("skills_inspect_github", org.json.JSONObject().put("url", url))
             val json = registry.inspectForManagement(url)
             val candidates = json.getJSONArray("candidates")
@@ -188,7 +239,7 @@ class SkillManagement private constructor(private val registry: SkillToolRegistr
 
     fun cancelInstall() {
         workerOnly()
-        synchronized(this) { pending = null; inspected = null }
+        synchronized(this) { pending = null; inspected = null; pendingLocal = null }
     }
 
     private fun safeCode(failure: Exception) = failure.message?.takeIf { it.matches(Regex("[a-z_]+")) } ?: "skills_unavailable"

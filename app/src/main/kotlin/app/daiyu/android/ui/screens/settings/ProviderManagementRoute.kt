@@ -211,7 +211,10 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
                 if (!live() || !enabled) false else controller.fetchModelCatalog(value.providerSettings(saved),
                     { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) deliver(it) }
-            }, pageTitle = pageTitleOverride ?: d.name, twoTabs = true, ownerCurrent = live,
+            }, pageTitle = pageTitleOverride ?: d.name,
+            // Keep the primary model route's established single-page controls and tags;
+            // additional providers use the explicit 配置/模型 split.
+            twoTabs = initialSlot != ProviderRegistry.PRIMARY, ownerCurrent = live,
             enabled = enabled, engineeringUi = engineeringUi, errorText = notice,
             credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
             testConnection = connection, localModelActions = actions)

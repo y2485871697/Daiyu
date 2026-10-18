@@ -62,6 +62,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     }
     private fun catalogue(body: String = """{"data":[{"id":"first"},{"id":"second"}]}""", status: Int = 200, held: Boolean = false):
         Triple<CountDownLatch, CountDownLatch, AtomicReference<CatalogConnection>> {
+        fixture.settings.modelCatalogSnapshot()
         val entered = CountDownLatch(1); val release = CountDownLatch(if (held) 1 else 0)
         val connection = AtomicReference<CatalogConnection>()
         fixture.controller.modelCatalog = app.daiyu.android.model.catalog.ModelCatalogService(

@@ -31,14 +31,16 @@ class SettingsPresentationTest {
     }
 
     @Test
-    fun productSettingsHaveNoEngineeringPermissionEntryEvenInSearch() {
+    fun productSettingsExposeCompleteInventoryInSearch() {
         val groups = SettingsCatalog.visibleGroups()
         val entries = groups.flatMap { it.entries }
-        assertEquals(33, entries.size)
-        assertTrue(entries.none { it.id in setOf("platform_tools", "browser", "enhancements", "overlay", "accessibility") })
-        assertTrue(entries.map { it.id }.containsAll(setOf("task_surface", "linux", "voice", "donate")))
+        assertEquals(SettingsCatalog.entries.size, entries.size)
+        assertTrue(entries.map { it.id }.containsAll(setOf(
+            "platform_tools", "browser", "enhancements", "overlay", "accessibility",
+            "task_surface", "linux", "voice", "donate",
+        )))
         for (title in listOf("平台只读", "浏览器", "无障碍", "悬浮窗权限")) {
-            assertTrue(filterSettingsGroups(title, groups).isEmpty())
+            assertTrue(filterSettingsGroups(title, groups).isNotEmpty())
         }
         assertEquals(SettingsCatalog.groups, SettingsCatalog.visibleGroups(engineeringUi = true))
     }

@@ -44,12 +44,12 @@ class SettingsProductActivityTest : WiredActivityTestCase() {
         assertDraft("product backup unsent")
     }
 
-    fun testProductModelFormHidesDeviceAndTierControlsButBodyRemainsEditable() {
+    fun testProductModelFormShowsDeviceAndTierControlsAndBodyRemainsEditable() {
         setDraft("product models unsent")
         val before = fixture.database.exportBackup()
         openModels()
         for (title in listOf("电量查询", "设备状态查询", "Codex 档位"))
-            node("settings-switch:$title").assertDoesNotExist()
+            node("settings-switch:$title").assertExists()
         reveal("model-custom-body").assertExists().performClick()
         modelField("自定义请求体").assertExists().assertIsEnabled()
         node("page:模型设置").performScrollToNode(hasTestTag("model-save"))

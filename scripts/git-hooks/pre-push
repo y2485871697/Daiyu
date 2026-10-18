@@ -1,0 +1,51 @@
+#!/bin/sh
+# Check real commit metadata before it becomes public on GitHub.
+set -eu
+export GIT_NO_REPLACE_OBJECTS=1
+
+fail() {
+    printf 'Git identity guard: %s\n' "$*" >&2
+    exit 1
+}
+valid_oid() {
+    case "$1" in ''|*[!0123456789abcdef]*) return 1 ;; esac
+    [ "${#1}" -eq 40 ] || [ "${#1}" -eq 64 ]
+}
+is_zero() {
+    case "$1" in *[!0]*) return 1 ;; *) return 0 ;; esac
+}
+
+anchor=846e2f175782d1b0aaa35b3125649ffedebdfde2
+expected=$(printf '%s\n' \
+    'y2485871697' 'y2485871697@users.noreply.github.com' \
+    'y2485871697' 'y2485871697@users.noreply.github.com')
+
+while read -r local_ref local_oid remote_ref remote_oid extra || [ -n "${local_ref-}" ]; do
+    [ -n "$local_ref" ] && [ -z "$extra" ] || fail 'Malformed pre-push input.'
+    valid_oid "$local_oid" && valid_oid "$remote_oid" || fail 'Invalid object ID.'
+    [ "$remote_ref" = refs/heads/main ] || fail 'Only updates to main are allowed.'
+    is_zero "$local_oid" && fail 'Deleting main is not allowed.'
+    is_zero "$remote_oid" && fail 'Creating a remote main is not allowed by this project guard.'
+    [ "$(git cat-file -t "$local_oid" 2>/dev/null)" = commit ] || fail 'Local commit is unavailable.'
+    [ "$(git cat-file -t "$remote_oid" 2>/dev/null)" = commit ] || fail 'Fetch remote main before pushing; its commit is missing locally.'
+    [ "$(git rev-parse --is-shallow-repository)" = false ] || fail 'Fetch complete history before pushing.'
+    [ -z "${GIT_GRAFT_FILE-}" ] || fail 'GIT_GRAFT_FILE overrides are unsupported.'
+    grafts=$(git rev-parse --git-path info/grafts)
+    [ ! -s "$grafts" ] || fail 'Legacy grafts must not alter the history being checked.'
+    git merge-base --is-ancestor "$anchor" "$remote_oid" 2>/dev/null || \
+        fail 'Remote main is not on the corrected history. Sync and inspect it; do not merge the old history.'
+    git merge-base --is-ancestor "$remote_oid" "$local_oid" || \
+        fail 'Non-fast-forward update refused. Sync corrected main without merging the old history.'
+    commits=$(git rev-list "$remote_oid..$local_oid") || fail 'Cannot enumerate new commits.'
+    for commit in $commits; do
+        actual=$(git show --no-patch --no-show-signature --format='%an%n%ae%n%cn%n%ce' "$commit") || \
+            fail "Cannot read commit $commit."
+        if [ "$actual" != "$expected" ]; then
+            printf 'Git identity guard: rejected commit %s.\n' "$commit" >&2
+            printf 'Both author and committer must be y2485871697 <y2485871697@users.noreply.github.com>.\n' >&2
+            printf 'Inspect with: git show -s --format=fuller %s\n' "$commit" >&2
+            printf 'Nothing was rewritten or pushed. Correct the unpushed commit after review; do not bypass the hook.\n' >&2
+            exit 1
+        fi
+    done
+done

@@ -426,4 +426,37 @@ class ModelSettingsRestoreTest : InstrumentationTestCase() {
         }
     }
 
+    fun testHeaderEnvelopeSaveFailureRestoresValueAndPresence() {
+        val header = app.daiyu.android.model.ProviderHeaders.parse("""{"x-tenant":"original-secret"}""")
+        for (outcome in listOf(CommitOutcome.FALSE_BEFORE_WRITE, CommitOutcome.FALSE_AFTER_WRITE, CommitOutcome.THROW_AFTER_WRITE)) {
+            for (transition in 0..2) {
+                val f = fresh()
+                val original = f.settings.copy(customHeaders = if (transition == 2) app.daiyu.android.model.ProviderHeaders.EMPTY else header)
+                f.save(original)
+                val before = HashMap(f.raw.all)
+                val replacement = original.copy(customHeaders = if (transition == 1) app.daiyu.android.model.ProviderHeaders.EMPTY
+                    else app.daiyu.android.model.ProviderHeaders.parse("""{"x-tenant":"replacement-secret"}"""))
+                f.spy.outcomes.add(outcome)
+                rejected { f.save(replacement) }
+                assertEquals(before, f.raw.all)
+                f.spy.protectCredentials = false
+                assertEquals(original, f.reopen().load())
+            }
+        }
+    }
+
+    fun testToolOnlyRestoreNeverReadsOrWritesHeaderEnvelope() {
+        val f = fresh()
+        f.save(f.settings.copy(customHeaders = app.daiyu.android.model.ProviderHeaders.parse("""{"x-tenant":"kept-secret"}""")))
+        val envelope = listOf("request-headers", "request-headers-iv", "key-alias").associateWith { f.raw.getString(it, null) }
+        f.spy.resetObservations()
+        val plan = f.store.prepareNonSecretRestore(JSONObject().put("battery", false))
+        f.store.applyNonSecretRestore(plan, true)
+        assertTrue(f.spy.reads.none { it in envelope })
+        assertTrue(f.spy.writes.none { it in envelope })
+        assertEquals(envelope, envelope.keys.associateWith { f.raw.getString(it, null) })
+        f.spy.protectCredentials = false
+        assertEquals("kept-secret", JSONObject(f.store.load().customHeaders.encode()).getString("x-tenant"))
+    }
+
 }

@@ -106,6 +106,7 @@ class ResponsesModel internal constructor(
                 conn.requestMethod = "GET"; conn.doOutput = false; conn.instanceFollowRedirects = false
                 conn.connectTimeout = 20_000; conn.readTimeout = 60_000
                 conn.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
+                settings.customHeaders.applyTo(conn)
                 conn.setRequestProperty("Accept", "text/event-stream")
                 checkCancelled()
                 val status = conn.responseCode
@@ -278,6 +279,7 @@ class ResponsesModel internal constructor(
                 conn.requestMethod = "POST"; conn.doOutput = true; conn.instanceFollowRedirects = false
                 conn.connectTimeout = 20_000; conn.readTimeout = 60_000
                 conn.setRequestProperty("Authorization", "Bearer ${settings.apiKey}")
+                settings.customHeaders.applyTo(conn)
                 conn.setRequestProperty("Content-Type", "application/json"); conn.setRequestProperty("Accept", "text/event-stream")
                 sessionHeaders.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 checkCancelled()

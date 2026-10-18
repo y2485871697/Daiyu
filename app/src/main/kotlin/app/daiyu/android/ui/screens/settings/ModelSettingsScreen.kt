@@ -41,6 +41,8 @@ internal data class ModelSettingsDraftUi(
     val protocolChangeAuthorized: Boolean = false,
     val requestOptionsReplacementAuthorized: Boolean = false,
     val anthropicVersion: String = "",
+    val customHeaders: String = "",
+    val headersReplacementAuthorized: Boolean = false,
 ) {
     override fun toString(): String = "ModelSettingsDraftUi(protocol=$protocol, model=$model, apiKey=<redacted>, customBody=<redacted>)"
 }
@@ -54,8 +56,10 @@ internal fun ModelSettingsDraftUi.selectProtocol(selected: ProviderProtocol): Mo
     if (selected == protocol) this else copy(
         protocol = selected,
         apiKey = "",
+        customHeaders = "",
         responsesPath = if (selected != ProviderProtocol.RESPONSES) "" else responsesPath,
         protocolChangeAuthorized = false,
+        headersReplacementAuthorized = false,
         anthropicVersion = if (selected == ProviderProtocol.MESSAGES) anthropicVersion else "",
     )
 
@@ -75,6 +79,7 @@ internal fun ModelSettingsScreen(
     errorText: String? = null,
     credentialUnavailable: Boolean = false,
     requestOptionsUnavailable: Boolean = false,
+    headersUnavailable: Boolean = false,
     catalog: List<ModelCatalogEntryUi> = emptyList(),
     isFetchingCatalog: Boolean = false,
     catalogStatusText: String? = null,
@@ -95,7 +100,7 @@ internal fun ModelSettingsScreen(
     val catalogIsCurrent = catalogForDraft?.let {
         it.endpoint == draft.endpoint && it.responsesPath == draft.responsesPath &&
             it.protocol == draft.protocol && it.apiKey == draft.apiKey && it.model == draft.model &&
-            it.anthropicVersion == draft.anthropicVersion
+            it.anthropicVersion == draft.anthropicVersion && it.customHeaders == draft.customHeaders
     } == true
     MiuixScaffoldPage(title = pageTitle, onBack = { connection.cancel(); onBack() }, modifier = modifier) {
         headerContent()
@@ -136,6 +141,14 @@ internal fun ModelSettingsScreen(
                 }
                 SettingsTextField("模型名", draft.model, { changeDraft(draft.copy(model = it)) }, enabled = enabled)
                 SettingsTextField("API Key", draft.apiKey, { changeDraft(draft.copy(apiKey = it)) }, password = true, enabled = enabled)
+                SettingsTextField("自定义请求头", draft.customHeaders, { changeDraft(draft.copy(customHeaders = it)) },
+                    password = true, hint = "JSON 对象；加密保存，不覆盖鉴权或会话字段", enabled = enabled)
+                if (headersUnavailable) {
+                    SettingsNote("原请求头不可用；请重新输入或明确清除", error = true)
+                    SettingsSwitchRow("授权替换或清除请求头", draft.headersReplacementAuthorized, enabled = enabled) {
+                        changeDraft(draft.copy(headersReplacementAuthorized = it))
+                    }
+                }
             }
         }
         item(key = "model_device_tools") {

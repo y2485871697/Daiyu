@@ -50,6 +50,7 @@ class CatalogModelParametersTest {
     @Test fun migrationPreservesCurrentParametersButNeverStoresCredentialsOrEndpoint() {
         val settings = ModelSettings("https://private.invalid", "customized", "never-persist-this-key", true,
             deviceStatusEnabled = true,
+            customHeaders = app.daiyu.android.model.ProviderHeaders.parse("""{"x-tenant":"header-private"}"""),
             requestOptions = ProviderRequestOptions("{\"temperature\":0.25}", GptSpeedMode.FAST, true))
         val migrated = CatalogModelParameters.fromCurrent(settings)
         val encoded = CatalogModelParametersCodec.encode(migrated.settings)
@@ -59,6 +60,9 @@ class CatalogModelParametersTest {
         assertTrue(migrated.settings.deviceStatusEnabled)
         assertFalse(encoded.contains(settings.apiKey))
         assertFalse(encoded.contains(settings.endpoint))
+        assertFalse(encoded.contains("header-private"))
+        assertEquals(settings.customHeaders, migrated.settings.applyTo(settings, "another-model").customHeaders)
+        assertEquals(settings.customHeaders, CatalogModelParameters.newModel(RemoteModel("new")).settings.applyTo(settings, "new").customHeaders)
         assertEquals("customized", migrated.id)
     }
 

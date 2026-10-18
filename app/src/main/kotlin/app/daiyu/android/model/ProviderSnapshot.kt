@@ -28,6 +28,7 @@ class ProviderSnapshot private constructor(
     val batteryEnabled: Boolean,
     val deviceStatusEnabled: Boolean,
     val requestOptions: ProviderRequestOptions,
+    val customHeaders: ProviderHeaders,
     /** Host-verified capability for this exact endpoint/protocol/model; null means unknown. */
     val imageInputSupported: Boolean?,
     tools: Set<ReadOnlyTool>
@@ -43,7 +44,8 @@ class ProviderSnapshot private constructor(
         responsesPath = responsesPath,
         deviceStatusEnabled = deviceStatusEnabled,
         protocol = protocol,
-        requestOptions = requestOptions
+        requestOptions = requestOptions,
+        customHeaders = customHeaders,
     )
 
     override fun toString(): String =
@@ -55,7 +57,7 @@ class ProviderSnapshot private constructor(
         protocol == other.protocol && endpoint == other.endpoint && model == other.model &&
         apiKey == other.apiKey && responsesPath == other.responsesPath &&
         batteryEnabled == other.batteryEnabled && deviceStatusEnabled == other.deviceStatusEnabled &&
-        tools == other.tools && requestOptions == other.requestOptions && imageInputSupported == other.imageInputSupported
+        tools == other.tools && requestOptions == other.requestOptions && customHeaders == other.customHeaders && imageInputSupported == other.imageInputSupported
 
     override fun hashCode(): Int {
         var result = protocol.hashCode()
@@ -67,6 +69,7 @@ class ProviderSnapshot private constructor(
         result = 31 * result + deviceStatusEnabled.hashCode()
         result = 31 * result + tools.hashCode()
         result = 31 * result + requestOptions.hashCode()
+        result = 31 * result + customHeaders.hashCode()
         result = 31 * result + (imageInputSupported?.hashCode() ?: 0)
         return result
     }
@@ -87,6 +90,7 @@ class ProviderSnapshot private constructor(
                 batteryEnabled = settings.batteryEnabled,
                 deviceStatusEnabled = settings.deviceStatusEnabled,
                 requestOptions = settings.requestOptions,
+                customHeaders = settings.customHeaders,
                 imageInputSupported = imageInputSupported,
                 tools = settings.enabledTools()
             )

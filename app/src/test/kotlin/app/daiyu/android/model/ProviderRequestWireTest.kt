@@ -12,7 +12,7 @@ import java.security.cert.Certificate
 import javax.net.ssl.HttpsURLConnection
 
 class ProviderRequestWireTest {
-    private val settings = ModelSettings("https://example.invalid/v1/responses", "gpt-5", "synthetic-key", false)
+    private val settings = ModelSettings("https://example.invalid/v1/responses", "gpt-5", "synthetic-key", false, customHeaders = ProviderHeaders.parse("""{"x-tenant":"private-tenant"}"""))
     private class Connection(body: String) : HttpsURLConnection(URL("https://example.invalid/fixture")) {
         val sent = ByteArrayOutputStream()
         private val received = body.byteInputStream()
@@ -23,7 +23,10 @@ class ProviderRequestWireTest {
         override fun getCipherSuite() = "fixture"
         override fun getLocalCertificates(): Array<Certificate>? = null
         override fun getServerCertificates(): Array<Certificate> = emptyArray()
-        override fun getOutputStream() = sent
+        override fun getOutputStream(): java.io.OutputStream {
+            assertEquals("private-tenant", getRequestProperty("x-tenant"))
+            return sent
+        }
         override fun getInputStream() = received
         override fun getResponseCode() = 200
         override fun getContentType() = "text/event-stream"
@@ -275,7 +278,7 @@ class ProviderRequestWireTest {
         )
         val conn = Connection(events.joinToString("") { "event: ${it.getString("type")}\ndata: $it\n\n" })
         val config = ModelSettings("https://example.invalid/v1/messages", "claude-fixture", "messages-key", false,
-            protocol = ProviderProtocol.MESSAGES, requestOptions = ProviderRequestOptions("""{"max_tokens":99,"service_tier":"standard_only","metadata":{"user_id":"fixture"}}"""))
+            customHeaders = settings.customHeaders, protocol = ProviderProtocol.MESSAGES, requestOptions = ProviderRequestOptions("""{"max_tokens":99,"service_tier":"standard_only","metadata":{"user_id":"fixture"}}"""))
         val user = Message(MessageId("u"), ConversationId("c"), RunId("r"), "user", listOf(MessageBlock.Text("u", "hi")), RunStatus.COMPLETED)
         var requestedUrl: URL? = null
         MessagesModel(config) { url -> requestedUrl = url; conn }.open(listOf(user)).next(emptyList()) {}

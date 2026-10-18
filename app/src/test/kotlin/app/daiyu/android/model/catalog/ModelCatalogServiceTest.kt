@@ -33,6 +33,26 @@ class ModelCatalogServiceTest {
         }
     }
 
+    @Test fun savedDraftAndConnectionUseOnlyTheirOwnHeadersWithoutInferenceValidation() {
+        val connections = mutableListOf<Connection>()
+        fun headers(value: String) = app.daiyu.android.model.ProviderHeaders.parse(
+            org.json.JSONObject().put("x-tenant", value).toString())
+        val saved = settings().copy(customHeaders = headers("saved-tenant"))
+        val draft = settings().copy(model = "", requestOptions = ProviderRequestOptions("not-json"),
+            customHeaders = headers("draft-tenant"))
+        val service = ModelCatalogService({ saved }, RemoteModelFetcher { url -> Connection(url).also(connections::add) })
+        service.fetchSaved(); service.fetchDraft(draft)
+        assertEquals(ModelConnectionResult.Connected(1), service.testDraft(draft) { false })
+        assertEquals(listOf("saved-tenant", "draft-tenant", "draft-tenant"),
+            connections.map { it.getRequestProperty("x-tenant") })
+        for (connection in connections) {
+            assertEquals("application/json", connection.getRequestProperty("Accept"))
+            assertEquals("Bearer saved-key", connection.getRequestProperty("Authorization"))
+            assertFalse(connection.instanceFollowRedirects)
+            assertTrue(connection.closed)
+        }
+    }
+
     @Test fun invalidVersionCannotStartADraftConnectionTest() {
         var connects = 0
         val service = ModelCatalogService({ error("no saved fallback") }, RemoteModelFetcher {

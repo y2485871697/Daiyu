@@ -60,12 +60,12 @@ internal class ProviderRepository(
     }
     fun editing(editor: ProviderEditorSlot): EditingSettings = withEditor(editor) { it.loadForEditing() }
     fun save(editor: ProviderEditorSlot, value: ModelSettings, expected: EditingSettings?,
-        protocolChangeAuthorized: Boolean, requestOptionsReplacementAuthorized: Boolean, admit: () -> Unit = {},
+        protocolChangeAuthorized: Boolean, requestOptionsReplacementAuthorized: Boolean, headersReplacementAuthorized: Boolean = false, admit: () -> Unit = {},
     ): Unit = withEditor(editor) { store ->
         store.modelCatalog.readConfiguration {
             admit()
             if (expected != null) check(store.loadForEditing() == expected) { "模型配置已变化，请重新打开设置" }
-            store.save(value, protocolChangeAuthorized, requestOptionsReplacementAuthorized)
+            store.save(value, protocolChangeAuthorized, requestOptionsReplacementAuthorized, headersReplacementAuthorized)
         }
     }
     fun catalogSnapshot(editor: ProviderEditorSlot): SavedModelCatalogSnapshot<CatalogModelParameters> =

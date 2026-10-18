@@ -1,5 +1,6 @@
 package app.daiyu.android.model.catalog
 
+import app.daiyu.android.model.ProviderHeaders
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.ProviderRequestOptions
 import org.json.JSONException
@@ -42,6 +43,7 @@ data class RemoteModelRequest(
     val modelsPath: String = "",
     val timeoutMillis: Int = RemoteModelFetcher.DEFAULT_TIMEOUT_MILLIS,
     val anthropicVersion: String? = null,
+    val customHeaders: ProviderHeaders = ProviderHeaders.EMPTY,
 ) {
     override fun toString(): String = "RemoteModelRequest(protocol=$protocol, apiKey=<redacted>)"
 }
@@ -152,6 +154,7 @@ class RemoteModelFetcher(
             connection.readTimeout = timeoutMillis
             connection.requestMethod = "GET"
             connection.doInput = true
+            request.customHeaders.applyTo(connection)
             connection.setRequestProperty("Accept", "application/json")
             if (apiKey.isNotEmpty()) when (protocol) {
                 RemoteModelProtocol.ANTHROPIC -> {

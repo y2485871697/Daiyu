@@ -4,6 +4,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CallSplit
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -33,6 +35,8 @@ internal fun MessageActionBar(
     branchEnabled: Boolean = true,
     allowSpeech: Boolean = true,
     showCopyAction: Boolean = true,
+    showEditAction: Boolean = false,
+    showRegenerateAction: Boolean = true,
 ) {
     val view = LocalView.current
     var copied by remember(id) { mutableStateOf(false) }
@@ -63,6 +67,18 @@ internal fun MessageActionBar(
                     else MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.75f),
             )
         }
+        if (showEditAction) IconButton(
+            onClick = { TouchHaptics.click(view); actions.onEditUser(id) },
+            minWidth = 30.dp,
+            minHeight = 30.dp,
+        ) {
+            Icon(
+                imageVector = DaiyuIcons.Edit,
+                contentDescription = "编辑",
+                modifier = Modifier.size(15.dp),
+                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.75f),
+            )
+        }
         if (allowSpeech) IconButton(
             onClick = { TouchHaptics.click(view); actions.onSpeak(id) },
             minWidth = 30.dp,
@@ -83,14 +99,14 @@ internal fun MessageActionBar(
                 minHeight = 30.dp,
             ) {
                 Icon(
-                    imageVector = DaiyuIcons.Branch,
+                    imageVector = Icons.Rounded.CallSplit,
                     contentDescription = "分支",
                     modifier = Modifier.size(15.dp),
                     tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.75f),
                 )
             }
         }
-        TooltipBox(text = "重新生成", enabled = messageActionsEnabled) {
+        if (showRegenerateAction) TooltipBox(text = "重新生成", enabled = messageActionsEnabled) {
             IconButton(
                 onClick = { TouchHaptics.click(view); actions.onRegenerate(id) },
                 enabled = messageActionsEnabled,

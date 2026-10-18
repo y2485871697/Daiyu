@@ -228,8 +228,19 @@ internal fun SkillManagementScreen(
     controller.localPreview?.let { local -> LocalSkillInstallSheet(controller, local) }
     details?.let { entry ->
         SkillDetailsSheet(entry = entry, onDismiss = { details = null },
+            canReinstall = switchesEnabled && entry.builtin,
+            onReinstall = { details = null; controller.prepareReinstall(entry) },
             canRemove = switchesEnabled && !entry.builtin,
             onRemove = { details = null; controller.prepareRemoval(entry) })
+    }
+    controller.reinstall?.let { approved ->
+        val entry = approved.entry
+        AlertDialog(onDismissRequest = controller::cancelReinstall,
+            title = { Text("重装内置技能") },
+            text = { Text("用当前应用自带正文替换 ${entry.skill.name}？\n当前版本：${entry.skill.revision}\n重装会启用此技能，全局开关不变；当前运行保留原快照。此操作需要可读取的已安装版本。") },
+            confirmButton = { TextButton(onClick = { controller.reinstall(approved) }, enabled = !controller.busy,
+                modifier = Modifier.testTag("skills-confirm-reinstall")) { Text("确认重装") } },
+            dismissButton = { TextButton(onClick = controller::cancelReinstall, enabled = !controller.busy) { Text("取消") } })
     }
     controller.removal?.let { removal ->
         AlertDialog(onDismissRequest = controller::cancelRemoval,
@@ -343,7 +354,7 @@ private fun SkillInstallSheet(controller: SkillManagementPageState, inspection: 
 /** Read-only details use the same bounded bottom-surface pattern as DaiyuChoiceSheet. */
 @Composable
 private fun SkillDetailsSheet(entry: SkillManagement.Entry, onDismiss: () -> Unit,
-    canRemove: Boolean, onRemove: () -> Unit) {
+    canRemove: Boolean, onRemove: () -> Unit, canReinstall: Boolean, onReinstall: () -> Unit) {
     val colors = MiuixTheme.colorScheme
     Dialog(
         onDismissRequest = onDismiss,
@@ -382,6 +393,10 @@ private fun SkillDetailsSheet(entry: SkillManagement.Entry, onDismiss: () -> Uni
                     ).forEach { (key, value) ->
                         Text("$key：$value", style = MiuixTheme.textStyles.body1, color = colors.onSurface)
                     }
+                }
+                if (entry.builtin) {
+                    TextButton(onClick = onReinstall, enabled = canReinstall,
+                        modifier = Modifier.testTag("skill-reinstall:${entry.id}")) { Text("重装内置技能") }
                 }
                 if (!entry.builtin) {
                     TextButton(onClick = onRemove, enabled = canRemove,
@@ -499,6 +514,34 @@ internal class SkillManagementPageState(
         private set
     var removal by mutableStateOf<SkillManagement.Removal?>(null)
         private set
+    class BuiltinReinstall internal constructor(val entry: SkillManagement.Entry)
+    var reinstall by mutableStateOf<BuiltinReinstall?>(null)
+        private set
+
+    fun prepareReinstall(entry: SkillManagement.Entry) {
+        if (!active || busy || !confirmed || !entry.builtin || state?.entries?.contains(entry) != true) return
+        cancelInstall()
+        removal = null
+        worker.execute { runCatching { management.cancelRemoval() } }
+        installMessage = null
+        reinstall = BuiltinReinstall(entry)
+    }
+
+    fun cancelReinstall() {
+        if (!active || busy || installing) return
+        reinstall = null
+    }
+
+    fun reinstall(approved: BuiltinReinstall) {
+        if (!active || busy || !confirmed || reinstall !== approved) return
+        val ticket = owner.ticket() ?: return
+        reinstall = null
+        installing = true
+        flow(ticket = ticket, operation = {
+            management.reinstallBuiltin(approved.entry.id, approved.entry.skill.revision) to runCatching { management.snapshot() }
+        }) { (result, refreshed) -> finishInstall(result, refreshed, "重装") }
+    }
+
     private var flowGeneration = 0L
     class LocalPick internal constructor()
     private var pendingPick: LocalPick? = null
@@ -507,6 +550,7 @@ internal class SkillManagementPageState(
 
     fun beginLocalPick(): LocalPick? {
         if (!active || busy) return null
+        reinstall = null
         cancelInstall()
         installMessage = null
         removal = null
@@ -531,6 +575,7 @@ internal class SkillManagementPageState(
 
     fun prepareRemoval(entry: SkillManagement.Entry) {
         if (!confirmed || !active || busy) return
+        reinstall = null
         inspection = null; preview = null; localPreview = null; selected = emptySet(); installMessage = null
         flow({ management.previewRemoval(entry.id, entry.skill.revision) }) { removal = it }
     }
@@ -563,7 +608,7 @@ internal class SkillManagementPageState(
 
     fun inspect() {
         if (!active || busy) return
-        inspection = null; preview = null; localPreview = null; removal = null; selected = emptySet(); installMessage = null
+        inspection = null; preview = null; localPreview = null; removal = null; reinstall = null; selected = emptySet(); installMessage = null
         val input = url.trim()
         flow({ management.inspect(input) }) { inspection = it }
     }
@@ -591,14 +636,14 @@ internal class SkillManagementPageState(
         }
     }
 
-    private fun finishInstall(result: SkillManagement.InstallResult, refreshed: Result<SkillManagement.State>) {
+    private fun finishInstall(result: SkillManagement.InstallResult, refreshed: Result<SkillManagement.State>, operation: String = "安装") {
         inspection = null; preview = null; localPreview = null; selected = emptySet()
         refreshed.fold(onSuccess = { state = it; confirmed = !it.entriesUnavailable }, onFailure = { confirmed = false })
         installMessage = when (result) {
             is SkillManagement.InstallResult.Installed -> if (result.cleanupPending)
-                "安装已提交，清理待完成；请刷新，不要重复安装。" else "安装成功，新运行可见；当前运行保持原快照。"
-            is SkillManagement.InstallResult.Rejected -> "安装未获确认（${result.code}），请刷新后重新检查和预览。"
-            SkillManagement.InstallResult.Unknown -> "安装结果未知，请刷新核对；不会自动重装。离页不代表回滚。"
+                "${operation}已提交，清理待完成；请刷新，不要重复提交。" else "${operation}成功，新运行可见；当前运行保持原快照。"
+            is SkillManagement.InstallResult.Rejected -> "${operation}未获确认（${result.code}），请刷新后重新确认。"
+            SkillManagement.InstallResult.Unknown -> "${operation}结果未知，请刷新核对；不会自动重试。离页不代表回滚。"
         }
         if (refreshed.isFailure) error = "列表读取失败，请刷新核对；不要重复提交安装。"
     }
@@ -606,6 +651,7 @@ internal class SkillManagementPageState(
     fun cancelInstall() {
         if (!active || installing) return
         flowGeneration++
+        reinstall = null
         busy = false
         inspection = null; preview = null; localPreview = null; pendingPick = null; selected = emptySet(); error = null
         worker.execute { runCatching { management.cancelInstall() } }
@@ -632,7 +678,7 @@ internal class SkillManagementPageState(
                 busy = false; installing = false
                 result.fold(onSuccess = accept, onFailure = { failure ->
                     if (writing) {
-                        inspection = null; preview = null; localPreview = null; removal = null; selected = emptySet(); confirmed = false
+                        inspection = null; preview = null; localPreview = null; removal = null; reinstall = null; selected = emptySet(); confirmed = false
                         installMessage = "修改结果未知，请刷新核对；不会自动重试。离页不代表回滚。"
                     } else {
                         error = when (failure.message) {
@@ -647,7 +693,11 @@ internal class SkillManagementPageState(
         }
     }
 
-    fun refresh() = load { management.snapshot() }
+    fun refresh() {
+        if (!active || busy) return
+        reinstall = null
+        load { management.snapshot() }
+    }
 
     fun setGlobalEnabled(enabled: Boolean) {
         if (!confirmed) return
@@ -671,7 +721,7 @@ internal class SkillManagementPageState(
                 result.fold(
                     onSuccess = { freshState ->
                         state = freshState
-                        confirmed = true
+                        confirmed = !freshState.entriesUnavailable
                         error = null
                     },
                     onFailure = { failure ->
@@ -688,7 +738,7 @@ internal class SkillManagementPageState(
         // Revoke synchronously without waiting for management's network/storage lock.
         // Queued tickets now fail admission; an already admitted write may finish.
         if (!owner.revoke()) return
-        pendingPick = null; localPreview = null
+        pendingPick = null; localPreview = null; reinstall = null
         worker.execute {
             if (managementDelegate.isInitialized()) runCatching { management.cancelInstall(); management.cancelRemoval() }
         }

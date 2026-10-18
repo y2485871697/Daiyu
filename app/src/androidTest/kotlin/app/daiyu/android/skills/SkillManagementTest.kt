@@ -218,7 +218,8 @@ class SkillManagementTest : InstrumentationTestCase() {
         manager.cancelInstall()
         assertEquals(SkillManagement.InstallResult.Rejected("stale_preview"), manager.installLocalZip(first, emptyMap()))
         val next = manager.previewLocalZip { localZip().inputStream() }
-        try { manager.inspect("not a URL"); fail("bad URL accepted") } catch (_: IllegalArgumentException) { }
+        try { manager.inspect("not a URL"); fail("bad URL accepted") }
+        catch (failure: IllegalStateException) { assertEquals("invalid_github_url", failure.message) }
         assertEquals(SkillManagement.InstallResult.Rejected("stale_preview"), manager.installLocalZip(next, emptyMap()))
         val installed = user.install(listOf(bundle())).single()
         val beforeDelete = manager.previewLocalZip { localZip().inputStream() }

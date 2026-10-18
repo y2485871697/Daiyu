@@ -10,10 +10,13 @@ import java.util.Collections
 class SkillToolRegistry(
     context: Context,
     private val github: GitHubSkills = GitHubSkills(),
-    private val builtin: SkillStore = SkillStore(File(context.filesDir, "agent-builtin-skills-v1")),
-    user: SkillStore? = null
+    builtin: SkillStore? = null,
+    user: SkillStore? = null,
+    private val builtinCatalogFactory: () -> BuiltinSkillCatalog = { if (builtin == null) BuiltinSkillCatalog(context) else BuiltinSkillCatalog.empty() }
 ) {
-    private val userStore by lazy { user ?: SkillStore(File(context.filesDir, "runtime-skills-v1"), builtin.installedNamesForRun()) }
+    private val builtin = builtin ?: SkillStore(File(context.filesDir, "agent-builtin-skills-v1"))
+    private val builtinCatalog by lazy(builtinCatalogFactory)
+    private val userStore by lazy { user ?: SkillStore(File(context.filesDir, "runtime-skills-v1"), this.builtin.installedNamesForRun() + builtinCatalog.names) }
     private val preferences = context.getSharedPreferences("runtime-skills-v1-settings", Context.MODE_PRIVATE)
     var enabled: Boolean
         get() = preferences.getBoolean("enabled", true)
@@ -42,6 +45,7 @@ class SkillToolRegistry(
     /** Capture once at turn start; do not regenerate mid-turn. No bodies are exposed for disabled skills. */
     fun snapshot(): SkillSnapshot {
         val skills = if (!enabled) emptyList() else {
+            seedBuiltins()
             val app = builtin.snapshot().skills
             val names = app.map { it.name }.toSet()
             app + userStore.snapshot().skills.filter { it.name !in names }
@@ -67,6 +71,7 @@ class SkillToolRegistry(
         if (!enabled || SkillRunSession.READ !in permissions) {
             return SkillRunSession.create(authorization, emptySet(), emptyList())
         }
+        seedBuiltins()
         val resolved = selected?.let(::resolveRunSelection)
         val app = builtin.captureForRun(SkillRunSession.MAX_CAPTURE_BYTES, resolved?.first)
         val used = app.lastOrNull()?.capturedBytes ?: 0
@@ -98,7 +103,7 @@ class SkillToolRegistry(
         if (bare.isNotEmpty()) {
             // Directory names, not enabled metadata, determine ambiguity. Disabling or
             // damaging one namesake must never make a bare token authorize the other.
-            val appNames = builtin.installedNamesForRun()
+            val appNames = builtin.installedNamesForRun() + builtinCatalog.names
             val userNames = userStore.installedNamesForRun()
             for (name in bare) {
                 if (name in appNames && name !in userNames) app.add(name)
@@ -110,12 +115,32 @@ class SkillToolRegistry(
     internal fun managementState(): SkillManagement.State {
         val global = enabled
         return try {
+            seedBuiltins()
             SkillManagement.State(global, Collections.unmodifiableList(
                 builtin.list().map { SkillManagement.Entry("builtin:${it.name}", it, true) } +
                     userStore.list().map { SkillManagement.Entry("user:${it.name}", it, false) }))
         } catch (_: Exception) {
             SkillManagement.State(global, emptyList(), entriesUnavailable = true)
         }
+    }
+    private fun seedBuiltins() {
+        val installed = builtin.installedNamesForRun()
+        for (name in builtinCatalog.names - installed) {
+            try { builtin.install(listOf(builtinCatalog.bundle(name))) }
+            catch (_: SkillConflict) { /* Another registry completed the same create-only seed. */ }
+            catch (_: SkillCleanupPending) { /* Publication succeeded; subsequent access recovers cleanup. */ }
+        }
+    }
+    internal fun reinstallBuiltinForManagement(id: String, expectedRevision: String): List<InstalledSkill> {
+        require(id.startsWith("builtin:")) { "builtin_not_found" }
+        val name = id.removePrefix("builtin:")
+        require(name in builtinCatalog.names) { "builtin_not_found" }
+        val bundle = builtinCatalog.bundle(name)
+        val incoming = builtin.previewForManagement(bundle).revision
+        val current = builtin.list().singleOrNull { it.name == name }
+        if (current?.revision != expectedRevision) throw SkillConflict(name, current?.revision)
+        require(userStore.installedNamesForRun().none { it == name }) { "builtin_user_conflict" }
+        return builtin.install(listOf(bundle), mapOf(name to expectedRevision), mapOf(name to incoming))
     }
     // Trusted settings-only building blocks. Do not expose these through a run catalog.
     internal fun inspectForManagement(url: String): JSONObject = github.inspect(url)
@@ -126,7 +151,7 @@ class SkillToolRegistry(
         bundles: List<SkillBundle>, replacements: Map<String, String>, incoming: Map<String, String>,
     ): List<InstalledSkill> {
         // Recheck at publication time as well as preview time, including newly provisioned builtins.
-        val protected = builtin.list().map { it.name }.toSet()
+        val protected = builtin.list().map { it.name }.toSet() + builtinCatalog.names
         if (bundles.any { SkillFrontmatter.parse(SkillFiles.text(it.files.getValue("SKILL.md"))).name in protected }) {
             throw ManagementBuiltinConflict()
         }
@@ -160,7 +185,7 @@ class SkillToolRegistry(
             else -> {
                 val validated = checkNotNull(install)
                 val bundles = github.download(validated.selection)
-                val protected = builtin.list().map { it.name }.toSet()
+                val protected = builtin.list().map { it.name }.toSet() + builtinCatalog.names
                 require(bundles.none { SkillFrontmatter.parse(SkillFiles.text(it.files.getValue("SKILL.md"))).name in protected }) { "builtin_conflict" }
                 val installed = userStore.install(bundles, validated.replacements, validated.incoming)
                 JSONObject().put("skills", JSONArray(installed.map { metadata("user", it) }))
@@ -173,7 +198,10 @@ class SkillToolRegistry(
     } catch (conflict: SkillConflict) {
         failure("skill_conflict").put("id", if (name == "skills_read" || name == "skills_read_resource") arguments.optString("id") else "user:${conflict.skillName}").put("current_revision", conflict.currentRevision ?: JSONObject.NULL).put("action", "reread_before_replace")
     } catch (problem: Exception) { failure(problem.message?.takeIf { it.matches(Regex("[a-z_]+")) } ?: "skills_unavailable") }
-    private fun listJson(): JSONArray = JSONArray(builtin.list().map { metadata("builtin", it) } + userStore.list().map { metadata("user", it) })
+    private fun listJson(): JSONArray {
+        seedBuiltins()
+        return JSONArray(builtin.list().map { metadata("builtin", it) } + userStore.list().map { metadata("user", it) })
+    }
     private fun metadata(origin: String, skill: InstalledSkill): JSONObject = JSONObject().put("id", "$origin:${skill.name}").put("name", skill.name).put("description", skill.description)
         .put("revision", skill.revision).put("enabled", enabled && skill.enabled).put("builtin", origin == "builtin").put("source", skill.source ?: JSONObject.NULL).put("commit", skill.commit ?: JSONObject.NULL)
     private fun resolve(id: String): Pair<SkillStore, String> {

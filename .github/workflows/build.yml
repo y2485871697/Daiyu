@@ -303,6 +303,10 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
+      - name: 核对启动验证源码身份
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only
       - name: 补检当前 CHECK 工具原文
         if: inputs.mode == 'smoke'
         run: python3 scripts/acceptance/record_tool_tests.py --python python3

@@ -54,10 +54,21 @@ class SourceTests(unittest.TestCase):
     def test_identity_and_unchanged_application(self):
         env = dict(SOURCE_SHA='a' * 40, SOURCE_RUN_ID='123')
         record = dict(source_sha='a' * 40, run_id='123', attempt='1', application_id='app.daiyu.android')
-        run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main', workflow_id=383377276, status='completed')
+        run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main', workflow_id=383377276, status='completed', conclusion='success')
         jobs = [dict(name='单测、检查与开发包', conclusion='success')]
         source.verify(env, record, run, jobs, ['scripts/smoke_boot.sh', 'docs/acceptance/final-delivery-entry.md',
                                               'scripts/acceptance/cloud_report.py', 'tests/test_smoke_boot.py'])
+        source.verify(env, record, dict(run, conclusion='failure'), jobs, [])
+        for conclusion in (None, 'cancelled', 'timed_out', 'skipped', 'neutral', 'action_required'):
+            with self.subTest(conclusion=conclusion), self.assertRaises(ValueError):
+                source.verify(env, record, dict(run, conclusion=conclusion), jobs, [])
+        with self.assertRaises(ValueError):
+            source.verify(env, record, {k: v for k, v in run.items() if k != 'conclusion'}, jobs, [])
+        with self.assertRaises(ValueError):
+            source.verify(env, record, dict(run, run_attempt=True), jobs, [])
+        for conclusion in ('failure', 'cancelled', 'skipped', None):
+            with self.subTest(build_conclusion=conclusion), self.assertRaises(ValueError):
+                source.verify(env, record, dict(run, conclusion='failure'), [dict(jobs[0], conclusion=conclusion)], [])
         for changed in (['app/build.gradle.kts'], ['core-domain/src/main/Foo.kt'],
                         ['scripts/prepare_signing.py'], ['scripts/verify_signing.py'],
                         ['scripts/prepare-speech-runtime.py'], ['scripts/new-build-input.py'],

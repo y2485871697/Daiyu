@@ -657,7 +657,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 require(item.keys().asSequence().toSet().containsAll(required) && item.keys().asSequence().toSet().all {it in required || it in optional}) {"文本备份不支持此协议字段"}
             }
             if(item.has("id")) string(item,"id")
-            if(item.has("status")) require(string(item,"status") in setOf("completed","in_progress","incomplete"))
+            if(item.has("status") && item.opt("type") != "web_search_call") require(string(item,"status") in setOf("completed","in_progress","incomplete"))
             when(string(item,"type")) {
                 "message"->{
                     fields(setOf("type","role","content"),setOf("id","status"))
@@ -666,14 +666,15 @@ class ConversationDatabase internal constructor(context: Context, private val af
                     repeat(content.length()) {j->val part=content.getJSONObject(j)
                         when(string(part,"type")) {
                             "output_text"->{require(part.keys().asSequence().toSet().containsAll(setOf("type","text")) && part.keys().asSequence().toSet().all {it in setOf("type","text","annotations","logprobs")});string(part,"text")
-                                // Nonempty metadata is preserved by the protocol layer, but not supported by this text format.
-                                for(key in listOf("annotations","logprobs")) if(part.has(key)) require(part.getJSONArray(key).length()==0)
+                                app.daiyu.android.model.ResponsesSearchProtocol.validateTextPart(part)
+                                if(part.has("logprobs")) require(part.getJSONArray("logprobs").length()==0)
                             }
                             "refusal"->{require(part.keys().asSequence().toSet()==setOf("type","refusal"));string(part,"refusal")}
                             else->error("文本备份不支持附件或此内容类型")
                         }
                     }
                 }
+                "web_search_call"->app.daiyu.android.model.ResponsesSearchProtocol.validateItem(item)
                 "function_call"->{fields(setOf("type","call_id","name","arguments"),setOf("id","status"));string(item,"call_id");string(item,"name");string(item,"arguments")}
                 "function_call_output"->{fields(setOf("type","call_id","output"),setOf("id","status"));string(item,"call_id");string(item,"output")}
                 "reasoning"->{

@@ -48,6 +48,10 @@ class ProviderSnapshot private constructor(
         customHeaders = customHeaders,
     )
 
+    internal fun withoutNativeSearch(): ProviderSnapshot = if (!requestOptions.openAiWebSearchEnabled) this else
+        capture(asModelSettings().copy(requestOptions = requestOptions.copy(openAiWebSearchEnabled = false)),
+            protocol, imageInputSupported)
+
     override fun toString(): String =
         "ProviderSnapshot(protocol=${protocol.wireName}, endpoint=$endpoint, model=$model, " +
             "responsesPath=$responsesPath, batteryEnabled=$batteryEnabled, " +

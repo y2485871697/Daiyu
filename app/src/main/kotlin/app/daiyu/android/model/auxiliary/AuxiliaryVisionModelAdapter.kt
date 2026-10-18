@@ -68,7 +68,7 @@ internal class AuxiliaryVisionModelAdapter(
             "Auxiliary observation identity mismatch"
         }
         val snapshot = binding.snapshot
-        val settings = snapshot.asModelSettings()
+        val settings = snapshot.withoutNativeSearch().asModelSettings()
         require(request.images.hasImages) { "Auxiliary input requires a frozen image" }
         request.images.validate(settings, snapshot.protocol, snapshot.imageInputSupported, history)
 

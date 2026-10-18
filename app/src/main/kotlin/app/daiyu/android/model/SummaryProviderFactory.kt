@@ -45,7 +45,7 @@ internal object SummaryProviderFactory {
         body.put(if (snapshot.protocol == ProviderProtocol.RESPONSES) "max_output_tokens" else "max_tokens",
             maxOutputTokens)
         val settings = snapshot.asModelSettings().copy(batteryEnabled = false, deviceStatusEnabled = false,
-            requestOptions = options.copy(customBody = body.toString()))
+            requestOptions = options.copy(customBody = body.toString(), openAiWebSearchEnabled = false))
         settings.validate()
         return when (snapshot.protocol) {
             ProviderProtocol.RESPONSES -> ResponsesModel(settings, connect, null, instructions)

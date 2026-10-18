@@ -8,16 +8,21 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.mcp.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+internal val RetainedMcpPolicyAction = SemanticsPropertyKey<() -> Unit>("RetainedMcpPolicyAction")
+
 /** Visiting/saving never connects; explicit refresh only discovers metadata. Neither grants execution. */
 @Composable internal fun McpSettingsScreen(store: McpSettingsStore, owner: McpSettingsOwner,
     ownerCurrent: () -> Boolean, onBack: () -> Unit,
-    managementFactory: (McpSettingsStore) -> McpManagement = { McpManagement(it) }) {
+    managementFactory: (McpSettingsStore) -> McpManagement = { McpManagement(it) },
+    engineeringUi: Boolean = false) {
     val scope = rememberCoroutineScope()
     var snapshot by remember(owner) { mutableStateOf<McpSettings?>(null) }
     var status by remember(owner) { mutableStateOf("正在读取本地加密配置") }
@@ -116,11 +121,14 @@ import kotlinx.coroutines.withContext
             }, modifier = Modifier.testTag("mcp-server:${server.id}")) { Text("编辑 ${server.id} · ${server.label}") }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("启用服务器")
-                Switch(checked = server.enabled, enabled = !busy, onCheckedChange = { enabled ->
-                    updatePolicy(rendered, server.withPolicy(enabled = enabled))
-                }, modifier = Modifier.testTag("mcp-server-enabled:${server.id}"))
-                TextButton(onClick = { refresh(rendered, server) }, enabled = !busy,
-                    modifier = Modifier.testTag("mcp-refresh:${server.id}")) { Text("刷新工具目录") }
+                val toggleServer: () -> Unit = { updatePolicy(rendered, server.withPolicy(enabled = !server.enabled)) }
+                val discover: () -> Unit = { refresh(rendered, server) }
+                Switch(checked = server.enabled, enabled = !busy, onCheckedChange = { toggleServer() },
+                    modifier = Modifier.testTag("mcp-server-enabled:${server.id}").then(if (engineeringUi)
+                        Modifier.semantics { this[RetainedMcpPolicyAction] = toggleServer } else Modifier))
+                TextButton(onClick = discover, enabled = !busy,
+                    modifier = Modifier.testTag("mcp-refresh:${server.id}").then(if (engineeringUi)
+                        Modifier.semantics { this[RetainedMcpPolicyAction] = discover } else Modifier)) { Text("刷新工具目录") }
             }
             if (server.catalog.isEmpty()) Text("尚无已发现工具；请显式刷新目录。")
             server.catalog.forEach { tool ->
@@ -131,15 +139,17 @@ import kotlinx.coroutines.withContext
                     Text(if (tool.readOnlyHint == true) "远端声明只读；仍按写操作审批" else "远端未声明只读，可能产生副作用")
                     Row {
                         Text("允许此工具")
+                        val toggleTool: () -> Unit = {
+                            if (snapshot === rendered && current() && !busy) {
+                                val enabled = tool.name !in server.allowedTools
+                                if (enabled && tool.readOnlyHint != true) approval = ToolApproval(rendered, server, tool)
+                                else updatePolicy(rendered, server.withPolicy(allowedTools = if (enabled)
+                                    server.allowedTools + tool.name else server.allowedTools - tool.name))
+                            }
+                        }
                         Checkbox(checked = tool.name in server.allowedTools, enabled = !busy,
-                            onCheckedChange = { enabled ->
-                                if (snapshot === rendered && current() && !busy) {
-                                    val before = rendered
-                                    if (enabled && tool.readOnlyHint != true) approval = ToolApproval(before, server, tool)
-                                    else updatePolicy(before, server.withPolicy(allowedTools = if (enabled)
-                                        server.allowedTools + tool.name else server.allowedTools - tool.name))
-                                }
-                            }, modifier = Modifier.testTag("mcp-tool-enabled:${server.id}:${tool.name}"))
+                            onCheckedChange = { toggleTool() }, modifier = Modifier.testTag("mcp-tool-enabled:${server.id}:${tool.name}")
+                                .then(if (engineeringUi) Modifier.semantics { this[RetainedMcpPolicyAction] = toggleTool } else Modifier))
                     }
                 }
             }

@@ -330,7 +330,7 @@ class ControllerVirtualDisplayRuntimeTest {
         session.close()
         assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown,
             f.work { session.observeCloseOnWorker(true) })
-        assertTrue(f.work { session.shutdownUninitializedOnceOnWorker() })
+        assertTrue(f.work { session.shutdownUninitializedOnceOnWorker(true) })
         assertEquals(listOf("receipt", "shutdown_uninitialized"), host.wire.operations())
         assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown,
             f.work { session.observeCloseOnWorker(true) }) // reply is not physical exit
@@ -435,7 +435,7 @@ class ControllerVirtualDisplayRuntimeTest {
         assertSame(session, retained.single())
         assertEquals(ControllerVirtualDisplaySession.CloseResult.Unknown,
             f.work { session.observeCloseOnWorker(true) })
-        assertFalse(f.work { session.shutdownUninitializedOnceOnWorker() })
+        assertFalse(f.work { session.shutdownUninitializedOnceOnWorker(true) })
         rejected { f.store().reserve(f::plan) }
         assertEquals(1, attempts.get())
     }

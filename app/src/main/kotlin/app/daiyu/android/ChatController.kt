@@ -2044,13 +2044,13 @@ class ChatController internal constructor(private val application:Application,
         uiOwner: app.daiyu.android.vdapproval.R08CleanupUiOwner,
         currentUiOwner: () -> app.daiyu.android.vdapproval.R08CleanupUiOwner?
     ): ControllerVirtualCleanupAdapter? = synchronized(this) {
-        if (closed || virtualDisplayEntry !== entry || !entry.revoked) return@synchronized null
+        if (closingStorage || virtualDisplayEntry !== entry || !entry.revoked) return@synchronized null
         val originalCatalog = entry.catalog ?: return@synchronized null
         val originalSession = entry.session ?: return@synchronized null
         ControllerVirtualCleanupAdapter(originalCatalog, originalSession, uiOwner,
             parentIsRetainedAndDrained = {
                 synchronized(this@ChatController) {
-                    !closed && entry.session === originalSession &&
+                    !closingStorage && entry.session === originalSession &&
                         virtualDisplayParentDrainedLocked(entry, originalCatalog)
                 }
             }, currentUiOwner = currentUiOwner)

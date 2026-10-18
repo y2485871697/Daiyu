@@ -32,7 +32,7 @@ internal fun R08CleanupApprovalScreen(
     val plan = request.review.plan
     val binding = remember(request) { plan.binding.json() }
     Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(if (request.deliversTasks) "已停止运行：所选任务交付审批" else "已停止运行：额外释放审批", style = MaterialTheme.typography.headlineSmall)
+        Text(if (request.deliversTasks) "已停止运行：所选任务交付审批" else if (request.cleanupOnly) "已停止运行：不交付任务的清理审批" else "已停止运行：额外释放审批", style = MaterialTheme.typography.headlineSmall)
         Text(request.warning)
         SelectionContainer(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

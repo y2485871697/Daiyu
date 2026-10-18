@@ -9,7 +9,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 /** Explicit host-only cleanup seam; no executor, launcher, dispatcher or automatic observation.
  * Capture ORIGINAL entry/catalog/session in parentIsRetainedAndDrained, checking under the
  * Controller monitor the unchanged observeVirtualDisplayClose outer gate (including Runner
- * return), plus !closed and original session identity. This is NOT the catalog's local drain;
+ * return), plus storage retention and original session identity. This is NOT the catalog's local drain;
  * the catalog rechecks its private gate at both preparation and send.
  *
  * Each visit has its own UI owner, independent of the text-send editor. currentUiOwner must
@@ -72,6 +72,13 @@ internal class ControllerVirtualCleanupAdapter(
             ::visitActive) ?: return null
         if (!eligible()) return null
         return synchronized(lock) { if (!visitActive()) null else { prepared = request; request } }
+    }
+
+    fun shutdownUninitializedOnWorker(): Boolean {
+        worker()
+        if (!eligible()) return false
+        return catalog.shutdownVirtualDisplayUninitializedOnWorker(session, parentDrained = true,
+            admissionStillValid = ::visitActive)
     }
 
     /** Check AGAIN on the UI lane before publishing a worker result. No physical observation. */

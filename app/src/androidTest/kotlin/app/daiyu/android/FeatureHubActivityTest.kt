@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** The old FeatureHub entry contract now belongs to the retained Compose settings home. */
 class FeatureHubActivityTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     private val entries get() = SettingsCatalog.visibleGroups().flatMap { it.entries }
     private fun openHub() { openSettings() }
     private fun entry(id: String): SemanticsNodeInteraction {
@@ -35,7 +36,10 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     }
     fun testOriginalSettingsAppearOutsideExistingChatTreeWithoutStateLabels() {
         openHub()
-        assertEquals(33, entries.size)
+        assertEquals(31, entries.size)
+        val hidden = setOf("balance", "generation", "platform_tools", "browser", "overlay", "enhancements", "accessibility")
+        for (engineering in listOf(false, true)) assertTrue(SettingsCatalog.visibleGroups(engineering)
+            .flatMap { it.entries }.none { it.id in hidden })
         entries.forEach { item -> entry(item.id).assertIsEnabled().assertTextContains(item.title) }
         ui.onAllNodes(SemanticsMatcher("forbidden state marker") { semantics ->
             val texts = semantics.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text).orEmpty()
@@ -79,7 +83,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         setDraft("独立生成设置保留草稿")
         val before = fixture.database.exportBackup()
         val chatSettings = fixture.settings.loadForEditing().settings
-        openHub(); entry("generation").performClick()
+        openHub(); openRetainedSettingsEntry("generation", "page:独立生成模型设置")
         node("page:独立生成模型设置").assertExists()
         assertEquals(0, fixture.opens.get())
         assertNull(fixture.controller.active)
@@ -113,8 +117,8 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     }
     fun testOldGenerationSettingsEntryCannotOpenAfterActivityRecreation() {
         setDraft("设置旧入口保留草稿")
-        openHub(); entry("generation")
-        val oldOpen = retainedClick(activity, "settings-row:独立生成模型")
+        openHub()
+        val oldOpen = retainedSettingsEntry("generation")
         val old = activity; activity = recreateActivity(activity)
         mainThread { oldOpen() }
         node("page:独立生成模型设置").assertDoesNotExist()

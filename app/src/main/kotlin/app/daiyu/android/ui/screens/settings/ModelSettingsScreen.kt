@@ -10,6 +10,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.model.ProviderProtocol
@@ -41,6 +43,8 @@ internal data class ModelSettingsDraftUi(
 ) {
     override fun toString(): String = "ModelSettingsDraftUi(protocol=$protocol, model=$model, apiKey=<redacted>, customBody=<redacted>)"
 }
+
+internal val RetainedModelSaveAction = SemanticsPropertyKey<() -> Unit>("RetainedModelSaveAction")
 
 internal data class ModelCatalogEntryUi(val id: String, val displayName: String = id)
 
@@ -83,6 +87,7 @@ internal fun ModelSettingsScreen(
     showCatalog: Boolean = true,
 ) {
     val connection = rememberSettingsConnectionTest(draft, enabled, testConnection)
+    val submit: () -> Unit = { connection.cancel(); onSave(draft) }
     val changeDraft: (ModelSettingsDraftUi) -> Unit = { connection.cancel(); onDraftChange(it) }
     var bodyExpanded by remember { mutableStateOf(false) }
     val catalogIsCurrent = catalogForDraft?.let {
@@ -217,9 +222,9 @@ internal fun ModelSettingsScreen(
             if (!errorText.isNullOrBlank()) SettingsNote(errorText, error = true)
             TextButton(
                 text = "保存",
-                onClick = { connection.cancel(); onSave(draft) },
+                onClick = submit,
                 enabled = enabled,
-                modifier = Modifier.testTag("model-save").fillMaxWidth().padding(horizontal = 12.dp, vertical = 24.dp),
+                modifier = Modifier.testTag("model-save").semantics { this[RetainedModelSaveAction] = submit }.fillMaxWidth().padding(horizontal = 12.dp, vertical = 24.dp),
             )
         }
     }

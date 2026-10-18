@@ -4,6 +4,9 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import app.daiyu.android.ui.FeatureRoute
 import app.daiyu.android.ui.icons.DaiyuIcons
 
+internal val RetainedSettingsEntryAction =
+    androidx.compose.ui.semantics.SemanticsPropertyKey<(SettingsEntry) -> Unit>("RetainedSettingsEntryAction")
+
 internal enum class SettingControl { PAGE, TOGGLE, CHOICE, ACTION }
 /** Pages hosted by the retained settings home, not an Activity-level FeatureRoute. */
 internal enum class SettingsLocalPage { TASK_SURFACE, ENHANCEMENTS, SHIZUKU_ACCESS, OVERLAY, UPDATES, WORKSPACE }

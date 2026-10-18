@@ -198,7 +198,9 @@ internal fun DaiyuSettingsScreen(
             else -> entry.route?.let(onRoute)
         }
     }
-    MiuixScaffoldPage(title = pageTitle, onBack = back, modifier = modifier, listState = listState) {
+    MiuixScaffoldPage(title = pageTitle, onBack = back, modifier = modifier, listState = listState,
+        listModifier = if (engineeringUi) Modifier.semantics { this[RetainedSettingsEntryAction] = open } else Modifier,
+    ) {
         if (selectedGroup != null) {
             item(key = "category_intro") { SettingsNote(selectedGroup.summary) }
             item(key = "category_entries") {

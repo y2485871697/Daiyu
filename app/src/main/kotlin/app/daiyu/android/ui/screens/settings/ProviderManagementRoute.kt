@@ -65,6 +65,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     var registry by remember { mutableStateOf<ProviderRegistrySnapshot?>(null) }
     var detail by remember { mutableStateOf<ProviderDetail?>(null) }
     var pausedDraft by remember { mutableStateOf<PausedProviderDraft?>(null) }
+    var pendingOpen by remember { mutableStateOf(true) }
     var serial by remember { mutableStateOf(0L) }
     var busy by remember { mutableStateOf<Any?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -103,6 +104,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     fun open(slot: String, restore: PausedProviderDraft? = null) {
         val p = permit
         if (!current(p) || busy != null) return
+        if (restore == null) pausedDraft = null
         closeDetail(); checkingRegistry = false; loading = true; notice = null
         val request = ++serial
         scope.launch {
@@ -124,8 +126,9 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     restore.configurationRevision == loaded.configurationRevision) {
                     loaded.draft = restore.draft.copy(protocolChangeAuthorized = false, requestOptionsReplacementAuthorized = false)
                 }
+                pausedDraft = null
                 detail = loaded
-            }, onFailure = { notice = "详情读取失败或已变化，请刷新后重新打开。" })
+            }, onFailure = { pausedDraft = null; notice = "详情读取失败或已变化，请刷新后重新打开。" })
         }
     }
     fun mutate(expected: ProviderRegistrySnapshot, p: ProviderPagePermit,
@@ -152,25 +155,28 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) {
-                pausedDraft = detail?.takeIf { busy == null && !loading }?.let {
-                    PausedProviderDraft(it.editor, it.editing, it.configurationRevision, it.draft)
+                detail?.let {
+                    pausedDraft = PausedProviderDraft(it.editor, it.editing, it.configurationRevision, it.draft)
                 }
                 resumed = false; permit.revoke(); closeDetail(); checkingRegistry = false
             } else if (event == Lifecycle.Event.ON_RESUME) {
                 permit = ProviderPagePermit(); resumed = true
-                val restore = pausedDraft.also { pausedDraft = null }
-                if (restore != null) open(restore.editor.slotId, restore)
-                else if (initialSlot == null) refresh() else open(initialSlot)
+                pendingOpen = true
             }
         }
         lifecycle.addObserver(observer)
         onDispose { pausedDraft = null; visit.set(false); permit.revoke(); detail?.live?.set(false); lifecycle.removeObserver(observer) }
     }
-    LaunchedEffect(Unit, initialSlot) {
-        if (initialSlot == null) refresh() else open(initialSlot)
+    LaunchedEffect(resumed, permit, busy, initialSlot, pendingOpen) {
+        if (pendingOpen && current(permit) && busy == null) {
+            val restore = pausedDraft
+            pendingOpen = false
+            if (restore != null) open(restore.editor.slotId, restore)
+            else if (initialSlot == null) refresh() else open(initialSlot)
+        }
     }
     fun back() {
-        pausedDraft = null
+        pausedDraft = null; pendingOpen = false
         if (detail != null || loading) {
             // The primary provider is entered as the app's model-settings page, not as a
             // separate provider-list visit. Returning from its detail must leave the route;
@@ -196,14 +202,33 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         val saved = d.editing.settings
         val save: (ModelSettingsDraftUi) -> Unit = { submitted ->
             if (live() && enabled && d.draft === submitted) {
-                val ticket = Any(); busy = ticket
-                try {
-                    controller.saveProviderSettings(d.editor, submitted.providerSettings(saved), d.editing,
-                        submitted.protocolChangeAuthorized, submitted.requestOptionsReplacementAuthorized, p.save) { success ->
-                        if (busy === ticket) busy = null
-                        if (live()) { if (success) open(d.editor.slotId) else { closeDetail(); notice = "未保存，请重新打开详情核对。"; refresh() } }
+                val value = runCatching {
+                    require(submitted.savedProtocol == saved.protocol) { "编辑基线已变化，请重新打开详情。" }
+                    require(submitted.protocol == saved.protocol || submitted.protocolChangeAuthorized) {
+                        "切换协议须重新输入密钥并明确确认"
                     }
-                } catch (_: Exception) { if (busy === ticket) busy = null; if (live()) notice = "当前不可保存；未重试。" }
+                    require(!d.editing.requestOptionsUnavailable || submitted.requestOptionsReplacementAuthorized) {
+                        "请求策略已损坏；替换或重置需要明确确认"
+                    }
+                    submitted.providerSettings(saved).also { it.validate() }
+                }
+                if (value.isFailure) {
+                    notice = "未保存，请检查输入和必要确认。"
+                } else {
+                    val ticket = Any(); busy = ticket
+                    try {
+                        controller.saveProviderSettings(d.editor, value.getOrThrow(), d.editing,
+                            submitted.protocolChangeAuthorized, submitted.requestOptionsReplacementAuthorized, p.save) { success ->
+                            if (busy === ticket) busy = null
+                            if (live()) {
+                                if (success && initialSlot == ProviderRegistry.PRIMARY) {
+                                    p.revoke(); onDetailBack()
+                                } else if (success) open(d.editor.slotId)
+                                else { closeDetail(); notice = "未保存，请重新打开详情核对。"; refresh() }
+                            }
+                        }
+                    } catch (_: Exception) { if (busy === ticket) busy = null; if (live()) notice = "当前不可保存；未重试。" }
+                }
             }
         }
         val change: (ModelSettingsDraftUi) -> Unit = { if (live() && enabled) d.draft = it }

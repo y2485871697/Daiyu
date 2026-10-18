@@ -138,7 +138,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
         } finally {super.tearDown()}
     }
     private fun start(intent:Intent=Intent(instrumentation.targetContext,MainActivity::class.java)):MainActivity {
-        val current=instrumentation.startActivitySync(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        val current=startMain(intent)
         activity=current;instrumentation.waitForIdleSync();return current
     }
     private fun opened(uri:Uri=textUri,mime:String="application/json",grant:Boolean=true)=
@@ -470,17 +470,12 @@ class BackupActivityTest:ComposeActivityTestCase() {
         recreate();main {assertNull(dialog())};assertEquals(0,provider.opens.get());unchanged(before)
     }
     private fun recreate() {
-        val monitor=instrumentation.addMonitor(MainActivity::class.java.name,null,false)
-        try {
-            main {activity!!.recreate()}
-            val recreated=instrumentation.waitForMonitorWithTimeout(monitor,5000) as? MainActivity
-            assertNotNull("recreated Activity must resume",recreated);activity=recreated
-            instrumentation.waitForIdleSync()
-        } finally {instrumentation.removeMonitor(monitor)}
+        activity = recreateActivity(checkNotNull(activity))
     }
     private fun restoreDialog():Any?=dialog()
     private fun restorePress(which:Int) {
-        if(which==DialogInterface.BUTTON_NEGATIVE && dialog()==null) backToChat(checkNotNull(activity)) else press(which)
+        if(which==DialogInterface.BUTTON_NEGATIVE && dialog()==null) return
+        press(which)
     }
     private fun restorePreview() {
         click("备份与导入")

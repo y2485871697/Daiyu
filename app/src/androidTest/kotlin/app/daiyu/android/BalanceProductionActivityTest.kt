@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * System backgrounding deliberately leaves settings composed: cancellation must be ON_STOP based.
  */
 class BalanceProductionActivityTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     private lateinit var originalHost: BalanceRuntimeHost
     private lateinit var testHost: BalanceRuntimeHost
     private lateinit var runtime: BalanceRuntime
@@ -75,8 +76,9 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
 
     private fun openBalance() {
         openSettings()
-        reveal("settings-row:LLM 提供商", "设置").performClick()
-        reveal("settings-row:供应商余额", "LLM 提供商").performClick()
+        val open = retainedSettingsEntry("balance")
+        mainThread { open() }
+        ui.waitUntil(5_000) { ui.onAllNodesWithText("独立余额设置").fetchSemanticsNodes().size == 1 }
         ui.onNodeWithText("独立余额设置").assertIsDisplayed()
         ui.waitUntil(timeoutMillis = 5000) {
             ui.onAllNodesWithText("独立余额账户标识").fetchSemanticsNodes().isNotEmpty()

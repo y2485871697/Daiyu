@@ -62,7 +62,7 @@ internal class ProviderRepository(
     fun save(editor: ProviderEditorSlot, value: ModelSettings, expected: EditingSettings?,
         protocolChangeAuthorized: Boolean, requestOptionsReplacementAuthorized: Boolean, admit: () -> Unit = {},
     ): Unit = withEditor(editor) { store ->
-        store.modelCatalog.configurationChange {
+        store.modelCatalog.readConfiguration {
             admit()
             if (expected != null) check(store.loadForEditing() == expected) { "模型配置已变化，请重新打开设置" }
             store.save(value, protocolChangeAuthorized, requestOptionsReplacementAuthorized)

@@ -15,6 +15,7 @@ import app.daiyu.android.model.catalog.CatalogLocalEditResult
 import app.daiyu.android.model.catalog.CatalogModelParameters
 import app.daiyu.android.model.catalog.SavedModelCatalogPersistence
 import app.daiyu.android.storage.*
+import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import app.daiyu.android.ui.components.DaiyuTextInputDialog
 import app.daiyu.android.ui.components.MiuixScaffoldPage
@@ -82,11 +83,12 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     var checkingRegistry by remember { mutableStateOf(false) }
     var notice by remember { mutableStateOf<String?>(null) }
     var prompt by remember { mutableStateOf<ProviderPrompt?>(null) }
+    var authentication by remember { mutableStateOf<Any?>(null) }
     var confirmation by remember { mutableStateOf<ProviderConfirm?>(null) }
     var version by remember { mutableStateOf(0L) }
     fun current(p: ProviderPagePermit) = visit.get() && p.live.get() && permit === p && resumed &&
         lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && ownerCheck()
-    fun clearPrompts() { prompt = null; confirmation = null }
+    fun clearPrompts() { prompt = null; authentication = null; confirmation = null }
     fun closeDetail() { serial++; loading = false; detail?.live?.set(false); detail = null; clearPrompts() }
     fun refresh() {
         val p = permit
@@ -314,7 +316,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 notice?.let { SettingsNote(it, error = true) }
                 if (loading) SettingsNote("正在读取提供商详情")
                 TextButton(text = "添加提供商", enabled = enabled && registry != null,
-                    modifier = Modifier.testTag("provider-add"), onClick = { if (enabled) prompt = ProviderPrompt(null) })
+                    modifier = Modifier.testTag("provider-add"), onClick = { if (enabled && registry != null) authentication = Any() })
                 TextButton(text = "刷新", enabled = !loading && busy == null,
                     modifier = Modifier.testTag("provider-refresh"), onClick = { if (current(p)) refresh() })
             }
@@ -346,6 +348,15 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     }
     val input = prompt
     val expected = registry
+    val auth = authentication
+    if (auth != null && expected != null) DaiyuChoiceSheet(
+        title = "认证方式", options = listOf("API Key", "OAuth"),
+        onSelect = { selected ->
+            if (authentication === auth && registry === expected && current(p) && enabled && selected == 0) {
+                authentication = null
+                prompt = ProviderPrompt(null)
+            }
+        }, onDismiss = { if (authentication === auth) authentication = null })
     if (input != null && expected != null) DaiyuTextInputDialog(
         title = if (input.registration == null) "添加提供商" else "重命名提供商", initial = input.registration?.name.orEmpty(),
         hint = "名称", confirmText = "保存", onConfirm = { raw ->

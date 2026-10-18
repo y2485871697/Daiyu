@@ -70,9 +70,20 @@ class WindowsUnitSkipsTests(unittest.TestCase):
             with self.subTest(kwargs=kwargs), self.assertRaises(ValueError):
                 verify_unit_matrix(windows, self.archive('bad-linux.zip', **kwargs))
 
+    def test_pty_unstarted_settlement_skip_still_requires_linux_execution(self):
+        identity = dict(classname='app.daiyu.android.terminal.LinuxPtySessionTest',
+                        method='unstartedFailureTransfersOriginalPinWhenSettlementMustRetry')
+        windows = self.archive('pty-windows.zip', reason='Linux store uses Unix directory fsync', **identity)
+        linux = self.archive('pty-linux.zip', skipped=False, **identity)
+        result = verify_xml(windows, 'unit', platform='Windows')
+        self.assertEqual((result['tests_passed'], result['tests_skipped']), (2, 1))
+        self.assertEqual(verify_unit_matrix(windows, linux), {'windows_skips_verified_on_linux': 1})
+        with self.assertRaises(ValueError):
+            verify_unit_matrix(windows, self.archive('pty-linux-skipped.zip', **identity))
+
     def test_allowlist_exactly_lists_unique_test_identities(self):
         allowlist = json.loads((Path(__file__).resolve().parents[1] / 'scripts/cooperation/windows_unit_skips.json').read_text())
-        self.assertEqual(sum(len(v) for v in allowlist.values()), 44)
+        self.assertEqual(sum(len(v) for v in allowlist.values()), 45)
         self.assertTrue(all(len(v) == len(set(v)) for v in allowlist.values()))
 
 

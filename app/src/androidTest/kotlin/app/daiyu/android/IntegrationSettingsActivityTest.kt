@@ -437,6 +437,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         val scope = reopened.captureForRun(app.daiyu.android.domain.tools.SessionCapabilities(owner.sessionId, setOf(app.daiyu.android.skills.SkillRunSession.READ)), owner)
         try { assertTrue(scope.availableTools.isEmpty()) } finally { scope.close() }
         assertTrue(blocked.isFile)
+        assertEquals("not a directory", blocked.readText())
     }
     fun testUnavailableRequestPolicyRequiresExplicitReplacementWithoutLosingOriginalOnFailure() {
         val prefs = fixture.application.getSharedPreferences("model-settings", 0)

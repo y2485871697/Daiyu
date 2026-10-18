@@ -112,7 +112,10 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
         val save = retainedClick(activity, "model-save")
         withHeldCatalog { release ->
             controlMain { save(); assertTrue(fixture.controller.dataBusy) }
-            controlMain { activity.onBackPressedDispatcher.onBackPressed(); release() }
+            controlMain { activity.onBackPressedDispatcher.onBackPressed() }
+            awaitUniqueTag("provider-management")
+            node("page:模型设置").assertDoesNotExist()
+            controlMain { assertTrue(fixture.controller.dataBusy); release() }
             awaitControl("departed save drained") { !fixture.controller.dataBusy }
         }
         awaitUniqueTag("provider-management")

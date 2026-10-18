@@ -1,5 +1,6 @@
 package app.daiyu.android
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
@@ -210,7 +211,8 @@ class ActivityTest : WiredActivityTestCase() {
         val config = fixture.settings.load().copy(responsesPath = "/responses")
         fixture.settings.save(config)
         setDraft("协议切换保留草稿"); openModels()
-        reveal("settings-radio:Anthropic Messages").assertIsEnabled().performClick()
+        reveal("settings-radio:Anthropic Messages").assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         reveal("settings-radio:Anthropic Messages").assertIsSelected()
         reveal("settings-radio:OpenAI Responses").assertIsNotSelected()
         modelField("API Key").assertEditableText(""); modelField("Responses 路径").assertEditableText("").assertIsNotEnabled()
@@ -226,7 +228,8 @@ class ActivityTest : WiredActivityTestCase() {
         assertTrue(app.daiyu.android.model.ModelFactory.create(messages) is app.daiyu.android.model.MessagesModel)
         openModels(); reveal("settings-radio:Anthropic Messages").assertIsSelected()
         modelField("Anthropic 版本").assertEditableText("2023-06-02")
-        reveal("settings-radio:OpenAI Responses").assertIsEnabled().performClick()
+        reveal("settings-radio:OpenAI Responses").assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         reveal("settings-radio:OpenAI Responses").assertIsSelected()
         reveal("settings-radio:Anthropic Messages").assertIsNotSelected()
         modelField("API Key").assertEditableText("")

@@ -87,6 +87,7 @@ class ProviderHeadersStoreTest : InstrumentationTestCase() {
     }
 
     fun testMissingKeyAndNonSecretRestoreRequireExplicitHeaderRebinding() {
+        val store = this.store
         store.save(settings())
         val headersBefore = prefs.getString("request-headers", null)
         val toolOnly = store.prepareNonSecretRestore(JSONObject().put("battery", true))
@@ -111,4 +112,37 @@ class ProviderHeadersStoreTest : InstrumentationTestCase() {
         store.save(settings(), headersReplacementAuthorized = true)
         assertEquals(settings(), store.load())
     }
+    fun testRestoreGatedHeaderPresenceRequiresConfirmationOnlyForExistingMaterial() {
+        val corruptions = listOf<(android.content.SharedPreferences.Editor) -> Unit>(
+            { it.remove("request-headers").remove("request-headers-iv") },
+            { },
+            { it.remove("request-headers-iv") },
+            { it.remove("request-headers") },
+            { it.putBoolean("request-headers", true) },
+            { it.putString("request-headers", "broken-ciphertext").putString("request-headers-iv", "broken-iv") })
+        for ((index, corrupt) in corruptions.withIndex()) {
+            val current = store
+            current.save(settings(), headersReplacementAuthorized = true)
+            val editor = prefs.edit(); corrupt(editor); assertTrue(editor.commit())
+            val envelope = prefs.all.filterKeys { it == "request-headers" || it == "request-headers-iv" }
+            val plan = current.prepareNonSecretRestore(JSONObject().put("endpoint", "https://restored.invalid/$index"))
+            current.applyNonSecretRestore(plan, true)
+            assertEquals(envelope, prefs.all.filterKeys { it == "request-headers" || it == "request-headers-iv" })
+            val gated = current.loadForEditing()
+            assertTrue(gated.credentialUnavailable); assertEquals("", gated.settings.apiKey)
+            assertEquals(index != 0, gated.headersUnavailable)
+            assertTrue(gated.settings.customHeaders.isEmpty)
+            val replacement = gated.settings.copy(apiKey = "replacement-key")
+            if (index != 0) {
+                val before = prefs.all
+                rejected { current.save(replacement, requestOptionsReplacementAuthorized = true) }
+                assertEquals(before, prefs.all)
+            }
+            current.save(replacement, headersReplacementAuthorized = index != 0)
+            assertFalse(prefs.contains("request-headers")); assertFalse(prefs.contains("request-headers-iv"))
+            assertFalse(prefs.getBoolean("credential-rebind-required", false))
+            assertEquals(replacement, current.load())
+        }
+    }
+
 }

@@ -520,7 +520,10 @@ class BackupActivityTest:ComposeActivityTestCase() {
         for(name in listOf("key","iv","key-alias")) assertEquals(before[name],modelPreferences().all[name])
         assertTrue(modelPreferences().getBoolean("credential-rebind-required",false))
         try {controller.settings.load();fail("must not read/reuse old key")} catch(_:CredentialUnavailableException) {}
-        assertEquals("",controller.settings.loadForEditing().settings.apiKey)
+        val restoredEditing = controller.settings.loadForEditing()
+        assertEquals("",restoredEditing.settings.apiKey)
+        assertFalse(restoredEditing.headersUnavailable)
+        assertTrue(restoredEditing.settings.customHeaders.isEmpty)
         main {assertNull(restoreDialog())}
         recreate()
         assertEquals("imported-model",modelPreferences().getString("model",null))
@@ -528,7 +531,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
         // Real settings dialog must not prefill the old credential; only an explicit new key save clears the gate.
         click("模型设置")
         modelField("API Key").assertEditableText("");editModel("API Key","synthetic-new-key");saveModel()
-        instrumentation.waitForIdleSync()
+        awaitState { !controller.dataBusy && !modelPreferences().getBoolean("credential-rebind-required",false) }
         assertFalse(modelPreferences().getBoolean("credential-rebind-required",false))
         assertEquals("synthetic-new-key",controller.settings.load().apiKey)
         assertFalse(controller.settings.load().batteryEnabled);assertFalse(controller.settings.load().deviceStatusEnabled)

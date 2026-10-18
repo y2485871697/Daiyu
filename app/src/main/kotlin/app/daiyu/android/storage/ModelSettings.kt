@@ -270,7 +270,7 @@ class ModelSettingsStore internal constructor(
         return EditingSettings(ModelSettings(values["endpoint"] as? String ?: "", values["model"] as? String ?: "", "",
             values["battery"] as? Boolean ?: false, values["responses-path"] as? String ?: "",
             values["device-status"] as? Boolean ?: false, readProtocol(), options), true, optionsUnavailable,
-            includeHeadersState)
+            includeHeadersState && (preferences.contains("request-headers") || preferences.contains("request-headers-iv")))
     }
     private fun keyStore()=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
     private fun existingKey(alias:String)=keyStore().getKey(alias,null) as? SecretKey

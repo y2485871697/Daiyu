@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -87,6 +88,8 @@ internal fun DaiyuConfirmDialog(
     }
 }
 
+internal val RetainedChoiceSelect = SemanticsPropertyKey<() -> Unit>("RetainedChoiceSelect")
+
 /** A bounded, scrollable bottom choice surface using the same Miuix palette and typography. */
 @Composable
 internal fun DaiyuChoiceSheet(
@@ -94,6 +97,7 @@ internal fun DaiyuChoiceSheet(
     options: List<String>,
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit,
+    engineeringUi: Boolean = false,
 ) {
     val colors = MiuixTheme.colorScheme
     Dialog(
@@ -123,10 +127,12 @@ internal fun DaiyuChoiceSheet(
                     modifier = Modifier.padding(bottom = 12.dp))
                 LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false)) {
                     itemsIndexed(options) { index, option ->
+                        val select = { onSelect(index) }
+                        val retained = if (engineeringUi) Modifier.semantics { this[RetainedChoiceSelect] = select } else Modifier
                         Box(
                             Modifier.testTag("prompt-choice:$index").fillMaxWidth().heightIn(min = 56.dp)
                                 .clip(RoundedCornerShape(8.dp))
-                                .clickable { onSelect(index) }.padding(horizontal = 12.dp, vertical = 16.dp),
+                                .then(retained).clickable(onClick = select).padding(horizontal = 12.dp, vertical = 16.dp),
                             contentAlignment = Alignment.CenterStart,
                         ) {
                             Text(option, style = MiuixTheme.textStyles.body1, color = colors.onSurface)

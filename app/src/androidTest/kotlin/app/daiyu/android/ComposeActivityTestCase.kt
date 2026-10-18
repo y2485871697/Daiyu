@@ -124,6 +124,14 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         }
         reveal("provider-open-primary", "提供商").assertIsDisplayed().assertIsEnabled()
     }
+    protected fun selectProviderTab(title: String) {
+        val tag = "settings-radio:$title"
+        val tab = reveal(tag).assertIsEnabled()
+        if (tab.fetchSemanticsNode().config[SemanticsProperties.Selected] != true) {
+            tab.performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        }
+        reveal(tag).assertIsSelected()
+    }
     protected fun openModels() {
         openProviderManagement()
         reveal("provider-open-primary", "提供商").performClick()

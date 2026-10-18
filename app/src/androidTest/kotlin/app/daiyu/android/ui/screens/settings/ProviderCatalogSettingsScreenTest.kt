@@ -32,7 +32,7 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
         try { super.tearDown() } finally { if (::directory.isInitialized) directory.deleteRecursively() }
     }
 
-    private fun show() {
+    private fun show(twoTabs: Boolean = true) {
         directory = File(instrumentation.targetContext.cacheDir, "catalog-ui-${UUID.randomUUID()}")
         catalog = FileSavedModelCatalogPersistence(File(directory, "catalog"), object : CatalogRecordCodec<String> {
             override fun encode(record: String) = record
@@ -53,7 +53,7 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
                         draft = draft, onDraftChange = { draft = it }, onSave = { saves++ }, onBack = {},
                         providerIdentity = identity, persistence = checkedPersistence,
                         createModel = { SavedCatalogModel(it.id, it.displayName, "defaults") },
-                        twoTabs = true,
+                        twoTabs = twoTabs,
                         localModelActions = LocalCatalogModelActions<String>(
                             currentModelId = old.id,
                             rename = { _, _, _, _ -> error("Unexpected local rename in import test") },
@@ -69,9 +69,9 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
         ui.waitForIdle()
     }
 
-    private fun startFetch() {
+    private fun startFetch(twoTabs: Boolean = true) {
         mainThread { fetched = null }
-        reveal("settings-radio:模型").performClick().assertIsSelected()
+        if (twoTabs) selectProviderTab("模型")
         reveal("model-catalog-fetch").performClick()
         ui.waitUntil(5_000) { fetched != null }
     }
@@ -140,4 +140,18 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
         assertEquals(listOf(old), catalog.current()!!.models)
         ui.runOnIdle { assertEquals("existing", draft.model); assertEquals(0, saves) }
     }
+    fun testSinglePageSaveFencesLateCatalogWithoutTabChangeOrDraftEdit() {
+        show(twoTabs = false)
+        startFetch(twoTabs = false)
+        val late = checkNotNull(fetched)
+        assertFalse(checkNotNull(cancelled).invoke())
+        reveal("model-save").performClick()
+        assertTrue(checkNotNull(cancelled).invoke())
+        mainThread { late(listOf(RemoteModel("late-after-save"))) }
+        ui.waitForIdle()
+        node("provider-model-selection").assertDoesNotExist()
+        assertEquals(listOf(old), catalog.current()!!.models)
+        ui.runOnIdle { assertEquals(1, saves); assertEquals("existing", draft.model) }
+    }
+
 }

@@ -1,9 +1,10 @@
 package app.daiyu.android
 
-import androidx.compose.ui.semantics.SemanticsActions
+import app.daiyu.android.ui.components.RetainedChoiceSelect
 import androidx.compose.ui.test.*
 
 class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     fun testFutureOAuthIsInertAndApiKeyStillRegistersThroughTheExistingFlow() {
         openProviderManagement()
         val before = fixture.controller.providers.snapshot()
@@ -31,7 +32,7 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         val before = fixture.controller.providers.snapshot()
         reveal("provider-add", "提供商").performClick()
         awaitUniqueTag("prompt-choice:0")
-        val choose = checkNotNull(node("prompt-choice:0").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val choose = node("prompt-choice:0").fetchSemanticsNode().config[RetainedChoiceSelect]
         realPauseResume(activity, atPause = { choose() })
         mainThread { choose() }
         node("prompt-input").assertDoesNotExist()

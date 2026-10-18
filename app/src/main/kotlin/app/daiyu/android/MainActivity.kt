@@ -1582,7 +1582,8 @@ class MainActivity : ComponentActivity() {
                     "providers" -> ProviderManagementRoute(controller,
                         ownerCurrent = { activityUsable() && voiceForeground && retainedPage == "providers" && !sidebarVisible },
                         onBack = { if (activityUsable() && retainedPage == "providers") retainedPage = "settings" },
-                        engineeringUi = engineeringUi)
+                        engineeringUi = engineeringUi, initialSlot = app.daiyu.android.storage.ProviderRegistry.PRIMARY,
+                        pageTitleOverride = "模型设置")
                     "models" -> modelDraft?.let { value ->
                         val connectionTest: app.daiyu.android.ui.screens.settings.ModelConnectionTester? = modelEditingOwner?.let { owner ->
                             { draft, cancelled, deliver -> requestModelConnectionTest(owner, draft, cancelled, deliver) }

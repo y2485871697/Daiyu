@@ -188,7 +188,7 @@ internal fun DaiyuSettingsScreen(
             "appearance" -> onOpenAppearance?.invoke()
             "haptics" -> onOpenHaptics?.invoke()
             "voice" -> onOpenVoice?.invoke()
-            "platform_tools" -> if (engineeringUi) onOpenPlatformTools?.invoke()
+            "platform_tools" -> onOpenPlatformTools?.invoke()
             "source" -> openProjectSource(context)
             "telegram", "qq", "relay_st", "relay_moyu" -> openRetainedSettingsLink(context, entry.id)
             "relay" -> {

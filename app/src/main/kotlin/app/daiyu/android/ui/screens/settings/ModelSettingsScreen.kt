@@ -125,7 +125,7 @@ internal fun ModelSettingsScreen(
                 SettingsTextField("API Key", draft.apiKey, { changeDraft(draft.copy(apiKey = it)) }, password = true, enabled = enabled)
             }
         }
-        if (engineeringUi) item(key = "model_device_tools") {
+        item(key = "model_device_tools") {
             SettingsSectionTitle("设备工具")
             SettingsCard {
                 SettingsSwitchRow("电量查询", draft.batteryEnabled, enabled = enabled) { changeDraft(draft.copy(batteryEnabled = it)) }
@@ -134,14 +134,14 @@ internal fun ModelSettingsScreen(
         }
         item(key = "model_advanced") {
             SettingsCard {
-                if (!engineeringUi) SettingsRow("自定义请求体", tag = "model-custom-body",
+                SettingsRow("自定义请求体", tag = "model-custom-body",
                     summary = if (draft.customBody.isBlank()) "未设置" else "已设置",
                     onClick = if (enabled) ({ bodyExpanded = !bodyExpanded }) else null)
                 if (engineeringUi || bodyExpanded) SettingsTextField("自定义请求体", draft.customBody,
                     { changeDraft(draft.copy(customBody = it)) }, multiline = true, enabled = enabled)
             }
         }
-        if (!engineeringUi && draft.protocol != ProviderProtocol.RESPONSES &&
+        if (draft.protocol != ProviderProtocol.RESPONSES &&
             (draft.speedMode != null || draft.codex)) item(key = "model_clear_incompatible_options") {
             SettingsCard {
                 SettingsRow("清除不兼容的请求档位", tag = "model-clear-incompatible-options",
@@ -149,10 +149,10 @@ internal fun ModelSettingsScreen(
                     onClick = if (enabled) ({ changeDraft(draft.copy(speedMode = null, codex = false)) }) else null)
             }
         }
-        if (engineeringUi || requestOptionsUnavailable) item(key = "model_speed") {
-            if (engineeringUi) SettingsSectionTitle("服务档位")
+        item(key = "model_speed") {
+            SettingsSectionTitle("服务档位")
             SettingsCard {
-                if (engineeringUi) listOf(
+                listOf(
                     null to "不指定",
                     GptSpeedMode.NORMAL to "普通",
                     GptSpeedMode.FAST to "快速",
@@ -160,7 +160,7 @@ internal fun ModelSettingsScreen(
                 ).forEach { (mode, title) ->
                     SettingsRadioRow(title, draft.speedMode == mode, enabled = enabled) { changeDraft(draft.copy(speedMode = mode)) }
                 }
-                if (engineeringUi) SettingsSwitchRow("Codex 档位", draft.codex, enabled = enabled) { changeDraft(draft.copy(codex = it)) }
+                SettingsSwitchRow("Codex 档位", draft.codex, enabled = enabled) { changeDraft(draft.copy(codex = it)) }
                 if (requestOptionsUnavailable) {
                     SettingsSwitchRow("授权替换策略", draft.requestOptionsReplacementAuthorized, enabled = enabled) {
                         changeDraft(draft.copy(requestOptionsReplacementAuthorized = it))

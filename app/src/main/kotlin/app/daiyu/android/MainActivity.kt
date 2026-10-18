@@ -1750,7 +1750,7 @@ class MainActivity : ComponentActivity() {
                                         if (imagePanelVisible) ImageComposerPanel()
                                         if (videoPanelVisible && !sidebarVisible) VideoComposerPanel()
                                         DictationComposerEntry()
-                                        if (engineeringUi) ShizukuComposerEntry()
+                                        ShizukuComposerEntry()
                                     }
                                 }
                             }
@@ -2175,7 +2175,7 @@ class MainActivity : ComponentActivity() {
         fun currentVoiceControls() = currentEditor() && voiceRequestEpoch == capturedVoiceEpoch &&
             cascadeVoice.operationToken == capturedCascadeToken && remoteVoice.operationToken == capturedRemoteToken &&
             speechHost.owner == capturedSpeechOwner
-        if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "离线语音设置", modifier = Modifier.testTag("offline-speech-open"),
+        top.yukonga.miuix.kmp.basic.TextButton(text = "离线语音设置", modifier = Modifier.testTag("offline-speech-open"),
             onClick = { if (activityUsable() && retainedPage == "chat" && !sidebarVisible) retainedPage = "offline-speech" })
         if (pack.enabled) top.yukonga.miuix.kmp.basic.TextButton(
             text = if (offline.listening) "取消离线听写" else "离线听写（本机麦克风）",
@@ -4337,7 +4337,6 @@ class MainActivity : ComponentActivity() {
         retainedPage = "reconnect-settings"
     }
     private fun openBrowserSettings() {
-        check(engineeringUi)
         requireActivityUsable()
         browserSettingsPageOwner?.revoke()
         browserSettingsPageOwner = app.daiyu.android.browser.BrowserSettingsSaveOwner()
@@ -4411,7 +4410,7 @@ class MainActivity : ComponentActivity() {
             }
             FeatureRoute.BROWSER_SETTINGS -> openBrowserSettings()
             FeatureRoute.RECONNECT_SETTINGS -> openReconnectSettings()
-            FeatureRoute.GUI_SETTINGS -> { check(engineeringUi); requireActivityUsable(); retainedPage = "gui-settings" }
+            FeatureRoute.GUI_SETTINGS -> { requireActivityUsable(); retainedPage = "gui-settings" }
             FeatureRoute.TITLE_MODEL_SETTINGS -> {
                 requireActivityUsable()
                 titleSettingsPageOwner?.revoke()

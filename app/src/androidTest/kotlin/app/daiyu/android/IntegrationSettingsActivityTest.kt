@@ -9,7 +9,6 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.*
 import androidx.lifecycle.lifecycleScope
-import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.model.ProviderRequestOptions
 import app.daiyu.android.model.catalog.CatalogCommitResult
 import app.daiyu.android.model.catalog.CatalogModelParameters
@@ -373,20 +372,22 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             backToChat(activity); assertEquals(before, fixture.settings.load())
         }
     }
-    fun testAdvancedRequestOptionsSaveReopenAndRejectInvalidBodyAndTier() {
-        openModels(); editModel("自定义请求体", "{\"temperature\":0.25}")
-        reveal("settings-radio:快速").performClick(); saveModel()
-        val expected = ProviderRequestOptions("{\"temperature\":0.25}", GptSpeedMode.FAST, false)
+    fun testCustomRequestBodySaveReopenRejectsInvalidBodyAndHidesUnsupportedTiers() {
+        val before = fixture.settings.load().requestOptions
+        val body = "{\"temperature\":0.25}"
+        openModels(); editModel("自定义请求体", body); saveModel()
+        val expected = before.copy(customBody = body)
         assertEquals(expected, fixture.settings.load().requestOptions)
         openModels(); modelField("自定义请求体").assertEditableText(expected.customBody)
-        reveal("settings-radio:快速").assertIsSelected()
         editModel("自定义请求体", "{\"messages\":[]}"); saveModel()
         assertEquals(expected, fixture.settings.load().requestOptions); node("model-save").assertExists()
-        editModel("自定义请求体", expected.customBody); reveal("settings-radio:超快速").performClick()
-        reveal("settings-switch:Codex 档位").performClick(); saveModel()
-        assertEquals(expected, fixture.settings.load().requestOptions); backToChat(activity)
+        editModel("自定义请求体", expected.customBody); saveModel()
+        assertEquals(expected, fixture.settings.load().requestOptions)
+        ui.onAllNodesWithText("超快速").assertCountEquals(0)
+        ui.onAllNodesWithText("Codex 档位").assertCountEquals(0)
+        backToChat(activity)
         activity = recreateActivity(activity); openModels()
-        modelField("自定义请求体").assertEditableText(expected.customBody); reveal("settings-radio:快速").assertIsSelected()
+        modelField("自定义请求体").assertEditableText(expected.customBody)
         backToChat(activity)
     }
     private fun openSkills() {

@@ -166,6 +166,10 @@ internal fun ModelSettingsScreen(
                 }
                 SettingsTextField("模型名", draft.model, { changeDraft(draft.copy(model = it)) }, enabled = enabled)
                 SettingsTextField("API Key", draft.apiKey, { changeDraft(draft.copy(apiKey = it)) }, password = true, enabled = enabled)
+                SettingsTextField(
+                    "自定义请求体", draft.customBody, { changeDraft(draft.copy(customBody = it)) },
+                    hint = "JSON 对象；留空使用服务默认请求体", multiline = true, enabled = enabled,
+                )
                 SettingsRow(
                     title = "自定义请求头",
                     summary = if (draft.customHeaders.isBlank()) "未设置" else "已设置",

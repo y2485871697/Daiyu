@@ -56,7 +56,7 @@ internal fun ChatModelPicker(
     }
     WindowDialog(show = true, title = "选择模型", onDismissRequest = onDismiss) {
         Column(Modifier.testTag("chat-model-picker").fillMaxWidth()
-            .heightIn(max = minOf(480.dp, (LocalConfiguration.current.screenHeightDp * 0.65f).dp))) {
+            .heightIn(max = minOf(520.dp, (LocalConfiguration.current.screenHeightDp * 0.72f).dp))) {
             TextField(value = query, onValueChange = { query = it }, label = "搜索模型",
                 useLabelAsPlaceholder = true, singleLine = true,
                 modifier = Modifier.testTag("chat-model-search").fillMaxWidth())

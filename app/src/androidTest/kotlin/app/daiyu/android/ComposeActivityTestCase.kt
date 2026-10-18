@@ -64,15 +64,48 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         node(tag).assertExists()
     }
 
+    protected fun focusedWindowRoot(): android.view.View {
+        checkNotNull(currentHost)
+        var root: android.view.View? = null
+        androidx.test.espresso.Espresso.onView(androidx.test.espresso.matcher.ViewMatchers.isRoot())
+            .inRoot(object : org.hamcrest.TypeSafeMatcher<androidx.test.espresso.Root>() {
+                override fun describeTo(description: org.hamcrest.Description) {
+                    description.appendText("attached window with current focus")
+                }
+                override fun matchesSafely(candidate: androidx.test.espresso.Root) =
+                    candidate.decorView.isAttachedToWindow && candidate.decorView.hasWindowFocus()
+            })
+            .perform(object : androidx.test.espresso.ViewAction {
+                override fun getConstraints(): org.hamcrest.Matcher<android.view.View> =
+                    androidx.test.espresso.matcher.ViewMatchers.isRoot()
+                override fun getDescription() = "capture focused window root"
+                override fun perform(controller: androidx.test.espresso.UiController, view: android.view.View) {
+                    root = view
+                }
+            })
+        return checkNotNull(root)
+    }
     protected fun dismissIme() {
-        val host = checkNotNull(currentHost)
-        // Espresso resolves the focused root, including Compose Dialog windows.
-        androidx.test.espresso.Espresso.closeSoftKeyboard()
+        val root = focusedWindowRoot()
+        // Hide only a visible IME, using the same focused window that we verify below.
+        instrumentation.runOnMainSync {
+            check(root.isAttachedToWindow && root.hasWindowFocus()) { "ime_window_changed" }
+            val insets = checkNotNull(androidx.core.view.ViewCompat.getRootWindowInsets(root))
+            if (insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())) {
+                val focus = root.findFocus() ?: root
+                check(focus.rootView === root)
+                val token = checkNotNull(focus.windowToken)
+                val imm = root.context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                    as android.view.inputmethod.InputMethodManager
+                imm.hideSoftInputFromWindow(token, 0)
+            }
+        }
         ui.waitUntil(5_000) {
             var hidden = false
             instrumentation.runOnMainSync {
-                hidden = androidx.core.view.ViewCompat.getRootWindowInsets(host.window.decorView)
-                    ?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) != true
+                val insets = androidx.core.view.ViewCompat.getRootWindowInsets(root)
+                hidden = root.isAttachedToWindow && insets != null &&
+                    !insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())
             }
             hidden
         }

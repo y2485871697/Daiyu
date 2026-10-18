@@ -19,13 +19,14 @@ internal class RunControlFixture(base:Context,
         app.daiyu.android.model.sessiongateway.SessionGatewayContext) -> Unit)? = null,
     mcpTransport: (app.daiyu.android.mcp.McpServer) -> app.daiyu.android.mcp.McpHttpSession = { app.daiyu.android.mcp.McpHttpSession(it) },
     beforeOpen: (List<Message>) -> Unit = {},
+    filesRoot: java.io.File? = null,
     beforeModel: () -> Unit = {}) : AutoCloseable {
     private class FixtureApplication(base:Context):Application() {
         init {attachBaseContext(base)}
         override fun getApplicationContext(): Context = this
     }
     private val fixtureId = UUID.randomUUID().toString()
-    private val filesRoot = java.io.File(base.cacheDir, "run-control-files-$fixtureId").apply { check(mkdirs()) }
+    private val filesRoot = (filesRoot ?: java.io.File(base.cacheDir, "run-control-files-$fixtureId")).apply { check(mkdirs()) }
     val application:Application=FixtureApplication(object : android.content.ContextWrapper(
         testContext(base,"run-control-$fixtureId-")) {
         override fun getFilesDir() = filesRoot

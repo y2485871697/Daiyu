@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.OutlinedTextField
@@ -202,8 +203,19 @@ internal fun SkillManagementScreen(
         SkillInstallSheet(controller, inspection)
     }
     details?.let { entry ->
-        SkillDetailsSheet(entry = entry, onDismiss = { details = null })
+        SkillDetailsSheet(entry = entry, onDismiss = { details = null },
+            canRemove = switchesEnabled && !entry.builtin,
+            onRemove = { details = null; controller.prepareRemoval(entry) })
     }
+    controller.removal?.let { removal ->
+        AlertDialog(onDismissRequest = controller::cancelRemoval,
+            title = { Text("删除技能") },
+            text = { Text("删除 ${removal.entry.skill.name}？当前运行保留已冻结的正文，新运行不再加载该技能。") },
+            confirmButton = { TextButton(onClick = { controller.remove(removal) }, enabled = !controller.busy,
+                modifier = Modifier.testTag("skills-confirm-remove")) { Text("删除") } },
+            dismissButton = { TextButton(onClick = controller::cancelRemoval, enabled = !controller.busy) { Text("取消") } })
+    }
+
 }
 
 @Composable
@@ -277,7 +289,8 @@ private fun SkillInstallSheet(controller: SkillManagementPageState, inspection: 
 
 /** Read-only details use the same bounded bottom-surface pattern as DaiyuChoiceSheet. */
 @Composable
-private fun SkillDetailsSheet(entry: SkillManagement.Entry, onDismiss: () -> Unit) {
+private fun SkillDetailsSheet(entry: SkillManagement.Entry, onDismiss: () -> Unit,
+    canRemove: Boolean, onRemove: () -> Unit) {
     val colors = MiuixTheme.colorScheme
     Dialog(
         onDismissRequest = onDismiss,
@@ -316,6 +329,10 @@ private fun SkillDetailsSheet(entry: SkillManagement.Entry, onDismiss: () -> Uni
                     ).forEach { (key, value) ->
                         Text("$key：$value", style = MiuixTheme.textStyles.body1, color = colors.onSurface)
                     }
+                }
+                if (!entry.builtin) {
+                    TextButton(onClick = onRemove, enabled = canRemove,
+                        modifier = Modifier.testTag("skill-remove:${entry.id}")) { Text("删除技能", color = colors.error) }
                 }
                 Box(
                     Modifier.fillMaxWidth().heightIn(min = 48.dp)
@@ -427,11 +444,45 @@ internal class SkillManagementPageState(
         private set
     var installMessage by mutableStateOf<String?>(null)
         private set
+    var removal by mutableStateOf<SkillManagement.Removal?>(null)
+        private set
     private var flowGeneration = 0L
+
+    fun prepareRemoval(entry: SkillManagement.Entry) {
+        if (!confirmed || !active || busy) return
+        inspection = null; preview = null; selected = emptySet(); installMessage = null
+        flow({ management.previewRemoval(entry.id, entry.skill.revision) }) { removal = it }
+    }
+
+    fun cancelRemoval() {
+        if (!active || installing || busy) return
+        removal = null
+        worker.execute { runCatching { management.cancelRemoval() } }
+    }
+
+    fun remove(approved: SkillManagement.Removal) {
+        if (!active || busy || removal !== approved) return
+        val ticket = owner.ticket() ?: return
+        installing = true
+        flow(ticket = ticket, operation = {
+            val result = management.remove(approved)
+            result to runCatching { management.snapshot() }
+        }) { (result, refreshed) ->
+            removal = null
+            refreshed.fold(onSuccess = { state = it; confirmed = !it.entriesUnavailable }, onFailure = { confirmed = false })
+            installMessage = when (result) {
+                is SkillManagement.RemovalResult.Removed -> if (result.cleanupPending)
+                    "删除已提交，清理待完成；请刷新，不要重复删除。" else "技能已删除，当前运行保留原正文快照。"
+                is SkillManagement.RemovalResult.Rejected -> "删除未提交（${result.code}），请刷新后重新确认。"
+                SkillManagement.RemovalResult.Unknown -> "删除结果未知，请刷新核对；不会自动重试。"
+            }
+            if (refreshed.isFailure) error = "列表读取失败，请刷新核对；不要重复删除。"
+        }
+    }
 
     fun inspect() {
         if (!active || busy) return
-        inspection = null; preview = null; selected = emptySet(); installMessage = null
+        inspection = null; preview = null; removal = null; selected = emptySet(); installMessage = null
         val input = url.trim()
         flow({ management.inspect(input) }) { inspection = it }
     }
@@ -496,8 +547,8 @@ internal class SkillManagementPageState(
                 busy = false; installing = false
                 result.fold(onSuccess = accept, onFailure = { failure ->
                     if (writing) {
-                        inspection = null; preview = null; selected = emptySet(); confirmed = false
-                        installMessage = "安装结果未知，请刷新核对；不会自动重装。离页不代表回滚。"
+                        inspection = null; preview = null; removal = null; selected = emptySet(); confirmed = false
+                        installMessage = "修改结果未知，请刷新核对；不会自动重试。离页不代表回滚。"
                     } else {
                         error = when (failure.message) {
                             "builtin_conflict" -> "所选技能与内置技能同名，不能覆盖内置技能。"
@@ -553,7 +604,7 @@ internal class SkillManagementPageState(
         // Queued tickets now fail admission; an already admitted write may finish.
         if (!owner.revoke()) return
         worker.execute {
-            if (managementDelegate.isInitialized()) runCatching { management.cancelInstall() }
+            if (managementDelegate.isInitialized()) runCatching { management.cancelInstall(); management.cancelRemoval() }
         }
         worker.shutdown()
     }

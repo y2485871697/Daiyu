@@ -12,6 +12,63 @@ class SkillStoreTest : InstrumentationTestCase() {
     override fun tearDown() { root.deleteRecursively(); super.tearDown() }
     private fun bundle(text: String = "Hello", resource: ByteArray = "reference".toByteArray()) = SkillBundle(mapOf("SKILL.md" to "---\nname: demo\ndescription: Test skill\n---\n$text".toByteArray(), "references/a.txt" to resource, "scripts/example.sh" to "echo never-executed".toByteArray()))
     private fun rejects(action: () -> Unit) { try { action(); fail("must reject") } catch (_: Exception) { } }
+    fun testRemovalRequiresExactRevisionAndPreservesOtherSkillsAndSnapshot() {
+        val store = SkillStore(root)
+        val old = store.install(listOf(bundle())).single()
+        val captured = store.snapshot()
+        val other = SkillBundle(mapOf("SKILL.md" to "---\nname: other\ndescription: Other\n---\nother".toByteArray()))
+        store.install(listOf(other))
+        val changed = store.install(listOf(bundle("Changed")), mapOf("demo" to old.revision)).single()
+        try { store.remove("demo", old.revision); fail("stale removal accepted") } catch (_: SkillConflict) { }
+        assertEquals(changed, store.remove("demo", changed.revision))
+        assertEquals(listOf("other"), SkillStore(root).list().map { it.name })
+        assertTrue(captured.skills.single().instructions.contains("Hello"))
+        rejects { store.readResource("demo", "SKILL.md", changed.revision) }
+        try { store.remove("demo", changed.revision); fail("repeat removal accepted") } catch (_: SkillConflict) { }
+        assertNoTransaction()
+    }
+    fun testRemovalPreCommitFailuresRestoreTheExactDisabledSkill() {
+        for (boundary in listOf("before_journal", "after_backup", "before_commit")) {
+            val directory = File(root, boundary)
+            val store = SkillStore(directory)
+            val old = store.install(listOf(bundle())).single()
+            store.setEnabled("demo", false, old.revision)
+            val bytes = File(directory, "installed/demo/.skill.json").readBytes()
+            store.transactionCheckpoint = { if (it == boundary) throw java.io.IOException("injected_failure") }
+            rejects { store.remove("demo", old.revision) }
+            val reopened = SkillStore(directory)
+            assertEquals(old.revision, reopened.list().single().revision)
+            assertFalse(reopened.list().single().enabled)
+            assertTrue(bytes.contentEquals(File(directory, "installed/demo/.skill.json").readBytes()))
+            assertFalse(File(directory, ".transaction.json").exists())
+        }
+    }
+    fun testRemovalCommittedFailuresRemainRemovedAfterRecovery() {
+        for (boundary in listOf("after_commit", "before_cleanup")) {
+            val directory = File(root, boundary)
+            val store = SkillStore(directory)
+            val old = store.install(listOf(bundle())).single()
+            store.transactionCheckpoint = { if (it == boundary) throw java.io.IOException("injected_failure") }
+            try { store.remove("demo", old.revision); fail("committed cleanup must be explicit") }
+            catch (committed: SkillRemovalCleanupPending) { assertEquals(old, committed.removedSkill) }
+            assertTrue(SkillStore(directory).list().isEmpty())
+            assertFalse(File(directory, ".transaction.json").exists())
+            assertFalse(directory.listFiles().orEmpty().any { it.name.startsWith(".txn-") })
+        }
+    }
+    fun testInterruptedRemovalJournalRestoresBackupBeforeCommit() {
+        val store = SkillStore(root)
+        val old = store.install(listOf(bundle())).single()
+        val transaction = ".txn-00000000-0000-0000-0000-000000000000"
+        val txn = File(root, transaction)
+        check(File(txn, "stage").mkdirs()); check(File(txn, "backup").mkdirs())
+        check(File(root, "installed/demo").renameTo(File(txn, "backup/demo")))
+        File(root, ".transaction.json").writeText(JSONObject().put("transaction", transaction)
+            .put("committed", false).put("entries", org.json.JSONArray().put(JSONObject()
+                .put("name", "demo").put("had_previous", true))).toString())
+        assertEquals(old, SkillStore(root).list().single())
+        assertFalse(txn.exists())
+    }
     fun testFrontmatterAndEnableSnapshot() {
         val store = SkillStore(root)
         val info = store.install(listOf(bundle())).single()

@@ -133,6 +133,12 @@ class SkillToolRegistry(
         return userStore.install(bundles, replacements, incoming)
     }
 
+    internal fun removeForManagement(id: String, revision: String): InstalledSkill {
+        if (id.startsWith("builtin:")) throw ManagementBuiltinConflict()
+        val (store, name) = resolve(id)
+        return store.remove(name, revision)
+    }
+
     fun setEnabled(id: String, value: Boolean, revision: String): InstalledSkill {
         val (store, name) = resolve(id); return store.setEnabled(name, value, revision)
     }

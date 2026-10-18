@@ -174,7 +174,7 @@ internal fun ModelSettingsScreen(
                 if (engineeringUi || bodyExpanded) {
                     SettingsTextField("自定义请求体", draft.customBody,
                         { changeDraft(draft.copy(customBody = it)) }, multiline = true, enabled = enabled)
-                    RequestBodyFieldsEditor(draft, enabled, changeDraft)
+                    RequestBodyFieldsEditor(draft, enabled, engineeringUi, changeDraft)
                 }
             }
         }

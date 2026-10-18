@@ -8,6 +8,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -17,6 +19,8 @@ import app.daiyu.android.model.RequestBodyFields
 import app.daiyu.android.model.RequestBodyValueType
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.window.WindowDialog
+
+internal val RetainedRequestBodyFieldApply = SemanticsPropertyKey<() -> Unit>("RetainedRequestBodyFieldApply")
 
 /** A visit-local capability, not a saved draft or an authorization to persist it. */
 internal class RequestBodyFieldEditorOwner(val draft: ModelSettingsDraftUi) {
@@ -30,7 +34,7 @@ internal class RequestBodyFieldEditorOwner(val draft: ModelSettingsDraftUi) {
 }
 
 @Composable
-internal fun RequestBodyFieldsEditor(draft: ModelSettingsDraftUi, enabled: Boolean,
+internal fun RequestBodyFieldsEditor(draft: ModelSettingsDraftUi, enabled: Boolean, engineeringUi: Boolean = false,
     onDraftChange: (ModelSettingsDraftUi) -> Unit,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -84,15 +88,19 @@ internal fun RequestBodyFieldsEditor(draft: ModelSettingsDraftUi, enabled: Boole
                 }
                 item {
                     notice?.let { SettingsNote(it, error = true) }
-                    TextButton(text = "应用到草稿", modifier = Modifier.testTag("model-body-field-apply"), enabled = enabled,
-                        onClick = {
-                            if (current(active)) {
-                                val result = runCatching { RequestBodyFields.put(active.draft.customBody, original?.name, field, active.draft.protocol) }
-                                result.fold(onSuccess = { body ->
-                                    if (current(active)) { close(active); latestChange(active.draft.copy(customBody = body)) }
-                                }, onFailure = { notice = "字段无效；请检查名称、类型、值及协议限制。" })
-                            }
-                        })
+                    val apply: () -> Unit = {
+                        if (current(active)) {
+                            val result = runCatching { RequestBodyFields.put(active.draft.customBody, original?.name, field, active.draft.protocol) }
+                            result.fold(onSuccess = { body ->
+                                if (current(active)) { close(active); latestChange(active.draft.copy(customBody = body)) }
+                            }, onFailure = { notice = "字段无效；请检查名称、类型、值及协议限制。" })
+                        }
+                    }
+                    val retained = if (engineeringUi) Modifier.semantics {
+                        this[RetainedRequestBodyFieldApply] = apply
+                    } else Modifier
+                    TextButton(text = "应用到草稿", modifier = Modifier.testTag("model-body-field-apply").then(retained),
+                        enabled = enabled, onClick = apply)
                     TextButton(text = "取消", onClick = { close(active) })
                 }
             }

@@ -594,7 +594,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
             val reexported = payload(saved.readText())
             assertEquals(data.getJSONObject("generation_history").toString(), reexported.getJSONObject("generation_history").toString())
             assertEquals(data.getJSONObject("child_task_history").toString(), reexported.getJSONObject("child_task_history").toString())
-            val blob = File(targetFiles, "neutral-context-blobs/${displayHash(image)}")
+            val blob = File(target.application.filesDir, "neutral-context-blobs/${displayHash(image)}")
             assertTrue(blob.isFile)
             val bad = byteArrayOf(9, 8, 7)
             blob.writeBytes(bad)

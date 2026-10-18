@@ -92,14 +92,15 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
         MenuEntry("视频", DaiyuIcons.Video, ChatMenuAction.ATTACH_VIDEO),
         MenuEntry("文件", DaiyuIcons.File, ChatMenuAction.ATTACH_FILE),
         MenuEntry("文件夹", DaiyuIcons.Folder, ChatMenuAction.ATTACH_FOLDER),
-        MenuEntry("输入路径", DaiyuIcons.Terminal, ChatMenuAction.ATTACH_PATH),
+        MenuEntry("路径引用", DaiyuIcons.Terminal, ChatMenuAction.ATTACH_PATH),
     )
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MiuixTheme.colorScheme.surfaceContainer,
         contentColor = MiuixTheme.colorScheme.onSurface) {
         Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
             Text("附件", Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MiuixTheme.textStyles.title3)
             entries.forEach { entry ->
-                Row(Modifier.fillMaxWidth().clickable { onDismiss(); onAction(entry.action) }
+                Row(Modifier.fillMaxWidth().testTag("chat-attachment:${entry.action.name}")
+                    .clickable { onDismiss(); onAction(entry.action) }
                     .padding(horizontal = 24.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(entry.icon, null, Modifier.size(22.dp), tint = daiyuIconColor(entry.icon))

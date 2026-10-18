@@ -15,6 +15,7 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import app.daiyu.android.browser.bridge.BrowserCommand
 import app.daiyu.android.browser.bridge.BrowserExecutionResult
+import app.daiyu.android.browser.host.BrowserToolTakeoverToken
 import app.daiyu.android.browser.host.BrowserTabLifecycle
 import app.daiyu.android.browser.runtime.AsyncBrowserBackend
 import app.daiyu.android.browser.runtime.UiDispatcher
@@ -30,6 +31,32 @@ import kotlinx.coroutines.yield
 import java.io.ByteArrayInputStream
 import java.util.concurrent.CompletableFuture
 import kotlin.coroutines.resume
+
+/** One exact UI attachment, never a tab-number or model capability. */
+class BrowserVisibleAttachment internal constructor(
+    private val ui: UiDispatcher,
+    private val navigateAction: (String) -> Unit,
+    private val loadingAction: () -> Boolean,
+    private val detachAction: () -> Unit,
+) : AutoCloseable {
+    private var closed = false
+    fun navigate(url: String) {
+        check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
+        check(!closed) { "BROWSER_VISIBLE_CLOSED" }
+        navigateAction(url)
+    }
+    val isLoading: Boolean get() {
+        check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
+        check(!closed) { "BROWSER_VISIBLE_CLOSED" }
+        return loadingAction()
+    }
+    override fun close() {
+        check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
+        if (closed) return
+        closed = true
+        detachAction()
+    }
+}
 
 /**
  * Android-only composition boundary, not a tool registration or grant factory. Construct on the
@@ -63,6 +90,44 @@ class AndroidOpenMinisBrowserHost(
     override val supportsTakeover: Boolean get() = delegate.supportsTakeover
     override fun create(lease: BrowserTabLease) = delegate.create(lease)
     override fun rebind(allocation: BrowserTabLease, lease: BrowserTabLease) = delegate.rebind(allocation, lease)
+    override fun beforeReleaseTakeover(allocation: BrowserTabLease, lease: BrowserTabLease) =
+        delegate.beforeReleaseTakeover(allocation, lease)
+
+    private fun <T> withVisibleResource(
+        token: BrowserToolTakeoverToken, requireIdle: Boolean,
+        block: (AndroidBlankResource, BrowserTabLease) -> T,
+    ): T {
+        check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
+        return token.session.withTakenOverTab(token) { allocation, lease ->
+            delegate.withTakenOverResource(allocation, lease, requireIdle) {
+                block(it as AndroidBlankResource, lease)
+            }
+        }
+    }
+
+    /** Reuses the original WebView; no navigation or tab creation occurs here. */
+    fun attach(token: BrowserToolTakeoverToken, container: ViewGroup): BrowserVisibleAttachment =
+        withVisibleResource(token, requireIdle = true) { resource, lease ->
+            val identity = Any()
+            resource.attach(identity, container, lease)
+            BrowserVisibleAttachment(ui,
+                navigateAction = { url ->
+                    withVisibleResource(token, requireIdle = false) { current, _ ->
+                        check(current === resource) { "BROWSER_STALE_TAB" }
+                        resource.navigateVisible(identity, url)
+                    }
+                },
+                loadingAction = {
+                    withVisibleResource(token, requireIdle = false) { current, _ ->
+                        check(current === resource) { "BROWSER_STALE_TAB" }
+                        resource.visibleLoading(identity)
+                    }
+                },
+                // Cleanup remains legal after token/owner revocation, for this instance only.
+                detachAction = { resource.detach(identity) },
+            )
+        }
+
     fun retryCleanup(lease: BrowserTabLease) = delegate.retryCleanup(lease)
     fun cleanupFailure(lease: BrowserTabLease): Exception? = delegate.cleanupFailure(lease)
     fun closeWithResult() = delegate.closeWithResult()
@@ -97,12 +162,24 @@ private class AndroidBlankResource(
     private val requestOverride: ((WebResourceRequest) -> WebResourceResponse?)?,
     private val operationTimeoutMillis: Long,
 ) : BlankBrowserResource {
-    private var destroyed = false
-    private val navigation = NavigationCallbacks(live, { url, title ->
+    @Volatile private var destroyed = false
+    @Volatile private var admissionRevoked = false
+    @Volatile private var visibleIdentity: Any? = null
+    @Volatile private var visibleLease: BrowserTabLease? = null
+    private var visibleParent: ViewGroup? = null
+    private fun resourceLive(): Boolean {
+        if (destroyed || admissionRevoked) return false
+        if (live()) return true
+        val original = visibleLease ?: return false
+        return try {
+            sessions.publishTakenOver(original) { !destroyed && !admissionRevoked && visibleIdentity != null && visibleLease == original }
+        } catch (_: IllegalStateException) { false }
+    }
+    private val navigation = NavigationCallbacks(::resourceLive, { url, title ->
         // Read the rebound lease at each hook, not the allocation/constructor snapshot.
         history.allowUpstreamRecord(lease, url, title)
     }, reject)
-    private val view = GuardedWebView(context, live, reject, navigation, ::callbackFence)
+    private val view = GuardedWebView(context, ::resourceLive, reject, navigation, ::callbackFence)
     private var manager: BrowserUseManager? = null
     private var visualRequest = 0L
 
@@ -110,7 +187,10 @@ private class AndroidBlankResource(
     // the selected history compatibility store only publishes state and enqueues its private writer.
     private fun callbackFence(action: () -> Unit) {
         check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
-        sessions.publish(lease) { action() }
+        check(resourceLive()) { "BROWSER_OPENMINIS_RESOURCE_RETIRED" }
+        val human = visibleLease
+        if (human != null && visibleIdentity != null) sessions.publishTakenOver(human) { action() }
+        else sessions.publish(lease) { action() }
     }
 
     override fun initialize() {
@@ -128,18 +208,99 @@ private class AndroidBlankResource(
     }
 
     override val isIdle: Boolean
-        get() = !destroyed && navigation.phase == NavigationCallbacks.Phase.IDLE
+        get() = !destroyed && !admissionRevoked && navigation.phase == NavigationCallbacks.Phase.IDLE
 
     fun currentUrl(): String? {
         check(!destroyed && live()) { "BROWSER_OPENMINIS_RESOURCE_RETIRED" }
         return view.url
     }
 
+    fun attach(identity: Any, parent: ViewGroup, takenOver: BrowserTabLease) {
+        check(!destroyed && visibleIdentity == null && view.parent == null && parent.childCount == 0) {
+            "BROWSER_VISIBLE_ALREADY_ATTACHED"
+        }
+        check(navigation.phase == NavigationCallbacks.Phase.IDLE) { "BROWSER_OPENMINIS_NATIVE_ACTIVE" }
+        visibleLease = takenOver
+        visibleIdentity = identity
+        visibleParent = parent
+        try {
+            navigation.enterManual()
+            parent.addView(view, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        } catch (failure: Exception) {
+            // addView may have partially succeeded. The host owns teardown of the original view.
+            visibleIdentity = null
+            visibleLease = null
+            visibleParent = null
+            navigation.retire()
+            reject("BROWSER_VISIBLE_ATTACH_FAILED")
+            throw failure
+        }
+    }
+
+    fun navigateVisible(identity: Any, url: String) {
+        check(visibleIdentity === identity && resourceLive()) { "BROWSER_VISIBLE_EXPIRED" }
+        check(navigation.phase == NavigationCallbacks.Phase.IDLE) { "BROWSER_OPENMINIS_NATIVE_ACTIVE" }
+        ensureManager()
+        view.loadUrl(url)
+    }
+
+    fun visibleLoading(identity: Any): Boolean {
+        check(visibleIdentity === identity && resourceLive()) { "BROWSER_VISIBLE_EXPIRED" }
+        return navigation.phase != NavigationCallbacks.Phase.IDLE
+    }
+
+    fun detach(identity: Any) {
+        check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
+        if (visibleIdentity !== identity) return
+        val parent = visibleParent
+        visibleIdentity = null
+        visibleLease = null
+        visibleParent = null
+        try {
+            check(view.parent == null || view.parent === parent) { "BROWSER_VISIBLE_PARENT_CHANGED" }
+            parent?.removeView(view)
+            if (admissionRevoked || destroyed) { navigation.retire(); return }
+            check(!destroyed && navigation.phase == NavigationCallbacks.Phase.IDLE) { "BROWSER_OPENMINIS_NATIVE_ACTIVE" }
+            navigation.leaveManual()
+        } catch (failure: Exception) {
+            navigation.retire()
+            reject("BROWSER_VISIBLE_DETACH_UNKNOWN")
+            throw failure
+        }
+    }
+
+    override fun beforeReleaseTakeover() {
+        check(!destroyed && visibleIdentity == null && !navigation.isManual) { "BROWSER_VISIBLE_ATTACHED" }
+        check(navigation.phase == NavigationCallbacks.Phase.IDLE) { "BROWSER_OPENMINIS_NATIVE_ACTIVE" }
+    }
+
     override fun rebind(lease: BrowserTabLease) {
-        check(!destroyed && navigation.phase == NavigationCallbacks.Phase.IDLE) {
+        check(!destroyed && visibleIdentity == null && !navigation.isManual && navigation.phase == NavigationCallbacks.Phase.IDLE) {
             "BROWSER_OPENMINIS_NAVIGATION_UNKNOWN"
         }
         this.lease = lease
+    }
+
+    private fun ensureManager(): BrowserUseManager = manager ?: BrowserUseManager(view).also { created ->
+        manager = created
+        // The fixed constructor configures cookies/JS. This happens only AFTER posted fence.
+        // Enforce file/content restrictions after configureWebView, before any navigation.
+        view.settings.apply {
+            allowFileAccess = false
+            allowContentAccess = false
+            @Suppress("DEPRECATION")
+            allowFileAccessFromFileURLs = false
+            @Suppress("DEPRECATION")
+            allowUniversalAccessFromFileURLs = false
+            mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        }
+        view.webViewClient = GuardedClient(view.webViewClient, ui, ::resourceLive, reject, navigation, requestOverride, ::callbackFence)
+        // No downloads/blob JS, new windows, external activities, or implicit tab mutation.
+        view.setDownloadListener { _, _, _, _, _ ->
+            navigation.failed("BROWSER_OPENMINIS_DOWNLOAD_UNSUPPORTED")
+        }
+        created.onNewWindow = null
+        created.onCloseWindow = { navigation.failed("BROWSER_OPENMINIS_PAGE_CLOSE_UNSUPPORTED") }
     }
 
     override suspend fun execute(input: BrowserActionInput): BrowserActionResult {
@@ -150,27 +311,7 @@ private class AndroidBlankResource(
                 check(navigation.begin(checkNotNull(input.url), operationTimeoutMillis)) { "BROWSER_OPENMINIS_NAVIGATION_NOT_ADMITTED" }
             }
             check(live()) { "BROWSER_OPENMINIS_RESOURCE_RETIRED" }
-            val active = manager ?: BrowserUseManager(view).also { created ->
-                manager = created
-                // The fixed constructor configures cookies/JS. This happens only AFTER posted fence.
-                // Enforce file/content restrictions after configureWebView, before any navigation.
-                view.settings.apply {
-                    allowFileAccess = false
-                    allowContentAccess = false
-                    @Suppress("DEPRECATION")
-                    allowFileAccessFromFileURLs = false
-                    @Suppress("DEPRECATION")
-                    allowUniversalAccessFromFileURLs = false
-                    mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                }
-                view.webViewClient = GuardedClient(view.webViewClient, ui, live, reject, navigation, requestOverride, ::callbackFence)
-                // No downloads/blob JS, new windows, external activities, or implicit tab mutation.
-                view.setDownloadListener { _, _, _, _, _ ->
-                    navigation.failed("BROWSER_OPENMINIS_DOWNLOAD_UNSUPPORTED")
-                }
-                created.onNewWindow = null
-                created.onCloseWindow = { navigation.failed("BROWSER_OPENMINIS_PAGE_CLOSE_UNSUPPORTED") }
-            }
+            val active = ensureManager()
             check(live()) { "BROWSER_OPENMINIS_RESOURCE_RETIRED" }
             if (input.action == BrowserAction.SCREENSHOT) awaitVisualState()
             // Actual pinned upstream implementation, not an emulated action engine.
@@ -209,9 +350,14 @@ private class AndroidBlankResource(
         })
     }
 
+    override fun revokeAdmission() { admissionRevoked = true }
+
     override fun destroy() {
         if (destroyed) return
         destroyed = true
+        visibleIdentity = null
+        visibleLease = null
+        visibleParent = null
         navigation.retire()
         view.disposed = true
         var failure: Exception? = null
@@ -255,13 +401,14 @@ private class GuardedWebView(
             navigation.failed("BROWSER_OPENMINIS_URL_BLOCKED")
             error("BROWSER_OPENMINIS_URL_BLOCKED")
         }
-        check(navigation.directLoad(url)) { "BROWSER_OPENMINIS_NAVIGATION_UNKNOWN" }
+        val admitted = if (navigation.isManual) navigation.manualOverride(url, true) else navigation.directLoad(url)
+        check(admitted) { "BROWSER_OPENMINIS_NAVIGATION_UNKNOWN" }
         super.loadUrl(url)
     }
 
     override fun evaluateJavascript(script: String, resultCallback: ValueCallback<String>?) {
         // Fixed upstream posts delayed resize JS; do not let it touch a destroyed WebView.
-        if (!disposed && live()) {
+        if (!disposed && live() && !navigation.isManual) {
             try { callbackFence { if (!disposed && live()) super.evaluateJavascript(script, resultCallback) } }
             catch (failure: IllegalStateException) {
                 if (live()) throw failure
@@ -294,8 +441,10 @@ private class GuardedClient(
         var denied = true
         fenced {
             val url = request.url.toString()
-            if (!blocked(url) && navigation.allowOverride(url, request.isForMainFrame) && live()) {
-                denied = upstream.shouldOverrideUrlLoading(view, request)
+            if (!blocked(url)) {
+                if (navigation.isManual) denied = !navigation.manualOverride(url, request.isForMainFrame)
+                else if (navigation.allowOverride(url, request.isForMainFrame) && live())
+                    denied = upstream.shouldOverrideUrlLoading(view, request)
             }
         }
         return denied
@@ -305,8 +454,10 @@ private class GuardedClient(
     override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
         var denied = true
         fenced {
-            if (!blocked(url) && navigation.allowOverride(url, true) && live()) {
-                denied = upstream.shouldOverrideUrlLoading(view, url)
+            if (!blocked(url)) {
+                if (navigation.isManual) denied = !navigation.manualOverride(url, true)
+                else if (navigation.allowOverride(url, true) && live())
+                    denied = upstream.shouldOverrideUrlLoading(view, url)
             }
         }
         return denied
@@ -341,7 +492,7 @@ private class GuardedClient(
     override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
         fenced {
             if (blocked(url) || !navigation.onStarted(url)) { view.stopLoading(); return@fenced }
-            if (live()) upstream.onPageStarted(view, url, favicon)
+            if (!navigation.isManual && live()) upstream.onPageStarted(view, url, favicon)
         }
     }
 

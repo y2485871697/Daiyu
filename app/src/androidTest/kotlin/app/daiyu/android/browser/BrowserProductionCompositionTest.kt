@@ -24,6 +24,7 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
     private val roots = mutableListOf<Path>()
     private val hosts = mutableListOf<AndroidBrowserRunHost>()
     private val screenshots = mutableListOf<Path>()
+    private val historyApprovals = mutableListOf<String>()
 
     private fun <T> main(block: () -> T): T {
         val task = FutureTask(block)
@@ -44,7 +45,7 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
                 cookieAuthorizeName = { _, origin, name ->
                     origin == "https://browser-fixture.invalid/" && name == "daiyu_fixture"
                 },
-                historyApproval = OpenMinisHistoryApproval { _, _, _ -> true },
+                historyApproval = OpenMinisHistoryApproval { _, url, _ -> historyApprovals.add(url); true },
                 requestOverride = { request ->
                     check(request.url.host == "browser-fixture.invalid")
                     WebResourceResponse("text/html", "UTF-8", ByteArrayInputStream(html.toByteArray()))
@@ -160,6 +161,83 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
         assertNull(main { host.webHost.currentUrl(lease) })
         host.close()
         assertNull(main { host.webHost.currentUrl(requireNotNull(host.currentTab ?: lease)) })
+    }
+
+    fun testVisibleTakeoverUsesOriginalViewAndManualFinishNeverApprovesHistory() {
+        val host = host()
+        confirmed(host, "action" to "new_tab")
+        confirmed(host, "action" to "navigate", "url" to "https://browser-fixture.invalid/model-original")
+        val original = requireNotNull(host.currentTab)
+        val before = main { historyApprovals.size }
+        val token = main { host.session.takeover(original) }
+        val parent = main { android.widget.FrameLayout(instrumentation.targetContext) }
+        val attachment = main { host.webHost.attach(token, parent) }
+        val view = main { parent.getChildAt(0) as android.webkit.WebView }
+        main {
+            assertEquals("https://browser-fixture.invalid/model-original", view.url)
+            try { host.webHost.attach(token, android.widget.FrameLayout(instrumentation.targetContext)); fail("double attachment") }
+            catch (_: IllegalStateException) { }
+            try { host.session.releaseTakeover(token); fail("attached release") }
+            catch (_: IllegalStateException) { }
+            assertSame(view, parent.getChildAt(0))
+            attachment.navigate("https://browser-fixture.invalid/manual-original")
+        }
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (main { attachment.isLoading } && System.nanoTime() < deadline) Thread.sleep(10)
+        main {
+            assertFalse("manual page must reach the real finish gate", attachment.isLoading)
+            assertEquals(before, historyApprovals.size)
+            assertEquals("https://browser-fixture.invalid/manual-original", view.url)
+            attachment.close()
+            assertEquals(0, parent.childCount)
+            val resumed = host.session.releaseTakeover(token)
+            val secondToken = host.session.takeover(resumed)
+            val secondParent = android.widget.FrameLayout(instrumentation.targetContext)
+            val second = host.webHost.attach(secondToken, secondParent)
+            assertSame(view, secondParent.getChildAt(0))
+            attachment.close()
+            assertSame(view, secondParent.getChildAt(0))
+            try { attachment.navigate("https://browser-fixture.invalid/stale"); fail("closed attachment") }
+            catch (_: IllegalStateException) { }
+            second.close()
+            host.session.releaseTakeover(secondToken)
+        }
+        confirmed(host, "action" to "navigate", "url" to "https://browser-fixture.invalid/model-after-human")
+    }
+
+    fun testRetiredManualAttachmentCannotNavigateBeforeNativeCleanupRuns() {
+        for (cancel in listOf(false, true)) {
+            val host = host()
+            confirmed(host, "action" to "new_tab")
+            confirmed(host, "action" to "navigate", "url" to "https://browser-fixture.invalid/retirement")
+            main {
+                val token = host.session.takeover(requireNotNull(host.currentTab))
+                val parent = android.widget.FrameLayout(instrumentation.targetContext)
+                host.webHost.attach(token, parent)
+                val view = parent.getChildAt(0) as android.webkit.WebView
+                if (cancel) host.webHost.cancel(token.lease) else host.webHost.closeWithResult()
+                // Still on the same Looper stack: queued destroy has not run yet.
+                @Suppress("DEPRECATION")
+                assertTrue(view.webViewClient.shouldOverrideUrlLoading(view,
+                    "https://browser-fixture.invalid/rejected-after-retirement"))
+            }
+        }
+    }
+
+    fun testExplicitCloseAcceptsLoadingVisibleTabWithoutReturningItToModel() {
+        val host = host()
+        confirmed(host, "action" to "new_tab")
+        main {
+            val token = host.session.takeover(requireNotNull(host.currentTab))
+            val parent = android.widget.FrameLayout(instrumentation.targetContext)
+            val attachment = host.webHost.attach(token, parent)
+            attachment.navigate("https://browser-fixture.invalid/close-during-load")
+            assertTrue(attachment.isLoading)
+            host.session.closeTab(token)
+            attachment.close()
+            assertNull(host.currentTab)
+            assertEquals(0, parent.childCount)
+        }
     }
 
     override fun tearDown() {

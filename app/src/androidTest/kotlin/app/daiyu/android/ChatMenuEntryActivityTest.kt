@@ -33,6 +33,20 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         assertDraft("menu draft stays unsent")
     }
 
+    fun testBrowserMenuOpensVisiblePageWithoutCreatingRunOrConsumingDraft() {
+        selectDraft()
+        val before = fixture.database.exportBackup()
+        menu(ChatMenuAction.OPEN_BROWSER)
+        node("browser-visual-page").assertExists()
+        node("browser-visual-status").assertExists()
+        node("browser-visual-takeover").assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+        assertEquals(before, fixture.database.exportBackup())
+        node("browser-visual-back").performClick()
+        assertDraft("menu draft stays unsent")
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testTokenMenuEntersContextWithoutSending() = context(ChatMenuAction.CONTEXT_STATS)
     fun testCompressMenuEntersExistingContextWithoutSending() = context(ChatMenuAction.COMPRESS_CONTEXT)
 

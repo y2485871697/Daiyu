@@ -1131,6 +1131,7 @@ class ChatController internal constructor(private val application:Application,
     private class RunResources(val initial:Message,val runner:ChatRunner,val tools:RunCatalogTools,
         val auxiliary: ControllerAuxiliaryVision? = null,
         val summaryPreparation: app.daiyu.android.context.RuntimeSummaryPreparation? = null) {
+        var browserVisual: ControllerBrowserVisual? = null
         val writer=Executors.newSingleThreadExecutor()
         val waiter=Executors.newSingleThreadExecutor()
         var question:QuestionRunSession?=null
@@ -1503,6 +1504,7 @@ class ChatController internal constructor(private val application:Application,
     private fun fenceRun(lifetime:RunResources) {
         if(lifetime.fenced) return
         lifetime.fenced=true
+        lifetime.browserVisual?.revoke()
         guiEntry?.takeIf { it.assistantId == lifetime.initial.id && it.runId == lifetime.initial.runId &&
             it.conversationId == lifetime.initial.conversationId }?.let { it.revoked = true; it.session?.close() }
         virtualDisplayEntry?.takeIf { it.assistantId == lifetime.initial.id && it.runId == lifetime.initial.runId &&
@@ -2170,6 +2172,15 @@ class ChatController internal constructor(private val application:Application,
                     if (closed || entry.revoked) session.close()
                 }
             })
+    }
+
+    internal fun openBrowserVisual(conversation: ConversationId): ControllerBrowserVisual.Visit? {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        val original = synchronized(this) {
+            resources?.takeIf { !closed && ready && !dataBusy && !it.fenced &&
+                it.initial.conversationId == conversation }?.browserVisual
+        } ?: return null
+        return original.openVisit()
     }
 
     @Synchronized internal fun browserPreparation(): ControllerBrowserPreparation? = preparation?.browser
@@ -3236,6 +3247,15 @@ class ChatController internal constructor(private val application:Application,
         video?.first?.accepted(user, videoPrepared?.inputs.orEmpty())
         generation?.session?.recordPersistence(generation.identity, GenerationPersistenceReceipt.Accepted(saved))
         val lifetime=RunResources(assistant,owned,tools,auxiliaryPort,token.summaryPreparation)
+        if (browserBinding?.visibleSupported == true) {
+            lifetime.browserVisual = ControllerBrowserVisual(assistant, browserBinding,
+                ownerCurrent = { isRunUnfenced(assistant) },
+                pauseOriginal = { pause(assistant) },
+                originalPaused = { owned.state().let {
+                    it.phase == app.daiyu.android.domain.runtime.ExecutionPhase.PAUSED && it.pauseRequested
+                } }, resumeOriginal = { resume(assistant) },
+                stopOriginal = { stop(assistant) })
+        }
         val installed=synchronized(this) {
             if(closed || token.revoked || !auxiliaryCurrent() ||
                 token.cancellation.isCancelled || shizukuPreparation?.isCancelled()==true ||
@@ -3942,7 +3962,10 @@ class ChatController internal constructor(private val application:Application,
         return accepted
     }
     internal fun resume(owner:Message):Boolean {
-        val owned=synchronized(this) {ownedRunner(owner)} ?: return false
+        val owned=synchronized(this) {
+            val original = ownedRunner(owner) ?: return@synchronized null
+            if (resources?.takeIf { it.runner === original }?.browserVisual?.automationHeld == true) null else original
+        } ?: return false
         val accepted=owned.resume()
         if(accepted) synchronized(this) {if(ownedRunner(owner)===owned) notifyChanged()}
         return accepted

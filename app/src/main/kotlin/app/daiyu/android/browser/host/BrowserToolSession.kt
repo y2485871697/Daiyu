@@ -27,6 +27,8 @@ interface BrowserTabLifecycle {
     /** Original allocation key, new execution lease. Runs outside the registry/facade fence;
      * must finish in bounded time. A failure is unknown: close, never retry/recreate. */
     fun rebind(allocation: BrowserTabLease, lease: BrowserTabLease) {}
+    /** Bounded state-only precheck. Rejection does not consume the takeover token. */
+    fun beforeReleaseTakeover(allocation: BrowserTabLease, lease: BrowserTabLease) {}
 }
 
 /** Trusted-host capability. It is not a model argument and must not be serialized as one. */
@@ -86,6 +88,19 @@ class BrowserToolSession(
 
     /** Snapshot for trusted host code; may be a taken-over lease, never an execution authority. */
     val currentTab: BrowserTabLease? get() = synchronized(lock) { current?.lease }
+
+    /** Trusted host only: resolve the exact token to its original allocation. */
+    fun <T> withTakenOverTab(
+        token: BrowserToolTakeoverToken,
+        block: (allocation: BrowserTabLease, lease: BrowserTabLease) -> T,
+    ): T = synchronized(lock) {
+        checkOpen()
+        check(token.session === this) { "BROWSER_TAKEOVER_OWNER" }
+        check(token.cleanupFailure == null) { "BROWSER_TAKEOVER_CLEANUP_FAILED" }
+        val slot = slots[token.lease.tabId] ?: error("BROWSER_TAB_MISSING")
+        check(slot.phase == Phase.TAKEN_OVER && slot.lease == token.lease) { "BROWSER_TAKEOVER_EXPIRED" }
+        sessions.publishTakenOver(token.lease) { block(slot.allocation, token.lease) }
+    }
 
     fun execute(parameters: Map<String, Any?>): BrowserOutcome {
         var entered = false
@@ -261,7 +276,13 @@ class BrowserToolSession(
     /** Trusted host resume; old leases and consumed tokens remain stale. */
     fun releaseTakeover(token: BrowserToolTakeoverToken): BrowserTabLease {
         val slot = beginRelease(token)
-        val resumed = sessions.releaseTakeover(token.token)
+        val resumed = try {
+            lifecycle.beforeReleaseTakeover(slot.allocation, token.lease)
+            sessions.releaseTakeover(token.token)
+        } catch (failure: Exception) {
+            restoreTakenOver(slot, token)
+            throw failure
+        }
         try {
             lifecycle.rebind(slot.allocation, resumed)
             synchronized(lock) {
@@ -283,7 +304,12 @@ class BrowserToolSession(
     /** A taken-over tab can be closed by the trusted host without exposing a READY window. */
     fun closeTab(token: BrowserToolTakeoverToken) {
         val slot = beginRelease(token)
-        val resumed = sessions.releaseTakeover(token.token)
+        val resumed = try {
+            sessions.releaseTakeover(token.token)
+        } catch (failure: Exception) {
+            restoreTakenOver(slot, token)
+            throw failure
+        }
         synchronized(lock) {
             if (slots[resumed.tabId] === slot) {
                 slot.lease = resumed
@@ -292,6 +318,11 @@ class BrowserToolSession(
             }
         }
         sessions.closeTab(resumed)
+    }
+
+    private fun restoreTakenOver(slot: Slot, token: BrowserToolTakeoverToken) = synchronized(lock) {
+        if (!closed && slots[token.lease.tabId] === slot && slot.lease == token.lease &&
+            slot.phase == Phase.TRANSITION) slot.phase = Phase.TAKEN_OVER
     }
 
     private fun beginRelease(token: BrowserToolTakeoverToken): Slot = synchronized(lock) {

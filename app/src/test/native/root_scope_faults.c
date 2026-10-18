@@ -10,10 +10,24 @@
 #include <sys/stat.h>
 #include <sys/statfs.h>
 #include <sys/types.h>
+#include <sys/ioctl.h>
+#include <sys/wait.h>
 #include <unistd.h>
 static char fake_parent[128];
 static int fail_open,fail_stat,fail_unlink,interrupt_unlink;
+static int preflight,pre_case,pre_ioctl_seen;
+static int fake_posix_openpt(int flags) {
+    if(preflight && pre_case==3) { errno=EMFILE; return -1; }
+    return posix_openpt(flags);
+}
+static int fake_ioctl(int fd,unsigned long request,void *arg) {
+    if(preflight && pre_case==4 && request==TIOCSWINSZ) {
+        pre_ioctl_seen=1; errno=EIO; return -1;
+    }
+    return ioctl(fd,request,arg);
+}
 static int fake_open(const char *path,int flags,...) {
+    assert(!preflight);
     assert(strcmp(path,"/sys/fs/cgroup/uid_0")==0);
     return open(fake_parent,flags);
 }
@@ -53,7 +67,9 @@ static int fake_unlinkat(int parent,const char *path,int flags) {
     for(int i=0;i<4;i++) assert(unlinkat(directory,names[i],0)==0);
     close(directory); return unlinkat(parent,path,flags);
 }
-static uid_t fake_uid(void) { return 0; }
+static uid_t fake_uid(void) { return preflight && pre_case==0 ? 1000 : 0; }
+#define posix_openpt fake_posix_openpt
+#define ioctl(fd,request,arg) fake_ioctl(fd,request,(void *)(arg))
 #define main pty_main_not_run
 #define open fake_open
 #define openat fake_openat
@@ -65,6 +81,8 @@ static uid_t fake_uid(void) { return 0; }
 #define geteuid fake_uid
 #include "../../main/kotlin/app/daiyu/android/terminal/native/daiyu_pty.c"
 #undef main
+#undef posix_openpt
+#undef ioctl
 #undef open
 #undef openat
 #undef fstat
@@ -84,7 +102,52 @@ static void clean_failure_receipt(int fd) {
     assert(size==(ssize_t)(5+strlen(receipt)) && bytes[0]=='F' && be32(bytes+1)==strlen(receipt));
     assert(memcmp(bytes+5,receipt,strlen(receipt))==0);
 }
+static void pre_scope_failures(void) {
+    for(int which=0;which<8;which++) {
+        int output[2]; assert(pipe(output)==0);
+        pid_t child=fork(); assert(child>=0);
+        if(child==0) {
+            close(output[0]); assert(dup2(output[1],STDOUT_FILENO)>=0); close(output[1]);
+            preflight=1; pre_case=which;
+            char *args[]={"pty","--root-scope","24","80","--","/bin/sh",NULL};
+            int result;
+            if(which>=6) {
+                root_mode=1;
+                if(which==6) close(STDOUT_FILENO);
+                else {
+                    int broken[2]; assert(pipe(broken)==0); close(broken[0]);
+                    assert(dup2(broken[1],STDOUT_FILENO)>=0); close(broken[1]);
+                    assert(signal(SIGPIPE,SIG_DFL)!=SIG_ERR);
+                }
+                result=root_pre_scope_failure(70);
+                struct sigaction observed; assert(sigaction(SIGPIPE,NULL,&observed)==0 && observed.sa_handler==SIG_IGN);
+                assert(out_len>0);
+            } else if(which==5) {
+                char *plain[]={"pty","invalid",NULL}; result=pty_main_not_run(2,plain);
+            } else {
+                if(which==2) args[2]="0";
+                result=pty_main_not_run(which==1 ? 2 : 6,args);
+                if(which==4) assert(pre_ioctl_seen);
+            }
+            _exit(result);
+        }
+        close(output[1]);
+        unsigned char bytes[128]; size_t size=0; ssize_t n;
+        while((n=read(output[0],bytes+size,sizeof(bytes)-size))>0) { size+=(size_t)n; assert(size<sizeof(bytes)); }
+        assert(n==0); close(output[0]);
+        int status; assert(waitpid(child,&status,0)==child && WIFEXITED(status));
+        int expected=which==0 ? 77 : (which==1 || which==2 || which==5) ? 64 : 70;
+        assert(WEXITSTATUS(status)==expected);
+        if(which>=5) assert(size==0);
+        else {
+            const char *receipt="DROOT0 guest=0 scope_clean=1";
+            assert(size==5+strlen(receipt) && bytes[0]=='F' && be32(bytes+1)==strlen(receipt));
+            assert(memcmp(bytes+5,receipt,strlen(receipt))==0);
+        }
+    }
+}
 int main(void) {
+    pre_scope_failures();
     strcpy(fake_parent,"/tmp/daiyu-root-scope-test-XXXXXX");
     assert(mkdtemp(fake_parent));
     int output[2]; assert(pipe(output)==0);
@@ -113,5 +176,5 @@ int main(void) {
     next+=9; assert(transcript[next]=='D' && next+5+be32(transcript+next+1)==(size_t)size);
     assert(dup2(saved_stdout,STDOUT_FILENO)>=0); close(saved_stdout); close(output[0]);
     assert(rmdir(fake_parent)==0);
-    puts("root_scope_faults: 5 passed"); return 0;
+    puts("root_scope_faults: 13 passed"); return 0;
 }

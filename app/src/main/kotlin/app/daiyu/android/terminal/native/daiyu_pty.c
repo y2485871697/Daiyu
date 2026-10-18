@@ -56,6 +56,14 @@ static int positive(const char *s) {
     return *s && !*end && n>0 && n<=1000 ? (int)n : -1;
 }
 #include "daiyu_root_scope.h"
+/* Called only before root_create(), when no scope or guest can exist. */
+static int root_pre_scope_failure(int result) {
+    if(root_mode && signal(SIGPIPE,SIG_IGN)!=SIG_ERR) {
+        const char *receipt="DROOT0 guest=0 scope_clean=1";
+        if(frame('F',receipt,strlen(receipt))==0) (void)root_flush(500);
+    }
+    return result;
+}
 int main(int argc, char **argv) {
     /* Read the actual inherited slave, without requiring a platform stty applet. */
     if(argc==2 && !strcmp(argv[1],"--probe-tty")) {
@@ -66,26 +74,26 @@ int main(int argc, char **argv) {
     }
     root_mode=argc>1 && strcmp(argv[1],"--root-scope")==0;
     if(root_mode) {
-        if(getuid()!=0 || geteuid()!=0) return 77;
+        if(getuid()!=0 || geteuid()!=0) return root_pre_scope_failure(77);
         --argc; ++argv;
     }
-    if(argc<5 || strcmp(argv[3],"--") || argv[4][0]!='/') return 64;
+    if(argc<5 || strcmp(argv[3],"--") || argv[4][0]!='/') return root_pre_scope_failure(64);
     int rows=positive(argv[1]), cols=positive(argv[2]);
-    if(rows<0 || cols<0) return 64;
+    if(rows<0 || cols<0) return root_pre_scope_failure(64);
     pid_t parent=getppid();
     struct sigaction action;
     memset(&action,0,sizeof(action)); action.sa_handler=on_signal; sigemptyset(&action.sa_mask);
-    if(sigaction(SIGTERM,&action,NULL)<0 || sigaction(SIGHUP,&action,NULL)<0 || sigaction(SIGINT,&action,NULL)<0) return 70;
-    if(prctl(PR_SET_PDEATHSIG,SIGTERM)<0 || getppid()!=parent) return 70;
+    if(sigaction(SIGTERM,&action,NULL)<0 || sigaction(SIGHUP,&action,NULL)<0 || sigaction(SIGINT,&action,NULL)<0) return root_pre_scope_failure(70);
+    if(prctl(PR_SET_PDEATHSIG,SIGTERM)<0 || getppid()!=parent) return root_pre_scope_failure(70);
     signal(SIGPIPE,SIG_IGN);
     int master=posix_openpt(O_RDWR|O_NOCTTY|O_CLOEXEC|O_NONBLOCK);
-    if(master<0 || grantpt(master)<0 || unlockpt(master)<0) return 70;
+    if(master<0 || grantpt(master)<0 || unlockpt(master)<0) return root_pre_scope_failure(70);
     char slave_name[256];
-    if(ptsname_r(master,slave_name,sizeof(slave_name))!=0) return 70;
+    if(ptsname_r(master,slave_name,sizeof(slave_name))!=0) return root_pre_scope_failure(70);
     int exec_error[2];
-    if(pipe2(exec_error,O_CLOEXEC)<0) return 70;
+    if(pipe2(exec_error,O_CLOEXEC)<0) return root_pre_scope_failure(70);
     struct winsize size={(unsigned short)rows,(unsigned short)cols,0,0};
-    if(ioctl(master,TIOCSWINSZ,&size)<0) return 70;
+    if(ioctl(master,TIOCSWINSZ,&size)<0) return root_pre_scope_failure(70);
     if(root_mode) {
         if(root_create()<0) return 70;
         if(frame('S',root_scope.name,strlen(root_scope.name))<0 || root_flush(500)<0 || interrupted)

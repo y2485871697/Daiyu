@@ -97,8 +97,16 @@ finally:
     if p.poll() is None:p.kill()
     p.wait(timeout=3)
 faults=subprocess.run([str(helper.with_name('root_scope_faults'))],check=True,capture_output=True,text=True,timeout=5)
-assert faults.stdout.strip()=='root_scope_faults: 5 passed',faults.stdout
-tests.extend(['root scope open failure removes its empty group','root scope fstat failure removes its empty group',
+assert faults.stdout.strip()=='root_scope_faults: 13 passed',faults.stdout
+tests.extend(['pre-scope uid refusal emits only F with exit 77',
+    'pre-scope invalid arguments emit only F with exit 64',
+    'pre-scope invalid dimensions emit only F with exit 64',
+    'pre-scope PTY open failure emits only F with exit 70',
+    'pre-scope window sizing failure emits only F with exit 70',
+    'non-root invalid arguments preserve empty stdout and exit 64',
+    'failed F flush preserves failure and cannot produce a cleanup receipt',
+    'closed pipe reader cannot terminate pre-scope failure via SIGPIPE',
+    'root scope open failure removes its empty group','root scope fstat failure removes its empty group',
     'root scope removal retries EINTR','failed scope removal reports S/E without drain',
     'pre-hello launch failure sends S/E/D and removes scope'])
 record['tests']=tests

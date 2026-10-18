@@ -1,6 +1,7 @@
 package app.daiyu.android.terminal
 
 import android.content.Context
+import app.daiyu.android.workspace.PrivateWorkspacePaths
 import app.daiyu.android.domain.tools.TaskAuthorization
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -355,11 +356,12 @@ private class AndroidTerminalEnvironmentBackend(
                     TerminalResource(session::read, session::write, session::close, session::awaitTermination)
                 }
             }
-            val cwd = File(root, "home").apply { check(mkdirs() || isDirectory) }
+            val home = File(root, "home").apply { check(mkdirs() || isDirectory) }
+            val cwd = PrivateWorkspacePaths(context.filesDir).ensureRoot()
             val journal = File(root, "journal")
             // Fixed Android app-UID shell. No su, Shizuku, arbitrary backend/argv or background job API.
             val session = AndroidPtyHost.open(context, request.owner, listOf("/system/bin/sh"),
-                mapOf("HOME" to cwd.absolutePath, "TMPDIR" to cwd.absolutePath, "PATH" to "/system/bin:/system/xbin",
+                mapOf("HOME" to home.absolutePath, "TMPDIR" to home.absolutePath, "PATH" to "/system/bin:/system/xbin",
                     "TERM" to "xterm-256color"), cwd, journal, request.sessionScope)
             return TerminalResource(session::read, session::write, session::close, session::awaitTermination)
         } catch (failure: LinuxPtyStartupFailure) {

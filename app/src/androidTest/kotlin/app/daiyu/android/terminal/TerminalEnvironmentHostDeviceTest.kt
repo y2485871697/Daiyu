@@ -57,6 +57,7 @@ class TerminalEnvironmentHostDeviceTest : InstrumentationTestCase() {
                     assertEquals("FAILED", host.state.value.phase)
                     assertFalse(host.state.value.terminationConfirmed)
                     assertEquals("", host.state.value.output)
+                    assertFalse(File(files, "workspace").exists())
                     assertFalse(File(files, "user-terminal/home").exists())
                     assertFalse(File(files, "user-terminal/tmp").exists())
                     assertFalse(File(files, "user-terminal/journal").exists())
@@ -89,11 +90,17 @@ class TerminalEnvironmentHostDeviceTest : InstrumentationTestCase() {
             assertFalse(host.send(copied, "exit 99\n").get(2, TimeUnit.SECONDS).ok)
             assertFalse(host.requestClose(copied))
             val event = checkNotNull(host.prepareInput(owner.authorization,
-                "printf '\\nR09_UID=%s\\n' \"$(id -u)\"; exit 7\n"))
+                "printf '\\nR09_UID=%s\\n' \"$(id -u)\"; printf 'R09_CWD=%s\\nR09_HOME=%s\\nR09_TMP=%s\\n' \"$(pwd -P)\" \"\$HOME\" \"\$TMPDIR\"; exit 7\n"))
             assertTrue(host.submit(owner.authorization, event).get(5, TimeUnit.SECONDS).ok)
             await("real output and termination") { host.state.value.terminationConfirmed }
             assertEquals(7, host.state.value.exitCode)
             assertTrue(host.state.value.output.lines().map(String::trim).contains("R09_UID=${Process.myUid()}"))
+            val files = instrumentation.targetContext.filesDir.canonicalFile
+            val lines = host.state.value.output.lines().map(String::trim)
+            assertTrue(lines.contains("R09_CWD=${File(files, "workspace").path}"))
+            val expectedHome = File(instrumentation.targetContext.filesDir, "user-terminal/home").absolutePath
+            assertTrue(lines.contains("R09_HOME=$expectedHome"))
+            assertTrue(lines.contains("R09_TMP=$expectedHome"))
             repeat(2) { host.refreshLinux() }
             Thread.sleep(150)
             assertFalse("observation must not restart an exited shell", host.state.value.ownsResources)

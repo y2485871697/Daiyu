@@ -1542,6 +1542,10 @@ class MainActivity : ComponentActivity() {
                             { draft, cancelled, deliver -> requestModelConnectionTest(owner, draft, cancelled, deliver) }
                         }
                         val identity = editingCatalogIdentity
+                        val localModelOwner = modelEditingOwner
+                        val localModelEditing = editingSettings
+                        val localModelCurrent = { activityUsable() && retainedPage == "models" && !sidebarVisible &&
+                            localModelOwner != null && modelEditingOwner === localModelOwner && editingSettings === localModelEditing }
                         if (identity == null) ModelSettingsScreen(
                             engineeringUi = engineeringUi,
                             testConnection = connectionTest,
@@ -1557,6 +1561,23 @@ class MainActivity : ComponentActivity() {
                             draft = value, onDraftChange = { changeModelDraft(it) },
                             onSave = { saveModelSettings(it) }, onBack = { returnToChat() },
                             providerIdentity = identity, persistence = controller.settings.modelCatalog,
+                            localModelActions = app.daiyu.android.ui.screens.settings.LocalCatalogModelActions(
+                                currentModelId = editingSettings?.settings?.model.orEmpty(),
+                                rename = { ticket, name, cancelled, completed ->
+                                    if (localModelCurrent() && !cancelled())
+                                        controller.renameConfiguredCatalogModel(ticket, name, cancelled) { result ->
+                                            if (localModelCurrent() && !cancelled()) completed(result)
+                                        }
+                                    else completed(app.daiyu.android.model.catalog.CatalogLocalEditResult.CANCELLED)
+                                },
+                                delete = { ticket, cancelled, completed ->
+                                    if (localModelCurrent() && !cancelled())
+                                        controller.deleteConfiguredCatalogModel(ticket, cancelled) { result ->
+                                            if (localModelCurrent() && !cancelled()) completed(result)
+                                        }
+                                    else completed(app.daiyu.android.model.catalog.CatalogLocalEditResult.CANCELLED)
+                                },
+                            ),
                             createModel = { CatalogModelParameters.newModel(it) },
                             fetchCatalog = ::requestSettingsCatalog,
                             enabled = controller.ready && controller.active == null && !controller.dataBusy,

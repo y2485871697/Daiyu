@@ -215,4 +215,26 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         }
         assertEquals(initial.model, ModelSettingsStore(guardedContext, prefix).modelCatalogSnapshot().models.single().id)
     }
+    fun testLocalRenameAndDeletionNeverReadCredentialsOrChangeActiveSettings() {
+        store.save(initial); append(importedModel("extra"))
+        raw.edit().putString("key", "malformed-private-ciphertext").commit()
+        val before = raw.all
+        val first = checkNotNull(store.localModelCatalogSnapshot())
+        assertEquals(CatalogLocalEditResult.CURRENT_MODEL,
+            store.deleteCatalogModel(checkNotNull(first.selectionFor(initial.model))) { false })
+        assertEquals(CatalogLocalEditResult.APPLIED,
+            store.renameCatalogModel(checkNotNull(first.selectionFor("extra")), "Renamed extra") { false })
+        val renamed = checkNotNull(store.localModelCatalogSnapshot())
+        assertEquals("Renamed extra", renamed.models.single { it.id == "extra" }.displayName)
+        assertEquals(first.models.single { it.id == "extra" }.settings, renamed.models.single { it.id == "extra" }.settings)
+        assertEquals(CatalogLocalEditResult.STALE,
+            store.deleteCatalogModel(checkNotNull(first.selectionFor("extra"))) { false })
+        assertEquals(CatalogLocalEditResult.CANCELLED,
+            store.deleteCatalogModel(checkNotNull(renamed.selectionFor("extra"))) { true })
+        assertEquals(CatalogLocalEditResult.APPLIED,
+            store.deleteCatalogModel(checkNotNull(renamed.selectionFor("extra"))) { false })
+        assertEquals(listOf(initial.model), checkNotNull(store.localModelCatalogSnapshot()).models.map { it.id })
+        assertEquals(before, raw.all)
+    }
+
 }

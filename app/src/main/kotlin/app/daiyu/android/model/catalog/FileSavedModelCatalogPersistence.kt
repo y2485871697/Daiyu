@@ -89,6 +89,40 @@ internal class FileSavedModelCatalogPersistence<T>(
         change(record)
     }
 
+    /** The host's current-model check runs inside the same catalog lease as the edit. */
+    fun editSelection(
+        selection: CatalogModelSelection<T>,
+        displayName: String?,
+        isCurrentModel: () -> Boolean,
+        isCancelled: () -> Boolean,
+    ): CatalogLocalEditResult = try {
+        exclusive {
+            if (cancelled(isCancelled)) return@exclusive CatalogLocalEditResult.CANCELLED
+            if (displayName != null) require(displayName.isNotBlank() && displayName == displayName.trim() &&
+                displayName.length <= 200 && displayName.none { it.code < 0x20 || it.code == 0x7f })
+            val old = readDocument()
+            if (old == null || old.identity != selection.providerIdentity || old.revision != selection.expectedRevision)
+                return@exclusive CatalogLocalEditResult.STALE
+            val encoded = old.models.singleOrNull { it.id == selection.record.id }
+                ?: return@exclusive CatalogLocalEditResult.STALE
+            if (SavedCatalogModel(encoded.id, encoded.name, codec.decode(encoded.record)) != selection.record)
+                return@exclusive CatalogLocalEditResult.STALE
+            if (displayName == null && isCurrentModel()) return@exclusive CatalogLocalEditResult.CURRENT_MODEL
+            val models = if (displayName == null) old.models.filterNot { it.id == encoded.id }
+                else old.models.map { if (it.id == encoded.id) it.copy(name = displayName) else it }
+            // Preserve encoded model parameters and every unselected record verbatim.
+            if (writeDocument(old.copy(revision = nextRevision(old.revision), models = models)) { cancelled(isCancelled) })
+                CatalogLocalEditResult.APPLIED else CatalogLocalEditResult.CANCELLED
+        }
+    } catch (_: InterruptedException) {
+        Thread.currentThread().interrupt()
+        CatalogLocalEditResult.CANCELLED
+    } catch (_: java.util.concurrent.CancellationException) {
+        CatalogLocalEditResult.CANCELLED
+    } catch (_: Exception) {
+        if (Thread.currentThread().isInterrupted) CatalogLocalEditResult.CANCELLED else CatalogLocalEditResult.FAILED
+    }
+
     /**
      * Host save synchronization, NOT import. Only one record is re-encoded; every other record
      * remains byte-for-byte intact. update receives the existing local UUID/name when present.

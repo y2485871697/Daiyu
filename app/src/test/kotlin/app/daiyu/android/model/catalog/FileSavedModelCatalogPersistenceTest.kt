@@ -160,4 +160,56 @@ class FileSavedModelCatalogPersistenceTest {
         store.configurationChange { }
         assertEquals(CatalogCommitResult.STALE, store.compareAndAppend(before.providerIdentity, 0, emptyList()) { false })
     }
+    @Test fun localRenameAndDeleteKeepParametersAndOtherRecordsAcrossReopen() {
+        val file = File(temporary.root, "edits.catalog")
+        val store = backend(file)
+        val first = store.register(listOf(record("a"), record("b")))
+        assertEquals(CatalogLocalEditResult.APPLIED,
+            store.editSelection(first.selectionFor("b")!!, "Renamed B", { error("rename must not inspect current settings") }) { false })
+        val renamed = backend(file).current()!!
+        assertEquals(first.providerIdentity, renamed.providerIdentity)
+        assertEquals(first.revision + 1, renamed.revision)
+        assertEquals(listOf(record("a"), record("b").copy(displayName = "Renamed B")), renamed.models)
+        assertEquals(CatalogLocalEditResult.STALE, store.editSelection(first.selectionFor("a")!!, "Stale", { false }) { false })
+        assertEquals(CatalogLocalEditResult.APPLIED, store.editSelection(renamed.selectionFor("b")!!, null, { false }) { false })
+        assertEquals(listOf(record("a")), backend(file).current()!!.models)
+    }
+
+    @Test fun localEditRejectsChangedRecordAndCurrentDeletionWithoutChangingBytes() {
+        val file = File(temporary.root, "edits.catalog"); val store = backend(file)
+        val first = store.register(listOf(record("a"))); val bytes = file.readBytes()
+        val ticket = first.selectionFor("a")!!
+        assertEquals(CatalogLocalEditResult.CURRENT_MODEL, store.editSelection(ticket, null, { true }) { false })
+        assertEquals(CatalogLocalEditResult.STALE, store.editSelection(ticket.copy(record = ticket.record.copy(settings = "tampered")), "Other", { false }) { false })
+        assertEquals(CatalogLocalEditResult.STALE, store.editSelection(ticket.copy(providerIdentity = UUID.randomUUID().toString()), null, { false }) { false })
+        assertArrayEquals(bytes, file.readBytes()); assertEquals(first, store.current())
+    }
+
+    @Test fun localEditRejectsInvalidNamesWithoutChangingBytes() {
+        val file = File(temporary.root, "edits.catalog"); val store = backend(file)
+        val first = store.register(listOf(record("a"))); val bytes = file.readBytes()
+        for (name in listOf("", " ", " padded", "line\nbreak", "x".repeat(201), "bad\u007f"))
+            assertEquals(CatalogLocalEditResult.FAILED, store.editSelection(first.selectionFor("a")!!, name, { false }) { false })
+        assertArrayEquals(bytes, file.readBytes()); assertEquals(first, store.current())
+    }
+
+    @Test fun localEditsCancelBeforeCommitAndNeverReportCancelledAfterCommit() {
+        val file = File(temporary.root, "edits.catalog"); val store = backend(file)
+        val first = store.register(listOf(record("a"))); val bytes = file.readBytes()
+        for (displayName in listOf("Changed", null)) {
+            var checks = 0
+            assertEquals(CatalogLocalEditResult.CANCELLED,
+                store.editSelection(first.selectionFor("a")!!, displayName, { false }) { ++checks == 2 })
+            assertEquals(2, checks); assertArrayEquals(bytes, file.readBytes()); assertEquals(first, store.current())
+        }
+        var checks = 0; var becameCancelled = false
+        assertEquals(CatalogLocalEditResult.APPLIED,
+            store.editSelection(first.selectionFor("a")!!, "Committed", { false }) {
+                checks++; if (checks == 2) becameCancelled = true; false
+            })
+        assertTrue(becameCancelled); assertEquals(2, checks)
+        assertEquals("Committed", backend(file).current()!!.models.single().displayName)
+        assertFalse(File(file.path + ".pending").exists())
+    }
+
 }

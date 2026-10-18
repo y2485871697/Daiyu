@@ -47,6 +47,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     credentialUnavailable: Boolean = false,
     requestOptionsUnavailable: Boolean = false,
     testConnection: ModelConnectionTester? = null,
+    localModelActions: LocalCatalogModelActions<T>? = null,
 ) {
     val scope = rememberCoroutineScope()
     var state by remember(persistence) { mutableStateOf(CatalogImportSession.State()) }
@@ -55,7 +56,13 @@ internal fun <T> ProviderCatalogSettingsScreen(
     DisposableEffect(session, providerIdentity, draft, enabled) {
         onDispose { session.invalidate() }
     }
+    var managingLocal by remember(providerIdentity, persistence) { mutableStateOf(false) }
+    if (managingLocal && localModelActions != null) {
+        LocalCatalogModelsScreen(providerIdentity, persistence, localModelActions, enabled, onBack = { managingLocal = false })
+        return
+    }
     ModelSettingsScreen(
+        onManageLocalModels = localModelActions?.let { { session.invalidate(); managingLocal = true } },
         engineeringUi = engineeringUi,
         testConnection = testConnection?.let { test -> { value, cancelled, deliver ->
             session.invalidate(); test(value, cancelled, deliver)

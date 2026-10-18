@@ -625,13 +625,73 @@ class MainActivity : ComponentActivity() {
     private val imagePicker = registerForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
         imageHost.picked(uris)
     }
+    private class ChatReferencePick(val tree: Boolean, val owner: ChatController.TextSendOwner, val text: String) {
+        var live = true
+        var firstPickerHop = true
+        var pickerAway = false
+        var returned = false
+        var uri: Uri? = null
+    }
+    private var chatReferencePick: ChatReferencePick? = null
+    private val chatReferencePicker = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        val request = chatReferencePick
+        if (request != null && !request.returned) {
+            request.returned = true
+            request.uri = if (request.live && result.resultCode == RESULT_OK) result.data?.let {
+                app.daiyu.android.platform.PlatformSettingsAccess.acceptedUri(it, request.tree)
+            } else null
+            settleChatReference()
+        }
+    }
+    private fun chatReferenceAvailable() = activityUsable() && selectionReady && retainedPage == "chat" &&
+        !sidebarVisible && controller.ready && !controller.dataBusy && controller.active == null &&
+        pendingTextSend == null && controller.textSendState() == null && !imageHost.busy && !imageHost.hasAttachments &&
+        videoHost.state.items.isEmpty() && !videoSending && !shizukuWritesBlocked &&
+        terminalEditor == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null &&
+        guiEditor == null && shizukuEditor == null && browserApproval == null && !browserPreparing &&
+        generationApproval == null && generationRequest == null && mcpApproval == null && !mcpPreparing && prompt == null
+    private fun chatReferenceMatches(request: ChatReferencePick) =
+        request.owner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) && request.text == draft
+    private fun revokeChatReferencePick() {
+        val request = chatReferencePick ?: return
+        request.live = false; request.uri = null
+        // Keep an unreturned slot reserved so its ActivityResult cannot enter a newer request.
+        if (request.returned) chatReferencePick = null
+    }
+    private fun pickChatReference(tree: Boolean) {
+        if (!generationResumed() || !voiceForeground || !chatReferenceAvailable() || chatReferencePick != null) return
+        val request = ChatReferencePick(tree, ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision), draft)
+        chatReferencePick = request
+        try { chatReferencePicker.launch(app.daiyu.android.platform.PlatformSettingsAccess.pickerIntent(tree)) }
+        catch (_: Exception) {
+            if (chatReferencePick === request) chatReferencePick = null
+            toast("无法打开文件选择器；原草稿保留")
+        }
+    }
+    private fun settleChatReference() {
+        val request = chatReferencePick ?: return
+        if (!request.returned) return
+        if (!request.live) { chatReferencePick = null; return }
+        if (!generationResumed() || !voiceForeground) return
+        chatReferencePick = null
+        val uri = request.uri ?: return
+        if (!chatReferenceAvailable() || !chatReferenceMatches(request)) return
+        val raw = uri.toString()
+        if (raw.any { it.code < 0x20 || it.code == 0x7f }) return
+        val reference = "${if (request.tree) "目录" else "文件"}引用（未读取）：$raw"
+        val next = if (request.text.isEmpty()) reference else "${request.text}\n$reference"
+        updateDraft(next)
+        if (draft == next) {
+            selectionStart = next.length; selectionEnd = next.length; publishChat(rowsChanged = false)
+        } else toast("引用未加入；原草稿保留")
+    }
     private var sidebarVisibleState by mutableStateOf(false)
     private var sidebarVisible: Boolean
         get() = sidebarVisibleState
         set(value) {
             // Opening revokes even without a visit; closing cannot revive clicks rendered behind it.
             if (value != sidebarVisibleState) revokeContextManagementEntry()
-            if (value && !sidebarVisibleState) { voiceConversationDialogOwner = null; revokePlatformActionVisit(); revokeLegacyLibrary(); cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
+            if (value && !sidebarVisibleState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); revokeLegacyLibrary(); cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
             sidebarVisibleState = value
         }
     private class ContextManagementVisit(val owner: ContextManagementOwner,
@@ -701,7 +761,7 @@ class MainActivity : ComponentActivity() {
         set(value) {
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
             if (value != retainedPageState && revokeContextManagementEntry()) editorGeneration++
-            if (value != retainedPageState) { voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelDeferredOpenedBackup(); revokeLegacyLibrary() }
+            if (value != retainedPageState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelDeferredOpenedBackup(); revokeLegacyLibrary() }
             if (value != "chat") cancelBrowserDownloadVisit()
             if (value != "reconnect-settings") {
                 reconnectSettingsPageOwner?.revoke()
@@ -815,12 +875,12 @@ class MainActivity : ComponentActivity() {
     }
     @Volatile private var editorGeneration = 0L
         set(value) {
-            if (field != value) { revokePlatformActionVisit(); cancelBrowserDownloadVisit(); cancelStaticGenerationVisit(); revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { revokeChatReferencePick(); revokePlatformActionVisit(); cancelBrowserDownloadVisit(); cancelStaticGenerationVisit(); revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private var draftRevision = 0L
         set(value) {
-            if (field != value) { revokePlatformActionVisit(); cancelGenerationEditor(); messageActionHost.invalidate(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { revokeChatReferencePick(); revokePlatformActionVisit(); cancelGenerationEditor(); messageActionHost.invalidate(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private data class PendingTextSend(val owner: ChatController.TextSendOwner, val text: String,
@@ -1924,6 +1984,8 @@ class MainActivity : ComponentActivity() {
                 }
             }
             ChatMenuAction.ATTACH_PATH -> openPathReference()
+            ChatMenuAction.ATTACH_FILE -> if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch) pickChatReference(false)
+            ChatMenuAction.ATTACH_FOLDER -> if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch) pickChatReference(true)
             ChatMenuAction.INTERACTIVE_MODE -> if (currentChat())
                 controller.interactiveMode.setEnabled(!controller.interactiveMode.enabled)
             ChatMenuAction.CONTEXT_STATS, ChatMenuAction.COMPRESS_CONTEXT, ChatMenuAction.CONTEXT_SCOPE -> openContextPage()
@@ -3945,6 +4007,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onResume() {
         super.onResume(); voiceForeground = true; speechHost.setForeground(true)
+        chatReferencePick?.pickerAway = false
         subAgentSourceRevision++
         refreshUnknownBranchOutcome()
         // Re-render fresh entry callbacks; none captured while backgrounded gains authority here.
@@ -3983,9 +4046,16 @@ class MainActivity : ComponentActivity() {
         window.decorView.post {
             if (generationResumed() && generationInputsDelegate.isInitialized()) generationInputs.resume()
             presentBackupImportResult()
+            settleChatReference()
         }
     }
     override fun onPause() {
+        chatReferencePick?.let { request ->
+            val preserve = request.live && request.firstPickerHop && !request.returned &&
+                chatReferenceAvailable() && chatReferenceMatches(request)
+            request.firstPickerHop = false; request.pickerAway = preserve
+            if (!preserve) revokeChatReferencePick()
+        }
         modelSaveOwner?.revoke(); modelSaveOwner = null
         subAgentModelSource.clear()
         revokePlatformActionVisit()
@@ -4040,6 +4110,7 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
     override fun onStop() {
+        if (chatReferencePick?.pickerAway != true) revokeChatReferencePick()
         revokePlatformActionVisit()
         revokeContextManagementEntry()
         revokeTerminalJobsVisit()
@@ -4058,6 +4129,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        revokeChatReferencePick(); chatReferencePick = null
         modelSaveOwner?.revoke(); modelSaveOwner = null
         paneRefreshClosed = true
         paneRefreshSerial++
@@ -5103,6 +5175,7 @@ class MainActivity : ComponentActivity() {
                     if (outcome == null) { backupImportVisit = null; return@importUserBackupAuto }
                     pendingBackupImportResult = BackupImportResult(visit, uri, outcome)
                     presentBackupImportResult()
+            settleChatReference()
                 }
             }
         }, backup = true)

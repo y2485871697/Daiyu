@@ -90,8 +90,8 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
     val entries = listOf(
         MenuEntry("图片", DaiyuIcons.Image, ChatMenuAction.ATTACH_IMAGE),
         MenuEntry("视频", DaiyuIcons.Video, ChatMenuAction.ATTACH_VIDEO),
-        MenuEntry("文件", DaiyuIcons.File, ChatMenuAction.ATTACH_FILE),
-        MenuEntry("文件夹", DaiyuIcons.Folder, ChatMenuAction.ATTACH_FOLDER),
+        MenuEntry("文件引用", DaiyuIcons.File, ChatMenuAction.ATTACH_FILE),
+        MenuEntry("目录引用", DaiyuIcons.Folder, ChatMenuAction.ATTACH_FOLDER),
         MenuEntry("路径引用", DaiyuIcons.Terminal, ChatMenuAction.ATTACH_PATH),
     )
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MiuixTheme.colorScheme.surfaceContainer,

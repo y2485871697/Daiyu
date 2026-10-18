@@ -32,7 +32,13 @@ class TerminalRegistryTest:InstrumentationTestCase() {
         }
         override fun exitValue():Int { if(alive) throw IllegalThreadStateException(); return 0 }
         override fun isAlive()=alive
-        override fun destroy() { alive=false; waiting?.countDown() }
+        var destroyFailure: java.io.IOException? = null
+        var destroyAttempts = 0
+        override fun destroy() {
+            destroyAttempts++
+            destroyFailure?.let { throw it }
+            alive=false; waiting?.countDown()
+        }
         override fun pid()=4242L
     }
     private fun isolatedContext(root:File)=object:ContextWrapper(instrumentation.targetContext) {
@@ -67,6 +73,46 @@ class TerminalRegistryTest:InstrumentationTestCase() {
             assertTrue(page.isNull("exit_code")); assertEquals("unknown",page.getString("execution"))
         } finally { registry.close(); root.deleteRecursively() }
     }
+    fun testOriginalRegistryRetriesCancellationAfterThrowingClose() {
+        val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
+        val registry=fakeRegistry(isolatedContext(root),UUID.randomUUID().toString())
+        val process=FakeProcess(waiting=CountDownLatch(1))
+        try {
+            registry.processStartReader={ "owned" }
+            registry.startProcess={ process }
+            registry.execute("terminal_exec",command(open(registry)))
+            process.destroyFailure=java.io.IOException("stop failed")
+            try { registry.close(); fail("first stop must fail") }
+            catch (_:java.io.IOException) { }
+            assertTrue(process.isAlive)
+            assertFalse(registry.awaitOrdinaryTermination(1))
+            process.destroyFailure=null
+            registry.close()
+            assertTrue(process.destroyAttempts>=2)
+            assertTrue(registry.awaitOrdinaryTermination(2000))
+            assertEquals("run_session_closed", registry.execute("terminal_open",JSONObject().put("request_id","closed")).getString("error"))
+        } finally { process.destroyFailure=null; registry.close(); root.deleteRecursively() }
+    }
+
+    fun testCloseDuringStartStillRetainsOutputPumpWhenCancellationThrows() {
+        val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
+        val registry=fakeRegistry(isolatedContext(root),UUID.randomUUID().toString())
+        val process=FakeProcess(waiting=CountDownLatch(1))
+        try {
+            registry.processStartReader={ "owned" }
+            process.destroyFailure=java.io.IOException("stop failed during dispatch")
+            registry.startProcess={ registry.close(); process }
+            val result=registry.execute("terminal_exec",command(open(registry)))
+            assertEquals("unknown",result.getString("execution"))
+            assertTrue(process.isAlive)
+            assertFalse(registry.awaitOrdinaryTermination(1))
+            process.destroyFailure=null
+            registry.close()
+            assertTrue(registry.awaitOrdinaryTermination(2000))
+            assertTrue(registry.inspectJobs().getJSONArray("jobs").getJSONObject(0).getBoolean("output_complete"))
+        } finally { process.destroyFailure=null; registry.close(); root.deleteRecursively() }
+    }
+
     fun testClosedOrdinaryScopeWaitsForActualOutputPumpNotJustExitCode() {
         val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
         val entered=CountDownLatch(1); val release=CountDownLatch(1)
@@ -207,7 +253,9 @@ class TerminalRegistryTest:InstrumentationTestCase() {
             val result=registry.execute("terminal_exec",command(session)); val id=result.getString("job_id")
             assertEquals("not_executed",result.getString("execution"))
             assertEquals(id,registry.execute("terminal_poll",JSONObject().put("job_id",id)).getString("job_id"))
-            val listed=registry.execute("terminal_list",JSONObject()).getJSONArray("jobs")
+            registry.close()
+            assertTrue(registry.awaitOrdinaryTermination(1000))
+            val listed=registry.inspectJobs().getJSONArray("jobs")
             assertEquals(1,listed.length()); assertEquals(id,listed.getJSONObject(0).getString("job_id"))
         } finally { root.deleteRecursively() }
     }

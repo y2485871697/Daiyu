@@ -37,9 +37,16 @@ internal sealed interface TerminalPtyLaunch {
     ) : TerminalPtyLaunch, AutoCloseable {
         private var claimed = false
         private var released = false
+        private var commandExecution: AutoCloseable? = null
+        @Synchronized internal fun claimCommandExecution() {
+            check(claimed && !released && commandExecution == null) { "terminal_command_execution_already_claimed" }
+            commandExecution = lease.claimExecution()
+        }
         @Synchronized internal fun claim() { check(!claimed && !released) { "terminal_launch_already_claimed" }; claimed = true }
         @Synchronized override fun close() { check(!claimed) { "terminal_launch_owned_by_binding" }; release() }
-        @Synchronized internal fun release() { if (!released) { lease.close(); released = true } }
+        @Synchronized internal fun release() {
+            if (!released) { (commandExecution ?: lease).close(); released = true }
+        }
         val executionMode get() = if (rootScope == null) app.daiyu.android.terminal.LinuxExecutionMode.PROOT else app.daiyu.android.terminal.LinuxExecutionMode.CHROOT
         internal fun commandConfiguration(): TerminalConfiguration {
             val current = lease.configuration(tempDirectory, hostWorkingDirectory)

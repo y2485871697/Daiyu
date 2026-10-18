@@ -5,6 +5,7 @@ import java.nio.file.Files
 
 /** Fixed app-owned storage, not a SAF grant or an implicit Linux mount. Construction is I/O-free. */
 internal class PrivateWorkspacePaths(private val filesDir: File) {
+    internal val storage: File get() = filesDir.absoluteFile
     val root: File get() = File(filesDir, "workspace")
 
     /** Called on the owning worker. Existing home files are neither moved nor deleted. */

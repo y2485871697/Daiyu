@@ -817,7 +817,7 @@ class MainActivity : ComponentActivity() {
                 // Retain outstanding request tokens until their callback consumes them. Otherwise a
                 // late result could be confused with a second picker opened on a newer page visit.
             }
-            if (value != "backup") { backupImportVisit = null; pendingBackupImportResult = null; cancelRestorePreview() }
+            if (value != "backup") { backupImportPickerHopPending = false; backupImportVisit = null; pendingBackupImportResult = null; cancelRestorePreview() }
             if (value != "terminal") terminalPageOwner = null
             if (value != "linux-settings") {
                 linuxSettingsVisit = null
@@ -1131,6 +1131,7 @@ class MainActivity : ComponentActivity() {
     private var configurationRestorePreview by mutableStateOf<ChatController.ConfigurationRestorePreview?>(null)
     private var restorePreviewText by mutableStateOf("")
     private var backupImportVisit: Any? = null
+    private var backupImportPickerHopPending = false
     private data class BackupImportResult(val visit: Any, val uri: Uri, val outcome: ChatController.BackupImportOutcome)
     private var pendingBackupImportResult: BackupImportResult? = null
     private var backupBusy by mutableStateOf(false)
@@ -1262,7 +1263,7 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "providers", "appearance", "haptics", "voice-settings", "terminal", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
+                        "backup", "skills", "subagents", "providers", "appearance", "haptics", "voice-settings", "terminal", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
                         "offline-speech" -> retainedPage = offlineSpeechReturnPage
                         "pet-model-settings" -> retainedPage = "pet-settings"
                         "app-icon" -> retainedPage = "appearance"
@@ -4238,10 +4239,14 @@ class MainActivity : ComponentActivity() {
         // A returned backup URI may show a one-shot confirmation. Unlike the external
         // DocumentsUI hop itself, that approval must not survive a background transition.
         // A fresh foreground visit must choose the file again.
-        if (pendingBackupRequest != 107) {
+        val preserveBackupPicker = pendingBackupRequest == 107 && backupImportPickerHopPending &&
+            backupImportVisit != null && retainedPage == "backup"
+        backupImportPickerHopPending = false
+        if (!preserveBackupPicker) {
             backupImportVisit = null
             pendingBackupImportResult = null
             if (prompt?.backup == true) prompt = null
+            cancelRestorePreview()
         }
         super.onPause()
     }
@@ -5280,12 +5285,13 @@ class MainActivity : ComponentActivity() {
     @Suppress("DEPRECATION") private fun pickBackupAuto() {
         checkBackupAvailable(); check(pendingBackupRequest == null)
         cancelRestorePreview(); backupImportVisit = Any(); pendingBackupRequest = 107
+        backupImportPickerHopPending = true
         try {
             startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE); type = "*/*"
                 putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/json", "application/zip", "application/octet-stream", "text/plain"))
             }, 107)
-        } catch (failure: Exception) { pendingBackupRequest = null; backupImportVisit = null; throw failure }
+        } catch (failure: Exception) { pendingBackupRequest = null; backupImportVisit = null; backupImportPickerHopPending = false; throw failure }
     }
     private fun confirmBackupImportAuto(uri: Uri, visit: Any = Any()) {
         checkBackupAvailable(); cancelRestorePreview()
@@ -5380,6 +5386,7 @@ class MainActivity : ComponentActivity() {
         }
         if (requestCode !in setOf(101, 102, 103, 104, 105, 106, 107) || pendingBackupRequest != requestCode) return
         pendingBackupRequest = null
+        if (requestCode == 107) backupImportPickerHopPending = false
         if (requestCode == 106) {
             // Reference is deliberately memory-only: activity/process recreation fails closed
             // and requires a fresh history selection rather than guessing a different asset.
@@ -5420,8 +5427,14 @@ class MainActivity : ComponentActivity() {
     }
     private fun confirmBackupImport(uri: Uri, complete: Boolean) {
         checkBackupAvailable()
+        val visit = Any()
+        backupImportVisit = visit
         prompt = ConfirmPrompt(if (complete) "确认导入完整中立备份" else "确认导入文本备份", "", "导入",
-            action = { backupGuard { controller.importUserBackup(uri, complete) } }, backup = true)
+            action = { backupGuard {
+                check(backupImportVisit === visit && retainedPage == "backup" && generationResumed())
+                backupImportVisit = null
+                controller.importUserBackup(uri, complete)
+            } }, backup = true)
     }
     private fun cancelRestorePreview() {
         configurationRestorePreview?.let { controller.cancelConfigurationRestore(it) }

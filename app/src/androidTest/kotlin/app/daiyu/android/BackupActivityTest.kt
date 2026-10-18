@@ -153,7 +153,6 @@ class BackupActivityTest:ComposeActivityTestCase() {
             openSettings();reveal("settings-row:数据备份","设置").performClick()
         }
     }
-    private fun choose(index:Int) {node("prompt-choice:$index").assertIsDisplayed().performClick()}
     private fun press(which:Int) {
         node(if(which==DialogInterface.BUTTON_NEGATIVE) "dialog-cancel" else "dialog-confirm").performClick()
         ui.waitForIdle()
@@ -176,10 +175,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
     }
     /** Monitor returns a platform ActivityResult to the actual startActivityForResult call. */
     private fun picker(code:Int,result:Int=Activity.RESULT_OK,uri:Uri?=null,beforeReturn:()->Unit={}) {
-        // Product backup settings intentionally expose only complete export and automatic import.
-        // 101/102/104 remain accepted aliases for older test call sites, but all route through
-        // the two visible actions and their current request codes.
-        val actualCode = when (code) { 101, 103 -> 103; 102, 104 -> 107; else -> code }
+        val actualCode = when (code) { 101, 103 -> 103; 102, 104, 107 -> 107; else -> error("unsupported backup action") }
         val exporting = actualCode == 103
         val observed=CountDownLatch(1)
         val monitor=object:Instrumentation.ActivityMonitor() {
@@ -189,6 +185,8 @@ class BackupActivityTest:ComposeActivityTestCase() {
                 assertTrue(intent.hasCategory(Intent.CATEGORY_OPENABLE))
                 assertEquals(actualCode,pending())
                 if(exporting) assertEquals("daiyu-complete.json",intent.getStringExtra(Intent.EXTRA_TITLE))
+                else assertEquals(listOf("application/json", "application/zip", "application/octet-stream", "text/plain"),
+                    intent.getStringArrayExtra(Intent.EXTRA_MIME_TYPES)?.toList())
                 beforeReturn();observed.countDown()
                 return Instrumentation.ActivityResult(result,if(uri==null) Intent() else Intent().setData(uri))
             }
@@ -202,9 +200,9 @@ class BackupActivityTest:ComposeActivityTestCase() {
             main {assertNull("request must be consumed at callback",pending())}
         } finally {instrumentation.removeMonitor(monitor)}
     }
-    fun testAllFourPickerRequestsCanceledAndMissingUriDoNoWork() {
+    fun testBothProductPickerRequestsCanceledAndMissingUriDoNoWork() {
         start();val before=controller.database.exportBackup()
-        for(code in 101..104) {
+        for(code in listOf(103,107)) {
             picker(code,Activity.RESULT_CANCELED,textUri)
             main {assertNull(dialog())};assertEquals(0,provider.opens.get());unchanged(before)
             picker(code,Activity.RESULT_OK,null)
@@ -213,9 +211,9 @@ class BackupActivityTest:ComposeActivityTestCase() {
             main {assertNull(dialog())};assertEquals(0,provider.opens.get());unchanged(before)
         }
     }
-    fun testAllFourPickerCallbacksRejectActiveBusyAndRecoveryAfterLaunch() {
+    fun testBothProductPickerCallbacksRejectActiveBusyAndRecoveryAfterLaunch() {
         start();val before=controller.database.exportBackup()
-        for(code in 101..104) for(state in listOf("active","busy","recovery","not-ready")) {
+        for(code in listOf(103,107)) for(state in listOf("active","busy","recovery","not-ready")) {
             picker(code,uri=if(code>=103) completeUri else textUri,beforeReturn={gate(state)})
             main {assertNull(dialog());gate(null)}
             assertEquals(0,provider.opens.get());unchanged(before)
@@ -234,7 +232,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
             }
         }
     }
-    fun testCompletePickerExportAndAutomaticImportReachController() {
+    fun testCompleteExportAndAutomaticTextAndCompleteImportReachController() {
         start()
         for(code in listOf(102,104)) {
             val uri=if(code==104) completeUri else textUri
@@ -249,14 +247,28 @@ class BackupActivityTest:ComposeActivityTestCase() {
             val text=provider.file(output).readText()
             assertTrue(text.contains("historical answer"))
             val envelope=org.json.JSONObject(text)
-            assertEquals("daiyu-neutral-complete", envelope.getString("format"))
-            assertEquals(5, envelope.getInt("version"))
+            assertEquals("daiyu-neutral-complete",envelope.getString("format"))
+            assertEquals(5,envelope.getInt("version"))
             NeutralBackupService(fixtureApp,controller.database).preflight(text)
             controller.database.conversations().forEach {controller.database.delete(it.id)}
             // Reset only revision for the second independent UI route; format fixtures stay tiny.
             main {setField("dataRevision",0L)}
         }
     }
+    fun testImportConfirmationExpiresAfterRealPauseResume() {
+        val current = start(opened(textUri))
+        val before = controller.database.exportBackup()
+        awaitUniqueTag("dialog-confirm")
+        assertEquals(0, provider.opens.get())
+        val stalePositive = retainedClick(current, "dialog-confirm")
+        realPauseResume(current)
+        main { stalePositive() }
+        instrumentation.waitForIdleSync()
+        assertEquals(0, provider.opens.get())
+        unchanged(before)
+        main { assertNull(dialog()) }
+    }
+
     fun testConversationExportPickerUsesVersionlessSuggestedName() {
         val conversation=controller.database.create("default")
         start();val before=controller.database.exportBackup()
@@ -264,7 +276,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
         val monitor=object:Instrumentation.ActivityMonitor() {
             override fun onStartActivity(intent:Intent):Instrumentation.ActivityResult? {
                 assertEquals(Intent.ACTION_CREATE_DOCUMENT,intent.action)
-                assertEquals(if (exporting) "application/json" else "*/*", intent.type)
+                assertEquals("application/json",intent.type)
                 assertTrue(intent.hasCategory(Intent.CATEGORY_OPENABLE))
                 assertEquals("daiyu-conversation.json",intent.getStringExtra(Intent.EXTRA_TITLE))
                 assertEquals(105,pending())
@@ -283,24 +295,24 @@ class BackupActivityTest:ComposeActivityTestCase() {
             assertEquals(0,provider.opens.get());unchanged(before)
         } finally {instrumentation.removeMonitor(monitor)}
     }
-    fun testViewRequiresManualChoiceAndConfirmationAndAllowsRetryAfterCancel() {
+    fun testViewRequiresConfirmationAndAllowsRetryAfterCancel() {
         start(opened(completeUri));val before=controller.database.exportBackup()
         main {assertNotNull(dialog())};assertEquals(0,provider.opens.get());unchanged(before)
-        choose(0);assertEquals(0,provider.opens.get());unchanged(before)
+        assertEquals(0,provider.opens.get());unchanged(before)
         press(DialogInterface.BUTTON_NEGATIVE);unchanged(before)
         main {instrumentation.callActivityOnNewIntent(activity,opened(completeUri))}
-        instrumentation.waitForIdleSync();choose(0);press(DialogInterface.BUTTON_POSITIVE)
+        instrumentation.waitForIdleSync();press(DialogInterface.BUTTON_POSITIVE)
         awaitState {!controller.dataBusy && controller.dataRevision==1L}
         assertEquals(1,controller.database.conversations().size);assertEquals(0,modelCalls.get())
     }
-    fun testViewNewIntentDeduplicatesVisiblePromptAndTextChoiceImportsOnlyOnConfirm() {
+    fun testViewNewIntentDeduplicatesVisiblePromptAndImportsOnlyOnConfirm() {
         start();val before=controller.database.exportBackup()
         main {
             instrumentation.callActivityOnNewIntent(activity,opened())
             val first=dialog();assertNotNull(first)
             instrumentation.callActivityOnNewIntent(activity,opened());assertSame(first,dialog())
         }
-        instrumentation.waitForIdleSync();choose(1);unchanged(before);assertEquals(0,provider.opens.get())
+        instrumentation.waitForIdleSync();unchanged(before);assertEquals(0,provider.opens.get())
         main {
             val confirmation=dialog()
             instrumentation.callActivityOnNewIntent(activity,opened());assertSame(confirmation,dialog())
@@ -321,14 +333,15 @@ class BackupActivityTest:ComposeActivityTestCase() {
     fun testViewRevokedGrantAndWrongFormatFailWithoutMutation() {
         start();val before=controller.database.exportBackup()
         main {provider.deny=true;instrumentation.callActivityOnNewIntent(activity,opened())}
-        instrumentation.waitForIdleSync();choose(1);press(DialogInterface.BUTTON_POSITIVE);awaitState {!controller.dataBusy}
+        instrumentation.waitForIdleSync();press(DialogInterface.BUTTON_POSITIVE);awaitState {!controller.dataBusy}
         assertEquals(1,provider.opens.get());unchanged(before)
+        provider.file(textUri).writeText("{\"format\":\"unsupported\"}")
         main {provider.deny=false;instrumentation.callActivityOnNewIntent(activity,opened(textUri))}
-        instrumentation.waitForIdleSync();choose(0);press(DialogInterface.BUTTON_POSITIVE);awaitState {!controller.dataBusy}
+        instrumentation.waitForIdleSync();press(DialogInterface.BUTTON_POSITIVE);awaitState {!controller.dataBusy}
         assertEquals(2,provider.opens.get());unchanged(before)
         provider.file(textUri).writeText("not JSON")
         main {instrumentation.callActivityOnNewIntent(activity,opened(textUri))}
-        instrumentation.waitForIdleSync();choose(1);press(DialogInterface.BUTTON_POSITIVE);awaitState {!controller.dataBusy}
+        instrumentation.waitForIdleSync();press(DialogInterface.BUTTON_POSITIVE);awaitState {!controller.dataBusy}
         assertEquals(3,provider.opens.get());unchanged(before)
     }
     private fun deferred():Any?=MainActivity::class.java.getDeclaredField("deferredOpenedBackup").apply {isAccessible=true}.get(activity)
@@ -341,7 +354,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
         instrumentation.waitForIdleSync()
     }
     private fun implicitOpened(uri:Uri=textUri)=opened(uri).setComponent(null).setPackage(instrumentation.targetContext.packageName)
-    fun testImplicitViewDuringRecoveryDefersOneUriThenRequiresChoiceAndConfirmation() {
+    fun testImplicitViewDuringRecoveryDefersOneUriThenRequiresConfirmation() {
         val implicit=implicitOpened()
         assertNull(implicit.component)
         val resolved=instrumentation.targetContext.packageManager.resolveActivity(implicit,android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
@@ -354,12 +367,12 @@ class BackupActivityTest:ComposeActivityTestCase() {
         assertEquals(0,provider.opens.get());unchanged(before)
         publishGate(null)
         main {assertNull(deferred());assertNotNull(dialog())}
-        node("prompt-choice:1").assertExists()
+        node("dialog-confirm").assertTextEquals("导入")
         val choice=dialog()
         publishGate(null)
         main {assertSame(choice,dialog())}
         assertEquals(0,provider.opens.get());unchanged(before)
-        choose(1)
+
         assertEquals(0,provider.opens.get());unchanged(before)
         press(DialogInterface.BUTTON_POSITIVE)
         awaitState {!controller.dataBusy && controller.dataRevision==1L}
@@ -391,7 +404,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
         }
         publishGate(null)
         assertEquals(0,provider.opens.get())
-        choose(0);press(DialogInterface.BUTTON_POSITIVE)
+        press(DialogInterface.BUTTON_POSITIVE)
         awaitState {!controller.dataBusy && controller.dataRevision==1L}
         assertEquals(1,provider.opens.get());assertEquals(1,controller.database.conversations().size)
         assertEquals(0,modelCalls.get())
@@ -419,7 +432,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
         provider.deny=true
         publishGate(null)
         assertEquals(0,provider.opens.get())
-        choose(1)
+
         assertEquals(0,provider.opens.get())
         press(DialogInterface.BUTTON_POSITIVE)
         awaitState {!controller.dataBusy}
@@ -449,11 +462,11 @@ class BackupActivityTest:ComposeActivityTestCase() {
             assertEquals(0,provider.opens.get());unchanged(before)
         }
     }
-    fun testRecreationDropsViewChoiceAndConfirmationWithoutReplay() {
+    fun testRecreationDropsViewConfirmationWithoutReplay() {
         start(opened());val before=controller.database.exportBackup()
         recreate();main {assertNull(dialog())};assertEquals(0,provider.opens.get());unchanged(before)
         main {instrumentation.callActivityOnNewIntent(activity,opened())}
-        instrumentation.waitForIdleSync();choose(1)
+        instrumentation.waitForIdleSync()
         recreate();main {assertNull(dialog())};assertEquals(0,provider.opens.get());unchanged(before)
     }
     private fun recreate() {
@@ -470,10 +483,16 @@ class BackupActivityTest:ComposeActivityTestCase() {
         if(which==DialogInterface.BUTTON_NEGATIVE && dialog()==null) backToChat(checkNotNull(activity)) else press(which)
     }
     private fun restorePreview() {
-        click("备份与导入");reveal("settings-row:预览模型配置","备份与导入").performClick()
-        val preview=(MainActivity::class.java.getDeclaredField("configurationRestorePreview\$delegate").apply {isAccessible=true}.get(activity) as androidx.compose.runtime.State<*>).value as? ChatController.ConfigurationRestorePreview
-        if(preview?.plan?.isNoOp==false) reveal("settings-row:恢复配置","备份与导入").performClick()
+        click("备份与导入")
+        main {
+            MainActivity::class.java.getDeclaredMethod("previewConfigurationRestore").apply {isAccessible=true}.invoke(activity)
+            if (configurationPreview()?.plan?.isNoOp == false)
+                MainActivity::class.java.getDeclaredMethod("confirmConfigurationRestore").apply {isAccessible=true}.invoke(activity)
+        }
     }
+    private fun configurationPreview() =
+        (MainActivity::class.java.getDeclaredField("configurationRestorePreview\$delegate").apply {isAccessible=true}.get(activity)
+            as androidx.compose.runtime.State<*>).value as? ChatController.ConfigurationRestorePreview
     private fun modelPreferences()=fixtureApp.getSharedPreferences("model-settings",0)
     private fun seedRestoreMetadata() {
         assertTrue(modelPreferences().edit().putString("endpoint","https://current.invalid").putString("model","current-model")
@@ -483,14 +502,14 @@ class BackupActivityTest:ComposeActivityTestCase() {
             "endpoint" to "https://imported.invalid","model" to "imported-model","responses-path" to "/responses",
             "battery" to true,"device-status" to true))
     }
-    fun testRealCompleteImportDoesNotApplyConfigurationThenMenuPreviewsAndConfirms() {
+    fun testRealCompleteImportOffersConfigurationConfirmationWithoutApplying() {
         seedRestoreMetadata()
         // Export metadata into a real complete backup, then clear it so the production import must fill it.
         val backup=NeutralBackupService(fixtureApp,controller.database)
         provider.file(completeUri).writeText(backup.exportPackage())
         backup.setNonSecretConfiguration(emptyMap())
         val before=HashMap(modelPreferences().all)
-        start(opened(completeUri));choose(0);press(DialogInterface.BUTTON_POSITIVE)
+        start(opened(completeUri));press(DialogInterface.BUTTON_POSITIVE)
         awaitState {!controller.dataBusy && controller.dataRevision==1L}
         assertEquals(before,modelPreferences().all);assertEquals(1,provider.opens.get())
         restorePreview()
@@ -564,10 +583,13 @@ class BackupActivityTest:ComposeActivityTestCase() {
         start();val before=HashMap(modelPreferences().all)
         restorePreview()
         node("dialog-confirm").assertDoesNotExist()
-        ui.onNodeWithText("暂无配置").assertExists()
+        main { assertTrue(configurationPreview()?.plan?.isNoOp == true) }
         restorePress(DialogInterface.BUTTON_NEGATIVE)
         NeutralBackupService(fixtureApp,controller.database).setNonSecretConfiguration(mapOf("model" to "m".repeat(201)))
-        click("备份与导入");reveal("settings-row:预览模型配置","备份与导入").performClick()
+        click("备份与导入")
+        main { runCatching {
+            MainActivity::class.java.getDeclaredMethod("previewConfigurationRestore").apply {isAccessible=true}.invoke(activity)
+        } }
         main {assertNull(restoreDialog())};assertEquals(before,modelPreferences().all)
         assertEquals(0,modelCalls.get());assertEquals(0,provider.opens.get())
     }

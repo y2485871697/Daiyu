@@ -2866,7 +2866,9 @@ class ChatController internal constructor(private val application:Application,
             problem="子模型配置未绑定、已变更或不支持；草稿保留，未切换到主模型";notifyChanged();return null
         }
         val interactiveSnapshot = interactiveMode.snapshot()
-        val frozenProvider = try { freezePreparationProvider(token) } catch (_: Exception) {
+        val frozenProvider = try { freezePreparationProvider(token) } catch (_: CredentialUnavailableException) {
+            problem="已保存密钥不可用；请到模型设置重新输入，未发起网络请求";notifyChanged();return null
+        } catch (_: Exception) {
             problem="请配置、启用并选择当前提供商；草稿保留，未发送请求";notifyChanged();return null
         }
         val config=try {(mcpPreparation?.provider?.asModelSettings() ?: terminalJobPreparation?.provider?.asModelSettings() ?: terminalPreparation?.provider?.asModelSettings() ?: browserPreparation?.provider?.asModelSettings() ?: frozenProvider.settings).also {it.validate()}} catch (_:CredentialUnavailableException) {

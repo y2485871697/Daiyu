@@ -91,6 +91,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
         var cleanupFailed = false
         var frameReportWritten = false
         var stage = "initialization"
+        var diagnosticsStateVerified = false
         var memoryCollector: SyntheticMemoryCollector? = null
         var memoryReport: File? = null
         var migrationReport: File? = null
@@ -111,6 +112,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
             awaitReady(activeFixture.controller)
             val diagnosticState = checkNotNull(activeFixture.controller.diagnostics).load()
             check(diagnosticState.loaded && !diagnosticState.unavailable && diagnosticState.enabled == (diagnosticsMode == "on"))
+            diagnosticsStateVerified = true
             val conversation = if (fullScale) {
                 val backup = app.daiyu.android.backup.NeutralBackupService(activeFixture.context, activeFixture.database)
                 val selected = FullPerformanceDataset.seed(activeFixture.database, backup)
@@ -187,7 +189,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                     memory.sample("switch_completed", index + 1, start)
                 }
                 // Take ten spaced post-switch observations; requesting GC does not prove stable recovery.
-                System.gc(); System.runFinalization()
+                System.gc(); memory.markGcRequested(); System.runFinalization()
                 repeat(10) { second -> Thread.sleep(1_000); memory.sample("post_gc_observation", second + 1) }
                 File(output.parentFile, "memory-$id.json").also { report ->
                     memory.write(report, id, diagnosticsMode); memoryReport = report
@@ -271,7 +273,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                         .put("fixture_resources_retained", fixture != null && (!activitiesDestroyed || !controllerRestored))
                         .put("cleanup_scope", "fixture_controller_databases_preferences_cache")
                         .put("diagnostics_mode", diagnosticsMode)
-                        .put("diagnostics_state_verified", true)
+                        .put("diagnostics_state_verified", diagnosticsStateVerified)
                         .put("memory_report", memoryReport?.name ?: JSONObject.NULL)
                         .put("backend_migration_report", migrationReport?.name ?: JSONObject.NULL)
                         .put("failure_class", primaryFailure?.javaClass?.name ?: JSONObject.NULL), inputs)
@@ -284,6 +286,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                     .put("collection_id", id).put("fixture_mode", if (fullScale) "full_scale" else "small_smoke")
                     .put("diagnostics_mode", diagnosticsMode)
                     .put("memory_report", memoryReport?.name ?: JSONObject.NULL)
+                    .put("diagnostics_state_verified", diagnosticsStateVerified)
                     .put("memory_switch_samples", memoryCollector?.switchSamples ?: 0)
                     .put("memory_post_gc_samples", memoryCollector?.postGcSamples ?: 0)
                     .put("collection_completed", complete).put("failure_stage", if (primaryFailure == null) JSONObject.NULL else stage)

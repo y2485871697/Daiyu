@@ -37,6 +37,17 @@ class MemoryCollectorContract(unittest.TestCase):
         self.assertIn('if (completed)', memory)
         self.assertIn('.put("collection_completed", completed)', memory)
 
+    def test_gc_and_diagnostic_evidence_record_executed_state(self):
+        source = (PERFORMANCE / 'ReleaseSyntheticPerformanceTest.kt').read_text()
+        self.assertIn('System.gc(); memory.markGcRequested(); System.runFinalization()', source)
+        self.assertIn('var diagnosticsStateVerified = false', source)
+        self.assertLess(source.index('check(diagnosticState.loaded'), source.index('diagnosticsStateVerified = true'))
+        self.assertNotIn('.put("diagnostics_state_verified", true)', source)
+        self.assertIn('.put("diagnostics_state_verified", diagnosticsStateVerified)', source)
+        memory = (PERFORMANCE / 'SyntheticMemoryCollector.kt').read_text()
+        self.assertIn('.put("gc_requested", gcRequested)', memory)
+        self.assertNotIn('postGcSamples > 0', memory)
+
     def test_memory_is_raw_observation_not_acceptance_or_peak_claim(self):
         source = (PERFORMANCE / 'SyntheticMemoryCollector.kt').read_text()
         for field in ('total_pss_kib', 'total_private_dirty_kib', 'java_heap_used_bytes',

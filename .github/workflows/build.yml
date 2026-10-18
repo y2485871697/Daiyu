@@ -1,5 +1,5 @@
 name: 代鱼构建
-run-name: ${{ inputs.mode == 'smoke' && format('代鱼双API补检 {0}', inputs.check_id) || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || inputs.mode == 'performance' && format('代鱼性能包 {0}', inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
+run-name: ${{ inputs.mode == 'smoke' && format('代鱼双API补检 {0}{1}', inputs.check_id, inputs.smoke_classes != '' && '-filtered' || '') || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || inputs.mode == 'performance' && format('代鱼性能包 {0}', inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
 on:
   workflow_dispatch:
     inputs:
@@ -19,6 +19,10 @@ on:
         type: choice
         options: [all, '26', '37.2']
         default: all
+      smoke_classes:
+        description: 仅smoke定向复验的完整测试类名（逗号分隔；空为全量，定向不计正式验收）
+        type: string
+        default: ''
       check_scope:
         description: 仅检查模式的补检范围
         type: choice
@@ -43,6 +47,8 @@ on:
 env:
   SKIP_JDK_VERSION_CHECK: "true"
   PYTHONUTF8: "1"
+  SMOKE_MODE: ${{ inputs.mode }}
+  SMOKE_TEST_CLASSES: ${{ inputs.smoke_classes }}
 permissions:
   contents: read
   actions: read
@@ -60,6 +66,9 @@ jobs:
       matrix:
         os: [ubuntu-26.04, windows-latest]
     steps:
+      - name: 限定定向过滤仅用于smoke补检
+        shell: bash
+        run: test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -115,6 +124,9 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 25
     steps:
+      - name: 限定定向过滤仅用于smoke补检
+        shell: bash
+        run: test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -201,6 +213,9 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 25
     steps:
+      - name: 限定定向过滤仅用于smoke补检
+        shell: bash
+        run: test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -289,7 +304,7 @@ jobs:
           path: performance-delivery/
           if-no-files-found: error
   smoke:
-    name: 启动验证 API ${{ matrix.api }} 分片${{ matrix.shard }}
+    name: 启动验证 API ${{ matrix.api }} 分片${{ matrix.shard }}${{ inputs.smoke_classes != '' && '-filtered' || '' }}
     needs: build
     if: always() && github.ref == 'refs/heads/main' && ((inputs.mode == 'build' && needs.build.result == 'success') || inputs.mode == 'smoke')
     runs-on: ubuntu-26.04
@@ -299,6 +314,9 @@ jobs:
       matrix:
         include: ${{ fromJSON(inputs.mode == 'smoke' && inputs.smoke_api == '26' && '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3}]' || inputs.mode == 'smoke' && inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]' || '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]') }}
     steps:
+      - name: 限定定向过滤仅用于smoke补检
+        shell: bash
+        run: test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -314,7 +332,7 @@ jobs:
         if: always() && inputs.mode == 'smoke'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: 代鱼工具证据-smoke-API${{ matrix.api }}-分片${{ matrix.shard }}
+          name: 代鱼工具证据-smoke-API${{ matrix.api }}-分片${{ matrix.shard }}${{ inputs.smoke_classes != '' && '-filtered' || '' }}
           path: tool-evidence/
           if-no-files-found: error
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
@@ -382,6 +400,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: 代鱼启动证据-API${{ matrix.api }}-分片${{ matrix.shard }}
+          name: 代鱼启动证据-API${{ matrix.api }}-分片${{ matrix.shard }}${{ inputs.smoke_classes != '' && '-filtered' || '' }}
           path: smoke/
           if-no-files-found: ignore

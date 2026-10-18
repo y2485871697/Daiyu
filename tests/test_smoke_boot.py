@@ -1,5 +1,6 @@
 """Synthetic process tests; these do not claim Android instrumentation coverage."""
 import importlib.util
+import hashlib
 import json
 import os
 import re
@@ -50,6 +51,34 @@ class SourceTests(unittest.TestCase):
         maximum += 60 * (3 * (5 + 5) + 2) + 19 * (2 * (10 + 5) + 1) + 100
         self.assertGreater(step, maximum)
         self.assertGreaterEqual(job - step, 600)
+
+    def test_workflow_safely_wires_filter_and_rejects_non_smoke_before_setup(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        self.assertIn('SMOKE_MODE: ${{ inputs.mode }}', workflow)
+        self.assertIn('SMOKE_TEST_CLASSES: ${{ inputs.smoke_classes }}', workflow)
+        guard = 'test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke'
+        for job in ('checks', 'build', 'synthetic', 'smoke'):
+            body = workflow.split('  ' + job + ':\n', 1)[1].split('    steps:\n', 1)[1]
+            first = body.split('      - uses:', 1)[0]
+            self.assertIn('shell: bash', first)
+            self.assertIn('run: ' + guard, first)
+        # Execute the exact workflow guard, not a copy with interpolated inputs.
+        if os.name != 'nt':  # Execute bash only on the smoke runner platform.
+            for mode in ('build', 'checks', 'synthetic', 'performance', 'smoke'):
+                for value in ('', 'app.daiyu.android.FirstTest', '$(exit 99)'):
+                    result = subprocess.run(['bash', '-c', guard], capture_output=True,
+                                            env=dict(os.environ, SMOKE_MODE=mode, SMOKE_TEST_CLASSES=value))
+                    self.assertEqual(result.returncode == 0, not value or mode == 'smoke')
+        suffix = "${{ inputs.smoke_classes != '' && '-filtered' || '' }}"
+        for name in ('    name: 启动验证 API ${{ matrix.api }} 分片${{ matrix.shard }}',
+                     '          name: 代鱼启动证据-API${{ matrix.api }}-分片${{ matrix.shard }}',
+                     '          name: 代鱼工具证据-smoke-API${{ matrix.api }}-分片${{ matrix.shard }}'):
+            self.assertIn(name + suffix, workflow)
+        smoke = workflow.split('  smoke:\n', 1)[1]
+        self.assertIn('SMOKE_SHARD_COUNT: 4', smoke)
+        matrix = re.search(r"\|\| '(\[.*\])'\) }}", smoke).group(1)
+        self.assertEqual({(v['api'], v['shard']) for v in json.loads(matrix)},
+                         {(api, index) for api in ('26', '37.2') for index in range(4)})
 
     def test_identity_and_unchanged_application(self):
         env = dict(SOURCE_SHA='a' * 40, SOURCE_RUN_ID='123')
@@ -130,12 +159,16 @@ class ProcessTests(unittest.TestCase):
         self.assertEqual((sdk / 'adb.real').read_bytes(), first)
 
     def smoke(self, api=26, case='ok', source_text=None, extra_source=None,
-              source_name='Test.kt', extra_sources=None, expected_classes=None, reported_count=None, shard_count=1, shard_index=0):
+              source_name='Test.kt', extra_sources=None, expected_classes=None, reported_count=None, shard_count=1, shard_index=0,
+              test_classes=None, mode="smoke"):
         (self.root / 'delivery/tests').mkdir(parents=True, exist_ok=True)
         (self.root / 'delivery/app.apk').touch()
         (self.root / 'delivery/tests/platform-test.apk').touch()
         source_root = self.root / 'app/src/androidTest'
+        shutil.rmtree(source_root, ignore_errors=True)
         source_root.mkdir(parents=True, exist_ok=True)
+        for name in ('adb-calls.txt', 'instrumentation-args.txt', 'launch-args.txt'):
+            (self.root / 'smoke' / name).unlink(missing_ok=True)
         sources = {
             source_name: source_text if source_text is not None else
             'package app.daiyu.android\nclass FirstTest : android.test.InstrumentationTestCase() {\n fun testOne() {}\n}\n',
@@ -167,6 +200,7 @@ class ProcessTests(unittest.TestCase):
                            '代鱼 · 聊天 发送' if case == 'old-title-only' else
                            ET.tostring(ui, encoding='unicode'), encoding='utf-8')
         self.executable('adb', r'''#!/bin/sh
+printf '%s\n' "$*" >> smoke/adb-calls.txt
 case "$*" in
  'shell getprop ro.build.version.sdk') printf '%s\n' "$API" ;;
  'shell getprop sys.boot_completed') printf '1\n' ;;
@@ -234,7 +268,10 @@ exit 0
             reported_count = 3 if case == 'multi' else 2 if case == 'count' else 1
         env = dict(self.env, API=str(api), CASE=case,
                    TEST_CLASSES=expected_classes, TEST_COUNT=str(reported_count), FAKE_UI=str(fake_ui),
-                   SMOKE_SHARD_COUNT=str(shard_count), SMOKE_SHARD_INDEX=str(shard_index))
+                   SMOKE_SHARD_COUNT=str(shard_count), SMOKE_SHARD_INDEX=str(shard_index), SMOKE_MODE=mode)
+        env.pop('SMOKE_TEST_CLASSES', None)
+        if test_classes is not None:
+            env['SMOKE_TEST_CLASSES'] = test_classes
         return self.run_process(['bash', str(ROOT / 'scripts/smoke_boot.sh')], env=env)
 
     def run_process(self, argv, env=None, timeout=15):
@@ -356,6 +393,120 @@ exit 0
             observed.update(names)
         self.assertEqual(observed, set(all_names))
         self.assertEqual(manifest["total_tests"], 9)
+
+    def selection(self):
+        return json.loads((self.root / 'smoke/selection.json').read_text())
+
+    def test_unset_and_empty_filter_preserve_original_inventory(self):
+        manifests = []
+        for value in (None, ''):
+            result = self.smoke(test_classes=value, mode='build')
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            manifests.append((self.root / 'smoke/instrumentation-shards.json').read_bytes())
+            selection = self.selection()
+            self.assertEqual(selection['scope'], 'full')
+            self.assertEqual(selection['requested_classes'], [])
+            self.assertEqual(selection['selected_classes'], ['app.daiyu.android.FirstTest'])
+            self.assertEqual(selection['status'], 'completed')
+        self.assertEqual(*manifests)
+
+    def test_filtered_subset_deduplicates_but_keeps_real_count_and_runner(self):
+        for api in (26, 37):
+            selected = 'app.daiyu.android.other.SecondTest'
+            result = self.smoke(api=api, extra_sources={'Second.java': JAVA_SECOND_SOURCE},
+                                test_classes=selected + ',' + selected,
+                                expected_classes=selected, reported_count=4)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            self.assertEqual((self.root / 'smoke/instrumentation-targets.txt').read_text().splitlines(), ['4', selected])
+            selection = self.selection()
+            self.assertEqual(selection['scope'], 'targeted')
+            self.assertEqual(selection['requested_classes'], [selected])
+            self.assertEqual(selection['selected_classes'], [selected])
+            self.assertEqual(selection['expected_tests'], 4)
+            self.assertEqual(selection['status'], 'completed')
+            for role in ('inventory', 'instrumentation'):
+                ref = selection[role]
+                self.assertEqual(ref['sha256'], hashlib.sha256((self.root / 'smoke' / ref['path']).read_bytes()).hexdigest())
+            inventory = json.loads((self.root / 'smoke/instrumentation-shards.json').read_text())
+            self.assertEqual(inventory['total_tests'], 5)
+            self.assertEqual(len(inventory['all_classes']), 2)
+
+    def test_selecting_all_classes_is_still_targeted(self):
+        result = self.smoke(test_classes='app.daiyu.android.FirstTest')
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertEqual(self.selection()['scope'], 'targeted')
+        self.assertEqual(self.selection()['requested_classes'], self.selection()['selected_classes'])
+
+    def test_invalid_or_unknown_filters_fail_before_any_adb(self):
+        known = 'app.daiyu.android.FirstTest'
+        for value in (' ', known + ',', ',' + known, known + ', ' + known,
+                      known + '#testOne', 'app.daiyu.android', known + '*',
+                      'app.daiyu.android.MissingTest', known + ',app.daiyu.android.MissingTest',
+                      known + '\n', '$(touch bad)', 'app.daiyu.android.Foo;echo bad'):
+            with self.subTest(value=value):
+                result = self.smoke(test_classes=value)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse((self.root / 'smoke/adb-calls.txt').exists())
+                self.assertFalse((self.root / 'smoke/instrumentation-args.txt').exists())
+                self.assertFalse((self.root / 'smoke/selection.json').exists())
+        result = self.smoke(test_classes=known, source_text='class Helper {}')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / 'smoke/adb-calls.txt').exists())
+
+    def test_non_smoke_filter_is_rejected_before_any_adb(self):
+        for mode in ('build', 'checks', 'synthetic', 'performance', ''):
+            result = self.smoke(mode=mode, test_classes='app.daiyu.android.FirstTest')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((self.root / 'smoke/adb-calls.txt').exists())
+
+    def test_filter_intersects_original_shards_and_empty_shards_still_launch(self):
+        sources = {f"Extra{i}.kt": f"package app.daiyu.android\nclass Extra{i}Test : android.test.InstrumentationTestCase() {{\n fun testOne() {{}}\n}}\n" for i in range(8)}
+        all_names = sorted(['app.daiyu.android.FirstTest'] + [f'app.daiyu.android.Extra{i}Test' for i in range(8)])
+        groups = [all_names[i::4] for i in range(4)]
+        # Extra0 belongs to shard0, First to shard0; other shards must not run either.
+        requested = [all_names[0], all_names[-1]]
+        for api in (26, 37):
+            observed = set()
+            for index in range(4):
+                selected = sorted(set(groups[index]).intersection(requested))
+                # Seed stale success files to prove the script itself removes them.
+                (self.root / 'smoke').mkdir(exist_ok=True)
+                (self.root / 'smoke/stages.txt').write_text('stale-instrumentation-success\n')
+                (self.root / 'smoke/settings-ui').mkdir(exist_ok=True)
+                (self.root / 'smoke/settings-ui/old.png').write_text('stale settings preview')
+                for name in ('platform-tests.txt', 'instrumentation-result.json'):
+                    (self.root / 'smoke' / name).write_text('stale success')
+                result = self.smoke(api=api, extra_sources=sources, shard_count=4, shard_index=index,
+                                    test_classes=','.join(reversed(requested)),
+                                    expected_classes=','.join(selected), reported_count=len(selected))
+                self.assertEqual(result.returncode, 0, result.stderr.decode())
+                inventory = json.loads((self.root / 'smoke/instrumentation-shards.json').read_text())
+                self.assertEqual(inventory['shards'][index]['classes'], groups[index])
+                selection = self.selection()
+                self.assertEqual(selection['requested_classes'], requested)
+                self.assertEqual(selection['selected_classes'], selected)
+                self.assertEqual(selection['expected_tests'], len(selected))
+                observed.update(selected)
+                self.assertNotIn('stale-instrumentation-success', (self.root / 'smoke/stages.txt').read_text())
+                self.assertFalse((self.root / 'smoke/settings-ui').exists())
+                if not selected:
+                    self.assertEqual(selection['status'], 'filtered-empty-shard')
+                    self.assertNotIn('instrumentation', selection)
+                    for name in ('platform-tests.txt', 'instrumentation-result.json', 'instrumentation-args.txt'):
+                        self.assertFalse((self.root / 'smoke' / name).exists())
+                    self.assertIn('reason=filtered-empty-shard', (self.root / 'smoke/stages.txt').read_text())
+                    self.assertEqual((self.root / 'smoke/instrumentation-targets.txt').read_text(), '0\n\n')
+                self.assertTrue((self.root / 'smoke/launch-args.txt').exists())
+                self.assertTrue((self.root / 'smoke/启动.png').exists())
+            self.assertEqual(observed, set(requested))
+
+    def test_targeted_count_mismatch_or_runner_failure_is_not_success(self):
+        for case in ('count', 'instrument-timeout', 'instrument-fail'):
+            result = self.smoke(case=case, test_classes='app.daiyu.android.FirstTest')
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(self.selection()['status'], 'planned')
+            self.assertNotIn('instrumentation', self.selection())
+            self.assertFalse((self.root / 'smoke/launch-args.txt').exists())
 
     def test_invalid_shard_parameters_fail_before_instrumentation(self):
         for count, index in [(0, 0), (4, -1), (4, 4), (17, 0), (4, 0), ("bad", 0)]:

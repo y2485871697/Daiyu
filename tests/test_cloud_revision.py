@@ -117,6 +117,12 @@ class BuildRevisionWorkflowTests(unittest.TestCase):
         workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/build.yml').read_text(encoding='utf-8')
         build = workflow.split('  build:', 1)[1].split('  smoke:', 1)[0]
         steps = re.split(r'(?m)^      - ', build)[1:]
+        self.assertTrue(steps[0].startswith('name: 限定定向过滤仅用于smoke补检'))
+        self.assertIn('shell: bash', steps[0])
+        self.assertIn('run: test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke', steps[0])
+        self.assertNotIn('if:', steps[0])
+        self.assertNotIn('continue-on-error:', steps[0])
+        steps = steps[1:]
         self.assertTrue(steps[0].startswith('uses: actions/checkout@'))
         self.assertIn('persist-credentials: false', steps[0])
         self.assertIn('EXPECTED_SHA: ${{ inputs.expected_sha }}', steps[1])
@@ -129,7 +135,7 @@ class BuildRevisionWorkflowTests(unittest.TestCase):
         workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/build.yml').read_text(encoding='utf-8')
         run_name = next(line for line in workflow.splitlines() if line.startswith('run-name:'))
         self.assertTrue(run_name.endswith("|| format('代鱼构建 {0}', inputs.check_id) }}"))
-        self.assertIn("format('代鱼双API补检 {0}', inputs.check_id)", run_name)
+        self.assertIn("format('代鱼双API补检 {0}{1}', inputs.check_id, inputs.smoke_classes != '' && '-filtered' || '')", run_name)
         self.assertIn("format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id)", run_name)
 
 
@@ -138,6 +144,12 @@ class SmokeRevisionWorkflowTests(unittest.TestCase):
         workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/build.yml').read_text(encoding='utf-8')
         smoke = workflow.split('  smoke:\n', 1)[1]
         steps = re.split(r'(?m)^      - ', smoke)[1:]
+        self.assertTrue(steps[0].startswith('name: 限定定向过滤仅用于smoke补检'))
+        self.assertIn('shell: bash', steps[0])
+        self.assertIn('run: test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke', steps[0])
+        self.assertNotIn('if:', steps[0])
+        self.assertNotIn('continue-on-error:', steps[0])
+        steps = steps[1:]
         self.assertTrue(steps[0].startswith('uses: actions/checkout@'))
         self.assertIn('persist-credentials: false', steps[0])
         self.assertIn('fetch-depth: 0', steps[0])

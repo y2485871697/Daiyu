@@ -127,7 +127,12 @@ final class OwnerIpcServer {
         synchronized (activeLock) {
             activeSocket = activeConnection == null ? null : activeConnection.socket;
         }
-        if (activeSocket != null) closeQuietly(activeSocket);
+        if (activeSocket != null) {
+            // Wake pending socket I/O before releasing the descriptor.
+            try { activeSocket.shutdownInput(); } catch (IOException ignored) {}
+            try { activeSocket.shutdownOutput(); } catch (IOException ignored) {}
+            closeQuietly(activeSocket);
+        }
         try {
             server.close();
         } catch (IOException ignored) {
@@ -363,7 +368,9 @@ final class OwnerIpcServer {
 
     private static void writeLine(LocalSocket socket, JSONObject response) {
         try {
-            writeLine(socket.getOutputStream(), response);
+            // Rejected peers may be flushing an unread request. LocalSocket.flush() waits for
+            // peer consumption on API26, so a rejection must write without waiting for their read.
+            socket.getOutputStream().write(OwnerProtocol.encodeLine(response).getBytes(StandardCharsets.UTF_8));
         } catch (IOException ignored) {
             // peer gone
         }

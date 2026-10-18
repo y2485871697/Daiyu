@@ -5,6 +5,8 @@ import android.net.LocalSocketAddress;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Process;
+import android.os.SystemClock;
+import android.util.Log;
 import android.test.InstrumentationTestCase;
 
 import org.json.JSONObject;
@@ -15,6 +17,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -24,6 +28,42 @@ import java.util.concurrent.atomic.AtomicReference;
 /** Device LocalSocket/kernel UID + real owner-looper/store tests; no root or display creation. */
 public class OwnerUninitializedShutdownSocketTest extends InstrumentationTestCase {
     private static final String TOKEN = "private-device-test-token";
+
+    private static final String DIAGNOSTIC_TAG = "OwnerShutdownDiag";
+    private volatile String phase = "not started";
+
+    private void phase(String value) {
+        phase = value;
+        Log.i(DIAGNOSTIC_TAG, getName() + " phase=" + value);
+    }
+
+    @Override protected void runTest() throws Throwable {
+        CountDownLatch finished = new CountDownLatch(1);
+        Thread watchdog = new Thread(() -> {
+            try {
+                if (finished.await(60, TimeUnit.SECONDS)) return;
+            } catch (InterruptedException interrupted) { return; }
+            Log.e(DIAGNOSTIC_TAG, getName() + " still running phase=" + phase);
+            for (Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet()) {
+                Throwable stack = new Throwable("thread=" + entry.getKey().getName()
+                        + " state=" + entry.getKey().getState());
+                stack.setStackTrace(entry.getValue());
+                Log.e(DIAGNOSTIC_TAG, "stalled owner test", stack);
+            }
+        }, "owner-shutdown-test-diagnostic");
+        watchdog.setDaemon(true);
+        watchdog.start();
+        try { super.runTest(); }
+        finally { finished.countDown(); watchdog.interrupt(); }
+    }
+
+    private final class TracedSocket extends LocalSocket {
+        @Override public void close() throws IOException {
+            phase("client.close.begin");
+            super.close();
+            phase("client.close.end");
+        }
+    }
 
     private final class Fixture implements AutoCloseable {
         final Path root;
@@ -42,6 +82,7 @@ public class OwnerUninitializedShutdownSocketTest extends InstrumentationTestCas
         Fixture(int allowedUid) throws Exception { this(allowedUid, false); }
 
         Fixture(int allowedUid, boolean gateTerminalDispatch) throws Exception {
+            phase("fixture.create.begin");
             root = Files.createTempDirectory(getInstrumentation().getTargetContext()
                     .getCacheDir().getCanonicalFile().toPath(), "r08_");
             Files.setPosixFilePermissions(root, PosixFilePermissions.fromString("rwx------"));
@@ -82,27 +123,37 @@ public class OwnerUninitializedShutdownSocketTest extends InstrumentationTestCas
                 finally { terminal.countDown(); }
             });
             server.start();
+            phase("fixture.create.end");
         }
 
         LocalSocket connect() throws IOException {
-            LocalSocket socket = new LocalSocket();
+            phase("client.connect.begin");
+            LocalSocket socket = new TracedSocket();
             socket.connect(new LocalSocketAddress(name, LocalSocketAddress.Namespace.ABSTRACT));
             socket.setSoTimeout(10000);
+            phase("client.connect.end");
             return socket;
         }
 
         void awaitTerminal() throws Exception {
+            phase("terminal.await.begin");
             assertTrue("terminal callback not delivered", terminal.await(15, TimeUnit.SECONDS));
             assertNull(failure.get());
             assertEquals("VD_OWNER_STOPPED initialized=false receiptsClosed=true", marker.get());
+            phase("terminal.await.end");
         }
 
         public void close() throws Exception {
             allowTerminalDispatch.countDown();
+            phase("fixture.server.stop.begin");
             server.stop();
+            phase("fixture.owner.quit.begin");
             thread.quitSafely();
+            phase("fixture.owner.join.begin");
             thread.join(10000);
+            phase("fixture.store.close.begin");
             store.close();
+            phase("fixture.close.end");
         }
     }
 
@@ -116,17 +167,24 @@ public class OwnerUninitializedShutdownSocketTest extends InstrumentationTestCas
                 .put("run", "r").put("assistantMessage", "m").put("runOwner", "o"));
     }
 
-    private static void send(LocalSocket socket, JSONObject request) throws Exception {
+    private void send(LocalSocket socket, JSONObject request) throws Exception {
+        phase("client.write.begin op=" + request.optString("op"));
         socket.getOutputStream().write((request.toString() + "\n").getBytes(StandardCharsets.UTF_8));
+        phase("client.flush.begin");
         socket.getOutputStream().flush();
+        phase("client.send.end");
     }
 
-    private static JSONObject receive(LocalSocket socket) throws Exception {
+    private JSONObject receive(LocalSocket socket) throws Exception {
+        phase("client.receive.begin");
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        for (int ch; (ch = socket.getInputStream().read()) >= 0 && ch != '\n';) {
+        int ch;
+        while ((ch = socket.getInputStream().read()) >= 0 && ch != '\n') {
             if (bytes.size() >= 4096) throw new IOException("test response limit");
             bytes.write(ch);
         }
+        if (ch < 0) throw new IOException("incomplete test response");
+        phase("client.receive.end");
         return new JSONObject(new String(bytes.toByteArray(), StandardCharsets.UTF_8));
     }
 
@@ -160,10 +218,14 @@ public class OwnerUninitializedShutdownSocketTest extends InstrumentationTestCas
                 assertTrue(result.getBoolean("receiptsClosed"));
                 f.awaitTerminal();
                 assertEquals(0, f.creates.get());
+                phase("store.reopen.begin");
                 try (OwnerReceiptStore reopened = new OwnerReceiptStore(f.root)) {
+                    phase("store.reopened.lookup.begin");
                     assertNull(reopened.lookupGeneration("device_generation",
                             OwnerOperationIdentity.bindingFromTrustedHost("s", "t", "c", "r", "m", "o")));
+                    phase("store.reopened.close.begin");
                 }
+                phase("store.reopened.close.end");
             }
         }
     }
@@ -172,11 +234,21 @@ public class OwnerUninitializedShutdownSocketTest extends InstrumentationTestCas
         // Retry only read-only receipt admission, never shutdown or initialize.
         for (int attempt = 0; attempt < 30; attempt++) {
             LocalSocket socket = f.connect();
-            send(socket, bound("receipt"));
-            JSONObject response = receive(socket);
-            if (response.optBoolean("ok", false)) return socket;
-            socket.close();
-            assertEquals("SESSION_BUSY", response.getString("error"));
+            boolean admitted = false;
+            try {
+                send(socket, bound("receipt"));
+                JSONObject response = receive(socket);
+                if (response.optBoolean("ok", false)) {
+                    admitted = true;
+                    return socket;
+                }
+                assertEquals("SESSION_BUSY", response.getString("error"));
+            } catch (IOException refused) {
+                // A rejected peer can close before our request or its busy response is consumed.
+                // Only this read-only admission probe may retry; never retry a shutdown.
+            } finally {
+                if (!admitted) socket.close();
+            }
             Thread.sleep(20);
         }
         throw new AssertionError("rejected peer did not relinquish connection");
@@ -196,6 +268,94 @@ public class OwnerUninitializedShutdownSocketTest extends InstrumentationTestCas
             f.awaitTerminal();
             assertEquals(0, f.creates.get());
         }
+    }
+
+    public void testBusyRejectionDoesNotWaitForPeerToReadBeforeClosingUnreadRequest() throws Exception {
+        try (Fixture f = new Fixture(Process.myUid()); LocalSocket active = f.connect()) {
+            send(active, bound("receipt"));
+            assertFalse(receive(active).getBoolean("found"));
+            try (LocalSocket rejected = f.connect()) {
+                CountDownLatch sent = new CountDownLatch(1);
+                AtomicReference<Throwable> sendFailure = new AtomicReference<>();
+                Thread sender = new Thread(() -> {
+                    try { send(rejected, bound("receipt")); }
+                    catch (Throwable error) { sendFailure.set(error); }
+                    finally { sent.countDown(); }
+                }, "owner-busy-request-sender");
+                sender.setDaemon(true);
+                sender.start();
+                try {
+                    // Deliberately do not read the rejection until the request's flush returns.
+                    assertTrue("request flush deadlocked with busy response", sent.await(5, TimeUnit.SECONDS));
+                    Throwable sendError = sendFailure.get();
+                    assertTrue("unexpected sender failure: " + sendError,
+                            sendError == null || sendError instanceof IOException);
+                    try {
+                        assertEquals("SESSION_BUSY", receive(rejected).getString("error"));
+                    } catch (java.net.SocketTimeoutException timeout) {
+                        throw timeout;
+                    } catch (IOException refused) {
+                        // Rejection can close an unread request; transport refusal is also final.
+                    }
+                } finally {
+                    try { rejected.shutdownInput(); } catch (IOException ignored) {}
+                    try { rejected.shutdownOutput(); } catch (IOException ignored) {}
+                    rejected.close();
+                    sender.join(5000);
+                }
+                assertFalse("busy sender survived cleanup", sender.isAlive());
+            }
+            send(active, bound("receipt"));
+            assertFalse(receive(active).getBoolean("found"));
+            assertFalse(f.coordinator.shouldStop());
+            assertEquals(0, f.creates.get());
+        }
+    }
+
+    public void testStopWakesAuthenticatedIdleReadWithoutCreatingOrTerminatingDisplay() throws Exception {
+        try (Fixture f = new Fixture(Process.myUid())) {
+            Set<Thread> before = Thread.getAllStackTraces().keySet();
+            try (LocalSocket socket = f.connect()) {
+                send(socket, bound("receipt"));
+                assertFalse(receive(socket).getBoolean("found"));
+                Thread connection = awaitIdleConnection(before);
+                CountDownLatch stopped = new CountDownLatch(1);
+                AtomicReference<Throwable> stopFailure = new AtomicReference<>();
+                Thread stop = new Thread(() -> {
+                    try { f.server.stop(); }
+                    catch (Throwable error) { stopFailure.set(error); }
+                    finally { stopped.countDown(); }
+                }, "owner-idle-stop-test");
+                stop.setDaemon(true);
+                phase("idle.stop.begin");
+                stop.start();
+                assertTrue("server stop blocked", stopped.await(5, TimeUnit.SECONDS));
+                assertNull(stopFailure.get());
+                connection.join(5000);
+                assertFalse("authenticated read survived stop", connection.isAlive());
+                assertEquals(-1, socket.getInputStream().read());
+                assertFalse(f.coordinator.shouldStop());
+                assertEquals(1L, f.terminal.getCount());
+                assertEquals(0, f.creates.get());
+                phase("idle.stop.end");
+            }
+        }
+    }
+
+    private Thread awaitIdleConnection(Set<Thread> before) throws Exception {
+        phase("idle.read.await");
+        long deadline = SystemClock.elapsedRealtime() + 5000;
+        while (SystemClock.elapsedRealtime() < deadline) {
+            for (Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet()) {
+                if (before.contains(entry.getKey()) || !"vd-owner-conn".equals(entry.getKey().getName())) continue;
+                for (StackTraceElement frame : entry.getValue()) {
+                    if (OwnerIpcServer.class.getName().equals(frame.getClassName())
+                            && "readLine".equals(frame.getMethodName())) return entry.getKey();
+                }
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError("authenticated connection did not enter idle read");
     }
 
     public void testLostShutdownResponseStillCompletesButNeverCreatesDisplay() throws Exception {

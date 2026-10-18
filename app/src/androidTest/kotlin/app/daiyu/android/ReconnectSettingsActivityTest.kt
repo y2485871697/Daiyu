@@ -25,7 +25,7 @@ class ReconnectSettingsActivityTest : WiredActivityTestCase() {
         reveal("settings-row:错误重连", "模型功能").performClick()
         node("page:错误重连").assertExists()
         ui.waitUntil(timeoutMillis = 5_000) {
-            ui.onAllNodes(hasTestTag("reconnect-saved") and hasAnyDescendant(hasText("关闭", substring = true)))
+            ui.onAllNodes(hasTestTag("reconnect-duration:none") and isEnabled())
                 .fetchSemanticsNodes().isNotEmpty()
         }
     }
@@ -40,17 +40,22 @@ class ReconnectSettingsActivityTest : WiredActivityTestCase() {
         return result
     }
 
-    fun testRealNavigationAndSaveOnlyChangeIndependentPreference() {
+    fun testSelectingPresetImmediatelySavesOnlyIndependentPreference() {
         val before = fixture.database.exportBackup()
         enter()
         reveal("reconnect-duration:window_5m", "错误重连").performClick()
-        reveal("reconnect-save", "错误重连").performClick()
         ui.waitUntil(timeoutMillis = 5_000) {
             store.snapshot().duration == ReconnectDurationPreset.WINDOW_5M
         }
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
         assertNull(fixture.controller.active)
+        reveal("reconnect-background", "错误重连").performClick()
+        ui.waitUntil(timeoutMillis = 5_000) { store.snapshot().responsesBackgroundEnabled }
+        reveal("reconnect-background", "错误重连").performClick()
+        ui.waitUntil(timeoutMillis = 5_000) { !store.snapshot().responsesBackgroundEnabled }
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testLeavingAndReenteringRevokesRatherThanReusesSaveOwner() {

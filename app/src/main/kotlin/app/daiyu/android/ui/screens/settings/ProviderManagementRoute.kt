@@ -47,7 +47,7 @@ private fun ModelSettingsDraftUi.providerSettings(base: ModelSettings) = base.co
 
 @Composable
 internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: () -> Boolean,
-    onBack: () -> Unit, engineeringUi: Boolean = false,
+    onBack: () -> Unit, onDetailBack: () -> Unit = onBack, engineeringUi: Boolean = false,
     initialSlot: String? = null, pageTitleOverride: String? = null,
 ) {
     val repo = controller.providers
@@ -150,7 +150,20 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     LaunchedEffect(Unit, initialSlot) {
         if (initialSlot == null) refresh() else open(initialSlot)
     }
-    fun back() { if (detail != null || loading) { closeDetail(); refresh() } else { permit.revoke(); onBack() } }
+    fun back() {
+        if (detail != null || loading) {
+            // The primary provider is entered as the app's model-settings page, not as a
+            // separate provider-list visit. Returning from its detail must leave the route;
+            // otherwise the next Back press only reveals the provider list.
+            if (initialSlot == ProviderRegistry.PRIMARY) {
+                permit.revoke(); onDetailBack()
+            } else {
+                closeDetail(); refresh()
+            }
+        } else {
+            permit.revoke(); onBack()
+        }
+    }
     BackHandler { back() }
     val p = permit
     val enabled = version.let { current(p) && controller.ready && controller.active == null &&

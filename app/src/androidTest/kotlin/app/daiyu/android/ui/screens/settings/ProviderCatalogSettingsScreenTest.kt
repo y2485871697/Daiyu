@@ -53,6 +53,12 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
                         draft = draft, onDraftChange = { draft = it }, onSave = { saves++ }, onBack = {},
                         providerIdentity = identity, persistence = checkedPersistence,
                         createModel = { SavedCatalogModel(it.id, it.displayName, "defaults") },
+                        twoTabs = true,
+                        localModelActions = LocalCatalogModelActions<String>(
+                            currentModelId = old.id,
+                            rename = { _, _, _, _ -> error("Unexpected local rename in import test") },
+                            delete = { _, _, _ -> error("Unexpected local delete in import test") },
+                        ),
                         fetchCatalog = { _, isCancelled, callback ->
                             cancelled = isCancelled; fetched = callback; true
                         },
@@ -65,6 +71,7 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
 
     private fun startFetch() {
         mainThread { fetched = null }
+        reveal("settings-radio:模型").performClick().assertIsSelected()
         reveal("model-catalog-fetch").performClick()
         ui.waitUntil(5_000) { fetched != null }
     }
@@ -97,7 +104,9 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
         assertTrue(checkNotNull(cancelled).invoke())
         startFetch()
         val late = checkNotNull(fetched)
-        editModel("Base URL", "https://changed.invalid")
+        // Keep this independent of tab-change cancellation.
+        mainThread { draft = draft.copy(endpoint = "https://changed.invalid") }
+        ui.waitForIdle()
         assertTrue(checkNotNull(cancelled).invoke())
         mainThread { late(listOf(RemoteModel("late"))) }
         ui.waitForIdle()
@@ -114,6 +123,21 @@ class ProviderCatalogSettingsScreenTest : WiredActivityTestCase() {
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-selection").fetchSemanticsNodes().isEmpty() }
         assertEquals(listOf(old), catalog.current()!!.models)
         ui.onNodeWithText("服务商或目录已变化，请重新获取").assertExists()
+        ui.runOnIdle { assertEquals("existing", draft.model); assertEquals(0, saves) }
+    }
+
+    fun testChangingTabsFencesLateCallbackWithoutSavingOrSelectingActiveModel() {
+        show()
+        reveal("settings-radio:配置").assertIsSelected()
+        node("model-local-manage").assertDoesNotExist()
+        startFetch()
+        val late = checkNotNull(fetched)
+        reveal("settings-radio:配置").performClick().assertIsSelected()
+        assertTrue(checkNotNull(cancelled).invoke())
+        mainThread { late(listOf(RemoteModel("late"))) }
+        ui.waitForIdle()
+        node("provider-model-selection").assertDoesNotExist()
+        assertEquals(listOf(old), catalog.current()!!.models)
         ui.runOnIdle { assertEquals("existing", draft.model); assertEquals(0, saves) }
     }
 }

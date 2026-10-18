@@ -209,6 +209,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         val cancelled = { !p.live.get() || !d.live.get() }
         val draft = d.draft
         val saved = d.editing.settings
+        val detailTitle = pageTitleOverride ?: if (d.editor.slotId == ProviderRegistry.PRIMARY) "模型设置" else d.name
         val save: (ModelSettingsDraftUi) -> Unit = { submitted ->
             if (live() && enabled && d.draft === submitted) {
                 val value = runCatching {
@@ -234,7 +235,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                             headersReplacementAuthorized = submitted.headersReplacementAuthorized) { success ->
                             if (busy === ticket) busy = null
                             if (live()) {
-                                if (success && initialSlot == ProviderRegistry.PRIMARY) {
+                                if (success && d.editor.slotId == ProviderRegistry.PRIMARY) {
                                     p.revoke(); onDetailBack()
                                 } else if (success) open(d.editor.slotId)
                                 else { closeDetail(); notice = "未保存，请重新打开详情核对。"; refresh() }
@@ -286,7 +287,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             })
         if (d.catalogIdentity == null) ModelSettingsScreen(draft, change, save, {}, { back() },
             modifier = connectionModifier,
-            pageTitle = pageTitleOverride ?: d.name, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
+            pageTitle = detailTitle, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
             credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
             headersUnavailable = d.editing.headersUnavailable,
             catalogEnabled = false, errorText = notice)
@@ -299,9 +300,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         if (live() && !requestCancelled() && d.draft === value) deliver(it)
                     }
                 } ?: false
-            }, modifier = connectionModifier, pageTitle = pageTitleOverride ?: d.name,
-            // Keep the primary model route's established single-page controls and tags;
-            // additional providers use the explicit 配置/模型 split.
+            }, modifier = connectionModifier, pageTitle = detailTitle,
+            // A normal list visit uses the configuration/model split for every provider.
             twoTabs = initialSlot != ProviderRegistry.PRIMARY, ownerCurrent = live,
             enabled = enabled, engineeringUi = engineeringUi, errorText = notice,
             credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,

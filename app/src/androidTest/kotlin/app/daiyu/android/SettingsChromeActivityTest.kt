@@ -237,4 +237,31 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
             check(editor.commit())
         }
     }
+
+    fun testModelProvidersEntryShowsListAndPrimaryBackReturnsThroughSettings() {
+        setDraft("provider navigation remains unsent")
+        openProviderManagement()
+        node("page:模型设置").assertDoesNotExist()
+        reveal("provider-open-primary", "提供商").performClick()
+        awaitModelEditor()
+        reveal("settings-radio:配置").assertIsSelected()
+        node("model-local-manage").assertDoesNotExist()
+        backToPage(activity, "page:提供商")
+        node("page:模型设置").assertDoesNotExist()
+        backToPage(activity, "page:设置")
+        backToChat(activity)
+        assertDraft("provider navigation remains unsent")
+    }
+
+    fun testPrimaryProviderSuccessfulSaveStillReturnsDirectlyToChat() {
+        setDraft("primary save remains unsent")
+        openModels()
+        reveal("settings-radio:配置").assertIsSelected()
+        saveModel()
+        awaitUniqueTag("chat-draft")
+        node("chat-draft").assertIsDisplayed()
+        node("page:模型设置").assertDoesNotExist()
+        node("page:提供商").assertDoesNotExist()
+        assertDraft("primary save remains unsent")
+    }
 }

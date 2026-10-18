@@ -115,6 +115,8 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
             controlMain { activity.onBackPressedDispatcher.onBackPressed(); release() }
             awaitControl("departed save drained") { !fixture.controller.dataBusy }
         }
+        awaitUniqueTag("provider-management")
+        backToChat(activity)
         awaitUniqueTag("chat-draft")
         assertEquals(saved, fixture.settings.load()); assertDraft("departing model save draft")
         assertEquals(0, fixture.opens.get())

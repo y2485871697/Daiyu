@@ -18,8 +18,8 @@ class LinuxRunnerGenerationPinsTest {
     }
 
     @Test fun knownRunsCanCoexistButOnlyOriginalProofSettlesEachPin() = fixture { root ->
-        val first = LinuxRunnerGenerationPins(root) { }
-        val second = LinuxRunnerGenerationPins(root) { }
+        val first = LinuxRunnerGenerationPins(root, fileKey = ::hostLinuxFileKey) { }
+        val second = LinuxRunnerGenerationPins(root, fileKey = ::hostLinuxFileKey) { }
         val one = first.claim(generation, listOf("installation")) { }
         val two = second.claim(generation, listOf("installation")) { }
         first.admitted { }
@@ -31,15 +31,15 @@ class LinuxRunnerGenerationPinsTest {
     }
 
     @Test fun failedClaimAfterRenameBlocksEveryNewAdmission() = fixture { root ->
-        val pins = LinuxRunnerGenerationPins(root) { throw IOException("directory sync") }
+        val pins = LinuxRunnerGenerationPins(root, fileKey = ::hostLinuxFileKey) { throw IOException("directory sync") }
         try { pins.claim(generation, listOf("installation")) { }; fail("claim must fail") } catch (_: IOException) { }
-        rejects { LinuxRunnerGenerationPins(root) { }.admitted { } }
+        rejects { LinuxRunnerGenerationPins(root, fileKey = ::hostLinuxFileKey) { }.admitted { } }
         assertEquals(1, root.listFiles()!!.count { it.name.startsWith(".runner-pin-") })
     }
 
     @Test fun failedSettlementRetainsFenceUntilOriginalSyncRetry() = fixture { root ->
         var failSync = false
-        val pins = LinuxRunnerGenerationPins(root) { if (failSync) throw IOException("settlement sync") }
+        val pins = LinuxRunnerGenerationPins(root, fileKey = ::hostLinuxFileKey) { if (failSync) throw IOException("settlement sync") }
         val original = pins.claim(generation, listOf("installation")) { }
         failSync = true
         try { original.settleAfterTermination(); fail("sync must fail") } catch (_: IOException) { }
@@ -50,36 +50,39 @@ class LinuxRunnerGenerationPinsTest {
     }
 
     @Test fun changedSelectionBeforeClaimNeverWritesAPin() = fixture { root ->
-        val pins = LinuxRunnerGenerationPins(root) { }
+        val pins = LinuxRunnerGenerationPins(root, fileKey = ::hostLinuxFileKey) { }
         rejects { pins.claim(generation, listOf("installation")) { error("selection changed") } }
         pins.admitted(requireEmpty = true) { }
     }
 
     @Test fun sameBytesAtAReplacementPinInodeAreNeverAdopted() = fixture { root ->
-        val pins = LinuxRunnerGenerationPins(root) { }
+        val pins = LinuxRunnerGenerationPins(root, fileKey = ::hostLinuxFileKey) { }
         val original = pins.claim(generation, listOf("installation")) { }
         val file = root.listFiles()!!.single { it.name.startsWith(".runner-pin-") }
         val replacement = File(root, "replacement").apply { writeBytes(file.readBytes()) }
         Files.move(replacement.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        HostLinuxIdentity.replaced(file.toPath())
         rejects { pins.admitted { } }
         rejects { original.settleAfterTermination() }
     }
 
     @Test fun replacingTheLockOrRootCannotCreateANewAdmissionDomain() = fixture { root ->
         val directory = File(root, "pins").apply { mkdirs() }
-        val pins = LinuxRunnerGenerationPins(directory) { }
+        val pins = LinuxRunnerGenerationPins(directory, fileKey = ::hostLinuxFileKey) { }
         pins.admitted { }
         val lock = File(directory, ".runner-pins.lock")
         assertTrue(lock.renameTo(File(directory, "old-lock"))); lock.writeText("")
+        HostLinuxIdentity.replaced(lock.toPath())
         rejects { pins.admitted { } }
         assertTrue(directory.renameTo(File(root, "old-root"))); assertTrue(directory.mkdir())
+        HostLinuxIdentity.replaced(directory.toPath())
         rejects { pins.admitted { } }
     }
 
     @Test fun actualNewJvmCannotTreatDeadOwnerOrNewScopeAsDrain() = fixture { root ->
         assertEquals("CLAIMED", runLinuxPinChild(root, "claim"))
         assertEquals("DENIED", runLinuxPinChild(root, "admit"))
-        rejects { LinuxRunnerGenerationPins(root) { }.admitted { } }
+        rejects { LinuxRunnerGenerationPins(root, fileKey = ::hostLinuxFileKey) { }.admitted { } }
     }
 
     @Test fun twoActualJvmsCannotBothClaimTheSameInstallationDomain() = fixture { root ->
@@ -114,7 +117,7 @@ internal fun runLinuxPinChild(directory: File, operation: String) = finishLinuxP
 internal object LinuxRunnerPinProcess {
     @JvmStatic fun main(args: Array<String>) {
         val root = File(args[0]); val operation = args[1]
-        val pins = LinuxRunnerGenerationPins(root) { }
+        val pins = LinuxRunnerGenerationPins(root, fileKey = ::hostLinuxFileKey) { }
         if (operation == "race") {
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
             while (!File(root, "go").exists()) {

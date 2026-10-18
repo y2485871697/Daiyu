@@ -163,8 +163,11 @@ internal fun ModelSettingsScreen(
                 SettingsRow("自定义请求体", tag = "model-custom-body",
                     summary = if (draft.customBody.isBlank()) "未设置" else "已设置",
                     onClick = if (enabled) ({ bodyExpanded = !bodyExpanded }) else null)
-                if (engineeringUi || bodyExpanded) SettingsTextField("自定义请求体", draft.customBody,
-                    { changeDraft(draft.copy(customBody = it)) }, multiline = true, enabled = enabled)
+                if (engineeringUi || bodyExpanded) {
+                    SettingsTextField("自定义请求体", draft.customBody,
+                        { changeDraft(draft.copy(customBody = it)) }, multiline = true, enabled = enabled)
+                    RequestBodyFieldsEditor(draft, enabled, changeDraft)
+                }
             }
         }
         if (draft.protocol != ProviderProtocol.RESPONSES &&

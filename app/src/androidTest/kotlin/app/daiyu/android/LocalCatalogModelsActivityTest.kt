@@ -58,7 +58,9 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         assertEquals(listOf(current), checkNotNull(fixture.settings.localModelCatalogSnapshot()).models)
         assertEquals(saved, fixture.settings.load()); assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
-        backToPage(activity, "page:模型设置"); backToChat(activity)
+        backToPage(activity, "page:模型设置")
+        node("page:模型设置").assertExists()
+        backToChat(activity)
         assertDraft("local model edits remain unsent")
     }
     fun testInvalidRenameAndCancelledDeletionNeverMutateTheCatalog() {

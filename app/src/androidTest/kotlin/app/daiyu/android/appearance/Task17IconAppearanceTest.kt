@@ -12,6 +12,7 @@ import app.daiyu.android.domain.appearance.IconComponentSnapshot
 import app.daiyu.android.domain.appearance.IconComponentState
 import app.daiyu.android.domain.appearance.LauncherComponentPort
 import app.daiyu.android.domain.appearance.IconThemeMode
+import app.daiyu.android.domain.appearance.IconNotificationPort
 import app.daiyu.android.domain.appearance.Task17IconCatalog
 import java.util.UUID
 import java.util.concurrent.CountDownLatch
@@ -174,6 +175,65 @@ class Task17IconAppearanceTest : InstrumentationTestCase() {
             }
             // Drain the main queue: rejected notifications must not leave an asynchronous callback.
             instrumentation.runOnMainSync { assertEquals(3, refreshCalls.get()) }
+        } finally {
+            base.deleteSharedPreferences(prefix + "task17_icon_appearance")
+            base.deleteSharedPreferences(prefix + "launcher_icon")
+        }
+    }
+
+    fun testUnconfirmedPreferencesCannotAutoApplyAfterCoordinatorRecreation() {
+        val base = instrumentation.targetContext
+        val prefix = "icon-failed-save-${UUID.randomUUID()}-"
+        var commitConfirmed = false
+        val appearance = base.getSharedPreferences(prefix + "task17_icon_appearance", Context.MODE_PRIVATE)
+        val guarded = object : SharedPreferences by appearance {
+            override fun edit(): SharedPreferences.Editor {
+                val editor = appearance.edit()
+                return object : SharedPreferences.Editor by editor {
+                    override fun putString(key: String?, value: String?): SharedPreferences.Editor {
+                        editor.putString(key, value); return this
+                    }
+                    override fun putInt(key: String?, value: Int): SharedPreferences.Editor {
+                        editor.putInt(key, value); return this
+                    }
+                    override fun commit(): Boolean {
+                        val written = editor.commit()
+                        return written && commitConfirmed
+                    }
+                }
+            }
+        }
+        val context = object : ContextWrapper(base) {
+            override fun getApplicationContext(): Context = this
+            override fun getSharedPreferences(name: String, mode: Int): SharedPreferences =
+                if (name == "task17_icon_appearance") guarded else base.getSharedPreferences(prefix + name, mode)
+        }
+        var componentCalls = 0; var refreshes = 0
+        val components = object : LauncherComponentPort {
+            override fun validate(componentName: String) { componentCalls++; error("injected PM failure") }
+            override fun snapshot(componentName: String): IconComponentSnapshot = error("not reached")
+            override fun setState(componentName: String, state: IconComponentState) = error("not reached")
+        }
+        val desired = IconAppearance(themeMode = IconThemeMode.DARK)
+        try {
+            instrumentation.runOnMainSync {
+                val first = IconAppearanceCoordinator(context, IconNotificationPort { refreshes++ }, components)
+                val failed = first.saveAndApply(desired)
+                assertEquals("persist-preferences", failed.failures.single().stage)
+                assertEquals("dark", appearance.getString("theme_mode", null))
+                val reopened = IconAppearanceCoordinator(context, IconNotificationPort { refreshes++ }, components)
+                repeat(2) {
+                    try { reopened.applyCurrent(); fail("unconfirmed preference") } catch (_: IllegalStateException) { }
+                }
+                assertEquals(0, componentCalls); assertEquals(0, refreshes)
+                commitConfirmed = true
+                val pmFailure = reopened.saveAndApply(desired)
+                assertFalse(pmFailure.complete)
+                assertTrue(componentCalls > 0)
+                assertEquals(desired, first.store.load()) // A confirmed choice survives a PM failure.
+                assertEquals(desired, reopened.store.load())
+                assertEquals(0, refreshes)
+            }
         } finally {
             base.deleteSharedPreferences(prefix + "task17_icon_appearance")
             base.deleteSharedPreferences(prefix + "launcher_icon")

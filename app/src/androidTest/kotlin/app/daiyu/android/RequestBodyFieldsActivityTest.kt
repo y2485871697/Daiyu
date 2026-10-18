@@ -1,6 +1,6 @@
 package app.daiyu.android
 
-import androidx.compose.ui.semantics.SemanticsActions
+import app.daiyu.android.ui.screens.settings.RetainedRequestBodyFieldApply
 import androidx.compose.ui.test.*
 import org.json.JSONObject
 
@@ -18,6 +18,47 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
         fieldControl("settings-radio:$type").performClick()
         fieldControl("settings-field:字段值").performTextReplacement(value)
         fieldControl("model-body-field-apply")
+    }
+    fun testDismissImeUsesTheOpenFieldDialogWindow() {
+        openModels()
+        reveal("model-body-fields").performClick()
+        fieldControl("model-body-field-add", "model-body-fields-list").performClick()
+        val field = node("settings-field:字段名")
+        field.performClick()
+        val dialogRoot = focusedWindowRoot()
+        mainThread {
+            assertNotSame(activity.window.decorView, dialogRoot)
+            assertFalse(activity.window.decorView.hasWindowFocus())
+            assertTrue(dialogRoot.hasWindowFocus())
+            val focus = checkNotNull(dialogRoot.findFocus())
+            val imm = dialogRoot.context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+                as android.view.inputmethod.InputMethodManager
+            imm.showSoftInput(focus, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        }
+        ui.waitUntil(5_000) {
+            var visible = false
+            instrumentation.runOnMainSync {
+                visible = androidx.core.view.ViewCompat.getRootWindowInsets(dialogRoot)
+                    ?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true
+            }
+            visible
+        }
+        dismissIme()
+        mainThread {
+            assertTrue(dialogRoot.isAttachedToWindow)
+            val insets = checkNotNull(androidx.core.view.ViewCompat.getRootWindowInsets(dialogRoot))
+            assertFalse(insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()))
+        }
+        dismissIme() // Already hidden in the same Dialog remains a valid no-op.
+        mainThread {
+            assertTrue(dialogRoot.isAttachedToWindow)
+            assertFalse(checkNotNull(androidx.core.view.ViewCompat.getRootWindowInsets(dialogRoot))
+                .isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()))
+        }
+        field.assertExists()
+        assertSame(dialogRoot, focusedWindowRoot())
+        fieldControl("model-body-field-apply").assertExists()
+        assertEquals(0, fixture.opens.get())
     }
     fun testTypedFieldEditsOnlyDraftThenPersistsThroughTheExistingSave() {
         val before = fixture.settings.load()
@@ -40,7 +81,7 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
     fun testPausedFieldApplyCapabilityCannotChangeTheReopenedDraftOrSave() {
         val before = fixture.settings.load()
         openModels(); beginField("metadata", "对象", """{"marker":true}""")
-        val apply = checkNotNull(node("model-body-field-apply").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val apply = node("model-body-field-apply").fetchSemanticsNode().config[RetainedRequestBodyFieldApply]
         realPauseResume(activity, atPause = { apply() })
         mainThread { apply() }
         assertEquals(before, fixture.settings.load())

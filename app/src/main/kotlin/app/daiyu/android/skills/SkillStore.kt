@@ -19,6 +19,8 @@ class SkillConflict(val skillName: String, val currentRevision: String?) : Illeg
 /** Publication succeeded; callers must not retry the write or describe it as rolled back. */
 class SkillCleanupPending(val installedSkills: List<InstalledSkill>, cause: Throwable) : IllegalStateException("skill_cleanup_pending", cause)
 
+class SkillRemovalCleanupPending(val removedSkill: InstalledSkill, cause: Throwable) : IllegalStateException("skill_removal_cleanup_pending", cause)
+
 /** Dedicated app-private store; never points at the repository's own skills directory. */
 class SkillStore(private val root: File, builtinNames: Set<String> = emptySet()) {
     private val builtinNames = builtinNames.toSet()
@@ -116,6 +118,42 @@ class SkillStore(private val root: File, builtinNames: Set<String> = emptySet())
         require(bytes.size <= MAX_FILE_BYTES) { "metadata_too_large" }
         SkillFiles.atomic(file, bytes)
         info.copy(enabled = enabled)
+    }
+    /** Exact revision removal shares the installation journal and crash-recovery rules. */
+    fun remove(name: String, expectedRevision: String): InstalledSkill = access {
+        val previous = infoLocked(name)
+        if (previous == null || previous.revision != expectedRevision) throw SkillConflict(name, previous?.revision)
+        val txn = File(root, ".txn-${UUID.randomUUID()}")
+        val journalFile = File(root, ".transaction.json")
+        var committed = false
+        try {
+            check(txn.mkdir())
+            check(File(txn, "stage").mkdir())
+            val backup = File(txn, "backup"); check(backup.mkdir())
+            transactionCheckpoint("before_journal")
+            val entries = JSONArray().put(JSONObject().put("name", name).put("had_previous", true))
+            val journal = JSONObject().put("transaction", txn.name).put("entries", entries).put("committed", false)
+            SkillFiles.atomic(journalFile, journal.toString().toByteArray(Charsets.UTF_8))
+            SkillFiles.move(File(installed, name), File(backup, name))
+            transactionCheckpoint("after_backup")
+            transactionCheckpoint("before_commit")
+            journal.put("committed", true)
+            SkillFiles.atomic(journalFile, journal.toString().toByteArray(Charsets.UTF_8))
+            committed = true
+            transactionCheckpoint("after_commit")
+        } catch (failure: Throwable) {
+            if (!committed && (journalFile.exists() || File(root, ".transaction.json.bak").exists())) {
+                try { committed = JSONObject(SkillFiles.text(SkillFiles.readAtomic(journalFile, MAX_FILE_BYTES))).getBoolean("committed") }
+                catch (checkFailure: Throwable) { failure.addSuppressed(checkFailure); throw failure }
+            }
+            if (committed) throw SkillRemovalCleanupPending(previous, failure)
+            try { if (journalFile.exists() || File(root, ".transaction.json.bak").exists()) recoverLocked() else SkillFiles.remove(txn) }
+            catch (rollbackFailure: Throwable) { failure.addSuppressed(rollbackFailure) }
+            throw failure
+        }
+        try { transactionCheckpoint("before_cleanup"); recoverLocked() }
+        catch (failure: Throwable) { throw SkillRemovalCleanupPending(previous, failure) }
+        previous
     }
     /** Missing expected revision means create-only. Replacement requires the exact current revision. */
     fun install(inputBundles: List<SkillBundle>, expectedRevisions: Map<String, String> = emptyMap(), expectedIncomingRevisions: Map<String, String>? = null): List<InstalledSkill> = access {

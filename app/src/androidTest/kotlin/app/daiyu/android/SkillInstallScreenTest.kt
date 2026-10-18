@@ -84,6 +84,41 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
         node("skills-confirm-install").assertDoesNotExist()
     }
 
+    fun testRemovalConfirmationCancelAndReopenPersistThroughRealScreen() {
+        val old = skills.user.install(listOf(skills.oldBundle())).single()
+        show()
+        reveal("skill-row:user:demo", "技能").performClick()
+        node("skill-remove:user:demo").performClick()
+        ready("skills-confirm-remove")
+        assertEquals(old, skills.user.list().single())
+        ui.onNodeWithText("取消").performClick()
+        node("skills-confirm-remove").assertDoesNotExist()
+        assertEquals(old, skills.user.list().single())
+        reveal("skill-row:user:demo", "技能").performClick()
+        node("skill-remove:user:demo").performClick()
+        ready("skills-confirm-remove")
+        node("skills-confirm-remove").performClick()
+        ui.waitUntil(10_000) {
+            ui.onAllNodesWithText("技能已删除", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        assertTrue(skills.user.list().isEmpty())
+        node("skill-row:user:demo").assertDoesNotExist()
+        mainThread { visible.value = false }
+        ui.waitForIdle()
+        mainThread { visible.value = true }
+        ready("skills-global")
+        node("skill-row:user:demo").assertDoesNotExist()
+        assertTrue(skills.manager.snapshot().entries.isEmpty())
+    }
+
+    fun testBuiltinDetailsDoNotOfferUserRemoval() {
+        val old = skills.builtin.install(listOf(skills.oldBundle())).single()
+        show()
+        reveal("skill-row:builtin:demo", "技能").performClick()
+        node("skill-remove:builtin:demo").assertDoesNotExist()
+        assertEquals(old, skills.builtin.list().single())
+    }
+
     fun testIncompatiblePreviewShowsOriginalReasonAndDisablesConfirmation() {
         skills.content = "---\nname: demo\ndescription: Install test\nmetadata:\n  runtime: android-a11y-cli\n---\nPortable-looking body\n".toByteArray()
         show()
@@ -178,6 +213,75 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
             worker.drain()
             deliver()
         }
+    }
+
+    private fun ControlledPage.prepareRemoval(): SkillManagement.Removal {
+        mainThread { controller.refresh() }
+        finishNext()
+        var entry: SkillManagement.Entry? = null
+        mainThread { entry = controller.state!!.entries.single { it.id == "user:demo" } }
+        mainThread { controller.prepareRemoval(checkNotNull(entry)) }
+        finishNext()
+        var removal: SkillManagement.Removal? = null
+        mainThread { removal = controller.removal }
+        return checkNotNull(removal)
+    }
+
+    fun testCanceledRemovalCannotReuseOldConfirmationAndDuplicateRunsOnce() {
+        val old = skills.user.install(listOf(skills.oldBundle())).single()
+        val page = ControlledPage()
+        try {
+            val canceled = page.prepareRemoval()
+            mainThread { page.controller.cancelRemoval(); page.controller.remove(canceled) }
+            page.worker.drain(); page.deliver()
+            assertEquals(old, skills.user.list().single())
+            val approved = page.prepareRemoval()
+            mainThread {
+                page.controller.remove(approved); page.controller.remove(approved)
+                assertEquals(1, page.worker.pending)
+            }
+            page.finishNext()
+            assertTrue(skills.user.list().isEmpty())
+            mainThread { page.controller.remove(approved); assertNotNull(page.controller.installMessage) }
+            assertEquals(0, page.worker.pending)
+        } finally { page.close() }
+    }
+
+    fun testLeavingRejectsQueuedRemovalBeforeAdmission() {
+        val old = skills.user.install(listOf(skills.oldBundle())).single()
+        val page = ControlledPage()
+        val approved = page.prepareRemoval()
+        mainThread { page.controller.remove(approved); page.controller.dispose() }
+        page.worker.drain(); page.deliver()
+        assertEquals(old, skills.user.list().single())
+        mainThread { assertNull(page.controller.installMessage) }
+    }
+
+    fun testAdmittedRemovalFinishesOnceAfterLeaveWithoutLatePageUpdate() {
+        skills.user.install(listOf(skills.oldBundle()))
+        val page = ControlledPage()
+        val approved = page.prepareRemoval()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val failure = AtomicReference<Throwable?>()
+        skills.user.transactionCheckpoint = { boundary ->
+            if (boundary == "after_backup") {
+                entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
+            }
+        }
+        mainThread { page.controller.remove(approved) }
+        val thread = Thread {
+            try { page.worker.runNext() } catch (problem: Throwable) { failure.set(problem) }
+        }.apply { start() }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            mainThread { page.controller.dispose(); page.controller.remove(approved) }
+        } finally { release.countDown(); thread.join(5_000); skills.user.transactionCheckpoint = {} }
+        assertFalse(thread.isAlive)
+        failure.get()?.let { throw it }
+        page.worker.drain(); page.deliver()
+        assertTrue(skills.user.list().isEmpty())
+        mainThread { assertNull(page.controller.installMessage) }
     }
 
     fun testLateInspectionAfterLeavingCannotPopulateEitherPage() {

@@ -34,6 +34,52 @@ class SkillManagement private constructor(private val registry: SkillToolRegistr
         }
     }
 
+    class Removal internal constructor(val entry: Entry)
+    sealed class RemovalResult {
+        data class Removed(val entry: Entry, val cleanupPending: Boolean = false) : RemovalResult()
+        data class Rejected(val code: String) : RemovalResult()
+        object Unknown : RemovalResult()
+    }
+    private var pendingRemoval: Removal? = null
+
+    fun previewRemoval(id: String, revision: String): Removal {
+        workerOnly()
+        return synchronized(this) {
+            pendingRemoval = null
+            val state = registry.managementState()
+            check(!state.entriesUnavailable) { "skills_unavailable" }
+            val entry = state.entries.singleOrNull { it.id == id } ?: throw SkillConflict(id, null)
+            if (entry.skill.revision != revision) throw SkillConflict(id, entry.skill.revision)
+            if (entry.builtin) throw SkillToolRegistry.ManagementBuiltinConflict()
+            Removal(entry).also { pendingRemoval = it }
+        }
+    }
+
+    fun remove(removal: Removal): RemovalResult {
+        workerOnly()
+        return synchronized(this) {
+            if (pendingRemoval !== removal) return@synchronized RemovalResult.Rejected("stale_removal")
+            pendingRemoval = null
+            try {
+                registry.removeForManagement(removal.entry.id, removal.entry.skill.revision)
+                RemovalResult.Removed(removal.entry)
+            } catch (_: SkillRemovalCleanupPending) {
+                RemovalResult.Removed(removal.entry, cleanupPending = true)
+            } catch (_: SkillToolRegistry.ManagementBuiltinConflict) {
+                RemovalResult.Rejected("builtin_conflict")
+            } catch (_: SkillConflict) {
+                RemovalResult.Rejected("skill_conflict")
+            } catch (_: Exception) {
+                RemovalResult.Unknown
+            }
+        }
+    }
+
+    fun cancelRemoval() {
+        workerOnly()
+        synchronized(this) { pendingRemoval = null }
+    }
+
     data class Candidate(val directory: String, val name: String, val description: String, val incomingRevision: String)
 
     /** Opaque page-visit objects: callers can display them, but cannot mint approval inputs. */

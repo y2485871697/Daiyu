@@ -426,7 +426,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         assertTrue(SkillToolRegistry(fixture.application).snapshot().skills.isEmpty())
     }
     fun testDamagedSkillListStillAllowsGlobalOffAndDefaultNextCaptureDoesNotReadIt() {
-        val blocked = File(directory, "agent-builtin-skills-v1/installed")
+        val blocked = File(fixture.application.filesDir, "agent-builtin-skills-v1/installed")
         check(blocked.parentFile!!.mkdirs()); blocked.writeText("not a directory"); openSkills()
         skillSwitch("skills-global", on = true)
         ui.onNodeWithText("技能列表暂不可用", substring = true).assertExists()

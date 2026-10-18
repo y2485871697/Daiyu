@@ -20,6 +20,67 @@ class SkillManagementTest : InstrumentationTestCase() {
     private fun bundle(text: String = "instructions") = SkillBundle(mapOf("SKILL.md" to
         "---\nname: sample\ndescription: Management sample\n---\n$text\n".toByteArray()))
 
+    fun testRemovalIsExactOriginOneShotAndCancelCannotDelete() = fixture { builtin, user, _, manager ->
+        val appSkill = builtin.install(listOf(bundle("builtin"))).single()
+        val userSkill = user.install(listOf(bundle())).single()
+        val canceled = manager.previewRemoval("user:sample", userSkill.revision)
+        manager.cancelRemoval()
+        assertTrue(manager.remove(canceled) is SkillManagement.RemovalResult.Rejected)
+        assertEquals(userSkill, user.list().single())
+        val approved = manager.previewRemoval("user:sample", userSkill.revision)
+        assertEquals("user:sample", approved.entry.id)
+        assertTrue(manager.remove(approved) is SkillManagement.RemovalResult.Removed)
+        assertTrue(manager.remove(approved) is SkillManagement.RemovalResult.Rejected)
+        assertTrue(user.list().isEmpty())
+        assertEquals(appSkill, builtin.list().single())
+    }
+    fun testManagementCannotOfferOrSubmitBuiltinRemoval() = fixture { builtin, _, registry, manager ->
+        val old = builtin.install(listOf(bundle("builtin"))).single()
+        try { manager.previewRemoval("builtin:sample", old.revision); fail("builtin preview accepted") }
+        catch (_: SkillToolRegistry.ManagementBuiltinConflict) { }
+        try { registry.removeForManagement("builtin:sample", old.revision); fail("builtin deletion accepted") }
+        catch (_: SkillToolRegistry.ManagementBuiltinConflict) { }
+        assertEquals(old, builtin.list().single())
+        assertTrue(builtin.snapshot().skills.single().instructions.contains("builtin"))
+    }
+
+    fun testRemovalRejectsReplacementAfterPreviewWithoutDeletingIt() = fixture { _, user, _, manager ->
+        val old = user.install(listOf(bundle())).single()
+        val approved = manager.previewRemoval("user:sample", old.revision)
+        val fresh = user.install(listOf(bundle("replacement")), mapOf("sample" to old.revision)).single()
+        assertEquals(SkillManagement.RemovalResult.Rejected("skill_conflict"), manager.remove(approved))
+        assertEquals(fresh, user.list().single())
+    }
+    fun testRemovalWhileGlobalAndIndividualOffPreservesCapturedBodyAndNextCapture() = fixture { _, user, registry, manager ->
+        val old = user.install(listOf(bundle())).single()
+        val owner = TaskAuthorization("removal-snapshot", "running")
+        val capabilities = SessionCapabilities(owner.sessionId, setOf(SkillRunSession.READ))
+        val run = registry.captureForRun(capabilities, owner)
+        try {
+            val body = run.read(owner, "user:sample", old.revision)
+            manager.setEnabled("user:sample", false, old.revision)
+            manager.setGlobalEnabled(false)
+            val approved = manager.previewRemoval("user:sample", old.revision)
+            assertTrue(manager.remove(approved) is SkillManagement.RemovalResult.Removed)
+            assertFalse(registry.enabled)
+            assertTrue(user.list().isEmpty())
+            assertEquals(body, run.read(owner, "user:sample", old.revision))
+            assertEquals("user:sample", run.index(owner).single().id)
+            manager.setGlobalEnabled(true)
+            val next = registry.captureForRun(capabilities, owner)
+            try { assertTrue(next.index(owner).isEmpty()) } finally { next.close() }
+        } finally { run.close() }
+    }
+
+    fun testRemovalCleanupPendingIsCommittedResult() = fixture { _, user, _, manager ->
+        val old = user.install(listOf(bundle())).single()
+        val approved = manager.previewRemoval("user:sample", old.revision)
+        user.transactionCheckpoint = { if (it == "after_commit") throw java.io.IOException("injected") }
+        val result = manager.remove(approved) as SkillManagement.RemovalResult.Removed
+        assertTrue(result.cleanupPending)
+        assertTrue(manager.snapshot().entries.isEmpty())
+    }
+
     fun testListIncludesDisabledAndPreservesIndividualSettingAcrossGlobalToggle() = fixture { builtin, user, _, manager ->
         builtin.install(listOf(bundle("builtin")))
         val installed = user.install(listOf(bundle())).single()

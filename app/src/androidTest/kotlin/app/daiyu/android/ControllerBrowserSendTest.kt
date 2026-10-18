@@ -41,7 +41,7 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
     override fun setUp() {
         super.setUp()
         val id = UUID.randomUUID().toString()
-        root = File(instrumentation.targetContext.cacheDir, "browser-parent-$id").apply { mkdirs() }
+        root = File(instrumentation.targetContext.cacheDir, "browser-parent-$id")
         // ContextPreparationTest's private-files pattern, with the actual TextSendTicketTest fixture.
         // applicationContext must stay isolated too: BrowserSettingsStore uses that context.
         isolatedContext = object : ContextWrapper(testContext(instrumentation.targetContext, "browser-parent-$id-")) {
@@ -51,7 +51,7 @@ class ControllerBrowserSendTest : InstrumentationTestCase() {
         fixture = RunControlFixture(isolatedContext,
             onSession = { _, _, context ->
                 sessionOwners.add(context.conversationId); assertNull(context.project)
-            }, beforeOpen = { history -> beforeOpen.get()?.invoke(history) }) {
+            }, beforeOpen = { history -> beforeOpen.get()?.invoke(history) }, filesRoot = root) {
             modelFactories.incrementAndGet()
         }
         assertSame(fixture.application, fixture.application.applicationContext)

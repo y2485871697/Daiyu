@@ -12,7 +12,7 @@ import java.io.File
  */
 class LinuxPtySession private constructor(
     private val session: PtyRunSession,
-    lease: LinuxEnvironmentStore.Lease,
+    lease: AutoCloseable,
 ) : AutoCloseable {
     private val termination = LinuxLeaseUntilExit(lease, session::awaitTermination)
 
@@ -76,6 +76,7 @@ class LinuxPtySession private constructor(
             openSession: (TerminalConfiguration) -> PtyRunSession,
         ): LinuxPtySession {
             val lease = store.acquire(expected)
+            var execution: AutoCloseable? = null
             try {
                 check(owner.environmentId == expected.environmentId && owner.generation == expected.generation) {
                     "linux_pty_owner_generation_mismatch"
@@ -84,14 +85,19 @@ class LinuxPtySession private constructor(
                 check(configuration.linux?.environmentId == "${owner.environmentId}:${owner.generation}") {
                     "linux_pty_owner_generation_mismatch"
                 }
-                return LinuxPtySession(openSession(configuration), lease)
+                execution = lease.claimExecution()
+                return LinuxPtySession(openSession(configuration), execution)
             } catch (failure: PtyStartupFailure) {
                 // Do not close the lease, even if shutdown was requested during startup: neither
                 // that request nor an X frame/EOF proves that the helper Process has terminated.
-                throw LinuxPtyStartupFailure(failure, LinuxPtyStartupCleanup(failure.cleanup, lease))
+                throw LinuxPtyStartupFailure(failure, LinuxPtyStartupCleanup(failure.cleanup, checkNotNull(execution)))
             } catch (failure: Throwable) {
                 // PtyRunSession's launch contract transfers every owned Process via PtyStartupFailure.
-                lease.close()
+                try { (execution ?: lease).close() }
+                catch (settlement: Throwable) {
+                    if (settlement !== failure) failure.addSuppressed(settlement)
+                    throw LinuxPtyStartupFailure(failure, LinuxPtyStartupCleanup.unstarted(execution ?: lease))
+                }
                 throw failure
             }
         }
@@ -100,20 +106,29 @@ class LinuxPtySession private constructor(
 
 /** Ownership transfer on failed launch; catch this before discarding an open() exception. */
 class LinuxPtyStartupFailure internal constructor(
-    cause: PtyStartupFailure,
+    cause: Throwable,
     val cleanup: LinuxPtyStartupCleanup,
 ) : IllegalStateException(cause.message, cause)
 
 /** Keeps the original startup cleanup and generation together, without exposing a raw lease. */
-class LinuxPtyStartupCleanup internal constructor(
-    private val cleanup: PtyStartupCleanup,
-    lease: LinuxEnvironmentStore.Lease,
+class LinuxPtyStartupCleanup private constructor(
+    private val requestShutdown: () -> Unit,
+    waitForExit: (Long) -> Boolean,
+    lease: AutoCloseable,
 ) : AutoCloseable {
-    private val termination = LinuxLeaseUntilExit(lease, cleanup::awaitTermination)
+    internal constructor(cleanup: PtyStartupCleanup, lease: AutoCloseable) :
+        this(cleanup::requestClose, cleanup::awaitTermination, lease)
 
-    fun requestClose() = cleanup.requestClose()
+    private val termination = LinuxLeaseUntilExit(lease, waitForExit)
+
+    fun requestClose() = requestShutdown()
     override fun close() = requestClose()
     fun awaitTermination(timeoutMillis: Long): Boolean = termination.awaitTermination(timeoutMillis)
+
+    companion object {
+        // Only the no-owned-Process exception path may transfer a pin-only cleanup.
+        internal fun unstarted(lease: AutoCloseable) = LinuxPtyStartupCleanup({}, { true }, lease)
+    }
 }
 
 /**

@@ -196,8 +196,8 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             synchronized(job) {
                 job.handle=OwnedProcess(process, pid, start); job.state="dispatched"
             }
-            applyCancellation(job)
             startLogPump(job,process)
+            applyCancellation(job)
             try { saveJob(job) } catch(_:Exception) { job.unknown=true; return dispatchedError(job,"job_metadata_commit_unknown_not_replayed") }
             if(job.cancelRequested) return dispatchedError(job,"session_closed_during_dispatch_unknown")
             if(mode!="sync") return identity(b).put("execution","unknown").put("job_id",id).put("state","dispatched")
@@ -212,6 +212,8 @@ class TerminalRegistry(context: Context) : AutoCloseable {
                 .apply { if(!completed) put("error","timeout_outcome_unknown_not_replayed") }
         } catch(_:Exception) {
             if(job.handle!=null) { job.unknown=true; return dispatchedError(job,"command_delivery_unknown_not_replayed") }
+            // No Process was returned: retain the journal, but allow this original registry to drain.
+            job.state = "start_failed"
             return error("job_preparation_failed_not_dispatched").put("job_id",id)
         } finally {
             applyCancellation(job)
@@ -307,7 +309,6 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     }
     override fun close() {
         synchronized(sessions) {
-            if (closed) return
             closed = true
             sessions.clear()
         }

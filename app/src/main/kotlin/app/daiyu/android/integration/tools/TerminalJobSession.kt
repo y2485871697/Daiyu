@@ -60,6 +60,9 @@ internal interface TerminalJobTransport : AutoCloseable {
     fun awaitOrdinaryTermination(timeoutMillis: Long): Boolean
 }
 
+/** Factory failed before any process or probe was started; unknown factories must not use this. */
+internal class TerminalJobNotStarted(cause: Throwable) : IllegalStateException(cause.message, cause)
+
 /** Retained by Controller even after catalog drain: Android daemon belongs to conversation, not run.
  * No restoration of live handles/authority across app restart. All blocking work is worker-only. */
 internal class TerminalJobSession private constructor(
@@ -129,7 +132,10 @@ internal class TerminalJobSession private constructor(
         }
         var factoryEntered = false
         try {
-            (plan.launch as? TerminalPtyLaunch.Linux)?.revalidate()
+            (plan.launch as? TerminalPtyLaunch.Linux)?.let { launch ->
+                launch.revalidate()
+                launch.claimCommandExecution()
+            }
             factoryEntered = true
             val transport = create()
             val late = synchronized(lock) { backend = transport; closed }
@@ -140,9 +146,12 @@ internal class TerminalJobSession private constructor(
                 .put("session_id", opened.getString("session_id")).put("command", plan.command).put("mode", plan.mode))
             synchronized(lock) { job = raw.optString("job_id").takeIf { it.matches(Regex("[a-f0-9-]{36}")) } }
             return receipt(raw)
+        } catch (failure: TerminalJobNotStarted) {
+            if (failure.cause is InterruptedException) Thread.currentThread().interrupt()
+            return ExecutionReceipt.NotExecuted("terminal_job_backend_not_started")
         } catch (failure: Exception) {
             if (failure is InterruptedException) Thread.currentThread().interrupt()
-            synchronized(lock) { if (factoryEntered && backend == null) creationUnconfirmed = true }
+            synchronized(lock) { if (factoryEntered && backend == null && failure !is TerminalJobNotStarted) creationUnconfirmed = true }
             markUnknown()
             return ExecutionReceipt.Unknown("terminal_job_start_unconfirmed_no_resend")
         } finally { synchronized(lock) { active = false } }
@@ -198,13 +207,17 @@ internal class TerminalJobSession private constructor(
         if (stopping != null && stopping !== Thread.currentThread()) stopping.join(timeoutMillis)
         val owned = synchronized(lock) {
             if (drained) return true
-            if (!closed || active || stopPending != 0 || stopFailed || creationUnconfirmed || joining) return false
+            if (!closed || active || stopPending != 0 || creationUnconfirmed || joining) return false
             joining = true
             backend
         }
         var complete = false
         try {
             if (owned != null) {
+                if (synchronized(lock) { stopFailed }) {
+                    owned.close()
+                    synchronized(lock) { stopFailed = false }
+                }
                 val remaining = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
                 if (remaining <= 0 || !owned.awaitOrdinaryTermination(remaining.coerceAtMost(30000))) return false
             }
@@ -225,10 +238,15 @@ internal class TerminalJobSession private constructor(
         const val READ = "terminal_job_read"
         fun approve(context: Context, plan: TerminalJobPlan, authorization: TaskAuthorization): TerminalJobSession =
             approved(plan, authorization) {
-                val registry = TerminalRegistry(context)
+                val registry = try { TerminalRegistry(context) }
+                catch (failure: Exception) { throw TerminalJobNotStarted(failure) }
                 // retain even if configure throws: no command has been started yet.
                 try { registry.configure(plan.sessionId, plan.configuration, plan.conversationId.value) }
-                catch (failure: Throwable) { registry.close(); throw failure }
+                catch (failure: Throwable) {
+                    try { registry.close() }
+                    catch (cleanup: Throwable) { if (cleanup !== failure) failure.addSuppressed(cleanup) }
+                    throw TerminalJobNotStarted(failure)
+                }
                 object : TerminalJobTransport {
                     override fun execute(name: String, arguments: JSONObject) = registry.execute(name, arguments)
                     override fun inspect(id: String) = registry.inspectJob(id)

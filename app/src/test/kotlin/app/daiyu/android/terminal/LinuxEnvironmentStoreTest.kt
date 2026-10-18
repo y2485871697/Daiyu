@@ -100,4 +100,19 @@ class LinuxEnvironmentStoreTest : TestCase() {
         assertEquals("next",store.status().getString("generation"))
     }
 
+    fun testColdStartUnknownExecutionBlocksNewScopeAndSelectionReplacement() = fixture { root, spec ->
+        val directory = File(root, "selection")
+        val store = LinuxEnvironmentStore(directory).apply { select(spec) }
+        assertEquals("CLAIMED", runLinuxPinChild(directory, "claim"))
+        val previous = File(directory, "selected-linux.json").readBytes()
+        assertEquals("RUNNER_UNKNOWN", store.status().getString("state"))
+        assertEquals("linux_runner_generation_unknown", store.status().getString("error"))
+        for (attempt in listOf<() -> Unit>({ store.acquire().close() },
+            { store.select(spec.copy(generation = "new-generation")) }, { store.clearSelection() })) {
+            try { attempt(); fail("old unknown runner must block new scopes and selection changes") }
+            catch (expected: IllegalStateException) { assertEquals("linux_runner_generation_unknown", expected.message) }
+        }
+        assertTrue(previous.contentEquals(File(directory, "selected-linux.json").readBytes()))
+    }
+
 }

@@ -46,6 +46,7 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
         this(directory, directorySync, fileKey, null)
     constructor(directory: File, chrootRoot: File) : this(directory, TerminalDurability::syncDirectory, chrootRoot = chrootRoot)
     private val selection = File(directory, "selected-linux.json")
+    private val runnerPins = LinuxRunnerGenerationPins(directory, fileKey, directorySync)
     private val shared = synchronized(stores) {
         stores[directory.canonicalPath] ?: run {
             check(stores.size < 128) { "linux_environment_store_limit" }
@@ -64,16 +65,22 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
         validate(frozen)
         val bytes = encode(frozen).toString().toByteArray(Charsets.UTF_8)
         require(bytes.size <= 32768) { "linux_installation_metadata_limit" }
-        TerminalDurability.replace(selection, bytes, directorySync = directorySync)
+        runnerPins.admitted(requireEmpty = true) {
+            TerminalDurability.replace(selection, bytes, directorySync = directorySync)
+        }
     }
 
     fun clearSelection() = synchronized(control) {
         check(shared.leases == 0) { "linux_environment_in_use" }
         // Persist an explicit empty choice rather than an un-fsynced unlink.
-        TerminalDurability.replace(selection, JSONObject().put("version", 2).toString().toByteArray(Charsets.UTF_8), directorySync = directorySync)
+        runnerPins.admitted(requireEmpty = true) {
+            TerminalDurability.replace(selection, JSONObject().put("version", 2).toString().toByteArray(Charsets.UTF_8), directorySync = directorySync)
+        }
     }
 
     fun status(): JSONObject = synchronized(control) {
+        try { runnerPins.admitted { } }
+        catch (_: Exception) { return@synchronized state("RUNNER_UNKNOWN").put("error", "linux_runner_generation_unknown") }
         if (!selection.exists()) return@synchronized state("NOT_SELECTED")
         try {
             val installation = load() ?: return@synchronized state("NOT_SELECTED")
@@ -92,7 +99,7 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
 
     fun acquire(expected: LinuxGenerationRef): Lease = acquireSelected(expected)
 
-    private fun acquireSelected(expected: LinuxGenerationRef?): Lease = synchronized(control) {
+    private fun acquireSelected(expected: LinuxGenerationRef?): Lease = synchronized(control) { runnerPins.admitted {
         val installation = load() ?: throw IllegalStateException("linux_environment_not_selected")
         check(expected == null || expected == LinuxGenerationRef(installation.environmentId, installation.generation)) {
             "linux_generation_mismatch"
@@ -100,7 +107,7 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
         val identities = validate(installation)
         shared.leases++
         Lease(installation, identities)
-    }
+    } }
 
     inner class Lease internal constructor(private val installation: LinuxInstallation, private val identities: List<String>) : AutoCloseable {
         private var closed = false
@@ -144,6 +151,14 @@ class LinuxEnvironmentStore internal constructor(private val directory: File,
             require(hostWorkingDirectory.isAbsolute && hostWorkingDirectory.isDirectory)
             return TerminalConfiguration(backend = "linux", root = false,
                 workingDirectory = hostWorkingDirectory, linux = backend(tempDirectory))
+        }
+        internal fun claimExecution(): AutoCloseable = synchronized(control) {
+            check(!closed) { "linux_environment_lease_closed" }
+            val pin = runnerPins.claim(LinuxGenerationRef(installation.environmentId, installation.generation), identities) {
+                check(load() == installation) { "linux_selection_changed" }
+                check(validate(installation) == identities) { "linux_installation_changed" }
+            }
+            AutoCloseable { pin.settleAfterTermination(); close() }
         }
         override fun close() = synchronized(control) {
             if (!closed) { closed = true; shared.leases-- }

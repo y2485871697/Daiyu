@@ -78,6 +78,8 @@ class LinuxPtySessionTest {
         var commitFailure = false
         var constructionFailure = false
         var startFailure: IOException? = null
+        var failSettlementOnStartFailure = false
+        var settlementFailure = false
         var configuration: TerminalConfiguration? = null
         var builder: ProcessBuilder? = null
 
@@ -86,13 +88,21 @@ class LinuxPtySessionTest {
             File(rootfs, "bin/sh").writeText("test-only guest shell; not a real rootfs")
             installation = LinuxInstallation("fixture", "env", "one", rootfs, proot, hash(proot),
                 loader, hash(loader), "/workspace", mapOf(mount.path to "/workspace/shared"))
-            store = LinuxEnvironmentStore(selection).apply { select(installation) }
+            store = LinuxEnvironmentStore(selection, directorySync = {
+                if (settlementFailure) throw IOException("pin settlement sync failed")
+                TerminalDurability.syncDirectory(it)
+            }).apply { select(installation) }
             other = LinuxEnvironmentStore(selection)
         }
 
         fun open(owner: PtyRunOwner = this.owner, expected: LinuxGenerationRef = this.expected): LinuxPtySession =
             LinuxPtySession.openConfigured(owner, store, expected, temp, cwd) { config ->
+                assertTrue(selection.listFiles()!!.any { it.name.startsWith(".runner-pin-") })
                 configuration = config
+                if (failSettlementOnStartFailure) {
+                    settlementFailure = true
+                    throw checkNotNull(startFailure)
+                }
                 val backend = checkNotNull(config.linux)
                 val session = PtySession.openBound(helper, backend.shellArgv,
                     backend.environment + config.environment, checkNotNull(config.workingDirectory),
@@ -125,6 +135,7 @@ class LinuxPtySessionTest {
         }
 
         fun assertReleased() {
+            assertFalse(selection.listFiles()!!.any { it.name.startsWith(".runner-pin-") })
             other.select(installation.copy(generation = "two"))
             assertEquals("two", store.status().getString("generation"))
         }
@@ -232,6 +243,22 @@ class LinuxPtySessionTest {
         assertTrue(f.process.destroyCalls >= 2)
         f.process.finish()
         assertTrue(session.awaitTermination(1000))
+        f.assertReleased()
+    }
+
+    @Test fun unstartedFailureTransfersOriginalPinWhenSettlementMustRetry() = fixture { f ->
+        val startFailure = IOException("no process was started")
+        f.startFailure = startFailure
+        f.failSettlementOnStartFailure = true
+        val failure = f.startupFailure()
+        assertSame(startFailure, failure.cause)
+        assertEquals("RUNNER_UNKNOWN", f.store.status().getString("state"))
+        failure.cleanup.requestClose()
+        try { failure.cleanup.awaitTermination(1000); fail("sync still fails") }
+        catch (_: IOException) { }
+        f.settlementFailure = false
+        assertTrue(failure.cleanup.awaitTermination(1000))
+        assertTrue(failure.cleanup.awaitTermination(1000))
         f.assertReleased()
     }
 

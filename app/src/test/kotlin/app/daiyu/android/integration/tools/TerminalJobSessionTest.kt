@@ -4,6 +4,7 @@ import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.*
 import app.daiyu.android.skills.SkillRunSession
+import app.daiyu.android.terminal.*
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -52,8 +53,8 @@ class TerminalJobSessionTest {
     }
     private inner class Fixture(val backend: Backend = Backend(), mode: String = "async",
         store: ToolLedgerStore = InMemoryToolLedgerStore(), enabled: Boolean = true,
-        create: (() -> TerminalJobTransport)? = null) {
-        val plan = plan(mode)
+        create: (() -> TerminalJobTransport)? = null, suppliedPlan: TerminalJobPlan? = null) {
+        val plan = suppliedPlan ?: plan(mode)
         val token = TaskAuthorization(plan.sessionId, plan.runId.value, setOf(plan.effect))
         val capabilities = SessionCapabilities(plan.sessionId, if (enabled) setOf(TerminalJobSession.CAPABILITY) else emptySet())
         val creates = AtomicInteger()
@@ -194,4 +195,82 @@ class TerminalJobSessionTest {
         assertTrue(backend.calls.isEmpty())
         assertTrue(backend.closes.get() > 0)
     }
+    private fun linuxJob(test: (File, LinuxEnvironmentStore, TerminalJobPlan) -> Unit) {
+        val root = java.nio.file.Files.createTempDirectory("linux-fixed-job-").toFile()
+        val rootfs = File(root, "rootfs").apply { mkdirs() }
+        File(rootfs, "bin").mkdirs(); File(rootfs, "bin/sh").writeText("test-only; never executed")
+        val proot = File(root, "proot").apply { writeText("test-only; never executed"); check(setExecutable(true)) }
+        val loader = File(root, "loader").apply { writeText("test-only loader") }
+        fun digest(file: File) = java.security.MessageDigest.getInstance("SHA-256").digest(file.readBytes())
+            .joinToString("") { "%02x".format(it) }
+        val spec = LinuxInstallation("fixture", "environment", "generation", rootfs, proot, digest(proot), loader, digest(loader))
+        val store = LinuxEnvironmentStore(File(root, "selection")).apply { select(spec) }
+        val launch = TerminalPtyLaunch.Linux.freeze(store, LinuxGenerationRef("environment", "generation"), root, root)
+        try { test(root, store, TerminalJobPlan(message.conversationId, message.runId, launch, "printf 'fixed'", "async")) }
+        finally { root.deleteRecursively() }
+    }
+    private fun pinCount(root: File) = File(root, "selection").listFiles()!!.count { it.name.startsWith(".runner-pin-") }
+
+    @Test fun linuxFixedCommandPinsBeforeFactoryAndOnlyOriginalOrdinaryDrainSettlesIt() = linuxJob { root, store, plan ->
+        val backend = Backend().apply { exited = false }
+        val f = Fixture(backend, suppliedPlan = plan, create = {
+            assertEquals(1, pinCount(root))
+            assertEquals("DENIED", runLinuxPinChild(File(root, "selection"), "admit"))
+            backend
+        })
+        assertEquals(0, pinCount(root))
+        assertTrue(f.call() is DispatchOutcome.Unknown)
+        assertEquals(1, pinCount(root))
+        assertTrue(f.close() is RunCatalogCloseResult.Unknown)
+        assertEquals(1, pinCount(root))
+        backend.exited = true
+        assertTrue(f.session.awaitCloseOnWorker(1000))
+        assertEquals(0, pinCount(root))
+        store.clearSelection()
+    }
+
+    @Test fun unstartedLinuxJobClosesOnlyItsPreviewLeaseWithoutCreatingAPin() = linuxJob { root, store, plan ->
+        val f = Fixture(suppliedPlan = plan)
+        assertEquals(0, pinCount(root)); assertEquals(0, f.creates.get())
+        assertEquals(RunCatalogCloseResult.Drained, f.close())
+        assertEquals(0, pinCount(root)); store.clearSelection()
+    }
+
+    @Test fun foreignPinAfterApprovalPreventsEvenTheCommandBackendFactory() = linuxJob { root, _, plan ->
+        val f = Fixture(suppliedPlan = plan)
+        assertEquals("CLAIMED", runLinuxPinChild(File(root, "selection"), "claim"))
+        assertTrue(f.call() is DispatchOutcome.Unknown)
+        assertEquals(0, f.creates.get()); assertTrue(f.backend.calls.isEmpty())
+        assertEquals(RunCatalogCloseResult.Drained, f.close())
+        assertEquals(1, pinCount(root))
+    }
+
+    @Test fun knownUnstartedFactoryFailureReleasesOnlyAfterOriginalDrain() = linuxJob { root, store, plan ->
+        val f = Fixture(suppliedPlan = plan, create = {
+            assertEquals(1, pinCount(root))
+            throw TerminalJobNotStarted(java.io.IOException("configuration failed before any process"))
+        })
+        assertTrue(f.call() is DispatchOutcome.NotExecuted)
+        assertEquals(1, pinCount(root))
+        assertEquals(RunCatalogCloseResult.Drained, f.close())
+        assertEquals(0, pinCount(root)); store.clearSelection()
+    }
+
+    @Test fun failedCloseKeepsOriginalPinAndExplicitDrainCanRetry() = linuxJob { root, store, plan ->
+        var allowClose = false
+        val backend = object : Backend() {
+            override fun close() {
+                super.close()
+                if (!allowClose) throw java.io.IOException("close failed")
+            }
+        }
+        val f = Fixture(backend, suppliedPlan = plan)
+        assertTrue(f.call() is DispatchOutcome.Unknown)
+        assertEquals(RunCatalogCloseResult.Unknown("terminal_job_drain_unconfirmed"), f.close())
+        assertEquals(1, pinCount(root))
+        allowClose = true
+        assertTrue(f.session.awaitCloseOnWorker(1000))
+        assertEquals(0, pinCount(root)); store.clearSelection()
+    }
+
 }

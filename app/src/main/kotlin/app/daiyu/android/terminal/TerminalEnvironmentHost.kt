@@ -403,6 +403,8 @@ internal class TerminalTrustedLinuxSelection(
                     TerminalLinuxState("FILES_READY", reference, trusted.distribution, choices)
                 }
             }
+        } catch (_: LinuxRunnerGenerationUnknown) {
+            TerminalLinuxState("RUNNER_UNKNOWN", choices = choices, error = "linux_runner_generation_unknown")
         } catch (_: Exception) {
             TerminalLinuxState("BROKEN", choices = choices, error = "linux_trusted_installation_mismatch")
         }

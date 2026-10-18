@@ -50,10 +50,12 @@ private fun ModelSettings.providerDraft() = ModelSettingsDraftUi(protocol = prot
     responsesPath = responsesPath, apiKey = apiKey, model = model, batteryEnabled = batteryEnabled,
     deviceStatusEnabled = deviceStatusEnabled, customBody = requestOptions.customBody,
     speedMode = requestOptions.speedMode, codex = requestOptions.codex,
-    anthropicVersion = requestOptions.anthropicVersion.orEmpty())
+    anthropicVersion = requestOptions.anthropicVersion.orEmpty(),
+    customHeaders = if (customHeaders.isEmpty) "" else customHeaders.encode())
 private fun ModelSettingsDraftUi.providerSettings(base: ModelSettings) = base.copy(endpoint = endpoint.trim(),
     responsesPath = responsesPath.trim(), model = model.trim(), apiKey = apiKey, protocol = protocol,
     batteryEnabled = batteryEnabled, deviceStatusEnabled = deviceStatusEnabled,
+    customHeaders = app.daiyu.android.model.ProviderHeaders.parse(customHeaders),
     requestOptions = base.requestOptions.copy(customBody = customBody, speedMode = speedMode, codex = codex,
         anthropicVersion = anthropicVersion.takeIf { it.isNotEmpty() }))
 
@@ -131,7 +133,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             result.fold(onSuccess = { loaded ->
                 if (restore != null && restore.editor == loaded.editor && restore.editing == loaded.editing &&
                     restore.configurationRevision == loaded.configurationRevision) {
-                    loaded.draft = restore.draft.copy(protocolChangeAuthorized = false, requestOptionsReplacementAuthorized = false)
+                    loaded.draft = restore.draft.copy(protocolChangeAuthorized = false, requestOptionsReplacementAuthorized = false, headersReplacementAuthorized = false)
                 }
                 pausedDraft = null
                 detail = loaded
@@ -217,6 +219,9 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     require(!d.editing.requestOptionsUnavailable || submitted.requestOptionsReplacementAuthorized) {
                         "请求策略已损坏；替换或重置需要明确确认"
                     }
+                    require(!d.editing.headersUnavailable || submitted.headersReplacementAuthorized) {
+                        "原请求头不可用；替换或清除需要明确确认"
+                    }
                     submitted.providerSettings(saved).also { it.validate() }
                 }
                 if (value.isFailure) {
@@ -225,7 +230,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     val ticket = Any(); busy = ticket
                     try {
                         controller.saveProviderSettings(d.editor, value.getOrThrow(), d.editing,
-                            submitted.protocolChangeAuthorized, submitted.requestOptionsReplacementAuthorized, p.save) { success ->
+                            submitted.protocolChangeAuthorized, submitted.requestOptionsReplacementAuthorized, p.save,
+                            headersReplacementAuthorized = submitted.headersReplacementAuthorized) { success ->
                             if (busy === ticket) busy = null
                             if (live()) {
                                 if (success && initialSlot == ProviderRegistry.PRIMARY) {
@@ -239,9 +245,16 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             }
         }
         val change: (ModelSettingsDraftUi) -> Unit = { if (live() && enabled) d.draft = it }
+        fun connectionSettings(value: ModelSettingsDraftUi): ModelSettings? = try { value.providerSettings(saved) }
+            catch (_: IllegalArgumentException) { notice = "自定义请求头无效，请检查后重试。"; null }
         val connection: ModelConnectionTester = { value, requestCancelled, deliver ->
-            if (!live() || !enabled || requestCancelled() || d.draft !== value) false else controller.testModelConnection(value.providerSettings(saved),
-                { cancelled() || requestCancelled() || d.draft !== value }) { if (live() && !requestCancelled() && d.draft === value) deliver(it) }
+            if (!live() || !enabled || requestCancelled() || d.draft !== value) false
+            else connectionSettings(value)?.let { settings ->
+                controller.testModelConnection(settings,
+                    { cancelled() || requestCancelled() || d.draft !== value }) {
+                    if (live() && !requestCancelled() && d.draft === value) deliver(it)
+                }
+            } ?: false
         }
         val connectionModifier = if (engineeringUi) Modifier.semantics {
             this[RetainedProviderConnectionTest] = draft to connection
@@ -275,17 +288,24 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             modifier = connectionModifier,
             pageTitle = pageTitleOverride ?: d.name, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
             credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
+            headersUnavailable = d.editing.headersUnavailable,
             catalogEnabled = false, errorText = notice)
         else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
             createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
-                if (!live() || !enabled || requestCancelled() || d.draft !== value) false else controller.fetchModelCatalog(value.providerSettings(saved),
-                    { cancelled() || requestCancelled() || d.draft !== value }) { if (live() && !requestCancelled() && d.draft === value) deliver(it) }
+                if (!live() || !enabled || requestCancelled() || d.draft !== value) false
+                else connectionSettings(value)?.let { settings ->
+                    controller.fetchModelCatalog(settings,
+                        { cancelled() || requestCancelled() || d.draft !== value }) {
+                        if (live() && !requestCancelled() && d.draft === value) deliver(it)
+                    }
+                } ?: false
             }, modifier = connectionModifier, pageTitle = pageTitleOverride ?: d.name,
             // Keep the primary model route's established single-page controls and tags;
             // additional providers use the explicit 配置/模型 split.
             twoTabs = initialSlot != ProviderRegistry.PRIMARY, ownerCurrent = live,
             enabled = enabled, engineeringUi = engineeringUi, errorText = notice,
             credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
+            headersUnavailable = d.editing.headersUnavailable,
             testConnection = connection, localModelActions = actions)
     } else {
         MiuixScaffoldPage("提供商", onBack = { back() }, modifier = Modifier.testTag("provider-management")) {

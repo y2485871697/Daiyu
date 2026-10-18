@@ -121,7 +121,7 @@ class OpenRouterVideoEvidence private constructor(
             val settings = provider.asModelSettings()
             require(settings.requestEndpoint() == OpenRouterVideoCapability.ENDPOINT)
             val facts = RemoteModelFetcher().fetchOpenRouterVideoFacts(
-                RemoteModelRequest(OPENROUTER_MODELS_ENDPOINT, settings.apiKey, RemoteModelProtocol.OPENAI),
+                RemoteModelRequest(OPENROUTER_MODELS_ENDPOINT, settings.apiKey, RemoteModelProtocol.OPENAI, customHeaders = settings.customHeaders),
                 provider.model, isCancelled,
             )
             if (Thread.currentThread().isInterrupted || isCancelled()) throw InterruptedException()

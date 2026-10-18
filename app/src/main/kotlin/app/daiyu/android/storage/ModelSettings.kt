@@ -23,8 +23,9 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import app.daiyu.android.model.ProviderHeaders
 
-data class ModelSettings(val endpoint: String, val model: String, val apiKey: String, val batteryEnabled: Boolean, val responsesPath: String = "", val deviceStatusEnabled: Boolean = false, val protocol: ProviderProtocol = ProviderProtocol.RESPONSES, val requestOptions: ProviderRequestOptions = ProviderRequestOptions()) {
+data class ModelSettings(val endpoint: String, val model: String, val apiKey: String, val batteryEnabled: Boolean, val responsesPath: String = "", val deviceStatusEnabled: Boolean = false, val protocol: ProviderProtocol = ProviderProtocol.RESPONSES, val requestOptions: ProviderRequestOptions = ProviderRequestOptions(), val customHeaders: ProviderHeaders = ProviderHeaders.EMPTY) {
     fun enabledTools(): Set<ReadOnlyTool> = buildSet {
         if (batteryEnabled) add(ReadOnlyTool.BATTERY)
         if (deviceStatusEnabled) add(ReadOnlyTool.DEVICE_STATUS)
@@ -50,7 +51,7 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
     }
 }
 class CredentialUnavailableException:IllegalStateException("已保存密钥不可用；请重新输入密钥")
-data class EditingSettings(val settings:ModelSettings,val credentialUnavailable:Boolean,val requestOptionsUnavailable:Boolean = false)
+data class EditingSettings(val settings:ModelSettings,val credentialUnavailable:Boolean,val requestOptionsUnavailable:Boolean = false,val headersUnavailable:Boolean = false)
 
 /** A detached preview, not an authorization. Snapshots preserve absent versus explicitly empty fields. */
 class NonSecretRestorePlan internal constructor(
@@ -83,7 +84,7 @@ class ModelSettingsStore internal constructor(
         modelCatalog.readConfiguration {
         checkCatalogConfiguration()
         modelCatalog.registerFrom {
-            val editing = synchronized(lock) { editingWithoutCredential() }
+            val editing = synchronized(lock) { editingWithoutCredential(includeHeadersState = false) }
             check(!editing.requestOptionsUnavailable) { "请求策略已损坏；请先明确修复再导入模型" }
             val current = editing.settings
             check(current.endpoint.isNotBlank() && current.model.isNotBlank()) { "请先保存服务商配置" }
@@ -197,7 +198,7 @@ class ModelSettingsStore internal constructor(
             // Rebound connections remain gated until an explicit credential save rotates identity.
             // Tool-only restores still update the active model's durable local policy.
             if (!plan.credentialRebindRequired) {
-                val editing = editingWithoutCredential()
+                val editing = editingWithoutCredential(includeHeadersState = false)
                 if (!editing.requestOptionsUnavailable) modelCatalog.updateRegisteredModel(editing.settings.model) {
                     CatalogModelParameters.updated(editing.settings, it)
                 }
@@ -236,8 +237,26 @@ class ModelSettingsStore internal constructor(
         if (preferences.contains("request-options")) preferences.getString("request-options", null)
             ?: throw IllegalStateException("模型请求配置无效；请重新保存") else null)
 
-    private fun editingWithoutCredential(): EditingSettings {
+    private fun readRequestHeaders(): ProviderHeaders {
+        if (!preferences.contains("request-headers") && !preferences.contains("request-headers-iv")) return ProviderHeaders.EMPTY
+        val encrypted = preferences.getString("request-headers", null) ?: throw CredentialUnavailableException()
+        require(encrypted.length <= 32 * 1024)
+        val iv = preferences.getString("request-headers-iv", null) ?: throw CredentialUnavailableException()
+        require(iv.length <= 32)
+        val alias = preferences.getString("key-alias", null) ?: throw CredentialUnavailableException()
+        if (!alias.startsWith("$keyAliasPrefix.")) throw CredentialUnavailableException()
+        val key = existingKey(alias) ?: throw CredentialUnavailableException()
+        val nonce = Base64.decode(iv, Base64.NO_WRAP)
+        require(nonce.size == 12)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, nonce))
+        cipher.updateAAD("$namespace/provider-headers-v1".toByteArray(Charsets.UTF_8))
+        return ProviderHeaders.parse(String(cipher.doFinal(Base64.decode(encrypted, Base64.NO_WRAP)), Charsets.UTF_8))
+    }
+
+    private fun editingWithoutCredential(includeHeadersState: Boolean = true): EditingSettings {
         val values = readNonSecretConfiguration(includeProtocol = false)
+        // Connection headers are not model-local policy and are never decrypted here.
         var optionsUnavailable = false
         val options = try {
             readRequestOptions().also {
@@ -249,7 +268,8 @@ class ModelSettingsStore internal constructor(
         }
         return EditingSettings(ModelSettings(values["endpoint"] as? String ?: "", values["model"] as? String ?: "", "",
             values["battery"] as? Boolean ?: false, values["responses-path"] as? String ?: "",
-            values["device-status"] as? Boolean ?: false, readProtocol(), options), true, optionsUnavailable)
+            values["device-status"] as? Boolean ?: false, readProtocol(), options), true, optionsUnavailable,
+            includeHeadersState)
     }
     private fun keyStore()=KeyStore.getInstance("AndroidKeyStore").apply {load(null)}
     private fun existingKey(alias:String)=keyStore().getKey(alias,null) as? SecretKey
@@ -258,7 +278,9 @@ class ModelSettingsStore internal constructor(
     }.generateKey()
     private fun discardKey(alias:String) {try {keyStore().deleteEntry(alias)} catch (_:Exception) {}}
     fun loadForEditing():EditingSettings=synchronized(lock) {
-        if(preferences in failedStores || credentialRebindRequired() || catalogRecoveryRequired() || readProtocol() == ProviderProtocol.UNKNOWN) return@synchronized editingWithoutCredential()
+        if(preferences in failedStores || credentialRebindRequired() || catalogRecoveryRequired() || readProtocol() == ProviderProtocol.UNKNOWN) {
+            return@synchronized editingWithoutCredential()
+        }
         val values=preferences.all
         var unavailable=false
         var optionsUnavailable = false
@@ -281,8 +303,15 @@ class ModelSettingsStore internal constructor(
                 String(cipher.doFinal(Base64.decode(encrypted,Base64.NO_WRAP)),Charsets.UTF_8)
             }
         } catch (_:Exception) {unavailable=true;""}
+        var headersUnavailable = false
+        val headers = if (!unavailable) try { readRequestHeaders() }
+            catch (_: Exception) { unavailable = true; headersUnavailable = true; ProviderHeaders.EMPTY }
+        else {
+            headersUnavailable = preferences.contains("request-headers") || preferences.contains("request-headers-iv")
+            ProviderHeaders.EMPTY
+        }
         EditingSettings(ModelSettings(values["endpoint"] as? String ?: "",values["model"] as? String ?: "",apiKey,
-            values["battery"] as? Boolean ?: false,values["responses-path"] as? String ?: "",values["device-status"] as? Boolean ?: false,readProtocol(),options),unavailable,optionsUnavailable)
+            values["battery"] as? Boolean ?: false,values["responses-path"] as? String ?: "",values["device-status"] as? Boolean ?: false,readProtocol(),options,headers),unavailable,optionsUnavailable,headersUnavailable)
     }
     fun load():ModelSettings=synchronized(lock) {
         check(readProtocol() != ProviderProtocol.UNKNOWN) {"模型协议无效；请到模型设置重新选择"}
@@ -302,19 +331,22 @@ class ModelSettingsStore internal constructor(
             save(CatalogModelParameters().applyTo(expected, model))
         }
     } }
-    fun save(settings:ModelSettings, protocolChangeAuthorized: Boolean = false, requestOptionsReplacementAuthorized: Boolean = false):Unit=modelCatalog.configurationChange { synchronized(lock) {
+    fun save(settings:ModelSettings, protocolChangeAuthorized: Boolean = false, requestOptionsReplacementAuthorized: Boolean = false, headersReplacementAuthorized: Boolean = false):Unit=modelCatalog.configurationChange { synchronized(lock) {
         settings.validate()
         val previousEditing = loadForEditing()
         val previousConnection = previousEditing.settings
         val connectionChanged = previousEditing.credentialUnavailable ||
             previousConnection.endpoint != settings.endpoint || previousConnection.protocol != settings.protocol ||
-            previousConnection.responsesPath != settings.responsesPath || previousConnection.apiKey != settings.apiKey
+            previousConnection.responsesPath != settings.responsesPath || previousConnection.apiKey != settings.apiKey ||
+            previousConnection.customHeaders != settings.customHeaders
         val previousOptionsValid = try {
             val previousOptions = readRequestOptions()
             val previousProtocol = readProtocol()
             if (previousProtocol != ProviderProtocol.UNKNOWN) previousOptions.validate(previousProtocol)
             true
         } catch (_: Exception) { false }
+        require(!previousEditing.headersUnavailable ||
+            (!preferences.contains("request-headers") && !preferences.contains("request-headers-iv")) || headersReplacementAuthorized) { "原请求头不可用；替换或清除需要明确确认" }
         require(previousOptionsValid || requestOptionsReplacementAuthorized) { "请求策略已损坏；替换或重置需要明确确认" }
         require(readProtocol() == settings.protocol || protocolChangeAuthorized) {"切换协议须重新输入密钥并明确确认"}
         val previous=preferences.all
@@ -324,8 +356,16 @@ class ModelSettingsStore internal constructor(
         var attempted=false
         var catalogReplaced=false
         try {
-            val cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,newKey(alias))
+            val key = newKey(alias)
+            val cipher=Cipher.getInstance("AES/GCM/NoPadding");cipher.init(Cipher.ENCRYPT_MODE,key)
             val encrypted=Base64.encodeToString(cipher.doFinal(settings.apiKey.toByteArray(Charsets.UTF_8)),Base64.NO_WRAP)
+            val headerCipher = if (settings.customHeaders.isEmpty) null else Cipher.getInstance("AES/GCM/NoPadding").apply {
+                init(Cipher.ENCRYPT_MODE, key)
+                updateAAD("$namespace/provider-headers-v1".toByteArray(Charsets.UTF_8))
+            }
+            val encryptedHeaders = headerCipher?.let {
+                Base64.encodeToString(it.doFinal(settings.customHeaders.encode().toByteArray(Charsets.UTF_8)), Base64.NO_WRAP)
+            }
             attempted=true
             committed=preferences.edit().putString("endpoint",settings.endpoint).putString("model",settings.model)
                 .putString("responses-path",settings.responsesPath).putBoolean("device-status",settings.deviceStatusEnabled).putBoolean("battery",settings.batteryEnabled)
@@ -336,6 +376,13 @@ class ModelSettingsStore internal constructor(
                 .apply {
                     if(settings.requestOptions == ProviderRequestOptions()) remove("request-options")
                     else putString("request-options", settings.requestOptions.encode())
+                }
+                .apply {
+                    if (headerCipher == null) { remove("request-headers"); remove("request-headers-iv") }
+                    else {
+                        putString("request-headers", encryptedHeaders)
+                        putString("request-headers-iv", Base64.encodeToString(headerCipher.iv, Base64.NO_WRAP))
+                    }
                 }
                 .putString("key-owner",owner).putString("key-alias",alias).putString("iv",Base64.encodeToString(cipher.iv,Base64.NO_WRAP)).putString("key",encrypted)
                 .apply { if (connectionChanged) putBoolean(CATALOG_PENDING, true) }
@@ -401,7 +448,7 @@ class ModelSettingsStore internal constructor(
         private const val REBIND_REQUIRED = "credential-rebind-required"
         private const val CATALOG_PENDING = "catalog-configuration-pending"
         private val configurationFields = listOf("endpoint", "model", "responses-path", "device-status", "battery", "protocol")
-        private val fields = configurationFields + listOf("request-options", "key-owner", "key-alias", "iv", "key", REBIND_REQUIRED, CATALOG_PENDING)
+        private val fields = configurationFields + listOf("request-options", "request-headers", "request-headers-iv", "key-owner", "key-alias", "iv", "key", REBIND_REQUIRED, CATALOG_PENDING)
 
         private fun putField(editor: SharedPreferences.Editor, name: String, values: Map<String, Any?>) {
             if(!values.containsKey(name)) editor.remove(name)

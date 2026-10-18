@@ -24,8 +24,8 @@ internal object MessagesRequest {
      * JSONTokener.nextClean/end checks alone still accept single quotes, comments and bare values.
      * This is syntax validation only, not tool-schema validation or argument defaulting.
      */
-    fun jsonObject(text: String, maxDepth: Int = MAX_JSON_CONTAINER_DEPTH): JSONObject {
-        ObjectSyntax(text, maxDepth).validate()
+    fun jsonObject(text: String, maxDepth: Int = MAX_JSON_CONTAINER_DEPTH, rejectDuplicateKeys: Boolean = false): JSONObject {
+        ObjectSyntax(text, maxDepth, rejectDuplicateKeys).validate()
         return JSONObject(text)
     }
 
@@ -47,7 +47,7 @@ internal object MessagesRequest {
         return value
     }
 
-    private class ObjectSyntax(private val text: String, private val maxDepth: Int) {
+    private class ObjectSyntax(private val text: String, private val maxDepth: Int, private val rejectDuplicateKeys: Boolean) {
         private var index = 0
         private fun invalid(): Nothing = throw JSONException("Invalid Messages JSON object")
         private fun expect(c: Char) { if (!take(c)) invalid() }
@@ -70,8 +70,15 @@ internal object MessagesRequest {
             if (depth > maxDepth) invalid()
             expect('{'); whitespace()
             if (take('}')) return
+            val names = if (rejectDuplicateKeys) mutableSetOf<String>() else null
             while (true) {
-                string(); whitespace(); expect(':'); whitespace(); value(depth + 1); whitespace()
+                val start = index
+                string()
+                if (names != null) {
+                    val name = org.json.JSONTokener(text.substring(start, index)).nextValue() as String
+                    if (!names.add(name)) invalid()
+                }
+                whitespace(); expect(':'); whitespace(); value(depth + 1); whitespace()
                 if (take('}')) return
                 expect(','); whitespace()
             }

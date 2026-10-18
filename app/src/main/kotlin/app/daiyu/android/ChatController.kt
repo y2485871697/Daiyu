@@ -3777,13 +3777,13 @@ class ChatController internal constructor(private val application:Application,
     }
     internal fun saveProviderSettings(editor: ProviderEditorSlot, value: ModelSettings, expected: EditingSettings,
         protocolChangeAuthorized: Boolean, requestOptionsReplacementAuthorized: Boolean, owner: ModelSettingsSaveOwner,
-        completed: (Boolean) -> Unit,
+        headersReplacementAuthorized: Boolean = false, completed: (Boolean) -> Unit,
     ) {
         check(Looper.myLooper() == Looper.getMainLooper())
         invalidateVideoConfiguration()
         dataTask(failureNotice = "提供商设置未保存；请重新打开详情", completed = completed, work = {
             providers.save(editor, value, expected, protocolChangeAuthorized, requestOptionsReplacementAuthorized,
-                admit = { owner.commit { Unit } })
+                headersReplacementAuthorized = headersReplacementAuthorized, admit = { owner.commit { Unit } })
             try { providers.catalogSnapshot(editor); "提供商设置已保存" }
             catch (_: Exception) { "提供商设置已保存；模型目录尚不可用，请重新打开详情" }
         })

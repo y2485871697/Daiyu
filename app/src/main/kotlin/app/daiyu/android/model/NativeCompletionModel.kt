@@ -81,6 +81,7 @@ class NativeCompletionModel internal constructor(
                 conn.connectTimeout = 20_000; conn.readTimeout = 60_000
                 conn.setRequestProperty(if (settings.protocol == ProviderProtocol.GEMINI) "x-goog-api-key" else "Authorization",
                     if (settings.protocol == ProviderProtocol.GEMINI) settings.apiKey else "Bearer ${settings.apiKey}")
+                settings.customHeaders.applyTo(conn)
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.setRequestProperty("Accept", "text/event-stream")
                 headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }

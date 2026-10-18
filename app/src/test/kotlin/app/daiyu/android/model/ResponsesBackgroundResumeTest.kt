@@ -15,7 +15,7 @@ import javax.net.ssl.HttpsURLConnection
 
 /** In-memory real Responses transport/decoder + Runner. Never connects to a provider. */
 class ResponsesBackgroundResumeTest {
-    private val settings = ModelSettings("https://api.openai.com/v1/responses", "fixture", "synthetic", false)
+    private val settings = ModelSettings("https://api.openai.com/v1/responses", "fixture", "synthetic", false, customHeaders = ProviderHeaders.parse("""{"x-tenant":"frozen-tenant"}"""))
     private val preference = ReconnectSettings(ReconnectDurationPreset.CONTINUOUS, true)
     private fun frozen(config: ModelSettings = settings) = FrozenReconnectAdapter.freeze(preference, ProviderSnapshot.capture(config))
     private fun wire(type: String, sequence: Int, body: JSONObject = JSONObject()) =
@@ -72,6 +72,10 @@ class ResponsesBackgroundResumeTest {
         val result = run(frozen().observeFailures(guarded) { fail(it) }, runtime)
         assertEquals(RunStatus.COMPLETED, result.status)
         assertEquals(listOf("POST","GET"), connections.map { it.requestMethod })
+        connections.forEach {
+            assertEquals("frozen-tenant", it.getRequestProperty("x-tenant"))
+            assertFalse(it.instanceFollowRedirects)
+        }
         assertEquals("https://api.openai.com/v1/responses/resp_fixture?stream=true&starting_after=1", connections[1].url.toString())
         assertEquals(0, connections[1].sent.size())
         val request = JSONObject(connections[0].sent.toString("UTF-8"))

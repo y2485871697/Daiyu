@@ -118,5 +118,5 @@ internal fun catalogRequest(settings: ModelSettings): RemoteModelRequest {
         "${uri.scheme}://${uri.rawAuthority}$basePath"
     } catch (_: Exception) { throw RemoteModelException(RemoteModelFailure.INVALID_ENDPOINT) }
     // The inference-only model, body policy and responsesPath do not select a catalogue URL.
-    return RemoteModelRequest(base, settings.apiKey, protocol, anthropicVersion = settings.requestOptions.anthropicVersion)
+    return RemoteModelRequest(base, settings.apiKey, protocol, anthropicVersion = settings.requestOptions.anthropicVersion, customHeaders = settings.customHeaders)
 }

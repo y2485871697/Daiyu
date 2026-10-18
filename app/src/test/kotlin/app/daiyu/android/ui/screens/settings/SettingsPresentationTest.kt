@@ -103,9 +103,12 @@ class SettingsPresentationTest {
     @Test
     fun protocolSwitchClearsSecretsAndRequiresFreshAuthorization() {
         val original = ModelSettingsDraftUi(apiKey = "test-only-secret", responsesPath = "/responses",
-            protocolChangeAuthorized = true)
+            protocolChangeAuthorized = true, customHeaders = "private-headers")
+        assertTrue(original === original.selectProtocol(ProviderProtocol.RESPONSES))
         val messages = original.selectProtocol(ProviderProtocol.MESSAGES)
         assertEquals("", messages.apiKey)
+        assertEquals("", messages.customHeaders)
+        assertEquals("", messages.selectProtocol(ProviderProtocol.RESPONSES).customHeaders)
         assertEquals("", messages.responsesPath)
         assertEquals(ProviderProtocol.RESPONSES, messages.savedProtocol)
         assertFalse(messages.protocolChangeAuthorized)
@@ -115,8 +118,9 @@ class SettingsPresentationTest {
 
     @Test
     fun draftStringDoesNotRevealKeyOrCustomJson() {
-        val draft = ModelSettingsDraftUi(apiKey = "never-print-key", customBody = "never-print-body")
+        val draft = ModelSettingsDraftUi(apiKey = "never-print-key", customBody = "never-print-body", customHeaders = "never-print-headers")
         assertFalse(draft.toString().contains("never-print-key"))
         assertFalse(draft.toString().contains("never-print-body"))
+        assertFalse(draft.toString().contains("never-print-headers"))
     }
 }

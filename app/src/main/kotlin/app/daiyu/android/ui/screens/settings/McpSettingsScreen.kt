@@ -8,21 +8,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.semantics.SemanticsPropertyKey
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.mcp.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-internal val RetainedMcpPolicyAction = SemanticsPropertyKey<() -> Unit>("RetainedMcpPolicyAction")
-
 /** Visiting/saving never connects; explicit refresh only discovers metadata. Neither grants execution. */
 @Composable internal fun McpSettingsScreen(store: McpSettingsStore, owner: McpSettingsOwner,
     ownerCurrent: () -> Boolean, onBack: () -> Unit,
-    managementFactory: (McpSettingsStore) -> McpManagement = { McpManagement(it) },
-    engineeringUi: Boolean = false) {
+    managementFactory: (McpSettingsStore) -> McpManagement = { McpManagement(it) }) {
     val scope = rememberCoroutineScope()
     var snapshot by remember(owner) { mutableStateOf<McpSettings?>(null) }
     var status by remember(owner) { mutableStateOf("正在读取本地加密配置") }
@@ -32,8 +27,6 @@ internal val RetainedMcpPolicyAction = SemanticsPropertyKey<() -> Unit>("Retaine
     var endpoint by remember(owner) { mutableStateOf("") }
     var bearer by remember(owner) { mutableStateOf("") }
     var keepSecret by remember(owner) { mutableStateOf(true) }
-    data class ToolApproval(val before: McpSettings, val server: McpServer, val tool: McpRemoteTool)
-    var approval by remember(owner) { mutableStateOf<ToolApproval?>(null) }
     fun current() = owner.current() && ownerCurrent()
     LaunchedEffect(owner) {
         val result = withContext(Dispatchers.IO) { runCatching { store.snapshot() } }
@@ -70,48 +63,23 @@ internal val RetainedMcpPolicyAction = SemanticsPropertyKey<() -> Unit>("Retaine
             }
         }
     }
-    fun updatePolicy(before: McpSettings, server: McpServer) {
-        if (busy || !current() || snapshot !== before) return
-        approval = null; busy = true
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching { store.save(before.servers.map { if (it.id == server.id) server else it }, owner, before) }
-            }
-            if (current()) {
-                busy = false
-                if (result.isSuccess) { snapshot = result.getOrThrow(); status = "策略已保存；旧批准已撤销，每轮仍须精确确认。" }
-                else status = "策略保存未确认；请重新打开设置核对。"
-            }
-        }
-    }
     fun refresh(before: McpSettings, server: McpServer) {
         if (busy || !current() || snapshot !== before) return
-        approval = null; busy = true
+        busy = true
         scope.launch {
             val result = withContext(Dispatchers.IO) { runCatching { managementFactory(store).refresh(before, server.id, owner) } }
             if (current()) {
                 busy = false
-                if (result.isSuccess) { snapshot = result.getOrThrow(); status = "工具目录已刷新；新增工具默认未启用。" }
-                else status = "目录刷新失败或已过期；保留上次目录，未自动启用工具。"
+                if (result.isSuccess) { snapshot = result.getOrThrow(); status = "工具目录已刷新；未授予任何工具权限。" }
+                else status = "目录刷新失败或已过期；保留上次目录，未授予权限。"
             }
         }
-    }
-    approval?.let { pending ->
-        AlertDialog(onDismissRequest = { approval = null }, title = { Text("允许此 MCP 工具？") },
-            text = { Text("${pending.server.label} / ${pending.tool.name}\n远端未声明只读，可能产生副作用。启用仅加入可选目录，每轮仍须批准精确参数；远端提示不是安全保证。") },
-            confirmButton = { TextButton(onClick = {
-                if (approval === pending && current() && snapshot === pending.before) {
-                    updatePolicy(pending.before, pending.server.withPolicy(allowedTools = pending.server.allowedTools + pending.tool.name))
-                }
-                approval = null
-            }, modifier = Modifier.testTag("mcp-tool-enable-confirm")) { Text("允许") } },
-            dismissButton = { TextButton(onClick = { approval = null }) { Text("取消") } })
     }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp).testTag("mcp-settings"),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("MCP 服务器", style = MaterialTheme.typography.headlineSmall)
         Text("仅支持受限 Streamable HTTP JSON-RPC 2025-03-26。SSE、分页目录、图片/资源内容不支持。连接成功不代表兼容所有服务器。")
-        Text("配置和凭据仅保存在 noBackup 私有加密存储，不导出到备份。每轮仍须在聊天入口明确批准精确工具和参数。")
+        Text("配置和凭据仅保存在 noBackup 私有加密存储，不导出到备份。此页只发现并展示工具目录，不启用服务器、不授予工具权限，也不调用远端工具；每轮批准仅在聊天入口进行。")
         Text(status, Modifier.testTag("mcp-settings-status"))
         snapshot?.let { rendered -> rendered.servers.forEach { server ->
             TextButton(enabled = !busy, onClick = {
@@ -119,17 +87,8 @@ internal val RetainedMcpPolicyAction = SemanticsPropertyKey<() -> Unit>("Retaine
                     id = server.id; label = server.label; endpoint = server.endpoint; bearer = ""; keepSecret = true
                 }
             }, modifier = Modifier.testTag("mcp-server:${server.id}")) { Text("编辑 ${server.id} · ${server.label}") }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("启用服务器")
-                val toggleServer: () -> Unit = { updatePolicy(rendered, server.withPolicy(enabled = !server.enabled)) }
-                val discover: () -> Unit = { refresh(rendered, server) }
-                Switch(checked = server.enabled, enabled = !busy, onCheckedChange = { toggleServer() },
-                    modifier = Modifier.testTag("mcp-server-enabled:${server.id}").then(if (engineeringUi)
-                        Modifier.semantics { this[RetainedMcpPolicyAction] = toggleServer } else Modifier))
-                TextButton(onClick = discover, enabled = !busy,
-                    modifier = Modifier.testTag("mcp-refresh:${server.id}").then(if (engineeringUi)
-                        Modifier.semantics { this[RetainedMcpPolicyAction] = discover } else Modifier)) { Text("刷新工具目录") }
-            }
+            TextButton(onClick = { refresh(rendered, server) }, enabled = !busy,
+                modifier = Modifier.testTag("mcp-refresh:${server.id}")) { Text("刷新工具目录") }
             if (server.catalog.isEmpty()) Text("尚无已发现工具；请显式刷新目录。")
             server.catalog.forEach { tool ->
                 Column(Modifier.fillMaxWidth().padding(start = 12.dp)) {
@@ -137,20 +96,6 @@ internal val RetainedMcpPolicyAction = SemanticsPropertyKey<() -> Unit>("Retaine
                     Text(tool.description)
                     Text("参数 schema（远端资料）：${tool.inputSchema}")
                     Text(if (tool.readOnlyHint == true) "远端声明只读；仍按写操作审批" else "远端未声明只读，可能产生副作用")
-                    Row {
-                        Text("允许此工具")
-                        val toggleTool: () -> Unit = {
-                            if (snapshot === rendered && current() && !busy) {
-                                val enabled = tool.name !in server.allowedTools
-                                if (enabled && tool.readOnlyHint != true) approval = ToolApproval(rendered, server, tool)
-                                else updatePolicy(rendered, server.withPolicy(allowedTools = if (enabled)
-                                    server.allowedTools + tool.name else server.allowedTools - tool.name))
-                            }
-                        }
-                        Checkbox(checked = tool.name in server.allowedTools, enabled = !busy,
-                            onCheckedChange = { toggleTool() }, modifier = Modifier.testTag("mcp-tool-enabled:${server.id}:${tool.name}")
-                                .then(if (engineeringUi) Modifier.semantics { this[RetainedMcpPolicyAction] = toggleTool } else Modifier))
-                    }
                 }
             }
         }
@@ -166,7 +111,7 @@ internal val RetainedMcpPolicyAction = SemanticsPropertyKey<() -> Unit>("Retaine
             modifier = Modifier.fillMaxWidth().testTag("mcp-server-bearer"))
         Row { Checkbox(keepSecret, { keepSecret = it }, enabled = !busy); Text("留空时保留此 ID 已存令牌；取消勾选并留空会移除令牌") }
         Button(onClick = { save(false) }, enabled = !busy && snapshot != null,
-            modifier = Modifier.testTag("mcp-settings-save")) { Text("保存服务器（不连接/不授权）") }
+            modifier = Modifier.testTag("mcp-settings-save")) { Text("保存服务器配置（不连接/不授权）") }
         TextButton(onClick = { save(true) }, enabled = !busy && snapshot != null,
             modifier = Modifier.testTag("mcp-settings-delete")) { Text("删除此服务器及凭据") }
         TextButton(onClick = {

@@ -90,8 +90,13 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         val root = focusedWindowRoot()
         fun requestHide() {
             check(root.isAttachedToWindow && root.hasWindowFocus()) { "ime_window_changed" }
-            checkNotNull(androidx.core.view.ViewCompat.getWindowInsetsController(root))
-                .hide(androidx.core.view.WindowInsetsCompat.Type.ime())
+            val controller = androidx.core.view.ViewCompat.getWindowInsetsController(root)
+            if (controller != null) controller.hide(androidx.core.view.WindowInsetsCompat.Type.ime())
+            else {
+                val focus = root.findFocus() ?: root
+                checkNotNull(root.context.getSystemService(android.view.inputmethod.InputMethodManager::class.java))
+                    .hideSoftInputFromWindow(checkNotNull(focus.windowToken), 0)
+            }
         }
         instrumentation.runOnMainSync { requestHide() }
         ui.waitUntil(5_000) {

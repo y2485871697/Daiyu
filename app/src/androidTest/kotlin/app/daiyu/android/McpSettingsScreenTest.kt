@@ -13,6 +13,7 @@ import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.mcp.*
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.settings.McpSettingsScreen
+import app.daiyu.android.ui.screens.settings.RetainedMcpPolicyAction
 import java.io.File
 import java.util.UUID
 import javax.crypto.KeyGenerator
@@ -52,7 +53,7 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
         try {
             store.save(listOf(McpServer("server", "fixture", "https://fixture.invalid/mcp", "synthetic-token")), owner, store.snapshot())
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                McpSettingsScreen(store, owner, ownerCurrent = { true }, onBack = {}, managementFactory = { management })
+                McpSettingsScreen(store, owner, ownerCurrent = { true }, onBack = {}, managementFactory = { management }, engineeringUi = true)
             } } }
             awaitStatus("保存只配置服务器，不授予工具权限。")
             assertTrue(methods.isEmpty())
@@ -62,8 +63,8 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             assertFalse(store.snapshot().servers.single().enabled)
             assertTrue(store.snapshot().servers.single().allowedTools.isEmpty())
             ui.onAllNodesWithText("synthetic-token", substring = true).assertCountEquals(0)
-            val oldEnable = node("mcp-tool-enabled:server:erase").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-            val oldRefresh = node("mcp-refresh:server").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+            val oldEnable = node("mcp-tool-enabled:server:erase").fetchSemanticsNode().config[RetainedMcpPolicyAction]
+            val oldRefresh = node("mcp-refresh:server").fetchSemanticsNode().config[RetainedMcpPolicyAction]
             click("mcp-tool-enabled:server:erase")
             node("mcp-tool-enable-confirm").assertExists()
             assertTrue(store.snapshot().servers.single().allowedTools.isEmpty())
@@ -73,8 +74,8 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             node("mcp-tool-enable-confirm").performClick()
             awaitStatus("策略已保存；旧批准已撤销，每轮仍须精确确认。")
             assertEquals(setOf("erase"), store.snapshot().servers.single().allowedTools)
-            val oldSwitch = node("mcp-server-enabled:server").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
-            val oldTool = node("mcp-tool-enabled:server:erase").fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+            val oldSwitch = node("mcp-server-enabled:server").fetchSemanticsNode().config[RetainedMcpPolicyAction]
+            val oldTool = node("mcp-tool-enabled:server:erase").fetchSemanticsNode().config[RetainedMcpPolicyAction]
             click("mcp-server-enabled:server")
             ui.waitUntil(5_000) { store.snapshot().servers.single().enabled }
             ui.waitForIdle()

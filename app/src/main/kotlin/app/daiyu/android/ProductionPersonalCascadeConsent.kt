@@ -69,7 +69,7 @@ internal fun ProductionPersonalCascadeConsent(
     LaunchedEffect(lifecycleState) {
         if (!lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) discard()
     }
-    TextButton(text = "级联：听写后手动确认发送，朗读下一条回答", enabled = !preparing,
+    TextButton(text = "听写并朗读", enabled = !preparing,
         modifier = Modifier.testTag("voice-cascade-arm"), onClick = {
             if (isCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
                 discard()

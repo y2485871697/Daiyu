@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
@@ -73,12 +74,16 @@ internal fun ChatIconButton(
     enabled: Boolean = true,
     tint: Color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
     onLongClick: (() -> Unit)? = null,
+    containerColor: Color? = null,
 ) {
     Box(modifier.size(48.dp).clip(CircleShape).combinedClickable(
         enabled = enabled, role = Role.Button, onClickLabel = label,
         onLongClick = onLongClick, onClick = onClick,
     ), contentAlignment = Alignment.Center) {
-        Icon(icon, contentDescription = label, modifier = Modifier.size(20.dp),
-            tint = if (enabled) tint else tint.copy(alpha = 0.38f))
+        Box(if (containerColor == null) Modifier else Modifier.size(24.dp).background(containerColor, CircleShape),
+            contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = label, modifier = Modifier.size(if (containerColor == null) 20.dp else 14.dp),
+                tint = if (enabled) tint else tint.copy(alpha = 0.38f))
+        }
     }
 }

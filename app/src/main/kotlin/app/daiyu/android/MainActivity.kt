@@ -1743,7 +1743,8 @@ class MainActivity : ComponentActivity() {
                                         composer = projectedVoiceComposer()), chatActions(), modifier = Modifier.weight(1f), turnExtras = { id ->
                                         QuestionExtras(id)
                                         VoiceExtras(id)
-                                    }, imageLoader = imageHost.historyLoader)
+                                    }, imageLoader = imageHost.historyLoader,
+                                        assistant = projectedAssistants.firstOrNull { it.id == (selected?.assistantId ?: activeAssistant) })
                                     Column(Modifier.fillMaxWidth().heightIn(max = extrasMaxHeight)
                                         .verticalScroll(rememberScrollState()).testTag("chat-extra-actions")) {
                                         pendingTextSend?.let { pending ->
@@ -2188,12 +2189,12 @@ class MainActivity : ComponentActivity() {
         fun currentVoiceControls() = currentEditor() && voiceRequestEpoch == capturedVoiceEpoch &&
             cascadeVoice.operationToken == capturedCascadeToken && remoteVoice.operationToken == capturedRemoteToken &&
             speechHost.owner == capturedSpeechOwner
-        top.yukonga.miuix.kmp.basic.TextButton(text = "离线语音设置", modifier = Modifier.testTag("offline-speech-open"),
+        if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "离线语音设置", modifier = Modifier.testTag("offline-speech-open"),
             onClick = { if (activityUsable() && retainedPage == "chat" && !sidebarVisible) {
                 offlineSpeechReturnPage = "chat"
                 retainedPage = "offline-speech"
             } })
-        if (pack.enabled) top.yukonga.miuix.kmp.basic.TextButton(
+        if (pack.enabled && (engineeringUi || offline.listening)) top.yukonga.miuix.kmp.basic.TextButton(
             text = if (offline.listening) "取消离线听写" else "离线听写（本机麦克风）",
             modifier = Modifier.testTag("offline-speech-microphone"),
             onClick = {
@@ -2206,7 +2207,6 @@ class MainActivity : ComponentActivity() {
         if (offline.preview.isNotEmpty()) top.yukonga.miuix.kmp.basic.Text(text = "离线识别预览（尚未写入草稿）：${offline.preview}",
             modifier = Modifier.testTag("offline-speech-preview"))
         val cascadeStatus by cascadeVoice.status.collectAsStateWithLifecycle()
-        val voiceConfig by voiceRuntime.configuration.collectAsStateWithLifecycle()
         val conversationVoiceConfig by voiceRuntime.conversationConfiguration.collectAsStateWithLifecycle()
         val dialogOwner = voiceConversationDialogOwner
         val showConversationDialog = currentEditor() && dialogOwner != null &&
@@ -2218,8 +2218,9 @@ class MainActivity : ComponentActivity() {
                     startUniversalVoice(profile, limits)
             },
             openRequested = showConversationDialog,
-            onCloseRequest = { if (voiceConversationDialogOwner == dialogOwner) voiceConversationDialogOwner = null })
-        top.yukonga.miuix.kmp.basic.Text("听写：${if (voiceConfig?.dictation == "DOUBAO") "豆包联网" else "系统 / 未配置"}；最终结果只填草稿")
+            onCloseRequest = { if (voiceConversationDialogOwner == dialogOwner) voiceConversationDialogOwner = null },
+            showEntry = engineeringUi,
+            cascadeEntry = {
         ProductionPersonalCascadeConsent(
             host = cascadeVoice,
             isCurrent = {
@@ -2230,6 +2231,7 @@ class MainActivity : ComponentActivity() {
             },
             onFailure = { toast(it) },
         )
+            })
         if (cascadeStatus.isNotEmpty()) {
             top.yukonga.miuix.kmp.basic.Text(cascadeStatus,
                 modifier = Modifier.testTag("voice-cascade-status").semantics { liveRegion = LiveRegionMode.Polite })
@@ -2274,7 +2276,7 @@ class MainActivity : ComponentActivity() {
             controller.ready && !controller.dataBusy && controller.active == null &&
             !imageHost.busy && !shizukuWritesBlocked && !hasImages && draft.isNotBlank() && terminalEditor == null
         Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
-            Row(Modifier.fillMaxWidth()) {
+            if (engineeringUi) Row(Modifier.fillMaxWidth()) {
                 top.yukonga.miuix.kmp.basic.TextButton(
                     text = if (hasImages) "Shizuku 仅限无附件文本" else "Shizuku 文本审批",
                     enabled = available && shizukuEditor == null,
@@ -2289,7 +2291,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.weight(1f).testTag("shizuku-settings-entry").heightIn(min = 48.dp),
                     onClick = { if (activityUsable()) retainedPage = "shizuku-settings" })
             }
-            top.yukonga.miuix.kmp.basic.TextButton(
+            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(
                 text = if (mcpPreparing) "正在冻结 MCP 本轮范围" else "MCP 本轮精确调用审批",
                 enabled = available && !mcpPreparing && mcpApproval == null && pendingTextSend == null,
                 modifier = Modifier.testTag("mcp-approval-entry").heightIn(min = 48.dp),
@@ -2300,22 +2302,22 @@ class MainActivity : ComponentActivity() {
                     onCancel = { if (mcpVisit === visit && mcpApproval === pending) cancelMcpEditor() },
                     onApprove = { approveMcp(pending, visit) })
             }
-            top.yukonga.miuix.kmp.basic.TextButton(
+            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(
                 text = if (browserPreparing) "正在准备浏览器审批" else "浏览器操作审批",
                 enabled = available && !browserPreparing && browserApproval == null && pendingTextSend == null,
                 modifier = Modifier.testTag("browser-approval-entry").heightIn(min = 48.dp),
                 onClick = ::openBrowserApproval)
-            top.yukonga.miuix.kmp.basic.TextButton(
+            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(
                 text = "图片 / 视频生成审批",
                 enabled = available && pendingTextSend == null && generationApproval == null &&
                     !controller.generationSubmissionPending(),
                 modifier = Modifier.testTag("generation-approval-entry").heightIn(min = 48.dp),
                 onClick = ::openGenerationApproval)
-            top.yukonga.miuix.kmp.basic.TextButton(text = "GUI 精确动作审批（前台屏幕）",
+            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "GUI 精确动作审批（前台屏幕）",
                 enabled = available && pendingTextSend == null && guiEditor == null,
                 modifier = Modifier.testTag("gui-prepare-entry").heightIn(min = 48.dp),
                 onClick = ::openGuiPreparation)
-            top.yukonga.miuix.kmp.basic.TextButton(text = "GUI 系统无障碍设置",
+            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "GUI 系统无障碍设置",
                 modifier = Modifier.testTag("gui-settings-entry").heightIn(min = 48.dp),
                 onClick = { if (activityUsable()) {
                     when (val result = app.daiyu.android.gui.GuiSystemSettings.openFromUser(this@MainActivity)) {
@@ -2330,7 +2332,7 @@ class MainActivity : ComponentActivity() {
                 top.yukonga.miuix.kmp.basic.TextButton(text = "撤销 GUI 准备 / 停止原任务",
                     modifier = Modifier.testTag("gui-cancel"), onClick = { cancelGuiEditor(entry); publishChat() })
             }
-            top.yukonga.miuix.kmp.basic.TextButton(text = "副屏运行准备（需单独批准）",
+            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "副屏运行准备（需单独批准）",
                 enabled = available && pendingTextSend == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null &&
                     controller.virtualDisplayEntry() == null,
                 modifier = Modifier.testTag("vd-prepare-entry").heightIn(min = 48.dp),
@@ -2354,10 +2356,10 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.testTag("vd-observe-close"),
                     onClick = { controller.observeVirtualDisplayClose(originalEntry) })
             }
-            top.yukonga.miuix.kmp.basic.TextButton(text = "读取本会话生成资产",
+            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "读取本会话生成资产",
                 modifier = Modifier.testTag("generation-output-entry").heightIn(min = 48.dp),
                 onClick = ::openGenerationOutputs)
-            top.yukonga.miuix.kmp.basic.TextButton(text = "保存本会话浏览器下载原件",
+            if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "保存本会话浏览器下载原件",
                 modifier = Modifier.testTag("browser-download-output-entry").heightIn(min = 48.dp),
                 onClick = ::openBrowserDownloadOutputs)
             BrowserDownloadOutputsSurface()
@@ -2441,7 +2443,7 @@ class MainActivity : ComponentActivity() {
             { expected, value -> platformActionCurrent(visit, expected, value) }
         }
         app.daiyu.android.ui.PlatformActionApprovalHost(controller, selected, originalText, owner, visit,
-            enabled = available && current(owner, originalText), isCurrent = current,
+            enabled = available && current(owner, originalText), isCurrent = current, showEntry = engineeringUi,
             onAccepted = { preview, saved ->
                 if (current(owner, originalText) && preview.conversation?.id == owner.conversationId &&
                     preview.text == originalText && saved.id == preview.conversationId) {
@@ -2483,7 +2485,7 @@ class MainActivity : ComponentActivity() {
             !shizukuWritesBlocked && pendingTextSend == null && controller.textSendState() == null && draft.isNotBlank() && terminalEditor == null &&
             shizukuEditor == null && browserApproval == null && !browserPreparing && generationApproval == null
         val renderedDraft = terminalDraft()
-        top.yukonga.miuix.kmp.basic.TextButton(text = "终端精确命令审批",
+        if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "终端精确命令审批",
             enabled = canEnter, modifier = Modifier.testTag("terminal-chat-entry"), onClick = {
                 if (canEnter && activityUsable() && retainedPage == "chat" && !sidebarVisible &&
                     renderedDraft == terminalDraft() && terminalEditor == null && !imageHost.hasAttachments &&
@@ -2661,6 +2663,7 @@ class MainActivity : ComponentActivity() {
     @Composable private fun TerminalJobsPanel() {
         val conversation = selected?.id ?: return
         val generation = editorGeneration
+        if (engineeringUi || controller.terminalJobRuns(conversation).isNotEmpty())
         androidx.compose.material3.TextButton(modifier = Modifier.testTag("terminal-jobs-entry"), onClick = {
             if (activityUsable() && retainedPage == "chat" && selected?.id == conversation && editorGeneration == generation) {
                 revokeTerminalJobsVisit()

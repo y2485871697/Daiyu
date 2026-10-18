@@ -1,10 +1,9 @@
 package app.daiyu.android.title
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import app.daiyu.android.ui.components.MiuixScaffoldPage
 import androidx.compose.ui.platform.testTag
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -44,11 +43,13 @@ fun TitleModelSettingsScreen(owner: TitleModelSettingsEditor, ownerCurrent: () -
     DisposableEffect(owner) {
         onDispose { owner.revoke(); draft = emptyDraft() }
     }
-    Column(Modifier.testTag("page:标题模型")) {
-        OutlinedButton(onClick = { if (ownerCurrent()) onBack() }) { Text("返回设置") }
-        TitleModelSettingsPanel(settings, draft, { if (ownerCurrent() && !busy) draft = it },
-            onSave = { if (ownerCurrent()) enqueue(owner.prepareSave(it), true) },
-            onDisable = { if (ownerCurrent()) enqueue(owner.prepareDisable(), true) },
-            busy = busy, notice = notice)
+    MiuixScaffoldPage(title = "标题模型", onBack = { if (ownerCurrent()) onBack() },
+        modifier = Modifier.testTag("page:标题模型")) {
+        item(key = "title-model-editor") {
+            TitleModelSettingsPanel(settings, draft, { if (ownerCurrent() && !busy) draft = it },
+                onSave = { if (ownerCurrent()) enqueue(owner.prepareSave(it), true) },
+                onDisable = { if (ownerCurrent()) enqueue(owner.prepareDisable(), true) },
+                busy = busy, notice = notice)
+        }
     }
 }

@@ -25,7 +25,8 @@ import org.json.JSONObject
     conversation: Conversation?, text: String, owner: ChatController.TextSendOwner, visit: Any,
     enabled: Boolean,
     isCurrent: (ChatController.TextSendOwner, String) -> Boolean,
-    onAccepted: (ControllerPlatformActionPreparation, Conversation) -> Unit
+    onAccepted: (ControllerPlatformActionPreparation, Conversation) -> Unit,
+    showEntry: Boolean = true,
 ) {
     var open by remember(owner, visit) { mutableStateOf(false) }
     var kind by remember(owner, visit) { mutableStateOf<PlatformActionKind?>(null) }
@@ -48,7 +49,7 @@ import org.json.JSONObject
         onDispose { active.set(false); preview?.let(controller::rejectPlatformAction) }
     }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        TextButton(enabled = enabled && preview == null, onClick = { open = !open },
+        if (showEntry) TextButton(enabled = enabled && preview == null, onClick = { open = !open },
             modifier = Modifier.testTag("platform-action-entry")) {
             Text("专用系统操作：闹钟 / 计时器 / 音量 / 媒体 / 联网（单次批准）")
         }

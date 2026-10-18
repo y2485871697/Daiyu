@@ -216,7 +216,15 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
             }
             UserTurnMenu(showMenu, { showMenu = false }, turn.id, actions)
         }
-        MessageTimestamp(turn.timestamp, Modifier.padding(top = 6.dp, end = 4.dp))
+        MessageActionBar(
+            id = turn.id,
+            actions = actions,
+            timestamp = turn.timestamp,
+            showEditAction = true,
+            allowSpeech = false,
+            showRegenerateAction = false,
+            modifier = Modifier.widthIn(max = 320.dp),
+        )
     }
 }
 

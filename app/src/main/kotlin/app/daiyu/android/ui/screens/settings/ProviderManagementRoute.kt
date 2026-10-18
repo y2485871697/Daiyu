@@ -49,11 +49,13 @@ private class ProviderConfirm(val title: String, val message: String, val destru
 private fun ModelSettings.providerDraft() = ModelSettingsDraftUi(protocol = protocol, endpoint = endpoint,
     responsesPath = responsesPath, apiKey = apiKey, model = model, batteryEnabled = batteryEnabled,
     deviceStatusEnabled = deviceStatusEnabled, customBody = requestOptions.customBody,
-    speedMode = requestOptions.speedMode, codex = requestOptions.codex)
+    speedMode = requestOptions.speedMode, codex = requestOptions.codex,
+    anthropicVersion = requestOptions.anthropicVersion.orEmpty())
 private fun ModelSettingsDraftUi.providerSettings(base: ModelSettings) = base.copy(endpoint = endpoint.trim(),
     responsesPath = responsesPath.trim(), model = model.trim(), apiKey = apiKey, protocol = protocol,
     batteryEnabled = batteryEnabled, deviceStatusEnabled = deviceStatusEnabled,
-    requestOptions = base.requestOptions.copy(customBody = customBody, speedMode = speedMode, codex = codex))
+    requestOptions = base.requestOptions.copy(customBody = customBody, speedMode = speedMode, codex = codex,
+        anthropicVersion = anthropicVersion.takeIf { it.isNotEmpty() }))
 
 @Composable
 internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: () -> Boolean,
@@ -238,8 +240,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         }
         val change: (ModelSettingsDraftUi) -> Unit = { if (live() && enabled) d.draft = it }
         val connection: ModelConnectionTester = { value, requestCancelled, deliver ->
-            if (!live() || !enabled) false else controller.testModelConnection(value.providerSettings(saved),
-                { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) deliver(it) }
+            if (!live() || !enabled || requestCancelled() || d.draft !== value) false else controller.testModelConnection(value.providerSettings(saved),
+                { cancelled() || requestCancelled() || d.draft !== value }) { if (live() && !requestCancelled() && d.draft === value) deliver(it) }
         }
         val connectionModifier = if (engineeringUi) Modifier.semantics {
             this[RetainedProviderConnectionTest] = draft to connection
@@ -276,8 +278,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             catalogEnabled = false, errorText = notice)
         else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
             createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
-                if (!live() || !enabled) false else controller.fetchModelCatalog(value.providerSettings(saved),
-                    { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) deliver(it) }
+                if (!live() || !enabled || requestCancelled() || d.draft !== value) false else controller.fetchModelCatalog(value.providerSettings(saved),
+                    { cancelled() || requestCancelled() || d.draft !== value }) { if (live() && !requestCancelled() && d.draft === value) deliver(it) }
             }, modifier = connectionModifier, pageTitle = pageTitleOverride ?: d.name,
             // Keep the primary model route's established single-page controls and tags;
             // additional providers use the explicit 配置/模型 split.

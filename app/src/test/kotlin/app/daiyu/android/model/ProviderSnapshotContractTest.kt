@@ -8,6 +8,16 @@ import org.junit.Test
 class ProviderSnapshotContractTest {
     private fun settings() = ModelSettings("https://example.invalid/gateway", "fixture-model", "synthetic-key", true, "/responses")
 
+    @Test fun snapshotRetainsNonDefaultAnthropicVersion() {
+        val options = ProviderRequestOptions(anthropicVersion = "2023-06-01")
+        val source = settings().copy(protocol = ProviderProtocol.MESSAGES, responsesPath = "", requestOptions = options)
+        val snapshot = ProviderSnapshot.capture(source)
+        assertEquals(source, snapshot.asModelSettings())
+        assertEquals(options, snapshot.requestOptions)
+        assertNotEquals(source.copy(requestOptions = ProviderRequestOptions()).requestSnapshot(), snapshot)
+        assertEquals("2023-06-01", snapshot.asModelSettings().requestOptions.anthropicVersion)
+    }
+
     @Test fun snapshotRetainsFieldsAndImmutableToolSet() {
         val original = settings()
         val snapshot = original.requestSnapshot()

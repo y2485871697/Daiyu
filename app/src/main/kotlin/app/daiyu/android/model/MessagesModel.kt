@@ -99,7 +99,7 @@ class MessagesModel internal constructor(
                 conn.requestMethod = "POST"; conn.doOutput = true; conn.instanceFollowRedirects = false
                 conn.connectTimeout = 20_000; conn.readTimeout = 60_000
                 conn.setRequestProperty("x-api-key", settings.apiKey)
-                conn.setRequestProperty("anthropic-version", "2023-06-01")
+                conn.setRequestProperty("anthropic-version", settings.requestOptions.anthropicVersion ?: "2023-06-01")
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.setRequestProperty("Accept", "text/event-stream")
                 sessionHeaders.forEach { (name, value) -> conn.setRequestProperty(name, value) }

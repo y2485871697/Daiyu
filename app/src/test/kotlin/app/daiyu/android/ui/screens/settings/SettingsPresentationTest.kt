@@ -75,6 +75,32 @@ class SettingsPresentationTest {
     }
 
     @Test
+    fun connectionDraftOwnerDistinguishesEqualFreshDrafts() {
+        val first = ModelSettingsDraftUi(anthropicVersion = "2023-06-01")
+        val equalFresh = first.copy()
+        assertEquals(first, equalFresh)
+        assertEquals(SettingsConnectionDraftOwner(first), SettingsConnectionDraftOwner(first))
+        assertEquals(SettingsConnectionDraftOwner(first).hashCode(), SettingsConnectionDraftOwner(first).hashCode())
+        assertFalse(SettingsConnectionDraftOwner(first) == SettingsConnectionDraftOwner(equalFresh))
+    }
+
+    @Test
+    fun leavingMessagesClearsVersionAndReturningDoesNotRestoreIt() {
+        val original = ModelSettingsDraftUi(protocol = ProviderProtocol.MESSAGES, apiKey = "test-only-secret",
+            anthropicVersion = "2023-06-02", protocolChangeAuthorized = true)
+        assertTrue(original === original.selectProtocol(ProviderProtocol.MESSAGES))
+        for (target in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI)) {
+            val switched = original.selectProtocol(target)
+            assertEquals("", switched.anthropicVersion); assertEquals("", switched.apiKey)
+            assertFalse(switched.protocolChangeAuthorized)
+            assertEquals(ProviderProtocol.MESSAGES, switched.savedProtocol)
+            val returned = switched.selectProtocol(ProviderProtocol.MESSAGES)
+            assertEquals("", returned.anthropicVersion); assertEquals("", returned.apiKey)
+            assertFalse(returned.protocolChangeAuthorized)
+        }
+    }
+
+    @Test
     fun protocolSwitchClearsSecretsAndRequiresFreshAuthorization() {
         val original = ModelSettingsDraftUi(apiKey = "test-only-secret", responsesPath = "/responses",
             protocolChangeAuthorized = true)

@@ -1,5 +1,7 @@
 package app.daiyu.android.model.catalog
 
+import app.daiyu.android.model.ProviderProtocol
+import app.daiyu.android.model.ProviderRequestOptions
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
@@ -38,7 +40,8 @@ data class RemoteModelRequest(
     val protocol: RemoteModelProtocol,
     /** Optional path relative to baseUrl. An empty value selects the protocol default. */
     val modelsPath: String = "",
-    val timeoutMillis: Int = RemoteModelFetcher.DEFAULT_TIMEOUT_MILLIS
+    val timeoutMillis: Int = RemoteModelFetcher.DEFAULT_TIMEOUT_MILLIS,
+    val anthropicVersion: String? = null,
 ) {
     override fun toString(): String = "RemoteModelRequest(protocol=$protocol, apiKey=<redacted>)"
 }
@@ -84,13 +87,7 @@ class RemoteModelFetcher(
     private val connect: (URL) -> HttpURLConnection = { it.openConnection() as HttpURLConnection }
 ) {
 
-    fun fetch(request: RemoteModelRequest): List<RemoteModel> = fetch(
-        request.baseUrl,
-        request.apiKey,
-        request.protocol,
-        request.modelsPath,
-        request.timeoutMillis
-    )
+    fun fetch(request: RemoteModelRequest): List<RemoteModel> = fetch(request, isCancelled = { false })
 
     fun fetch(
         baseUrl: String,
@@ -137,6 +134,12 @@ class RemoteModelFetcher(
         if (timeoutMillis !in 1..MAX_TIMEOUT_MILLIS) {
             throw RemoteModelException(RemoteModelFailure.INVALID_ENDPOINT)
         }
+        try {
+            ProviderRequestOptions(anthropicVersion = request.anthropicVersion).validate(
+                if (protocol == RemoteModelProtocol.ANTHROPIC) ProviderProtocol.MESSAGES else ProviderProtocol.RESPONSES)
+        } catch (_: IllegalArgumentException) {
+            throw RemoteModelException(RemoteModelFailure.REQUEST)
+        }
         checkCancelled(isCancelled)
 
         var connection: HttpURLConnection? = null
@@ -153,14 +156,14 @@ class RemoteModelFetcher(
             if (apiKey.isNotEmpty()) when (protocol) {
                 RemoteModelProtocol.ANTHROPIC -> {
                     connection.setRequestProperty("x-api-key", apiKey)
-                    connection.setRequestProperty("anthropic-version", ANTHROPIC_VERSION)
+                    connection.setRequestProperty("anthropic-version", request.anthropicVersion ?: ANTHROPIC_VERSION)
                 }
                 RemoteModelProtocol.GEMINI, RemoteModelProtocol.GOOGLE ->
                     connection.setRequestProperty("x-goog-api-key", apiKey)
                 else -> connection.setRequestProperty("Authorization", "Bearer $apiKey")
             } else if (protocol == RemoteModelProtocol.ANTHROPIC) {
                 // The version header is part of Anthropic's protocol even for a public test server.
-                connection.setRequestProperty("anthropic-version", ANTHROPIC_VERSION)
+                connection.setRequestProperty("anthropic-version", request.anthropicVersion ?: ANTHROPIC_VERSION)
             }
             configuringRequest = false
             checkCancelled(isCancelled)
@@ -225,10 +228,7 @@ class RemoteModelFetcher(
     fun fetch(
         request: RemoteModelRequest,
         isCancelled: () -> Boolean
-    ): List<RemoteModel> = fetch(
-        request.baseUrl, request.apiKey, request.protocol, request.modelsPath,
-        request.timeoutMillis, isCancelled
-    )
+    ): List<RemoteModel> = execute(request, isCancelled) { body -> parseModels(body, request.protocol) }
 
     private fun checkCancelled(isCancelled: () -> Boolean) {
         if (Thread.currentThread().isInterrupted || isCancelled()) throw InterruptedException()

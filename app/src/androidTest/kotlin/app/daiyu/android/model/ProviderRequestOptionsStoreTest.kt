@@ -23,6 +23,28 @@ class ProviderRequestOptionsStoreTest : InstrumentationTestCase() {
         } finally { super.tearDown() }
     }
 
+    fun testAnthropicVersionSurvivesReopenButNeverEntersNonSecretBackup() {
+        val options = ProviderRequestOptions(anthropicVersion = "2023-06-01")
+        val value = settings().copy(endpoint = "https://example.invalid/v1/messages", model = "claude-fixture",
+            protocol = ProviderProtocol.MESSAGES, requestOptions = options)
+        store.save(value, protocolChangeAuthorized = true)
+        assertEquals(value, store.load())
+        assertEquals(options, store.loadForEditing().settings.requestOptions)
+        store.save(store.loadForEditing().settings.copy(model = "changed-model"))
+        assertEquals(options, store.load().requestOptions)
+        val backup = store.nonSecretConfiguration()
+        val allowed = setOf("endpoint", "model", "responses-path", "battery", "device-status", "protocol")
+        assertTrue(allowed.containsAll(backup.keys))
+        assertFalse(JSONObject(backup).toString().contains("2023-06-01"))
+        for (key in listOf("request-options", "anthropic_version")) {
+            try {
+                store.prepareNonSecretRestore(JSONObject().put(key,
+                    if (key == "request-options") options.encode() else "2023-06-01"))
+                fail("non-secret restore must reject $key")
+            } catch (_: IllegalArgumentException) {}
+        }
+    }
+
     fun testOptionsSurviveReopenAndNeverEnterNonSecretBackup() {
         val options = ProviderRequestOptions("""{"metadata":{"private":"not-for-export"}}""", GptSpeedMode.FAST)
         val value = settings().copy(requestOptions = options)

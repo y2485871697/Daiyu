@@ -777,6 +777,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private var retainedPageState by mutableStateOf("chat")
+    private var offlineSpeechReturnPage = "chat"
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
@@ -1261,7 +1262,8 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "providers", "appearance", "haptics", "offline-speech", "voice-settings", "terminal", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
+                        "providers", "appearance", "haptics", "voice-settings", "terminal", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
+                        "offline-speech" -> retainedPage = offlineSpeechReturnPage
                         "pet-model-settings" -> retainedPage = "pet-settings"
                         "app-icon" -> retainedPage = "appearance"
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
@@ -1475,7 +1477,7 @@ class MainActivity : ComponentActivity() {
                     )
                     "skills" -> SkillManagementScreen(
                         managementFactory = { controller.skillManagement() },
-                        onBack = { returnToChat() },
+                        onBack = { if (activityUsable() && retainedPage == "skills") retainedPage = "settings" },
                     )
                     "voice-settings" -> VoiceSettingsPanel(voiceRuntime, remoteVoice, controller.voiceAccounts,
                         installPreviewRevoke = { revoke ->
@@ -1487,7 +1489,10 @@ class MainActivity : ComponentActivity() {
                         invalidate = { invalidateConfiguredVoice(); speechHost.stop(speechHost.owner); dictationHost.invalidate() },
                         onBack = { if (activityUsable()) retainedPage = "settings" },
                         onOpenOfflineSpeech = {
-                            if (activityUsable() && voiceForeground && retainedPage == "voice-settings") retainedPage = "offline-speech"
+                            if (activityUsable() && voiceForeground && retainedPage == "voice-settings") {
+                                offlineSpeechReturnPage = "voice-settings"
+                                retainedPage = "offline-speech"
+                            }
                         })
                     "session-gateway" -> {
                         val owner = gatewayOwner
@@ -1566,7 +1571,7 @@ class MainActivity : ComponentActivity() {
                         },
                     ) } } }
                     "offline-speech" -> app.daiyu.android.ui.screens.settings.OfflineSpeechSettingsScreen(
-                        applicationContext, onBack = { retainedPage = "settings" },
+                        applicationContext, onBack = { if (activityUsable() && retainedPage == "offline-speech") retainedPage = offlineSpeechReturnPage },
                         ownerCurrent = { activityUsable() && retainedPage == "offline-speech" })
                     "haptics" -> hapticsHost?.let { host ->
                         host.settingsOwner?.let { owner -> key(owner) {
@@ -1649,7 +1654,7 @@ class MainActivity : ComponentActivity() {
                     "backup" -> BackupScreen(
                         engineeringUi = engineeringUi,
                         onImport = { backupGuard { pickBackupAuto() } },
-                        onBack = { returnToChat() },
+                        onBack = { if (activityUsable() && retainedPage == "backup") retainedPage = "settings" },
                         onExportCompact = { backupGuard { pickBackup(true, false) } },
                         onExportComplete = { backupGuard { pickBackup(true, true) } },
                         onImportCompact = { backupGuard { pickBackup(false, false) } },
@@ -1671,7 +1676,7 @@ class MainActivity : ComponentActivity() {
                         coordinator = iconCoordinator,
                         onBack = { if (activityUsable() && retainedPage == "app-icon") retainedPage = "appearance" },
                     )
-                    "subagents" -> SubAgentSettingsScreen(onBack = { returnToChat() },
+                    "subagents" -> SubAgentSettingsScreen(onBack = { if (activityUsable() && retainedPage == "subagents") retainedPage = "settings" },
                         repositoryFactory = { subAgentRepository }, isCurrentRoute = retainedPage == "subagents",
                         modelSource = subAgentModelSource)
                     "assistant-edit" -> assistantEditingId?.let { id ->
@@ -2177,7 +2182,10 @@ class MainActivity : ComponentActivity() {
             cascadeVoice.operationToken == capturedCascadeToken && remoteVoice.operationToken == capturedRemoteToken &&
             speechHost.owner == capturedSpeechOwner
         top.yukonga.miuix.kmp.basic.TextButton(text = "离线语音设置", modifier = Modifier.testTag("offline-speech-open"),
-            onClick = { if (activityUsable() && retainedPage == "chat" && !sidebarVisible) retainedPage = "offline-speech" })
+            onClick = { if (activityUsable() && retainedPage == "chat" && !sidebarVisible) {
+                offlineSpeechReturnPage = "chat"
+                retainedPage = "offline-speech"
+            } })
         if (pack.enabled) top.yukonga.miuix.kmp.basic.TextButton(
             text = if (offline.listening) "取消离线听写" else "离线听写（本机麦克风）",
             modifier = Modifier.testTag("offline-speech-microphone"),
@@ -4227,6 +4235,14 @@ class MainActivity : ComponentActivity() {
         }
         previousPreferredRefreshRate = null; requestedPreferredRefreshRate = null
         if (selectionReady) selections[selected?.id] = selectionStart to selectionEnd
+        // A returned backup URI may show a one-shot confirmation. Unlike the external
+        // DocumentsUI hop itself, that approval must not survive a background transition.
+        // A fresh foreground visit must choose the file again.
+        if (pendingBackupRequest != 107) {
+            backupImportVisit = null
+            pendingBackupImportResult = null
+            if (prompt?.backup == true) prompt = null
+        }
         super.onPause()
     }
     override fun onStop() {

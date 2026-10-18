@@ -54,9 +54,12 @@ class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
             assertDraft(expected)
             assertSelection(expected.length, expected.length)
             assertEquals(1, launches.get())
-            ConversationDatabase(fixture.application).use { reopened ->
+            val reopened = ConversationDatabase(fixture.application)
+            try {
                 assertEquals(expected, reopened.conversations().single { it.id == conversation.id }.draft)
                 assertEquals(messages, reopened.messages(conversation.id))
+            } finally {
+                reopened.close()
             }
             activity = recreateActivity(activity)
             awaitUniqueTag("chat-draft")

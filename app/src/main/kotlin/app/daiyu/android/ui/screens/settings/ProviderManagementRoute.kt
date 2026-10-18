@@ -29,11 +29,16 @@ private class ProviderPagePermit {
 }
 private class ProviderDetail(
     val editor: ProviderEditorSlot, val name: String, val editing: EditingSettings,
+    val configurationRevision: Long,
     val persistence: SavedModelCatalogPersistence<CatalogModelParameters>, val catalogIdentity: String?,
 ) {
     val live = AtomicBoolean(true)
     var draft by mutableStateOf(editing.settings.providerDraft())
 }
+private class PausedProviderDraft(
+    val editor: ProviderEditorSlot, val editing: EditingSettings, val configurationRevision: Long,
+    val draft: ModelSettingsDraftUi,
+)
 private class ProviderPrompt(val registration: RegisteredProvider?)
 private class ProviderConfirm(val title: String, val message: String, val destructive: Boolean, val action: () -> Unit)
 private fun ModelSettings.providerDraft() = ModelSettingsDraftUi(protocol = protocol, endpoint = endpoint,
@@ -59,6 +64,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     var resumed by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var registry by remember { mutableStateOf<ProviderRegistrySnapshot?>(null) }
     var detail by remember { mutableStateOf<ProviderDetail?>(null) }
+    var pausedDraft by remember { mutableStateOf<PausedProviderDraft?>(null) }
     var serial by remember { mutableStateOf(0L) }
     var busy by remember { mutableStateOf<Any?>(null) }
     var loading by remember { mutableStateOf(false) }
@@ -94,7 +100,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             }, onFailure = { closeDetail(); notice = "提供商列表读取失败；未创建替代配置。" })
         }
     }
-    fun open(slot: String) {
+    fun open(slot: String, restore: PausedProviderDraft? = null) {
         val p = permit
         if (!current(p) || busy != null) return
         closeDetail(); checkingRegistry = false; loading = true; notice = null
@@ -105,13 +111,21 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 val registration = checkNotNull(snapshot.providers.singleOrNull { it.slotId == slot })
                 val editor = repo.editor(slot)
                 check(editor.registryRevision == snapshot.revision)
-                val editing = repo.editing(editor)
+                val (configurationRevision, editing) = repo.withEditor(editor) { store ->
+                    store.modelCatalog.readConfiguration { revision -> revision to store.loadForEditing() }
+                }
                 val identity = repo.withEditor(editor) { it.localModelCatalogSnapshot()?.providerIdentity }
-                ProviderDetail(editor, registration.name, editing, repo.catalogPersistence(editor), identity)
+                ProviderDetail(editor, registration.name, editing, configurationRevision, repo.catalogPersistence(editor), identity)
             } }
             if (!current(p) || serial != request) return@launch
             loading = false
-            result.fold(onSuccess = { detail = it }, onFailure = { notice = "详情读取失败或已变化，请刷新后重新打开。" })
+            result.fold(onSuccess = { loaded ->
+                if (restore != null && restore.editor == loaded.editor && restore.editing == loaded.editing &&
+                    restore.configurationRevision == loaded.configurationRevision) {
+                    loaded.draft = restore.draft.copy(protocolChangeAuthorized = false, requestOptionsReplacementAuthorized = false)
+                }
+                detail = loaded
+            }, onFailure = { notice = "详情读取失败或已变化，请刷新后重新打开。" })
         }
     }
     fun mutate(expected: ProviderRegistrySnapshot, p: ProviderPagePermit,
@@ -138,19 +152,25 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) {
+                pausedDraft = detail?.takeIf { busy == null && !loading }?.let {
+                    PausedProviderDraft(it.editor, it.editing, it.configurationRevision, it.draft)
+                }
                 resumed = false; permit.revoke(); closeDetail(); checkingRegistry = false
             } else if (event == Lifecycle.Event.ON_RESUME) {
                 permit = ProviderPagePermit(); resumed = true
-                if (initialSlot == null) refresh() else open(initialSlot)
+                val restore = pausedDraft.also { pausedDraft = null }
+                if (restore != null) open(restore.editor.slotId, restore)
+                else if (initialSlot == null) refresh() else open(initialSlot)
             }
         }
         lifecycle.addObserver(observer)
-        onDispose { visit.set(false); permit.revoke(); detail?.live?.set(false); lifecycle.removeObserver(observer) }
+        onDispose { pausedDraft = null; visit.set(false); permit.revoke(); detail?.live?.set(false); lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(Unit, initialSlot) {
         if (initialSlot == null) refresh() else open(initialSlot)
     }
     fun back() {
+        pausedDraft = null
         if (detail != null || loading) {
             // The primary provider is entered as the app's model-settings page, not as a
             // separate provider-list visit. Returning from its detail must leave the route;

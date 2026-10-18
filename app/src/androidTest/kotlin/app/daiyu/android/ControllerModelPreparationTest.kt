@@ -114,11 +114,11 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             assertTrue(f.db.messages(conversation.id).isEmpty())
             assertEquals("keep until accepted", f.db.conversations().single().draft)
             assertNull(f.controller.send(conversation, "reentrant duplicate"))
-            f.settings.save(config.copy(model="later-model", apiKey="later-key", batteryEnabled=false, deviceStatusEnabled=true))
             object : ModelPort {
                 override fun open(history: List<Message>): ModelSession = error("explicit frozen tools required")
                 override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = error("legacy enums must not swallow catalog")
                 override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
+                    f.settings.save(config.copy(model="later-model", apiKey="later-key", batteryEnabled=false, deviceStatusEnabled=true))
                     opens.incrementAndGet()
                     assertEquals(expectedBaseCatalog, definitions.map { it.name }.toSet())
                     assertEquals(setOf("ask_user"), definitions.filter {it.sideEffect}.map {it.name}.toSet())
@@ -153,6 +153,22 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         assertEquals(RunStatus.COMPLETED, messages.last().second.status)
     }
 
+    fun testConfigurationChangeDuringPreparationRejectsBeforeReceiptAndOpen() {
+        lateinit var f: Fixture
+        val opens = AtomicInteger()
+        f = fresh { config ->
+            f.settings.save(config.copy(model = "replacement-model"))
+            ModelPort { opens.incrementAndGet(); session("must not run") }
+        }
+        val conversation = f.db.create("default")
+        f.db.draft(conversation.id, "keep until fresh send")
+        assertNull(f.controller.send(conversation, "keep until fresh send"))
+        assertEquals(0, opens.get())
+        assertTrue(f.db.messages(conversation.id).isEmpty())
+        assertEquals("keep until fresh send", f.db.conversations().single().draft)
+        assertTrue(f.controller.problem?.contains("提供商选择或配置已变化") == true)
+    }
+
     fun testTransactionFailureNeverOpensPreparedPort() {
         val factories = AtomicInteger(); val opens = AtomicInteger()
         val f = fresh {
@@ -173,10 +189,12 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         var firstUsage: ModelEvent.Usage? = null
         val returned = java.util.concurrent.CopyOnWriteArrayList<List<ToolOutput>>()
         var beforeReturn: () -> Unit = {}
+        var afterAccepted: () -> Unit = {}
         override fun open(history: List<Message>): ModelSession = error("catalog required")
         override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = error("enum route forbidden")
         override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
             this.history=history.toList();this.definitions=definitions.toList()
+            afterAccepted()
             return object : ModelSession {
                 private var turn=0
                 override fun next(outputs:List<ToolOutput>,sink:(ModelEvent)->Unit) {
@@ -262,7 +280,8 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
     fun testCatalogDefinitionsUseFrozenSettingsAndHostLocators() {
         val probe=CatalogProbe();lateinit var f:Fixture
         f=fresh {config ->
-            f.settings.save(config.copy(batteryEnabled=false,deviceStatusEnabled=true));probe
+            probe.afterAccepted = { f.settings.save(config.copy(batteryEnabled=false,deviceStatusEnabled=true)) }
+            probe
         }
         val c=f.db.create("default");finish(f,c)
         assertEquals(expectedBaseCatalog,probe.definitions.map {it.name}.toSet())

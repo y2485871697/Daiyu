@@ -86,26 +86,21 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         return checkNotNull(root)
     }
     protected fun dismissIme() {
+        ui.waitForIdle()
         val root = focusedWindowRoot()
-        // Hide only a visible IME, using the same focused window that we verify below.
-        instrumentation.runOnMainSync {
+        fun requestHide() {
             check(root.isAttachedToWindow && root.hasWindowFocus()) { "ime_window_changed" }
-            val insets = checkNotNull(androidx.core.view.ViewCompat.getRootWindowInsets(root))
-            if (insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())) {
-                val focus = root.findFocus() ?: root
-                check(focus.rootView === root)
-                val token = checkNotNull(focus.windowToken)
-                val imm = root.context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
-                    as android.view.inputmethod.InputMethodManager
-                imm.hideSoftInputFromWindow(token, 0)
-            }
+            checkNotNull(androidx.core.view.ViewCompat.getWindowInsetsController(root))
+                .hide(androidx.core.view.WindowInsetsCompat.Type.ime())
         }
+        instrumentation.runOnMainSync { requestHide() }
         ui.waitUntil(5_000) {
             var hidden = false
             instrumentation.runOnMainSync {
                 val insets = androidx.core.view.ViewCompat.getRootWindowInsets(root)
                 hidden = root.isAttachedToWindow && insets != null &&
                     !insets.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime())
+                if (!hidden) requestHide()
             }
             hidden
         }

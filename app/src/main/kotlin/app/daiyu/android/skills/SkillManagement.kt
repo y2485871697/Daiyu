@@ -34,6 +34,25 @@ class SkillManagement private constructor(private val registry: SkillToolRegistr
         }
     }
 
+    /** Explicit trusted restoration of the APK-supplied package; never a model tool. */
+    fun reinstallBuiltin(id: String, expectedRevision: String): InstallResult {
+        workerOnly()
+        return synchronized(this) {
+            inspected = null; pending = null; pendingLocal = null; pendingRemoval = null
+            try {
+                InstallResult.Installed(frozen(registry.reinstallBuiltinForManagement(id, expectedRevision)))
+            } catch (committed: SkillCleanupPending) {
+                InstallResult.Installed(frozen(committed.installedSkills), cleanupPending = true)
+            } catch (_: SkillConflict) {
+                InstallResult.Rejected("skill_conflict")
+            } catch (_: SkillIncompatible) {
+                InstallResult.Rejected("skill_incompatible")
+            } catch (_: IllegalArgumentException) {
+                InstallResult.Rejected("builtin_not_available")
+            } catch (_: Exception) { InstallResult.Unknown }
+        }
+    }
+
     class Removal internal constructor(val entry: Entry)
     sealed class RemovalResult {
         data class Removed(val entry: Entry, val cleanupPending: Boolean = false) : RemovalResult()

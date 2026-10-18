@@ -162,6 +162,140 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
 
     // The same page controller as Compose, with explicit worker-start and UI-delivery
     // boundaries. No sleeps, network, app stores or executor scheduling assumptions.
+    private fun usePackagedBuiltins() {
+        skills.close()
+        skills = SkillInstallFixture(instrumentation.targetContext, packagedBuiltins = true)
+    }
+
+    fun testBuiltinReinstallNeedsConfirmationCancelDoesNotWriteAndKeepsGlobalOff() {
+        usePackagedBuiltins()
+        val original = skills.manager.snapshot().entries.single { it.id == "builtin:skill-creator" }
+        skills.manager.setEnabled(original.id, false, original.skill.revision)
+        skills.manager.setGlobalEnabled(false)
+        show()
+        reveal("skill-row:${original.id}", "技能").performClick()
+        node("skill-reinstall:${original.id}").performClick()
+        node("skills-confirm-reinstall").assertIsEnabled()
+        ui.onNodeWithText("取消").performClick()
+        assertFalse(skills.builtin.list().single { it.name == "skill-creator" }.enabled)
+        reveal("skill-row:${original.id}", "技能").performClick()
+        node("skill-reinstall:${original.id}").performClick()
+        node("skills-confirm-reinstall").performClick()
+        ui.waitUntil(10_000) { skills.builtin.list().single { it.name == "skill-creator" }.enabled }
+        ready("skills-global")
+        node("skills-global").assertIsOff()
+        assertFalse(skills.registry.enabled)
+        assertTrue(skills.calls.isEmpty())
+    }
+
+    private fun ControlledPage.prepareBuiltinReinstall(): SkillManagementPageState.BuiltinReinstall {
+        mainThread { controller.refresh() }
+        finishNext()
+        var entry: SkillManagement.Entry? = null
+        mainThread {
+            entry = controller.state!!.entries.single { it.id == "builtin:skill-creator" }
+            controller.prepareReinstall(checkNotNull(entry))
+        }
+        worker.drain(); deliver()
+        var approved: SkillManagementPageState.BuiltinReinstall? = null
+        mainThread { approved = controller.reinstall }
+        return checkNotNull(approved)
+    }
+
+    fun testBuiltinReinstallCanceledConfirmationCannotBeReusedAndDuplicateWritesOnce() {
+        usePackagedBuiltins()
+        val page = ControlledPage()
+        try {
+            val canceled = page.prepareBuiltinReinstall()
+            mainThread { page.controller.cancelReinstall(); page.controller.reinstall(canceled) }
+            assertEquals(0, page.worker.pending)
+            var writes = 0
+            skills.builtin.transactionCheckpoint = { if (it == "before_journal") writes++ }
+            val approved = page.prepareBuiltinReinstall()
+            mainThread { page.controller.reinstall(approved); page.controller.reinstall(approved) }
+            assertEquals(1, page.worker.pending)
+            page.finishNext()
+            assertEquals(1, writes)
+            mainThread { page.controller.reinstall(approved); assertNotNull(page.controller.installMessage) }
+            assertEquals(0, page.worker.pending)
+        } finally { skills.builtin.transactionCheckpoint = {}; page.close() }
+    }
+
+    fun testLeavingRejectsQueuedBuiltinReinstallAndLateConfirmation() {
+        usePackagedBuiltins()
+        val page = ControlledPage()
+        val approved = page.prepareBuiltinReinstall()
+        var writes = 0
+        skills.builtin.transactionCheckpoint = { if (it == "before_journal") writes++ }
+        mainThread { page.controller.reinstall(approved); page.controller.dispose(); page.controller.reinstall(approved) }
+        page.worker.drain(); page.deliver()
+        assertEquals(0, writes)
+        mainThread { assertNull(page.controller.installMessage) }
+        skills.builtin.transactionCheckpoint = {}
+    }
+
+    fun testAdmittedBuiltinReinstallFinishesAfterLeaveWithoutLatePageUpdate() {
+        usePackagedBuiltins()
+        val page = ControlledPage()
+        val approved = page.prepareBuiltinReinstall()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val failure = AtomicReference<Throwable?>()
+        var writes = 0
+        skills.builtin.transactionCheckpoint = { boundary ->
+            if (boundary == "before_journal") { writes++; entered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
+        }
+        mainThread { page.controller.reinstall(approved) }
+        val thread = Thread { try { page.worker.runNext() } catch (problem: Throwable) { failure.set(problem) } }.apply { start() }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            mainThread { page.controller.dispose(); page.controller.reinstall(approved) }
+        } finally { release.countDown(); thread.join(5_000); skills.builtin.transactionCheckpoint = {} }
+        assertFalse(thread.isAlive)
+        failure.get()?.let { throw it }
+        page.worker.drain(); page.deliver()
+        assertEquals(1, writes)
+        assertEquals(approved.entry.skill.revision, skills.builtin.list().single { it.name == "skill-creator" }.revision)
+        assertTrue(skills.builtin.list().single { it.name == "skill-creator" }.enabled)
+        mainThread { assertNull(page.controller.installMessage) }
+    }
+
+    fun testBuiltinReinstallUnknownConsumesConfirmationAndRefreshNeverReplays() {
+        usePackagedBuiltins()
+        val page = ControlledPage()
+        try {
+            val approved = page.prepareBuiltinReinstall()
+            var attempts = 0
+            skills.builtin.transactionCheckpoint = { if (it == "before_journal") { attempts++; error("unavailable") } }
+            mainThread { page.controller.reinstall(approved) }
+            page.finishNext()
+            mainThread {
+                assertTrue(page.controller.installMessage!!.contains("结果未知"))
+                assertNull(page.controller.reinstall)
+                page.controller.reinstall(approved)
+                page.controller.refresh()
+            }
+            page.finishNext()
+            assertEquals(1, attempts)
+        } finally { skills.builtin.transactionCheckpoint = {}; page.close() }
+    }
+
+    fun testBuiltinReinstallOldPageTokenCannotBorrowFreshPageConfirmation() {
+        usePackagedBuiltins()
+        val old = ControlledPage()
+        val stale = old.prepareBuiltinReinstall()
+        old.close()
+        val fresh = ControlledPage()
+        try {
+            val current = fresh.prepareBuiltinReinstall()
+            mainThread { fresh.controller.reinstall(stale); assertSame(current, fresh.controller.reinstall) }
+            assertEquals(0, fresh.worker.pending)
+            mainThread { fresh.controller.reinstall(current) }
+            fresh.finishNext()
+            mainThread { assertTrue(fresh.controller.installMessage!!.contains("重装成功")) }
+        } finally { fresh.close() }
+    }
+
     private class QueuedWorker : AbstractExecutorService() {
         private val tasks = LinkedBlockingQueue<Runnable>()
         @Volatile private var stopped = false

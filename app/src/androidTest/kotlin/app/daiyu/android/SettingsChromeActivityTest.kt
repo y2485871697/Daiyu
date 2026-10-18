@@ -253,6 +253,16 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         assertDraft("provider navigation remains unsent")
     }
 
+    fun testSeparateFixturesNeverShareThePrimaryCatalog() {
+        fixture.settings.modelCatalogSnapshot()
+        RunControlFixture(instrumentation.targetContext).use { other ->
+            awaitControl("second isolated controller ready") { other.controller.ready }
+            assertNull(other.settings.localModelCatalogSnapshot())
+            assertNotNull(fixture.settings.localModelCatalogSnapshot())
+            assertFalse(fixture.application.filesDir == other.application.filesDir)
+        }
+    }
+
     fun testMissingCatalogKeepsBothTabsWithoutRegisteringAProviderIdentity() {
         val editor = fixture.controller.providers.editor(app.daiyu.android.storage.ProviderRegistry.PRIMARY)
         assertNull(fixture.controller.providers.withEditor(editor) { it.localModelCatalogSnapshot() })

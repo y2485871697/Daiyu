@@ -24,7 +24,12 @@ internal class RunControlFixture(base:Context,
         init {attachBaseContext(base)}
         override fun getApplicationContext(): Context = this
     }
-    val application:Application=FixtureApplication(testContext(base,"run-control-${UUID.randomUUID()}-"))
+    private val fixtureId = UUID.randomUUID().toString()
+    private val filesRoot = java.io.File(base.cacheDir, "run-control-files-$fixtureId").apply { check(mkdirs()) }
+    val application:Application=FixtureApplication(object : android.content.ContextWrapper(
+        testContext(base,"run-control-$fixtureId-")) {
+        override fun getFilesDir() = filesRoot
+    })
     val database=ConversationDatabase(application)
     private val alias="app.daiyu.android.test.run-control.${UUID.randomUUID()}"
     val settings=ModelSettingsStore(application,alias)
@@ -72,12 +77,14 @@ internal class RunControlFixture(base:Context,
         synchronized(queued) {sessions.add(it);queued.addLast(it)}
     }
     override fun close() {
+        check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper()) { "fixture_cleanup_requires_worker" }
         synchronized(queued) {sessions.forEach {it.release.countDown()}}
         if (diagnosticsFile.exists()) diagnostics.setEnabled(false)
         controller.stop();controller.close()
         diagnosticsFile.parentFile?.deleteRecursively()
         application.getSharedPreferences("model-settings",0).edit().clear().commit()
         application.getSharedPreferences("conversation-ui",0).edit().clear().commit()
+        check(filesRoot.deleteRecursively())
         database.runtimeLockFile.delete()
         application.deleteDatabase("conversations.db")
         val keys=java.security.KeyStore.getInstance("AndroidKeyStore").apply {load(null)}

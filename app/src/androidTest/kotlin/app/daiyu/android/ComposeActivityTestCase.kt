@@ -66,11 +66,8 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
 
     protected fun dismissIme() {
         val host = checkNotNull(currentHost)
-        mainThread {
-            host.currentFocus?.clearFocus()
-            host.getSystemService(android.view.inputmethod.InputMethodManager::class.java)
-                .hideSoftInputFromWindow(host.window.decorView.windowToken, 0)
-        }
+        // Espresso resolves the focused root, including Compose Dialog windows.
+        androidx.test.espresso.Espresso.closeSoftKeyboard()
         ui.waitUntil(5_000) {
             var hidden = false
             instrumentation.runOnMainSync {

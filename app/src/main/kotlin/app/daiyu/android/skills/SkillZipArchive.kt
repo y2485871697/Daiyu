@@ -7,8 +7,23 @@ import java.util.zip.ZipInputStream
 object SkillZipArchive {
     const val MAX_ZIP_BYTES = 16 * 1024 * 1024
     fun read(bytes: ByteArray, commit: String, checkpoint: () -> Unit = {}): Map<String, ByteArray> {
+        require(commit.matches(Regex("[a-f0-9]{40}"))) { "invalid_archive" }
+        return readArchive(bytes, commit, checkpoint)
+    }
+
+    /** A local archive is exactly one root skill or one wrapping directory, never a repository selection. */
+    fun readLocal(bytes: ByteArray, checkpoint: () -> Unit = {}): Map<String, ByteArray> {
+        val files = readArchive(bytes, null, checkpoint)
+        val skills = files.keys.filter { it == "SKILL.md" || it.endsWith("/SKILL.md") }
+        require(skills.size == 1) { "single_skill_required" }
+        val prefix = skills.single().removeSuffix("SKILL.md")
+        require(prefix.count { it == '/' } <= 1 && files.keys.all { it.startsWith(prefix) }) { "invalid_skill_layout" }
+        return files.mapKeys { (path, _) -> path.removePrefix(prefix) }
+    }
+
+    private fun readArchive(bytes: ByteArray, commit: String?, checkpoint: () -> Unit): Map<String, ByteArray> {
         checkpoint()
-        require(commit.matches(Regex("[a-f0-9]{40}")) && bytes.size <= MAX_ZIP_BYTES) { "invalid_archive" }
+        require(bytes.size <= MAX_ZIP_BYTES) { "invalid_archive" }
         fun u16(offset: Int): Int { require(offset >= 0 && offset + 2 <= bytes.size) { "invalid_archive" }; return (bytes[offset].toInt() and 255) or ((bytes[offset + 1].toInt() and 255) shl 8) }
         fun u32(offset: Int): Long = u16(offset).toLong() or (u16(offset + 2).toLong() shl 16)
         var end = -1
@@ -30,7 +45,7 @@ object SkillZipArchive {
             val mode = ((u32(cursor + 38) shr 16) and 0xf000).toInt()
             require(mode in setOf(0, 0x8000, 0x4000)) { "unsafe_archive_entry" }
             val name = SkillFiles.text(bytes.copyOfRange(cursor + 46, cursor + 46 + nameLength))
-            validateName(name)
+            validateName(name, commit != null)
             require(names.add(name)) { "duplicate_archive_entry" }
             require(size <= SkillStore.MAX_FILE_BYTES || name.endsWith('/')) { "resource_too_large" }
             expanded += size; require(expanded <= SkillStore.MAX_SKILL_BYTES) { "archive_too_large" }
@@ -48,15 +63,17 @@ object SkillZipArchive {
                 slash = name.indexOf('/', slash + 1)
             }
         }
-        val roots = names.map { it.substringBefore('/') }.toSet()
-        require(roots.size == 1 && roots.single().endsWith("-$commit")) { "archive_commit_mismatch" }
-        val root = roots.single() + "/"
+        val root = if (commit != null) {
+            val roots = names.map { it.substringBefore('/') }.toSet()
+            require(roots.size == 1 && roots.single().endsWith("-$commit")) { "archive_commit_mismatch" }
+            roots.single() + "/"
+        } else ""
         val files = linkedMapOf<String, ByteArray>(); val seen = mutableSetOf<String>(); var total = 0
         ZipInputStream(ByteArrayInputStream(bytes), Charsets.UTF_8).use { zip ->
             while (true) {
                 checkpoint()
                 val entry = zip.nextEntry ?: break
-                validateName(entry.name)
+                validateName(entry.name, commit != null)
                 require(entry.name in names && seen.add(entry.name)) { "invalid_archive" }
                 val relative = entry.name.removePrefix(root)
                 require(entry.name.startsWith(root)) { "unsafe_archive_entry" }
@@ -77,7 +94,7 @@ object SkillZipArchive {
         SkillFiles.validateResourceTree(files.keys)
         return files
     }
-    private fun validateName(name: String) {
-        require(name.length in 1..512 && '/' in name && !name.startsWith('/') && '\\' !in name && name.none { it.code < 32 } && name.trimEnd('/').split('/').none { it.isEmpty() || it == "." || it == ".." }) { "unsafe_archive_path" }
+    private fun validateName(name: String, requireRoot: Boolean) {
+        require(name.length in 1..512 && (!requireRoot || '/' in name) && !name.startsWith('/') && '\\' !in name && name.none { it.code < 32 } && name.trimEnd('/').split('/').none { it.isEmpty() || it == "." || it == ".." }) { "unsafe_archive_path" }
     }
 }

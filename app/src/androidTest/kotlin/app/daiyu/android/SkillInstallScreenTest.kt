@@ -227,6 +227,157 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
         return checkNotNull(removal)
     }
 
+    private class LocalZipPicker : androidx.activity.result.ActivityResultRegistry(), androidx.activity.result.ActivityResultRegistryOwner {
+        override val activityResultRegistry: androidx.activity.result.ActivityResultRegistry get() = this
+        var launched: Int? = null
+        override fun <I, O> onLaunch(requestCode: Int, contract: androidx.activity.result.contract.ActivityResultContract<I, O>,
+            input: I, options: androidx.core.app.ActivityOptionsCompat?) {
+            check(contract is androidx.activity.result.contract.ActivityResultContracts.OpenDocument)
+            check((input as Array<*>).toList() == listOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+            launched = requestCode
+        }
+        fun result(uri: android.net.Uri?) {
+            dispatchResult(checkNotNull(launched), if (uri == null) android.app.Activity.RESULT_CANCELED else android.app.Activity.RESULT_OK,
+                uri?.let { android.content.Intent().setData(it) })
+        }
+    }
+
+    fun testLocalOpenDocumentCancelAndRealProviderImportThroughScreen() {
+        val file = java.io.File(instrumentation.targetContext.cacheDir, "local-skill-${java.util.UUID.randomUUID()}.zip")
+        file.writeBytes(localZip())
+        val opens = java.util.concurrent.atomic.AtomicInteger()
+        val provider = object : android.content.ContentProvider() {
+            override fun onCreate() = true
+            override fun getType(uri: android.net.Uri) = "application/zip"
+            override fun openFile(uri: android.net.Uri, mode: String): android.os.ParcelFileDescriptor {
+                check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper())
+                check(mode == "r"); opens.incrementAndGet()
+                return android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+            }
+            override fun query(uri: android.net.Uri, projection: Array<out String>?, selection: String?, args: Array<out String>?, order: String?): android.database.Cursor? = null
+            override fun insert(uri: android.net.Uri, values: android.content.ContentValues?): android.net.Uri? = error("unused")
+            override fun delete(uri: android.net.Uri, selection: String?, args: Array<out String>?) = error("unused")
+            override fun update(uri: android.net.Uri, values: android.content.ContentValues?, selection: String?, args: Array<out String>?) = error("unused")
+        }
+        provider.attachInfo(instrumentation.targetContext, android.content.pm.ProviderInfo().apply {
+            authority = "local-skill-test"; exported = false
+            applicationInfo = instrumentation.targetContext.applicationInfo
+        })
+        val resolver = android.test.mock.MockContentResolver(instrumentation.targetContext).apply { addProvider("local-skill-test", provider) }
+        val context = object : android.content.ContextWrapper(activity) { override fun getContentResolver() = resolver }
+        val picker = LocalZipPicker()
+        try {
+            mainThread { activity.setContent {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    androidx.compose.ui.platform.LocalContext provides context,
+                    androidx.activity.compose.LocalActivityResultRegistryOwner provides picker,
+                ) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    SkillManagementScreen(managementFactory = { skills.manager }, onBack = {})
+                } }
+            } }
+            ready("skills-import-zip")
+            reveal("skills-import-zip", "技能").performClick()
+            mainThread { picker.result(null) }
+            ready("skills-import-zip")
+            assertEquals(0, opens.get()); assertTrue(skills.user.list().isEmpty())
+            reveal("skills-import-zip", "技能").performClick()
+            mainThread { picker.result(android.net.Uri.parse("content://local-skill-test/package")) }
+            ready("skills-confirm-local-install")
+            assertEquals(1, opens.get()); assertTrue(skills.user.list().isEmpty())
+            file.writeBytes(byteArrayOf(0)) // confirmation must use already frozen bytes
+            node("skills-confirm-local-install").performClick()
+            ui.waitUntil(10_000) { ui.onAllNodesWithText("安装成功", substring = true).fetchSemanticsNodes().isNotEmpty() }
+            assertEquals(1, opens.get()); assertEquals(1, skills.user.list().size)
+            assertNull(skills.user.list().single().commit); assertTrue(skills.calls.isEmpty())
+        } finally { file.delete() }
+    }
+
+    private fun localZip(): ByteArray {
+        val bytes = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(bytes).use { out -> skills.oldBundle().files.forEach { (path, data) ->
+            out.putNextEntry(java.util.zip.ZipEntry(path)); out.write(data); out.closeEntry()
+        } }
+        return bytes.toByteArray()
+    }
+
+    private fun ControlledPage.prepareLocal(): SkillManagement.LocalPreview {
+        var request: SkillManagementPageState.LocalPick? = null
+        mainThread { request = controller.beginLocalPick() }
+        worker.drain(); deliver()
+        mainThread { controller.receiveLocalPick(checkNotNull(request)) { localZip().inputStream() } }
+        finishNext()
+        var preview: SkillManagement.LocalPreview? = null
+        mainThread { preview = controller.localPreview }
+        return checkNotNull(preview)
+    }
+
+    fun testLocalPickerCanceledDuplicateAndLateResultNeverReadDocument() {
+        val page = ControlledPage()
+        var request: SkillManagementPageState.LocalPick? = null
+        var reads = 0
+        try {
+            mainThread { request = page.controller.beginLocalPick(); assertTrue(page.controller.busy) }
+            page.worker.drain(); page.deliver()
+            mainThread {
+                page.controller.receiveLocalPick(checkNotNull(request), null)
+                page.controller.receiveLocalPick(checkNotNull(request)) { reads++; localZip().inputStream() }
+                assertFalse(page.controller.busy); assertNull(page.controller.localPreview)
+                request = page.controller.beginLocalPick()
+                page.controller.dispose()
+                page.controller.receiveLocalPick(checkNotNull(request)) { reads++; localZip().inputStream() }
+            }
+            page.worker.drain(); page.deliver()
+            assertEquals(0, reads)
+            assertTrue(skills.user.list().isEmpty())
+        } finally { page.close() }
+    }
+
+    fun testLocalQueuedInstallIsRevokedOnLeaveAndFreshPageCanInstallOnce() {
+        val old = ControlledPage()
+        val preview = old.prepareLocal()
+        mainThread { old.controller.installLocal(preview, preview.replacements); old.controller.dispose() }
+        old.worker.drain(); old.deliver()
+        assertTrue(skills.user.list().isEmpty())
+        mainThread { assertNull(old.controller.installMessage) }
+        val fresh = ControlledPage()
+        try {
+            val next = fresh.prepareLocal()
+            mainThread {
+                fresh.controller.installLocal(preview, preview.replacements)
+                assertFalse(fresh.controller.busy)
+                fresh.controller.installLocal(next, next.replacements)
+                fresh.controller.installLocal(next, next.replacements)
+                assertEquals(1, fresh.worker.pending)
+            }
+            fresh.finishNext()
+            assertEquals(next.change.candidate.incomingRevision, skills.user.list().single().revision)
+            assertTrue(skills.calls.isEmpty())
+            mainThread { assertNotNull(fresh.controller.installMessage); assertNull(fresh.controller.localPreview) }
+        } finally { fresh.close() }
+    }
+
+    fun testLocalAdmittedInstallFinishesAfterLeaveWithoutUpdatingOldPage() {
+        val page = ControlledPage()
+        val preview = page.prepareLocal()
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val failure = AtomicReference<Throwable?>()
+        skills.user.transactionCheckpoint = { boundary -> if (boundary == "after_publish") {
+            entered.countDown(); check(release.await(10, TimeUnit.SECONDS))
+        } }
+        mainThread { page.controller.installLocal(preview, preview.replacements) }
+        val thread = Thread { try { page.worker.runNext() } catch (problem: Throwable) { failure.set(problem) } }.apply { start() }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            mainThread { page.controller.dispose() }
+            release.countDown(); thread.join(5000); assertFalse(thread.isAlive)
+            failure.get()?.let { throw AssertionError("local install failed", it) }
+            page.worker.drain(); page.deliver()
+            assertEquals(preview.change.candidate.incomingRevision, skills.user.list().single().revision)
+            mainThread { assertNull(page.controller.installMessage); assertNull(page.controller.localPreview) }
+        } finally { release.countDown(); thread.join(5000); page.close() }
+    }
+
     fun testCanceledRemovalCannotReuseOldConfirmationAndDuplicateRunsOnce() {
         val old = skills.user.install(listOf(skills.oldBundle())).single()
         val page = ControlledPage()

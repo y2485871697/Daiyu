@@ -168,4 +168,80 @@ class SkillManagementTest : InstrumentationTestCase() {
         } finally { release.countDown(); worker.join(5000) }
     }
 
+    private fun localZip(body: String = "local instructions"): ByteArray {
+        val output = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(output).use { zip ->
+            bundle(body).files.forEach { (path, bytes) ->
+                zip.putNextEntry(java.util.zip.ZipEntry(path)); zip.write(bytes); zip.closeEntry()
+            }
+        }
+        return output.toByteArray()
+    }
+
+    fun testLocalPreviewFreezesBytesClosesStreamAndInstallsOnceWithGlobalOff() = fixture { _, user, registry, manager ->
+        manager.setGlobalEnabled(false)
+        val bytes = localZip()
+        var closes = 0
+        val preview = manager.previewLocalZip {
+            object : java.io.ByteArrayInputStream(bytes) {
+                override fun close() { closes++; super.close() }
+            }
+        }
+        assertEquals(1, closes)
+        assertTrue(user.list().isEmpty())
+        bytes.fill(0)
+        val result = manager.installLocalZip(preview, emptyMap()) as SkillManagement.InstallResult.Installed
+        assertEquals(preview.change.candidate.incomingRevision, result.skills.single().revision)
+        assertNull(result.skills.single().source)
+        assertNull(result.skills.single().commit)
+        assertFalse(registry.enabled)
+        assertTrue(user.list().single().enabled)
+        assertTrue(manager.installLocalZip(preview, emptyMap()) is SkillManagement.InstallResult.Rejected)
+    }
+
+    fun testLocalReplacementRequiresExactOneShotApprovalAndRejectsChangedTarget() = fixture { _, user, _, manager ->
+        val old = user.install(listOf(bundle())).single()
+        val missing = manager.previewLocalZip { localZip().inputStream() }
+        assertEquals(mapOf("user:sample" to old.revision), missing.replacements)
+        assertEquals(SkillManagement.InstallResult.Rejected("replacement_approval_required"), manager.installLocalZip(missing, emptyMap()))
+        assertEquals(SkillManagement.InstallResult.Rejected("stale_preview"), manager.installLocalZip(missing, missing.replacements))
+        val stale = manager.previewLocalZip { localZip().inputStream() }
+        val new = user.install(listOf(bundle("external")), mapOf("sample" to old.revision)).single()
+        assertEquals(SkillManagement.InstallResult.Rejected("skill_conflict"), manager.installLocalZip(stale, stale.replacements))
+        assertEquals(new, user.list().single())
+        val approved = manager.previewLocalZip { localZip().inputStream() }
+        assertTrue(manager.installLocalZip(approved, approved.replacements) is SkillManagement.InstallResult.Installed)
+    }
+
+    fun testLocalCancelAndSourceChangesRevokeOldPreview() = fixture { _, user, _, manager ->
+        val first = manager.previewLocalZip { localZip().inputStream() }
+        manager.cancelInstall()
+        assertEquals(SkillManagement.InstallResult.Rejected("stale_preview"), manager.installLocalZip(first, emptyMap()))
+        val next = manager.previewLocalZip { localZip().inputStream() }
+        try { manager.inspect("not a URL"); fail("bad URL accepted") } catch (_: IllegalArgumentException) { }
+        assertEquals(SkillManagement.InstallResult.Rejected("stale_preview"), manager.installLocalZip(next, emptyMap()))
+        val installed = user.install(listOf(bundle())).single()
+        val beforeDelete = manager.previewLocalZip { localZip().inputStream() }
+        manager.previewRemoval("user:sample", installed.revision)
+        assertEquals(SkillManagement.InstallResult.Rejected("stale_preview"), manager.installLocalZip(beforeDelete, beforeDelete.replacements))
+    }
+
+    fun testLocalBuiltinConflictAtPreviewAndPublication() = fixture { builtin, user, _, manager ->
+        val preview = manager.previewLocalZip { localZip().inputStream() }
+        builtin.install(listOf(bundle("builtin")))
+        assertEquals(SkillManagement.InstallResult.Rejected("builtin_conflict"), manager.installLocalZip(preview, emptyMap()))
+        try { manager.previewLocalZip { localZip().inputStream() }; fail("builtin preview accepted") }
+        catch (failure: IllegalArgumentException) { assertEquals("builtin_conflict", failure.message) }
+        assertTrue(user.list().isEmpty())
+    }
+
+    fun testLocalCommittedCleanupFailureIsNotRejectedOrRetried() = fixture { _, user, _, manager ->
+        val preview = manager.previewLocalZip { localZip().inputStream() }
+        user.transactionCheckpoint = { if (it == "after_commit") throw java.io.IOException("injected") }
+        val result = manager.installLocalZip(preview, emptyMap()) as SkillManagement.InstallResult.Installed
+        assertTrue(result.cleanupPending)
+        assertEquals(preview.change.candidate.incomingRevision, user.list().single().revision)
+        assertEquals(SkillManagement.InstallResult.Rejected("stale_preview"), manager.installLocalZip(preview, emptyMap()))
+    }
+
 }

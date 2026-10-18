@@ -2538,7 +2538,8 @@ class ChatController internal constructor(private val application:Application,
             val selection = app.daiyu.android.mcp.McpSelection(serverId, tool, arguments)
             val scope = app.daiyu.android.mcp.McpRunScope(frozen, listOf(selection),
                 conversation?.id ?: ConversationId(UUID.randomUUID().toString()), RunId(UUID.randomUUID().toString()),
-                configurationCurrent = { store.isCurrent(frozen) }, transport = mcpTransport)
+                configurationCurrent = { store.isCurrent(frozen) }, transport = mcpTransport,
+                observeConfiguration = { invalidate -> store.observeInvalidated(frozen, invalidate) })
             pending = ControllerMcpPreparation(conversation, editor, text, profile, ProviderSnapshot.capture(config),
                 selection, scope, MessageId(UUID.randomUUID().toString()))
             synchronized(this) {

@@ -25,6 +25,7 @@ class RunCatalogToolsMcpTest {
         val methods = mutableListOf<String>()
         val calls = AtomicInteger()
         var callBody: ((Interceptor.Chain) -> String)? = null
+        var listing = """{"tools":[{"name":"erase","inputSchema":{"type":"object"},"annotations":{"readOnlyHint":true}}]}"""
         override fun intercept(chain: Interceptor.Chain): Response {
             val buffer = Buffer(); chain.request().body!!.writeTo(buffer)
             val input = McpJson.objectValue(buffer.readUtf8()); val method = input.getString("method")
@@ -32,7 +33,7 @@ class RunCatalogToolsMcpTest {
             val text = when (method) {
                 "initialize" -> """{"protocolVersion":"2025-03-26","capabilities":{"tools":{}},"serverInfo":{"name":"fixture","version":"1"}}"""
                 "notifications/initialized" -> null
-                "tools/list" -> """{"tools":[{"name":"erase","inputSchema":{"type":"object"},"annotations":{"readOnlyHint":true}}]}"""
+                "tools/list" -> listing
                 "tools/call" -> { calls.incrementAndGet(); callBody?.invoke(chain) ?: """{"content":[{"type":"text","text":"done"}]}""" }
                 else -> error("unexpected method")
             }
@@ -46,7 +47,7 @@ class RunCatalogToolsMcpTest {
     }
     private inner class Fixture(val wire: Wire = Wire(), factory: ((McpServer) -> McpHttpSession)? = null) {
         val current = AtomicBoolean(true)
-        val server = McpServer("server", "Fixture", "https://mcp.invalid/rpc", "secret-token")
+        val server = McpServer("server", "Fixture", "https://mcp.invalid/rpc", "secret-token", enabled = true, catalog = listOf(McpRemoteTool("erase", "erase", readOnlyHint = true)), allowedTools = setOf("erase"))
         val scope = McpRunScope(McpSettings("revision", listOf(server)), listOf(McpSelection("server", "erase", "{\"target\":\"one\"}")),
             message.conversationId, message.runId, current::get, factory ?: { McpHttpSession(it, OkHttpClient.Builder().addInterceptor(wire).build()) })
         val capabilities = SessionCapabilities("run", setOf(McpRunScope.CAPABILITY, "audit"))
@@ -71,6 +72,42 @@ class RunCatalogToolsMcpTest {
             catalog.closeWithResult { assertEquals(RunCatalogCloseResult.Drained, it); done.countDown() }
             assertTrue(done.await(5, TimeUnit.SECONDS))
         }
+    }
+    @Test fun metadataDriftRejectsPreviouslyAllowedNameBeforeCallAndDrains() {
+        for (listing in listOf(
+            """{"tools":[{"name":"erase","description":"changed","inputSchema":{"type":"object"},"annotations":{"readOnlyHint":true}}]}""",
+            """{"tools":[{"name":"erase","inputSchema":{"type":"object","required":["target"]},"annotations":{"readOnlyHint":true}}]}""",
+            """{"tools":[{"name":"erase","inputSchema":{"type":"object"},"annotations":{"readOnlyHint":false}}]}""")) {
+            val wire = Wire().apply { this.listing = listing }
+            val f = Fixture(wire)
+            try {
+                assertThrows(IllegalStateException::class.java) { f.catalog.definitions }
+                assertEquals(0, wire.calls.get())
+                assertFalse(f.scope.isCurrent())
+            } finally { f.close() }
+        }
+    }
+    @Test fun bothPersistentPolicyGatesRejectBeforeTransportAndInvalidationClosesScope() {
+        val tool = McpRemoteTool("erase", "erase", readOnlyHint = true)
+        for (server in listOf(
+            McpServer("server", "fixture", "https://mcp.invalid/rpc", ""),
+            McpServer("server", "fixture", "https://mcp.invalid/rpc", "", catalog = listOf(tool), allowedTools = setOf("erase")),
+            McpServer("server", "fixture", "https://mcp.invalid/rpc", "", enabled = true, catalog = listOf(tool)))) {
+            assertThrows(IllegalArgumentException::class.java) {
+                McpRunScope(McpSettings("policy", listOf(server)), listOf(McpSelection("server", "erase", "{}")),
+                    message.conversationId, message.runId, { true }, { error("disabled transport") })
+            }
+        }
+        var invalidate: (() -> Unit)? = null
+        var unsubscribed = 0
+        val server = McpServer("server", "fixture", "https://mcp.invalid/rpc", "", true, listOf(tool), setOf("erase"))
+        val scope = McpRunScope(McpSettings("policy", listOf(server)), listOf(McpSelection("server", "erase", "{}")),
+            message.conversationId, message.runId, { true }, { error("preview must not connect") },
+            observeConfiguration = { invalidate = it; { unsubscribed++ } })
+        assertTrue(scope.isCurrent()); checkNotNull(invalidate).invoke()
+        assertFalse(scope.isCurrent()); assertEquals(1, unsubscribed)
+        var drained = false; scope.observeDrained { drained = true }; assertTrue(drained)
+        scope.close(); assertEquals(1, unsubscribed)
     }
     @Test fun dynamicToolsUseSameOpaqueOwnerUniqueAuthorizationAndOriginalLedger() {
         val f = Fixture()

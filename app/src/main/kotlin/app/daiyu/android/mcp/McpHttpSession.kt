@@ -12,7 +12,34 @@ import java.nio.ByteBuffer
 import java.nio.charset.CodingErrorAction
 import java.util.concurrent.TimeUnit
 
-internal class McpRemoteTool(val name: String, val description: String)
+internal class McpRemoteTool(val name: String, val description: String,
+    inputSchema: String = "{\"type\":\"object\"}", val readOnlyHint: Boolean? = null) {
+    val inputSchema: String = McpJson.canonical(McpJson.objectValue(inputSchema))
+    init {
+        require(name.length in 1..128 && name.none { it < ' ' } && description.length <= 4096)
+        require(this.inputSchema.toByteArray(Charsets.UTF_8).size <= 16384)
+        require(McpJson.text(McpJson.objectValue(this.inputSchema), "type") == "object")
+    }
+    fun redacted(secret: String): McpRemoteTool = fromJson(McpJson.redact(json(), secret) as JSONObject)
+    fun sameMetadata(other: McpRemoteTool): Boolean = McpJson.canonical(json()) == McpJson.canonical(other.json())
+    fun json(): JSONObject = JSONObject().put("name", name).put("description", description)
+        .put("inputSchema", McpJson.objectValue(inputSchema)).also {
+            readOnlyHint?.let { hint -> it.put("annotations", JSONObject().put("readOnlyHint", hint)) }
+        }
+    override fun toString() = "McpRemoteTool(untrusted)"
+    companion object {
+        fun fromJson(tool: JSONObject): McpRemoteTool {
+            val name = McpJson.text(tool, "name")
+            val description = if (tool.has("description")) McpJson.text(tool, "description") else name
+            val schema = tool.getJSONObject("inputSchema")
+            val annotation = if (tool.has("annotations")) tool.getJSONObject("annotations") else null
+            val hint = annotation?.let { if (it.has("readOnlyHint")) {
+                require(it.get("readOnlyHint") is Boolean); it.getBoolean("readOnlyHint")
+            } else null }
+            return McpRemoteTool(name, description, McpJson.canonical(schema), hint)
+        }
+    }
+}
 
 /** One frozen endpoint, one HTTP session, no background GET, reconnect, redirect or retry.
  * JSON response subset of Streamable HTTP 2025-03-26. SSE/batches/server requests are rejected.
@@ -51,11 +78,7 @@ internal class McpHttpSession(
             val tool = list.getJSONObject(i)
             val name = McpJson.text(tool, "name")
             require(name.length in 1..128 && name.none { it < ' ' } && names.add(name))
-            val schema = tool.getJSONObject("inputSchema")
-            require(McpJson.text(schema, "type") == "object")
-            val description = if (tool.has("description")) McpJson.text(tool, "description") else name
-            require(description.length <= 4096)
-            McpRemoteTool(name, description)
+            McpRemoteTool.fromJson(tool)
         }
     }
     fun call(tool: String, arguments: String): Pair<String, Boolean> {

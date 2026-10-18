@@ -16,11 +16,20 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 /** Deliberately not a data class: neither URL nor credentials may appear in logs/toString. */
-internal class McpServer(val id: String, val label: String, val endpoint: String, val bearer: String) {
+internal class McpServer(val id: String, val label: String, val endpoint: String, val bearer: String,
+    val enabled: Boolean = false, catalog: List<McpRemoteTool> = emptyList(), allowedTools: Set<String> = emptySet()) {
+    val catalog: List<McpRemoteTool> = java.util.Collections.unmodifiableList(catalog.toList())
+    val allowedTools: Set<String> = java.util.Collections.unmodifiableSet(allowedTools.toSet())
+    fun eligible(tool: String): Boolean = enabled && tool in allowedTools && catalog.any { it.name == tool }
+    fun withPolicy(enabled: Boolean = this.enabled, allowedTools: Set<String> = this.allowedTools,
+        catalog: List<McpRemoteTool> = this.catalog) = McpServer(id, label, endpoint, bearer, enabled, catalog, allowedTools)
+
     init {
         require(id.matches(Regex("[a-z][a-z0-9_-]{0,31}")))
         require(label.isNotBlank() && label.length <= 80 && label.none { it < ' ' })
         require(endpoint.length <= 2048 && bearer.length <= 4096 && bearer.matches(Regex("[-A-Za-z0-9._~+/=]*")))
+        require(catalog.size <= 64 && catalog.map { it.name }.distinct().size == catalog.size)
+        require(allowedTools.all { name -> catalog.any { it.name == name } }) { "mcp_policy_unknown_tool" }
         val url = endpoint.toHttpUrl()
         require(url.isHttps && url.username.isEmpty() && url.password.isEmpty() && url.query == null && url.fragment == null)
     }
@@ -32,8 +41,18 @@ internal class McpSettings(val revision: String, servers: List<McpServer>, inter
     override fun toString() = "McpSettings(redacted)"
 }
 internal class McpSettingsOwner {
+    private val lock = Any()
     @Volatile private var active = true
-    fun revoke() { active = false }
+    private val observers = linkedSetOf<() -> Unit>()
+    fun revoke() {
+        val callbacks = synchronized(lock) { active = false; observers.toList().also { observers.clear() } }
+        callbacks.forEach { runCatching(it) }
+    }
+    fun observeRevoked(callback: () -> Unit): () -> Unit {
+        val revoked = synchronized(lock) { if (active) { observers.add(callback); false } else true }
+        if (revoked) callback()
+        return { synchronized(lock) { observers.remove(callback) }; Unit }
+    }
     fun current() = active
 }
 
@@ -43,7 +62,32 @@ internal class McpSettingsOwner {
 internal class McpSettingsStore(context: Context, private val testKey: (() -> SecretKey)? = null) {
     private val file = AtomicFile(File(context.noBackupFilesDir, "mcp-private-v1.bin"))
     private val path = file.baseFile.absolutePath
-    fun snapshot(): McpSettings = synchronized(lock) {
+    private data class Observer(val expected: McpSettings, val invalidate: () -> Unit)
+    private fun <T> access(action: () -> T): T {
+        val callbacks = mutableListOf<() -> Unit>()
+        try {
+            return synchronized(lock) {
+                try { action() } finally {
+                    observers[path]?.let { values ->
+                        val stale = values.filterNot { revisions[path] == it.expected.revision && stamps[path] === it.expected.stamp }
+                        values.removeAll(stale.toSet()); callbacks.addAll(stale.map { it.invalidate })
+                        if (values.isEmpty()) observers.remove(path)
+                    }
+                }
+            }
+        } finally { callbacks.forEach { runCatching(it) } }
+    }
+    fun observeInvalidated(expected: McpSettings, callback: () -> Unit): () -> Unit {
+        val observer = Observer(expected, callback)
+        val stale = synchronized(lock) {
+            if (isCurrent(expected)) { observers.getOrPut(path) { linkedSetOf() }.add(observer); false } else true
+        }
+        if (stale) callback()
+        return { synchronized(lock) {
+            observers[path]?.let { it.remove(observer); if (it.isEmpty()) observers.remove(path) }
+        }; Unit }
+    }
+    fun snapshot(): McpSettings = access {
         try {
             val value = read()
             if (revisions[path] != value.revision || stamps[path] == null) stamps[path] = Any()
@@ -57,12 +101,14 @@ internal class McpSettingsStore(context: Context, private val testKey: (() -> Se
     fun isCurrent(snapshot: McpSettings): Boolean = synchronized(lock) {
         revisions[path] == snapshot.revision && stamps[path] === snapshot.stamp
     }
-    fun save(servers: List<McpServer>, owner: McpSettingsOwner, expected: McpSettings): McpSettings = synchronized(lock) {
+    fun save(servers: List<McpServer>, owner: McpSettingsOwner, expected: McpSettings): McpSettings = access {
         check(owner.current() && isCurrent(expected) && read().revision == expected.revision) { "mcp_settings_stale" }
         val value = McpSettings(UUID.randomUUID().toString(), servers)
         val array = JSONArray()
         value.servers.forEach { array.put(JSONObject().put("id", it.id).put("label", it.label)
-            .put("endpoint", it.endpoint).put("bearer", it.bearer)) }
+            .put("endpoint", it.endpoint).put("bearer", it.bearer).put("enabled", it.enabled)
+            .put("catalog", JSONArray().also { tools -> it.catalog.forEach { tool -> tools.put(tool.json()) } })
+            .put("allowed_tools", JSONArray(it.allowedTools.sorted()))) }
         val bytes = JSONObject().put("revision", value.revision).put("servers", array).toString().toByteArray(Charsets.UTF_8)
         require(bytes.size <= 60000)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
@@ -78,7 +124,7 @@ internal class McpSettingsStore(context: Context, private val testKey: (() -> Se
         stamps[path] = value.stamp
         value
     }
-    fun clear(owner: McpSettingsOwner): McpSettings = synchronized(lock) {
+    fun clear(owner: McpSettingsOwner): McpSettings = access {
         check(owner.current()) { "mcp_settings_stale" }
         revisions[path] = UUID.randomUUID().toString()
         file.delete()
@@ -100,7 +146,22 @@ internal class McpSettingsStore(context: Context, private val testKey: (() -> Se
             require(revision.matches(Regex("[a-f0-9-]{36}")))
             return McpSettings(revision, (0 until list.length()).map { i ->
                 val item = list.getJSONObject(i)
-                McpServer(McpJson.text(item, "id"), McpJson.text(item, "label"), McpJson.text(item, "endpoint"), McpJson.text(item, "bearer"))
+                val policyKeys = listOf("enabled", "catalog", "allowed_tools")
+                val hasPolicy = policyKeys.any { item.has(it) }
+                require(!hasPolicy || policyKeys.all { item.has(it) })
+                val tools = if (hasPolicy) item.getJSONArray("catalog").let { values ->
+                    require(values.length() <= 64)
+                    (0 until values.length()).map { McpRemoteTool.fromJson(values.getJSONObject(it)) }
+                } else emptyList()
+                val allowed = if (hasPolicy) item.getJSONArray("allowed_tools").let { values ->
+                    require(values.length() <= 64)
+                    (0 until values.length()).map { require(values.get(it) is String); values.getString(it) }.also {
+                        require(it.distinct().size == it.size)
+                    }.toSet()
+                } else emptySet()
+                require(!hasPolicy || item.get("enabled") is Boolean)
+                McpServer(McpJson.text(item, "id"), McpJson.text(item, "label"), McpJson.text(item, "endpoint"), McpJson.text(item, "bearer"),
+                    hasPolicy && item.getBoolean("enabled"), tools, allowed)
             })
         } catch (_: Exception) { throw IllegalStateException("MCP 私有配置不可读；未启用服务器，请明确修复") }
     }
@@ -118,6 +179,7 @@ internal class McpSettingsStore(context: Context, private val testKey: (() -> Se
         private val lock = Any()
         private val revisions = mutableMapOf<String, String>()
         private val stamps = mutableMapOf<String, Any>()
+        private val observers = mutableMapOf<String, MutableSet<Observer>>()
         private const val alias = "daiyu_mcp_private_v1"
         private val aad = "daiyu:mcp:private-settings:v1".toByteArray(Charsets.UTF_8)
     }

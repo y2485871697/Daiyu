@@ -66,7 +66,10 @@ def pinned_large(root, ref):
     return path
 
 
-def run_and_job(files, run_ref, jobs_ref, expected, name):
+def run_and_job(files, run_ref, jobs_ref, expected, name, *, mode="full_build"):
+    if mode == "old_apk_recheck":
+        require(expected["attempt"] == 1, "old_apk_reuse_forbidden")
+    conclusions = ("success", "failure") if mode == "old_apk_recheck" else ("success",)
     run, jobs = files.json(run_ref), files.json(jobs_ref)
     require(isinstance(run, dict), "actions_run_mismatch")
     repository = run.get("repository")
@@ -76,7 +79,7 @@ def run_and_job(files, run_ref, jobs_ref, expected, name):
             and run["run_attempt"] == expected["attempt"] and run.get("head_sha") == expected["sha"]
             and repository.get("full_name") == cloud_report.REPOSITORY
             and run.get("workflow_id") == cloud_report.WORKFLOW_ID and run.get("head_branch") == "main"
-            and run.get("status") == "completed" and run.get("conclusion") == "success",
+            and run.get("status") == "completed" and run.get("conclusion") in conclusions,
             "actions_run_mismatch")
     require(isinstance(jobs, dict) and isinstance(jobs.get("jobs"), list)
             and type(jobs.get("total_count")) is int and jobs["total_count"] == len(jobs["jobs"]),
@@ -92,10 +95,10 @@ def run_and_job(files, run_ref, jobs_ref, expected, name):
     return run, jobs["jobs"], job
 
 
-def delivery(files, document, expected, repo_root):
+def delivery(files, document, expected, repo_root, *, mode="full_build"):
     shape(document, ("run", "jobs", "artifact", "archive", "record", "sums", "signature", "app", "test"),
           "invalid_delivery")
-    run, jobs, job = run_and_job(files, document["run"], document["jobs"], expected, "单测、检查与开发包")
+    run, jobs, job = run_and_job(files, document["run"], document["jobs"], expected, "单测、检查与开发包", mode=mode)
     meta = files.json(document["artifact"])
     archive_path = pinned_large(files.root, document["archive"])
     require(isinstance(meta, dict) and type(meta.get("id")) is int and meta["id"] > 0
@@ -211,7 +214,7 @@ def verify(manifest_path, manifest_sha256, repo_root, evidence_root,
         require(doc["build"] != doc["check"], "recheck_identity_required")
     files = Files(evidence_root)
     source = source_gate.verify(repo_root, check_sha)
-    record, run, jobs, apk = delivery(files, doc["delivery"], doc["build"], repo_root)
+    record, run, jobs, apk = delivery(files, doc["delivery"], doc["build"], repo_root, mode=doc["mode"])
     reuse_ok = doc["mode"] == "full_build"
     if not reuse_ok and source["source_bound"]:
         reuse(repo_root, doc["build"], doc["check"], record, run, jobs)

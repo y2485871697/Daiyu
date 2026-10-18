@@ -175,8 +175,11 @@ class FinalDeliveryTests(unittest.TestCase):
         if code:
             self.assertEqual(str(caught.exception), code)
 
-    def add_cloud(self, apis=("26", "37.2")):
-        snapshot = {"schema_version": 2, "run": copy.deepcopy(self.run), "jobs": [], "reports": []}
+    def add_cloud(self, apis=("26", "37.2"), *, expected=None):
+        expected = self.expected if expected is None else expected
+        check_run = dict(self.run, id=expected["run_id"], run_attempt=expected["attempt"],
+                         head_sha=expected["sha"], conclusion="success")
+        snapshot = {"schema_version": 2, "run": check_run, "jobs": [], "reports": []}
         classes = {f"fixture.Class{i}Test": 1 for i in range(4)}
         groups = [dict(index=i, expected_tests=1, classes=[f"fixture.Class{i}Test"]) for i in range(4)]
         for api in apis:
@@ -188,11 +191,11 @@ class FinalDeliveryTests(unittest.TestCase):
                     total_tests=4, all_classes=classes, shards=groups))
                 log = self.put(base + "platform-tests.txt", b"OK (1 test)\nINSTRUMENTATION_CODE: -1\n")
                 logcat = self.put(base + "logcat.txt", b"I/Runner: finished\n")
-                report = self.put(base + "report.json", {"schema_version": 2, "head_sha": SHA,
-                    "run_id": 42, "run_attempt": 1, "job_id": job_id, "api": api, "exit_code": 0,
+                report = self.put(base + "report.json", {"schema_version": 2, "head_sha": expected["sha"],
+                    "run_id": expected["run_id"], "run_attempt": expected["attempt"], "job_id": job_id, "api": api, "exit_code": 0,
                     "expected_tests": 1, "instrumentation": log, "logcat": logcat,
                     "inventory": inventory, **identity})
-                snapshot["jobs"].append({"id": job_id, "head_sha": SHA, "run_id": 42, "run_attempt": 1,
+                snapshot["jobs"].append({"id": job_id, "head_sha": expected["sha"], "run_id": expected["run_id"], "run_attempt": expected["attempt"],
                     "api": api, "name": f"启动验证 API {api} 分片{index}", "status": "completed", "conclusion": "success",
                     "report_sha256": report["sha256"], **identity})
                 snapshot["reports"].append({"api": api, "job_id": job_id, **identity, **report})
@@ -232,10 +235,95 @@ class FinalDeliveryTests(unittest.TestCase):
         self.doc["business"] = {"ledger": self.put("ledger.json", ledger),
             "policy": self.put("policy.json", template.make_template(self.spec, self.spec_digest, SHA, "policy"))}
 
-    def add_tool(self):
-        self.doc["tool"] = {"receipt": self.put("tool-receipt.json", {"identity": self.expected,
+    def add_tool(self, *, expected=None):
+        expected = self.expected if expected is None else expected
+        self.doc["tool"] = {"receipt": self.put("tool-receipt.json", {"identity": expected,
             "command": ["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "exit_code": 0}),
             "log": self.put("tool.log", b"testOne (fixture.Suite.testOne) ... ok\n\nRan 1 test in 0.1s\n\nOK\n")}
+
+    def prepare_failed_source_recheck(self):
+        self.run["conclusion"] = "failure"
+        self.delivery["run"] = self.put("build-run.json", self.run)
+        self.doc["mode"] = "old_apk_recheck"
+        self.doc["check"] = {"sha": "b" * 40, "run_id": 43, "attempt": 1}
+        self.add_cloud(expected=self.doc["check"])
+        self.add_tool(expected=self.doc["check"])
+        self.add_business(passed=True)
+
+    def verify_failed_source_recheck(self, *, changed=b"scripts/acceptance/final_delivery.py\0", **overrides):
+        check = self.doc["check"]
+        args = dict(check_sha=check["sha"], check_run=check["run_id"], check_attempt=check["attempt"])
+        args.update(overrides)
+        with patch.object(final.subprocess, "run", side_effect=[
+                subprocess.CompletedProcess(["git"], 0),
+                subprocess.CompletedProcess(["git"], 0, stdout=changed)]) as git:
+            result = self.verify(**args)
+        self.assertEqual(git.call_count, 2)
+        return result
+
+    def test_full_build_still_requires_overall_source_success(self):
+        self.run["conclusion"] = "failure"
+        self.delivery["run"] = self.put("build-run.json", self.run)
+        self.reject("actions_run_mismatch")
+
+    def test_failed_source_recheck_needs_all_eight_shards(self):
+        self.prepare_failed_source_recheck()
+        result = self.verify_failed_source_recheck()
+        self.assertEqual(result["status"], "ready_for_independent_review")
+        self.assertTrue(result["internal_consistency_satisfied"])
+        self.assertTrue(result["source_tool"]["old_apk_reuse_validated"])
+        self.assertEqual(result["build"], self.expected)
+        self.assertEqual(result["check"], self.doc["check"])
+        self.assertEqual(len(result["cloud"]["jobs"]), 8)
+        self.assertFalse(result["final_acceptance_passed"])
+        self.assertFalse(result["trusted_collection"])
+        snapshot = json.loads((self.root / self.doc["cloud"]["path"]).read_bytes())
+        snapshot["jobs"].pop()
+        snapshot["reports"].pop()
+        self.doc["cloud"] = self.put("snapshot.json", snapshot)
+        result = self.verify_failed_source_recheck()
+        self.assertEqual(result["status"], "incomplete")
+        self.assertFalse(result["internal_consistency_satisfied"])
+        self.doc["cloud"] = None
+        self.assertEqual(self.verify_failed_source_recheck()["status"], "incomplete")
+
+    def test_recheck_rejects_other_source_terminal_states_and_failed_build(self):
+        self.prepare_failed_source_recheck()
+        for conclusion in (None, "cancelled", "timed_out", "skipped", "neutral", "action_required"):
+            self.delivery["run"] = self.put("build-run.json", dict(self.run, conclusion=conclusion))
+            with self.subTest(conclusion=conclusion), self.assertRaises(evidence.InvalidEvidence) as caught:
+                self.verify_failed_source_recheck()
+            self.assertEqual(str(caught.exception), "actions_run_mismatch")
+        self.delivery["run"] = self.put("build-run.json", self.run)
+        self.delivery["jobs"] = self.put("build-jobs.json", {"total_count": 1, "jobs": [dict(self.job, conclusion="failure")]})
+        with self.assertRaises(evidence.InvalidEvidence) as caught:
+            self.verify_failed_source_recheck()
+        self.assertEqual(str(caught.exception), "job_identity_mismatch")
+
+    def test_recheck_source_attempt_two_forbidden(self):
+        self.prepare_failed_source_recheck()
+        self.doc["build"]["attempt"] = 2
+        with self.assertRaises(evidence.InvalidEvidence) as caught:
+            self.verify_failed_source_recheck(build_attempt=2)
+        self.assertEqual(str(caught.exception), "old_apk_reuse_forbidden")
+
+    def test_recheck_still_rejects_changed_application_inputs(self):
+        self.prepare_failed_source_recheck()
+        with self.assertRaises(evidence.InvalidEvidence) as caught:
+            self.verify_failed_source_recheck(changed=b"app/build.gradle.kts\0")
+        self.assertEqual(str(caught.exception), "old_apk_reuse_forbidden")
+
+    def test_recheck_check_run_and_each_job_require_terminal_success(self):
+        self.prepare_failed_source_recheck()
+        for target in ("run", "job"):
+            self.add_cloud(expected=self.doc["check"])
+            snapshot = json.loads((self.root / self.doc["cloud"]["path"]).read_bytes())
+            value = snapshot["run"] if target == "run" else snapshot["jobs"][0]
+            value["conclusion"] = "failure"
+            self.doc["cloud"] = self.put("snapshot.json", snapshot)
+            with self.subTest(target=target), self.assertRaises(evidence.InvalidEvidence) as caught:
+                self.verify_failed_source_recheck()
+            self.assertEqual(str(caught.exception), "terminal_success_required")
 
     def test_missing_81_item_evidence_cannot_pass_even_with_full_cloud(self):
         self.add_cloud()

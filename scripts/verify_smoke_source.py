@@ -12,9 +12,11 @@ def verify(env, record, source_run, jobs, changed):
     run_id = env['SOURCE_RUN_ID']
     if not re.fullmatch(r'[0-9a-f]{40}', sha) or not run_id.isdecimal():
         raise ValueError('补检必须指定完整源码SHA与run ID')
-    if (str(source_run['id']) != run_id or source_run['run_attempt'] != 1
+    if (str(source_run['id']) != run_id
+            or type(source_run['run_attempt']) is not int or source_run['run_attempt'] != 1
             or source_run['head_sha'] != sha or source_run['head_branch'] != 'main'
-            or source_run['workflow_id'] != 383377276 or source_run['status'] != 'completed'):
+            or source_run['workflow_id'] != 383377276 or source_run['status'] != 'completed'
+            or source_run.get('conclusion') not in ('success', 'failure')):
         raise ValueError('源run身份或终态不符')
     if not any(j['name'] == '单测、检查与开发包' and j['conclusion'] == 'success' for j in jobs):
         raise ValueError('源开发包构建没有成功')

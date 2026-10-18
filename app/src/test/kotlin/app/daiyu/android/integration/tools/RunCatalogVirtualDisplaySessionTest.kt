@@ -90,6 +90,16 @@ class RunCatalogVirtualDisplaySessionTest {
             AndroidVirtualDisplayOwnerHost.Lifecycle.DRAINED, true, 0, 71, true) }
     }
 
+    private class Shutdown : ControllerVirtualDisplaySession.UninitializedShutdown {
+        val lookups = AtomicInteger()
+        val sends = AtomicInteger()
+        override fun lookupOnly(generation: String, binding: OwnerRunBinding): ControllerVirtualDisplaySession.UninitializedEvidence {
+            lookups.incrementAndGet()
+            return ControllerVirtualDisplaySession.UninitializedEvidence.PROVEN_UNINITIALIZED
+        }
+        override fun shutdownOnce(generation: String, binding: OwnerRunBinding) { sends.incrementAndGet() }
+    }
+
     private inner class Fixture(
         store: ToolLedgerStore = InMemoryToolLedgerStore(),
         direct: Boolean = false,
@@ -125,6 +135,7 @@ class RunCatalogVirtualDisplaySessionTest {
         }
         val lease = Lease()
         val endpoint = Endpoint()
+        val shutdown = Shutdown()
         val constructions = AtomicInteger()
         val factories = AtomicInteger()
         val reserves = AtomicInteger()
@@ -180,7 +191,7 @@ class RunCatalogVirtualDisplaySessionTest {
                 }
             }) {
             constructions.incrementAndGet()
-            ControllerVirtualDisplaySession.OwnerHandle(endpoint, endpoint::observePhysical)
+            ControllerVirtualDisplaySession.OwnerHandle(endpoint, endpoint::observePhysical, shutdown)
         }
         val registry = ToolRegistry().register(AskUserPlanTool).register(object : RegisteredTool {
             override val definition = app.daiyu.android.domain.tools.ToolDefinition(
@@ -230,6 +241,61 @@ class RunCatalogVirtualDisplaySessionTest {
             factoryGate?.countDown(); captureGate?.countDown(); finishGate?.countDown(); reserveGate?.countDown()
             tools.close(); pool.shutdownNow()
         }
+    }
+
+    @Test fun shutdownRequiresCatalogDrainParentDrainAndLiveAdmission() = Fixture(otherObservation = true).use { f ->
+        f.prepare()
+        assertTrue(f.dispatch(listOf(f.step())).single().outcome is DispatchOutcome.Confirmed)
+        val closed = AtomicReference<RunCatalogCloseResult?>()
+        f.tools.closeWithResult { closed.set(it) }
+        assertNotNull(f.otherDone.get())
+        assertFalse(f.work { f.tools.shutdownVirtualDisplayUninitializedOnWorker(f.session, true) })
+        assertEquals(0, f.shutdown.lookups.get())
+        f.otherDone.get()!!.invoke(RunCatalogCloseResult.Drained)
+        assertTrue(f.tools.virtualDisplayCleanupLocallyDrained(f.session))
+        assertFalse(f.work { f.tools.shutdownVirtualDisplayUninitializedOnWorker(f.session, false) })
+        assertFalse(f.work { f.tools.shutdownVirtualDisplayUninitializedOnWorker(f.session, true) { false } })
+        assertEquals(0, f.shutdown.lookups.get())
+        assertEquals(0, f.shutdown.sends.get())
+        assertTrue(f.work { f.tools.shutdownVirtualDisplayUninitializedOnWorker(f.session, true) })
+        assertFalse(f.work { f.tools.shutdownVirtualDisplayUninitializedOnWorker(f.session, true) })
+        assertEquals(1, f.shutdown.lookups.get())
+        assertEquals(1, f.shutdown.sends.get())
+        assertEquals(0, f.endpoint.observations.get())
+        assertEquals(0, f.endpoint.cleanupSends.get())
+        assertEquals(0, f.lease.releases.get())
+        assertNull(closed.get())
+        assertSame(f.session, f.tools.virtualDisplaySessionForRetention())
+    }
+
+    @Test fun shutdownAdapterRejectsPendingParentAndOldVisitWithoutConsumingAttempt() = Fixture().use { f ->
+        f.prepare()
+        assertTrue(f.dispatch(listOf(f.step())).single().outcome is DispatchOutcome.Confirmed)
+        f.tools.closeWithResult { }
+        val oldOwner = R08CleanupUiOwner()
+        val current = AtomicReference(oldOwner)
+        val parentReady = java.util.concurrent.atomic.AtomicBoolean(false)
+        val old = ControllerVirtualCleanupAdapter(f.tools, f.session, oldOwner, { parentReady.get() }, { current.get() })
+        assertFalse(f.work { old.shutdownUninitializedOnWorker() })
+        assertEquals(0, f.shutdown.lookups.get())
+        parentReady.set(true)
+        old.close()
+        val newOwner = R08CleanupUiOwner()
+        current.set(newOwner)
+        assertFalse(f.work { old.shutdownUninitializedOnWorker() })
+        assertEquals(0, f.shutdown.lookups.get())
+        assertEquals(0, f.shutdown.sends.get())
+        val newer = ControllerVirtualCleanupAdapter(f.tools, f.session, newOwner, { parentReady.get() }, { current.get() })
+        try {
+            assertTrue(f.work { newer.shutdownUninitializedOnWorker() })
+            assertFalse(f.work { newer.shutdownUninitializedOnWorker() })
+            assertEquals(1, f.shutdown.lookups.get())
+            assertEquals(1, f.shutdown.sends.get())
+            assertEquals(0, f.endpoint.observations.get())
+            assertEquals(0, f.endpoint.cleanupSends.get())
+            assertEquals(0, f.lease.releases.get())
+            assertSame(f.session, f.tools.virtualDisplaySessionForRetention())
+        } finally { newer.close() }
     }
 
     @Test fun factoryAndDirectSessionUseOneRealOwnerAndAuthBeforeOriginalSnapshotWithoutLaunching() {

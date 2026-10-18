@@ -133,5 +133,36 @@ class BuildRevisionWorkflowTests(unittest.TestCase):
         self.assertIn("format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id)", run_name)
 
 
+class SmokeRevisionWorkflowTests(unittest.TestCase):
+    def test_guard_is_first_after_checkout_for_both_smoke_entry_modes(self):
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/build.yml').read_text(encoding='utf-8')
+        smoke = workflow.split('  smoke:\n', 1)[1]
+        steps = re.split(r'(?m)^      - ', smoke)[1:]
+        self.assertTrue(steps[0].startswith('uses: actions/checkout@'))
+        self.assertIn('persist-credentials: false', steps[0])
+        self.assertIn('fetch-depth: 0', steps[0])
+        self.assertNotRegex(steps[0], r'(?m)^\s+ref:')
+        self.assertIn('EXPECTED_SHA: ${{ inputs.expected_sha }}', steps[1])
+        self.assertIn('run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only', steps[1])
+        self.assertNotIn('if:', steps[1])
+        self.assertNotIn('continue-on-error:', steps[1])
+        self.assertIn('run: python3 scripts/acceptance/record_tool_tests.py --python python3', steps[2])
+
+    def test_guard_preserves_existing_apk_reuse_without_rebuild_or_extra_download(self):
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/build.yml').read_text(encoding='utf-8')
+        smoke = workflow.split('  smoke:\n', 1)[1]
+        self.assertEqual(smoke.count('uses: actions/download-artifact@'), 1)
+        self.assertIn("run-id: ${{ inputs.mode == 'smoke' && inputs.source_run_id || github.run_id }}", smoke)
+        self.assertIn('SOURCE_RUN_ID: ${{ inputs.source_run_id }}', smoke)
+        self.assertIn('SOURCE_SHA: ${{ inputs.source_sha }}', smoke)
+        self.assertNotIn('gradlew', smoke)
+        self.assertNotIn('assemble', smoke)
+        anchors = ('run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only',
+                   'uses: actions/download-artifact@', 'run: python3 scripts/verify_smoke_source.py',
+                   'run: cd delivery && sha256sum -c SHA256SUMS', 'uses: ReactiveCircus/android-emulator-runner@')
+        positions = [smoke.index(anchor) for anchor in anchors]
+        self.assertEqual(positions, sorted(positions))
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -64,7 +64,7 @@ class ControllerMcpSendTest : InstrumentationTestCase() {
         })
         awaitControl("controller ready") { controller.ready }
         store = McpSettingsStore(fixture.application)
-        store.save(listOf(McpServer("server", "fixture", "https://fixture.invalid/mcp", "synthetic-token")), McpSettingsOwner(), store.snapshot())
+        store.save(listOf(McpServer("server", "fixture", "https://fixture.invalid/mcp", "synthetic-token", enabled = true, catalog = listOf(McpRemoteTool("erase", "erase")), allowedTools = setOf("erase"))), McpSettingsOwner(), store.snapshot())
         fixture.database.draft(text)
     }
     override fun tearDown() {

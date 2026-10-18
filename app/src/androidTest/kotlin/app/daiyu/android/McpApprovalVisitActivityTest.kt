@@ -3,6 +3,7 @@ package app.daiyu.android
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.compose.ui.test.*
+import app.daiyu.android.mcp.McpRemoteTool
 import app.daiyu.android.mcp.McpServer
 import app.daiyu.android.mcp.McpSettingsOwner
 import app.daiyu.android.mcp.McpSettingsStore
@@ -38,7 +39,7 @@ class McpApprovalVisitActivityTest : WiredActivityTestCase() {
     override fun setUp() {
         super.setUp()
         val store = McpSettingsStore(fixture.application)
-        store.save(listOf(McpServer("server", "fixture", "https://fixture.invalid/mcp", "")), McpSettingsOwner(), store.snapshot())
+        store.save(listOf(McpServer("server", "fixture", "https://fixture.invalid/mcp", "", enabled = true, catalog = listOf(McpRemoteTool("erase", "erase")), allowedTools = setOf("erase"))), McpSettingsOwner(), store.snapshot())
         setDraft(text)
     }
 

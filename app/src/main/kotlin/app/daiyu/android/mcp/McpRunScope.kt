@@ -21,6 +21,7 @@ internal class McpRunScope(
     val runId: RunId,
     private val configurationCurrent: () -> Boolean,
     private val transport: (McpServer) -> McpHttpSession = { McpHttpSession(it) },
+    private val observeConfiguration: ((() -> Unit) -> (() -> Unit))? = null,
 ) : AutoCloseable {
     private val choices = selections.toList()
     private val servers = choices.map { choice -> settings.servers.single { it.id == choice.serverId } }
@@ -44,14 +45,18 @@ internal class McpRunScope(
     private var drained = false
     private val observers = mutableListOf<() -> Unit>()
     private val attempted = BooleanArray(choices.size)
+    private var unsubscribe: (() -> Unit)? = null
     init {
         require(choices.size in 1..8 && choices.map { it.serverId to it.tool }.distinct().size == choices.size)
         choices.forEachIndexed { index, choice ->
+            require(servers[index].eligible(choice.tool)) { "mcp_tool_disabled" }
             val secret = servers[index].bearer
             require(secret.isEmpty() || (McpJson.canonical(McpJson.redact(McpJson.objectValue(choice.arguments), secret)) == choice.arguments &&
                 !choice.tool.contains(secret))) { "mcp_secret_in_intent" }
         }
         require(configurationCurrent()) { "mcp_configuration_stale" }
+        val registration = observeConfiguration?.invoke { close() }
+        synchronized(lock) { if (!closed.get()) unsubscribe = registration else registration?.invoke() }
     }
     fun bind(realOwner: RunExecutionOwner, grants: SessionCapabilities, task: TaskAuthorization) = synchronized(lock) {
         require(realOwner.conversationId == conversationId && realOwner.runId == runId)
@@ -72,8 +77,9 @@ internal class McpRunScope(
                 }
                 val cancelled = synchronized(lock) { sessions = sessions + (server.id to session); closed.get() }
                 if (cancelled) { session.close(); error("mcp_run_closed") }
-                val tools = session.discover()
-                check(choices.filter { it.serverId == server.id }.all { choice -> tools.any { it.name == choice.tool } }) {
+                val tools = session.discover().map { it.redacted(server.bearer) }
+                check(choices.filter { it.serverId == server.id }.all { choice -> tools.any { fresh -> fresh.name == choice.tool &&
+                        server.catalog.any { old -> old.name == choice.tool && old.sameMetadata(fresh) } } }) {
                     "mcp_selected_tool_unavailable"
                 }
             }
@@ -125,7 +131,11 @@ internal class McpRunScope(
     fun isCurrent(): Boolean = !closed.get() && configurationCurrent()
     fun markUnknown() { synchronized(lock) { unknown = true }; close() }
     override fun close() {
-        val handles = synchronized(lock) { closed.set(true); sessions.values.toList() }
+        val (handles, registration) = synchronized(lock) {
+            closed.set(true)
+            (sessions.values.toList() to unsubscribe).also { unsubscribe = null }
+        }
+        registration?.invoke()
         handles.forEach { it.close() }
         advanceClose()
     }

@@ -176,6 +176,41 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
         check(records.count { it.optString("type") == "stop_sample" } == 20)
     }
 
+    private fun collectLongConversationEntries(activity: MainActivity, database: ConversationDatabase,
+        records: MutableList<JSONObject>) {
+        val conversations = database.conversations()
+        val short = conversations.single { it.id == ConversationId("p-c-1") }
+        val long = conversations.single { it.id == ConversationId("p-c-0") }
+        val tail = "chat-turn:p-a-1003"
+        repeat(20) { round ->
+            main { activity.select(short) }
+            ui.waitForIdle()
+            ui.onNodeWithTag(tail).assertDoesNotExist()
+            val start = System.nanoTime()
+            main { activity.select(long) }
+            val copy = ui.onNode(hasContentDescription("复制回答") and hasAnyAncestor(hasTestTag(tail)))
+            ui.waitUntil(5_000) {
+                try {
+                    ui.onNodeWithTag(tail).assertIsDisplayed()
+                    copy.assertIsDisplayed().assertIsEnabled().assertHasClickAction()
+                    ui.onNodeWithTag("chat-draft").assertIsDisplayed().assertIsEnabled().assert(hasSetTextAction())
+                    true
+                } catch (_: AssertionError) { false }
+            }
+            val verified = System.nanoTime()
+            val draw = nextDrawNs(activity)
+            records.add(JSONObject().put("type", "long_entry_sample").put("round", round)
+                .put("entry_kind", "warm_reentry").put("prewarmed_long_selection_count", 1)
+                .put("conversation_id", long.id.value).put("tail_message_id", "p-a-1003")
+                .put("method", "select_to_visible_tail_action_and_enabled_editor_next_draw")
+                .put("latency_kind", "instrumented_upper_bound").put("start_ns", start)
+                .put("tail_operable_verified_ns", verified).put("next_draw_ns", draw)
+                .put("tail_action_execution_verified", false).put("navigation_gesture_measured", false)
+                .put("upper_bound_ns", draw - start).put("present_latency", false)
+                .put("first_visible_feedback_measured", false))
+        }
+    }
+
     private fun collect(fullScale: Boolean) {
         val target = instrumentation.targetContext
         check(target.packageName == "app.daiyu.android.synthetic") { "non_synthetic_target_refused" }
@@ -258,6 +293,11 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
             ui.onNodeWithTag("chat-messages").assertIsDisplayed()
             main { refreshRate = launched.window.decorView.display.refreshRate; preferredRate = launched.window.attributes.preferredRefreshRate }
             val captured = SyntheticFrameCollector(instrumentation, launched.window); collector = captured
+            if (fullScale) {
+                stage = "long_conversation_entry"
+                captured.scenario("synthetic_long_entry")
+                collectLongConversationEntries(launched, activeFixture.database, inputs)
+            }
             stage = "scroll"
             captured.scenario("synthetic_scroll"); scrollStart = System.nanoTime()
             val deadline = scrollStart + TimeUnit.SECONDS.toNanos(30)

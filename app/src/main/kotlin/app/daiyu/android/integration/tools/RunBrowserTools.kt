@@ -10,6 +10,7 @@ import app.daiyu.android.browser.session.BrowserSessionRegistry
 import app.daiyu.android.domain.runtime.RunExecutionOwner
 import app.daiyu.android.domain.tools.*
 import org.json.JSONObject
+import app.daiyu.android.media.BrowserScreenshotStore
 import java.net.URI
 import java.util.Collections
 
@@ -18,7 +19,7 @@ import java.util.Collections
  * Even blank-tab creation/closure is a WRITE here; FULL alone never grants a task write.
  * tab_id is the catalog spelling of BrowserToolSession's tabId. Writes must name a tab
  * explicitly (except new_tab), rather than authorizing a moving "current tab" target.
- * Confirmed payloads are {text, filePath}; filePath is null when the facade returns none.
+ * Screenshot success requires a call-bound receipt; other payloads retain {text, filePath}.
  * Identical writes (including new_tab) are one effect for the central ledger, not a request
  * to repeat an uncertain operation under a fresh provider call ID.
  */
@@ -50,11 +51,12 @@ internal object RunBrowserTools {
         assistant: AssistantProfile,
         confirmed: BrowserRunAuthorization,
         authorization: TaskAuthorization? = null,
+        screenshotStore: BrowserScreenshotStore? = null,
     ): ConfirmedCatalog {
         // Profile ID is frozen here; never look up a moving active-assistant selection.
         val assistantId = assistant.id
         val task = confirmed.taskAuthorization(owner, assistantId, session, authorization)
-        return ConfirmedCatalog(task, createTools(session, owner, task, Confirmation(confirmed, assistantId)))
+        return ConfirmedCatalog(task, createTools(session, owner, task, Confirmation(confirmed, assistantId), screenshotStore))
     }
 
     private data class Confirmation(val token: BrowserRunAuthorization, val assistantId: String)
@@ -64,6 +66,7 @@ internal object RunBrowserTools {
         owner: RunExecutionOwner,
         authorization: TaskAuthorization,
         confirmation: Confirmation?,
+        screenshotStore: BrowserScreenshotStore? = null,
     ): List<RegisteredTool> {
         // Confirmed child tokens already validate the ORIGINAL inherited TaskAuthorization.
         // Its sessionId belongs to the parent; browser resource/effect keys use childRunId.
@@ -102,11 +105,13 @@ internal object RunBrowserTools {
                             !matches(context.invocation.arguments, write, command) -> ExecutionReceipt.NotExecuted("tool_invocation_mismatch")
                             effect != null && effect !in context.authorization.allowedWrites ->
                                 ExecutionReceipt.NotExecuted("task_write_not_authorized")
+                            command.action == "screenshot" && screenshotStore == null ->
+                                ExecutionReceipt.NotExecuted("browser_screenshot_store_unavailable")
                             else -> confirmedAdmission(confirmation, context, session)
                         }
                     }) { context ->
                         if (context.cancelled()) ExecutionReceipt.NotExecuted("cancelled_before_execution")
-                        else confirmedAdmission(confirmation, context, session) ?: execute(session, command)
+                        else confirmedAdmission(confirmation, context, session) ?: execute(session, command, context, screenshotStore)
                     }
                 }
             }
@@ -162,15 +167,28 @@ internal object RunBrowserTools {
     private fun matches(json: String, write: Boolean, command: Command): Boolean =
         try { freeze(json, write).canonical == command.canonical } catch (_: Exception) { false }
 
-    private fun execute(session: BrowserToolSession, command: Command): ExecutionReceipt =
-        // One call only: no fallback route, automatic retry, tab reopening or cleanup here.
-        when (val result = session.execute(command.parameters)) {
-            is BrowserOutcome.Confirmed -> ExecutionReceipt.Confirmed(JSONObject()
-                .put("text", result.result.text)
-                .put("filePath", result.result.filePath ?: JSONObject.NULL).toString())
+    private fun execute(session: BrowserToolSession, command: Command, context: ToolExecutionContext,
+        screenshotStore: BrowserScreenshotStore?): ExecutionReceipt {
+        return when (val result = session.execute(command.parameters)) {
+            is BrowserOutcome.Confirmed -> {
+                val payload = JSONObject().put("text", result.result.text)
+                    .put("filePath", result.result.filePath ?: JSONObject.NULL)
+                if (command.action == "screenshot") {
+                    try {
+                        val receipt = checkNotNull(screenshotStore).freeze(BrowserScreenshotStore.Binding.from(context.owner, context.invocation),
+                            checkNotNull(result.result.filePath))
+                        payload.put("screenshot_receipt", receipt).put("filePath", JSONObject.NULL)
+                    } catch (_: Exception) {
+                        return ExecutionReceipt.Unknown("browser_screenshot_persistence_unconfirmed")
+                    }
+                }
+                ExecutionReceipt.Confirmed(payload.toString())
+            }
             is BrowserOutcome.NotExecuted -> ExecutionReceipt.NotExecuted(result.code)
             BrowserOutcome.Unknown -> ExecutionReceipt.Unknown("browser_execution_unconfirmed")
         }
+
+    }
 
     private val reads = BrowserSessionRegistry.readOnlyActions + "list_tabs"
     private val tabChanges = setOf("new_tab", "close_tab")

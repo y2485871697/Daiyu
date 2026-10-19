@@ -31,12 +31,14 @@ internal class CatalogBrowserBinding private constructor(
     /** Deterministic lifecycle seam; production always wraps the actual Android run host below. */
     internal interface Host {
         val session: BrowserToolSession
+        val screenshotStore: app.daiyu.android.media.BrowserScreenshotStore? get() = null
         val webHost: AndroidOpenMinisBrowserHost? get() = null
         fun closeWithResult(): BrowserCloseResult
         fun closeStatus(): BrowserCloseResult
     }
 
-    private class AndroidHost(private val original: AndroidBrowserRunHost) : Host {
+    private class AndroidHost(private val original: AndroidBrowserRunHost,
+        override val screenshotStore: app.daiyu.android.media.BrowserScreenshotStore? = null) : Host {
         override val session: BrowserToolSession get() = original.session
         override val webHost: AndroidOpenMinisBrowserHost get() = original.webHost
         override fun closeWithResult() = original.closeWithResult()
@@ -106,7 +108,7 @@ internal class CatalogBrowserBinding private constructor(
             }
             return@synchronized it
         }
-        RunBrowserTools.createConfirmed(session, owner, assistant, confirmed, authorization).also {
+        RunBrowserTools.createConfirmed(session, owner, assistant, confirmed, authorization, host.screenshotStore).also {
             this.owner = owner
             bound = it
         }
@@ -192,7 +194,8 @@ internal class CatalogBrowserBinding private constructor(
                 cookieEnvPath = { _, _ -> error("browser_cookie_offload_disabled") },
                 cookieAuthorizeName = { _, _, _ -> false },
                 historyApproval = OpenMinisHistoryApproval.DENY,
-                onDownloadCompleted = onDownloadCompleted))
+                onDownloadCompleted = onDownloadCompleted),
+                app.daiyu.android.media.BrowserScreenshotStore(context.filesDir, context.cacheDir))
         }
 
         internal fun create(

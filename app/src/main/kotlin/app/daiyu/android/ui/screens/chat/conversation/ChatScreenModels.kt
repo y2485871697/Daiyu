@@ -95,6 +95,7 @@ data class WorkStepUi(
     val sections: List<ToolDetailSectionUi> = emptyList(),
     /** Host-validated dedicated projection; never grants execution permission. */
     val dedicatedKey: String? = null,
+    val hasBrowserScreenshot: Boolean = false,
     val categoryDetails: ToolCategoryDetailsUi? = null,
     val activity: ToolActivityUi = ToolActivityUi.from(state),
 ) {

@@ -79,6 +79,11 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
         assertNotNull("capture must be a decodable image, not just an invented path", bitmap)
         assertTrue(bitmap.width > 0 && bitmap.height > 0)
         bitmap.recycle()
+        val original = Files.readAllBytes(file)
+        val second = java.nio.file.Paths.get(requireNotNull(confirmed(host, "action" to "screenshot").result.filePath))
+        screenshots.add(second)
+        assertFalse("each capture must own a distinct cache file", file == second)
+        assertTrue(original.contentEquals(Files.readAllBytes(file)))
         assertTrue(capture.text.length + file.toString().length <= 16_000)
     }
 

@@ -30,7 +30,7 @@ internal fun ToolScreenshotContent(controller: ChatController, step: WorkStepUi)
         var visible = true
         image = null; loading = true
         if (!controller.loadToolScreenshot(owner, step.toolCallId) {
-            if (visible) { image = it; loading = false }
+            if (visible) { image = it; loading = false } else it?.recycle()
         }) loading = false
         onDispose { visible = false }
     }

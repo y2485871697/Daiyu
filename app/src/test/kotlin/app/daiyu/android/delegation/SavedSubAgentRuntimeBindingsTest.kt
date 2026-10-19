@@ -23,6 +23,9 @@ class SavedSubAgentRuntimeBindingsTest {
         bindings.authorizePrimaryModel(owner, profile, child.modelId, provider)
         val frozen = bindings.freeze(owner, config)
         assertTrue(snapshots.isEmpty())
+        assertEquals(profile.name, frozen.getValue(profile.id).display?.agentName)
+        assertEquals(child.modelId, frozen.getValue(profile.id).display?.modelId)
+        assertEquals(child.displayName, frozen.getValue(profile.id).display?.modelName)
         assertThrows(IllegalArgumentException::class.java) { bindings.freeze(SubAgentConfigKey.Conversation("other"), config) }
         current = saved.copy(apiKey = "replacement-key")
         assertThrows(IllegalArgumentException::class.java) { bindings.freeze(owner, config) }

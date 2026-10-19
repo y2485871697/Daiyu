@@ -73,6 +73,21 @@ class ToolOperationCardTest : ComposeActivityTestCase() {
         }
         assertEquals(0, executions)
     }
+    fun testTypedCategoryBodiesUseTheSharedReadOnlyDisclosure() {
+        ToolCardPresentations.categories.forEach { category ->
+            val details = ToolCategoryDetails.project(category, "{}", "{\"count\":0,\"state\":\"unknown\"}")
+            val step = WorkStepUi("typed", "typed-$category", "安全摘要", WorkStepState.UNKNOWN,
+                WorkStepOwnerUi("chat", "run", category), "fixture-only", category,
+                categoryDetails = details)
+            show(ChatTurnUi.Assistant("typed-$category", content = listOf(MessageContentUi.Tool(step))), ChatScreenActions())
+            ui.onNodeWithTag("tool-category:$category").assertDoesNotExist()
+            ui.onNodeWithText("typed-$category").performClick()
+            ui.onNodeWithTag("tool-category:$category").assertIsDisplayed()
+            ui.onNodeWithText(details.heading).assertIsDisplayed()
+            ui.onNodeWithContentDescription("重试 typed-$category").assertDoesNotExist()
+        }
+    }
+
     fun testDedicatedQuestionIsVisibleAtCallPositionInBothPathsAndMissingHostFallsBack() {
         for (mixed in listOf(false, true)) {
             val original = source(mixed).copy(blocks = source(mixed).blocks.map { block ->

@@ -89,7 +89,7 @@ object ChatTurnMapper {
             },
             owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value),
             toolName = block.invocation.name, category = display.category, sections = display.sections,
-            dedicatedKey = dedicatedKey,
+            dedicatedKey = dedicatedKey, categoryDetails = display.details,
         )
     }
 

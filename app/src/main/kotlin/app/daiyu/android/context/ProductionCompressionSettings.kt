@@ -67,6 +67,17 @@ class ProductionCompressionSettingsStore(private val preferences: SharedPreferen
             summaryModel = if (json.isNull("summaryModel")) null else decodeBinding(json.getJSONObject("summaryModel")))
     }
 
+    fun changeAutomatic(expected: Boolean): ProductionCompressionSettings = synchronized(lock) {
+        val before = snapshot()
+        check(before.automatic == expected) { "compression_configuration_changed" }
+        if (!expected) check(before.contextWindowTokens != null && before.summaryModel != null) {
+            "compression_configuration_incomplete"
+        }
+        val next = before.copy(automatic = !expected)
+        save(next)
+        snapshot().also { check(it == next) { "compression_write_unconfirmed" } }
+    }
+
     fun save(settings: ProductionCompressionSettings) = synchronized(lock) {
         val raw = JSONObject().put("version", 2).put("automatic", settings.automatic)
             .put("window", settings.contextWindowTokens ?: JSONObject.NULL)

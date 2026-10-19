@@ -817,7 +817,7 @@ private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) 
 }
 
 @Composable
-private fun RecordedUsagePane(
+internal fun RecordedUsagePane(
     projection: RecordedUsageProjection?,
     modelView: Boolean,
     modifier: Modifier = Modifier,

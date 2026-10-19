@@ -85,7 +85,7 @@ class ChildCommandSchemaMigrationTest : InstrumentationTestCase() {
         val conversation = legacy(context, helper)
         val before = context.openOrCreateDatabase("conversations.db", 0, null).use { raw -> witnesses(raw) to messages(raw) }
         val sql = helper.readableDatabase
-        assertEquals(20, sql.version)
+        assertEquals(21, sql.version)
         val rows = SQLiteChildTaskStore(helper).list(conversation.value)
         assertEquals(1, rows.size)
         val old = rows.single()
@@ -121,7 +121,7 @@ class ChildCommandSchemaMigrationTest : InstrumentationTestCase() {
             })
         }
         val sql = helper.readableDatabase
-        assertEquals(20, sql.version)
+        assertEquals(21, sql.version)
         assertEquals(before.first, messages(sql)); assertEquals(before.second, witnesses(sql))
         assertEquals(before.third, sidecars(sql))
         val history = helper.messages(conversation)
@@ -153,4 +153,20 @@ class ChildCommandSchemaMigrationTest : InstrumentationTestCase() {
             assertFalse(raw.rawQuery("SELECT 1 FROM sqlite_master WHERE name='child_task_commands'", null).use { it.moveToFirst() })
         }
     }
+    fun testVersionTwentyAddsOnlyNullableDisplaySnapshots() {
+        val (context, helper) = fixture()
+        val conversation = legacy(context, helper)
+        context.openOrCreateDatabase("conversations.db", 0, null).use { raw ->
+            SQLiteChildTaskStore.installCommandSchema(raw)
+            raw.version = 20
+        }
+        val migrated = helper.readableDatabase
+        assertEquals(21, migrated.version)
+        assertTrue(columns(migrated).containsAll(listOf("agent_name_snapshot", "model_id_snapshot", "model_name_snapshot")))
+        val task = SQLiteChildTaskStore(helper).list(conversation.value).single()
+        assertNull(task.display)
+        assertEquals("old result", task.text)
+        assertEquals(ChildTaskStatus.COMPLETED, task.status)
+    }
+
 }

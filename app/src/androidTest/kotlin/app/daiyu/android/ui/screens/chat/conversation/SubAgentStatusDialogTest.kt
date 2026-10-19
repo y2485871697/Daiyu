@@ -1,0 +1,71 @@
+package app.daiyu.android.ui.screens.chat.conversation
+
+import android.content.Intent
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.*
+import app.daiyu.android.ComposeActivityTestCase
+import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
+import app.daiyu.android.domain.delegation.ChildRunOwner
+import app.daiyu.android.ui.app.AgentAppTheme
+
+class SubAgentStatusDialogTest : ComposeActivityTestCase() {
+    private lateinit var activity: ComponentActivity
+    override fun setUp() {
+        super.setUp()
+        activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, ComponentActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
+    }
+    override fun tearDown() { try { mainThread { activity.finish() } } finally { super.tearDown() } }
+
+    private fun show(rows: List<SubAgentStatusRow>, mode: AppearanceThemeMode, failed: Boolean = false,
+        onClose: () -> Unit = {}) {
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(themeMode = mode), applyInterfaceScale = false) {
+                var open by remember(rows, mode, failed) { mutableStateOf(true) }
+                if (open) SubAgentStatusDialog(rows, loading = false, failed = failed,
+                    onDismiss = { open = false; onClose() })
+            }
+        } }
+        ui.waitForIdle()
+    }
+
+    fun testEmptyAndFailedStatesCanCloseWithoutCreatingTasks() {
+        for (mode in listOf(AppearanceThemeMode.LIGHT, AppearanceThemeMode.DARK)) {
+            var closes = 0
+            show(emptyList(), mode, onClose = { closes++ })
+            ui.onNodeWithText("本会话暂无子代理任务").assertIsDisplayed()
+            ui.onNodeWithTag("subagent-status-list").assertDoesNotExist()
+            ui.onNodeWithTag("subagent-status-close").performClick()
+            ui.onNodeWithTag("subagent-status").assertDoesNotExist()
+            assertEquals(1, closes)
+            show(emptyList(), mode, failed = true)
+            ui.onNodeWithText("任务状态读取失败；未改变任何任务").assertIsDisplayed()
+            ui.onNodeWithText("本会话暂无子代理任务").assertDoesNotExist()
+            ui.onNodeWithTag("subagent-status-close").performClick()
+        }
+    }
+
+    fun testLongListUsesFrozenModelAndScrollsInBothThemes() {
+        val rows = (0 until 40).map { index ->
+            SubAgentStatusRow(ChildRunOwner("chat", "run", "group", 1, "task-$index", "answer"),
+                "代理 $index", if (index == 39) "已完成" else "执行中", completed = index == 39,
+                model = "冻结模型 $index")
+        }
+        for (mode in listOf(AppearanceThemeMode.LIGHT, AppearanceThemeMode.DARK)) {
+            show(rows, mode)
+            ui.onNodeWithText("冻结模型 0").assertIsDisplayed()
+            ui.onNodeWithTag("subagent-status-list").performScrollToIndex(39)
+            ui.onNodeWithTag("subagent-status:task-39").assertIsDisplayed()
+            ui.onNodeWithText("冻结模型 39").assertIsDisplayed()
+            ui.onNodeWithText("已完成").assertIsDisplayed()
+            ui.onNodeWithTag("subagent-status-close").performClick()
+            ui.onNodeWithTag("subagent-status").assertDoesNotExist()
+        }
+    }
+}

@@ -79,6 +79,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, onCopy: ((Wo
 internal fun WorkStepRow(step: WorkStepUi, onCopy: ((WorkStepUi) -> Unit)? = null, showConnector: Boolean = false) {
     val colors = MiuixTheme.colorScheme
     var expanded by rememberSaveable(step.owner, step.toolCallId) { mutableStateOf(false) }
+    var technical by rememberSaveable(step.owner, step.toolCallId) { mutableStateOf(false) }
     val tint = when (step.state) {
         WorkStepState.FAILED -> colors.error
         WorkStepState.OK -> daiyuIconColor(DaiyuIcons.Chart)
@@ -113,7 +114,15 @@ internal fun WorkStepRow(step: WorkStepUi, onCopy: ((WorkStepUi) -> Unit)? = nul
                 style = MiuixTheme.textStyles.footnote1, maxLines = 1, overflow = TextOverflow.Ellipsis)
             AnimatedVisibility(expanded) {
                 Column(Modifier.padding(top = 6.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    step.sections.forEach { section -> ToolDetailSection(section, step.category in setOf("terminal", "background_job", "files")) }
+                    step.categoryDetails?.let { ToolCategoryContent(step.category, it) }
+                    if (step.categoryDetails == null || technical) {
+                        step.sections.forEach { section -> ToolDetailSection(section, step.category in setOf("terminal", "background_job", "files")) }
+                    }
+                    if (step.categoryDetails != null && step.sections.isNotEmpty()) {
+                        Text(if (technical) "收起技术详情" else "技术详情", Modifier
+                            .clickable(role = Role.Button) { technical = !technical }.padding(vertical = 6.dp),
+                            style = MiuixTheme.textStyles.footnote1, color = colors.primary)
+                    }
                     onCopy?.let { copy ->
                         ChatIconButton(DaiyuIcons.Copy, "复制安全摘要", { copy(step) })
                     }
@@ -133,7 +142,7 @@ private fun ToolDetailSection(section: ToolDetailSectionUi, code: Boolean) {
             .background(colors.surfaceVariant.copy(alpha = 0.45f)).padding(6.dp),
             color = colors.onSurfaceVariantSummary,
             style = if (code) MiuixTheme.textStyles.footnote1.copy(fontFamily = FontFamily.Monospace) else MiuixTheme.textStyles.footnote1,
-            maxLines = 12, overflow = TextOverflow.Ellipsis)
+            maxLines = Int.MAX_VALUE)
     }
 }
 

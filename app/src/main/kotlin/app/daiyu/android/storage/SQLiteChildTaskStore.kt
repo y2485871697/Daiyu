@@ -138,6 +138,8 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
         put("generation", task.owner.generation); put("task_index", task.index)
         put("assistant_message_id", task.owner.assistantMessageId); put("profile_id", task.profileId)
         put("prompt", task.prompt); put("status", task.status.name); put("text", task.text); put("detail", task.detail)
+        put("agent_name_snapshot", task.display?.agentName); put("model_id_snapshot", task.display?.modelId)
+        put("model_name_snapshot", task.display?.modelName)
         put("control_revision", task.revision); put("source_task_id", task.sourceTaskId); put("command_kind", task.commandKind?.name)
     }
 
@@ -146,13 +148,15 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
         c.getString(3), c.getString(4), c.getInt(7), c.getString(9), c.getString(10),
         ChildTaskStatus.valueOf(c.getString(11)), c.getString(12), if (c.isNull(13)) null else c.getString(13),
         c.getLong(14), if (c.isNull(15)) null else c.getString(15),
-        if (c.isNull(16)) null else ChildTaskCommandKind.valueOf(c.getString(16)))
+        if (c.isNull(16)) null else ChildTaskCommandKind.valueOf(c.getString(16)),
+        if (c.isNull(17) && c.isNull(18) && c.isNull(19)) null else
+            ChildTaskDisplay(c.getString(17), c.getString(18), c.getString(19)))
 
     companion object {
         private const val TABLE = "child_tasks"
         private val COLUMNS = arrayOf("task_id", "conversation_id", "parent_run_id", "parent_message_id", "parent_owner_id",
             "task_group_id", "generation", "task_index", "assistant_message_id", "profile_id", "prompt", "status", "text", "detail",
-            "control_revision", "source_task_id", "command_kind")
+            "control_revision", "source_task_id", "command_kind", "agent_name_snapshot", "model_id_snapshot", "model_name_snapshot")
         private val TERMINAL = setOf(ChildTaskStatus.COMPLETED, ChildTaskStatus.NOT_EXECUTED, ChildTaskStatus.UNKNOWN)
 
         fun installSchema(db: SQLiteDatabase) {
@@ -163,6 +167,16 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
                 "text TEXT NOT NULL,detail TEXT,UNIQUE(task_group_id,task_index))")
             db.execSQL("CREATE INDEX IF NOT EXISTS child_tasks_conversation ON child_tasks(conversation_id,seq)")
             installCommandSchema(db)
+            installDisplaySchema(db)
+        }
+
+        fun installDisplaySchema(db: SQLiteDatabase) {
+            val columns = db.rawQuery("PRAGMA table_info(child_tasks)", null).use { c ->
+                buildSet { while (c.moveToNext()) add(c.getString(1)) }
+            }
+            listOf("agent_name_snapshot", "model_id_snapshot", "model_name_snapshot").forEach { column ->
+                if (column !in columns) db.execSQL("ALTER TABLE child_tasks ADD COLUMN $column TEXT")
+            }
         }
 
         /** Invoke inside the parent's single version-upgrade transaction, after child_tasks exists. */

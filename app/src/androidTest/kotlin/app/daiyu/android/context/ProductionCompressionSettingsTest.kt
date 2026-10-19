@@ -107,4 +107,16 @@ class ProductionCompressionSettingsTest : InstrumentationTestCase() {
         store.save(ProductionCompressionSettings(keepTurns = 2))
         assertEquals(2, ProductionCompressionSettingsStore(failing).snapshot().keepTurns)
     }
+    fun testMenuTogglePreservesConfigurationAndRejectsStaleOrIncompleteValues() {
+        val store = ProductionCompressionSettingsStore(prefs)
+        try { store.changeAutomatic(false); fail("missing summary binding") } catch (_: IllegalStateException) { }
+        assertEquals(ProductionCompressionSettings(), store.snapshot())
+        val initial = ProductionCompressionSettings(false, 32000, 4000, 75, 3, SummaryModelBinding("p", "summary"))
+        store.save(initial)
+        assertEquals(initial.copy(automatic = true), store.changeAutomatic(false))
+        try { store.changeAutomatic(false); fail("stale menu") } catch (_: IllegalStateException) { }
+        assertEquals(initial.copy(automatic = true), store.snapshot())
+        assertEquals(initial, store.changeAutomatic(true))
+    }
+
 }

@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -57,6 +58,13 @@ internal fun ChatModelPicker(
     WindowDialog(show = true, title = "选择模型", onDismissRequest = onDismiss) {
         Column(Modifier.testTag("chat-model-picker").fillMaxWidth()
             .heightIn(max = minOf(520.dp, (LocalConfiguration.current.screenHeightDp * 0.72f).dp))) {
+            Column(Modifier.testTag("chat-model-current").fillMaxWidth().padding(bottom = 10.dp)
+                .clip(RoundedCornerShape(12.dp)).background(colors.primary.copy(alpha = .08f)).padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text("当前使用", style = MiuixTheme.textStyles.footnote1, color = colors.onSurfaceVariantSummary)
+                Text(state.models.firstOrNull { it.id == state.current }?.displayName ?: state.current.ifBlank { "未选择模型" },
+                    style = MiuixTheme.textStyles.body1, color = colors.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
             TextField(value = query, onValueChange = { query = it }, label = "搜索模型",
                 useLabelAsPlaceholder = true, singleLine = true,
                 modifier = Modifier.testTag("chat-model-search").fillMaxWidth())
@@ -72,8 +80,8 @@ internal fun ChatModelPicker(
                 .padding(top = 8.dp)) {
                 items(visible, key = { it.id }) { model ->
                     Row(Modifier.testTag("chat-model-option:${model.id}").fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp)).selectable(
-                            selected = model.id == state.current, enabled = state.enabled,
+                        .clip(RoundedCornerShape(12.dp)).background(if (model.id == state.current) colors.primary.copy(alpha = .08f) else colors.surfaceContainer).selectable(
+                            selected = model.id == state.current, enabled = state.enabled && !state.loading,
                             role = Role.RadioButton, onClick = { onSelect(model.id) })
                         .heightIn(min = 56.dp).padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically,

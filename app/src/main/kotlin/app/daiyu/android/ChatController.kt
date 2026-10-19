@@ -4218,14 +4218,32 @@ class ChatController internal constructor(private val application:Application,
             check(Looper.myLooper() != Looper.getMainLooper())
             // Clear history deletes existing conversations, not the account. dataBusy prevents
             // new preparation/read admission while the worker captures and seals this scope.
-            val revocations = captured ?: run {
-                val deleted = database.conversations().map { it.id.value }.toSet()
-                synchronized(this) { sealGenerationOwners(deleted) }
-            }
+            val deleted = selected ?: database.conversations().map { it.id.value }.toSet()
+            val revocations = captured ?: synchronized(this) { sealGenerationOwners(deleted) }
             revocations.forEach { it.revokeOnWorker() }
             closeGenerationOutputReaders(selected)
             mutation()
-            "删除已完成"
+            check(!database.writableDatabase.inTransaction())
+            var screenshotsCleaned = true
+            val screenshots = app.daiyu.android.media.BrowserScreenshotStore(application.filesDir, application.cacheDir)
+            for (id in deleted) {
+                database.readableDatabase.rawQuery("SELECT 1 FROM conversations WHERE id=? LIMIT 1", arrayOf(id)).use {
+                    check(!it.moveToFirst()) { "会话删除未确认，保留截图" }
+                }
+                database.readableDatabase.rawQuery("SELECT 1 FROM messages WHERE conversation_id=? LIMIT 1", arrayOf(id)).use {
+                    check(!it.moveToFirst()) { "消息删除未确认，保留截图" }
+                }
+                try { screenshots.deleteConversation(id) } catch (_: Exception) { screenshotsCleaned = false }
+            }
+            if (selected == null && screenshotsCleaned) {
+                // Also recover originals left by an earlier delete whose filesystem cleanup failed.
+                val retained = database.conversations().map { it.id.value }.toMutableSet()
+                database.readableDatabase.rawQuery("SELECT DISTINCT conversation_id FROM messages", null).use {
+                    while (it.moveToNext()) retained.add(it.getString(0))
+                }
+                try { screenshots.deleteOrphanConversations(retained) } catch (_: Exception) { screenshotsCleaned = false }
+            }
+            if (screenshotsCleaned) "删除已完成" else "会话已删除；部分截图清理未完成"
         })
     }
 

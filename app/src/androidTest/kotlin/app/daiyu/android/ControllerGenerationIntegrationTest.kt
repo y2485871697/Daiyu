@@ -525,6 +525,31 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
         } finally { saved.delete() }
     }
 
+    fun testScreenshotCleanupDoesNotRunWhenDeleteMutationLeavesConversation() = verifyDeleteReadback()
+
+    private fun verifyDeleteReadback() {
+        val conversation = fixture.database.create("default")
+        val source = File(fixture.application.cacheDir, "browser_screenshots/screenshot_${System.nanoTime()}.jpg")
+        check(source.parentFile!!.mkdirs() || source.parentFile!!.isDirectory)
+        val bitmap = android.graphics.Bitmap.createBitmap(3, 2, android.graphics.Bitmap.Config.ARGB_8888)
+        try { source.outputStream().use { check(bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, it)) } }
+        finally { bitmap.recycle() }
+        val store = app.daiyu.android.media.BrowserScreenshotStore(fixture.application.filesDir, fixture.application.cacheDir)
+        val binding = app.daiyu.android.media.BrowserScreenshotStore.Binding(conversation.id.value,
+            "message", "run", "call", "browser_read", "{\"action\":\"screenshot\"}")
+        val receipt = store.freeze(binding, source.path)
+        val bytes = source.readBytes()
+        try {
+            val success = AtomicBoolean(true)
+            assertTrue(dataOperation {
+                controller.mutateGenerationOwners(setOf(conversation.id.value), completed = { success.set(it) }) {}
+            }.startsWith("删除未确认"))
+            assertFalse(success.get())
+            assertTrue(fixture.database.conversations().any { it.id == conversation.id })
+            assertTrue(bytes.contentEquals(store.read(binding, receipt)))
+        } finally { source.delete() }
+    }
+
     fun testBrowserCardOriginalUsesCommittedReceiptAndSavesExactJpeg() = verifyBrowserCardOriginal()
 
     private fun verifyBrowserCardOriginal() {
@@ -582,6 +607,17 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
                 .startsWith("原件保存未确认"))
             assertEquals(1, documents.opens.get())
             assertEquals(0, fixture.opens.get())
+            assertTrue(dataOperation {
+                controller.mutateGenerationOwners(setOf(conversation.id.value), completed = {}) {
+                    fixture.database.delete(conversation.id)
+                }
+            }.startsWith("删除已完成"))
+            val screenshotBinding = app.daiyu.android.media.BrowserScreenshotStore.Binding(binding.conversationId,
+                binding.assistantMessageId, binding.runId, binding.toolCallId, binding.toolName, call.arguments)
+            assertTrue(runCatching {
+                app.daiyu.android.media.BrowserScreenshotStore(fixture.application.filesDir, fixture.application.cacheDir)
+                    .read(screenshotBinding, receipt)
+            }.isFailure)
         } finally { saved.delete() }
     }
 

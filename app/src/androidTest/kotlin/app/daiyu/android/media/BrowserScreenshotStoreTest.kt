@@ -34,6 +34,74 @@ class BrowserScreenshotStoreTest : AndroidTestCase() {
         assertTrue(source.readBytes().contentEquals(store.read(binding, receipt)))
     }
 
+    fun testDeleteConversationOnlyRemovesItsOwnOriginals() = verifyDeleteConversation()
+
+    private fun verifyDeleteConversation() = fixture { _, source, binding, store ->
+        val receipt = store.freeze(binding, source.path)
+        val other = binding.copy(conversation = "other")
+        val otherReceipt = store.freeze(other, source.path)
+        store.deleteConversation(binding.conversation)
+        store.deleteConversation(binding.conversation)
+        assertTrue(runCatching { store.read(binding, receipt) }.isFailure)
+        assertTrue(source.readBytes().contentEquals(store.read(other, otherReceipt)))
+    }
+
+    fun testDeleteConversationRejectsSymlinkWithoutTouchingTarget() = verifyDeleteSymlink()
+
+    private fun verifyDeleteSymlink() = fixture { files, source, binding, store ->
+        val receipt = store.freeze(binding, source.path)
+        val root = File(files, "browser-call-screenshots")
+        val directory = checkNotNull(root.listFiles()).single()
+        val outside = File(files, "outside")
+        check(directory.renameTo(outside))
+        java.nio.file.Files.createSymbolicLink(directory.toPath(), outside.toPath())
+        assertTrue(runCatching { store.deleteConversation(binding.conversation) }.isFailure)
+        check(directory.delete()); check(outside.renameTo(directory))
+        assertTrue(source.readBytes().contentEquals(store.read(binding, receipt)))
+    }
+
+    fun testDeleteRetryStillRequiresDirectorySync() = verifyDeleteRetrySync()
+
+    private fun verifyDeleteRetrySync() = fixture { files, source, binding, store ->
+        store.freeze(binding, source.path)
+        val root = File(files, "browser-call-screenshots")
+        var syncs = 0
+        val failing = BrowserScreenshotStore(files, source.parentFile!!.parentFile!!) { directory ->
+            assertEquals(root, directory)
+            syncs++
+            error("injected sync failure")
+        }
+        repeat(2) { assertTrue(runCatching { failing.deleteConversation(binding.conversation) }.isFailure) }
+        assertEquals(2, syncs)
+        BrowserScreenshotStore(files, source.parentFile!!.parentFile!!) { directory ->
+            assertEquals(root, directory)
+            syncs++
+        }.deleteConversation(binding.conversation)
+        assertEquals(3, syncs)
+    }
+
+    fun testOrphanCleanupRecoversEarlierFailureAndKeepsRetainedConversations() = verifyOrphanCleanup()
+
+    private fun verifyOrphanCleanup() = fixture { files, source, binding, store ->
+        store.freeze(binding, source.path)
+        val retained = binding.copy(conversation = "retained")
+        val receipt = store.freeze(retained, source.path)
+        val root = File(files, "browser-call-screenshots")
+        val orphan = checkNotNull(root.listFiles()).single { entry ->
+            entry.name == java.security.MessageDigest.getInstance("SHA-256")
+                .digest(binding.conversation.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        }
+        val outside = File(files, "held-original")
+        check(orphan.renameTo(outside))
+        java.nio.file.Files.createSymbolicLink(orphan.toPath(), outside.toPath())
+        assertTrue(runCatching { store.deleteConversation(binding.conversation) }.isFailure)
+        check(orphan.delete()); check(outside.renameTo(orphan))
+        store.deleteOrphanConversations(setOf(retained.conversation))
+        assertTrue(source.readBytes().contentEquals(store.read(retained, receipt)))
+        store.deleteOrphanConversations(emptySet())
+        assertTrue(checkNotNull(File(files, "browser-call-screenshots").listFiles()).isEmpty())
+    }
+
     private fun fixture(body: (File, File, BrowserScreenshotStore.Binding, BrowserScreenshotStore) -> Unit) {
         val root = File(context.cacheDir, "browser-sidecar-test-${UUID.randomUUID()}")
         val files = File(root, "files").apply { mkdirs() }

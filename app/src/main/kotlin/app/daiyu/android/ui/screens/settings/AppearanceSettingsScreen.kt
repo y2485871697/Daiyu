@@ -16,6 +16,8 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import top.yukonga.miuix.kmp.window.WindowDialog
+import top.yukonga.miuix.kmp.basic.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -91,6 +93,10 @@ internal fun AppearanceSettingsScreen(
         app.daiyu.android.data.model.MIN_INTERFACE_SCALE..app.daiyu.android.data.model.MAX_INTERFACE_SCALE,
 ) {
     val colors = MiuixTheme.colorScheme
+    var scaleDraft by remember(state.interfaceScale) { mutableStateOf(state.interfaceScale) }
+    var scaleEditor by remember { mutableStateOf(false) }
+    var scaleInput by remember { mutableStateOf("") }
+    var loadingExpanded by remember { mutableStateOf(false) }
     var choice by remember { mutableStateOf<String?>(null) }
     val palettes = listOf("柔和", "中性", "鲜艳", "表现力", "彩虹", "水果沙拉", "单色", "忠实", "内容")
     val accents = listOf("跟随壁纸", "蓝色", "紫色", "粉色", "红色", "橙色", "黄色", "绿色", "青色")
@@ -109,6 +115,19 @@ internal fun AppearanceSettingsScreen(
             choice = null
         }, onDismiss = { choice = null },
     )
+    if (scaleEditor) WindowDialog(show = true, title = "界面缩放", onDismissRequest = { scaleEditor = false }) {
+        Column {
+            SettingsTextField("缩放百分比", scaleInput, { scaleInput = it.filter(Char::isDigit).take(3) }, hint = "80–110")
+            val value = scaleInput.toIntOrNull()
+            TextButton(text = "确定", enabled = value != null && value in 80..110, onClick = {
+                if (value != null && value in 80..110) {
+                    onChange(state.copy(interfaceScale = value / 100f))
+                    scaleEditor = false
+                }
+            })
+            TextButton(text = "取消", onClick = { scaleEditor = false })
+        }
+    }
     MiuixScaffoldPage(title = "外观与主题", onBack = onBack, modifier = modifier) {
         item(key = "appearance_theme") {
             SettingsSectionTitle("主题模式")
@@ -131,11 +150,13 @@ internal fun AppearanceSettingsScreen(
         item(key = "appearance_scale") {
             SettingsSectionTitle("界面缩放")
             SettingsCard {
+                SettingsRow("界面缩放", summary = "${(scaleDraft * 100).roundToInt()}%",
+                    onClick = { scaleInput = (scaleDraft * 100).roundToInt().toString(); scaleEditor = true })
                 Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically) {
                         Text("文字与控件大小", style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp), color = colors.onSurface)
-                        Text("${(state.interfaceScale * 100).roundToInt()}%", style = MiuixTheme.textStyles.body2,
+                        Text("${(scaleDraft * 100).roundToInt()}%", style = MiuixTheme.textStyles.body2,
                             color = colors.primary, modifier = Modifier.testTag("appearance-scale-value"))
                     }
                     Column(Modifier.fillMaxWidth().background(colors.surfaceVariant, RoundedCornerShape(14.dp)).padding(16.dp),
@@ -144,7 +165,13 @@ internal fun AppearanceSettingsScreen(
                         Text("让界面刚刚好", style = MiuixTheme.textStyles.body1.copy(fontWeight = FontWeight.Medium), color = colors.onSurface)
                         Text("留一点空白，专注每一次对话。", style = MiuixTheme.textStyles.body2, color = colors.onSurfaceVariantSummary)
                     }
-                    Slider(value = state.interfaceScale.coerceIn(scaleRange), onValueChange = { onChange(state.copy(interfaceScale = it)) },
+                    Slider(value = scaleDraft.coerceIn(scaleRange), onValueChange = { scaleDraft = it },
+                        onValueChangeFinished = {
+                            val requested = app.daiyu.android.data.model.normalizeInterfaceScale(
+                                (scaleDraft * 100).roundToInt() / 100f)
+                            scaleDraft = state.interfaceScale
+                            onChange(state.copy(interfaceScale = requested))
+                        },
                         valueRange = scaleRange,
                         colors = SliderDefaults.colors(thumbColor = colors.primary, activeTrackColor = colors.primary,
                             inactiveTrackColor = colors.primaryContainer),
@@ -160,8 +187,10 @@ internal fun AppearanceSettingsScreen(
             SettingsSectionTitle("界面与效果")
             SettingsCard {
                 SettingsSwitchRow("消息时间戳", state.messageTimestampsEnabled) { onChange(state.copy(messageTimestampsEnabled = it)) }
+                SettingsSwitchRow("模糊效果", state.blurEnabled && blurSupported, enabled = blurSupported) {
+                    onChange(state.copy(blurEnabled = it))
+                }
                 if (blurSupported) {
-                    SettingsSwitchRow("模糊效果", state.blurEnabled) { onChange(state.copy(blurEnabled = it)) }
                     if (state.blurEnabled) {
                         SettingsRow("顶栏模糊样式", summary = blurStyles[state.topBarBlurStyle.ordinal], onClick = { choice = "blur" })
                     }
@@ -172,11 +201,19 @@ internal fun AppearanceSettingsScreen(
                 SettingsSwitchRow("预测性返回手势", state.predictiveBackEnabled) {
                     onChange(state.copy(predictiveBackEnabled = it))
                 }
-                SettingsSwitchRow("圆形加载指示器", state.morphLoadingIndicator) {
-                    onChange(state.copy(morphLoadingIndicator = it))
-                }
-                SettingsSwitchRow("仅消息生成前", state.morphLoadingBeforeResponseOnly) {
-                    onChange(state.copy(morphLoadingBeforeResponseOnly = it))
+                SettingsRow("圆形加载指示器", tag = "settings-switch:圆形加载指示器",
+                    onClick = {
+                        if (!state.morphLoadingIndicator) {
+                            onChange(state.copy(morphLoadingIndicator = true)); loadingExpanded = true
+                        } else loadingExpanded = !loadingExpanded
+                    }, trailing = {
+                        androidx.compose.material3.Switch(checked = state.morphLoadingIndicator,
+                            onCheckedChange = { loadingExpanded = it; onChange(state.copy(morphLoadingIndicator = it)) })
+                    })
+                if (state.morphLoadingIndicator && loadingExpanded) {
+                    SettingsSwitchRow("仅消息生成前", state.morphLoadingBeforeResponseOnly) {
+                        onChange(state.copy(morphLoadingBeforeResponseOnly = it))
+                    }
                 }
             }
         }

@@ -36,6 +36,7 @@ internal fun ReconnectSettingsScreen(
     val page = remember(store, owner) { ReconnectSettingsPage() }
     val currentOwner by rememberUpdatedState(ownerCurrent)
     var draft by remember(store, owner) { mutableStateOf(ReconnectSettings()) }
+    var durationConfirmed by remember(store, owner) { mutableStateOf(false) }
     var busy by remember(store, owner) { mutableStateOf(true) }
     var notice by remember(store, owner) { mutableStateOf<String?>(null) }
     var failed by remember(store, owner) { mutableStateOf(false) }
@@ -54,12 +55,15 @@ internal fun ReconnectSettingsScreen(
             if (canAct()) {
                 result.onSuccess {
                     draft = it
+                    durationConfirmed = true
                     failed = false
                 }.onFailure {
                     val restored = withContext(Dispatchers.IO) { runCatching { store.snapshot() } }
                     draft = restored.getOrElse { previous }
+                    durationConfirmed = restored.isSuccess
                     failed = true
-                    notice = "保存失败，已恢复为上次保存的设置。"
+                    notice = if (restored.isSuccess) "保存失败，已恢复为上次保存的设置。"
+                        else "保存失败，无法确认已保存的设置；请重新选择时长。"
                 }
                 busy = false
             }
@@ -74,7 +78,7 @@ internal fun ReconnectSettingsScreen(
     LaunchedEffect(store, owner) {
         val result = withContext(Dispatchers.IO) { runCatching { store.snapshot() } }
         if (canAct()) {
-            result.onSuccess { draft = it }.onFailure {
+            result.onSuccess { draft = it; durationConfirmed = true }.onFailure {
                 failed = true
                 notice = "无法确认已保存的重连设置；请明确选择并重新保存。不会因此启用自动恢复。"
             }
@@ -89,13 +93,13 @@ internal fun ReconnectSettingsScreen(
                         onClick = if (!busy) ({
                             saveImmediately(draft.copy(duration = duration))
                         }) else null,
-                        trailing = { RadioButton(selected = draft.duration == duration, onClick = null, enabled = !busy) })
+                        trailing = { RadioButton(selected = durationConfirmed && draft.duration == duration, onClick = null, enabled = !busy) })
                 }
                 SettingsRow("OpenAI Responses 后台请求（默认关闭）",
-                    tag = "reconnect-background", onClick = if (!busy) ({
+                    tag = "reconnect-background", onClick = if (!busy && durationConfirmed) ({
                         saveImmediately(draft.copy(responsesBackgroundEnabled = !draft.responsesBackgroundEnabled))
                     }) else null,
-                    trailing = { RadioButton(selected = draft.responsesBackgroundEnabled, onClick = null, enabled = !busy) })
+                    trailing = { RadioButton(selected = durationConfirmed && draft.responsesBackgroundEnabled, onClick = null, enabled = !busy && durationConfirmed) })
             }
         }
         notice?.let { text -> item(key = "reconnect-notice") { SettingsNote(text, error = failed) } }

@@ -44,6 +44,7 @@ internal fun HapticsSettingsScreen(
 ) {
     var settings by remember(runtime) { mutableStateOf(runtime.store.read()) }
     var error by remember(runtime) { mutableStateOf<String?>(null) }
+    var intensityDialog by remember { mutableStateOf(false) }
     var expanded by rememberSaveable { mutableStateOf(false) }
     val currentOwner by rememberUpdatedState(ownerCurrent)
     val pageOwner = remember(runtime, session) { HapticsPageOwner() }
@@ -93,29 +94,35 @@ internal fun HapticsSettingsScreen(
         item(key = "haptics_switches") {
             SettingsSectionTitle("触感设置")
             SettingsCard {
-                HapticsSwitchRow("触感反馈", settings.touch, true) { save { copy(touch = it) } }
+                SettingsRow("触感反馈", tag = "settings-switch:触感反馈",
+                    summary = labels[settings.intensity.ordinal],
+                    onClick = { if (canAct()) intensityDialog = true }, trailing = {
+                        Switch(checked = settings.touch, onCheckedChange = { save { copy(touch = it) } })
+                    })
                 HapticsSwitchRow("消息生成震动", settings.generationOn, settings.touch) {
                     save { copy(generation = it) }
                 }
-                HapticsSwitchRow("后台震动", settings.backgroundOn, settings.generationOn) {
-                    expanded = it
-                    save { copy(background = it) }
-                }
-                SettingsRow("后台震动选项", summary = when {
-                    !settings.backgroundOn -> "开启后台震动后可设置推理过程"
-                    settings.backgroundReasoning -> "正文、工具与推理过程"
-                    else -> "正文、工具与推理完成"
-                }, onClick = if (settings.backgroundOn) ({
-                    if (canAct()) { session.touch(); expanded = !expanded }
-                }) else null)
+                SettingsRow("后台震动", tag = "settings-switch:后台震动",
+                    summary = if (settings.backgroundReasoning) "正文、工具与推理过程" else "正文、工具与推理完成",
+                    onClick = if (settings.generationOn) ({
+                        if (canAct()) {
+                            if (!settings.backgroundOn) { save { copy(background = true) }; expanded = true }
+                            else { session.touch(); expanded = !expanded }
+                        }
+                    }) else null, trailing = {
+                        Switch(checked = settings.backgroundOn, enabled = settings.generationOn,
+                            onCheckedChange = { expanded = it; save { copy(background = it) } })
+                    })
                 if (expanded && settings.backgroundOn) HapticsSwitchRow(
                     "后台推理过程震动", settings.backgroundReasoning, true,
                 ) { save { copy(backgroundReasoning = it) } }
             }
             SettingsNote("关闭上级开关不会覆盖已保存的下级选项。后台震动不会保持应用进程存活。")
         }
-        item(key = "haptics_intensity") {
-            SettingsSectionTitle("触感强度")
+        error?.let { message -> item(key = "haptics_error") { SettingsNote(message, error = true) } }
+    }
+    top.yukonga.miuix.kmp.window.WindowDialog(show = intensityDialog, title = "触感强度",
+        onDismissRequest = { intensityDialog = false }) {
             SettingsCard {
                 SettingsRow("强度", summary = labels[settings.intensity.ordinal])
                 Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp)) {
@@ -136,8 +143,7 @@ internal fun HapticsSettingsScreen(
             }
             SettingsNote("系统默认使用系统触感主题；低、中、高优先使用设备支持的震动原语，无振幅控制时使用系统振幅。")
         }
-        error?.let { message -> item(key = "haptics_error") { SettingsNote(message, error = true) } }
-    }
+
 }
 
 private class HapticsPageOwner { var active = false }

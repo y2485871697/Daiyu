@@ -117,6 +117,7 @@ internal fun SettingsSwitchRow(title: String, checked: Boolean, enabled: Boolean
     ), trailing = {
         Switch(
             checked = checked,
+            enabled = enabled,
             onCheckedChange = null,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = colors.onPrimary,

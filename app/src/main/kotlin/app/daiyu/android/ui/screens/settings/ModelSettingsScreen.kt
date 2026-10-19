@@ -170,6 +170,12 @@ internal fun ModelSettingsScreen(
                     "自定义请求体", draft.customBody, { changeDraft(draft.copy(customBody = it)) },
                     hint = "JSON 对象；留空使用服务默认请求体", multiline = true, enabled = enabled,
                 )
+                if (requestOptionsUnavailable) {
+                    SettingsNote("原请求策略不可用；替换需要明确确认", error = true)
+                    SettingsSwitchRow("授权替换策略", draft.requestOptionsReplacementAuthorized, enabled = enabled) {
+                        changeDraft(draft.copy(requestOptionsReplacementAuthorized = it))
+                    }
+                }
                 SettingsRow(
                     title = "自定义请求头",
                     summary = if (draft.customHeaders.isBlank()) "未设置" else "已设置",
@@ -271,4 +277,15 @@ internal fun ModelSettingsScreen(
             )
         }
     }
+}
+
+@Composable
+internal fun ResponsesPathRow(title: String, path: String, enabled: Boolean, onSelect: (String) -> Unit) {
+    var choosing by remember { mutableStateOf(false) }
+    val options = listOf("/v1/responses", "/responses")
+    SettingsRow(title, summary = path.ifBlank { options.first() },
+        tag = "responses-path-select:$title", onClick = if (enabled) ({ choosing = true }) else null)
+    if (choosing) DaiyuChoiceSheet(title = title, options = options,
+        onSelect = { index -> if (enabled) onSelect(options[index]); choosing = false },
+        onDismiss = { choosing = false })
 }

@@ -22,7 +22,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         try { super.cleanupFixture() } finally { directory?.deleteRecursively(); directory = null }
     }
     private fun openLocalModelTab() {
-        reveal("settings-radio:模型").assertIsEnabled().performClick().assertIsSelected()
+        selectProviderTab("模型")
         awaitUniqueTag("local-model-refresh")
         ui.waitUntil(5_000) { ui.onAllNodesWithText("正在读取本地模型").fetchSemanticsNodes().isEmpty() }
         reveal("local-model:extra-local").assertExists()

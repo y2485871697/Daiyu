@@ -29,8 +29,7 @@ class CompressionSettingsActivityTest : WiredActivityTestCase() {
 
     private fun enter() {
         openSettings()
-        reveal("settings-row:模型功能", "设置").performClick()
-        reveal("settings-row:上下文压缩", "模型功能").performClick()
+        reveal("settings-row:上下文压缩", "设置").performClick()
         node("page:上下文压缩").assertExists()
         ui.waitUntil(timeoutMillis = 5000) {
             ui.onAllNodes(hasTestTag("settings-field:上下文窗口 tokens") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
@@ -60,8 +59,7 @@ class CompressionSettingsActivityTest : WiredActivityTestCase() {
         backToPage(activity, "page:设置")
         node("page:设置").assertExists()
         assertNull(old.prepareLoad())
-        reveal("settings-row:模型功能", "设置").performClick()
-        reveal("settings-row:上下文压缩", "模型功能").performClick()
+        reveal("settings-row:上下文压缩", "设置").performClick()
         assertNotSame(old, owner())
         assertEquals(0, fixture.opens.get())
     }

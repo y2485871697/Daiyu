@@ -81,7 +81,7 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         for (dark in listOf(false, true)) {
             showHome(mutableListOf(), dark)
             val first = node("settings-row:模型提供商").fetchSemanticsNode().boundsInRoot
-            val second = node("settings-row:外观与主题").fetchSemanticsNode().boundsInRoot
+            val second = node("settings-row:默认启用推理").fetchSemanticsNode().boundsInRoot
             assertEquals(first.bottom, second.top, 0.1f)
             val pixels = ui.onRoot().captureToImage().toPixelMap()
             val density = activity.resources.displayMetrics.density
@@ -113,13 +113,11 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertEquals(listOf("MCP_SETTINGS", "SKILLS"), events) }
     }
 
-    fun testCategoryBackReturnsHomeAndKeepsOriginalReasoningEntry() {
+    fun testOriginalGroupedHomeKeepsReasoningEntryWithoutCategoryNavigation() {
         val events = mutableListOf<String>()
         showHome(events)
-        reveal("settings-row:LLM 提供商", "设置").performClick()
-        node("page:LLM 提供商").assertExists()
-        reveal("settings-row:默认启用推理", "LLM 提供商").assertIsEnabled().performClick()
-        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        node("settings-row:LLM 提供商").assertDoesNotExist()
+        reveal("settings-row:默认启用推理", "设置").assertIsEnabled().performClick()
         node("page:设置").assertExists()
         ui.runOnIdle { assertTrue(events.isEmpty()) }
     }
@@ -143,32 +141,48 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText("绿色").performClick()
         ui.runOnIdle { assertEquals(AppearanceAccentColor.GREEN, state.accentColor); assertTrue(state.monetEnabled) }
         reveal("settings-switch:消息时间戳", "外观与主题").performClick().assertIsOn()
-        reveal("settings-switch:圆形加载指示器", "外观与主题").performClick().assertIsOff()
+        reveal("settings-switch:圆形加载指示器", "外观与主题").performClick()
         reveal("settings-switch:仅消息生成前", "外观与主题").performClick().assertIsOn()
-        ui.runOnIdle {
-            assertFalse(state.morphLoadingIndicator)
-            assertTrue(state.morphLoadingBeforeResponseOnly)
-        }
-        reveal("settings-switch:圆形加载指示器", "外观与主题").performClick().assertIsOn()
+        ui.runOnIdle { assertTrue(state.morphLoadingIndicator); assertTrue(state.morphLoadingBeforeResponseOnly) }
+        reveal("settings-switch:圆形加载指示器", "外观与主题").onChild().performClick()
+        ui.runOnIdle { assertFalse(state.morphLoadingIndicator); assertTrue(state.morphLoadingBeforeResponseOnly) }
+        node("settings-switch:仅消息生成前").assertDoesNotExist()
+        reveal("settings-switch:圆形加载指示器", "外观与主题").performClick()
         ui.runOnIdle { assertTrue(state.morphLoadingBeforeResponseOnly) }
         node("page:外观与主题").performScrollToIndex(0)
         capture("appearance-dark")
     }
 
+    fun testScaleGestureCommitsOnceAndRejectedSaveRestoresConfirmedValue() {
+        val state = AppearanceSettings(interfaceScale = 1f)
+        val requests = mutableListOf<AppearanceSettings>()
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(state, false) {
+                    AppearanceSettingsScreen(state, onChange = { requests.add(it) }, onBack = {})
+                }
+            }
+        }
+        reveal("appearance-scale", "外观与主题").performTouchInput { swipeLeft() }
+        ui.runOnIdle {
+            assertEquals(1, requests.size)
+            assertTrue(requests.single().interfaceScale < state.interfaceScale)
+        }
+        node("appearance-scale-value").assertTextEquals("100%")
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testToolsKeepOnlyRequestedEntriesAndSkillsLivesInExtensions() {
         val events = mutableListOf<String>()
         showHome(events)
-        reveal("settings-row:数据备份", "设置").assertExists()
-        node("settings-row:Skills").assertDoesNotExist()
-        reveal("settings-row:工具", "设置").performClick()
-        val rows = ui.onAllNodes(SemanticsMatcher("settings rows") {
-            it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("settings-row:") == true
-        }).fetchSemanticsNodes().map { it.config[SemanticsProperties.TestTag].removePrefix("settings-row:") }
-        assertEquals(listOf("工作区与文件", "终端", "Linux 工具环境", "Agent任务偏好"), rows)
+        for (title in listOf("工作区与文件", "终端", "Linux 工具环境", "Agent任务偏好")) {
+            reveal("settings-row:$title", "设置").assertHasClickAction().assertIsEnabled()
+        }
+        for (title in listOf("浏览器", "平台只读工具与私密出站", "Root 与系统增强", "悬浮窗权限")) {
+            node("settings-row:$title").assertDoesNotExist()
+        }
         capture("tools-refined")
-        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-        reveal("settings-row:扩展", "设置").performClick()
-        reveal("settings-row:Skills", "扩展").performClick()
+        reveal("settings-row:Skills", "设置").performClick()
         ui.runOnIdle { assertEquals(listOf("SKILLS"), events) }
     }
 

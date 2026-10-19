@@ -43,7 +43,7 @@ internal object DaiyuPalette {
         onSurface = Color(0xFF36333F),
         surfaceVariant = Color(0xFFFAF8FF),
         onSurfaceSecondary = Color(0xFF716A82),
-        onSurfaceVariantSummary = Color(0xFF82798F),
+        onSurfaceVariantSummary = Color(0xFF716A82),
         onSurfaceVariantActions = Color(0xFF82798F),
         disabledOnSurface = Color(0xFFA19AA9),
         surfaceContainer = Color.White,

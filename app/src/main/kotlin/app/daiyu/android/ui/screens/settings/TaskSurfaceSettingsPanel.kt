@@ -40,6 +40,16 @@ internal fun TaskSurfaceSettingsPanel(
         val loaded = withContext(Dispatchers.IO) { TaskSurfaceSettingsEditor(store) }
         if (visit.active) { editor = loaded; draft = loaded.draft }
     }
+    fun saveSelection(value: TaskSurfacePreference) {
+        val current = editor ?: return
+        if (!visit.active || busy) return
+        current.choose(value); draft = value
+        busy = true; failed = false; saved = false
+        scope.launch {
+            val success = withContext(Dispatchers.IO) { if (visit.active) current.save() else false }
+            if (visit.active) { busy = false; failed = !success; saved = success }
+        }
+    }
     val back = { if (visit.active) onBack() }
     BackHandler { back() }
     MiuixScaffoldPage(title = "Agent任务偏好", onBack = back, modifier = modifier) {
@@ -53,7 +63,7 @@ internal fun TaskSurfaceSettingsPanel(
                         TaskSurfacePreference.ASK -> "每次运行询问"
                     }, selected = draft == value, enabled = editor != null && !busy) {
                         if (visit.active && !busy) {
-                            editor?.choose(value); draft = value; failed = false; saved = false
+                            saveSelection(value)
                         }
                     }
                 }
@@ -66,21 +76,13 @@ internal fun TaskSurfaceSettingsPanel(
         }
         if (failed) item { SettingsNote("保存失败，未确认新偏好。后续执行将拒绝使用未确认的位置；请重试保存。", error = true) }
         if (saved) item { SettingsNote("任务位置偏好已保存；当前运行的决定保持不变。") }
-        item {
+        if (busy) item { SettingsNote("正在保存…") }
+        if (failed) item {
             SettingsCard(Modifier.testTag("task-surface-save")) {
-                SettingsRow(if (busy) "正在保存…" else "保存任务位置", onClick = {
-                    val current = editor
-                    if (visit.active && !busy && current != null && draft != null) {
-                        busy = true; failed = false; saved = false
-                        scope.launch {
-                            val success = withContext(Dispatchers.IO) { current.save() }
-                            if (visit.active) { busy = false; failed = !success; saved = success }
-                        }
-                    }
-                })
+                SettingsRow("重试保存", onClick = { draft?.let(::saveSelection) })
             }
         }
     }
 }
 
-private class TaskSurfaceSettingsVisit { var active = true }
+private class TaskSurfaceSettingsVisit { @Volatile var active = true }

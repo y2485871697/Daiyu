@@ -63,12 +63,11 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
             entry(item.id).performClick(); node("page:设置").assertExists()
             assertUnchanged()
         }
-        entry("relay").performClick(); node("page:关于").assertExists(); assertUnchanged()
+        entry("relay").performClick(); node("page:设置").assertExists(); assertUnchanged()
         for (title in listOf("ST API", "摸鱼")) {
-            reveal("settings-row:$title", "关于").assertExists(); node("page:关于").assertExists()
+            reveal("settings-row:$title", "设置").assertExists(); node("page:设置").assertExists()
             assertUnchanged()
         }
-        backToPage(activity, "page:设置"); node("page:设置").assertExists()
         backToChat(activity); assertDraft("Gemini UI 草稿")
     }
     fun testConnectedModelEntryOpensTheExistingSettingsWithoutSaving() {
@@ -108,10 +107,8 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         node("settings-radio:每次运行询问").assertExists()
         backToPage(activity, "page:设置"); node("page:设置").assertExists()
         reveal("settings-search", "设置").performTextReplacement("")
-        reveal("settings-row:工具", "设置").performClick()
-        reveal("settings-row:Agent任务偏好", "工具").performClick()
+        reveal("settings-row:Agent任务偏好", "设置").performClick()
         node("page:Agent任务偏好").assertExists()
-        backToPage(activity, "page:工具"); node("page:工具").assertExists()
         backToPage(activity, "page:设置"); node("page:设置").assertExists()
         backToChat(activity); assertDraft("任务位置设置保留草稿")
         assertEquals(before, fixture.database.exportBackup())

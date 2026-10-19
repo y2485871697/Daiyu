@@ -33,11 +33,13 @@ class TaskSurfaceSettingsActivityTest : WiredActivityTestCase() {
             val gate = CountDownLatch(1)
             entered.set(CountDownLatch(1)); release.set(gate)
             try {
-                reveal("settings-row:保存任务位置", "Agent任务偏好").performClick()
+                reveal("settings-radio:后台执行", "Agent任务偏好").assertIsEnabled().performClick()
                 awaitControl("preference persistence entered") { entered.get().count == 0L }
-                awaitUniqueTag("settings-row:正在保存…")
+                node("settings-radio:后台执行").assertIsNotEnabled()
             } finally { gate.countDown() }
-            awaitUniqueTag("settings-row:保存任务位置")
+            ui.waitUntil(5_000) {
+                ui.onAllNodes(hasTestTag("settings-radio:后台执行") and isEnabled()).fetchSemanticsNodes().size == 1
+            }
         }
         val before = fixture.database.exportBackup()
         val modelSettings = fixture.settings.loadForEditing().settings
@@ -53,12 +55,11 @@ class TaskSurfaceSettingsActivityTest : WiredActivityTestCase() {
                 ?.config?.getOrNull(SemanticsProperties.Disabled) == null &&
                 ui.onAllNodesWithTag("settings-radio:后台执行").fetchSemanticsNodes().isNotEmpty()
         }
-        reveal("settings-radio:后台执行", "Agent任务偏好").assertIsEnabled().performClick()
         saveWithObservedBusyState()
         val failure = "保存失败，未确认新偏好。后续执行将拒绝使用未确认的位置；请重试保存。"
         awaitControl("failed preference write fenced") { store.load() === TaskSurfaceSettings.Unavailable }
         ui.waitUntil(5_000) {
-            ui.onAllNodesWithTag("settings-row:保存任务位置")
+            ui.onAllNodes(hasTestTag("settings-radio:后台执行") and isEnabled())
                 .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
         }
         node("page:Agent任务偏好").performScrollToNode(hasText(failure))
@@ -72,7 +73,7 @@ class TaskSurfaceSettingsActivityTest : WiredActivityTestCase() {
             store.load() == TaskSurfaceSettings.Available(TaskSurfacePreference.BACKGROUND)
         }
         ui.waitUntil(5_000) {
-            ui.onAllNodesWithTag("settings-row:保存任务位置")
+            ui.onAllNodes(hasTestTag("settings-radio:后台执行") and isEnabled())
                 .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
         }
         node("page:Agent任务偏好").performScrollToNode(hasText(success))

@@ -3,8 +3,6 @@ package app.daiyu.android.title
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -47,7 +45,7 @@ fun TitleModelSettingsPanel(
     notice: String? = null,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("独立标题模型")
         Text(if (settings.enabled) "已启用独立固定绑定" else "默认关闭；不会使用聊天主模型")
         Text("手动改名优先。模型失绑定会明确拒绝；保存仅写本地配置，不发送供应商请求。")
@@ -66,8 +64,9 @@ fun TitleModelSettingsPanel(
             }, enabled = !busy) { Text(protocol.wireName) }
         }
         if (draft.protocol == ProviderProtocol.RESPONSES) {
-            OutlinedTextField(draft.responsesPath, { onDraftChange(draft.copy(responsesPath = it)) },
-                label = { Text("Responses 路径（可留空）") }, enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth())
+            app.daiyu.android.ui.screens.settings.ResponsesPathRow("Responses 路径", draft.responsesPath, !busy) {
+                onDraftChange(draft.copy(responsesPath = it))
+            }
         }
         // These are explicit authorizations, not a guessed migration or automatic repair.
         OutlinedButton(onClick = { onDraftChange(draft.copy(protocolChangeAuthorized = !draft.protocolChangeAuthorized)) }, enabled = !busy) {

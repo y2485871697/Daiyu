@@ -19,8 +19,7 @@ class TerminalActivityTest : WiredActivityTestCase() {
 
     private fun enterFromSettings() {
         openSettings()
-        reveal("settings-row:工具", "设置").performClick()
-        reveal("settings-row:终端", "工具").performClick()
+        reveal("settings-row:终端", "设置").performClick()
         awaitTerminal()
     }
 
@@ -51,8 +50,7 @@ class TerminalActivityTest : WiredActivityTestCase() {
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         ui.waitForIdle()
         node("terminal-screen").assertDoesNotExist()
-        reveal("settings-row:工具", "设置").performClick()
-        reveal("settings-row:终端", "工具").performClick()
+        reveal("settings-row:终端", "设置").performClick()
         awaitTerminal()
         val caller = owner.caller.value
         mainThread { oldOpen() }

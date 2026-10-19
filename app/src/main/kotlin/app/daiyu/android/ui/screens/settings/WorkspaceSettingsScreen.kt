@@ -145,6 +145,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
             if (!it && current() && !loaded) refresh(clearNotice = false)
         })
     MiuixScaffoldPage(title = "工作区与文件", onBack = back, modifier = modifier) {
+        item(key = "private-workspace") { privatePanel() }
         item(key = "sharing") {
             SettingsNote("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。")
             SettingsCard {
@@ -196,7 +197,6 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
                 }
             }
         }
-        item(key = "private-workspace") { privatePanel() }
     }
 }
 

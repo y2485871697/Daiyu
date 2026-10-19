@@ -9,8 +9,7 @@ import app.daiyu.android.ui.screens.settings.SettingsCatalog
 class TitleModelSettingsActivityTest : WiredActivityTestCase() {
     private fun enter() {
         openSettings()
-        reveal("settings-row:模型功能", "设置").performClick()
-        reveal("settings-row:标题模型", "模型功能").performClick()
+        reveal("settings-row:标题模型", "设置").performClick()
         node("page:标题模型").assertExists()
     }
     private fun owner(): TitleModelSettingsEditor {
@@ -33,8 +32,7 @@ class TitleModelSettingsActivityTest : WiredActivityTestCase() {
         enter(); val first = owner()
         backToPage(activity, "page:设置")
         assertNull(first.prepareLoad())
-        reveal("settings-row:模型功能", "设置").performClick()
-        reveal("settings-row:标题模型", "模型功能").performClick()
+        reveal("settings-row:标题模型", "设置").performClick()
         val replacement = owner(); assertNotSame(first, replacement)
         activity = recreateActivity(activity)
         assertNull(replacement.prepareLoad())

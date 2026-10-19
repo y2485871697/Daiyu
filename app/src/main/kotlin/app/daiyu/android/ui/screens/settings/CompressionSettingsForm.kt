@@ -100,9 +100,11 @@ internal fun CompressionSettingsForm(
                     }
                     SettingsTextField("摘要 Base URL", draft.provider.endpoint,
                         { onChange(draft.copy(provider = draft.provider.copy(endpoint = it))) }, enabled = enabled)
-                    SettingsTextField("摘要 Responses 路径", draft.provider.responsesPath,
-                        { onChange(draft.copy(provider = draft.provider.copy(responsesPath = it))) },
-                        enabled = enabled && draft.provider.protocol == ProviderProtocol.RESPONSES)
+                    if (draft.provider.protocol == ProviderProtocol.RESPONSES) {
+                        ResponsesPathRow("摘要 Responses 路径", draft.provider.responsesPath, enabled) {
+                            onChange(draft.copy(provider = draft.provider.copy(responsesPath = it)))
+                        }
+                    }
                     SettingsTextField("摘要模型名", draft.provider.model,
                         { onChange(draft.copy(provider = draft.provider.copy(model = it))) }, enabled = enabled)
                     SettingsTextField("摘要 API Key", draft.provider.apiKey,
@@ -114,7 +116,7 @@ internal fun CompressionSettingsForm(
                     SettingsTextField("摘要协议预留 tokens", draft.overheadBudget, { onChange(draft.copy(overheadBudget = it)) }, enabled = enabled)
                     SettingsTextField("摘要截止时间毫秒", draft.deadlineMillis, { onChange(draft.copy(deadlineMillis = it)) }, enabled = enabled)
                     SettingsRow("重置摘要请求策略并授权替换",
-                        summary = if (draft.requestOptionsReplacementAuthorized) "已重置草稿；点击保存才写入" else "清除自定义请求体及 GPT 档位；点击保存才写入",
+                        summary = if (draft.requestOptionsReplacementAuthorized) "已重置草稿；点击保存才写入" else "清除自定义请求参数；点击保存才写入",
                         onClick = if (enabled) ({ onChange(draft.resetRequestOptions()) }) else null)
 
                 }

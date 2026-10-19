@@ -128,7 +128,6 @@ internal fun DaiyuSettingsScreen(
     var localPage by remember { mutableStateOf<SettingsLocalPage?>(null) }
     val diagnosticsUi = rememberSettingsDiagnostics(diagnostics) { visit.active && localPage == null }
     var query by rememberSaveable { mutableStateOf("") }
-    var section by rememberSaveable { mutableStateOf<String?>(null) }
     var relayExpanded by rememberSaveable { mutableStateOf(false) }
     var choosingDefaultReasoning by remember { mutableStateOf(false) }
     val defaultReasoningToggle: ((Boolean) -> Unit)? = onDefaultReasoningChange?.let { change -> { enabled ->
@@ -149,7 +148,7 @@ internal fun DaiyuSettingsScreen(
     val catalogGroups = remember(engineeringUi) { SettingsCatalog.visibleGroups(engineeringUi) }
     val groups = remember(query, catalogGroups) { filterSettingsGroups(query, catalogGroups) }
     val listState = rememberLazyListState()
-    LaunchedEffect(section, query) { listState.scrollToItem(0) }
+    LaunchedEffect(query) { listState.scrollToItem(0) }
     val openedPage = localPage
     if (openedPage != null) {
         val localBack: () -> Unit = {
@@ -174,10 +173,6 @@ internal fun DaiyuSettingsScreen(
         }
         return
     }
-    val selectedGroup = catalogGroups.find { it.id == section }
-    val pageTitle = selectedGroup?.title ?: "设置"
-    val back: () -> Unit = { if (section != null) section = null else onBack() }
-    BackHandler(enabled = section != null) { section = null }
     val open: (SettingsEntry) -> Unit = open@ { entry ->
         if (!visit.active || localPage != null || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@open
         focus.clearFocus()
@@ -192,84 +187,28 @@ internal fun DaiyuSettingsScreen(
             "source" -> openProjectSource(context)
             "telegram", "qq", "relay_st", "relay_moyu" -> openRetainedSettingsLink(context, entry.id)
             "relay" -> {
-                if (section != "about") { section = "about"; relayExpanded = true }
-                else relayExpanded = !relayExpanded
+                relayExpanded = !relayExpanded
             }
             else -> entry.route?.let(onRoute)
         }
     }
-    MiuixScaffoldPage(title = pageTitle, onBack = back, modifier = modifier, listState = listState,
+    MiuixScaffoldPage(title = "设置", onBack = onBack, modifier = modifier, listState = listState,
         listModifier = if (engineeringUi) Modifier.semantics { this[RetainedSettingsEntryAction] = open } else Modifier,
     ) {
-        if (selectedGroup != null) {
-            item(key = "category_intro") { SettingsNote(selectedGroup.summary) }
-            item(key = "category_entries") {
+        item(key = "settings_search") { SettingsSearch(query) { query = it } }
+        if (query.isNotBlank()) item(key = "search_heading") {
+            SettingsSectionTitle("搜索结果 · ${groups.sumOf { it.entries.size }}")
+        }
+        if (groups.isEmpty()) item(key = "settings_empty") { SettingsNote("没有匹配的设置") }
+        groups.forEach { group ->
+            item(key = "settings_group_${group.id}") { SettingsSectionTitle(group.title) }
+            item(key = "settings_entries_${group.id}") {
                 SettingsCard {
-                    selectedGroup.entries.filter { relayExpanded || it.id !in setOf("relay_st", "relay_moyu") }
+                    group.entries.filter { query.isNotBlank() || relayExpanded || it.id !in setOf("relay_st", "relay_moyu") }
                         .forEach { entry ->
-                            OriginalSettingsRow(entry, defaultReasoning, defaultReasoningError, defaultReasoningToggle, diagnosticsUi) { open(entry) }
+                            OriginalSettingsRow(entry, defaultReasoning, defaultReasoningError,
+                                defaultReasoningToggle, diagnosticsUi) { open(entry) }
                         }
-                }
-            }
-        } else {
-            item(key = "settings_search") { SettingsSearch(query) { query = it } }
-            if (query.isNotBlank()) {
-                item(key = "search_heading") { SettingsSectionTitle("搜索结果 · ${groups.sumOf { it.entries.size }}") }
-                if (groups.isEmpty()) item(key = "settings_empty") {
-                    Column(Modifier.fillMaxWidth().padding(32.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        SettingsIcon(DaiyuIcons.Search)
-                        Text("没有匹配的设置", color = MiuixTheme.colorScheme.onSurface,
-                            style = MiuixTheme.textStyles.body1.copy(fontWeight = FontWeight.Medium))
-                        Text("试试“模型”“语音”或“备份”", color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            style = MiuixTheme.textStyles.body2)
-                    }
-                }
-                groups.forEach { group ->
-                    item(key = "search_group_${group.id}") { SettingsSectionTitle(group.title) }
-                    group.entries.forEach { entry ->
-                        item(key = "search_entry_${entry.id}") {
-                            SettingsCard(Modifier.padding(bottom = 6.dp)) {
-                                OriginalSettingsRow(entry, defaultReasoning, defaultReasoningError, defaultReasoningToggle, diagnosticsUi) { open(entry) }
-                            }
-                        }
-                    }
-                }
-            } else {
-                item(key = "settings_common") {
-                    SettingsSectionTitle("常用设置")
-                    SettingsCard {
-                        listOf("providers", "appearance", "assistants", "subagents").forEach { id ->
-                            val entry = SettingsCatalog.entry(id)
-                            SettingsRow(entry.title, onClick = { open(entry) },
-                                summary = when (id) {
-                                    "providers" -> "服务地址、模型与请求参数"
-                                    "appearance" -> "主题、界面缩放与显示"
-                                    "assistants" -> "身份、记忆与专属技能"
-                                    else -> "模型、预设与协作配置"
-                                }, leading = { SettingsIcon(entry.icon) })
-                        }
-                    }
-                }
-                item(key = "settings_tools") {
-                    SettingsSectionTitle("工具与数据")
-                    SettingsCard {
-                        listOf("usage", "backup").forEach { id ->
-                            val entry = SettingsCatalog.entry(id)
-                            SettingsRow(entry.title, onClick = { open(entry) },
-                                leading = { SettingsIcon(entry.icon) })
-                        }
-                    }
-                }
-                item(key = "settings_categories_heading") { SettingsSectionTitle("全部设置") }
-                item(key = "settings_categories") {
-                    SettingsCard {
-                        catalogGroups.forEach { group ->
-                            SettingsRow(group.title, summary = group.summary,
-                                onClick = { section = group.id }, leading = { SettingsIcon(group.entries.first().icon) })
-                        }
-                    }
                 }
             }
         }

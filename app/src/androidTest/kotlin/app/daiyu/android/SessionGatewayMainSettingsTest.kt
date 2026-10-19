@@ -50,7 +50,6 @@ class SessionGatewayMainSettingsTest : WiredActivityTestCase() {
         fixture.settings.save(before.copy(requestOptions = before.requestOptions.copy(sessionGateway = rule)))
         openModels()
         editModel("模型名", "changed-model")
-        reveal("model-custom-body").performClick()
         editModel("自定义请求体", "{\"temperature\":0.2}")
         saveModel()
         val saved = fixture.settings.load()

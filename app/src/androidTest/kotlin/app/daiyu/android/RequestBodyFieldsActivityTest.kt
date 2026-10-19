@@ -17,7 +17,8 @@ import androidx.compose.ui.test.*
 import org.json.JSONObject
 
 class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
-    override val engineeringUi = true
+    override val engineeringUi: Boolean
+        get() = name != "testJsonBodyEditsOnlyDraftThenPersistsThroughTheExistingSave"
     private var draft by mutableStateOf(ModelSettingsDraftUi())
     private var saved: ModelSettingsDraftUi? = null
     private var saveCount = 0
@@ -101,17 +102,19 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
     }
     fun testJsonBodyEditsOnlyDraftThenPersistsThroughTheExistingSave() {
         val before = fixture.settings.load()
+        val metadata = """{"marker":true,"numeric":"123"}"""
         setDraft("JSON editor unsent draft"); openModels()
-        editModel("自定义请求体", """{"metadata":{"marker":true,"numeric":"123"}}""")
+        addInlineBodyField("metadata", metadata)
         assertEquals(before, fixture.settings.load())
         saveModel()
         val body = JSONObject(fixture.settings.load().requestOptions.customBody)
         assertTrue(body.getJSONObject("metadata").getBoolean("marker"))
         assertEquals("123", body.getJSONObject("metadata").get("numeric"))
         assertEquals(before.copy(requestOptions = before.requestOptions.copy(customBody = body.toString())), fixture.settings.load())
-        openModels()
-        modelField("自定义请求体").assertEditableText(body.toString())
-        editModel("自定义请求体", "{}")
+        openModels(); openInlineBodyFields()
+        inlineBodyControl("model-body-field-name:0").assertEditableText("metadata")
+        inlineBodyControl("model-body-field-value:0").assertEditableText(metadata)
+        inlineBodyControl("model-body-field-delete:0").assertIsEnabled().performClick()
         assertTrue(JSONObject(fixture.settings.load().requestOptions.customBody).has("metadata"))
         saveModel()
         assertFalse(JSONObject(fixture.settings.load().requestOptions.customBody).has("metadata"))
@@ -128,7 +131,10 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
         mainThread { apply() }
         assertEquals(initial, draft)
         assertNull(saved); assertEquals(0, saveCount)
-        modelField("自定义请求体").assertEditableText(initial.customBody)
+        reveal("model-body-fields").performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        awaitUniqueTag("model-body-fields-list")
+        node("model-body-field:0").assertDoesNotExist()
+        ui.onNodeWithText("关闭").performClick()
         node("model-body-field-apply").assertDoesNotExist()
         beginField("fresh", "对象", """{"marker":"fresh"}""")
         mainThread { apply() }

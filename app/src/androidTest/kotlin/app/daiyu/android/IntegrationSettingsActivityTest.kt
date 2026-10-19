@@ -26,7 +26,11 @@ import java.util.concurrent.atomic.AtomicReference
 
 @Suppress("DEPRECATION")
 class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
-    override val engineeringUi = true
+    override val engineeringUi: Boolean
+        get() = name !in setOf(
+            "testCustomRequestBodySaveReopenRejectsInvalidBodyAndHidesUnsupportedTiers",
+            "testUnavailableRequestPolicyRequiresExplicitReplacementWithoutLosingOriginalOnFailure",
+        )
     private lateinit var fixture: RunControlFixture
     private lateinit var original: ChatController
     private lateinit var directory: File
@@ -313,7 +317,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         fetch(); finished(connection)
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-option:second").fetchSemanticsNodes().isNotEmpty() }
         node("provider-model-option:second").performClick()
-        ui.onNodeWithText("导入所选").performClick()
+        node("dialog-confirm").assertIsEnabled().performClick()
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-selection").fetchSemanticsNodes().isEmpty() }
         assertEquals(before, fixture.settings.load())
         assertEquals("https://catalog.invalid/v1/models", connection.get().url.toString())
@@ -379,21 +383,32 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     }
     fun testCustomRequestBodySaveReopenRejectsInvalidBodyAndHidesUnsupportedTiers() {
         val before = fixture.settings.load().requestOptions
-        val body = "{\"temperature\":0.25}"
-        openModels(); editModel("自定义请求体", body); saveModel()
+        val body = """{"temperature":0.25}"""
+        openModels(); addInlineBodyField("temperature", "0.25"); saveModel()
         val expected = before.copy(customBody = body)
         assertEquals(expected, fixture.settings.load().requestOptions)
-        openModels(); modelField("自定义请求体").assertEditableText(expected.customBody)
-        editModel("自定义请求体", "{\"messages\":[]}"); saveModel()
+        val saved = fixture.settings.load()
+        openModels(); openInlineBodyFields()
+        inlineBodyControl("model-body-field-name:0").assertEditableText("temperature")
+        inlineBodyControl("model-body-field-value:0").assertEditableText("0.25")
+        inlineBodyControl("model-body-field-name:0").performTextReplacement("messages")
+        inlineBodyControl("model-body-field-value:0").performTextReplacement("[]")
+        attemptBlockedInlineBodySave()
+        assertEquals(saved, fixture.settings.load())
         assertEquals(expected, fixture.settings.load().requestOptions); node("model-save").assertExists()
-        editModel("自定义请求体", expected.customBody); saveModel()
+        inlineBodyControl("model-body-field-value:0").performTextReplacement("0.25")
+        inlineBodyControl("model-body-field-name:0").performTextReplacement("temperature")
+        saveModel()
         assertEquals(expected, fixture.settings.load().requestOptions)
         ui.onAllNodesWithText("超快速").assertCountEquals(0)
         ui.onAllNodesWithText("Codex 档位").assertCountEquals(0)
         backToChat(activity)
-        activity = recreateActivity(activity); openModels()
-        modelField("自定义请求体").assertEditableText(expected.customBody)
+        activity = recreateActivity(activity); openModels(); openInlineBodyFields()
+        inlineBodyControl("model-body-field-name:0").assertEditableText("temperature")
+        inlineBodyControl("model-body-field-value:0").assertEditableText("0.25")
+        assertEquals(expected, fixture.settings.load().requestOptions)
         backToChat(activity)
+        assertEquals(0, fixture.opens.get())
     }
     private fun openSkills() {
         openSettings(); reveal("settings-row:Skills", "设置").performClick()
@@ -450,13 +465,19 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         val prefs = fixture.application.getSharedPreferences("model-settings", 0)
         check(prefs.edit().putString("request-options", "not-json").commit()); val before = HashMap(prefs.all)
         openModels(); reveal("settings-switch:授权替换策略").assertIsOff()
-        editModel("API Key", "replacement-key"); editModel("自定义请求体", "{\"temperature\":0.5}"); saveModel()
+        editModel("API Key", "replacement-key"); addInlineBodyField("temperature", "0.5"); saveModel()
         assertEquals(before, prefs.all)
-        reveal("settings-switch:授权替换策略").performClick(); editModel("自定义请求体", "{\"tools\":[]}"); saveModel()
+        reveal("settings-switch:授权替换策略").performClick(); openInlineBodyFields()
+        inlineBodyControl("model-body-field-name:0").performTextReplacement("tools")
+        inlineBodyControl("model-body-field-value:0").performTextReplacement("[]")
+        attemptBlockedInlineBodySave()
         assertEquals(before, prefs.all)
-        editModel("自定义请求体", "{\"temperature\":0.5}"); saveModel()
-        assertEquals(ProviderRequestOptions("{\"temperature\":0.5}"), fixture.settings.load().requestOptions)
+        inlineBodyControl("model-body-field-value:0").performTextReplacement("0.5")
+        inlineBodyControl("model-body-field-name:0").performTextReplacement("temperature")
+        saveModel()
+        assertEquals(ProviderRequestOptions("""{"temperature":0.5}"""), fixture.settings.load().requestOptions)
         assertEquals("replacement-key", fixture.settings.load().apiKey)
         openModels(); reveal("model-save"); node("settings-switch:授权替换策略").assertDoesNotExist(); backToChat(activity)
+        assertEquals(0, fixture.opens.get())
     }
 }

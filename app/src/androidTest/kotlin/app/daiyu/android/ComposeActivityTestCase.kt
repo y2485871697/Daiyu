@@ -180,6 +180,28 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
     protected fun editModel(label: String, text: String) { reveal("settings-field:$label").performTextReplacement(text) }
     protected fun modelField(label: String) = reveal("settings-field:$label")
+    protected fun inlineBodyControl(tag: String): SemanticsNodeInteraction = reveal(tag).performScrollTo()
+    protected fun openInlineBodyFields() {
+        inlineBodyControl("model-body-fields")
+        if (ui.onAllNodesWithTag("model-body-field-add").fetchSemanticsNodes().isEmpty()) {
+            node("model-body-fields").assertIsEnabled().performSemanticsAction(SemanticsActions.OnClick) {
+                assertTrue(it())
+            }
+        }
+        inlineBodyControl("model-body-field-add").assertExists()
+    }
+    protected fun addInlineBodyField(name: String, jsonValue: String, index: Int = 0) {
+        openInlineBodyFields()
+        inlineBodyControl("model-body-field-add").assertIsEnabled().performClick()
+        inlineBodyControl("model-body-field-name:$index").performTextReplacement(name)
+        inlineBodyControl("model-body-field-value:$index").performTextReplacement(jsonValue)
+    }
+    protected fun attemptBlockedInlineBodySave() {
+        val submit = reveal("model-save").assertIsNotEnabled().fetchSemanticsNode()
+            .config[app.daiyu.android.ui.screens.settings.RetainedModelSaveAction]
+        mainThread { submit() }
+        ui.waitForIdle()
+    }
     protected fun SemanticsNodeInteraction.assertEditableText(text: String): SemanticsNodeInteraction {
         ui.waitUntil(timeoutMillis = 5_000) {
             fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text == text

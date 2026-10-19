@@ -47,17 +47,17 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         node("catalog-model-editor").performScrollToNode(hasTestTag("local-model-delete:${saved.model}"))
         node("local-model-delete:${saved.model}").assertIsNotEnabled()
         node("catalog-model-editor").performScrollToNode(hasTestTag("dialog-cancel"))
-        node("catalog-model-editor").performScrollToNode(hasTestTag("dialog-cancel"))
         node("dialog-cancel").performClick()
         reveal("local-model-rename:extra-local").performClick()
         node("settings-field:展示名称").performTextReplacement("Renamed local model")
         node("catalog-model-editor").performScrollToNode(hasTestTag("dialog-confirm"))
         node("dialog-confirm").performClick()
         awaitControl("local rename completed") { !fixture.controller.dataBusy }
+        reveal("local-model-refresh")
         ui.waitUntil(5_000) {
-            ui.onAllNodes(hasTestTag("local-model:extra-local") and
-                hasAnyDescendant(hasText("Renamed local model"))).fetchSemanticsNodes().size == 1
+            ui.onAllNodes(hasTestTag("local-model-refresh") and isEnabled()).fetchSemanticsNodes().size == 1
         }
+        reveal("local-model:extra-local").assertTextContains("Renamed local model")
         val renamed = checkNotNull(fixture.settings.localModelCatalogSnapshot())
         assertEquals(extra.copy(displayName = "Renamed local model"), renamed.models.single { it.id == extra.id })
         assertEquals(current, renamed.models.single { it.id == current.id })

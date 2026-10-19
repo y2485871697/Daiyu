@@ -6,7 +6,8 @@ import app.daiyu.android.model.sessiongateway.SessionGatewayRule
 /** Real Main navigation + Controller worker + encrypted synthetic fixture settings. No provider. */
 @Suppress("DEPRECATION")
 class SessionGatewayMainSettingsTest : WiredActivityTestCase() {
-    override val engineeringUi = true
+    override val engineeringUi: Boolean
+        get() = name != "testOrdinaryModelEditorDoesNotRebuildAndDiscardTheFiveGatewayFields"
     private val page = "保留会话网关"
     private fun openGateway() {
         openSettings()
@@ -51,7 +52,8 @@ class SessionGatewayMainSettingsTest : WiredActivityTestCase() {
         fixture.settings.save(before.copy(requestOptions = before.requestOptions.copy(sessionGateway = rule)))
         openModels()
         editModel("模型名", "changed-model")
-        editModel("自定义请求体", "{\"temperature\":0.2}")
+        addInlineBodyField("temperature", "0.2")
+        assertEquals(before.copy(requestOptions = before.requestOptions.copy(sessionGateway = rule)), fixture.settings.load())
         saveModel()
         val saved = fixture.settings.load()
         assertEquals("changed-model", saved.model)

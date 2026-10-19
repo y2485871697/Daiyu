@@ -27,7 +27,6 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
             activity.setContent {
                 MiuixTheme {
                     Column(Modifier.fillMaxSize()) {
-                        RequestBodyFieldsEditor(draft, true, true) { draft = it }
                         ModelSettingsScreen(draft, onDraftChange = { draft = it },
                             onSave = { saved = it; saveCount++ }, onFetchCatalog = { error("no fetch") },
                             onBack = {}, modifier = Modifier.weight(1f), engineeringUi = true, showCatalog = false)
@@ -43,7 +42,7 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
         return node(tag).assertIsDisplayed()
     }
     private fun beginField(name: String, type: String, value: String) {
-        node("model-body-fields").assertExists()
+        reveal("model-body-fields").assertExists()
             .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         awaitUniqueTag("model-body-fields-list")
         fieldControl("model-body-field-add", "model-body-fields-list").performClick()
@@ -54,7 +53,7 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
     }
     fun testDismissImeUsesTheOpenFieldDialogWindow() {
         showComponent()
-        node("model-body-fields").assertExists()
+        reveal("model-body-fields").assertExists()
             .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         awaitUniqueTag("model-body-fields-list")
         fieldControl("model-body-field-add", "model-body-fields-list").performClick()

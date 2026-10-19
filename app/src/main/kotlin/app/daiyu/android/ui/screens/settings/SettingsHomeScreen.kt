@@ -95,8 +95,9 @@ private fun OriginalSettingsRow(entry: SettingsEntry, defaultReasoning: Reasonin
             modifier = Modifier.testTag("reasoning-default-select"), onClick = { onDefaultReasoningToggle(true) })
         return
     }
-    SettingsRow(entry.title, onClick = onClick,
+    SettingsRow(entry.title, onClick = if (entry.id == "donate") null else onClick,
         summary = when (entry.id) {
+            "donate" -> "暂未开放；仅保留占位，不提供支付入口"
             "accessibility" -> "查看服务与授权边界；进入设置不向模型授权"
             "task_surface" -> "前台、后台或每次运行询问；不改变当前运行"
             else -> null
@@ -156,6 +157,7 @@ internal fun DaiyuSettingsScreen(
                 localPage = if (openedPage == SettingsLocalPage.SHIZUKU_ACCESS) SettingsLocalPage.ENHANCEMENTS else null
             }
         }
+        BackHandler(onBack = localBack)
         if (openedPage == SettingsLocalPage.TASK_SURFACE) {
             TaskSurfaceSettingsPanel(onBack = localBack, modifier = modifier)
         } else if (openedPage == SettingsLocalPage.WORKSPACE) {
@@ -176,7 +178,11 @@ internal fun DaiyuSettingsScreen(
     val open: (SettingsEntry) -> Unit = open@ { entry ->
         if (!visit.active || localPage != null || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return@open
         focus.clearFocus()
-        if (entry.localPage != null) { localPage = entry.localPage; return@open }
+        if (entry.localPage != null) {
+            diagnosticsUi.retirePicker()
+            localPage = entry.localPage
+            return@open
+        }
         when (entry.id) {
             "assistants" -> onOpenAssistants?.invoke()
             "subagents" -> onOpenSubAgents?.invoke()

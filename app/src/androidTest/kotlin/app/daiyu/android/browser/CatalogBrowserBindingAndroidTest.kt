@@ -119,7 +119,7 @@ class CatalogBrowserBindingAndroidTest : InstrumentationTestCase() {
 
     private fun verifyScreenshotReceipt() {
         val base = instrumentation.targetContext
-        val root = Files.createTempDirectory(base.cacheDir.toPath(), "browser-receipt-").toFile()
+        val root = Files.createTempDirectory(base.cacheDir.toPath(), "browser-receipt-").toFile().canonicalFile
         val files = java.io.File(root, "files").apply { mkdirs() }
         val cache = java.io.File(root, "cache").apply { mkdirs() }
         val context = object : android.content.ContextWrapper(base) {
@@ -134,13 +134,38 @@ class CatalogBrowserBindingAndroidTest : InstrumentationTestCase() {
             grant, setOf("screenshot"))
         val token = preparation.confirm(preparation.preview)
         var binding: CatalogBrowserBinding? = null
+        var constructionCleanup: (() -> app.daiyu.android.browser.network.BrowserCloseResult)? = null
+        var testFailure: Throwable? = null
         try {
             val privateRoot = app.daiyu.android.ControllerBrowserPreparation.preparePrivateRootOnWorker(context)
-            val opened = main { CatalogBrowserBinding.open(context, privateRoot,
-                AssistantProfile(identity.assistantId, "Screenshot", ""), token) }
+            val opened = main {
+                CatalogBrowserBinding.create(AssistantProfile(identity.assistantId, "Screenshot", ""), token) {
+                    val host = try { app.daiyu.android.browser.openminis.AndroidBrowserRunHost(context, grant, privateRoot,
+                        cookieEnvPath = { _, _ -> error("unused") }, cookieAuthorizeName = { _, _, _ -> false },
+                        historyApproval = app.daiyu.android.browser.openminis.OpenMinisHistoryApproval { _, url, _ ->
+                            url == "https://browser-fixture.invalid/receipt"
+                        }, requestOverride = { request ->
+                            check(request.url.toString() == "https://browser-fixture.invalid/receipt")
+                            android.webkit.WebResourceResponse("text/html", "UTF-8", java.io.ByteArrayInputStream(
+                                "<html><body>Receipt screenshot fixture</body></html>".toByteArray()))
+                        }) } catch (failure: app.daiyu.android.browser.openminis.BrowserRunConstructionException) {
+                            constructionCleanup = { failure.closeWithResult() }
+                            throw failure
+                        }
+                    object : CatalogBrowserBinding.Host {
+                        override val session get() = host.session
+                        override val screenshotStore = app.daiyu.android.media.BrowserScreenshotStore(files, cache)
+                        override fun closeWithResult() = host.closeWithResult()
+                        override fun closeStatus() = host.closeStatus()
+                    }
+                }
+            }
             binding = opened
             assertTrue(opened.session.execute(mapOf("action" to "new_tab")) is
                 app.daiyu.android.browser.bridge.BrowserOutcome.Confirmed)
+            assertTrue("fixture document must finish before screenshot",
+                opened.session.execute(mapOf("action" to "navigate", "url" to "https://browser-fixture.invalid/receipt")) is
+                    app.daiyu.android.browser.bridge.BrowserOutcome.Confirmed)
             val executionOwner = owner(identity)
             val catalog = opened.bindOwner(executionOwner)
             val ledger = app.daiyu.android.domain.tools.InMemoryToolLedgerStore()
@@ -162,17 +187,35 @@ class CatalogBrowserBindingAndroidTest : InstrumentationTestCase() {
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
             while (!opened.closeStatus().successful && System.nanoTime() < deadline) Thread.sleep(10)
             assertTrue(opened.closeStatus().successful)
-            java.io.File(cache, "browser_screenshots").deleteRecursively()
+            val sourceDirectory = java.io.File(cache, "browser_screenshots")
+            assertTrue(sourceDirectory.deleteRecursively())
+            assertFalse(sourceDirectory.exists())
             val reopened = app.daiyu.android.media.BrowserScreenshotStore(files, cache)
             assertTrue(original.contentEquals(reopened.read(assetBinding, receipt)))
             assertTrue(runCatching { reopened.read(assetBinding.copy(call = "other-call"), receipt) }.isFailure)
             val thumbnail = reopened.thumbnail(assetBinding, receipt)
             assertNotNull(thumbnail)
             thumbnail!!.recycle()
+        } catch (failure: Throwable) {
+            testFailure = failure
+            throw failure
         } finally {
-            binding?.close()
-            main { Unit }
-            root.deleteRecursively()
+            try {
+                val close: (() -> app.daiyu.android.browser.network.BrowserCloseResult)? =
+                    binding?.let { opened -> { opened.close(); opened.closeStatus() } } ?: constructionCleanup
+                if (close != null) {
+                    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                    var status = close()
+                    while (!status.successful && System.nanoTime() < deadline) {
+                        Thread.sleep(10)
+                        status = close()
+                    }
+                    assertTrue("fixture host must drain before deleting its root: $status", status.successful)
+                }
+                assertTrue(root.deleteRecursively())
+            } catch (cleanup: Throwable) {
+                if (testFailure != null) testFailure.addSuppressed(cleanup) else throw cleanup
+            }
         }
     }
 

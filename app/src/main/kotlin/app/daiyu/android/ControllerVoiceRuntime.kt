@@ -111,6 +111,12 @@ internal class ControllerVoiceRuntime(
     val conversationConfiguration = conversation.asStateFlow()
     private val legacy = MutableStateFlow<VoiceConfiguration?>(null)
     val legacyConfiguration = legacy.asStateFlow()
+    /** Envelope readiness only; personal media index loading is independent. */
+    internal enum class LoadState { NOT_STARTED, LOADING, LOADED, FAILED, CANCELLED }
+    @Volatile internal var loadState = LoadState.NOT_STARTED
+        private set
+    @Volatile internal var loadFailureType: String? = null
+        private set
     @Volatile private var failed = false
     @Volatile private var state = VoiceProfileEnvelope(emptyMap())
     private val lock = Any() // Persistence only. Never invoke listeners/cancel/drain under this lock.
@@ -142,14 +148,31 @@ internal class ControllerVoiceRuntime(
     }
 
     suspend fun load() = withContext(Dispatchers.IO) {
-        invalidateSpeech()
-        synchronized(lock) {
-            try {
-                val loaded = VoiceProfileEnvelope.decode(vault.load().apiKey)
-                loaded.profiles.values.forEach(::validate)
-                loaded.legacy?.let(::validate)
-                publish(loaded); failed = false
-            } catch (_: Exception) { failed = true; publish(VoiceProfileEnvelope(emptyMap())) }
+        loadState = LoadState.LOADING
+        loadFailureType = null
+        try {
+            invalidateSpeech()
+            synchronized(lock) {
+                try {
+                    val loaded = VoiceProfileEnvelope.decode(vault.load().apiKey)
+                    loaded.profiles.values.forEach(::validate)
+                    loaded.legacy?.let(::validate)
+                    publish(loaded); failed = false
+                    loadState = LoadState.LOADED
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (problem: Exception) {
+                    failed = true; publish(VoiceProfileEnvelope(emptyMap()))
+                    loadFailureType = problem.javaClass.simpleName
+                    loadState = LoadState.FAILED
+                }
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            loadState = LoadState.CANCELLED
+            throw cancelled
+        } catch (problem: Exception) {
+            loadFailureType = problem.javaClass.simpleName
+            loadState = LoadState.FAILED
+            throw problem
         }
         personal.load()
     }

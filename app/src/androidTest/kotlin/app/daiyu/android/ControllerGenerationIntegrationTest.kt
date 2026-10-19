@@ -38,6 +38,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
         forbidGenerationCredentials = false
         credentialOpens.set(0)
         val guarded = object : android.content.ContextWrapper(instrumentation.targetContext) {
+            override fun getCacheDir(): File = super.getCacheDir().canonicalFile
             override fun getSharedPreferences(name: String, mode: Int): android.content.SharedPreferences {
                 if (name.contains("generation-credential-")) {
                     credentialOpens.incrementAndGet()
@@ -46,7 +47,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
                 return super.getSharedPreferences(name, mode)
             }
         }
-        fixture = RunControlFixture(guarded)
+        fixture = RunControlFixture(guarded, filesRoot = File(guarded.cacheDir, "generation-control-${UUID.randomUUID()}").canonicalFile)
         awaitControl("controller ready") { controller.ready }
         store = GenerationSettingsStore(fixture.application)
         configured = null

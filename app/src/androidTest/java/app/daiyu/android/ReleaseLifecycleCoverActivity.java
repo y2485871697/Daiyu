@@ -5,6 +5,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Parcelable;
+import android.os.Parcel;
 import android.os.ResultReceiver;
 
 /** Runs in the test APK's own process, without the target APK's Kotlin runtime. */
@@ -32,7 +33,14 @@ public final class ReleaseLifecycleCoverActivity extends Activity {
         reply = (ResultReceiver) candidate;
         handler.postDelayed(expiry, 15_000L);
         Bundle data = new Bundle();
-        data.putParcelable("finish", control);
+        Parcel parcel = Parcel.obtain();
+        try {
+            control.writeToParcel(parcel, 0);
+            parcel.setDataPosition(0);
+            data.putParcelable("finish", ResultReceiver.CREATOR.createFromParcel(parcel));
+        } finally {
+            parcel.recycle();
+        }
         data.putInt("task", getTaskId());
         data.putInt("pid", android.os.Process.myPid());
         data.putInt("uid", android.os.Process.myUid());

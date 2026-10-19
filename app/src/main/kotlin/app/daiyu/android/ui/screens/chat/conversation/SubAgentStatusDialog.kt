@@ -80,7 +80,7 @@ internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolea
                 else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = minOf(480.dp,
                     (LocalConfiguration.current.screenHeightDp * 0.6f).dp)).testTag("subagent-status-list"),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    items(rows, key = { it.owner }) { row ->
+                    items(rows, key = { subAgentStatusItemKey(it.owner) }) { row ->
                         Row(Modifier.fillMaxWidth().padding(vertical = 10.dp).testTag("subagent-status:${row.owner.childRunId}"),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)) {

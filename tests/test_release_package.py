@@ -149,6 +149,8 @@ class ReleasePackageTests(unittest.TestCase):
         harness = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
         focus = harness.split('protected fun focusedWindowRoot()', 1)[1].split('protected fun dismissIme()', 1)[0]
         for fragment in ('candidate.windowLayoutParams.orNull() ?: return false',
+                         'windowContext === host || decor === hostDecor',
+                         'windowContext = windowContext.baseContext',
                          'activityToken != null && params.token == activityToken',
                          'hostDecor.windowToken != null && decor.applicationWindowToken == hostDecor.windowToken',
                          'FIRST_APPLICATION_WINDOW', 'LAST_SUB_WINDOW',
@@ -188,13 +190,15 @@ class ReleasePackageTests(unittest.TestCase):
                       'handler.removeCallbacks(expiry)'):
             self.assertIn(value, source)
         self.assertNotIn('finishAndRemoveTask', source)
+        self.assertNotIn('instrumentation.context.applicationInfo.uid', (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text())
         for name in ('main', 'release'):
             manifest = ROOT / f'app/src/{name}/AndroidManifest.xml'
             if manifest.exists():
                 self.assertNotIn('LifecycleCoverActivity', manifest.read_text())
         harness = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
         for value in ('coverPid != android.os.Process.myPid()',
-                      'assertEquals(instrumentation.context.applicationInfo.uid, coverUid)',
+                      '.getApplicationInfo(instrumentation.context.packageName, 0).uid',
+                      'installedTestUid, coverUid',
                       'coverUid != android.os.Process.myUid()',
                       'if (cleanupRequested) finishCover?.send(0, null)',
                       'assertEquals(original.taskId, coverTask)'):

@@ -70,6 +70,43 @@ internal class BrowserScreenshotStore(private val filesDir: File, private val ca
         return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
     }
 
+    fun deleteConversation(conversation: String) {
+        require(conversation.isNotBlank())
+        val root = deletionRoot() ?: return
+        removeConversationDirectory(root, digest(conversation.toByteArray(Charsets.UTF_8)))
+    }
+
+    fun deleteOrphanConversations(retained: Set<String>) {
+        val root = deletionRoot() ?: return
+        val keep = retained.map { digest(it.toByteArray(Charsets.UTF_8)) }.toSet()
+        for (entry in checkNotNull(root.listFiles())) {
+            check(entry.name.matches(Regex("[a-f0-9]{64}")))
+            if (entry.name !in keep) removeConversationDirectory(root, entry.name)
+        }
+        syncDirectory(root)
+    }
+
+    private fun deletionRoot(): File? {
+        val root = File(filesDir, "browser-call-screenshots")
+        if (!Files.exists(root.toPath(), NOFOLLOW_LINKS)) return null
+        check(Files.isDirectory(root.toPath(), NOFOLLOW_LINKS) && root.canonicalFile == root.absoluteFile)
+        return root
+    }
+
+    private fun removeConversationDirectory(root: File, name: String) {
+        val target = File(root, name)
+        fun remove(entry: File) {
+            check(entry.canonicalFile == entry.absoluteFile)
+            if (Files.isDirectory(entry.toPath(), NOFOLLOW_LINKS)) {
+                val children = checkNotNull(entry.listFiles())
+                children.forEach(::remove)
+            } else regular(entry)
+            check(entry.delete())
+        }
+        if (Files.exists(target.toPath(), NOFOLLOW_LINKS)) remove(target)
+        syncDirectory(root)
+    }
+
     private fun directory(binding: Binding, create: Boolean): File {
         val root = File(filesDir, "browser-call-screenshots")
         val conversation = File(root, digest(binding.conversation.toByteArray(Charsets.UTF_8)))

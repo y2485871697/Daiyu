@@ -147,6 +147,19 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
         reveal("settings-row:鲸鱼女仆", "设置").performClick()
         awaitUniqueTag("pet-settings-view")
         node("pet-settings-view").assertIsDisplayed()
+        listOf("pet-enabled", "pet-work-reactions", "pet-global-visible", "pet-custom-model", "pet-model-configure")
+            .forEach { node(it).assertIsDisplayed() }
+        node("pet-overlay-permission").assertDoesNotExist()
+        ui.waitUntil(timeoutMillis = 5_000) {
+            try { node("pet-model-configure").assertIsEnabled(); true } catch (_: AssertionError) { false }
+        }
+        node("pet-model-configure").performClick()
+        awaitUniqueTag("settings-model-picker")
+        node("settings-model-picker").assertIsDisplayed()
+        node("independent-model-pet").assertDoesNotExist()
+        node("settings-field:API 密钥").assertDoesNotExist()
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        awaitUniqueTag("pet-settings-view")
         backToPage(current, "page:设置") // Pet settings BackHandler returns to the actual SettingsHome.
         reveal("settings-row:辅助视觉模型", "设置").performClick()
         awaitUniqueTag("independent-model-vision")

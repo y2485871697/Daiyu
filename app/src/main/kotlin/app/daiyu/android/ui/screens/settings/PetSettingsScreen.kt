@@ -1,6 +1,8 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -12,80 +14,89 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.domain.pet.PetFood
 import app.daiyu.android.pet.PetHost
+import app.daiyu.android.pet.PetApplicationHost
+import app.daiyu.android.assistants.AssistantProfile
+import app.daiyu.android.storage.IndependentModelSettings
+import app.daiyu.android.ui.components.DaiyuChoiceSheet
+import app.daiyu.android.ui.components.DaiyuConfirmDialog
+import app.daiyu.android.ui.icons.DaiyuIcon
+import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import kotlin.math.roundToInt
 
-private enum class PetSettingsPage { HOME, PERMISSION, MORE, SCALE, FEED, MEMORY }
+private enum class PetSettingsPage { HOME, MORE, SCALE, FEED, MEMORY }
 
 /** The application owns this host; navigating settings never creates or closes a runtime. */
 @Composable
-fun PetSettingsScreen(host: PetHost, modifier: Modifier = Modifier, onBack: () -> Unit = {},
-    onOpenModel: () -> Unit = {}, overlayAllowed: () -> Boolean = { false },
-    onOverlayAllowedChange: ((Boolean) -> Unit)? = null, onOpenOverlayPermission: () -> Unit = {}) {
+internal fun PetSettingsScreen(host: PetHost, models: IndependentModelSettings,
+    source: SettingsModelSource, assistants: List<AssistantProfile>, pets: PetApplicationHost,
+    modifier: Modifier = Modifier, onBack: () -> Unit = {},
+    onOverlayAllowedChange: (Boolean) -> Unit, onOpenOverlayPermission: () -> Unit) {
+    IndependentModelSelection(models, IndependentModelSettings.Slot.PET, assistants, pets, source) { model ->
+        PetSettingsContent(host, model, modifier, onBack, onOverlayAllowedChange, onOpenOverlayPermission)
+    }
+}
+
+@Composable
+private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, modifier: Modifier,
+    onBack: () -> Unit, onOverlayAllowedChange: (Boolean) -> Unit, onOpenOverlayPermission: () -> Unit) {
     var snapshot by remember(host) { mutableStateOf(host.snapshot()) }
     DisposableEffect(host) {
         val observation = host.observe { snapshot = it }
         onDispose { observation.cancel() }
     }
     var page by remember(host) { mutableStateOf(PetSettingsPage.HOME) }
-    var processAllowed by remember(host) { mutableStateOf(overlayAllowed()) }
-    var notice by remember(host) { mutableStateOf<String?>(null) }
+    var showMenu by remember(host) { mutableStateOf(false) }
+    var showPermission by remember(host) { mutableStateOf(false) }
     val settings = snapshot.pet.state.settings
     val state = snapshot.pet.state
     val enabled = !snapshot.closed
     val back: () -> Unit = {
         page = when (page) {
             PetSettingsPage.HOME -> { onBack(); PetSettingsPage.HOME }
-            PetSettingsPage.PERMISSION, PetSettingsPage.MORE -> PetSettingsPage.HOME
+            PetSettingsPage.MORE -> PetSettingsPage.HOME
             else -> PetSettingsPage.MORE
         }
     }
     BackHandler(enabled = page != PetSettingsPage.HOME, onBack = back)
     MiuixScaffoldPage(title = when (page) {
         PetSettingsPage.HOME -> "鲸鱼女仆"
-        PetSettingsPage.PERMISSION -> "悬浮显示权限"
         PetSettingsPage.MORE -> "更多设置"
         PetSettingsPage.SCALE -> "桌宠大小"
         PetSettingsPage.FEED -> "投喂"
         PetSettingsPage.MEMORY -> "记忆与用量"
     }, onBack = back, modifier = modifier.testTag("pet-settings-view")) {
         snapshot.pet.error?.let { item("pet-error") { SettingsNote(it, error = true) } }
-        notice?.let { item("pet-notice") { SettingsNote(it) } }
+        model.problem?.let { item("pet-model-problem") { SettingsNote(it, error = true) } }
         when (page) {
-            PetSettingsPage.HOME -> {
-                item("pet-controls") {
-                    SettingsCard {
-                        SettingsSwitchRow("鲸鱼女仆", settings.enabled, enabled, tag = "pet-enabled") { host.setEnabled(it) }
-                        SettingsSwitchRow("任务结束后说话", settings.workReactions, enabled) {
-                            host.updateSettings(host.snapshot().pet.state.settings.copy(workReactions = it))
+            PetSettingsPage.HOME -> item("pet-controls") {
+                SettingsCard(Modifier.padding(top = 12.dp)) {
+                    SettingsSwitchRow("鲸鱼女仆", settings.enabled, enabled, tag = "pet-enabled",
+                        accessory = {
+                            DaiyuIcon(DaiyuIcons.ChevronDown, contentDescription = "桌宠选项",
+                                modifier = Modifier.padding(end = 12.dp).size(20.dp)
+                                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { showMenu = true })
+                        }) { host.setEnabled(it) }
+                    SettingsSwitchRow("任务结束后说话", settings.workReactions, enabled,
+                        tag = "pet-work-reactions") {
+                        host.updateSettings(host.snapshot().pet.state.settings.copy(workReactions = it))
+                    }
+                    SettingsSwitchRow("全局显示", settings.globalVisible, enabled,
+                        tag = "pet-global-visible") { requested ->
+                        if (!requested) {
+                            host.setGlobalVisible(false)
+                            onOverlayAllowedChange(false)
+                        } else {
+                            onOverlayAllowedChange(true)
+                            host.setGlobalVisible(true)
+                            if (!host.snapshot().canDrawOverlays) showPermission = true
                         }
-                        SettingsSwitchRow("全局显示", settings.globalVisible, enabled,
-                            summary = if (settings.globalVisible && !snapshot.canDrawOverlays) "请在悬浮显示权限中完成授权" else null) {
-                            host.setGlobalVisible(it)
-                        }
-                        SettingsRow("说话模型", summary = if (settings.model.modelId.isBlank()) "尚未配置" else "已选择独立模型",
-                            tag = "pet-model-configure", onClick = if (enabled) onOpenModel else null)
                     }
+                    SettingsSwitchRow("指定说话模型", model.enabled, enabled && !model.busy,
+                        tag = "pet-custom-model", onCheckedChange = model.onEnabledChange)
+                    SettingsRow("说话模型", summary = model.label ?: "选择模型",
+                        tag = "pet-model-configure", onClick = if (enabled && !model.busy) model.onChoose else null)
                 }
-                item("pet-settings-links") {
-                    SettingsCard {
-                        SettingsRow("悬浮显示权限", tag = "pet-overlay-permission", onClick = { page = PetSettingsPage.PERMISSION })
-                        SettingsRow("更多设置", summary = "投喂、大小、语音与记忆", onClick = { page = PetSettingsPage.MORE })
-                    }
-                }
-            }
-            PetSettingsPage.PERMISSION -> item("pet-overlay-controls") {
-                SettingsCard {
-                    if (onOverlayAllowedChange != null) SettingsSwitchRow("允许本次运行悬浮显示", processAllowed, enabled) {
-                        onOverlayAllowedChange(it)
-                        processAllowed = overlayAllowed()
-                    }
-                    SettingsRow("系统悬浮窗权限", summary = "打开系统设置进行授权", onClick = onOpenOverlayPermission)
-                    SettingsRow("刷新权限状态", summary = if (snapshot.canDrawOverlays) "已允许悬浮显示" else "尚未允许悬浮显示",
-                        onClick = if (enabled) ({ host.refreshOverlayPermission() }) else null)
-                }
-                SettingsNote("本次运行许可和系统权限均允许后，才会在其他应用上显示。")
-                snapshot.overlayError?.let { SettingsNote(it, error = true) }
             }
             PetSettingsPage.MORE -> item("pet-more") {
                 SettingsCard {
@@ -95,6 +106,8 @@ fun PetSettingsScreen(host: PetHost, modifier: Modifier = Modifier, onBack: () -
                     SettingsRow("桌宠大小", summary = "${(settings.scale * 100).roundToInt()}%", onClick = { page = PetSettingsPage.SCALE })
                     SettingsRow("投喂", summary = "粮食 ${state.satiety}", onClick = { page = PetSettingsPage.FEED })
                     SettingsRow("记忆与用量", onClick = { page = PetSettingsPage.MEMORY })
+                    SettingsRow("系统悬浮窗权限", onClick = onOpenOverlayPermission)
+                    SettingsRow("刷新权限状态", onClick = if (enabled) ({ host.refreshOverlayPermission() }) else null)
                 }
             }
             PetSettingsPage.SCALE -> item("pet-scale") {
@@ -134,4 +147,12 @@ fun PetSettingsScreen(host: PetHost, modifier: Modifier = Modifier, onBack: () -
             }
         }
     }
+    if (showMenu) DaiyuChoiceSheet("鲸鱼女仆", listOf("鲸鱼女仆", "更多设置"),
+        onSelect = { index -> showMenu = false; if (index == 1) page = PetSettingsPage.MORE },
+        onDismiss = { showMenu = false })
+    if (showPermission) DaiyuConfirmDialog("允许悬浮显示", "需要在系统设置中允许悬浮窗权限。",
+        confirmText = "去设置", destructive = false,
+        onConfirm = { showPermission = false; onOpenOverlayPermission() },
+        onDismiss = { showPermission = false })
+
 }

@@ -1436,8 +1436,9 @@ class MainActivity : ComponentActivity() {
                     "pet-settings" -> app.daiyu.android.ui.screens.settings.PetSettingsScreen(
                         host = pets.host, modifier = Modifier.fillMaxSize(),
                         onBack = { retainedPage = "settings" },
-                        onOpenModel = { retainedPage = "pet-model-settings" },
-                        overlayAllowed = { pets.overlayAllowed },
+                        models = controller.independentModels,
+                        source = remember(pets.host) { app.daiyu.android.ui.screens.settings.SettingsModelSource(applicationContext, controller.providers) },
+                        assistants = assistantProfiles, pets = pets,
                         onOverlayAllowedChange = { pets.setOverlayAllowed(it) },
                         onOpenOverlayPermission = {
                             startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,

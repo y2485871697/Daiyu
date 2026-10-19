@@ -239,8 +239,13 @@ internal fun VoiceSettingsPanel(
                     item { VoiceSettingsPreview(runtime, profile, !busy && saved == draft && saved?.engine == "MIMO", ::current, installPreviewRevoke, configuration = saved) }
                 } else when (section) {
                     "RECOGNITION" -> {
-                        item { SettingsCard { SettingsSwitchRow("启用语音输入", inputEnabled, enabled = !busy, tag = "voice-input-enable",
-                            summary = "点击聊天输入框的语音按钮，把说话变成文字。") { switchFeature("input", it) { inputEnabled = it } } } }
+                        item { SettingsCard {
+                            SettingsSwitchRow("启用语音输入", inputEnabled, enabled = !busy, tag = "voice-input-enable",
+                                summary = "点击聊天输入框的语音按钮，把说话变成文字。") { switchFeature("input", it) { inputEnabled = it } }
+                            SettingsRow("离线语音", tag = "voice-offline-settings", onClick = if (busy) null else ({
+                                if (current() && !busy && stopAudio()) { invalidatePicker(); onOpenOfflineSpeech() }
+                            }))
+                        } }
                         item { OfflineSpeechPackCard(context, ::current) }
                         item { SettingsCard { SettingsRow("识别方式", tag = "voice-recognition-method",
                             summary = if (draft.dictation == "DOUBAO") "豆包识别 · 需要联网" else "本机识别 · 无需账户",

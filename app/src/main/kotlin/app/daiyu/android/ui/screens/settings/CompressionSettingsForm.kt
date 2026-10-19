@@ -1,6 +1,10 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.testTag
 import top.yukonga.miuix.kmp.basic.TextButton
 import androidx.compose.ui.Modifier
@@ -69,7 +73,11 @@ internal fun CompressionSettingsForm(
     error: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    var summaryExpanded by remember { mutableStateOf(false) }
+    var diagnosticsExpanded by remember { mutableStateOf(false) }
     MiuixScaffoldPage(title = "上下文压缩", onBack = onBack, modifier = modifier) {
+        notice?.let { item(key = "compression-notice") { SettingsNote(it, error = error) } }
+        if (!enabled) item(key = "compression-busy") { SettingsNote("正在读取或保存设置…") }
         item(key = "compression-policy") {
             SettingsSectionTitle("当前会话发送预算")
             SettingsCard {
@@ -80,15 +88,22 @@ internal fun CompressionSettingsForm(
                 SettingsTextField("触发百分比", draft.trigger, { onChange(draft.copy(trigger = it)) }, enabled = enabled)
                 SettingsTextField("保留完整轮数", draft.keepTurns, { onChange(draft.copy(keepTurns = it)) }, enabled = enabled)
             }
-            SettingsNote("压缩阈值按窗口减去预留后计算。关闭自动压缩不会关闭已知窗口的发送预算检查。旧版消息数设置需明确改为完整轮数并保存。")
+            SettingsNote("开启自动压缩后，达到阈值时压缩。关闭后仍会检查已知窗口的发送预算。")
         }
         item(key = "compression-profile") {
             SettingsSectionTitle("独立摘要模型")
             SettingsCard {
                 SettingsSwitchRow("使用独立摘要配置", draft.configureSummary, enabled) {
+                    summaryExpanded = it
                     onChange(draft.copy(configureSummary = it))
                 }
                 if (draft.configureSummary) {
+                    SettingsRow("摘要模型配置",
+                        summary = if (summaryExpanded) "收起连接与预算设置" else
+                            draft.provider.model.takeIf { it.isNotBlank() }?.let { "模型：$it · 展开编辑" } ?: "尚未填写模型 · 展开编辑",
+                        tag = "compression-summary-config", onClick = { summaryExpanded = !summaryExpanded })
+                }
+                if (draft.configureSummary && summaryExpanded) {
                     SettingsRadioRow("OpenAI Responses", draft.provider.protocol == ProviderProtocol.RESPONSES, enabled) {
                         onChange(draft.selectProtocol(ProviderProtocol.RESPONSES))
                     }
@@ -111,6 +126,7 @@ internal fun CompressionSettingsForm(
                         { onChange(draft.copy(provider = draft.provider.copy(model = it))) }, enabled = enabled)
                     SettingsTextField("摘要 API Key", draft.provider.apiKey,
                         { onChange(draft.copy(provider = draft.provider.copy(apiKey = it))) }, password = true, enabled = enabled)
+                    SettingsNote("请按摘要模型容量填写预算：输入预算 = 摘要窗口 − 输出、推理及协议预留。")
                     SettingsTextField("摘要窗口 tokens", draft.summaryWindow, { onChange(draft.copy(summaryWindow = it)) }, enabled = enabled)
                     SettingsTextField("摘要输入预算 tokens", draft.inputBudget, { onChange(draft.copy(inputBudget = it)) }, enabled = enabled)
                     SettingsTextField("摘要最大输出 tokens", draft.outputBudget, { onChange(draft.copy(outputBudget = it)) }, enabled = enabled)
@@ -123,12 +139,22 @@ internal fun CompressionSettingsForm(
 
                 }
             }
-            SettingsNote("摘要模型与聊天模型独立保存，不回退到聊天密钥。输入预算必须等于摘要窗口减去输出、推理和协议预留；这些数值需按你的模型明确填写。保存只更新设置，不发起摘要请求。")
+            SettingsNote("摘要配置与聊天配置独立，不会使用聊天模型密钥。保存不会发起摘要请求。")
         }
         item(key = "compression-save") {
             SettingsCard { TextButton(text = "保存配置", enabled = enabled,
                 modifier = Modifier.testTag("compression-save"), onClick = { onSave(draft) }) }
         }
-        notice?.let { item(key = "compression-notice") { SettingsNote(it, error = error) } }
+        item(key = "compression-diagnostics") {
+            SettingsCard {
+                SettingsRow("诊断详情", summary = if (diagnosticsExpanded) "收起阈值计算与兼容说明" else "展开阈值计算与兼容说明",
+                    tag = "compression-diagnostics", onClick = { diagnosticsExpanded = !diagnosticsExpanded })
+                if (diagnosticsExpanded) {
+                    SettingsNote("压缩阈值按上下文窗口减去发送预留后计算；窗口留空表示容量未知，不会自动推测。")
+                    SettingsNote("旧版消息数不会自动换算为完整轮数。请确认保留轮数后保存。")
+                    SettingsNote("摘要协议、端点和预算可在「摘要模型配置」中编辑。更换协议需重输摘要密钥并授权；保存后会重新读取设置确认结果。")
+                }
+            }
+        }
     }
 }

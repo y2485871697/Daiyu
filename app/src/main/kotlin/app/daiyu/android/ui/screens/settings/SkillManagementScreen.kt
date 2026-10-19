@@ -281,6 +281,7 @@ internal fun SkillManagementScreen(
 private fun LocalSkillInstallSheet(controller: SkillManagementPageState, preview: SkillManagement.LocalPreview) {
     val colors = MiuixTheme.colorScheme
     var approved by remember(preview) { mutableStateOf(false) }
+    var packageDetails by remember(preview) { mutableStateOf(false) }
     val change = preview.change
     val cancel: () -> Unit = { if (!controller.installing && controller.localPreview === preview) controller.cancelInstall() }
     AlertDialog(onDismissRequest = cancel,
@@ -288,17 +289,26 @@ private fun LocalSkillInstallSheet(controller: SkillManagementPageState, preview
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("${change.candidate.name}\n${change.candidate.description}", color = colors.onSurface)
-                Text("包 SHA-256：${preview.archiveSha256}\n新版本：${change.candidate.incomingRevision}", color = colors.onSurface)
+
                 Text(if (preview.compatible) "兼容性静态检查通过；仅导入静态资源，不执行脚本。"
                     else "不兼容：${change.compatibility.reason}", color = if (preview.compatible) colors.onSurfaceVariantSummary else colors.error)
-                change.previousRevision?.let { old ->
+                change.previousRevision?.let {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Checkbox(checked = approved, enabled = !controller.busy, onCheckedChange = { approved = it },
                             modifier = Modifier.testTag("skills-local-replace"))
-                        Text("批准替换 user:${change.candidate.name}\n旧版本：$old", color = colors.onSurface)
+                        Text("替换已安装的 ${change.candidate.name}", color = colors.onSurface)
                     }
                 }
-                Text("确认安装预览时冻结的包内容，当前运行保持原快照。", color = colors.onSurfaceVariantSummary)
+                Text("仅安装本次确认的内容，正在运行的任务不受影响。", color = colors.onSurfaceVariantSummary)
+                TextButton(onClick = { packageDetails = !packageDetails }, modifier = Modifier.testTag("skills-local-details-toggle")) {
+                    Text(if (packageDetails) "收起包详情" else "包详情")
+                }
+                if (packageDetails) Column(Modifier.heightIn(max = 180.dp).verticalScroll(rememberScrollState())
+                    .testTag("skills-local-package-details"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("包 SHA-256：${preview.archiveSha256}", color = colors.onSurfaceVariantSummary)
+                    Text("新版本：${change.candidate.incomingRevision}", color = colors.onSurfaceVariantSummary)
+                    change.previousRevision?.let { Text("旧版本：$it", color = colors.onSurfaceVariantSummary) }
+                }
             }
         },
         confirmButton = { TextButton(onClick = { controller.installLocal(preview, preview.replacements) },

@@ -23,3 +23,18 @@ internal fun chatActionColors(): ChatActionColors {
         appendContent = if (dark) Color(0xFF211735) else Color.White,
     )
 }
+
+internal data class ChatChromeColors(
+    val text: Color,
+    val muted: Color,
+    val toolbar: Color,
+    val accent: Color,
+    val line: Color,
+)
+
+@Composable
+internal fun chatChromeColors(): ChatChromeColors {
+    val dark = MiuixTheme.colorScheme.background.luminance() < .3f
+    return if (dark) ChatChromeColors(Color(0xFFE0DCE8), Color(0xFF7A7786), Color(0xFFB2A9C7), Color(0xFFA491F1), Color(0xFF2B283A))
+    else ChatChromeColors(Color(0xFF36333F), Color(0xFFA19AA9), Color(0xFF716A82), Color(0xFF7663BD), Color(0xFFECE7F5))
+}

@@ -41,12 +41,12 @@ internal fun CompressionSettingsScreen(
                             is CompressionSettingsEditor.Outcome.Loaded -> {
                                 draft = outcome.snapshot.toDraft(binding)
                                 error = outcome.snapshot.profileUnavailableReason != null
-                                notice = if (error) "已选摘要配置不可用，请重新填写并保存；未读取聊天模型密钥。" else null
+                                notice = if (error) "已选摘要配置不可用，请重新填写并保存。" else null
                             }
                             is CompressionSettingsEditor.Outcome.Saved -> {
                                 draft = outcome.snapshot.toDraft(binding)
                                 error = false
-                                notice = "设置已保存并回读；没有发起摘要请求。"
+                                notice = "设置已保存。"
                             }
                             is CompressionSettingsEditor.Outcome.Failed -> {
                                 error = true

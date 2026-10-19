@@ -96,7 +96,11 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
         }
         val (record, settings) = value
         label(if (slot == IndependentModelSettings.Slot.PET) "桌宠独立模型（不使用主聊天模型）" else "辅助视觉独立模型（不使用主聊天模型）")
-        label("服务商记录：${record.providerId.ifBlank { "保存时新建" }}\n模型记录：${record.localModelId.ifBlank { "保存时新建" }}")
+        val recordDetails = TextView(context).apply {
+            text = "服务商记录：${record.providerId.ifBlank { "保存时新建" }}\n模型记录：${record.localModelId.ifBlank { "保存时新建" }}"
+            visibility = android.view.View.GONE
+            setTextIsSelectable(true)
+        }
         val enabled = CheckBox(context).apply { text = "启用此独立配置"; isChecked = record.enabled }
         column.addView(enabled)
         val endpoint = field("HTTPS 服务商地址", settings.endpoint)
@@ -190,6 +194,7 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
                         store.record(slot)
                     } }
                     result.onSuccess { saved ->
+                        recordDetails.text = "服务商记录：${saved.providerId}\n模型记录：${saved.localModelId}"
                         if (slot == IndependentModelSettings.Slot.PET) {
                             pets.updateSettings(pets.host.snapshot().pet.state.settings.copy(model = PetModelSelection(
                                 checkNotNull(saved.assistantId), saved.providerId, saved.localModelId)))
@@ -214,6 +219,15 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
             }
         })
         if (slot == IndependentModelSettings.Slot.PET) column.addView(Button(context).apply { text = "返回"; setOnClickListener { onBack() } })
+        column.addView(Button(context).apply {
+            text = "配置详情"
+            setOnClickListener {
+                val expanded = recordDetails.visibility != android.view.View.VISIBLE
+                recordDetails.visibility = if (expanded) android.view.View.VISIBLE else android.view.View.GONE
+                text = if (expanded) "收起配置详情" else "配置详情"
+            }
+        })
+        column.addView(recordDetails)
         ScrollView(context).apply { tag = "independent-model-${slot.key}"; addView(column) }
     })
     }

@@ -35,7 +35,7 @@ internal fun SpeechMorphButton(
 ) {
     val view = LocalView.current
     val diameter by animateDpAsState(
-        if (listening) 28.dp else 24.dp,
+        if (listening) 28.dp else 20.dp,
         spring(dampingRatio = 0.65f),
         label = "speechDiameter",
     )

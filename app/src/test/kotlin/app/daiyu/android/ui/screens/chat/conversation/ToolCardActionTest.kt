@@ -7,18 +7,15 @@ class ToolCardActionTest {
     private val step = WorkStepUi("call", "工作区", "", owner = WorkStepOwnerUi("chat", "run", "message"),
         toolName = "workspace-inspect", category = "workspace")
 
-    @Test fun actionsDoNotDependOnBackendOrReceiptState() {
-        assertEquals(listOf(ToolCardAction.OPEN_WORKSPACE, ToolCardAction.VIEW_DIFF, ToolCardAction.CHECK_WORKSPACE,
-            ToolCardAction.MERGE_WORKSPACE, ToolCardAction.DISCARD_WORKSPACE), toolCardActions("workspace"))
-        WorkStepState.entries.forEach { state ->
-            val value = step.copy(state = state)
-            assertEquals(toolCardActions(step.category), toolCardActions(value.category))
-        }
-        assertTrue(toolCardActions("browser").contains(ToolCardAction.OPEN_BROWSER))
+    @Test fun workspaceMutationsAndDuplicateNavigationAreNotUserActions() {
+        val names = ToolCardAction.entries.map { it.name }.toSet()
+        assertTrue(names.intersect(setOf("CHECK_WORKSPACE", "MERGE_WORKSPACE", "DISCARD_WORKSPACE",
+            "OPEN_WORKSPACE", "VIEW_DIFF", "OPEN_TERMINAL", "VIEW_TASKS", "OPEN_BROWSER", "VIEW_DOWNLOADS")).isEmpty())
+        assertTrue(names.containsAll(setOf("PAUSE_TASK", "RESUME_TASK", "STOP_TASK", "OPEN_IMAGE", "SAVE_MEDIA")))
     }
 
     @Test fun fullInvocationIdentityIsRequired() {
-        val request = step.actionRequest(ToolCardAction.MERGE_WORKSPACE, "asset")
+        val request = step.actionRequest(ToolCardAction.SAVE_MEDIA, "asset")
         assertTrue(request.matches(step))
         val owner = requireNotNull(step.owner)
         listOf(step.copy(id = "other"), step.copy(toolName = "other"), step.copy(owner = null),
@@ -28,7 +25,7 @@ class ToolCardActionTest {
     }
 
     @Test fun bothLayoutsResolveCurrentRecordRatherThanCapturedText() {
-        val request = step.actionRequest(ToolCardAction.OPEN_WORKSPACE)
+        val request = step.actionRequest(ToolCardAction.SAVE_MEDIA)
         val current = step.copy(detail = "current")
         val mixed = ChatTurnUi.Assistant("message", content = listOf(MessageContentUi.Tool(current)))
         val grouped = ChatTurnUi.Assistant("message", workProcess = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(current))), ""))

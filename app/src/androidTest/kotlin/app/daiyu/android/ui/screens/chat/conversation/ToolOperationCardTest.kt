@@ -77,7 +77,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithTag("tool-category:$category").assertDoesNotExist()
             ui.onNodeWithText("typed-$category").performClick()
             ui.onNodeWithTag("tool-category:$category").assertIsDisplayed()
-            ui.onNodeWithText(details.heading).assertIsDisplayed()
+            ui.onNodeWithText(details.heading).assertDoesNotExist()
             ui.onNodeWithText(details.notice).assertDoesNotExist()
             ui.onNodeWithText(details.rich.source).assertDoesNotExist()
             ui.onNodeWithContentDescription("重试 typed-$category").assertDoesNotExist()
@@ -106,9 +106,19 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithText("读取终端输出").performClick()
             ui.onAllNodesWithText("trusted-host-slot").assertCountEquals(1)
             ui.onNodeWithText(body).assertDoesNotExist()
+            val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            ui.onNodeWithTag("tool-output-preview:标准输出", useUnmergedTree = true)
+                .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            assertTrue(layouts.single().lineCount <= 3)
             ui.onNodeWithTag("tool-document:标准输出").performClick()
             ui.onNodeWithText(body).assertExists()
-            ui.onNodeWithTag("tool-document:标准输出").performClick()
+            ui.onNodeWithTag("tool-output-copy").performClick()
+            ui.onNodeWithText("已复制").assertExists()
+            mainThread {
+                val manager = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                assertEquals(body, manager.primaryClip!!.getItemAt(0).text.toString())
+            }
+            ui.onNodeWithTag("tool-output-close").performClick()
             ui.onNodeWithText(body).assertDoesNotExist()
             assertEquals(0, executions)
         }
@@ -152,18 +162,16 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    ToolCardControls(step) { requests += it }
-                    ToolAudioControls(step.copy(category = "speech")) { requests += it }
                     ToolMediaSurface(step, null, true, 12000L, "asset") { requests += it }
                 }
             }
         } }
         ui.waitForIdle()
-        ui.onNodeWithTag("tool-action:MERGE_WORKSPACE").assertIsEnabled().performClick()
-        assertEquals(step.actionRequest(ToolCardAction.MERGE_WORKSPACE), requests.single())
+        ui.onNodeWithTag("tool-action:MERGE_WORKSPACE").assertDoesNotExist()
+        ui.onNodeWithTag("tool-action:DISCARD_WORKSPACE").assertDoesNotExist()
         ui.onNodeWithTag("tool-action:PLAY_VIDEO").performScrollTo().assertIsEnabled().performClick()
         assertEquals(step.actionRequest(ToolCardAction.PLAY_VIDEO, "asset"), requests.last())
-        assertEquals(2, requests.size)
+        assertEquals(1, requests.size)
         ui.onNodeWithText("暂未接入", substring = true).assertDoesNotExist()
         ui.onNodeWithText("宿主未提供", substring = true).assertDoesNotExist()
     }

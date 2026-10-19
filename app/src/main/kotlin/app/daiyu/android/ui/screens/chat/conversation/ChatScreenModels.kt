@@ -98,6 +98,7 @@ data class WorkStepUi(
     val hasBrowserScreenshot: Boolean = false,
     val categoryDetails: ToolCategoryDetailsUi? = null,
     val activity: ToolActivityUi = ToolActivityUi.from(state),
+    val operationGlyph: String = "generic",
 ) {
     val toolCallId: String get() = id
 }

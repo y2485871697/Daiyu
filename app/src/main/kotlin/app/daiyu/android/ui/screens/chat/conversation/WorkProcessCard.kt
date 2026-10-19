@@ -29,7 +29,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.icons.DaiyuIcons
@@ -48,8 +47,8 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, onCopy: ((Wo
         Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(role = Role.Button) { expanded = !expanded }
             .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Box(Modifier.size(6.dp).clip(CircleShape)
-                .background(if (work.running) colors.primary else colors.onSurfaceVariantSummary))
+            Icon(ToolOperationIcons.category(work.segments.flatMap { it.steps }.map { it.category }.distinct().singleOrNull()),
+                null, Modifier.size(16.dp), tint = colors.onSurfaceVariantSummary)
             Text("工作过程", color = colors.onSurface, style = MiuixTheme.textStyles.footnote1, maxLines = 1)
             Text("$stepCount 步 · ${work.summary}", Modifier.weight(1f),
                 color = colors.onSurfaceVariantSummary, style = MiuixTheme.textStyles.footnote1,
@@ -106,7 +105,7 @@ internal fun WorkStepRow(step: WorkStepUi, onCopy: ((WorkStepUi) -> Unit)? = nul
                 .semantics { stateDescription = "$stateLabel · ${if (expanded) "已展开" else "已折叠"}" }
                 .padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Icon(toolCategoryIcon(step.category), null, Modifier.size(14.dp), tint = colors.onSurfaceVariantSummary)
+                Icon(ToolOperationIcons.operation(step.operationGlyph), null, Modifier.size(14.dp), tint = colors.onSurfaceVariantSummary)
                 Text(step.name, Modifier.weight(1f), color = colors.onSurface,
                     style = MiuixTheme.textStyles.footnote1, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(stateLabel, color = tint, style = MiuixTheme.textStyles.footnote1, maxLines = 1)
@@ -116,8 +115,6 @@ internal fun WorkStepRow(step: WorkStepUi, onCopy: ((WorkStepUi) -> Unit)? = nul
             if (step.activity in setOf(ToolActivityUi.STOPPING, ToolActivityUi.STOPPED, ToolActivityUi.INTERRUPTED) &&
                 step.state in setOf(WorkStepState.PENDING, WorkStepState.UNKNOWN)) Text("工具回执未确认 · 不重放", color = colors.onSurfaceVariantSummary,
                 style = MiuixTheme.textStyles.footnote1)
-            if (step.detail.isNotBlank()) Text(step.detail, color = colors.onSurfaceVariantSummary,
-                style = MiuixTheme.textStyles.footnote1, maxLines = 1, overflow = TextOverflow.Ellipsis)
             AnimatedVisibility(expanded) {
                 Column(Modifier.padding(top = 6.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     step.categoryDetails?.let { ToolCategoryContent(step.category, it) }
@@ -143,30 +140,5 @@ internal fun WorkStepRow(step: WorkStepUi, onCopy: ((WorkStepUi) -> Unit)? = nul
 }
 
 @Composable
-private fun ToolDetailSection(section: ToolDetailSectionUi, code: Boolean) {
-    val colors = MiuixTheme.colorScheme
-    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        Text(section.title, color = colors.onSurfaceVariantSummary, style = MiuixTheme.textStyles.footnote1)
-        Text(section.text, Modifier.fillMaxWidth().clip(RoundedCornerShape(5.dp))
-            .background(colors.surfaceVariant.copy(alpha = 0.45f)).padding(6.dp),
-            color = colors.onSurfaceVariantSummary,
-            style = if (code) MiuixTheme.textStyles.footnote1.copy(fontFamily = FontFamily.Monospace) else MiuixTheme.textStyles.footnote1,
-            maxLines = Int.MAX_VALUE)
-    }
-}
-
-private fun toolCategoryIcon(category: String) = when (category) {
-    "memory", "context" -> DaiyuIcons.Context
-    "skills" -> DaiyuIcons.Skills
-    "delegation", "child_control" -> DaiyuIcons.SubAgent
-    "workspace", "files" -> DaiyuIcons.Folder
-    "terminal", "background_job" -> DaiyuIcons.Terminal
-    "image_read", "generation" -> DaiyuIcons.Image
-    "browser", "mcp" -> DaiyuIcons.Browser
-    "gui" -> DaiyuIcons.Accessibility
-    "apps", "device_read", "system_action" -> DaiyuIcons.Device
-    "personal_search" -> DaiyuIcons.Search
-    "speech" -> DaiyuIcons.Voice
-    "user_question" -> DaiyuIcons.Interactive
-    else -> DaiyuIcons.Tool
-}
+private fun ToolDetailSection(section: ToolDetailSectionUi, code: Boolean) =
+    ToolDocument(ToolDisclosureUi(section.title, section.text, code))

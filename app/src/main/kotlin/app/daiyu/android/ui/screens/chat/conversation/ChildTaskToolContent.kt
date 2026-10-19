@@ -83,7 +83,7 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
                         "已暂停" -> listOf(ToolCardAction.RESUME_TASK, ToolCardAction.STOP_TASK)
                         "执行中", "排队中" -> listOf(ToolCardAction.PAUSE_TASK, ToolCardAction.STOP_TASK)
                         "暂停中", "停止中" -> emptyList()
-                        else -> listOf(ToolCardAction.READ_TASK_RESULT)
+                        else -> if (records.any { it.owner == row.owner && it.text.isNotBlank() }) emptyList() else listOf(ToolCardAction.READ_TASK_RESULT)
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         actions.forEach { action -> TextButton(text = action.label, modifier = Modifier.heightIn(min = 44.dp),

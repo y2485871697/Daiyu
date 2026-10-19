@@ -226,6 +226,8 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         val settings = fixture.settings.load()
         val grants = PlatformSafGrants(instrumentation.targetContext).grants()
         ui.onNodeWithContentDescription("附件").performClick()
+        node("chat-attachment:ATTACH_PATH").assertDoesNotExist()
+        node("chat-attachment-path-toggle").performClick()
         node("chat-attachment:ATTACH_PATH").performClick()
         awaitUniqueTag("prompt-input")
         node("prompt-input").performTextReplacement("content://not-granted.invalid/never-read")

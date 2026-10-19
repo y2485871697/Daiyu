@@ -79,7 +79,6 @@ internal fun GenerationToolContent(controller: ChatController, step: WorkStepUi,
             items.isEmpty() -> Text("暂无产物", style = MiuixTheme.textStyles.footnote1)
         }
         if (pending == 0) TextButton(text = "刷新产物", onClick = { readRevision++ })
-        if (items.isEmpty()) ToolMediaSurface(step, null, step.toolName == "generate_videos", null, null, onAction = onAction)
         items.forEach { item -> key(item.key) { TrustedMediaItem(item, step, onAction) } }
         TextButton(text = "查看全部产物", onClick = { onAction(step.actionRequest(ToolCardAction.VIEW_ASSETS)) })
     }

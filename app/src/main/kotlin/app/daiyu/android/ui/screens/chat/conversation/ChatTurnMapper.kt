@@ -96,6 +96,7 @@ object ChatTurnMapper {
             dedicatedKey = dedicatedKey, categoryDetails = display.details,
             hasBrowserScreenshot = block.invocation.name in setOf("browser_read", "browser_write") &&
                 runCatching { org.json.JSONObject(block.invocation.arguments).optString("action") == "screenshot" }.getOrDefault(false),
+            operationGlyph = toolOperationGlyph(block.invocation.name, block.invocation.arguments),
             activity = activity ?: ToolActivityUi.from(receipt ?: when (confirmedError) {
                 true -> WorkStepState.FAILED
                 false -> WorkStepState.OK

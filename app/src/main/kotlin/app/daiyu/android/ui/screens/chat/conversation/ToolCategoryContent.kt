@@ -36,8 +36,6 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun ToolCategoryContent(category: String, details: ToolCategoryDetailsUi) {
     val rich = details.rich
     Column(Modifier.fillMaxWidth().testTag("tool-category:$category"), verticalArrangement = Arrangement.spacedBy(7.dp)) {
-        SectionTitle(details.heading)
-        if (rich.operation != details.heading) SectionTitle(rich.operation)
         when (category) {
             "terminal", "background_job" -> {
                 Disclosure("运行环境", "tool-runtime") {
@@ -139,34 +137,51 @@ private fun EntryList(entries: List<ToolRichEntryUi>, title: String) {
 internal fun ToolDocument(document: ToolDisclosureUi) = Document(document)
 
 @Composable
-private fun CategoryDocument(document: ToolDisclosureUi) {
-    if (document.text.length > 500 || document.text.count { it == '\n' } > 5) Document(document)
-    else Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        SectionTitle(document.title)
-        SelectionContainer {
-            Text(document.text, Modifier.fillMaxWidth().background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = .35f)).padding(8.dp),
-                style = if (document.code) MiuixTheme.textStyles.footnote1.copy(fontFamily = FontFamily.Monospace)
-                    else MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurface)
-        }
-    }
-}
+private fun CategoryDocument(document: ToolDisclosureUi) = Document(document)
 
 @Composable
 private fun Document(document: ToolDisclosureUi) {
-    var longer by remember(document) { mutableStateOf(false) }
-    Disclosure("查看${document.title} · 已脱敏", "tool-document:${document.title}") {
-        SelectionContainer {
-            Text(document.text, Modifier.fillMaxWidth()
-                .heightIn(max = if (longer) 360.dp else 160.dp)
-                .background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = .35f))
-                .verticalScroll(rememberScrollState()).padding(8.dp),
-                style = if (document.code) MiuixTheme.textStyles.footnote1.copy(fontFamily = FontFamily.Monospace)
-                    else MiuixTheme.textStyles.footnote1,
+    var opened by remember(document) { mutableStateOf(false) }
+    var copied by remember(document) { mutableStateOf(false) }
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val log = document.title in setOf("标准输出", "标准错误", "已收到输出", "任务日志", "守护日志", "运行回执")
+    val preview = toolOutputPreview(document.text, tail = log)
+    val tappable = log || preview.truncated
+    val style = if (document.code) MiuixTheme.textStyles.footnote1.copy(fontFamily = FontFamily.Monospace)
+        else MiuixTheme.textStyles.footnote1
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        SectionTitle(document.title)
+        val surface = Modifier.fillMaxWidth().background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = .35f))
+        if (tappable) Column(surface.testTag("tool-document:${document.title}")
+            .clickable(role = Role.Button, onClickLabel = "查看${document.title}") { opened = true }.padding(8.dp)) {
+            Text(preview.text, modifier = Modifier.testTag("tool-output-preview:${document.title}"), style = style, maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                 color = MiuixTheme.colorScheme.onSurface)
+            Text("点按查看完整输出", style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        } else SelectionContainer {
+            Text(document.text, surface.padding(8.dp), style = style, color = MiuixTheme.colorScheme.onSurface)
         }
-        if (document.text.length > 500 || document.text.count { it == '\n' } > 5) {
-            Text(if (longer) "收起长内容" else "展开长内容", Modifier.heightIn(min = 44.dp).clickable(role = Role.Button) { longer = !longer }
-                .padding(vertical = 5.dp), color = MiuixTheme.colorScheme.primary, style = MiuixTheme.textStyles.footnote1)
+    }
+    if (opened) top.yukonga.miuix.kmp.window.WindowDialog(show = true, title = document.title,
+        onDismissRequest = { opened = false }) {
+        Column(Modifier.fillMaxWidth().testTag("tool-output-dialog"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            SectionTitle("${document.text.count { it == '\n' } + 1} 行")
+            SelectionContainer {
+                Text(document.text, Modifier.fillMaxWidth().heightIn(max = minOf(480.dp,
+                    (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * .55f).dp))
+                    .verticalScroll(rememberScrollState()).testTag("tool-output-text"),
+                    style = style, color = MiuixTheme.colorScheme.onSurface)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                top.yukonga.miuix.kmp.basic.TextButton(text = if (copied) "已复制" else "复制全文",
+                    modifier = Modifier.testTag("tool-output-copy"), onClick = {
+                        runCatching { clipboard.setText(androidx.compose.ui.text.AnnotatedString(document.text)) }
+                            .onSuccess { copied = true }
+                            .onFailure { android.widget.Toast.makeText(context, "复制失败，可长按选择文本", android.widget.Toast.LENGTH_SHORT).show() }
+                    })
+                top.yukonga.miuix.kmp.basic.TextButton(text = "关闭", onClick = { opened = false },
+                    modifier = Modifier.testTag("tool-output-close"))
+            }
         }
     }
 }

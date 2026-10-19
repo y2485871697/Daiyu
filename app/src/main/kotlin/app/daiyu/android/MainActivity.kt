@@ -4317,24 +4317,11 @@ class MainActivity : ComponentActivity() {
         }
         val owner = step.owner ?: return
         when (request.action) {
-            ToolCardAction.OPEN_BROWSER -> {
-                if (controller.hasBrowserVisual(owner)) openBrowserVisualPage(owner)
-                else toast("页面已关闭")
-            }
-            ToolCardAction.VIEW_DOWNLOADS -> openBrowserDownloadOutputs()
-            ToolCardAction.OPEN_WORKSPACE -> retainedPage = "chat-workspace"
-            ToolCardAction.OPEN_TERMINAL -> guard { openTerminal() }
-            ToolCardAction.VIEW_TASKS, ToolCardAction.READ_TASK_RESULT -> guard { openChildTaskRecords(owner.conversationId) }
+            ToolCardAction.READ_TASK_RESULT -> guard { openChildTaskRecords(owner.conversationId) }
             ToolCardAction.PAUSE_TASK, ToolCardAction.RESUME_TASK, ToolCardAction.STOP_TASK ->
                 controlChildTaskFromCard(step, request)
             ToolCardAction.OPEN_IMAGE, ToolCardAction.PLAY_VIDEO, ToolCardAction.SAVE_MEDIA -> generationMediaAction(step, request)
             ToolCardAction.VIEW_ASSETS -> openGenerationOutputs()
-            ToolCardAction.VIEW_DIFF -> {
-                val documents = step.categoryDetails?.rich?.documents.orEmpty()
-                val diff = documents.filter { it.title.contains("差异") || it.title.contains("审查") }
-                if (diff.isEmpty()) toast("没有差异记录")
-                else prompt = ConfirmPrompt("差异", diff.joinToString("\n\n") { it.text }, "关闭", false, {})
-            }
             else -> toast("操作未完成，请稍后再试")
         }
     }
@@ -4347,7 +4334,6 @@ class MainActivity : ComponentActivity() {
                 if (editorGeneration == editor && contextManagementEntryEpoch == visit) handleToolCardAction(request)
             }
         }
-        ToolCardControls(step, action)
         if ((step.toolName == "screen" || step.hasBrowserScreenshot) && step.state == WorkStepState.OK && activityUsable() && voiceForeground &&
             retainedPage == "chat" && step.owner?.conversationId == selected?.id?.value) {
             app.daiyu.android.ui.screens.chat.conversation.ToolScreenshotContent(controller, step)

@@ -22,6 +22,12 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Switch
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,10 +53,6 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
     interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true,
     automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false) {
     val groups = listOf(
-        listOf(
-            MenuEntry("新建会话", DaiyuIcons.NewChat, ChatMenuAction.NEW_CHAT),
-            MenuEntry("搜索记录", DaiyuIcons.Search, ChatMenuAction.SEARCH),
-        ),
         listOf(MenuEntry("交互模式", DaiyuIcons.Interactive, ChatMenuAction.INTERACTIVE_MODE)),
         listOf(
             MenuEntry("打开终端", DaiyuIcons.Terminal, ChatMenuAction.OPEN_TERMINAL),
@@ -109,6 +111,7 @@ private fun ChatMenuItem(entry: MenuEntry, onDismiss: () -> Unit, onAction: (Cha
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit) {
+    var showPath by remember { mutableStateOf(false) }
     val entries = listOf(
         MenuEntry("图片", DaiyuIcons.Image, ChatMenuAction.ATTACH_IMAGE),
         MenuEntry("视频", DaiyuIcons.Video, ChatMenuAction.ATTACH_VIDEO),
@@ -118,17 +121,20 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
     )
     ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MiuixTheme.colorScheme.surfaceContainer,
         contentColor = MiuixTheme.colorScheme.onSurface) {
-        Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-            Text("附件", Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MiuixTheme.textStyles.title3)
-            entries.forEach { entry ->
+        Column(Modifier.fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * .72f).dp)
+            .verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
+            Text("附件", Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MiuixTheme.textStyles.body2)
+            entries.filter { it.action != ChatMenuAction.ATTACH_PATH || showPath }.forEach { entry ->
                 Row(Modifier.fillMaxWidth().testTag("chat-attachment:${entry.action.name}")
                     .clickable { onDismiss(); onAction(entry.action) }
-                    .padding(horizontal = 24.dp, vertical = 14.dp),
+                    .padding(horizontal = 24.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(entry.icon, null, Modifier.size(22.dp), tint = daiyuIconColor(entry.icon))
-                    Text(entry.title, style = MiuixTheme.textStyles.body1, color = MiuixTheme.colorScheme.onSurface)
+                    Icon(entry.icon, null, Modifier.size(18.dp), tint = daiyuIconColor(entry.icon))
+                    Text(entry.title, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurface)
                 }
             }
+            top.yukonga.miuix.kmp.basic.TextButton(text = if (showPath) "收起路径输入" else "输入文件路径",
+                onClick = { showPath = !showPath }, modifier = Modifier.padding(horizontal = 24.dp).testTag("chat-attachment-path-toggle"))
         }
     }
 }

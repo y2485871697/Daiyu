@@ -50,9 +50,13 @@ class SubAgentStatusDialogTest : WiredActivityTestCase() {
         }
         for (mode in listOf(AppearanceThemeMode.LIGHT, AppearanceThemeMode.DARK)) {
             show(rows, mode)
+            ui.onNodeWithText("冻结模型 0").assertDoesNotExist()
+            ui.onNodeWithTag("subagent-status:task-0").performClick()
             ui.onNodeWithText("冻结模型 0").assertIsDisplayed()
             ui.onNodeWithTag("subagent-status-list").performScrollToIndex(39)
             ui.onNodeWithTag("subagent-status:task-39").assertIsDisplayed()
+            ui.onNodeWithText("冻结模型 39").assertDoesNotExist()
+            ui.onNodeWithTag("subagent-status:task-39").performClick()
             ui.onNodeWithText("冻结模型 39").assertIsDisplayed()
             ui.onNodeWithText("已完成").assertIsDisplayed()
             ui.onNodeWithTag("subagent-status-close").performClick()

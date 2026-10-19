@@ -156,7 +156,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         verticalAlignment = Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             ChatIconButton(DaiyuIcons.Attach, "附件", { actions.onAttach(); attachments = true },
-                                Modifier.size(40.dp), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Attach))
+                                Modifier.size(40.dp), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Attach), iconSize = 16.dp)
                             ChatIconButton(DaiyuIcons.Reasoning, "推理强度，当前为 ${state.reasoningLabel}", actions.onOpenReasoning,
                                 Modifier.size(40.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Reasoning))
                             Box(Modifier.size(40.dp).testTag("chat-assistant").clip(CircleShape)
@@ -164,7 +164,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     onClickLabel = "选择助手", onClick = actions.onOpenAssistant)
                                 .semantics { contentDescription = "选择助手，当前为 ${state.assistantLabel}" },
                                 contentAlignment = Alignment.Center) {
-                                AssistantAvatar(assistant, 24.dp)
+                                AssistantAvatar(assistant, 18.dp)
                             }
                         }
                         key(state.controlOwnerKey) {

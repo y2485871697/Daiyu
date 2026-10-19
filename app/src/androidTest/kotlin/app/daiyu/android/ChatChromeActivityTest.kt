@@ -113,7 +113,8 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         show(state, actions)
         touch(node("chat-reasoning")); touch(node("chat-assistant"))
         touch(button("更多"))
-        touch(node("chat-menu:NEW_CHAT").performScrollTo())
+        node("chat-menu:NEW_CHAT").assertDoesNotExist()
+        touch(node("chat-menu:OPEN_TERMINAL").performScrollTo())
         node("chat-overflow-menu").assertDoesNotExist()
         touch(button("更多"))
         val menu = node("chat-overflow-menu").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
@@ -130,7 +131,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         touch(node("chat-control"))
         node("chat-control").performTouchInput { longClick() }
         ui.runOnIdle {
-            assertEquals(listOf("reasoning", "assistant", "more", "menu:NEW_CHAT", "more", "menu:CONTEXT_STATS",
+            assertEquals(listOf("reasoning", "assistant", "more", "menu:OPEN_TERMINAL", "more", "menu:CONTEXT_STATS",
                 "model", "context", "voice", "supplement<${state.text}>", "continue", "stop"), events.toList())
             assertEquals(3, presses); assertEquals(3, releases)
         }
@@ -167,7 +168,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             "加载更早消息", "定位用户消息", "回到底部", "设置", "启动 Kimi Web", "停止 Kimi Web")) {
             ui.onNodeWithText(text, substring = false, useUnmergedTree = true).assertDoesNotExist()
         }
-        val expected = listOf("NEW_CHAT", "SEARCH", "INTERACTIVE_MODE", "OPEN_TERMINAL", "OPEN_BROWSER",
+        val expected = listOf("INTERACTIVE_MODE", "OPEN_TERMINAL", "OPEN_BROWSER",
             "OPEN_WORKSPACE", "SUB_AGENT", "CONTEXT_STATS", "COMPRESS_CONTEXT", "AUTO_COMPRESS")
         val actual = ui.onAllNodes(SemanticsMatcher("overflow menu item") {
             it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("chat-menu:") == true

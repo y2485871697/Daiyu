@@ -9,6 +9,11 @@ import app.daiyu.android.domain.delegation.RetainedChildTask
 internal data class SubAgentStatusRow(val owner: ChildRunOwner, val agent: String, val status: String,
     val completed: Boolean = false, val model: String = "模型未记录")
 
+internal fun subAgentStatusItemKey(owner: ChildRunOwner): String = with(owner) {
+    listOf(conversationId, parentRunId, taskGroupId, generation.toString(), childRunId, assistantMessageId)
+        .joinToString("") { "${it.length}:$it" }
+}
+
 internal fun subAgentStatusRows(records: List<ChildTaskRecord>, live: List<RetainedChildTask>): List<SubAgentStatusRow> {
     val current = live.associateBy { it.record.owner }
     val merged = records.associateByTo(linkedMapOf()) { it.owner }

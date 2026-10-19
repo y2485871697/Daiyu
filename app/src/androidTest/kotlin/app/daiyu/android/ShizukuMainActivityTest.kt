@@ -108,22 +108,30 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
             .apply { isAccessible = true }.get(fixture.controller) as java.util.concurrent.ExecutorService
         val entered = java.util.concurrent.CountDownLatch(1)
         val release = java.util.concurrent.CountDownLatch(1)
-        executor.execute {
+        val blocker = executor.submit {
             entered.countDown()
-            check(release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+            release.await()
         }
-        assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
         try {
+            assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
             ui.onNodeWithText("同意本次写操作并发送").performClick()
             assertTrue(p.isSubmitted())
-            activity = recreateActivity(activity)
-            assertTrue(p.isCancelled())
-            release.countDown()
+            var cancelledBeforeRelease = false
+            activity = recreateActivity(activity) {
+                cancelledBeforeRelease = p.isCancelled()
+                release.countDown()
+            }
+            assertTrue(cancelledBeforeRelease)
+            blocker.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            executor.submit { }.get(5, java.util.concurrent.TimeUnit.SECONDS)
             ui.waitUntil(5_000) { fixture.controller.shizukuPreparation() == null }
             assertDraft(text)
             assertEquals(0, fixture.opens.get())
             assertTrue(fixture.database.conversations().isEmpty())
-        } finally { release.countDown() }
+        } finally {
+            release.countDown()
+            blocker.get(5, java.util.concurrent.TimeUnit.SECONDS)
+        }
     }
 
     fun testEditorAbaAndOtherConversationRejectOldAcceptedCallbacks() {

@@ -91,7 +91,8 @@ class PlatformActionVisitActivityTest : WiredActivityTestCase() {
     fun testApprovedButBlockedWorkerIsRevokedSynchronouslyBeforeDatabaseAcceptance() {
         setDraft(text)
         val old = preview()
-        clickAction("platform-action-confirm")
+        dismissIme()
+        node("platform-action-confirm").assertIsDisplayed().assertIsEnabled().performClick()
         assertTrue(entered.await(5, TimeUnit.SECONDS))
         realPauseResume(activity) { assertTrue(old.cancelled) }
         release.countDown()

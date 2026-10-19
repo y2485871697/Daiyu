@@ -63,6 +63,11 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
         val dialogRoot = focusedWindowRoot()
         mainThread {
             assertNotSame(activity.window.decorView, dialogRoot)
+            var windowContext = dialogRoot.context
+            while (windowContext is android.content.ContextWrapper && windowContext !is android.app.Activity) {
+                windowContext = windowContext.baseContext
+            }
+            assertSame(activity, windowContext)
             assertFalse(activity.window.decorView.hasWindowFocus())
             assertTrue(dialogRoot.hasWindowFocus())
             val focus = checkNotNull(dialogRoot.findFocus())

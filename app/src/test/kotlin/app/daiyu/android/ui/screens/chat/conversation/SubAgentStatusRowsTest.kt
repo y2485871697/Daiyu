@@ -8,6 +8,17 @@ class SubAgentStatusRowsTest {
     private fun task() = ChildTaskRecord(ChildRunOwner("conversation", "run", "group", 1, "task-id", "answer"),
         "message", "logical-owner", 0, "profile", "prompt", display = ChildTaskDisplay("审查", "frozen-model", "冻结模型"))
 
+    @Test fun savedItemKeyPreservesAllOwnerPartsWithoutDelimiterCollisions() {
+        val owner = task().owner
+        val keys = listOf(owner, owner.copy(conversationId = "other"), owner.copy(parentRunId = "other"),
+            owner.copy(taskGroupId = "other"), owner.copy(generation = 2), owner.copy(childRunId = "other"),
+            owner.copy(assistantMessageId = "other")).map(::subAgentStatusItemKey)
+        assertEquals(7, keys.toSet().size)
+        assertEquals(keys.first(), subAgentStatusItemKey(owner.copy()))
+        assertNotEquals(subAgentStatusItemKey(owner.copy(conversationId = "a:b", parentRunId = "c")),
+            subAgentStatusItemKey(owner.copy(conversationId = "a", parentRunId = "b:c")))
+    }
+
     @Test fun frozenDisplayAndLiveControlStateMergeOnceByExactOwner() {
         val task = task().copy(status = ChildTaskStatus.RUNNING)
         val live = RetainedChildTask(task, stopRequested = false, settled = false, journalUnconfirmed = false,

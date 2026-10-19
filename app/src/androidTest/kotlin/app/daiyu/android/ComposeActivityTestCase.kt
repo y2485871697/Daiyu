@@ -97,8 +97,12 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                             val hostDecor = host.window.decorView
                             val activityToken = host.window.attributes.token
                             val params = candidate.windowLayoutParams.orNull() ?: return false
-                            // Dialogs have their own decor token but share the Activity's layout token.
-                            val owned = decor === hostDecor ||
+                            var windowContext = decor.context
+                            while (windowContext is android.content.ContextWrapper && windowContext !is android.app.Activity) {
+                                windowContext = windowContext.baseContext
+                            }
+                            // Compose application Dialogs may have an independent layout token on API 26.
+                            val owned = windowContext === host || decor === hostDecor ||
                                 (activityToken != null && params.token == activityToken) ||
                                 (hostDecor.windowToken != null && decor.applicationWindowToken == hostDecor.windowToken)
                             return owned && params.type in android.view.WindowManager.LayoutParams.FIRST_APPLICATION_WINDOW..
@@ -490,7 +494,9 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                 assertEquals(android.os.ResultReceiver::class.java, checkNotNull(finishCover).javaClass)
                 assertEquals(original.taskId, coverTask)
                 assertTrue("cover must use another process", coverPid > 0 && coverPid != android.os.Process.myPid())
-                assertEquals(instrumentation.context.applicationInfo.uid, coverUid)
+                val installedTestUid = instrumentation.context.packageManager
+                    .getApplicationInfo(instrumentation.context.packageName, 0).uid
+                assertEquals("cover UID must match the installed test package", installedTestUid, coverUid)
                 assertTrue("cover must use the test APK UID", coverUid != android.os.Process.myUid())
             }
             failure.get()?.let { throw it }
@@ -519,10 +525,12 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         ui.waitForIdle()
     }
 
-    protected fun recreateActivity(activity: MainActivity): MainActivity {
+    protected fun recreateActivity(activity: MainActivity, afterDestroyed: () -> Unit = {}): MainActivity {
         val monitor = instrumentation.addMonitor(MainActivity::class.java.name, null, false)
         try {
             mainThread { activity.recreate() }
+            awaitControl("original Activity destroyed before recreated UI waits") { activity.isDestroyed }
+            afterDestroyed()
             val replacement = instrumentation.waitForMonitorWithTimeout(monitor, 5000) as? MainActivity
             assertNotNull("framework recreation must resume a new Activity", replacement)
             val created = checkNotNull(replacement)

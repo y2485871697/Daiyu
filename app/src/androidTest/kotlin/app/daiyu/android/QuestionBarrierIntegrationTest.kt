@@ -115,8 +115,8 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         node("question-note").assertDoesNotExist()
         if(readOnly) {
             node("question-submit").assertDoesNotExist()
-            node("question-option:0").assertIsNotEnabled()
-            node("question-option:1").assertIsNotEnabled()
+            node("question-option:0").assertDoesNotExist()
+            node("question-option:1").assertDoesNotExist()
         }
     }
     // Invoke the attached semantics callback twice in one main-thread turn: recomposition must not
@@ -316,6 +316,16 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         }
         launch(f,f.db.conversations().single())
         waitForCard(readOnly=true)
+        if (answer == null) {
+            node("question-toggle").assertTextContains("提问已中断 · Route choice")
+            ui.onNodeWithText("提问已中断，当前不可作答").assertExists()
+        } else {
+            node("question-toggle").assertTextContains("已回答 · Route choice").performClick()
+            ui.onNodeWithText("已选择：Second route").assertExists()
+            node("question-option:0").assertDoesNotExist()
+            node("question-option:1").assertDoesNotExist()
+            node("question-submit").assertDoesNotExist()
+        }
         drainWorker(f);assertNull(f.c.active);assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())
         val saved=checkpoint(f,old.message);assertEquals(RunStatus.INTERRUPTED,saved.message.status);assertEquals(ExecutionPhase.TERMINAL,saved.phase);assertNull(saved.pending)
         assertTrue(saved.owner!=old.owner);assertEquals(ToolDisposition.UNKNOWN,saved.tools.single().disposition)

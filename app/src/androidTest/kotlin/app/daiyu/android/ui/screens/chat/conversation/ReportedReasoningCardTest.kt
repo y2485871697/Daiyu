@@ -26,16 +26,16 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         ui.onNodeWithText("answer remains").assertIsDisplayed()
         ui.onNodeWithText("工作过程").assertIsDisplayed()
         ui.onNodeWithText("reported summary").assertDoesNotExist()
-        ui.onNodeWithText("展开模型已报告的思考 / 摘要").performClick()
+        ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
         ui.onNodeWithText("reported summary").assertIsDisplayed()
         ui.onNodeWithText("answer remains").assertIsDisplayed()
         ui.onNodeWithText("工作过程").performClick()
         ui.onNodeWithText("fixture tool").assertIsDisplayed()
-        ui.onNodeWithText("收起模型已报告的思考 / 摘要").performClick()
+        ui.onNodeWithContentDescription("收起模型已报告的思考 / 摘要").performClick()
         ui.onNodeWithText("reported summary").assertDoesNotExist()
         ui.onNodeWithText("answer remains").assertIsDisplayed()
         ui.onNodeWithText("fixture tool").assertIsDisplayed()
-        ui.onNodeWithText("展开模型已报告的思考 / 摘要").performClick()
+        ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
         mainThread { turn = turn.copy(reportedReasoning = listOf(ReportedReasoning("r", "final reported summary"))) }
         ui.waitForIdle()
         ui.onNodeWithText("final reported summary").assertIsDisplayed()
@@ -51,6 +51,6 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         } }
         ui.waitForIdle()
         ui.onNodeWithText("ordinary answer").assertIsDisplayed()
-        ui.onNodeWithText("展开模型已报告的思考 / 摘要").assertDoesNotExist()
+        ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").assertDoesNotExist()
     }
 }

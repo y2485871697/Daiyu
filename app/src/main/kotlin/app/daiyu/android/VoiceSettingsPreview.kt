@@ -15,6 +15,9 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 
+internal fun stopVoicePreview(host: VoiceHost, gate: AudioOwnerGate): Boolean =
+    host.stop(host.owner) && gate.releaseHealthy()
+
 /** Uses the same audio gate and players as chat, and only starts after an explicit click. */
 @Composable
 internal fun VoiceSettingsPreview(runtime: ControllerVoiceRuntime, profile: VoiceProfile,
@@ -44,7 +47,7 @@ internal fun VoiceSettingsPreview(runtime: ControllerVoiceRuntime, profile: Voic
     val state by host.state.collectAsState()
     fun stop(): Boolean {
         request++; preparation?.cancel(); preparation = null; preparing = false; consent = null; initialize = false
-        val stopped = host.stop(host.owner)
+        val stopped = stopVoicePreview(host, ActivityVoiceAudio.gate)
         prepared = null
         if (!stopped) error = "音频停止未确认，请退出本页检查语音输出。"
         return stopped

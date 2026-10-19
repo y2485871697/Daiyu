@@ -77,7 +77,14 @@ internal fun VoiceSettingsPanel(
     fun current() = alive.get() && pageCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     fun invalidatePicker() { picker.invalidate(); pickerPending = picker.pending; selectedSample = null }
     fun changeDraft(value: VoiceConfiguration) { invalidatePicker(); draft = value }
-    fun stopAudio() { invalidate(); runtime.invalidateSpeech(); remote.invalidate() }
+    fun stopAudio(): Boolean = try {
+        invalidate(); runtime.invalidateSpeech(); remote.invalidate()
+        check(ActivityVoiceAudio.gate.releaseHealthy())
+        true
+    } catch (_: Exception) {
+        notice = "音频停止未确认，未更改设置。"
+        false
+    }
     fun mimoConnection(): VoiceConfiguration? {
         val live = runtime.profileConfiguration(profile).value
         return confirmedMimo?.takeIf { mimoBaseRevision == live?.revision } ?: live?.takeIf { it.engine == "MIMO" }
@@ -92,7 +99,8 @@ internal fun VoiceSettingsPanel(
         if (value.engine != "SYSTEM" && value.voice.isBlank()) { notice = "请选择音色后保存。"; return }
         val target = profile
         val previous = saved
-        stopAudio(); busy = true
+        if (!stopAudio()) return
+        busy = true
         scope.launch {
             try {
                 runtime.save(value, target)
@@ -110,10 +118,10 @@ internal fun VoiceSettingsPanel(
     }
     fun switchFeature(feature: String, enabled: Boolean, update: (Boolean) -> Unit) {
         if (!current() || busy) return
-        try { stopAudio(); preferences.setEnabled(feature, enabled); update(enabled) }
+        try { if (stopAudio()) { preferences.setEnabled(feature, enabled); update(enabled) } }
         catch (_: Exception) { notice = "设置未保存" }
     }
-    fun leaveChild() { if (current() && !busy) { invalidatePicker(); stopAudio(); child = null; notice = "" } }
+    fun leaveChild() { if (current() && !busy && stopAudio()) { invalidatePicker(); child = null; notice = "" } }
     DisposableEffect(picker) { onDispose { alive.set(false); picker.close() } }
     LaunchedEffect(profile, saved?.revision) {
         invalidatePicker()
@@ -142,7 +150,7 @@ internal fun VoiceSettingsPanel(
     val pageTitle = when (child) { "ASR" -> "识别方式"; "MIMO" -> "MiMo 语音"; else -> "语音设置" }
     MiuixScaffold(title = pageTitle, onBack = {
         if (current() && !busy) {
-            if (child != null) leaveChild() else { picker.close(); stopAudio(); onBack() }
+            if (child != null) leaveChild() else if (stopAudio()) { picker.close(); onBack() }
         }
     }, modifier = Modifier.testTag("voice-settings")) { padding, scrollBehavior, sidePadding ->
         Column(Modifier.fillMaxSize().padding(padding).consumeWindowInsets(padding)
@@ -157,8 +165,8 @@ internal fun VoiceSettingsPanel(
                 if (choosingSection) Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
                     sections.forEach { entry ->
                         SettingsRadioRow(entry.second, section == entry.first, enabled = !busy) {
-                            if (current() && !busy) {
-                                stopAudio(); invalidatePicker(); dialog = null; notice = ""
+                            if (current() && !busy && stopAudio()) {
+                                invalidatePicker(); dialog = null; notice = ""
                                 val target = if (entry.first == "CONVERSATION") VoiceProfile.CONVERSATION else VoiceProfile.READ_ALOUD
                                 if (target != profile) { drafts[profile] = draft; profile = target }
                                 section = entry.first; choosingSection = false
@@ -236,7 +244,7 @@ internal fun VoiceSettingsPanel(
                         item { OfflineSpeechPackCard(context, ::current) }
                         item { SettingsCard { SettingsRow("识别方式", tag = "voice-recognition-method",
                             summary = if (draft.dictation == "DOUBAO") "豆包识别 · 需要联网" else "本机识别 · 无需账户",
-                            onClick = if (busy) null else ({ if (current()) { stopAudio(); child = "ASR" } })) } }
+                            onClick = if (busy) null else ({ if (current() && stopAudio()) { child = "ASR" } })) } }
                         if (pack.ready && draft.dictation != "DOUBAO") item { SettingsCard { SettingsSwitchRow("离线听写", pack.enabled,
                             tag = "offline-speech-enable") { if (current()) OfflineSpeechPack.setEnabled(context, it) } } }
                     }
@@ -244,8 +252,7 @@ internal fun VoiceSettingsPanel(
                         if (section == "CONVERSATION") item { SettingsCard {
                             SettingsSwitchRow("启用语音会话", conversationEnabled, enabled = !busy) { switchFeature("conversation", it) { conversationEnabled = it } }
                             SettingsSwitchRow("云端识别", draft.dictation == "DOUBAO", enabled = !busy) {
-                                if (current()) {
-                                    stopAudio()
+                                if (current() && stopAudio()) {
                                     if (it) changeDraft(draft.copy(dictation = "DOUBAO")) else save(recognitionConfiguration().copy(dictation = "SYSTEM"))
                                 }
                             }
@@ -258,8 +265,8 @@ internal fun VoiceSettingsPanel(
                         if (section == "CONVERSATION" && draft.dictation != "DOUBAO") item { OfflineSpeechPackCard(context, ::current) }
                         item { SettingsCard {
                             SettingsSwitchRow("云端语音", cloud, enabled = !busy, tag = "voice-cloud-enable", summary = "关闭时使用系统语音。") { enabled ->
-                                if (current() && !busy) {
-                                    stopAudio(); cloud = enabled
+                                if (current() && !busy && stopAudio()) {
+                                    cloud = enabled
                                     if (!enabled) { preferences.rememberCloud(profile, draft); save(draft.copy(engine = "SYSTEM", voice = "")) }
                                     else {
                                         val engine = preferences.cloudEngine(profile)
@@ -290,13 +297,13 @@ internal fun VoiceSettingsPanel(
                     "PERSONAL" -> item { SettingsCard {
                         SettingsRow("豆包语音", tag = "voice-account-open", onClick = if (busy) null else ({
                             val selected = saved
-                            if (current()) {
-                                stopAudio(); invalidatePicker()
+                            if (current() && stopAudio()) {
+                                invalidatePicker()
                                 if (selected != null && selected.engine == "DOUBAO" && runtime.current(selected, profile)) accountPage = selected
                                 else dialog = "DOUBAO_MODEL"
                             }
                         }))
-                        SettingsRow("MiMo 语音", tag = "voice-mimo-open", onClick = if (busy) null else ({ if (current()) { stopAudio(); child = "MIMO"; notice = "" } }))
+                        SettingsRow("MiMo 语音", tag = "voice-mimo-open", onClick = if (busy) null else ({ if (current() && stopAudio()) { child = "MIMO"; notice = "" } }))
                     } }
                 }
                 if (notice.isNotBlank()) item { SettingsNote(notice, error = notice.startsWith("未")) }
@@ -340,8 +347,8 @@ internal fun VoiceSettingsPanel(
         DaiyuConfirmDialog("删除参考声音？", "删除本机录音与记录。若正在用于朗读，需要重新选择。", "删除", true,
             onConfirm = {
                 removing = null
-                if (current() && !busy) {
-                    stopAudio(); busy = true
+                if (current() && !busy && stopAudio()) {
+                    busy = true
                     scope.launch {
                         try { runtime.removePersonal(id); notice = "参考声音已删除" }
                         catch (cancelled: CancellationException) { throw cancelled }

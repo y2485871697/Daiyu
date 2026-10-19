@@ -89,4 +89,37 @@ class VoiceHostGateTest {
         assertEquals(0, player.bestEffortCloses)
         host.close()
     }
+    @Test fun previewStopCannotTurnUnknownReleaseIntoIdleSuccess() = runTest {
+        val gate = AudioOwnerGate()
+        val player = Player(failRelease = true)
+        val host = VoiceHost(backgroundScope, gate) { player }
+        host.enter("preview"); host.setForeground(true)
+        assertTrue(host.speak(host.owner, "preview", "sample"))
+        assertFalse(stopVoicePreview(host, gate))
+        assertFalse(stopVoicePreview(host, gate))
+        assertEquals(1, player.closes)
+        host.close()
+    }
+
+    @Test fun previewNaturalReleaseFailureStillBlocksLaterSaveBarrier() = runTest {
+        val gate = AudioOwnerGate()
+        val player = Player(failRelease = true)
+        val host = VoiceHost(backgroundScope, gate) { player }
+        host.enter("preview"); host.setForeground(true)
+        assertTrue(host.speak(host.owner, "preview", "sample"))
+        runCurrent()
+        player.state.value = player.state.value.copy(phase = SpeechPhase.COMPLETED)
+        runCurrent()
+        assertEquals(1, player.closes)
+        assertFalse(stopVoicePreview(host, gate))
+        host.close()
+    }
+
+    @Test fun previewHealthyIdleAllowsSaveBarrier() = runTest {
+        val gate = AudioOwnerGate()
+        val host = VoiceHost(backgroundScope, gate) { Player() }
+        assertTrue(stopVoicePreview(host, gate))
+        host.close()
+    }
+
 }

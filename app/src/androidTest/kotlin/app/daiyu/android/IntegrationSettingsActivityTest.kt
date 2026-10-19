@@ -400,13 +400,14 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         node("page:技能").assertIsDisplayed()
     }
     private fun skillSwitch(tag: String, on: Boolean): SemanticsNodeInteraction {
+        reveal(tag, "技能")
         ui.waitUntil(timeoutMillis = 5_000) {
-            ui.onAllNodesWithTag(tag).fetchSemanticsNodes().singleOrNull()?.config?.let { config ->
+            ui.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().singleOrNull()?.config?.let { config ->
                 config.getOrNull(SemanticsProperties.Disabled) == null &&
                     config.getOrNull(SemanticsProperties.ToggleableState) == (if (on) ToggleableState.On else ToggleableState.Off)
             } == true
         }
-        return node(tag).assertIsEnabled().also { if (on) it.assertIsOn() else it.assertIsOff() }
+        return ui.onNodeWithTag(tag, useUnmergedTree = true).assertIsDisplayed().assertIsEnabled().also { if (on) it.assertIsOn() else it.assertIsOff() }
     }
     fun testSkillsEntryPersistsIndividualAndGlobalSwitchesAndClosesWithActivity() {
         val name = "integration-demo"

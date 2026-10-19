@@ -97,8 +97,19 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
             val click = checkNotNull(node("workspace-pick-directory").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
             realPauseResume(activity, atPause = { click() })
             assertEquals(0, launches.get())
-            mainThread { activity.setContent {} }
             mainThread { click() }; assertEquals(0, launches.get())
+            workspaceClick("workspace-pick-directory")
+            ui.waitUntil(5_000) { launches.get() == 1 }
+            mainThread { activity.setContent {} }
+            ui.waitForIdle()
+            node("page:工作区").assertDoesNotExist()
+            mainThread { click() }; assertEquals(1, launches.get())
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), false) {
+                WorkspaceSettingsScreen(onBack = {}, engineeringUi = true)
+            } } }
+            workspaceClick("workspace-pick-directory")
+            ui.waitUntil(5_000) { launches.get() == 2 }
+            assertEquals(2, launches.get())
         } finally { instrumentation.removeMonitor(monitor) }
     }
     fun testPauseDiscardsAnInflightDirectoryResultAndExplicitRefreshCanBrowseAgain() {

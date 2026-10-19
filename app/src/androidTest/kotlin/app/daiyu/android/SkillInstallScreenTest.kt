@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import app.daiyu.android.ui.screens.settings.RetainedSkillRemovalCancel
+
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.SemanticsActions
@@ -48,8 +50,9 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
     }
 
     private fun ready(tag: String) {
+        if (tag == "skills-global" || tag == "skills-import-zip") reveal(tag, "技能")
         ui.waitUntil(timeoutMillis = 10_000) {
-            ui.onAllNodesWithTag(tag).fetchSemanticsNodes().singleOrNull()?.config?.let {
+            ui.onAllNodesWithTag(tag, useUnmergedTree = true).fetchSemanticsNodes().singleOrNull()?.config?.let {
                 it.getOrNull(SemanticsProperties.Disabled) == null
             } == true
         }
@@ -127,7 +130,7 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
             ready("skills-confirm-remove")
         }
         openRemoval()
-        val oldCancel = checkNotNull(ui.onNodeWithText("取消").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val oldCancel = ui.onNodeWithText("取消").fetchSemanticsNode().config[RetainedSkillRemovalCancel]
         ui.onNodeWithText("取消").performClick()
         openRemoval()
         mainThread { oldCancel() }

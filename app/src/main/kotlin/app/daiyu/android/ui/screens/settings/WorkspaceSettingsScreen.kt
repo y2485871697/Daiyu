@@ -45,6 +45,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
     val scope = rememberCoroutineScope()
     val visit = remember(access, lifecycle) { AtomicBoolean(true) }
     val epoch = remember(access, lifecycle) { AtomicLong() }
+    var callbackEpoch by remember(access, lifecycle) { mutableLongStateOf(0L) }
     var grants by remember(access) { mutableStateOf<List<Uri>>(emptyList()) }
     var loaded by remember(access) { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -73,7 +74,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
     DisposableEffect(access, lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) refresh()
-            if (event == Lifecycle.Event.ON_PAUSE) { epoch.incrementAndGet(); invalidateRead(); revoking = null; grants = emptyList(); loaded = false }
+            if (event == Lifecycle.Event.ON_PAUSE) { callbackEpoch = epoch.incrementAndGet(); invalidateRead(); revoking = null; grants = emptyList(); loaded = false }
         }
         lifecycle.addObserver(observer)
         onDispose { visit.set(false); invalidateRead(); lifecycle.removeObserver(observer) }
@@ -106,8 +107,9 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
             }
         }
     }
+    val pickerCallbackEpoch = callbackEpoch
     fun pick(tree: Boolean) {
-        if (!current() || busy || privateOccupied || pendingTree != null) return
+        if (!current() || epoch.get() != pickerCallbackEpoch || busy || privateOccupied || pendingTree != null) return
         pendingTree = tree; revoking = null; invalidateRead()
         try { picker.launch(PlatformSettingsAccess.pickerIntent(tree)) }
         catch (_: Exception) { pendingTree = null; notice = "未能打开系统文件选择器" }

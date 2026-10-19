@@ -47,7 +47,10 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
         fun awaitStatus(text: String) { ui.waitUntil(5_000) {
             ui.onAllNodes(hasTestTag("mcp-settings-status") and hasText(text)).fetchSemanticsNodes().isNotEmpty()
         } }
-        fun click(tag: String) { node(tag).performScrollTo().performClick() }
+        fun click(tag: String) {
+            if (tag.startsWith("mcp-refresh:")) node(tag).assertIsDisplayed().assertIsEnabled().performClick()
+            else reveal(tag, "MCP 服务器").performClick()
+        }
         try {
             store.save(listOf(McpServer("server", "fixture", "https://fixture.invalid/mcp", "synthetic-token")), owner, store.snapshot())
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {

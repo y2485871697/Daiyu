@@ -95,7 +95,7 @@ private fun OriginalSettingsRow(entry: SettingsEntry, defaultReasoning: Reasonin
     }
     SettingsRow(entry.title, onClick = if (entry.id == "donate") null else onClick,
         summary = when (entry.id) {
-            "donate" -> "暂未开放；仅保留占位，不提供支付入口"
+            "donate" -> "暂未开放，不提供支付入口"
             "accessibility" -> "查看服务与授权边界；进入设置不向模型授权"
             "task_surface" -> "前台、后台或每次运行询问；不改变当前运行"
             else -> null

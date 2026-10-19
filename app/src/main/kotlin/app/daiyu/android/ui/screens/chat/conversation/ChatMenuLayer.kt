@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -140,7 +142,7 @@ private fun ChatGlassMenuSurface(backdrop: LayerBackdrop?, modifier: Modifier, c
     val shades = if (dark) listOf(Color(0xE62C2739), Color(0xDB1B1924))
         else listOf(Color(0xE6FFFFFF), Color(0xD4FAF7FF))
     Column(modifier.width(IntrinsicSize.Max).clip(shape).then(blur)
-        .clickable(indication = null, interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() }) {}
+        .pointerInput(Unit) { detectTapGestures(onTap = {}) }
         .background(Brush.linearGradient(shades))
         .border(1.dp, if (dark) Color(0x26DCCDFF) else Color(0xF0FFFFFF), shape)
         .verticalScroll(rememberScrollState()).padding(6.dp)) { content() }

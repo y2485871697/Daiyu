@@ -61,8 +61,10 @@ class AssistantPickerAdmissionTest : WiredActivityTestCase() {
     fun testStaleDeleteConfirmationDoesNotReachStoreOrAssets() {
         ui.onNodeWithText("Picker A").performTouchInput { longClick() }
         ui.onNodeWithText(instrumentation.targetContext.getString(R.string.action_delete)).performClick()
+        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.assistant_delete_title)).assertIsDisplayed()
         mainThread { admitted = false }
-        node("dialog-confirm").performClick()
+        ui.onNode(hasText(instrumentation.targetContext.getString(R.string.action_delete)) and hasClickAction())
+            .assertIsDisplayed().assertIsEnabled().performClick()
         ui.waitForIdle()
         assertEquals(0, writes.get())
         assertEquals(0, assetsWrites.get())

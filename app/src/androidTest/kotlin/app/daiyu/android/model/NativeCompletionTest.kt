@@ -354,6 +354,7 @@ class NativeCompletionTest : InstrumentationTestCase() {
             // the HTTP read would miss the original race because usable is already false by then.
             val heldOutputs = object : AbstractList<ToolOutput>() {
                 override val size: Int get() {
+                    check(Thread.holdsLock(session)) { "next must own the session monitor before validation" }
                     atValidation.countDown()
                     check(releaseValidation.await(5, TimeUnit.SECONDS)) { "fixture validation timeout" }
                     return 0
@@ -363,27 +364,27 @@ class NativeCompletionTest : InstrumentationTestCase() {
             val firstFailure = AtomicReference<Throwable>()
             val secondFailure = AtomicReference<Throwable>()
             val secondAttempted = CountDownLatch(1)
+            val secondCompleted = CountDownLatch(1)
             val first = Thread { try { session.next(heldOutputs) {} } catch (failure: Throwable) { firstFailure.set(failure) } }
             val second = Thread {
                 secondAttempted.countDown()
                 try { session.next(emptyList()) {} } catch (failure: Throwable) { secondFailure.set(failure) }
+                finally { secondCompleted.countDown() }
             }
-            var serialized = false
             try {
                 first.start()
                 assertTrue(atValidation.await(3, TimeUnit.SECONDS))
                 second.start()
                 assertTrue(secondAttempted.await(3, TimeUnit.SECONDS))
-                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3)
-                while (second.isAlive && second.state != Thread.State.BLOCKED && System.nanoTime() < deadline) second.join(10)
-                serialized = second.state == Thread.State.BLOCKED
+                assertFalse("second next must not complete while validation owns the session monitor",
+                    secondCompleted.await(200, TimeUnit.MILLISECONDS))
+                assertTrue(first.isAlive)
             } finally {
                 releaseValidation.countDown()
                 first.join(5000); second.join(5000)
                 session.cancel()
             }
             assertFalse(first.isAlive); assertFalse(second.isAlive)
-            assertTrue("second next must wait at the session monitor", serialized)
             assertNull(firstFailure.get())
             assertTrue(secondFailure.get() is IllegalStateException)
             assertEquals(1, posts.get())

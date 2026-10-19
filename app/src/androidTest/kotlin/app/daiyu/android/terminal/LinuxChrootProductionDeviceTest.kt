@@ -119,6 +119,7 @@ class LinuxChrootProductionDeviceTest : InstrumentationTestCase() {
                 /bin/busybox stty -echo
                 printf '\nPARENT_$token UID=%s PID=%s\n' "${'$'}(/bin/busybox id -u)" "${'$'}${'$'}"
                 printf '\nTOKEN:%s\n' "${'$'}(/bin/busybox cat /probe-token)"
+                /bin/busybox cat /proc/self/status >/tmp/proc-status && /bin/busybox grep -q '^Name:' /tmp/proc-status && printf '\nPROC_$token FS=%s\n' "${'$'}(/bin/busybox stat -f -c %t /proc)"
                 /bin/busybox setsid /bin/sh -c 'printf "\nCHILD_$token UID=%s PID=%s\n" "${'$'}(/bin/busybox id -u)" "${'$'}${'$'}"; exec /bin/busybox sleep ${holdSeconds + 300}' </empty &
 
             """.trimIndent() + "\n"
@@ -135,7 +136,8 @@ class LinuxChrootProductionDeviceTest : InstrumentationTestCase() {
                 report.put("last_state", state)
                 parentPid = parentPattern.find(output)?.groupValues?.get(1)?.toInt()
                 childPid = childPattern.find(output)?.groupValues?.get(1)?.toInt()
-                if (parentPid != null && childPid != null && output.contains("\nTOKEN:$token\r\n")) {
+                if (parentPid != null && childPid != null && output.contains("\nTOKEN:$token\r\n") &&
+                    output.contains("\nPROC_$token FS=9fa0\r\n")) {
                     scope = state.getString("root_scope"); break
                 }
                 Thread.sleep(20)
@@ -148,6 +150,17 @@ class LinuxChrootProductionDeviceTest : InstrumentationTestCase() {
                 "for p in $parent $child; do printf 'PID:%s\\n' \"\$p\"; " +
                 "cat /proc/\$p/status /proc/\$p/stat /proc/\$p/cgroup; readlink /proc/\$p/root; done; " +
                 "cat /sys/fs/cgroup/uid_0/$originalScope/cgroup.events")
+            val mounts = rootObservation("set -eu; cat /proc/$parent/mountinfo")
+            val procMount = mounts.lineSequence().single { line ->
+                line.split(" ").getOrNull(4) == "/proc" && line.contains(" - proc ")
+            }
+            assertTrue(procMount.split(" ")[5].split(",").containsAll(listOf("nosuid", "nodev", "noexec")))
+            val hostMounts = rootObservation("cat /proc/self/mountinfo")
+            assertFalse(hostMounts.contains(" ${rootfs.canonicalPath}/proc "))
+            val rebuilt = LinuxEnvironmentStore(selected, policy)
+            leased(rebuilt)
+            report.put("guest_mountinfo", mounts).put("host_mountinfo", hostMounts)
+                .put("live_store_rebuild_lease_verified", true)
             report.put("before", before).put("scope", originalScope).put("parent_pid", parent).put("child_pid", child)
             assertEquals(2, Regex("(?m)^Uid:\\s+0\\s+0\\s+0\\s+0$").findAll(before).count())
             assertEquals(2, Regex("(?m)^0::/uid_0/$originalScope$").findAll(before).count())
@@ -203,7 +216,9 @@ class LinuxChrootProductionDeviceTest : InstrumentationTestCase() {
                 "test ! -e /proc/$parent; test ! -e /proc/$child; " +
                 "test ! -e /sys/fs/cgroup/uid_0/$originalScope; printf 'original_scope_and_pids_gone\\n'")
             assertEquals("original_scope_and_pids_gone", after.trim())
-            report.put("after", after).put("passed", true)
+            val afterMounts = rootObservation("cat /proc/self/mountinfo")
+            assertFalse(afterMounts.contains(" ${rootfs.canonicalPath}/proc "))
+            report.put("after", after).put("host_mountinfo_after", afterMounts).put("passed", true)
         } catch (failure: LinuxPtyStartupFailure) {
             report.put("startup_diagnostics", (failure.cause as? PtyStartupFailure)?.diagnostics ?: JSONObject.NULL)
             startup = failure.cleanup; primary = failure; throw failure

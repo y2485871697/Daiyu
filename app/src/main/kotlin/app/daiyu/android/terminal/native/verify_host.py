@@ -97,8 +97,11 @@ finally:
     if p.poll() is None:p.kill()
     p.wait(timeout=3)
 faults=subprocess.run([str(helper.with_name('root_scope_faults'))],check=True,capture_output=True,text=True,timeout=5)
-assert faults.stdout.strip()=='root_scope_faults: 13 passed',faults.stdout
-tests.extend(['pre-scope uid refusal emits only F with exit 77',
+assert faults.stdout.strip()=='root_scope_faults: 18 passed',faults.stdout
+tests.extend(['proc mount creates missing directory through pinned fd with fixed flags',
+    'existing real proc directory is accepted', 'proc mount refusal preserves errno',
+    'proc symlink is rejected before mount', 'proc regular file is rejected before mount',
+    'pre-scope uid refusal emits only F with exit 77',
     'pre-scope invalid arguments emit only F with exit 64',
     'pre-scope invalid dimensions emit only F with exit 64',
     'pre-scope PTY open failure emits only F with exit 70',

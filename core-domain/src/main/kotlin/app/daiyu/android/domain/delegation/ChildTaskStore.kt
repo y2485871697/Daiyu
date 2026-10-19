@@ -4,6 +4,14 @@ import app.daiyu.android.domain.runtime.RunExecutionOwner
 
 enum class ChildTaskStatus { QUEUED, RUNNING, COMPLETED, NOT_EXECUTED, UNKNOWN }
 
+data class ChildTaskDisplay(val agentName: String, val modelId: String, val modelName: String) {
+    init {
+        require(agentName.isNotBlank() && agentName.length <= 80)
+        require(modelId.isNotBlank() && modelId.length <= 4096)
+        require(modelName.isNotBlank() && modelName.length <= 4096)
+    }
+}
+
 data class ChildTaskRecord(
     val owner: ChildRunOwner,
     val parentMessageId: String,
@@ -17,7 +25,8 @@ data class ChildTaskRecord(
     /** Command CAS revision; execution status is compared separately. */
     val revision: Long = 0,
     val sourceTaskId: String? = null,
-    val commandKind: ChildTaskCommandKind? = null
+    val commandKind: ChildTaskCommandKind? = null,
+    val display: ChildTaskDisplay? = null
 ) {
     init {
         require(revision >= 0)

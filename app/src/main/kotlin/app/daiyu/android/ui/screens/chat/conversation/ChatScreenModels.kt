@@ -15,6 +15,8 @@ data class ChatScreenState(
     val contentRevision: Long = 0L,
     val interactiveModeEnabled: Boolean = false,
     val interactiveModeChangeEnabled: Boolean = true,
+    val automaticCompression: Boolean? = null,
+    val automaticCompressionPending: Boolean = false,
 )
 
 /** A new serial consumes a host navigation request, never a model execution state. */
@@ -93,6 +95,7 @@ data class WorkStepUi(
     val sections: List<ToolDetailSectionUi> = emptyList(),
     /** Host-validated dedicated projection; never grants execution permission. */
     val dedicatedKey: String? = null,
+    val categoryDetails: ToolCategoryDetailsUi? = null,
 ) {
     val toolCallId: String get() = id
 }
@@ -133,6 +136,7 @@ data class ComposerUi(
     val morphLoadingIndicator: Boolean = true,
     val morphLoadingBeforeResponseOnly: Boolean = false,
     val editorGeneration: Long = 0,
+    val voiceMode: ChatMenuAction = ChatMenuAction.VOICE_INPUT,
 )
 
 internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !imageSendBlocked && !supplementPending && when (phase) {

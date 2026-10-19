@@ -87,4 +87,39 @@ class ToolCardPresentationTest {
         assertFalse(pty.toString().contains("退出码"))
     }
 
+    @Test fun typedDetailsKeepSafeCategoryFieldsAndNeverEchoFreeText() {
+        val payload = """{"wait_status":0,"next_offset":256,"stdout":"token=secret","password":"private","state":"running"}"""
+        val detail = ToolCardPresentations.present("terminal_pty_read", "{}", payload).details
+        assertEquals("运行与输出", detail.heading)
+        assertTrue(detail.fields.contains(ToolFieldUi("原始等待状态", "0")))
+        assertTrue(detail.fields.contains(ToolFieldUi("下次偏移", "256")))
+        assertFalse(detail.toString().contains("secret"))
+        assertFalse(detail.toString().contains("private"))
+        ToolCardPresentations.categories.forEach { category ->
+            val typed = ToolCategoryDetails.project(category, payload, payload)
+            assertTrue(typed.heading.isNotBlank())
+            assertTrue(typed.notice.isNotBlank())
+            assertFalse(typed.toString().contains("token=secret"))
+        }
+    }
+    @Test fun taskDetailsUseReturnedStatesWithoutPromotingAdmissionToCompletion() {
+        val detail = ToolCategoryDetails.project("delegation", "{\"tasks\":[{}]}",
+            """{"accepted":true,"tasks":[{"state":"queued"},{"state":"running","text":"private-output"}]}""")
+        assertEquals(listOf("排队中", "执行中"), detail.items.map { it.fields.single().value })
+        assertFalse(detail.fields.any { it.label == "任务已完成" })
+        assertFalse(detail.toString().contains("private-output"))
+        assertTrue(ToolCategoryDetails.project("system_action", "{\"percent\":0,\"enabled\":false}", null)
+            .fields.containsAll(listOf(ToolFieldUi("百分比", "0"), ToolFieldUi("已启用", "否"))))
+    }
+
+    @Test fun copyIncludesTypedZeroCountsAndRevalidatesCurrentIdentity() {
+        val display = ToolCardPresentations.present("skills_list", "{}", "{\"skills\":[]}")
+        val step = WorkStepUi("call", display.title, display.summary, WorkStepState.OK,
+            WorkStepOwnerUi("conversation", "run", "message"), "skills_list", display.category,
+            display.sections, categoryDetails = display.details)
+        val turn = ChatTurnUi.Assistant("message", content = listOf(MessageContentUi.Tool(step)))
+        assertTrue(ToolCardPresentations.copySummary(listOf(turn), step)!!.contains("技能数：0"))
+        assertNull(ToolCardPresentations.copySummary(listOf(turn), step.copy(owner = WorkStepOwnerUi("other", "run", "message"))))
+    }
+
 }

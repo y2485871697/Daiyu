@@ -56,26 +56,28 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifier: Modifier = Modifier, assistant: AssistantDisplay? = null) {
+internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifier: Modifier = Modifier, assistant: AssistantDisplay? = null,
+    balanceState: app.daiyu.android.balance.BalanceState? = null) {
     val colors = MiuixTheme.colorScheme
     val currentEditorGeneration by rememberUpdatedState(state.editorGeneration)
     var attachments by remember { mutableStateOf(false) }
     var voiceModes by remember { mutableStateOf(false) }
     val hasText = state.text.isNotBlank() || (state.phase == ComposerPhase.IDLE && state.imageSendAvailable)
-    val primaryEnabled = if (hasText) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
+    val textAction = hasText && state.phase != ComposerPhase.RUNNING
+    val primaryEnabled = if (textAction) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
     val secondaryColor = if (state.enabled) colors.onSurfaceVariantSummary else colors.disabledOnSurface
     val primaryIcon = when {
         state.phase == ComposerPhase.PAUSED && !hasText -> DaiyuIcons.Resume
-        hasText && state.phase != ComposerPhase.IDLE -> DaiyuIcons.Steer
-        hasText -> DaiyuIcons.Send
+        textAction && state.phase != ComposerPhase.IDLE -> DaiyuIcons.Steer
+        textAction -> DaiyuIcons.Send
         state.phase == ComposerPhase.RUNNING -> DaiyuIcons.Pause
         else -> DaiyuIcons.Send
     }
     val primaryLabel = when {
         state.phase == ComposerPhase.PAUSED && !hasText -> "继续"
         state.supplementPending -> "正在追加"
-        hasText && state.phase != ComposerPhase.IDLE -> "追加消息"
-        hasText -> "发送"
+        textAction && state.phase != ComposerPhase.IDLE -> "追加消息"
+        textAction -> "发送"
         state.phase == ComposerPhase.RUNNING -> "暂停"
         else -> "发送"
     }
@@ -85,7 +87,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             ComposerChip(DaiyuIcons.Model, state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
                 Modifier.weight(1f).testTag("chat-model"),
-                onLongClick = { actions.onMenuAction(ChatMenuAction.SUB_AGENT) })
+                onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) })
             Row(Modifier.widthIn(min = 112.dp, max = 144.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
                 .combinedClickable(enabled = state.enabled, role = Role.Button, onClickLabel = "上下文统计", onClick = actions.onContextClick,
                     onLongClick = { actions.onMenuAction(ChatMenuAction.CONTEXT_SCOPE) })
@@ -166,22 +168,19 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         }
                         key(state.controlOwnerKey) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (hasText && state.phase != ComposerPhase.IDLE) {
-                                ChatIconButton(if (state.phase == ComposerPhase.PAUSED) DaiyuIcons.Resume else DaiyuIcons.Pause,
-                                    if (state.phase == ComposerPhase.PAUSED) "继续" else "暂停", actions.onPrimaryTap,
-                                    Modifier.size(40.dp).testTag("chat-control").controlGesture(actions, state.enabled), enabled = state.enabled,
-                                    onLongClick = actions.onPrimaryLongPress)
-                            }
+                            app.daiyu.android.balance.ui.ProviderBalanceIndicator(
+                                state = balanceState, modifier = Modifier.testTag("chat-provider-balance")
+                                    .widthIn(max = 60.dp).padding(horizontal = 2.dp), animateChanges = true)
                             ChatIconButton(primaryIcon, primaryLabel, {
-                                if (!hasText) actions.onPrimaryTap()
+                                if (!textAction) actions.onPrimaryTap()
                                 else if (state.phase == ComposerPhase.IDLE) actions.onSend(state.text)
                                 else actions.onSupplement(state.text)
-                            }, Modifier.size(48.dp).testTag(if (hasText || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
+                            }, Modifier.size(48.dp).testTag(if (textAction || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
                                 .controlGesture(actions, primaryEnabled),
                                 containerColor = if (!primaryEnabled) colors.disabledPrimaryButton
-                                    else if (state.phase == ComposerPhase.PAUSED || (!hasText && state.phase == ComposerPhase.RUNNING)) colors.onSurface else colors.primary,
+                                    else if (state.phase == ComposerPhase.PAUSED || (!textAction && state.phase == ComposerPhase.RUNNING)) colors.onSurface else colors.primary,
                                 enabled = primaryEnabled,
-                                tint = if (state.phase == ComposerPhase.PAUSED || (!hasText && state.phase == ComposerPhase.RUNNING)) colors.surface else colors.onPrimary,
+                                tint = if (state.phase == ComposerPhase.PAUSED || (!textAction && state.phase == ComposerPhase.RUNNING)) colors.surface else colors.onPrimary,
                                 onLongClick = if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
                             }
                         }
@@ -194,7 +193,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             onClick = actions.onVoice,
                             onLongClick = { actions.onVoiceLongPress(); voiceModes = true },
                         )
-                        ChatVoiceModeMenu(voiceModes, { voiceModes = false }, actions.onMenuAction)
+                        ChatVoiceModeMenu(voiceModes, { voiceModes = false }, actions.onMenuAction, state.voiceMode)
                     }
                 }
         }

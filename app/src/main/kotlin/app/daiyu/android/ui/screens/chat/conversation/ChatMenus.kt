@@ -19,6 +19,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Switch
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -35,13 +37,15 @@ enum class ChatMenuAction {
     NEW_CHAT, RENAME, INTERACTIVE_MODE, CONVERSATION_ID, EXPORT, CONTEXT_STATS,
     COMPRESS_CONTEXT, AUTO_COMPRESS, SUB_AGENT, OPEN_TERMINAL, OPEN_BROWSER, OPEN_WORKSPACE,
     ATTACH_IMAGE, ATTACH_VIDEO, ATTACH_FILE, ATTACH_FOLDER, ATTACH_PATH, GENERATE_IMAGE, GENERATE_VIDEO,
-    VOICE_INPUT, VOICE_CHAT, VOICE_DOUBAO, CONTEXT_SCOPE,
+    VOICE_INPUT, VOICE_CHAT, VOICE_DOUBAO, CONTEXT_SCOPE, COLLABORATION,
 }
 
 private data class MenuEntry(val title: String, val icon: ImageVector, val action: ChatMenuAction)
 
 @Composable
-internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit) {
+internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit,
+    interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true,
+    automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false) {
     val groups = listOf(
         listOf(
             MenuEntry("新建会话", DaiyuIcons.NewChat, ChatMenuAction.NEW_CHAT),
@@ -63,20 +67,38 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
     val colors = MiuixTheme.colorScheme
     val maxHeight = minOf(336.dp, (LocalConfiguration.current.screenHeightDp * 0.55f).dp)
     DropdownMenu(expanded, onDismiss, modifier = Modifier.testTag("chat-overflow-menu")
-        .widthIn(min = 240.dp, max = 292.dp).heightIn(max = maxHeight),
+        .widthIn(min = 208.dp, max = 292.dp).heightIn(max = maxHeight),
         shape = RoundedCornerShape(16.dp), containerColor = colors.surfaceContainer,
         tonalElevation = 0.dp, shadowElevation = 5.dp, border = BorderStroke(1.dp, colors.outline.copy(alpha = 0.7f))) {
         groups.forEachIndexed { index, entries ->
             if (index > 0) HorizontalDivider(Modifier.padding(vertical = 4.dp), color = colors.outline)
-            entries.forEach { entry -> ChatMenuItem(entry, onDismiss, onAction, Modifier.height(40.dp)) }
+            entries.forEach { entry ->
+                val checked = when (entry.action) {
+                    ChatMenuAction.INTERACTIVE_MODE -> interactiveModeEnabled
+                    ChatMenuAction.AUTO_COMPRESS -> automaticCompression
+                    else -> null
+                }
+                val enabled = when (entry.action) {
+                    ChatMenuAction.INTERACTIVE_MODE -> interactiveModeChangeEnabled
+                    ChatMenuAction.AUTO_COMPRESS -> automaticCompression != null && !automaticCompressionPending
+                    else -> true
+                }
+                ChatMenuItem(entry, onDismiss, onAction, Modifier.height(44.dp), checked, enabled)
+            }
         }
     }
 }
 
 @Composable
 private fun ChatMenuItem(entry: MenuEntry, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit,
-    modifier: Modifier = Modifier) {
+    modifier: Modifier = Modifier, checked: Boolean? = null, enabled: Boolean = true) {
     DropdownMenuItem(
+        enabled = enabled,
+        trailingIcon = if (checked == null) null else { {
+            if (entry.action == ChatMenuAction.INTERACTIVE_MODE || entry.action == ChatMenuAction.AUTO_COMPRESS)
+                Switch(checked = checked, onCheckedChange = null, enabled = enabled)
+            else Checkbox(checked = checked, onCheckedChange = null, enabled = enabled)
+        } },
         modifier = modifier.testTag("chat-menu:${entry.action.name}"),
         text = { Text(entry.title, style = MiuixTheme.textStyles.body1, color = MiuixTheme.colorScheme.onSurface) },
         leadingIcon = { Icon(entry.icon, null, Modifier.size(18.dp), tint = daiyuIconColor(entry.icon)) },
@@ -131,7 +153,8 @@ internal fun UserTurnMenu(expanded: Boolean, onDismiss: () -> Unit, id: String, 
 }
 
 @Composable
-internal fun ChatVoiceModeMenu(expanded: Boolean, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit) {
+internal fun ChatVoiceModeMenu(expanded: Boolean, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit,
+    selected: ChatMenuAction = ChatMenuAction.VOICE_INPUT) {
     DropdownMenu(expanded, onDismiss, shape = RoundedCornerShape(12.dp),
         containerColor = MiuixTheme.colorScheme.surfaceContainer, tonalElevation = 0.dp,
         border = BorderStroke(1.dp, MiuixTheme.colorScheme.outline)) {
@@ -139,6 +162,9 @@ internal fun ChatVoiceModeMenu(expanded: Boolean, onDismiss: () -> Unit, onActio
             MenuEntry("语音输入", DaiyuIcons.Voice, ChatMenuAction.VOICE_INPUT),
             MenuEntry("语音对话", DaiyuIcons.Speak, ChatMenuAction.VOICE_CHAT),
             MenuEntry("豆包实时通话", DaiyuIcons.Voice, ChatMenuAction.VOICE_DOUBAO),
-        ).forEach { ChatMenuItem(it, onDismiss, onAction) }
+        ).forEach { entry ->
+            ChatMenuItem(entry, onDismiss, onAction, checked = entry.action == selected,
+                enabled = entry.action != ChatMenuAction.VOICE_DOUBAO)
+        }
     }
 }

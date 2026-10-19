@@ -170,7 +170,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                 val owner = binding.owner
                 val record = ChildTaskRecord(ChildRunOwner(owner.conversationId.value, owner.runId.value,
                     group, epoch, UUID.randomUUID().toString(), UUID.randomUUID().toString()),
-                    owner.assistantMessageId.value, owner.ownerId, index, inputTask.profileId, inputTask.prompt)
+                    owner.assistantMessageId.value, owner.ownerId, index, inputTask.profileId, inputTask.prompt,
+                    display = resources.models.getValue(inputTask.profileId).display)
                 Task(binding, request, record, context.invocation, deadline,
                     ChildTaskPauseControl { notifyChanged(binding) }).also { tasks[record.owner.childRunId] = it }
             }
@@ -277,7 +278,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                 val record = ChildTaskRecord(ChildRunOwner(parent.conversationId.value, parent.runId.value,
                     UUID.randomUUID().toString(), epoch, UUID.randomUUID().toString(), UUID.randomUUID().toString()),
                     parent.assistantMessageId.value, parent.ownerId, 0, command.profileId, command.instruction,
-                    sourceTaskId = source.owner.childRunId, commandKind = command.kind)
+                    sourceTaskId = source.owner.childRunId, commandKind = command.kind,
+                    display = binding.resources?.models?.get(command.profileId)?.display)
                 Task(binding, ChildTaskRequest(fingerprint.toByteArray(), 1), record, invocation,
                     System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis),
                     ChildTaskPauseControl { notifyChanged(binding) }, source).also {

@@ -325,7 +325,7 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
     fun testVersionSevenUpgradeKeepsHistoryAndCreatesTaskSchema() {
         val db = fresh(); val owner = parent(db); val before = db.messages(owner.conversationId)
         db.writableDatabase.execSQL("DROP TABLE child_tasks"); app.daiyu.android.removeAssistantSchemaForLegacyFixture(db.writableDatabase); db.writableDatabase.version = 7; db.close()
-        assertEquals(20, db.readableDatabase.version); assertEquals(before, db.messages(owner.conversationId))
+        assertEquals(21, db.readableDatabase.version); assertEquals(before, db.messages(owner.conversationId))
         assertTrue(SQLiteChildTaskStore(db).list(owner.conversationId.value, 20).isEmpty())
         val runtime = lease(db); val newOwner = parent(db); val rows = tasks(newOwner, 1)
         runtime.childTasks.enqueue(newOwner, rows)
@@ -421,6 +421,20 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
             assertEquals("retained child answer", rows.getValue(1).text)
             assertEquals(2, db.messages(owner.conversationId).size)
         } finally { first.release.countDown(); second.release.countDown(); closeChildren(supervisor) }
+    }
+
+    fun testTaskDisplayRoundTripsAndSurvivesRuntimeRecovery() {
+        val db = fresh(); val runtime = lease(db); val owner = parent(db)
+        val display = ChildTaskDisplay("历史审查代理", "api-model", "冻结模型名称")
+        val record = tasks(owner, 1).single().copy(display = display)
+        runtime.childTasks.enqueue(owner, listOf(record))
+        assertEquals(record, runtime.childTasks.list(owner.conversationId.value).single())
+        runtime.childTasks.started(record)
+        assertEquals(display, runtime.childTasks.list(owner.conversationId.value).single().display)
+        runtime.close()
+        val recovered = lease(db).childTasks.list(owner.conversationId.value).single()
+        assertEquals(ChildTaskStatus.UNKNOWN, recovered.status)
+        assertEquals(display, recovered.display)
     }
 
 }

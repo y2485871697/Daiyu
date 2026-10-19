@@ -18,7 +18,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 data class ChildModelTask(val profileId: String, val prompt: String)
 
 /** An exact host-frozen selection. Zero means no extra model-pool limit. */
-class ChildModelDefinition(val poolKey: String, val parallelLimit: Int, val create: () -> ModelPort) {
+class ChildModelDefinition(val poolKey: String, val parallelLimit: Int, val display: ChildTaskDisplay?, val create: () -> ModelPort) {
+    constructor(poolKey: String, parallelLimit: Int, create: () -> ModelPort) : this(poolKey, parallelLimit, null, create)
     init { require(poolKey.isNotBlank()); require(parallelLimit >= 0) }
 }
 
@@ -115,7 +116,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
             val records = queued ?: snapshot.mapIndexed { index, task ->
                 ChildTaskRecord(ChildRunOwner(parent.conversationId.value, parent.runId.value, group, current,
                     UUID.randomUUID().toString(), UUID.randomUUID().toString()), parent.assistantMessageId.value,
-                    parent.ownerId, index, task.profileId, task.prompt)
+                    parent.ownerId, index, task.profileId, task.prompt, display = models.getValue(task.profileId).display)
             }
             if (queued == null) store?.enqueue(parent, records)
             snapshot.forEachIndexed { index, task ->

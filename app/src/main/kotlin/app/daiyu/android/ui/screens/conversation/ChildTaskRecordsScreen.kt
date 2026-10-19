@@ -241,7 +241,8 @@ private fun TaskRecordCard(record: ChildTaskRecord, live: RetainedChildTask?, en
     }
     SettingsCard(Modifier.padding(bottom = 12.dp).testTag("child-task:${record.owner.childRunId}")) {
         Column(Modifier.padding(16.dp)) {
-            Text(record.profileId, style = MiuixTheme.textStyles.body1)
+            Text(record.display?.agentName ?: record.profileId, style = MiuixTheme.textStyles.body1)
+            Text(record.display?.modelName ?: "模型未记录", style = MiuixTheme.textStyles.footnote1)
             Text("修订 ${record.revision}", style = MiuixTheme.textStyles.footnote1)
             record.sourceTaskId?.let { Text("来源 $it · ${record.commandKind?.name}", style = MiuixTheme.textStyles.footnote1) }
             if (onCommand != null) {

@@ -2,6 +2,7 @@ package app.daiyu.android.delegation
 
 import app.daiyu.android.domain.ModelPort
 import app.daiyu.android.domain.delegation.ChildModelDefinition
+import app.daiyu.android.domain.delegation.ChildTaskDisplay
 import app.daiyu.android.model.*
 import app.daiyu.android.storage.ModelSettings
 
@@ -11,7 +12,7 @@ internal class SavedSubAgentRuntimeBindings(
     private val createModel: (ProviderSnapshot) -> ModelPort = ModelFactory::create
 ) {
     private class Approval(val profile: SubAgentProfile, val saved: ProviderSnapshot, val child: ProviderSnapshot,
-        val resolveSavedModel: ((String, String) -> ModelSettings)?)
+        val resolveSavedModel: ((String, String) -> ModelSettings)?, val modelName: String)
     private val approvals = mutableMapOf<SubAgentConfigKey.Conversation, MutableMap<String, Approval>>()
 
     @Synchronized fun authorizeSavedModel(owner: SubAgentConfigKey.Conversation, profile: SubAgentProfile,
@@ -47,7 +48,7 @@ internal class SavedSubAgentRuntimeBindings(
         val child = ModelFactory.snapshot(saved.asModelSettings().copy(model = expectedApiModel,
             batteryEnabled = false, deviceStatusEnabled = false, requestOptions = options.copy(speedMode = speed, openAiWebSearchEnabled = false)))
         val detached = profile.copy(reasoningByModel = profile.reasoningByModel.toMap(), gptSpeedByModel = profile.gptSpeedByModel.toMap())
-        owned[profile.id] = Approval(detached, saved, child, resolveSavedModel)
+        owned[profile.id] = Approval(detached, saved, child, resolveSavedModel, selected.displayName.ifBlank { child.model })
     }
 
     @Synchronized fun freeze(owner: SubAgentConfigKey.Conversation, config: ConversationSubAgentConfig,
@@ -68,7 +69,8 @@ internal class SavedSubAgentRuntimeBindings(
         require(current) { "Saved provider or model record changed after binding" }
         return selected.associate { grant ->
             val model = SubAgentParallelModel(grant.profile.providerId, grant.child.model)
-            grant.profile.id to ChildModelDefinition(frozen.poolKey(owner, model), frozen.parallelLimit(model)) { runModel(grant.child) }
+            grant.profile.id to ChildModelDefinition(frozen.poolKey(owner, model), frozen.parallelLimit(model),
+                ChildTaskDisplay(grant.profile.name, grant.child.model, grant.modelName)) { runModel(grant.child) }
         }
     }
 

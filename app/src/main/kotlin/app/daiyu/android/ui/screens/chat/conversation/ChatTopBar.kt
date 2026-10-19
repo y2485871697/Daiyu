@@ -35,7 +35,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.BalanceState?, actions: ChatScreenActions, modifier: Modifier = Modifier, assistantLabel: String = "助手",
-    interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true) {
+    interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true,
+    automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false) {
     var expanded by remember { mutableStateOf(false) }
     Row(modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         ChatIconButton(DaiyuIcons.Menu, "打开侧边栏", actions.onOpenSidebar)
@@ -48,18 +49,13 @@ internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.B
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        app.daiyu.android.balance.ui.ProviderBalanceIndicator(
-            state = balanceState,
-            modifier = Modifier.testTag("chat-provider-balance").widthIn(max = 116.dp)
-                .padding(horizontal = 8.dp, vertical = 5.dp),
-            animateChanges = true,
-        )
         InteractiveModeToggle(enabled = interactiveModeChangeEnabled, checked = interactiveModeEnabled,
             onCheckedChange = actions.onInteractiveModeChange)
-        ChatIconButton(DaiyuIcons.NewChat, "新建会话", { actions.onMenuAction(ChatMenuAction.NEW_CHAT) }, tint = daiyuIconColor(DaiyuIcons.NewChat))
+        ChatIconButton(DaiyuIcons.SubAgent, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, tint = daiyuIconColor(DaiyuIcons.SubAgent))
         Box {
             ChatIconButton(DaiyuIcons.More, "更多", { actions.onMore(); expanded = true })
-            ChatOverflowMenu(expanded, { expanded = false }, actions.onMenuAction)
+            ChatOverflowMenu(expanded, { expanded = false }, actions.onMenuAction,
+                interactiveModeEnabled, interactiveModeChangeEnabled, automaticCompression, automaticCompressionPending)
         }
     }
 }

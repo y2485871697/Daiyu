@@ -63,7 +63,7 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         prefs(source)
         val db = database()
         val store = SqliteAssistantStore(db).also { it.requireReady() }
-        assertEquals(20, db.readableDatabase.version)
+        assertEquals(21, db.readableDatabase.version)
         assertEquals(listOf(second, first), store.list())
         assertEquals(first.id, store.selectedId.value)
         assertEquals(source, raw())

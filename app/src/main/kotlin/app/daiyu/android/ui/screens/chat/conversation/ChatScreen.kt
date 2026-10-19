@@ -70,7 +70,8 @@ internal fun DaiyuChatScreen(
     ) {
         ChatTopBar(state.title, state.balanceState, actions, assistantLabel = state.composer.assistantLabel,
             interactiveModeEnabled = state.interactiveModeEnabled,
-            interactiveModeChangeEnabled = state.interactiveModeChangeEnabled)
+            interactiveModeChangeEnabled = state.interactiveModeChangeEnabled,
+            automaticCompression = state.automaticCompression, automaticCompressionPending = state.automaticCompressionPending)
         state.statusText?.let { status ->
             // Operational errors/recovery/preparation are not money and never enter the amount slot.
             top.yukonga.miuix.kmp.basic.Text(status,
@@ -82,6 +83,6 @@ internal fun DaiyuChatScreen(
         androidx.compose.runtime.key(state.conversationKey) {
             ChatMessageList(state.turns, state.canJumpToPreviousUser, actions, Modifier.weight(1f), state.scrollRequest, turnExtras, imageLoader, dedicatedTool)
         }
-        ChatComposer(state.composer, actions, assistant = assistant)
+        ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState)
     }
 }

@@ -5,7 +5,7 @@ import org.json.JSONObject
 /** Display taxonomy, not a registry or an execution permission. */
 internal object ToolCardPresentations {
     val categories = setOf("memory", "skills", "delegation", "child_control", "workspace", "terminal", "background_job", "files", "image_read", "browser", "gui", "apps", "device_read", "personal_search", "system_action", "generation", "speech", "mcp", "context", "user_question", "generic")
-    data class Presentation(val category: String, val title: String, val summary: String, val sections: List<ToolDetailSectionUi>)
+    data class Presentation(val category: String, val title: String, val summary: String, val sections: List<ToolDetailSectionUi>, val details: ToolCategoryDetailsUi)
     private val tools = buildMap {
         fun group(category: String, vararg entries: Pair<String, String>) { entries.forEach { (name, title) -> put(name, category to title) } }
         group("memory", "assistant_memory_search" to "检索记忆", "assistant_memory_read" to "读取记忆")
@@ -92,7 +92,7 @@ internal object ToolCardPresentations {
         val title = if (kind.first == "generic" && toolName.matches(Regex("[A-Za-z][A-Za-z0-9_.-]{0,63}"))) {
             "执行其他工具 · $toolName"
         } else kind.second
-        return Presentation(kind.first, title, summary, sections)
+        return Presentation(kind.first, title, summary, sections, ToolCategoryDetails.project(kind.first, arguments, result))
     }
     fun copySummary(turns: List<ChatTurnUi>, requested: WorkStepUi): String? {
         if (requested.owner == null) return null
@@ -101,7 +101,12 @@ internal object ToolCardPresentations {
             else turn.workProcess?.segments.orEmpty().flatMap { it.steps }.asSequence()
         }.firstOrNull { it.owner == requested.owner && it.toolCallId == requested.toolCallId && it.toolName == requested.toolName }
             ?: return null
-        return (listOf(current.name, current.detail) + current.sections.map { "${it.title}：${it.text}" })
+        val category = current.categoryDetails
+        val typed = category?.let { detail -> listOf(detail.heading, detail.notice) +
+            detail.fields.map { "${it.label}：${it.value}" } + detail.items.flatMap { item ->
+                listOf(item.title) + item.fields.map { "${it.label}：${it.value}" }
+            } }.orEmpty()
+        return (listOf(current.name, current.detail) + typed + current.sections.map { "${it.title}：${it.text}" })
             .joinToString("\n").take(4096)
     }
 

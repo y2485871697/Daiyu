@@ -781,7 +781,12 @@ class MainActivity : ComponentActivity() {
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
-            if (value != retainedPageState) revokeBackupExportPage()
+            if (value != retainedPageState) {
+                childStatusVisit = null
+                usageVisit = null
+                revokeBackupExportPage()
+                if (value == "chat") refreshConfirmedModelLabel()
+            }
             if (value != "browser") closeBrowserVisualVisit()
             if (value != "chat") revokeChildAuthorization()
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
@@ -1189,6 +1194,15 @@ class MainActivity : ComponentActivity() {
     }
     private var collaborationOwner by mutableStateOf<String?>(null)
     private var collaborationVisible by mutableStateOf(false)
+    private var childStatusVisit by mutableStateOf<Pair<Any, String?>?>(null)
+    private data class UsageVisit(val token: Any, val conversation: String?, val scopePicker: Boolean)
+    private var usageVisit by mutableStateOf<UsageVisit?>(null)
+    private var automaticCompression by mutableStateOf<Boolean?>(null)
+    private var automaticCompressionPending by mutableStateOf(false)
+    private var confirmedModelLabel by mutableStateOf("模型")
+    private var modelLabelRead: Any? = null
+    private val voiceEntryPreferences by lazy { getSharedPreferences("chat-voice-entry", MODE_PRIVATE) }
+    private var voiceEntryMode by mutableStateOf(ChatMenuAction.VOICE_INPUT)
     private var thinkingPicker by mutableStateOf(false)
     private val appearanceStore by lazy { AppearanceSettingsStore(this) }
     private var appearance by mutableStateOf(AppearanceSettings())
@@ -1205,6 +1219,12 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        voiceEntryMode = when (voiceEntryPreferences.getString("mode", null)) {
+            ChatMenuAction.VOICE_CHAT.name -> ChatMenuAction.VOICE_CHAT
+            else -> ChatMenuAction.VOICE_INPUT
+        }
+        refreshAutomaticCompression()
+        refreshConfirmedModelLabel()
         nextBrowserSaveRequestCode = state?.getInt("browser-save-next", 14000) ?: 14000
         lifecycleScope.launch {
             // Application-retained deferred: first Keystore/disk read runs on IO, once per process.
@@ -1755,7 +1775,8 @@ class MainActivity : ComponentActivity() {
                                 val extrasMaxHeight = minOf(200.dp, maxHeight * 0.35f)
                                 Column(Modifier.fillMaxSize()) {
                                     DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
-                                        composer = projectedVoiceComposer()), chatActions(), modifier = Modifier.weight(1f), turnExtras = { turn ->
+                                        automaticCompression = automaticCompression, automaticCompressionPending = automaticCompressionPending,
+                                        composer = projectedVoiceComposer().copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel)), chatActions(), modifier = Modifier.weight(1f), turnExtras = { turn ->
                                         if (turn.segmentIndex == 0) {
                                             QuestionCleanup(turn.id)
                                             VoiceExtras(turn.id)
@@ -1851,6 +1872,20 @@ class MainActivity : ComponentActivity() {
                         } },
                         onDismiss = { if(assistantSelectionOwner===owner) assistantPicker = false })
                 } }
+                usageVisit?.let { visit ->
+                    if (retainedPage == "chat" && !sidebarVisible && selected?.id?.value == visit.conversation) {
+                        key(visit.token) { ChatUsageDialog(controller, visit.conversation, visit.scopePicker,
+                            onDismiss = { if (usageVisit === visit) usageVisit = null }) }
+                    } else LaunchedEffect(visit) { if (usageVisit === visit) usageVisit = null }
+                }
+                childStatusVisit?.let { visit ->
+                    if (retainedPage == "chat" && !sidebarVisible && selected?.id?.value == visit.second) {
+                        key(visit.first) {
+                            SubAgentStatusHost(controller, visit.second,
+                                onDismiss = { if (childStatusVisit === visit) childStatusVisit = null })
+                        }
+                    } else LaunchedEffect(visit) { if (childStatusVisit === visit) childStatusVisit = null }
+                }
                 val owner = collaborationOwner
                 val authorizationEpoch = childAuthorizationEpoch
                 val authorizationGeneration = editorGeneration
@@ -2034,7 +2069,10 @@ class MainActivity : ComponentActivity() {
         },
         onVisibleCompleted = completionReadAction(),
         onInteractiveModeChange = { enabled -> if (activityUsable()) controller.interactiveMode.setEnabled(enabled) },
-        onVoice = ::requestDictation, onContextClick = ::openContextPage,
+        onMore = { if (currentChat()) refreshAutomaticCompression() },
+        onVoice = { if (voiceEntryMode == ChatMenuAction.VOICE_INPUT) requestDictation()
+            else if (currentChat()) voiceConversationDialogOwner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) },
+        onContextClick = { if (currentChat()) usageVisit = UsageVisit(Any(), selected?.id?.value, false) },
         onRegenerate = messageCallbacks.onRegenerate, onSpeak = { id ->
             if (editorMatches() && controller.ready && !controller.dataBusy &&
                 speechHost.owner == renderedSpeechOwner && selected?.id?.value == renderedConversation) {
@@ -2103,18 +2141,21 @@ class MainActivity : ComponentActivity() {
             ChatMenuAction.ATTACH_FOLDER -> if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch) pickChatReference(true)
             ChatMenuAction.INTERACTIVE_MODE -> if (currentChat())
                 controller.interactiveMode.setEnabled(!controller.interactiveMode.enabled)
-            ChatMenuAction.CONTEXT_STATS, ChatMenuAction.COMPRESS_CONTEXT, ChatMenuAction.CONTEXT_SCOPE -> openContextPage()
-            ChatMenuAction.AUTO_COMPRESS -> if (currentChat()) openCompressionSettings()
-            ChatMenuAction.VOICE_INPUT -> requestDictation()
-            ChatMenuAction.VOICE_CHAT -> if (currentChat()) {
-                voiceConversationDialogOwner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+            ChatMenuAction.CONTEXT_STATS -> if (currentChat()) usageVisit = UsageVisit(Any(), selected?.id?.value, false)
+            ChatMenuAction.CONTEXT_SCOPE -> if (currentChat()) usageVisit = UsageVisit(Any(), selected?.id?.value, true)
+            ChatMenuAction.COMPRESS_CONTEXT -> openContextPage()
+            ChatMenuAction.AUTO_COMPRESS -> if (currentChat()) toggleAutomaticCompression()
+            ChatMenuAction.VOICE_INPUT, ChatMenuAction.VOICE_CHAT -> if (currentChat()) {
+                if (voiceEntryPreferences.edit().putString("mode", action.name).commit()) voiceEntryMode = action
+                else toast("语音入口未保存；保持原选择")
             }
-            ChatMenuAction.VOICE_DOUBAO -> if (currentChat()) retainedPage = "voice-settings"
+            ChatMenuAction.VOICE_DOUBAO -> if (currentChat()) toast("豆包实时通话尚未接入；可使用已配置的语音对话")
             ChatMenuAction.NEW_CHAT -> select(null)
             ChatMenuAction.RENAME -> selected?.let { conversation ->
                 editConversation(conversation.id.value, false)
             }
-            ChatMenuAction.SUB_AGENT -> { collaborationOwner = selected?.id?.value; collaborationVisible = true }
+            ChatMenuAction.SUB_AGENT -> if (currentChat()) childStatusVisit = Any() to selected?.id?.value
+            ChatMenuAction.COLLABORATION -> { collaborationOwner = selected?.id?.value; collaborationVisible = true }
             ChatMenuAction.LOAD_EARLIER -> loadEarlier()
             ChatMenuAction.LOCATE_USER -> chooseUserMessage()
             ChatMenuAction.BOTTOM -> jumpToBottom()
@@ -4715,7 +4756,7 @@ class MainActivity : ComponentActivity() {
         imagePanelVisible = imageHost.hasAttachments || imageHost.fenced ||
             MessageHistory.expand(shown.map { it.second }).any { row -> row.blocks.any { it is MessageBlock.Image } }
         if (videoPanelVisible) imagePanelVisible = false
-        collaborationOwner = null; collaborationVisible = false; publishChat(); jumpToBottom(); refresh()
+        childStatusVisit = null; usageVisit = null; collaborationOwner = null; collaborationVisible = false; publishChat(); jumpToBottom(); refresh()
     }
     private fun sendDraft(text: String, universal: UniversalSend? = null) {
         if (pendingTextSend != null || text != draft || text.isBlank()) {
@@ -4958,9 +4999,7 @@ class MainActivity : ComponentActivity() {
         val binding=selected?.id?.let(controller.database::assistantId) ?: if(selected==null) assistantStore.selectedId.value else null
         if(binding==null) "未绑定助手" else assistantStore.read(binding)?.name ?: "助手已删除，请重新绑定"
     } catch (_:Exception) { "助手不可用" }
-    private fun savedModelLabel(): String = try {
-        chatModelSettings?.model?.ifBlank { "模型" } ?: "模型"
-    } catch (_: Exception) { "模型" }
+    private fun savedModelLabel(): String = confirmedModelLabel
     private fun readLoadedWindow(id: ConversationId, before: Long, count: Int): List<Pair<Long, Message>> {
         val result = mutableListOf<Pair<Long, Message>>()
         var cursor = before
@@ -5060,6 +5099,46 @@ class MainActivity : ComponentActivity() {
         (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("代鱼消息", text))
     }
 
+    private fun refreshConfirmedModelLabel() {
+        val request = Any()
+        modelLabelRead = request
+        lifecycleScope.launch {
+            val saved = withContext(Dispatchers.IO) { runCatching {
+                val editor = controller.providers.activeEditor()
+                controller.providers.withEditor(editor) { it.load().model }
+            }.getOrNull() }
+            if (activityUsable() && modelLabelRead === request) {
+                confirmedModelLabel = saved?.ifBlank { "模型" } ?: "模型"
+            }
+        }
+    }
+
+    private fun refreshAutomaticCompression() {
+        if (automaticCompressionPending) return
+        automaticCompressionPending = true
+        lifecycleScope.launch {
+            val value = withContext(Dispatchers.IO) { runCatching {
+                app.daiyu.android.context.ProductionCompressionSettingsStore(applicationContext).snapshot().automatic
+            } }
+            automaticCompression = value.getOrNull()
+            automaticCompressionPending = false
+        }
+    }
+    private fun toggleAutomaticCompression() {
+        val expected = automaticCompression ?: return toast("自动压缩配置不可用；请先核对摘要配置")
+        if (automaticCompressionPending) return
+        automaticCompressionPending = true
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching {
+                val store = app.daiyu.android.context.ProductionCompressionSettingsStore(applicationContext)
+                store.changeAutomatic(expected).automatic
+            } }
+            automaticCompressionPending = false
+            automaticCompression = result.getOrNull()
+            if (result.isFailure && activityUsable()) toast("自动压缩未确认；请在摘要配置中核对，不会自动发起压缩")
+        }
+    }
+
     private fun openChatModels() {
         requireActivityUsable()
         dismissChatModels()
@@ -5090,6 +5169,7 @@ class MainActivity : ComponentActivity() {
                 cancelled.get() || chatModelCancelled !== cancelled) return@launch
             val saved = settings.getOrNull()
             chatModelSettings = saved
+            confirmedModelLabel = saved?.model?.ifBlank { "模型" } ?: "模型"
             chatModelProviderEditor = loaded.getOrNull()?.first
             val snapshot = catalog.getOrNull()
             val session = snapshot?.let { LocalCatalogChatModelPickerSession(it, saved?.model.orEmpty()) }
@@ -5119,7 +5199,10 @@ class MainActivity : ComponentActivity() {
                 controller.active == null && !controller.dataBusy)
             controller.selectProviderCatalogModel(checkNotNull(chatModelProviderEditor), saved, ticket) { success ->
                 if (activityUsable()) {
-                    if (success) imageHost.configurationChanged()
+                    if (success) {
+                        imageHost.configurationChanged()
+                        refreshConfirmedModelLabel()
+                    }
                     if (chatModelOwner === owner && chatModelSession === session && retainedPage == "chat") {
                         if (success) { dismissChatModels(); refresh() }
                         else {

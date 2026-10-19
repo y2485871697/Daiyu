@@ -64,7 +64,7 @@ class NativeCompletionModel internal constructor(
             if (settings.protocol == ProviderProtocol.CHAT_COMPLETIONS)
                 SessionGateway.applyResponses(request, endpoint, settings.requestOptions.sessionGateway, sessionContext)
             else require(!settings.requestOptions.sessionGateway.matches(settings.model, endpoint)) { "Gemini 不支持 OpenAI 会话网关请求字段" }
-            ReasoningRequestPolicy.validate(request, settings.protocol)
+            ReasoningRequestPolicy.validate(request, settings.protocol, settings.reasoningOverride)
             val headers = SessionGateway.headers(endpoint, sessionContext)
             val bytes = ImageRequestPreflight.bytes(request, settings, null, cancelled::get)
             var deliveryFailure: Exception? = null

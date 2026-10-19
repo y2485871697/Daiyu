@@ -34,6 +34,36 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         try { root.deleteRecursively() } finally { super.tearDown() }
     }
 
+    fun testRuntimeOverridesAreFrozenWithoutPreferenceWritesAndEditsInvalidateOldConfiguration() {
+        store.save(initial)
+        val ticket = store.modelCatalogSnapshot().selectionFor(initial.model)!!
+        val edited = ticket.record.copy(settings = ticket.record.settings.copy(
+            contextWindowOverride = 8192, reasoningOverride = false, visionOverride = true))
+        assertEquals(CatalogLocalEditResult.APPLIED, store.modelCatalog.replaceSelection(ticket, edited) { false })
+        val directory = store.localModelCatalogSnapshot()
+        val preferences = raw.all
+        val repository = ProviderRepository(context, primary = store)
+        val frozen = repository.freezeActive()
+        assertEquals(8192, frozen.settings.contextWindowOverride)
+        assertEquals(false, frozen.settings.reasoningOverride)
+        assertEquals(true, frozen.settings.visionOverride)
+        assertTrue(repository.isCurrentActive(frozen))
+        assertEquals(directory, store.localModelCatalogSnapshot())
+        assertEquals(preferences, raw.all)
+        assertNull(store.load().contextWindowOverride)
+        val nextTicket = store.localModelCatalogSnapshot()!!.selectionFor(initial.model)!!
+        val automatic = nextTicket.record.copy(settings = nextTicket.record.settings.copy(
+            contextWindowOverride = null, reasoningOverride = null, visionOverride = null))
+        assertEquals(CatalogLocalEditResult.APPLIED, store.modelCatalog.replaceSelection(nextTicket, automatic) { false })
+        assertFalse(repository.isCurrentActive(frozen))
+        val next = repository.freezeActive()
+        assertNull(next.settings.contextWindowOverride)
+        assertNull(next.settings.reasoningOverride)
+        assertNull(next.settings.visionOverride)
+        assertTrue(repository.isCurrentActive(next))
+        assertEquals(8192, frozen.settings.contextWindowOverride)
+    }
+
     fun testInterruptedAccountSaveBlocksExecutionAndDirectoryUntilExplicitRecovery() {
         store.save(initial)
         append(importedModel("old-account-model"))

@@ -3224,7 +3224,8 @@ class ChatController internal constructor(private val application:Application,
             // draft CAS and database.send stay unchanged. No re-observe or second resource owner.
             val modelUser = if (gui == null) user else app.daiyu.android.gui.GuiConfirmedModelPort.project(
                 user, checkNotNull(gui.delivery))
-            val frozen = coordinator.freeze(conversationId,listOf(modelUser),token.cancellation, summaryUsage = summary.usagePort)
+            val frozen = coordinator.freeze(conversationId,listOf(modelUser),token.cancellation, summaryUsage = summary.usagePort,
+                contextWindowOverride = requestProvider.contextWindowOverride)
             if (video == null) coordinator.prepare(frozen) else {
                 // A video run must not silently replace physical/retained history with a text summary.
                 // Keep the same policy/budget and acceptance revision, but send every physical row.

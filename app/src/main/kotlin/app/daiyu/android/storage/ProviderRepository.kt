@@ -96,7 +96,7 @@ internal class ProviderRepository(
         check(requireProvider(state, id).enabled) { "提供商未启用" }
         val store = resolveStore(id)
         store.modelCatalog.readConfiguration { revision ->
-            ProviderRunConfiguration(ProviderEditorSlot(id, state.revision), store.load().also { it.validate() }, revision)
+            ProviderRunConfiguration(ProviderEditorSlot(id, state.revision), store.loadForRun().also { it.validate() }, revision)
         }
     }
     fun isCurrentActive(frozen: ProviderRunConfiguration): Boolean = try {
@@ -106,7 +106,7 @@ internal class ProviderRepository(
             else {
                 val store = resolveStore(frozen.editor.slotId)
                 store.modelCatalog.readConfiguration { revision ->
-                    revision == frozen.configurationRevision && store.load() == frozen.settings
+                    revision == frozen.configurationRevision && store.loadForRun() == frozen.settings
                 }
             }
         }

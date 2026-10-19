@@ -66,6 +66,24 @@ class ContextPreparationCoordinatorTest : InstrumentationTestCase() {
         models: SummaryModelResolver = SummaryModelResolver { bound() }) =
         ContextPreparationCoordinator(service, settings, policies, models)
 
+    fun testRunWindowOverridesSavedCapacityWithoutMutatingPreferences() {
+        val owner = seed(1)
+        val saved = settings().copy(automatic = false, contextWindowTokens = 100000)
+        val coordinator = coordinator({ saved }, SummaryModelResolver { error("automatic disabled") })
+        val input = pending(owner).copy(blocks = listOf(MessageBlock.Text("input", "x".repeat(20000))))
+        val frozen = coordinator.freeze(owner, listOf(input), contextWindowOverride = 2048)
+        assertEquals(2048L, frozen.settings.contextWindowTokens)
+        assertEquals(2048L, frozen.policy.contextTokens)
+        assertEquals(100000L, saved.contextWindowTokens)
+        val before = service.displayHistory(owner)
+        var rejected = false
+        try { coordinator.prepare(frozen) } catch (_: ContextCapacityExceededException) { rejected = true }
+        assertTrue(rejected)
+        assertEquals(before, service.displayHistory(owner))
+        val automatic = coordinator.freeze(owner, listOf(pending(owner)))
+        assertEquals(saved, automatic.settings)
+    }
+
     fun testFrozenSettingsBindingAndPendingAreUsedOnce() {
         val owner = seed(); val original = service.displayHistory(owner)
         var current = settings(); var resolved: SummaryModelBinding? = null; var requests = 0

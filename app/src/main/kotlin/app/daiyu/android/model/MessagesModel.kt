@@ -80,7 +80,7 @@ class MessagesModel internal constructor(
                 settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens), ProviderProtocol.MESSAGES),
                 assistantInstructions,
             )
-            ReasoningRequestPolicy.validate(request, ProviderProtocol.MESSAGES)
+            ReasoningRequestPolicy.validate(request, ProviderProtocol.MESSAGES, settings.reasoningOverride)
             settings.requestOptions.sessionGateway.requireExecutable()
             SessionGateway.applyAnthropic(request, sessionContext)
             val sessionHeaders = SessionGateway.headers(endpoint, sessionContext)

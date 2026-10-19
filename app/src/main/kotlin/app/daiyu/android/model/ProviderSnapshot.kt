@@ -29,8 +29,11 @@ class ProviderSnapshot private constructor(
     val deviceStatusEnabled: Boolean,
     val requestOptions: ProviderRequestOptions,
     val customHeaders: ProviderHeaders,
-    /** Host-verified capability for this exact endpoint/protocol/model; null means unknown. */
+    /** Effective image policy: catalog declaration first, otherwise the original host capability. */
     val imageInputSupported: Boolean?,
+    val contextWindowOverride: Int?,
+    val reasoningOverride: Boolean?,
+    val visionOverride: Boolean?,
     tools: Set<ReadOnlyTool>
 ) {
     val tools: Set<ReadOnlyTool> =
@@ -46,6 +49,9 @@ class ProviderSnapshot private constructor(
         protocol = protocol,
         requestOptions = requestOptions,
         customHeaders = customHeaders,
+        contextWindowOverride = contextWindowOverride,
+        reasoningOverride = reasoningOverride,
+        visionOverride = visionOverride,
     )
 
     internal fun withoutNativeSearch(): ProviderSnapshot = if (!requestOptions.openAiWebSearchEnabled) this else
@@ -61,7 +67,8 @@ class ProviderSnapshot private constructor(
         protocol == other.protocol && endpoint == other.endpoint && model == other.model &&
         apiKey == other.apiKey && responsesPath == other.responsesPath &&
         batteryEnabled == other.batteryEnabled && deviceStatusEnabled == other.deviceStatusEnabled &&
-        tools == other.tools && requestOptions == other.requestOptions && customHeaders == other.customHeaders && imageInputSupported == other.imageInputSupported
+        contextWindowOverride == other.contextWindowOverride && reasoningOverride == other.reasoningOverride &&
+        visionOverride == other.visionOverride && tools == other.tools && requestOptions == other.requestOptions && customHeaders == other.customHeaders && imageInputSupported == other.imageInputSupported
 
     override fun hashCode(): Int {
         var result = protocol.hashCode()
@@ -75,6 +82,9 @@ class ProviderSnapshot private constructor(
         result = 31 * result + requestOptions.hashCode()
         result = 31 * result + customHeaders.hashCode()
         result = 31 * result + (imageInputSupported?.hashCode() ?: 0)
+        result = 31 * result + (contextWindowOverride ?: 0)
+        result = 31 * result + (reasoningOverride?.hashCode() ?: 0)
+        result = 31 * result + (visionOverride?.hashCode() ?: 0)
         return result
     }
 
@@ -95,7 +105,10 @@ class ProviderSnapshot private constructor(
                 deviceStatusEnabled = settings.deviceStatusEnabled,
                 requestOptions = settings.requestOptions,
                 customHeaders = settings.customHeaders,
-                imageInputSupported = imageInputSupported,
+                imageInputSupported = settings.visionOverride ?: imageInputSupported,
+                contextWindowOverride = settings.contextWindowOverride,
+                reasoningOverride = settings.reasoningOverride,
+                visionOverride = settings.visionOverride,
                 tools = settings.enabledTools()
             )
         }

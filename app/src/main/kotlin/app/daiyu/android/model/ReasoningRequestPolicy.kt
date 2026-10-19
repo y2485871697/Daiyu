@@ -11,6 +11,9 @@ internal object ReasoningRequestPolicy {
     private val keys = setOf("reasoning", "reasoning_effort", "thinking", "output_config")
 
     fun freeze(provider: ProviderSnapshot, effort: ReasoningEffort): ProviderSnapshot {
+        require(provider.reasoningOverride != false || effort == ReasoningEffort.DEFAULT || effort == ReasoningEffort.OFF) {
+            "当前模型已声明不支持思考；请选择默认或关闭"
+        }
         val options = provider.requestOptions
         val body = if (options.customBody.isEmpty()) JSONObject() else MessagesRequest.jsonObject(options.customBody)
         if (effort != ReasoningEffort.DEFAULT) {
@@ -37,14 +40,14 @@ internal object ReasoningRequestPolicy {
                 else -> throw IllegalArgumentException("当前协议尚未接通思考偏好；请选择默认")
             }
         }
-        validate(body, provider.protocol)
+        validate(body, provider.protocol, provider.reasoningOverride)
         if (body.toString() == "{}" && options.customBody.isEmpty()) return provider
         val settings = provider.asModelSettings().copy(requestOptions = options.copy(customBody = body.toString()))
         return ProviderSnapshot.capture(settings, provider.protocol, provider.imageInputSupported)
     }
 
     /** Called on the final merged request, before any connection, on every tool round. */
-    fun validate(body: JSONObject, protocol: ProviderProtocol) {
+    fun validate(body: JSONObject, protocol: ProviderProtocol, reasoningOverride: Boolean? = null) {
         if (keys.none(body::has)) return
         fun strict(value: JSONObject, key: String): String = value.opt(key) as? String
             ?: throw IllegalArgumentException("推理参数 $key 必须为字符串")
@@ -74,6 +77,16 @@ internal object ReasoningRequestPolicy {
                 }
             }
             else -> throw IllegalArgumentException("当前协议尚未接通推理参数")
+        }
+        if (reasoningOverride == false) {
+            val disabled = when (protocol) {
+                ProviderProtocol.RESPONSES -> body.optJSONObject("reasoning")?.let {
+                    it.opt("effort") == "none" && !it.has("summary")
+                } == true
+                ProviderProtocol.MESSAGES -> body.optJSONObject("thinking")?.opt("type") == "disabled"
+                else -> false
+            }
+            require(disabled) { "当前模型已声明不支持思考，不能发送启用推理的参数" }
         }
     }
 }

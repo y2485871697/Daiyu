@@ -1,0 +1,230 @@
+"""Offline synthetic fixtures: no device measurements or acceptance claims."""
+import copy
+import importlib.util
+import json
+import contextlib
+import io
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1] / 'scripts' / 'acceptance'
+with patch.object(sys, 'path', [str(ROOT)] + sys.path):
+    spec = importlib.util.spec_from_file_location('performance_summary', ROOT / 'performance_summary.py')
+    summary = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(summary)
+
+
+def capture():
+    env = {'fixture_mode': 'full_scale', 'scroll_window_includes_driver_idle_time': True, 'collection_id': 'fixture', 'diagnostics_mode': 'off', 'diagnostics_state_verified': True,
+           'collection_completed': True, 'cleanup_succeeded': True,
+           'scroll_start_ns': 0, 'scroll_end_ns': 30_000_000_000}
+    rows = [{'type': 'metadata', 'schema': summary.SCHEMA, 'clock': 'System.nanoTime',
+             'framework_dropped_reports': 0, 'collector_overflow_count': 0, 'frame_count': 6,
+             'metric_names': ['total_duration_ns', 'intended_vsync_timestamp_ns'], 'environment': env}]
+    for i, (vsync, duration) in enumerate([(0, 16_700_000), (29_999_999_999, 16_700_001),
+                                          (30_000_000_000, 50_000_000), (59_999_999_999, 50_000_001),
+                                          (60_000_000_000, 700_000_000), (89_999_999_999, 1)]):
+        rows.append({'type': 'frame', 'index': i, 'framework_drop_count': 0,
+                     'callback_ns': 999_000_000_000, 'scenario_hint': 'wrong', 'metrics': [duration, vsync]})
+    for i, scenario in enumerate(['synthetic_streaming', 'synthetic_input_connection'], 1):
+        rows.append({'type': 'scenario_window', 'scenario': scenario, 'completed': True,
+                     'start_ns': i * 30_000_000_000, 'end_ns': (i + 1) * 30_000_000_000,
+                     'frame_count_by_intended_vsync': 2})
+    methods = {'input_sample': 'semantics_text_replacement_to_verified_text_next_draw',
+               'stop_sample': 'controller_stop_request_to_verified_idle_next_draw',
+               'long_entry_sample': 'select_to_visible_tail_action_and_enabled_editor_next_draw'}
+    for kind, method in methods.items():
+        for i in range(20):
+            rows.append({'type': kind, 'round': i, 'method': method, 'latency_kind': 'instrumented_upper_bound',
+                         'start_ns': 100, 'semantics_verified_ns': 100, 'tail_operable_verified_ns': 100,
+                         'next_draw_ns': 100 + (i + 1) * 1_000_000, 'upper_bound_ns': (i + 1) * 1_000_000,
+                         'first_visible_feedback_measured': False, 'entry_kind': 'warm_reentry',
+                         'prewarmed_long_selection_count': 1, 'tail_action_execution_verified': False,
+                         'navigation_gesture_measured': False})
+    return rows
+
+
+def memory(slope=0):
+    phases = [('before_switches', 0)] + [('switch_completed', i) for i in range(1, 101)] + [('post_gc_observation', i) for i in range(1, 11)]
+    return {'schema': 'daiyu.synthetic.memory.raw.v1', 'collection_id': 'fixture', 'diagnostics_mode': 'off',
+            'clock': 'System.nanoTime', 'collection_completed': True, 'stable_recovery_verified': False, 'peak_memory_measured': False,
+            'samples': [{'phase': phase, 'ordinal': n, 'sample_start_ns': (i + 1) * 1_000_000_000,
+                         'sample_end_ns': (i + 1) * 1_000_000_000 + 1,
+                         'total_pss_kib': 1000 + slope * i} for i, (phase, n) in enumerate(phases)]}
+
+
+class SummaryTests(unittest.TestCase):
+    def test_frame_exact_thresholds_and_intended_vsync_not_callback(self):
+        frames = summary.frames(capture())
+        self.assertEqual(frames[0]['over_16_7_ms_ratio'], .5)
+        self.assertEqual(frames[0]['over_50_ms_ratio'], 0)
+        self.assertEqual(frames[1]['over_50_ms_ratio'], .5)
+        self.assertEqual(frames[2]['max_duration_ms'], 700)
+        self.assertTrue(all(f['frame_count'] == 2 for f in frames))
+
+    def test_metric_order_is_discovered(self):
+        rows = capture()
+        rows[0]['metric_names'].reverse()
+        for row in rows:
+            if row['type'] == 'frame': row['metrics'].reverse()
+        self.assertEqual(summary.frames(rows), summary.frames(capture()))
+
+    def test_p95_rounds_and_honest_scope(self):
+        report = summary.summarize(capture(), memory(-1))
+        self.assertFalse(report['measurement_ready'])
+        self.assertFalse(report['business_acceptance'])
+        self.assertFalse(report['collection_authenticated'])
+        self.assertFalse(report['memory']['stable_recovery_verified'])
+        for row in report['latencies']:
+            self.assertEqual(row['count'], 20)
+            self.assertEqual(row['p95_ms'], 19)
+            self.assertFalse(row['formal_feedback_endpoint_verified'])
+        self.assertEqual(report['latencies'][-1]['entry_kind'], 'warm_reentry')
+        self.assertTrue(report['frames'][0]['window_includes_driver_idle_time'])
+
+    def test_missing_duplicate_and_bool_rounds_rejected(self):
+        for change in ('missing', 'extra', 'duplicate', 'bool'):
+            rows = capture()
+            selected = [r for r in rows if r['type'] == 'input_sample']
+            if change == 'missing': rows.remove(selected[-1])
+            elif change == 'extra': rows.append(copy.deepcopy(selected[-1]))
+            elif change == 'duplicate': selected[-1]['round'] = 18
+            else: selected[0]['round'] = False
+            with self.subTest(change=change), self.assertRaises(summary.InvalidEvidence):
+                summary.latency(rows, 'input_sample')
+
+    def test_timestamps_method_and_endpoint_tampering_rejected(self):
+        for field, value in [('upper_bound_ns', 0), ('semantics_verified_ns', 2_000_000),
+                             ('method', 'first_visible_feedback'), ('first_visible_feedback_measured', True)]:
+            rows = capture()
+            selected = next(r for r in rows if r['type'] == 'stop_sample')
+            selected[field] = value
+            with self.subTest(field=field), self.assertRaises(summary.InvalidEvidence):
+                summary.latency(rows, 'stop_sample')
+
+    def test_incomplete_frames_rejected(self):
+        for field, value in [('frame_count', 5), ('framework_dropped_reports', 1),
+                             ('collector_overflow_count', 1), ('clock', 'wall')]:
+            rows = capture(); rows[0][field] = value
+            with self.subTest(field=field), self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
+        for field, value in [('index', True), ('framework_drop_count', 1), ('metrics', [-1, 0])]:
+            rows = capture(); rows[1][field] = value
+            with self.subTest(field=field), self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
+
+    def test_window_duration_counts_and_completion_rejected(self):
+        for field, value in [('end_ns', 31_000_000_000), ('frame_count_by_intended_vsync', 1), ('completed', False)]:
+            rows = capture(); selected = next(r for r in rows if r['type'] == 'scenario_window'); selected[field] = value
+            with self.subTest(field=field), self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
+
+    def test_memory_units_and_slope(self):
+        for slope in (-1, 0, 1):
+            result = summary.memory(memory(slope), 'fixture', 'off')
+            self.assertAlmostEqual(result['observed_ols_slope_mb_per_second'], slope * .001024)
+            self.assertAlmostEqual(result['last_minus_before_switches_mb'], slope * 110 * .001024)
+            self.assertFalse(result['stable_recovery_verified'])
+            self.assertFalse(result['peak_memory_measured'])
+
+    def test_memory_identity_order_and_false_stability_rejected(self):
+        for field, value in [('collection_id', 'other'), ('diagnostics_mode', 'on'),
+                             ('stable_recovery_verified', True), ('collection_completed', False)]:
+            report = memory(); report[field] = value
+            with self.subTest(field=field), self.assertRaises(summary.InvalidEvidence): summary.memory(report, 'fixture', 'off')
+        report = memory(); report['samples'][2]['ordinal'] = 1
+        with self.assertRaises(summary.InvalidEvidence): summary.memory(report, 'fixture', 'off')
+        report = memory(); report['samples'][2]['sample_start_ns'] = 1
+        with self.assertRaises(summary.InvalidEvidence): summary.memory(report, 'fixture', 'off')
+
+    def test_bounded_strict_raw_reader(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / 'raw.jsonl'
+            path.write_text('\n'.join(json.dumps(r) for r in capture()))
+            rows, digest = summary.read_raw(path)
+            self.assertEqual(len(digest), 64)
+            self.assertEqual(summary.frames(rows), summary.frames(capture()))
+            valid_extension = '\n'.join(json.dumps(r) for r in capture())
+            valid_extension = valid_extension.replace('"frame_count": 6', '"frame_count": 6, "ignored_extension": 1e999', 1)
+            path.write_text(valid_extension)
+            with self.assertRaises(summary.InvalidEvidence): summary.read_raw(path)
+            for raw in ['{"type":"frame","type":"metadata"}', '{"x":NaN}', '{}\n\n{}', '[]']:
+                path.write_text(raw)
+                with self.subTest(raw=raw), self.assertRaises(summary.InvalidEvidence): summary.read_raw(path)
+
+
+    def test_collection_identity_is_required_and_typed(self):
+        for value in (None, '', True, 1, [], {}, 'a/b', 'x' * 129):
+            rows = capture(); rows[0]['environment']['collection_id'] = value
+            with self.subTest(value=value), self.assertRaises(summary.InvalidEvidence):
+                summary.summarize(rows)
+            report = memory(); report['collection_id'] = value
+            with self.subTest(memory=value), self.assertRaises(summary.InvalidEvidence):
+                summary.memory(report, value, 'off')
+        rows = capture(); del rows[0]['environment']['collection_id']
+        with self.assertRaises(summary.InvalidEvidence): summary.summarize(rows)
+
+    def test_reused_or_reversed_scenario_windows_rejected(self):
+        for start, end in [(0, 30_000_000_000), (29_000_000_000, 60_000_000_000)]:
+            rows = capture(); row = next(r for r in rows if r['type'] == 'scenario_window')
+            row.update(start_ns=start, end_ns=end)
+            with self.subTest(start=start), self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
+
+    def test_cli_success_optional_and_valid_memory(self):
+        with tempfile.TemporaryDirectory() as root:
+            raw = Path(root) / 'raw.jsonl'; mem = Path(root) / 'memory.json'
+            raw.write_text('\n'.join(json.dumps(r) for r in capture()))
+            mem.write_text(json.dumps(memory()))
+            for extra in ([], ['--memory', str(mem)]):
+                output, errors = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                    code = summary.main(['--raw', str(raw)] + extra)
+                self.assertEqual(code, 0); self.assertEqual(errors.getvalue(), '')
+                report = json.loads(output.getvalue())
+                self.assertEqual('memory' in report, bool(extra))
+                self.assertEqual('memory_sha256' in report, bool(extra))
+                self.assertEqual(len(report['raw_sha256']), 64)
+
+    def test_cli_invalid_inputs_have_fixed_private_failure(self):
+        with tempfile.TemporaryDirectory(prefix='private-path-') as root:
+            raw = Path(root) / 'raw.jsonl'; mem = Path(root) / 'memory.json'
+            raw.write_text('\n'.join(json.dumps(r) for r in capture()))
+            mem.write_text('null')
+            cases = [[], ['--raw'], ['--private-argument'], ['--raw', str(raw), '--memory', str(mem)],
+                     ['--raw', str(raw.parent / 'missing')]]
+            for args in cases:
+                output, errors = io.StringIO(), io.StringIO()
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                    code = summary.main(args)
+                self.assertEqual(code, 2); self.assertEqual(errors.getvalue(), '')
+                self.assertEqual(json.loads(output.getvalue()), {'valid': False,
+                    'error': 'invalid_performance_capture', 'business_acceptance': False})
+            for content in ('private bad JSON', '{}', '{"x":1e999}'):
+                raw.write_text(content)
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output): code = summary.main(['--raw', str(raw)])
+                self.assertEqual(code, 2); self.assertNotIn('private', output.getvalue())
+
+
+    def test_producer_scope_cannot_be_silently_upgraded(self):
+        for field, value in [('entry_kind', 'first_entry'), ('prewarmed_long_selection_count', True),
+                             ('tail_action_execution_verified', True), ('navigation_gesture_measured', True)]:
+            rows = capture(); row = next(r for r in rows if r['type'] == 'long_entry_sample'); row[field] = value
+            with self.subTest(field=field), self.assertRaises(summary.InvalidEvidence):
+                summary.latency(rows, 'long_entry_sample')
+        report = memory(); report['peak_memory_measured'] = True
+        with self.assertRaises(summary.InvalidEvidence): summary.memory(report, 'fixture', 'off')
+        rows = capture(); rows[0]['environment']['scroll_window_includes_driver_idle_time'] = False
+        with self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
+
+    def test_small_smoke_has_explicit_unsupported_mode(self):
+        rows = capture(); rows[0]['environment']['fixture_mode'] = 'small_smoke'
+        with tempfile.TemporaryDirectory() as root:
+            raw = Path(root) / 'raw.jsonl'; raw.write_text('\n'.join(json.dumps(r) for r in rows))
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output): code = summary.main(['--raw', str(raw)])
+            self.assertEqual(code, 2)
+            self.assertEqual(json.loads(output.getvalue())['error'], 'unsupported_fixture_mode')
+
+
+if __name__ == '__main__': unittest.main()

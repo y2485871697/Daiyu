@@ -48,7 +48,6 @@ internal object SettingsCatalog {
         SettingsGroup("tools", "工具", "工作区、Linux 与任务执行偏好", listOf(
             SettingsEntry("platform_tools", "平台只读工具与私密出站", DaiyuIcons.Shield, SettingControl.PAGE),
             SettingsEntry("workspace", "工作区与文件", DaiyuIcons.Folder, SettingControl.PAGE, localPage = SettingsLocalPage.WORKSPACE),
-            SettingsEntry("terminal", "终端", DaiyuIcons.Terminal, SettingControl.PAGE, FeatureRoute.TERMINAL),
             SettingsEntry("browser", "浏览器", DaiyuIcons.Browser, SettingControl.PAGE, FeatureRoute.BROWSER_SETTINGS),
             SettingsEntry("linux", "Linux 工具环境", DaiyuIcons.Terminal, SettingControl.PAGE, FeatureRoute.LINUX_SETTINGS),
             SettingsEntry("task_surface", "Agent任务偏好", DaiyuIcons.VirtualScreen, SettingControl.PAGE,

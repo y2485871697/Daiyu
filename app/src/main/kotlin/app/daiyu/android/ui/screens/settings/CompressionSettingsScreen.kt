@@ -17,6 +17,7 @@ internal fun CompressionSettingsScreen(
     onBack: () -> Unit,
     ownerCurrent: () -> Boolean,
     modifier: Modifier = Modifier,
+    source: SettingsModelSource,
 ) {
     val worker = remember(editor) { Executors.newSingleThreadExecutor() }
     val main = remember { Handler(Looper.getMainLooper()) }
@@ -25,6 +26,10 @@ internal fun CompressionSettingsScreen(
     var busy by remember(editor) { mutableStateOf(true) }
     var notice by remember(editor) { mutableStateOf<String?>(null) }
     var error by remember(editor) { mutableStateOf(false) }
+    var protocolFilter by remember(editor) { mutableStateOf<app.daiyu.android.model.ProviderProtocol?>(null) }
+    var choosingModel by remember(editor) { mutableStateOf(false) }
+    var modelLabel by remember(editor) { mutableStateOf(source.label("compression")) }
+    var selectedKey by remember(editor) { mutableStateOf(source.key("compression")) }
     val page = remember(editor) { CompressionPage() }
     val currentOwner by rememberUpdatedState(ownerCurrent)
 
@@ -39,20 +44,26 @@ internal fun CompressionSettingsScreen(
                         if (!editor.isCurrent(completed)) return@onSuccess
                         when (val outcome = completed.outcome) {
                             is CompressionSettingsEditor.Outcome.Loaded -> {
-                                draft = outcome.snapshot.toDraft(binding)
+                                draft = outcome.snapshot.toDraft(binding).let {
+                                    it.copy(provider = it.provider.copy(protocol = source.protocol("compression") ?: it.provider.protocol))
+                                }
                                 error = outcome.snapshot.profileUnavailableReason != null
-                                notice = if (error) "已选摘要配置不可用，请重新填写并保存。" else null
+                                notice = if (error) "已选压缩模型暂不可用。" else null
                             }
                             is CompressionSettingsEditor.Outcome.Saved -> {
-                                draft = outcome.snapshot.toDraft(binding)
-                                error = false
-                                notice = "设置已保存。"
+                                draft = outcome.snapshot.toDraft(binding).let {
+                                    it.copy(provider = it.provider.copy(protocol = source.protocol("compression") ?: it.provider.protocol))
+                                }
+                                modelLabel = source.label("compression")
+                                selectedKey = source.key("compression")
+                                error = outcome.snapshot.profileUnavailableReason != null
+                                notice = if (error) "所选模型暂不可用于压缩。" else null
                             }
                             is CompressionSettingsEditor.Outcome.Failed -> {
                                 error = true
                                 notice = if (outcome.writesMayHaveOccurred)
                                     "保存或回读未确认。请核对后明确重新保存；不会自动重试。"
-                                else "当前设置无法读取或校验失败。请明确填写后保存；旧版消息数不会自动转成轮数。"
+                                else "设置读取或保存失败，请重新操作。"
                             }
                             CompressionSettingsEditor.Outcome.Revoked -> return@onSuccess
                         }
@@ -93,14 +104,31 @@ internal fun CompressionSettingsScreen(
         onSave = { requested ->
             if (page.active && currentOwner() && !busy) {
                 val request = runCatching { CompressionSettingsEditor.SaveRequest(
-                    requested.compression(), requested.summary(), requested.protocolChangeAuthorized,
-                    requested.requestOptionsReplacementAuthorized) }
+                    requested.compression()) }
                 request.onSuccess { editor.prepareSave(it)?.let(::submit) }.onFailure {
                     error = true
-                    notice = "请检查窗口、预算、保留轮数、端点和摘要配置；数值必须为合法整数。"
+                    notice = "设置保存失败，请重新操作。"
                 }
             }
-        }, onBack = leave, enabled = !busy, notice = notice, error = error, modifier = modifier)
+        }, onBack = leave, enabled = !busy, notice = notice, error = error, modifier = modifier,
+        modelLabel = modelLabel, onChooseModel = {
+            if (!busy && page.active && currentOwner()) { protocolFilter = null; choosingModel = true }
+        }, onChooseProtocol = { protocol ->
+            if (!busy && page.active && currentOwner()) { protocolFilter = protocol; choosingModel = true }
+        })
+    if (choosingModel) SettingsModelPicker("压缩模型", source, selectedKey,
+        protocols = protocolFilter?.let { setOf(it) } ?: setOf(app.daiyu.android.model.ProviderProtocol.RESPONSES, app.daiyu.android.model.ProviderProtocol.MESSAGES),
+        onSelect = { choice ->
+            if (!busy && page.active && currentOwner()) {
+                choosingModel = false
+                val selectedBinding = SummaryModelBinding(UUID.randomUUID().toString(), UUID.randomUUID().toString())
+                val settings = draft.copy(binding = selectedBinding, configureSummary = true).compression()
+                editor.prepareSelection(settings) {
+                    source.withModel(choice) { /* Validate the explicitly selected provider on the admitted worker. */ }
+                    source.remember("compression", choice)
+                }?.let(::submit)
+            }
+        }, onDismiss = { choosingModel = false })
 }
 
 private class CompressionPage { var active = true }
@@ -111,7 +139,8 @@ private fun CompressionSettingsEditor.Snapshot.toDraft(fallbackBinding: SummaryM
         reserve = settings.reserveTokens.toString(), trigger = settings.triggerPercent.toString(),
         keepTurns = settings.keepTurns.toString(), configureSummary = settings.summaryModel != null)
     val saved = profile ?: return value
-    return value.copy(provider = saved.provider, savedProtocol = saved.provider.protocol,
+    return value.copy(provider = app.daiyu.android.storage.ModelSettings("", saved.provider.model, "", false,
+            responsesPath = saved.provider.responsesPath, protocol = saved.provider.protocol), savedProtocol = saved.provider.protocol,
         summaryWindow = saved.budgets.contextWindowTokens.toString(), inputBudget = saved.budgets.inputBudgetTokens.toString(),
         outputBudget = saved.budgets.maxOutputTokens.toString(), reasoningBudget = saved.budgets.reasoningReserveTokens.toString(),
         overheadBudget = saved.budgets.providerOverheadTokens.toString(), deadlineMillis = saved.budgets.deadlineMillis.toString())

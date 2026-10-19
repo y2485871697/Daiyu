@@ -236,7 +236,35 @@ def memory(report, expected_collection_id, diagnostics):
             'peak_memory_measured': False}
 
 
-def summarize(rows, memory_report=None):
+def backend_migration(report, env):
+    require(isinstance(report, dict) and report.get('type') == 'backend_migration_sample',
+            'backend_migration_schema_mismatch')
+    collection_id(report.get('collection_id'))
+    require(report['collection_id'] == env['collection_id'], 'backend_migration_identity_mismatch')
+    require(report.get('clock') == 'System.nanoTime', 'backend_migration_clock_mismatch')
+    start = integer(report.get('start_ns'))
+    committed = integer(report.get('commit_returned_ns'))
+    duration = integer(report.get('duration_ns'))
+    require(start <= committed and duration == committed - start, 'backend_migration_timestamp_mismatch')
+    require(integer(report.get('bytes_read')) == integer(env.get('migration_package_bytes')) == 100_000_000
+            and env.get('mb_definition') == 'decimal_1000000_bytes', 'backend_migration_bytes_mismatch')
+    for field in ('dataset_sha256', 'package_sha256'):
+        value = report.get(field)
+        expected = env.get('migration_package_sha256' if field == 'package_sha256' else field)
+        require(isinstance(value, str) and re.fullmatch(r'[0-9a-f]{64}', value) is not None
+                and value == expected, 'backend_migration_digest_mismatch')
+    for field in ('database_reopened', 'integrity_verified'):
+        require(report.get(field) is True, 'backend_migration_incomplete')
+    for field in ('ui_progress_measured', 'saf_measured', 'business_acceptance', 'collection_authenticated'):
+        require(report.get(field) is False, 'unsupported_backend_migration_claim')
+    return {'metric': 'backend_read_and_import_commit', 'duration_ms': duration / 1_000_000,
+            'bytes_read': report['bytes_read'], 'package_sha256': report['package_sha256'],
+            'dataset_sha256': report['dataset_sha256'], 'database_reopened': True, 'integrity_verified': True,
+            'integrity_verification_in_duration': False, 'ui_progress_measured': False, 'saf_measured': False,
+            'collection_authenticated': False, 'business_acceptance': False}
+
+
+def summarize(rows, memory_report=None, backend_migration_report=None):
     frame_summary = frames(rows)
     env = rows[0]['environment']
     result = {'schema_version': 1, 'frames': frame_summary,
@@ -248,6 +276,8 @@ def summarize(rows, memory_report=None):
                               'build_and_physical_device_identity_require_independent_binding']}
     if memory_report is not None:
         result['memory'] = memory(memory_report, env.get('collection_id'), env['diagnostics_mode'])
+    if backend_migration_report is not None:
+        result['backend_migration'] = backend_migration(backend_migration_report, env)
     return result
 
 
@@ -255,15 +285,20 @@ def main(argv=None):
     parser = CaptureParser(description=__doc__)
     parser.add_argument('--raw', required=True, type=Path)
     parser.add_argument('--memory', type=Path)
+    parser.add_argument('--backend-migration', type=Path)
     try:
         args = parser.parse_args(argv)
         rows, digest = read_raw(args.raw)
         mem, mem_digest = load_json(args.memory) if args.memory else (None, None)
         if args.memory:
             require(isinstance(mem, dict), 'memory_schema_mismatch')
-        report = summarize(rows, mem)
+        migration, migration_digest = load_json(args.backend_migration) if args.backend_migration else (None, None)
+        if args.backend_migration:
+            require(isinstance(migration, dict), 'backend_migration_schema_mismatch')
+        report = summarize(rows, mem, migration)
         report['raw_sha256'] = digest
         if mem_digest: report['memory_sha256'] = mem_digest
+        if migration_digest: report['backend_migration_sha256'] = migration_digest
         print(json.dumps(report, ensure_ascii=False, allow_nan=False))
         return 0
     except (InvalidEvidence, OSError, ValueError, TypeError, KeyError, OverflowError) as problem:

@@ -169,6 +169,15 @@ class FinalDeliveryTests(unittest.TestCase):
                                                        "code": "source_bound", "head_sha": SHA}):
             return final.verify(**args)
 
+    def test_candidate_mode_is_not_final_delivery_mode(self):
+        self.doc['mode'] = 'candidate'
+        self.reject('invalid_mode')
+
+    def test_candidate_artifact_cannot_be_formal_delivery(self):
+        self.meta['name'] = '代鱼定向候选包-filtered'
+        self.delivery['artifact'] = self.put('build-artifact.json', self.meta)
+        self.reject('artifact_metadata_mismatch')
+
     def reject(self, code=None, **overrides):
         with self.assertRaises(evidence.InvalidEvidence) as caught:
             self.verify(**overrides)

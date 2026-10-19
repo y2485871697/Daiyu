@@ -553,6 +553,11 @@ class ShardedCloudTests(unittest.TestCase):
     def verify(self):
         return self.fixture.verify()
 
+    def test_candidate_job_cannot_satisfy_formal_cloud(self):
+        self.snapshot['jobs'][0]['name'] = '定向候选验证 API 26 分片0-filtered'
+        with self.assertRaisesRegex(evidence.InvalidEvidence, '^job_api_mismatch$'):
+            self.verify()
+
     def test_filtered_job_cannot_satisfy_full_eight_shard_matrix(self):
         self.assertTrue(self.verify()['cloud_regression_satisfied'])
         self.assertEqual(len(self.snapshot['jobs']), 8)

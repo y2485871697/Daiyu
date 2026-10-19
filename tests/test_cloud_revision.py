@@ -144,9 +144,11 @@ class SmokeRevisionWorkflowTests(unittest.TestCase):
         workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/build.yml').read_text(encoding='utf-8')
         smoke = workflow.split('  smoke:\n', 1)[1]
         steps = re.split(r'(?m)^      - ', smoke)[1:]
-        self.assertTrue(steps[0].startswith('name: 限定定向过滤仅用于smoke补检'))
+        self.assertTrue(steps[0].startswith('name: 限定定向过滤仅用于smoke或candidate'))
         self.assertIn('shell: bash', steps[0])
-        self.assertIn('run: test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke', steps[0])
+        self.assertIn('test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke', steps[0])
+        self.assertIn('if test "$SMOKE_MODE" = candidate; then', steps[0])
+        self.assertIn('test -n "$SMOKE_TEST_CLASSES"', steps[0])
         self.assertNotIn('if:', steps[0])
         self.assertNotIn('continue-on-error:', steps[0])
         steps = steps[1:]

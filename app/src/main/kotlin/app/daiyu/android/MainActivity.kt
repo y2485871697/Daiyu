@@ -1084,9 +1084,9 @@ class MainActivity : ComponentActivity() {
     private val supplementDraft = PausedSupplementDraft()
     private val selections get() = controller.selections
     private var shown = mutableListOf<Pair<Long, Message>>()
-    private data class QuestionRowUi(val message: Message,
-        val projections: List<ChatController.QuestionProjection>, val retryCleanup: Boolean)
+    private data class QuestionRowUi(val message: Message, val retryCleanup: Boolean)
     private var questionRows by mutableStateOf<Map<String, QuestionRowUi>>(emptyMap())
+    private var questionCards by mutableStateOf<Map<Pair<WorkStepOwnerUi, String>, ChatController.QuestionProjection>>(emptyMap())
     private var titleRevision = -1L
     private var dataRevision = -1L
     private var scrollSerial = 0L
@@ -1755,10 +1755,12 @@ class MainActivity : ComponentActivity() {
                                 val extrasMaxHeight = minOf(200.dp, maxHeight * 0.35f)
                                 Column(Modifier.fillMaxSize()) {
                                     DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
-                                        composer = projectedVoiceComposer()), chatActions(), modifier = Modifier.weight(1f), turnExtras = { id ->
-                                        QuestionExtras(id)
-                                        VoiceExtras(id)
-                                    }, imageLoader = imageHost.historyLoader,
+                                        composer = projectedVoiceComposer()), chatActions(), modifier = Modifier.weight(1f), turnExtras = { turn ->
+                                        if (turn.segmentIndex == 0) {
+                                            QuestionCleanup(turn.id)
+                                            VoiceExtras(turn.id)
+                                        }
+                                    }, dedicatedTool = { step -> DedicatedQuestion(step) }, imageLoader = imageHost.historyLoader,
                                         assistant = projectedAssistants.firstOrNull { it.id == (selected?.assistantId ?: activeAssistant) })
                                     Column(Modifier.fillMaxWidth().heightIn(max = extrasMaxHeight)
                                         .verticalScroll(rememberScrollState()).testTag("chat-extra-actions")) {
@@ -4112,21 +4114,27 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun QuestionExtras(id: String) {
-        val row = questionRows[id] ?: return
-        row.projections.forEach { question ->
-            key(question.identity) {
-                val binding = question.binding
-                if (binding != null) {
-                    QuestionCard(question.identity, question.record, question.canAnswer, binding)
-                } else {
-                    QuestionCard(question.identity, question.record, canAnswer = false,
-                        submit = { _, _, complete ->
-                            complete(app.daiyu.android.question.QuestionCardView.Reply.STOPPED)
-                        })
-                }
+    @Composable private fun DedicatedQuestion(step: WorkStepUi): Boolean {
+        if (step.toolName != "ask_user") return false
+        val owner = step.owner ?: return false
+        val question = questionCards[owner to step.toolCallId] ?: return false
+        if (step.dedicatedKey != question.identity.storageKey) return false
+        key(question.identity) {
+            val binding = question.binding
+            if (binding != null) {
+                QuestionCard(question.identity, question.record, question.canAnswer, binding)
+            } else {
+                QuestionCard(question.identity, question.record, canAnswer = false,
+                    submit = { _, _, complete ->
+                        complete(app.daiyu.android.question.QuestionCardView.Reply.STOPPED)
+                    })
             }
         }
+        return true
+    }
+
+    @Composable private fun QuestionCleanup(id: String) {
+        val row = questionRows[id] ?: return
         if (row.retryCleanup) {
             top.yukonga.miuix.kmp.basic.TextButton(text = "重试停止清理",
                 modifier = Modifier.testTag("question-retry-cleanup"),
@@ -4979,18 +4987,28 @@ class MainActivity : ComponentActivity() {
         speechHost.syncConversation(selected?.id?.value)
         imageHost.syncConversation(selected?.id?.value)
         if (rowsChanged) questionRows = shown.mapNotNull { (_, message) ->
-            val projections = message.blocks.filterIsInstance<MessageBlock.Tool>()
-                .mapNotNull { controller.questionProjection(message, it.invocation) }
             val retryCleanup = controller.canRetryQuestionCleanup(message)
-            if (projections.isEmpty() && !retryCleanup) null
-            else message.id.value to QuestionRowUi(message, projections, retryCleanup)
+            if (!retryCleanup) null else message.id.value to QuestionRowUi(message, retryCleanup)
         }.toMap()
+        if (rowsChanged) questionCards = buildMap {
+            MessageHistory.expand(shown.map { it.second }).forEach { message ->
+                val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
+                message.blocks.filterIsInstance<MessageBlock.Tool>().forEach { block ->
+                    controller.questionProjection(message, block.invocation)?.let { question ->
+                        put(owner to block.invocation.id.value, question)
+                    }
+                }
+            }
+        }
         val state = controlOwner?.let { controller.runState(it) }
         val phase = composerPhaseForRun(state?.pauseRequested)
         val allowed = !sidebarVisible && controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true
         chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
             contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
-            turns = if (!rowsChanged) chatState.turns else ChatTurnMapper.map(shown.map { it.second }, timestamp = { message ->
+            turns = if (!rowsChanged) chatState.turns else ChatTurnMapper.map(shown.map { it.second }, dedicatedTool = { message, block ->
+                val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
+                questionCards[owner to block.invocation.id.value]?.identity?.storageKey
+            }, timestamp = { message ->
                 MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
             }, toolState = app.daiyu.android.ui.RetainedToolOutcomes.stateReader(controller.database, shown.map { it.second })), canJumpToPreviousUser = if (rowsChanged) shown.any { it.second.role == "user" } else chatState.canJumpToPreviousUser,
             statusText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中";

@@ -73,4 +73,33 @@ class ToolOperationCardTest : ComposeActivityTestCase() {
         }
         assertEquals(0, executions)
     }
+    fun testDedicatedQuestionIsVisibleAtCallPositionInBothPathsAndMissingHostFallsBack() {
+        for (mixed in listOf(false, true)) {
+            val original = source(mixed).copy(blocks = source(mixed).blocks.map { block ->
+                if (block is MessageBlock.Tool) block.copy(invocation = block.invocation.copy(name = "ask_user")) else block
+            })
+            val turn = ChatTurnMapper.map(listOf(original), dedicatedTool = { _, _ -> "validated-question" })
+                .single() as ChatTurnUi.Assistant
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        AssistantTurn(turn, ChatScreenActions(), dedicatedTool = { step ->
+                            if (step.dedicatedKey == "validated-question") {
+                                top.yukonga.miuix.kmp.basic.Text("Dedicated question")
+                                true
+                            } else false
+                        })
+                    }
+                }
+            } }
+            ui.waitForIdle()
+            ui.onAllNodesWithText("Dedicated question").assertCountEquals(1)
+            ui.onNodeWithText("Dedicated question").assertIsDisplayed()
+            ui.onNodeWithText("工作过程").assertDoesNotExist()
+            ui.onAllNodesWithTag("tool-step:card-call").assertCountEquals(0)
+            show(turn, ChatScreenActions())
+            ui.onAllNodesWithTag("tool-step:card-call").assertCountEquals(1)
+        }
+    }
+
 }

@@ -109,4 +109,17 @@ class MessageImageContractTest {
             fail("cancellation was swallowed")
         } catch (_: CancellationException) { }
     }
+    @Test fun dedicatedQuestionWithImageRetainsOneInlineCallAndReadOnlyUnknownState() {
+        val question = MessageBlock.Tool(ToolInvocation(ToolCallId("question"), "ask_user", "{}"), null)
+        val source = message(listOf(text("before"), image(1), question, text("after")), Message.ASSISTANT_ROLE)
+        val turn = ChatTurnMapper.map(listOf(source), dedicatedTool = { _, _ -> "historical-question" })
+            .single() as ChatTurnUi.Assistant
+        assertEquals(4, turn.content.size)
+        val step = turn.content.filterIsInstance<MessageContentUi.Tool>().single().step
+        assertEquals("question", step.toolCallId)
+        assertEquals("historical-question", step.dedicatedKey)
+        assertEquals(WorkStepState.UNKNOWN, step.state)
+        assertEquals(1, turn.content.filterIsInstance<MessageContentUi.Image>().size)
+    }
+
 }

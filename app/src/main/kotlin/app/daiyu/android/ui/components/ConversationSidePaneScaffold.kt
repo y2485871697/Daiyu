@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import app.daiyu.android.ui.screens.chat.conversation.ChatAnchoredMenu
+import app.daiyu.android.ui.screens.chat.conversation.ChatMenuLayer
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -78,6 +81,14 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.blur
+import top.yukonga.miuix.kmp.blur.LayerBackdrop
+import top.yukonga.miuix.kmp.blur.BlurColors
+import top.yukonga.miuix.kmp.blur.textureBlur
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
@@ -119,35 +130,34 @@ private val DrawerMenuItemModifier = Modifier.height(40.dp)
 private val DrawerMenuItemPadding = PaddingValues(horizontal = 12.dp)
 
 private object DrawerMetrics {
-    val PaneMaxWidth = 320.dp
-    val PaneWidthFraction = 0.78f
-    val DrawerCornerRadius = 20.dp
+    val PaneMaxWidth @Composable get() = 320.dp * conversationPanePreviewScale()
+    const val PaneWidthFraction = 0.78f
+    val DrawerCornerRadius @Composable get() = 28.dp * conversationPanePreviewScale()
     const val OpenDurationMs = 220
     const val CloseDurationMs = 200
-    val PaneHorizontalPadding = 16.dp
-    val TopInset = 8.dp
-    val AfterSearch = 12.dp
-    val SearchIconSize = 18.dp
-    val SearchCornerRadius = 12.dp
-    val SearchVerticalPadding = 10.dp
-    val ChipGap = 8.dp
-    val AfterChips = 10.dp
-    val ListBottomPadding = 12.dp
-    val BottomInset = 10.dp
-    val ActionIconSize = 20.dp
-    val CircleButtonPadding = 10.dp
-    val SectionTopPadding = 10.dp
-    val SectionBottomPadding = 6.dp
-    val RowMinHeight = 44.dp
-    val RowGap = 2.dp
-    val RowCornerRadius = 12.dp
-    val RowHorizontalPadding = 14.dp
-    val RowVerticalPadding = 10.dp
-    val ActiveDotSize = 6.dp
-    val ActiveDotGap = 8.dp
-    val EmptyVerticalPadding = 28.dp
-    val DockTopGap = 8.dp
-    val AssistantBarHeight = 48.dp
+    val PaneHorizontalPadding @Composable get() = 14.dp * conversationPanePreviewScale()
+    val AfterSearch @Composable get() = 12.dp * conversationPanePreviewScale()
+    val SearchIconSize @Composable get() = 18.dp * conversationPanePreviewScale()
+    val SearchCornerRadius @Composable get() = 13.dp * conversationPanePreviewScale()
+    val SearchVerticalPadding @Composable get() = 10.dp * conversationPanePreviewScale()
+    val ChipGap @Composable get() = 6.dp * conversationPanePreviewScale()
+    val AfterChips @Composable get() = 12.dp * conversationPanePreviewScale()
+    val ListBottomPadding @Composable get() = 8.dp * conversationPanePreviewScale()
+    val BottomInset @Composable get() = 14.dp * conversationPanePreviewScale()
+    val ActionIconSize @Composable get() = 20.dp * conversationPanePreviewScale()
+    val CircleButtonPadding @Composable get() = 10.dp * conversationPanePreviewScale()
+    val SectionTopPadding @Composable get() = 12.dp * conversationPanePreviewScale()
+    val SectionBottomPadding @Composable get() = 6.dp * conversationPanePreviewScale()
+    val RowMinHeight @Composable get() = 44.dp * conversationPanePreviewScale()
+    val RowGap @Composable get() = 4.dp * conversationPanePreviewScale()
+    val RowCornerRadius @Composable get() = 18.dp * conversationPanePreviewScale()
+    val RowHorizontalPadding @Composable get() = 12.dp * conversationPanePreviewScale()
+    val RowVerticalPadding @Composable get() = 10.dp * conversationPanePreviewScale()
+    val ActiveDotSize @Composable get() = 6.dp * conversationPanePreviewScale()
+    val ActiveDotGap @Composable get() = 8.dp * conversationPanePreviewScale()
+    val EmptyVerticalPadding @Composable get() = 30.dp * conversationPanePreviewScale()
+    val DockTopGap @Composable get() = 8.dp * conversationPanePreviewScale()
+    val AssistantBarHeight @Composable get() = 48.dp * conversationPanePreviewScale()
 }
 
 @Composable
@@ -184,6 +194,7 @@ internal fun ConversationSidePaneScaffold(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
+    val backdrop = rememberTopBarBackdrop()
     val sceneLifecycleState by LocalLifecycleOwner.current.lifecycle.currentStateFlow.collectAsState()
     val navigationEventState = rememberNavigationEventState(NavigationEventInfo.None)
     val focusManager = LocalFocusManager.current
@@ -265,7 +276,8 @@ internal fun ConversationSidePaneScaffold(
         onBackCompleted = { currentOnDismiss() },
     )
 
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+    ChatMenuLayer(modifier.fillMaxSize()) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
         val paneWidth = minOf(maxWidth * DrawerMetrics.PaneWidthFraction, DrawerMetrics.PaneMaxWidth)
         val drawerShape = AbsoluteRoundedCornerShape(
             topLeft = 0.dp,
@@ -277,13 +289,14 @@ internal fun ConversationSidePaneScaffold(
         ModalNavigationDrawer(
             drawerState = drawerState,
             gesturesEnabled = backHandlerEnabled,
-            scrimColor = MiuixTheme.colorScheme.windowDimming,
+            scrimColor = conversationPanePreviewPalette().scrim,
             modifier = Modifier.fillMaxSize(),
             drawerContent = {
                 ConversationPanePanel(
                     state = state,
                     width = paneWidth,
                     drawerShape = drawerShape,
+                    backdrop = backdrop,
                     // Only the search row observes open/settle state. The panel and its
                     // lazy item provider must stay reusable when the drawer opens.
                     enableSearchFocus = {
@@ -318,10 +331,13 @@ internal fun ConversationSidePaneScaffold(
                 )
             },
         ) {
-            content()
+            Box(Modifier.fillMaxSize()
+                .blur(if (visible && backdrop != null) 2.dp * conversationPanePreviewScale() else 0.dp)
+                .captureForTopBar(backdrop)) { content() }
         }
         }
     }
+}
 }
 
 @Composable
@@ -329,6 +345,7 @@ private fun ConversationPanePanel(
     state: ConversationPaneUiState,
     width: androidx.compose.ui.unit.Dp,
     drawerShape: AbsoluteRoundedCornerShape,
+    backdrop: LayerBackdrop?,
     enableSearchFocus: () -> Boolean,
     onSearchChange: (String) -> Unit,
     onConversationSelected: (String) -> Unit,
@@ -366,17 +383,31 @@ private fun ConversationPanePanel(
     val activeAssistant = remember(profiles, activeId) {
         profiles.firstOrNull { it.id == activeId } ?: profiles.firstOrNull()
     }
+    val colors = conversationPanePreviewPalette()
+    val scale = conversationPanePreviewScale()
+    val density = LocalDensity.current
+    val safeTop = with(density) { WindowInsets.safeDrawing.getTop(density).toDp() }
     Surface(
         modifier = modifier
             .width(width)
             .fillMaxHeight()
-            .graphicsLayer {
-                clip = true
-                shape = drawerShape
-            },
+            .graphicsLayer { clip = true; shape = drawerShape }
+            .then(if (backdrop != null) Modifier.textureBlur(backdrop = backdrop, shape = drawerShape,
+                blurRadius = 28f * scale, colors = BlurColors(blendColors = emptyList(), saturation = 1.3f))
+                else Modifier.background(if (colors.dark) Color(0xFF24202F) else Color(0xFFF8F4FC)))
+            .drawWithCache {
+                // CSS linear-gradient(145deg), including its explicit 62% stop.
+                val length = size.width * .573576f + size.height * .819152f
+                val delta = Offset(length * .573576f / 2, length * .819152f / 2)
+                val center = Offset(size.width / 2, size.height / 2)
+                val brush = Brush.linearGradient(0f to colors.gradient[0], .62f to colors.gradient[1], 1f to colors.gradient[2],
+                    start = center - delta, end = center + delta)
+                onDrawBehind { drawRect(brush) }
+            }
+            .border(1.dp, colors.border, drawerShape),
         shape = drawerShape,
-        color = MiuixTheme.colorScheme.surface,
-        contentColor = MiuixTheme.colorScheme.onSurface,
+        color = Color.Transparent,
+        contentColor = colors.text,
         shadowElevation = 0.dp,
     ) {
         Column(
@@ -387,7 +418,8 @@ private fun ConversationPanePanel(
                 .consumeWindowInsets(WindowInsets.ime)
                 .padding(horizontal = DrawerMetrics.PaneHorizontalPadding),
         ) {
-            Spacer(modifier = Modifier.height(DrawerMetrics.TopInset))
+            // The HTML drawer's 30px top padding includes the status area.
+            Spacer(modifier = Modifier.height((30.dp * scale - safeTop).coerceAtLeast(0.dp)))
             PaneSearchRow(
                 query = state.searchQuery,
                 onSearchChange = onSearchChange,
@@ -446,6 +478,8 @@ private fun ConversationPanePanel(
                     }
                 }
             }
+            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.footerBorder))
+            Spacer(Modifier.height(11.dp * scale))
             PaneAssistantBar(
                 name = activeAssistant?.name?.ifBlank { stringResource(R.string.app_name) }
                     ?: stringResource(R.string.app_name),
@@ -453,7 +487,7 @@ private fun ConversationPanePanel(
                 avatar = {
                     AssistantAvatar(
                         assistant = activeAssistant,
-                        size = 32.dp,
+                        size = 32.dp * scale,
                     )
                 },
             )
@@ -477,11 +511,13 @@ private fun PaneSearchRow(
     onSearchChange: (String) -> Unit,
     enableSearchFocus: () -> Boolean,
 ) {
+    val s = conversationPanePreviewScale()
+    val colors = conversationPanePreviewPalette()
     val searchFocusEnabled = enableSearchFocus()
     val textStyle = MiuixTheme.textStyles.body2.merge(
         TextStyle(
-            color = MiuixTheme.colorScheme.onSurface,
-            fontSize = 14.sp,
+            color = conversationPanePreviewPalette().text,
+            fontSize = (12f * s).sp,
         ),
     )
     val searchFocusRequester = remember { FocusRequester() }
@@ -503,8 +539,10 @@ private fun PaneSearchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(min = 38.dp * s)
             .clip(RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
-            .background(MiuixTheme.colorScheme.surfaceVariant)
+            .background(colors.search)
+            .border(1.dp, colors.searchBorder, RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
             .clickable(
                 enabled = searchFocusEnabled && !searchActive,
                 interactionSource = remember { MutableInteractionSource() },
@@ -512,22 +550,22 @@ private fun PaneSearchRow(
             ) {
                 searchActive = true
             }
-            .padding(horizontal = 12.dp, vertical = DrawerMetrics.SearchVerticalPadding),
+            .padding(horizontal = 12.dp * s, vertical = 8.dp * s),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp * s),
     ) {
         Icon(
             imageVector = Icons.Rounded.Search,
             contentDescription = null,
             modifier = Modifier.size(DrawerMetrics.SearchIconSize),
-            tint = MiuixTheme.colorScheme.onSurface,
+            tint = colors.muted,
         )
         Box(modifier = Modifier.weight(1f)) {
             if (query.isEmpty()) {
                 Text(
                     text = stringResource(R.string.conversation_search_hint),
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    style = MiuixTheme.textStyles.body2,
+                    color = colors.muted,
+                    style = textStyle,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -542,7 +580,7 @@ private fun PaneSearchRow(
                     .focusProperties { canFocus = searchFocusEnabled && searchActive },
                 singleLine = true,
                 textStyle = textStyle,
-                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                cursorBrush = SolidColor(conversationPanePreviewPalette().accent),
             )
         }
     }
@@ -555,7 +593,7 @@ private fun PaneDrawerActions(
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(DrawerMetrics.ChipGap),
+        verticalArrangement = Arrangement.spacedBy(8.dp * conversationPanePreviewScale()),
     ) {
         DrawerActionRow(
             label = stringResource(R.string.drawer_new_conversation),
@@ -577,35 +615,18 @@ private fun DrawerActionRow(
     onClick: () -> Unit,
 ) {
     val view = LocalView.current
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
-            .background(MiuixTheme.colorScheme.surfaceVariant)
-            .pointerInput(onClick) {
-                detectTapGestures(onTap = {
-                    TouchHaptics.click(view)
-                    onClick()
-                })
-            }
-            .padding(horizontal = 12.dp, vertical = DrawerMetrics.SearchVerticalPadding),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-            tint = daiyuIconColor(icon),
-        )
-        Text(
-            text = label,
-            color = MiuixTheme.colorScheme.onSurface,
-            style = MiuixTheme.textStyles.body2,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
+    val colors = conversationPanePreviewPalette()
+    val s = conversationPanePreviewScale()
+    Row(Modifier.fillMaxWidth().heightIn(min = 38.dp * s)
+        .clip(RoundedCornerShape(13.dp * s)).background(colors.action)
+        .border(1.dp, colors.actionBorder, RoundedCornerShape(13.dp * s))
+        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+            TouchHaptics.click(view); onClick()
+        }.padding(horizontal = 12.dp * s, vertical = 10.dp * s),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp * s)) {
+        Icon(icon, null, Modifier.size(18.dp * s), tint = colors.toolbar)
+        Text(label, color = colors.accent, fontSize = (11f * s).sp, fontWeight = FontWeight.Medium,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -645,10 +666,9 @@ private fun PaneFolderBar(
                     onClick = { onSelectFolder(folder.id) },
                     onLongClick = { showMenu = true },
                 )
-                EtaDropdownMenu(
+                DrawerGlassMenu(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false },
-                    offset = DpOffset(x = 0.dp, y = 8.dp),
                 ) {
                     DropdownMenuItem(
                         modifier = DrawerMenuItemModifier,
@@ -672,7 +692,7 @@ private fun PaneFolderBar(
                         text = {
                             Text(
                                 text = stringResource(R.string.action_delete),
-                                color = MiuixTheme.colorScheme.error,
+                                color = conversationPanePreviewPalette().danger,
                             )
                         },
                         leadingIcon = {
@@ -680,7 +700,7 @@ private fun PaneFolderBar(
                                 imageVector = Icons.Rounded.Delete,
                                 contentDescription = null,
                                 modifier = Modifier.size(DrawerMetrics.ActionIconSize),
-                                tint = MiuixTheme.colorScheme.error,
+                                tint = conversationPanePreviewPalette().danger,
                             )
                         },
                         onClick = {
@@ -783,22 +803,24 @@ private fun DrawerChip(
     onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null,
 ) {
+    val s = conversationPanePreviewScale()
     val background = if (selected) {
-        MiuixTheme.colorScheme.primary
+        conversationPanePreviewPalette().folder
     } else {
-        MiuixTheme.colorScheme.surfaceContainer
+        Color.Transparent
     }
     val contentColor = if (selected) {
-        MiuixTheme.colorScheme.onPrimary
+        conversationPanePreviewPalette().folderText
     } else {
-        MiuixTheme.colorScheme.onSurface
+        conversationPanePreviewPalette().toolbar
     }
     val view = LocalView.current
     Row(
         modifier = Modifier
-            .heightIn(min = 36.dp)
-            .clip(CircleShape)
+            .heightIn(min = 34.dp * s)
+            .clip(RoundedCornerShape(18.dp * s))
             .background(background)
+            .border(1.dp, if (selected) background else Color.Transparent, RoundedCornerShape(18.dp * s))
             .pointerInput(onClick, onLongClick) {
                 detectTapGestures(
                     onTap = {
@@ -813,23 +835,23 @@ private fun DrawerChip(
                     },
                 )
             }
-            .padding(horizontal = 12.dp, vertical = 6.dp),
+            .padding(horizontal = 11.dp * s, vertical = 6.dp * s),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp * s),
     ) {
         if (icon != null) {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                modifier = Modifier.size(14.dp),
+                modifier = Modifier.size(13.dp * s),
                 tint = contentColor,
             )
         }
         Text(
             text = label,
             color = contentColor,
-            style = MiuixTheme.textStyles.footnote1,
-            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+            fontSize = (10f * s).sp,
+            fontWeight = FontWeight.Normal,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
@@ -842,8 +864,9 @@ private fun ConversationSectionHeader(
 ) {
     Text(
         text = group.localizedLabel(),
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        style = MiuixTheme.textStyles.footnote1,
+        color = conversationPanePreviewPalette().muted,
+        fontSize = (10f * conversationPanePreviewScale()).sp,
+        letterSpacing = (.2f * conversationPanePreviewScale()).sp,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier
             .fillMaxWidth()
@@ -879,12 +902,15 @@ private fun ConversationTextRow(
                 .clip(RoundedCornerShape(DrawerMetrics.RowCornerRadius))
                 .background(
                     if (selected) {
-                        MiuixTheme.colorScheme.primaryContainer
+                        conversationPanePreviewPalette().bubble
                     } else {
                         Color.Transparent
                     },
                 )
+                .border(1.dp, if (selected) conversationPanePreviewPalette().line else Color.Transparent,
+                    RoundedCornerShape(DrawerMetrics.RowCornerRadius))
                 .combinedClickable(
+                    interactionSource = remember { MutableInteractionSource() }, indication = null,
                     hapticFeedbackEnabled = false,
                     onClick = {
                         TouchHaptics.click(view)
@@ -903,9 +929,10 @@ private fun ConversationTextRow(
         ) {
             Text(
                 text = conversation.title.ifBlank { conversation.preview },
-                color = if (selected) MiuixTheme.colorScheme.onPrimaryContainer else MiuixTheme.colorScheme.onSurface,
-                style = MiuixTheme.textStyles.body1,
-                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                color = conversationPanePreviewPalette().text,
+                fontSize = (12f * conversationPanePreviewScale()).sp,
+                lineHeight = (17.4f * conversationPanePreviewScale()).sp,
+                fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
@@ -918,9 +945,9 @@ private fun ConversationTextRow(
                         .clip(CircleShape)
                         .then(
                             if (conversation.isActiveRun) {
-                                Modifier.background(MiuixTheme.colorScheme.primary)
+                                Modifier.background(conversationPanePreviewPalette().accent)
                             } else {
-                                Modifier.border(1.dp, MiuixTheme.colorScheme.primary, CircleShape)
+                                Modifier.border(1.dp, conversationPanePreviewPalette().accent, CircleShape)
                             },
                         ),
                 )
@@ -931,17 +958,15 @@ private fun ConversationTextRow(
                     contentDescription = null,
                     modifier = Modifier.padding(
                         start = if (conversation.isActiveRun || conversation.hasCompletionMarker) DrawerMetrics.ActiveDotGap else 0.dp,
-                    ).size(14.dp),
-                    tint = MiuixTheme.colorScheme.primary,
+                    ).size(11.dp * conversationPanePreviewScale()),
+                    tint = conversationPanePreviewPalette().accent.copy(alpha = .8f),
                 )
             }
         }
 
-        EtaDropdownMenu(
+        DrawerGlassMenu(
             expanded = showActionMenu,
             onDismissRequest = { showActionMenu = false },
-            offset = DpOffset(x = 8.dp, y = 8.dp),
-            alignEnd = true,
         ) {
             DropdownMenuItem(
                 modifier = DrawerMenuItemModifier,
@@ -1025,13 +1050,13 @@ private fun ConversationTextRow(
             DropdownMenuItem(
                 modifier = DrawerMenuItemModifier,
                 contentPadding = DrawerMenuItemPadding,
-                text = { Text(text = stringResource(R.string.action_delete), color = MiuixTheme.colorScheme.error) },
+                text = { Text(text = stringResource(R.string.action_delete), color = conversationPanePreviewPalette().danger) },
                 leadingIcon = {
                     Icon(
                         imageVector = Icons.Rounded.Delete,
                         contentDescription = null,
                         modifier = Modifier.size(DrawerMetrics.ActionIconSize),
-                        tint = MiuixTheme.colorScheme.error,
+                        tint = conversationPanePreviewPalette().danger,
                     )
                 },
                 onClick = {
@@ -1049,9 +1074,10 @@ private fun EmptyConversations(isSearching: Boolean) {
         text = stringResource(
             if (isSearching) R.string.conversation_no_results else R.string.conversation_empty,
         ),
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        style = MiuixTheme.textStyles.body2,
-        fontWeight = FontWeight.Medium,
+        color = conversationPanePreviewPalette().muted,
+        fontSize = (11f * conversationPanePreviewScale()).sp,
+        textAlign = TextAlign.Center,
+        fontWeight = FontWeight.Normal,
         modifier = Modifier.padding(
             horizontal = DrawerMetrics.RowHorizontalPadding,
             vertical = DrawerMetrics.EmptyVerticalPadding,
@@ -1080,9 +1106,10 @@ private fun PaneAssistantBar(
     ) {
         Text(
             text = name,
-            color = MiuixTheme.colorScheme.onSurface,
-            style = MiuixTheme.textStyles.body1,
-            fontWeight = FontWeight.Medium,
+            color = conversationPanePreviewPalette().text,
+            fontSize = (12f * conversationPanePreviewScale()).sp,
+            lineHeight = (18f * conversationPanePreviewScale()).sp,
+            fontWeight = FontWeight.Normal,
             textAlign = TextAlign.End,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -1111,19 +1138,19 @@ private fun PaneDock(
             label = stringResource(R.string.ui_permission_health_3048bb),
             onClick = onOpenPermissions,
         )
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.width(8.dp * conversationPanePreviewScale()))
         DrawerCircleButton(
             icon = Icons.Rounded.Memory,
             label = stringResource(R.string.conversation_dock_models),
             onClick = onOpenModelProviders,
         )
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.width(8.dp * conversationPanePreviewScale()))
         DrawerCircleButton(
             icon = Icons.Rounded.Extension,
             label = stringResource(R.string.route_skills),
             onClick = onOpenSkills,
         )
-        Spacer(modifier = Modifier.width(10.dp))
+        Spacer(modifier = Modifier.width(8.dp * conversationPanePreviewScale()))
         DrawerCircleButton(
             icon = Icons.Rounded.BarChart,
             label = stringResource(R.string.stats_page_title),
@@ -1148,7 +1175,7 @@ private fun DrawerCircleButton(
     Box(
         modifier = Modifier
             .clip(CircleShape)
-            .background(MiuixTheme.colorScheme.surfaceVariant)
+            .background(conversationPanePreviewPalette().bubble)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1163,7 +1190,7 @@ private fun DrawerCircleButton(
             imageVector = icon,
             contentDescription = label,
             modifier = Modifier.size(DrawerMetrics.ActionIconSize),
-            tint = daiyuIconColor(icon),
+            tint = conversationPanePreviewPalette().toolbar,
         )
     }
 }
@@ -1235,4 +1262,11 @@ private fun ConversationSummaryUi.drawerSection(): ConversationDrawerSection = w
     isPinned -> ConversationDrawerSection.Pinned
     isToday -> ConversationDrawerSection.Today
     else -> ConversationDrawerSection.Dated(timeLabel)
+}
+
+@Composable
+private fun DrawerGlassMenu(expanded: Boolean, onDismissRequest: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
+    ChatAnchoredMenu(expanded = expanded, onDismiss = onDismissRequest) {
+        Column(content = content)
+    }
 }

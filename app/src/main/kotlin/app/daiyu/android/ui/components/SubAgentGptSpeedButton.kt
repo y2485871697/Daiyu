@@ -6,6 +6,11 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -70,7 +75,11 @@ private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: Conver
         MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.onPrimaryContainer),
         animationSpec = tween(durationMillis = SubAgentGptSpeedAnimationDurationMillis), label = "sub_agent_gpt_speed_color")
     val displayedColor = if (usable) contentColor else contentColor.copy(alpha = 0.38f)
-    Row(modifier = modifier.defaultMinSize(minWidth = SubAgentGptSpeedMinTouchSize, minHeight = SubAgentGptSpeedMinTouchSize)
+    val chatStyle = app.daiyu.android.ui.components.subagent.LocalConversationAgentStyle.current
+    val chatColors = app.daiyu.android.ui.components.subagent.conversationAgentColors()
+    val chipShape = androidx.compose.foundation.shape.RoundedCornerShape(8.dp)
+    Row(modifier = (if (chatStyle) modifier.clip(chipShape).background(chatColors.soft).border(1.dp, chatColors.line, chipShape).padding(horizontal = 6.dp, vertical = 4.dp)
+        else modifier.defaultMinSize(minWidth = SubAgentGptSpeedMinTouchSize, minHeight = SubAgentGptSpeedMinTouchSize))
         .semantics(mergeDescendants = true) { contentDescription = subAgentGptSpeedDescription(profile.name, mode) }
         .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = usable,
             role = Role.Button, hapticFeedbackEnabled = false, onLongClick = null, onClick = {
@@ -90,11 +99,13 @@ private fun BoundSubAgentGptSpeedButton(profile: SubAgentProfile, editor: Conver
                 }
             }), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterHorizontally)) {
-        Icon(imageVector = ImageVector.vectorResource(R.drawable.ic_atom), contentDescription = null,
+        if (!chatStyle) Icon(imageVector = ImageVector.vectorResource(R.drawable.ic_atom), contentDescription = null,
             modifier = Modifier.size(SubAgentGptSpeedIconSize).graphicsLayer {
                 rotationZ = subAgentGptSpeedRotationDegrees(progress.value)
                 val scale = subAgentGptSpeedScale(progress.value); scaleX = scale; scaleY = scale
             }, tint = displayedColor)
-        Text(text = subAgentGptSpeedDisplayName(mode), style = MaterialTheme.typography.labelMedium, color = displayedColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(text = (if (chatStyle) "GPT 速度 · " else "") + subAgentGptSpeedDisplayName(mode), style = MaterialTheme.typography.labelMedium,
+            fontSize = if (chatStyle) 8.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
+            color = if (chatStyle) chatColors.accent else displayedColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

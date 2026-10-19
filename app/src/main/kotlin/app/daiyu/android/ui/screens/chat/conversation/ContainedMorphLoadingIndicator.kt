@@ -34,7 +34,6 @@ import kotlin.math.sin
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /**
  * Material 3 ContainedLoadingIndicator 的同款动画：圆底里一块形状在变形、旋转。
@@ -45,8 +44,8 @@ internal fun ContainedMorphLoadingIndicator(
     modifier: Modifier = Modifier,
     indicatorSize: Dp = 28.dp,
     animate: Boolean = true,
-    containerColor: Color = MiuixTheme.colorScheme.primaryContainer,
-    indicatorColor: Color = MiuixTheme.colorScheme.onPrimaryContainer,
+    containerColor: Color = if (conversationColors().dark) Color(0xFF383045) else Color(0xFFE5E0EE),
+    indicatorColor: Color = if (conversationColors().dark) Color(0xFFD7CAE8) else Color(0xFF4B4357),
 ) {
     val activityBlend = remember { Animatable(if (animate) 1f else 0f) }
     val morphProgress = remember { Animatable(0f) }

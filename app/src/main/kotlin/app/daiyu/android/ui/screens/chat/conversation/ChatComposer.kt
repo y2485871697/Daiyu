@@ -68,8 +68,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val hasText = state.text.isNotBlank() || (state.phase == ComposerPhase.IDLE && state.imageSendAvailable)
     val textAction = hasText && state.phase != ComposerPhase.RUNNING
     val primaryEnabled = if (textAction) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
-    val secondaryColor = if (state.enabled) colors.onSurfaceVariantSummary else colors.disabledOnSurface
-    val primaryIcon = when {
+        val primaryIcon = when {
         state.phase == ComposerPhase.PAUSED && !hasText -> DaiyuIcons.Resume
         textAction && state.phase != ComposerPhase.IDLE -> DaiyuIcons.Steer
         textAction -> DaiyuIcons.Send
@@ -84,18 +83,18 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         state.phase == ComposerPhase.RUNNING -> "暂停"
         else -> "发送"
     }
-    Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
+    Column(modifier.fillMaxWidth().padding(start = 9.dp, end = 9.dp, top = 10.dp, bottom = 12.dp)) {
         ChatComposerSurface(backdrop) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+        Row(Modifier.fillMaxWidth().padding(start = 13.dp, end = 13.dp, top = 11.dp, bottom = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             ComposerChip(DaiyuIcons.Model, state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
                 Modifier.weight(1f).testTag("chat-model"),
                 onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) })
-            Row(Modifier.widthIn(min = 112.dp, max = 144.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
+            Row(Modifier.widthIn(max = 144.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
                 .border(1.dp, colors.outline, RoundedCornerShape(12.dp))
                 .combinedClickable(enabled = state.enabled, role = Role.Button, onClickLabel = "上下文统计", onClick = actions.onContextClick,
                     onLongClick = { actions.onMenuAction(ChatMenuAction.CONTEXT_SCOPE) })
-                .padding(start = 8.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+                .padding(start = 6.dp, end = 6.dp, top = 3.dp, bottom = 3.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 val fraction = state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
                 Canvas(Modifier.size(16.dp)) {
@@ -115,12 +114,12 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                     }
                 }
                 Text(if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}",
-                    modifier = Modifier.weight(1f),
-                    style = MiuixTheme.textStyles.footnote1, color = secondaryColor,
+                    modifier = Modifier,
+                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 9.sp), color = colors.primary,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-                Box(Modifier.fillMaxWidth().padding(horizontal = 14.dp).height(1.dp)
+                Box(Modifier.fillMaxWidth().padding(horizontal = 13.dp).height(1.dp)
                     .background(colors.primary.copy(alpha = 0.12f)))
                 key(state.editorGeneration) {
                     val mountedGeneration = state.editorGeneration
@@ -139,30 +138,28 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             }
                         },
                         enabled = state.enabled,
-                        modifier = Modifier.testTag("chat-draft").fillMaxWidth().heightIn(min = 48.dp, max = 160.dp)
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = colors.onSurface, fontSize = 15.sp, lineHeight = 22.sp),
+                        modifier = Modifier.testTag("chat-draft").fillMaxWidth().heightIn(min = 47.dp, max = 160.dp)
+                            .padding(start = 13.dp, end = 13.dp, top = 13.dp, bottom = 7.dp),
+                        maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = colors.onSurface, fontSize = 12.sp, lineHeight = 18.sp),
                         cursorBrush = SolidColor(colors.primary),
                         decorationBox = { inner ->
                             Box {
                                 if (state.text.isEmpty()) Text("给代鱼发消息", color = colors.onSurfaceVariantSummary,
-                                    style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp, lineHeight = 22.sp))
+                                    style = MiuixTheme.textStyles.body1.copy(fontSize = 12.sp, lineHeight = 18.sp))
                                 inner()
                             }
                         },
                     )
                 }
-                // Same centered overlay as Eta's ChatComposerActionRow: both the visible
-                // circle and its 48dp touch target are centered on the whole input row.
-                Box(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 10.dp).height(30.dp), contentAlignment = Alignment.Center) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                             ChatIconButton(DaiyuIcons.Attach, "附件", { actions.onAttach(); attachments = true },
-                                Modifier.size(40.dp), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Attach), iconSize = 16.dp)
+                                Modifier.size(28.dp), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Attach), iconSize = 16.dp)
                             ChatIconButton(DaiyuIcons.Reasoning, "推理强度，当前为 ${state.reasoningLabel}", actions.onOpenReasoning,
-                                Modifier.size(40.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Reasoning))
-                            Box(Modifier.size(40.dp).testTag("chat-assistant").clip(CircleShape)
+                                Modifier.size(28.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Reasoning))
+                            Box(Modifier.size(28.dp).testTag("chat-assistant").clip(CircleShape)
                                 .combinedClickable(enabled = state.enabled, role = Role.Button,
                                     onClickLabel = "选择助手", onClick = actions.onOpenAssistant)
                                 .semantics { contentDescription = "选择助手，当前为 ${state.assistantLabel}" },
@@ -179,12 +176,13 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 if (!textAction) actions.onPrimaryTap()
                                 else if (state.phase == ComposerPhase.IDLE) actions.onSend(state.text)
                                 else actions.onSupplement(state.text)
-                            }, Modifier.size(48.dp).testTag(if (textAction || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
+                            }, Modifier.size(28.dp).testTag(if (textAction || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
                                 .controlGesture(actions, primaryEnabled),
                                 containerColor = if (!primaryEnabled) colors.disabledPrimaryButton
                                     else if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer,
                                 enabled = primaryEnabled,
                                 tint = if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
+                                iconSize = if (state.phase == ComposerPhase.RUNNING || state.phase == ComposerPhase.PAUSED && !hasText) 10.dp else 12.dp,
                                 onLongClick = if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
                             }
                         }
@@ -227,10 +225,10 @@ internal fun ComposerChip(icon: ImageVector, label: String, enabled: Boolean, on
     val contentColor = if (enabled) colors.onSurfaceVariantSummary else colors.disabledOnSurface
     Row(modifier.clip(RoundedCornerShape(12.dp))
         .combinedClickable(enabled = enabled, role = Role.Button, onClickLabel = "选择模型",
-            onClick = onClick, onLongClick = onLongClick).padding(horizontal = 8.dp, vertical = 10.dp),
+            onClick = onClick, onLongClick = onLongClick).padding(horizontal = 0.dp, vertical = 3.dp),
         horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(14.dp), tint = contentColor)
-        Text(label, Modifier.weight(1f, fill = false), style = MiuixTheme.textStyles.footnote1,
+        Text(label, Modifier.weight(1f, fill = false), style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp),
             color = contentColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Icon(DaiyuIcons.ChevronDown, null, Modifier.size(12.dp), tint = contentColor)
     }

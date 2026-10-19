@@ -1,6 +1,9 @@
 package app.daiyu.android.ui.components
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -26,6 +29,28 @@ import app.daiyu.android.ui.icons.daiyuIconColor
 internal fun SubAgentSettingRow(label: String, value: String, icon: ImageVector, description: String,
     enabled: Boolean = true, dropdown: Boolean = false, badge: String? = null, onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null, modifier: Modifier = Modifier) {
+    if (app.daiyu.android.ui.components.subagent.LocalConversationAgentStyle.current) {
+        val colors = app.daiyu.android.ui.components.subagent.conversationAgentColors()
+        val model = label == "模型"
+        val plain = model || label == "GPT 速度"
+        Column(modifier.fillMaxWidth().padding(bottom = 12.dp)) {
+            Text(label, fontSize = 10.sp, color = colors.text, modifier = Modifier.padding(bottom = 5.dp))
+            Row(Modifier.fillMaxWidth().semantics { contentDescription = description }
+                .then(if (plain) Modifier else Modifier.background(colors.soft, RoundedCornerShape(10.dp)).border(1.dp, colors.line, RoundedCornerShape(10.dp)))
+                .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                    enabled = enabled, role = Role.Button, hapticFeedbackEnabled = false, onClick = onClick, onLongClick = onLongClick)
+                .padding(horizontal = if (plain) 0.dp else 10.dp, vertical = if (model) 7.dp else 9.dp),
+                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                if (model || label == "思考深度") Icon(icon, null, Modifier.size(if (model) 12.dp else 13.dp), tint = colors.accent)
+                Text(value, Modifier.weight(1f), fontSize = 11.sp, color = colors.text.copy(alpha = if (enabled) 1f else .4f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                trailing?.invoke()
+                Icon(Icons.Rounded.ExpandMore, null, Modifier.size(12.dp), tint = colors.muted)
+            }
+            if (plain) HorizontalDivider(color = colors.line)
+            if (!badge.isNullOrBlank()) Text(badge, fontSize = 9.sp, color = colors.muted, modifier = Modifier.padding(top = 4.dp))
+        }
+        return
+    }
     val colors = MaterialTheme.colorScheme
     val alpha = if (enabled) 1f else 0.38f
     Row(modifier.fillMaxWidth().heightIn(min = 48.dp).semantics { contentDescription = description }

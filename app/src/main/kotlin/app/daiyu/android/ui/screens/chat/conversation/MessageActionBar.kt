@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -16,15 +17,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.haptics.TouchHaptics
 import app.daiyu.android.ui.icons.DaiyuIcons
 import kotlinx.coroutines.delay
 import top.yukonga.miuix.kmp.basic.Icon
-import top.yukonga.miuix.kmp.basic.IconButton
+import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TooltipBox
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/** Eta AgentMessageActionRow's layout and feedback; side effects are delegated to the host. */
+/** Compact chat actions; side effects remain delegated to the host. */
 @Composable
 internal fun MessageActionBar(
     id: String,
@@ -37,8 +39,10 @@ internal fun MessageActionBar(
     showCopyAction: Boolean = true,
     showEditAction: Boolean = false,
     showRegenerateAction: Boolean = true,
+    endAligned: Boolean = false,
 ) {
     val view = LocalView.current
+    val colors = conversationColors()
     var copied by remember(id) { mutableStateOf(false) }
     LaunchedEffect(copied) {
         if (copied) {
@@ -47,95 +51,42 @@ internal fun MessageActionBar(
         }
     }
     Row(
-        modifier = modifier.fillMaxWidth().padding(top = 2.dp),
+        modifier = modifier.fillMaxWidth().padding(top = if (endAligned) 5.dp else 3.dp),
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp, if (endAligned) Alignment.End else Alignment.Start),
     ) {
-        if (showCopyAction) IconButton(
-            onClick = {
-                TouchHaptics.click(view)
-                actions.onCopy(id)
-                copied = true
-            },
-            minWidth = 30.dp,
-            minHeight = 30.dp,
-        ) {
-            Icon(
-                imageVector = if (copied) DaiyuIcons.Check else DaiyuIcons.Copy,
-                contentDescription = if (copied) "已复制" else "复制回答",
-                modifier = Modifier.size(15.dp),
-                tint = if (copied) MiuixTheme.colorScheme.primary
-                    else MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.75f),
-            )
+        if (showCopyAction) ConversationIconButton(onClick = {
+            TouchHaptics.click(view)
+            actions.onCopy(id)
+            copied = true
+        }) {
+            Icon(if (copied) DaiyuIcons.Check else DaiyuIcons.Copy,
+                if (copied) "已复制" else "复制回答", Modifier.size(13.dp),
+                tint = if (copied) colors.success else colors.muted)
         }
-        if (showEditAction) IconButton(
-            onClick = { TouchHaptics.click(view); actions.onEditUser(id) },
-            minWidth = 30.dp,
-            minHeight = 30.dp,
-        ) {
-            Icon(
-                imageVector = DaiyuIcons.Edit,
-                contentDescription = "编辑",
-                modifier = Modifier.size(15.dp),
-                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.75f),
-            )
+        if (showEditAction) ConversationIconButton(onClick = { TouchHaptics.click(view); actions.onEditUser(id) }) {
+            Icon(DaiyuIcons.Edit, "编辑", Modifier.size(13.dp), tint = colors.muted)
         }
-        if (allowSpeech) IconButton(
-            onClick = { TouchHaptics.click(view); actions.onSpeak(id) },
-            minWidth = 30.dp,
-            minHeight = 30.dp,
-        ) {
-            Icon(
-                imageVector = DaiyuIcons.Speak,
-                contentDescription = "朗读",
-                modifier = Modifier.size(15.dp),
-                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.75f),
-            )
+        if (allowSpeech) ConversationIconButton(onClick = { TouchHaptics.click(view); actions.onSpeak(id) }) {
+            Icon(DaiyuIcons.Speak, "朗读", Modifier.size(13.dp), tint = colors.muted)
         }
         TooltipBox(text = "分支", enabled = branchEnabled) {
-            IconButton(
-                onClick = { TouchHaptics.click(view); actions.onBranch(id) },
-                enabled = branchEnabled,
-                minWidth = 30.dp,
-                minHeight = 30.dp,
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.CallSplit,
-                    contentDescription = "分支",
-                    modifier = Modifier.size(15.dp),
-                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.75f),
-                )
+            ConversationIconButton(onClick = { TouchHaptics.click(view); actions.onBranch(id) }, enabled = branchEnabled) {
+                Icon(Icons.Rounded.CallSplit, "分支", Modifier.size(14.dp), tint = colors.muted)
             }
         }
         if (showRegenerateAction) TooltipBox(text = "重新生成", enabled = messageActionsEnabled) {
-            IconButton(
-                onClick = { TouchHaptics.click(view); actions.onRegenerate(id) },
-                enabled = messageActionsEnabled,
-                minWidth = 30.dp,
-                minHeight = 30.dp,
-            ) {
-                Icon(
-                    imageVector = DaiyuIcons.Regenerate,
-                    contentDescription = "重新生成",
-                    modifier = Modifier.size(15.dp),
-                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.75f),
-                )
+            ConversationIconButton(onClick = { TouchHaptics.click(view); actions.onRegenerate(id) }, enabled = messageActionsEnabled) {
+                Icon(DaiyuIcons.Regenerate, "重新生成", Modifier.size(13.dp), tint = colors.muted)
             }
         }
         TooltipBox(text = "删除", enabled = messageActionsEnabled) {
-            IconButton(
-                onClick = { TouchHaptics.click(view); actions.onDeleteTurn(id) },
-                enabled = messageActionsEnabled,
-                minWidth = 30.dp,
-                minHeight = 30.dp,
-            ) {
-                Icon(
-                    imageVector = DaiyuIcons.Delete,
-                    contentDescription = "删除",
-                    modifier = Modifier.size(15.dp),
-                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.75f),
-                )
+            ConversationIconButton(onClick = { TouchHaptics.click(view); actions.onDeleteTurn(id) }, enabled = messageActionsEnabled) {
+                Icon(DaiyuIcons.Delete, "删除", Modifier.size(13.dp), tint = colors.muted)
             }
         }
-        MessageTimestamp(timestamp, Modifier.weight(1f).padding(start = 6.dp))
+        if (timestamp.isNotBlank()) Text(timestamp,
+            style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 12.sp),
+            color = colors.muted, maxLines = 1)
     }
 }

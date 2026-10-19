@@ -33,10 +33,15 @@ import app.daiyu.android.domain.ConversationId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.*
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import app.daiyu.android.ui.components.subagent.*
 
 /** A visit owns observations only. Closing never stops, resumes or redispatches a child. */
 @Composable
@@ -71,42 +76,53 @@ internal fun SubAgentStatusHost(controller: ChatController, conversationId: Stri
 @Composable
 internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolean, failed: Boolean,
     onDismiss: () -> Unit) {
-    val colors = MiuixTheme.colorScheme
-    WindowDialog(show = true, title = "子代理状态", onDismissRequest = onDismiss) {
-        Column(Modifier.fillMaxWidth().testTag("subagent-status"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val colors = conversationAgentColors()
+    val maximumHeight = (LocalConfiguration.current.screenHeightDp - 48).coerceAtLeast(180).dp
+    ConversationAgentSheet(onDismiss, radius = 26, modifier = Modifier.heightIn(max = maximumHeight)) {
+        Column(Modifier.fillMaxWidth().heightIn(min = 180.dp).padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 12.dp).testTag("subagent-status")) {
+            Text("子代理状态", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = colors.text, modifier = Modifier.padding(bottom = 10.dp))
+            Text("当前会话", fontSize = 10.sp, color = colors.taskMuted, modifier = Modifier.padding(bottom = 10.dp))
             when {
-                loading -> Text("正在读取任务状态…", color = colors.onSurfaceVariantSummary)
-                failed -> Text("任务状态读取失败；未改变任何任务", color = colors.error)
-                rows.isEmpty() -> Text("本会话暂无子代理任务", color = colors.onSurfaceVariantSummary)
-                else -> LazyColumn(Modifier.fillMaxWidth().heightIn(max = minOf(480.dp,
-                    (LocalConfiguration.current.screenHeightDp * 0.6f).dp)).testTag("subagent-status-list"),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                loading -> Text("正在读取任务状态…", color = colors.taskMuted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 32.dp))
+                failed -> Text("任务状态读取失败；未改变任何任务", color = Color(0xffa15468), fontSize = 13.sp, modifier = Modifier.padding(vertical = 32.dp))
+                rows.isEmpty() -> Text("本会话暂无子代理任务", color = colors.taskMuted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 32.dp))
+                else -> LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).testTag("subagent-status-list")) {
                     items(rows, key = { subAgentStatusItemKey(it.owner) }) { row ->
                         var expanded by remember(subAgentStatusItemKey(row.owner)) { mutableStateOf(false) }
                         Column(Modifier.fillMaxWidth()) {
-                        Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 10.dp).testTag("subagent-status:${row.owner.childRunId}"),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Box(Modifier.size(7.dp).background(if (row.completed) colors.primary else colors.onSurfaceVariantSummary, CircleShape))
-                            Text(ToolRichDetails.scrub(row.agent, limit = 100), Modifier.weight(1f),
-                                style = MiuixTheme.textStyles.body2, color = colors.onSurface,
-                                maxLines = 2, overflow = TextOverflow.Ellipsis)
-                            Text(row.status, style = MiuixTheme.textStyles.footnote1,
-                                color = if (row.completed) colors.primary else colors.onSurfaceVariantSummary)
+                        val stateColor = when {
+                            row.completed -> Color(if (colors.dark) 0xffa4c8b5 else 0xff527867)
+                            row.status in setOf("执行中", "已暂停", "暂停中") -> Color(if (colors.dark) 0xffc4aad2 else 0xff786285)
+                            else -> colors.taskMuted
                         }
-                        if (expanded) androidx.compose.foundation.text.selection.SelectionContainer {
-                            Column(Modifier.padding(start = 17.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(ToolRichDetails.scrub(row.model, limit = 160), style = MiuixTheme.textStyles.footnote1,
-                                    color = colors.onSurfaceVariantSummary)
-                                Text(row.owner.childRunId, style = MiuixTheme.textStyles.footnote1,
-                                    color = colors.onSurfaceVariantSummary)
+                        Row(Modifier.fillMaxWidth().heightIn(min = 42.dp).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { expanded = !expanded }
+                            .padding(horizontal = 1.dp, vertical = 10.dp).testTag("subagent-status:${row.owner.childRunId}"),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(ToolRichDetails.scrub(row.agent, limit = 100), Modifier.weight(1f),
+                                fontSize = 13.sp, fontWeight = FontWeight.Medium, color = colors.text,
+                                maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Box(Modifier.size(5.dp).background(stateColor, CircleShape))
+                                Text(row.status, fontSize = 10.sp, color = stateColor)
                             }
                         }
+                        if (expanded) androidx.compose.foundation.text.selection.SelectionContainer {
+                            Column(Modifier.padding(start = 1.dp, end = 1.dp, bottom = 10.dp)) {
+                                Text(ToolRichDetails.scrub(row.model, limit = 160), fontSize = 10.sp, lineHeight = 17.sp, color = colors.taskMuted)
+                                Text(row.owner.childRunId, fontSize = 10.sp, lineHeight = 17.sp, color = colors.taskMuted)
+                            }
+                        }
+                        if (row != rows.lastOrNull()) HorizontalDivider(color = colors.taskLine)
                         }
                     }
                 }
             }
-            TextButton(text = "关闭", onClick = onDismiss, modifier = Modifier.fillMaxWidth().testTag("subagent-status-close"))
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onDismiss, modifier = Modifier.testTag("subagent-status-close"), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) {
+                    Text("关闭", fontSize = 12.sp, color = colors.strong)
+                }
+            }
         }
     }
 }

@@ -25,8 +25,16 @@ import app.daiyu.android.context.ContextManagementControllerAdapter
 import app.daiyu.android.context.ContextManagementOperation
 import app.daiyu.android.context.ContextManagementState
 import app.daiyu.android.domain.Message
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
+import app.daiyu.android.ui.components.UsageBody as Text
+import app.daiyu.android.ui.components.UsageAction as TextButton
+import app.daiyu.android.ui.components.UsageGlassDialog
+import app.daiyu.android.ui.components.UsageSurface
+import app.daiyu.android.ui.components.UsageMetric
+import app.daiyu.android.ui.components.UsageDivider
+import app.daiyu.android.ui.components.usagePalette
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.sp
 
 /** Visit-scoped adapter: construction/loading never starts a model request. Parent supplies the
  * real admission seam; this route is intentionally not attached to Main's pendingFeature. */
@@ -52,13 +60,12 @@ internal fun ContextManagementPanel(
     val snapshot = state.snapshot
     var showArchive by remember(state.owner, snapshot?.effective?.archiveId) { mutableStateOf(false) }
     val busy = state.operation != null
-    LazyColumn(modifier.fillMaxSize().padding(16.dp).testTag("context-management"),
-        verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    UsageGlassDialog(title = "压缩会话", onDismiss = onClose) {
+    LazyColumn(modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 430.dp).testTag("context-management"),
+        verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(text = "返回", onClick = onClose, modifier = Modifier.testTag("context-close"))
-                Text("上下文压缩", style = MiuixTheme.textStyles.body1)
-                Text("查看与刷新不联网；手动压缩需确认，原始消息保留。", style = MiuixTheme.textStyles.footnote1)
+                Text("查看与刷新不联网；手动压缩需确认，原始消息保留。", style = TextStyle(fontSize = 9.sp, lineHeight = 15.sp, color = usagePalette().muted))
                 TextButton(text = "刷新本机快照", enabled = !busy, onClick = actions::refresh,
                     modifier = Modifier.testTag("context-refresh"))
                 if (busy) {
@@ -74,30 +81,35 @@ internal fun ContextManagementPanel(
                 if (state.requiresRefresh) Text("以下是操作前快照，不代表最新状态；请先刷新核对。")
                 if (snapshot == null) Text("尚无可展示的本机快照。新会话请先保存消息；不推测会话或档案。")
                 else {
-                    Text("原文物理消息：${snapshot.originals.size}；有效上下文消息：${snapshot.effective.messages.size}")
-                    Text("有效历史估算：${snapshot.effective.estimatedTokens} tokens（UTF-8 保守估算，不含未发送草稿）")
                     val configuration = snapshot.configuration
-                    Text("自动压缩：${when (configuration?.automatic) { true -> "开"; false -> "关"; null -> "不可用" }}", style = MiuixTheme.textStyles.body2)
-                    Text("窗口：${configuration?.contextWindowTokens ?: "未知"}；保留完整轮：${configuration?.keepTurns ?: "未知"}")
+                    UsageSurface {
+                        UsageMetric("原文物理消息", snapshot.originals.size.toString())
+                        UsageMetric("有效上下文消息", snapshot.effective.messages.size.toString())
+                        UsageDivider()
+                        UsageMetric("有效历史估算", "${snapshot.effective.estimatedTokens} tokens")
+                        Text("UTF-8 保守估算，不含未发送草稿", color = usagePalette().muted, fontSize = 8.sp)
+                        UsageMetric("自动压缩", when (configuration?.automatic) { true -> "开"; false -> "关"; null -> "不可用" })
+                        UsageMetric("窗口", configuration?.contextWindowTokens?.toString() ?: "未知")
+                        UsageMetric("保留完整轮", configuration?.keepTurns?.toString() ?: "未知")
+                    }
                     val target = snapshot.summaryTarget
-                    TextButton(text = "手动压缩…", enabled = !busy && !state.requiresRefresh && snapshot.canCompress,
-                        onClick = actions::requestCompression, modifier = Modifier.testTag("context-compress"))
-                    if (!snapshot.canCompress) Text("当前无法压缩，请检查摘要配置或刷新会话。", style = MiuixTheme.textStyles.footnote1)
+                    TextButton(text = "手动压缩…", primary = true, modifier = Modifier.fillMaxWidth().testTag("context-compress"), enabled = !busy && !state.requiresRefresh && snapshot.canCompress,
+                        onClick = actions::requestCompression)
+                    if (!snapshot.canCompress) Text("当前无法压缩，请检查摘要配置或刷新会话。", style = TextStyle(fontSize = 9.sp, lineHeight = 15.sp, color = usagePalette().muted))
                     if (state.confirmingCompression) {
-                        Column(Modifier.fillMaxWidth().testTag("context-compression-confirmation"),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        UsageSurface(Modifier.testTag("context-compression-confirmation")) {
                             Text("确认压缩此会话？")
                             SelectableEvidence("精确会话 ID：${state.owner.conversationId.value}\n完整原文版本：${snapshot.historyRevision}")
                             SelectableEvidence("本次收费目标 endpoint：${target?.endpoint}\nAPI model：${target?.apiModel}")
                             Text("将向此 endpoint / API model 发送可压缩原文，可能产生费用；不发送聊天消息、不执行工具。保留原始消息与受保护尾部。摘要 profile（含密钥）保存版本改变时零请求拒绝，必须刷新并重新确认；归属或历史改变也会拒绝。失败或取消不自动重试；取消不能撤回已提交档案。")
-                            TextButton(text = "明确开始一次手动压缩", enabled = !busy,
+                            TextButton(text = "明确开始一次手动压缩", enabled = !busy, primary = true,
                                 onClick = actions::confirmCompression, modifier = Modifier.testTag("context-confirm-compress"))
                             TextButton(text = "暂不压缩", onClick = actions::dismissCompression,
                                 modifier = Modifier.testTag("context-dismiss-compress"))
                         }
                     }
                     TextButton(text = if (showAdvanced) "收起高级选项" else "高级选项",
-                        onClick = { showAdvanced = !showAdvanced }, modifier = Modifier.testTag("context-advanced"))
+                        onClick = { showAdvanced = !showAdvanced }, plain = true, modifier = Modifier.fillMaxWidth().testTag("context-advanced"))
                     if (showAdvanced) {
                         SelectableEvidence("精确会话 ID：${state.owner.conversationId.value}\n选择代次：${state.owner.generation}\n完整原文版本：${snapshot.historyRevision}")
                         SelectableEvidence("独立摘要 endpoint：${target?.endpoint ?: "不可用"}\nAPI model：${target?.apiModel ?: "不可用"}")
@@ -135,6 +147,10 @@ internal fun ContextManagementPanel(
                 MessageEvidence(archive.offset + index, message, "context-archive-message-$index")
             }
         }
+    }
+    UsageDivider(Modifier.padding(top = 9.dp))
+    TextButton(text = "取消", onClick = onClose,
+        modifier = Modifier.fillMaxWidth().padding(top = 10.dp).testTag("context-close"))
     }
 }
 

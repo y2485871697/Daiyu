@@ -325,6 +325,80 @@ class FinalDeliveryTests(unittest.TestCase):
                 self.verify_failed_source_recheck()
             self.assertEqual(str(caught.exception), "terminal_success_required")
 
+    def production_release(self):
+        spec = importlib.util.spec_from_file_location("release_fixtures", ROOT / "tests/test_release_package.py")
+        fixtures = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(fixtures)
+        APP, TEST = fixtures.APP, fixtures.TEST
+        self.doc["mode"] = "production_release"
+        self.job["name"] = "单测、检查与生产Release"
+        self.delivery["jobs"] = self.put("build-jobs.json", {"total_count": 1, "jobs": [self.job]})
+        self.meta["name"] = "代鱼正式候选包"
+        self.delivery["app_manifest"] = self.put("delivery/app-manifest.xml", APP.encode())
+        self.delivery["test_manifest"] = self.put("delivery/test-manifest.xml", TEST.encode())
+        self.members.update(app_manifest="app-manifest.xml", test_manifest="test-manifest.xml")
+        self.release_record = json.loads((self.root / self.delivery["record"]["path"]).read_bytes())
+        self.release_record.update(variant="release", debuggable=False, profileable=False,
+            production_delivery=True, version_name="0.1.0", version_code=1,
+            test_application_id="app.daiyu.android.test",
+            sha256={self.members["app"]: self.delivery["app"]["sha256"],
+                self.members["test"]: self.delivery["test"]["sha256"]},
+            manifest_sha256={self.members[key]: self.delivery[key]["sha256"]
+                for key in ("app_manifest", "test_manifest")})
+        self.delivery["record"] = self.put("delivery/构建记录.json", self.release_record)
+        self.repack()
+
+    def test_production_release_retains_full_cloud_tool_and_81_case_gates(self):
+        self.production_release()
+        self.add_cloud()
+        self.add_tool()
+        result = self.verify()
+        self.assertEqual("production_release", result["mode"])
+        self.assertFalse(result["internal_consistency_satisfied"])
+        self.assertEqual(81, result["business"]["counts"]["not_run"])
+        self.add_business(passed=True)
+        self.assertTrue(self.verify()["internal_consistency_satisfied"])
+        self.assertFalse(self.verify()["final_acceptance_passed"])
+        self.add_cloud(("26",))
+        self.assertFalse(self.verify()["internal_consistency_satisfied"])
+
+    def test_production_release_cannot_relabel_debug_or_reuse_another_check(self):
+        self.doc["mode"] = "production_release"
+        self.reject("invalid_delivery")
+        self.production_release()
+        self.release_record["variant"] = "debug"
+        self.delivery["record"] = self.put("delivery/构建记录.json", self.release_record)
+        self.repack()
+        self.reject("delivery_record_mismatch")
+        self.release_record["variant"] = "release"
+        self.release_record["debuggable"] = True
+        self.delivery["record"] = self.put("delivery/构建记录.json", self.release_record)
+        self.repack()
+        self.reject("delivery_record_mismatch")
+        self.doc["check"] = {"sha": "b" * 40, "run_id": 43, "attempt": 1}
+        self.reject("full_build_identity_mismatch", check_sha="b" * 40, check_run=43)
+
+    def test_production_release_rechecks_pinned_manifest_after_all_hashes_rebound(self):
+        self.production_release()
+        path = self.root / self.delivery["app_manifest"]["path"]
+        raw = path.read_bytes().replace(b'<application ', b'<application android:debuggable="true" ')
+        self.delivery["app_manifest"] = self.put("delivery/app-manifest.xml", raw)
+        self.release_record["manifest_sha256"]["app-manifest.xml"] = sha256(raw)
+        self.delivery["record"] = self.put("delivery/构建记录.json", self.release_record)
+        self.repack()
+        self.reject("release_manifest_mismatch")
+
+    def test_production_release_metadata_and_manifest_members_are_mandatory(self):
+        self.production_release()
+        self.release_record["profileable"] = True
+        self.delivery["record"] = self.put("delivery/构建记录.json", self.release_record)
+        self.repack()
+        self.reject("release_record_mismatch")
+        self.release_record["profileable"] = False
+        self.delivery["record"] = self.put("delivery/构建记录.json", self.release_record)
+        self.repack(override={"app-manifest.xml": b"different manifest"})
+        self.reject("archive_member_mismatch")
+
     def test_missing_81_item_evidence_cannot_pass_even_with_full_cloud(self):
         self.add_cloud()
         self.add_tool()

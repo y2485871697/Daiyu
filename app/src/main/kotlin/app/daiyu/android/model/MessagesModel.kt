@@ -91,6 +91,7 @@ class MessagesModel internal constructor(
                 try { sink(event) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
             }
             var ownedConnection: HttpsURLConnection? = null
+            var configuringRequest = true
             try {
                 checkCancelled()
                 val conn = connect(URL(endpoint))
@@ -104,7 +105,8 @@ class MessagesModel internal constructor(
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.setRequestProperty("Accept", "text/event-stream")
                 sessionHeaders.forEach { (name, value) -> conn.setRequestProperty(name, value) }
-                conn.outputStream.use { it.write(requestBytes) }
+                configuringRequest = false
+                conn.outputStream.useProviderResource { it.write(requestBytes) }
                 checkCancelled()
                 val status = conn.responseCode
                 checkCancelled()
@@ -119,7 +121,7 @@ class MessagesModel internal constructor(
                 })
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", ignoreCase = true) != true)
                     throw ModelRequestException(ModelFailure.PROTOCOL)
-                conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                conn.inputStream.bufferedReader(Charsets.UTF_8).useProviderResource { reader ->
                     val raw = MessagesStream.read(reader, cancelled::get, deliver)
                     checkCancelled()
                     val item = JSONObject(raw)
@@ -140,12 +142,7 @@ class MessagesModel internal constructor(
                 // Caller failures retain identity even when the sink also cancels the session.
                 if (failure === deliveryFailure) throw failure
                 checkCancelled()
-                throw when (failure) {
-                    is java.net.SocketTimeoutException -> ModelRequestException(ModelFailure.TIMEOUT)
-                    is javax.net.ssl.SSLException -> ModelRequestException(ModelFailure.TLS)
-                    is java.io.IOException -> ModelRequestException(ModelFailure.NETWORK)
-                    else -> failure
-                }
+                throw providerTransportFailure(failure, configuringRequest)
             } finally {
                 // Do not read or expose provider error bodies. Close any already available error stream.
                 try { ownedConnection?.errorStream?.close() } catch (_: Exception) {}

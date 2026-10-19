@@ -1,5 +1,5 @@
 name: 代鱼构建
-run-name: ${{ inputs.mode == 'smoke' && format('代鱼双API补检 {0}{1}', inputs.check_id, inputs.smoke_classes != '' && '-filtered' || '') || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || inputs.mode == 'performance' && format('代鱼性能包 {0}', inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
+run-name: ${{ inputs.mode == 'smoke' && format('代鱼双API补检 {0}{1}', inputs.check_id, inputs.smoke_classes != '' && '-filtered' || '') || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || inputs.mode == 'performance' && format('代鱼性能包 {0}', inputs.check_id) || inputs.mode == 'release' && format('代鱼正式候选 {0}', inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
 on:
   workflow_dispatch:
     inputs:
@@ -12,6 +12,7 @@ on:
           - smoke
           - synthetic
           - performance
+          - release
         default: build
         required: true
       smoke_api:
@@ -37,13 +38,18 @@ on:
         type: string
         default: manual
       source_run_id:
-        description: 双API补检使用的既有开发包run ID（不重新打包）
+        description: 双API补检使用的既有应用包run ID（不重新打包）
         type: string
         default: ''
       source_sha:
-        description: 双API补检开发包的完整源码SHA
+        description: 双API补检应用包的完整源码SHA
         type: string
         default: ''
+      source_variant:
+        description: 仅smoke补检使用的源包变体（不重新打包）
+        type: choice
+        options: [debug, release]
+        default: debug
 env:
   SKIP_JDK_VERSION_CHECK: "true"
   PYTHONUTF8: "1"
@@ -207,6 +213,95 @@ jobs:
           name: 代鱼开发包
           path: delivery/
           if-no-files-found: error
+  release:
+    name: 单测、检查与生产Release
+    if: inputs.mode == 'release' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    steps:
+      - name: 限定定向过滤仅用于smoke补检
+        shell: bash
+        run: test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: 核对完整构建源码身份
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            27
+          check-latest: true
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: 安装固定 SDK
+        run: sdkmanager 'platforms/android-37.2' 'build-tools/37.0.0'
+      - name: 校验独立边界
+        run: |
+          python3 scripts/acceptance/record_tool_tests.py --python python3
+          python3 scripts/verify_boundaries.py
+      - name: 准备固定离线语音 JNI（不打包）
+        run: ./gradlew --no-daemon :app:prepareOfflineSpeechRuntime
+      - name: 单测与 Lint
+        run: ./gradlew --no-daemon :core-domain:test :app:testReleaseUnitTest :app:lintRelease
+      - name: 准备固定签名
+        env:
+          DAIYU_RELEASE_KEYSTORE_BASE64: ${{ secrets.DAIYU_RELEASE_KEYSTORE_BASE64 }}
+          DAIYU_RELEASE_KEY_ALIAS: ${{ secrets.DAIYU_RELEASE_KEY_ALIAS }}
+          DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
+          DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
+        run: python3 scripts/prepare_signing.py
+      - name: 构建生产 Release 与同变体测试 APK
+        env:
+          DAIYU_REQUIRE_SIGNING: 'true'
+          DAIYU_RELEASE_STORE_FILE: ${{ runner.temp }}/daiyu-release.p12
+          DAIYU_RELEASE_KEY_ALIAS: ${{ secrets.DAIYU_RELEASE_KEY_ALIAS }}
+          DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
+          DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
+        run: ./gradlew --no-daemon -PdaiyuProductionRelease=true :app:assembleRelease :app:assembleReleaseAndroidTest
+      - name: 清理临时签名文件
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/daiyu-release.p12"
+      - name: 打包版本与摘要
+        shell: bash
+        run: |
+          mkdir delivery
+          short=${GITHUB_SHA:0:8}
+          mkdir -p delivery/tests
+          cp app/build/outputs/apk/androidTest/release/app-release-androidTest.apk delivery/tests/platform-test.apk
+          cp app/build/outputs/apk/release/app-release.apk "delivery/代鱼-0.1.0-${short}.apk"
+          python3 scripts/verify_release_package.py --apkanalyzer "$ANDROID_HOME/cmdline-tools/16111833/bin/apkanalyzer" --apksigner "$ANDROID_HOME/build-tools/37.0.0/apksigner" --delivery delivery
+          python3 scripts/verify_license_bundle.py --apk "delivery/代鱼-0.1.0-${short}.apk"
+          (cd delivery && sha256sum *.apk tests/*.apk > SHA256SUMS)
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼Release测试报告
+          path: |
+            tool-evidence/
+            app/build/test-results/testReleaseUnitTest/
+            app/build/reports/tests/testReleaseUnitTest/
+            core-domain/build/test-results
+            core-domain/build/reports/tests
+            app/build/reports/lint-results-release.*
+            app/build/reports/host-pty/
+          if-no-files-found: ignore
+      - name: 上传生产Release候选包
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼正式候选包
+          path: delivery/
+          if-no-files-found: error
   synthetic:
     name: ${{ inputs.mode == 'performance' && '隔离 Release 性能包' || '隔离合成测试包' }}
     if: (inputs.mode == 'synthetic' || inputs.mode == 'performance') && github.ref == 'refs/heads/main'
@@ -305,8 +400,8 @@ jobs:
           if-no-files-found: error
   smoke:
     name: 启动验证 API ${{ matrix.api }} 分片${{ matrix.shard }}${{ inputs.smoke_classes != '' && '-filtered' || '' }}
-    needs: build
-    if: always() && github.ref == 'refs/heads/main' && ((inputs.mode == 'build' && needs.build.result == 'success') || inputs.mode == 'smoke')
+    needs: [build, release]
+    if: always() && github.ref == 'refs/heads/main' && ((inputs.mode == 'build' && needs.build.result == 'success') || (inputs.mode == 'release' && needs.release.result == 'success') || inputs.mode == 'smoke')
     runs-on: ubuntu-26.04
     timeout-minutes: 120
     strategy:
@@ -337,16 +432,17 @@ jobs:
           if-no-files-found: error
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
-          name: 代鱼开发包
+          name: ${{ (inputs.mode == 'release' || (inputs.mode == 'smoke' && inputs.source_variant == 'release')) && '代鱼正式候选包' || '代鱼开发包' }}
           path: delivery
           run-id: ${{ inputs.mode == 'smoke' && inputs.source_run_id || github.run_id }}
           github-token: ${{ github.token }}
-      - name: 核对补检开发包与源码身份
+      - name: 核对补检应用包与源码身份
         if: inputs.mode == 'smoke'
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_RUN_ID: ${{ inputs.source_run_id }}
           SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_VARIANT: ${{ inputs.source_variant }}
         run: python3 scripts/verify_smoke_source.py
       - name: 校验 APK 摘要
         run: cd delivery && sha256sum -c SHA256SUMS

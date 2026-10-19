@@ -296,6 +296,13 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     /** Real framework pause/resume, retaining this Activity without onStop or recreation. */
     protected fun realPauseResume(original: MainActivity, beforePause: () -> Unit = {}, atPause: () -> Unit = {}) {
         check(android.os.Looper.myLooper() != android.os.Looper.getMainLooper())
+        val debugCover = android.content.ComponentName(original.packageName, "app.daiyu.android.LifecycleCoverActivity")
+        val debugCoverPresent = try { original.packageManager.getActivityInfo(debugCover, 0); true }
+            catch (_: android.content.pm.PackageManager.NameNotFoundException) { false }
+        if (!debugCoverPresent) {
+            releasePauseResume(original, beforePause, atPause)
+            return
+        }
         val app = original.application
         val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
         var cover: android.app.Activity? = null
@@ -353,6 +360,83 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                 if (primary == null) throw cleanup else primary.addSuppressed(cleanup)
             } finally {
                 mainThread { original.lifecycle.removeObserver(before); app.unregisterActivityLifecycleCallbacks(callbacks) }
+            }
+        }
+        ui.waitForIdle()
+    }
+
+    /** Release keeps its APK free of test components; this cover belongs only to the test APK. */
+    private fun releasePauseResume(original: MainActivity, beforePause: () -> Unit, atPause: () -> Unit) {
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        var finishCover: android.os.ResultReceiver? = null
+        var coverReady = false
+        var coverDestroyed = false
+        var coverTask = -1
+        var paused = false
+        var resumed = false
+        var stopped = false
+        fun capture(action: () -> Unit) {
+            try { action() } catch (problem: Throwable) { failure.compareAndSet(null, problem) }
+        }
+        val before = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) capture(beforePause)
+        }
+        val callbacks = object : android.app.Application.ActivityLifecycleCallbacks {
+            override fun onActivityPaused(activity: android.app.Activity) {
+                if (activity === original) { paused = true; capture { assertFalse(stopped); atPause() } }
+            }
+            override fun onActivityResumed(activity: android.app.Activity) { if (activity === original) resumed = true }
+            override fun onActivityStopped(activity: android.app.Activity) { if (activity === original) stopped = true }
+            override fun onActivityCreated(activity: android.app.Activity, state: Bundle?) = Unit
+            override fun onActivityStarted(activity: android.app.Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: android.app.Activity, state: Bundle) = Unit
+            override fun onActivityDestroyed(activity: android.app.Activity) = Unit
+        }
+        val reply = object : android.os.ResultReceiver(android.os.Handler(android.os.Looper.getMainLooper())) {
+            @Suppress("DEPRECATION")
+            override fun onReceiveResult(code: Int, data: Bundle?) {
+                when (code) {
+                    0 -> { finishCover = data?.getParcelable("finish"); coverTask = data?.getInt("task", -1) ?: -1 }
+                    1 -> coverReady = true
+                    2 -> coverDestroyed = true
+                }
+            }
+        }
+        mainThread {
+            assertEquals(androidx.lifecycle.Lifecycle.State.RESUMED, original.lifecycle.currentState)
+            original.application.registerActivityLifecycleCallbacks(callbacks)
+            original.lifecycle.addObserver(before)
+        }
+        var primary: Throwable? = null
+        var launched = false
+        try {
+            mainThread {
+                original.startActivity(Intent().setComponent(android.content.ComponentName(
+                    instrumentation.context.packageName, "app.daiyu.android.ReleaseLifecycleCoverActivity"))
+                    .putExtra("reply", reply))
+                launched = true
+            }
+            awaitControl("original paused under test APK cover") { paused && !stopped && coverReady && finishCover != null }
+            mainThread { assertEquals(original.taskId, coverTask) }
+            failure.get()?.let { throw it }
+        } catch (problem: Throwable) {
+            primary = problem
+            throw problem
+        } finally {
+            try {
+                if (launched) {
+                    awaitControl("test APK cover finish channel") { finishCover != null || coverDestroyed }
+                    mainThread { finishCover?.send(0, null) }
+                    awaitControl("same release Activity resumed after test cover") {
+                        coverDestroyed && (!paused || resumed) && !original.isDestroyed && !original.isFinishing &&
+                            original.lifecycle.currentState == androidx.lifecycle.Lifecycle.State.RESUMED
+                    }
+                }
+                mainThread { assertFalse("pause-only cover must not stop original", stopped) }
+            } catch (cleanup: Throwable) {
+                if (primary == null) throw cleanup else primary.addSuppressed(cleanup)
+            } finally {
+                mainThread { original.lifecycle.removeObserver(before); original.application.unregisterActivityLifecycleCallbacks(callbacks) }
             }
         }
         ui.waitForIdle()

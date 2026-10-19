@@ -42,6 +42,12 @@ val daiyuSyntheticApplication = providers.gradleProperty("daiyuSyntheticApplicat
 val daiyuPhysicalPerformance = providers.gradleProperty("daiyuPhysicalPerformance").map {
     it.toBooleanStrictOrNull() ?: error("daiyuPhysicalPerformance 必须是 true 或 false")
 }.getOrElse(false)
+val daiyuProductionRelease = providers.gradleProperty("daiyuProductionRelease").map {
+    it.toBooleanStrictOrNull() ?: error("daiyuProductionRelease 必须是 true 或 false")
+}.getOrElse(false)
+check(!daiyuProductionRelease || (!daiyuSyntheticApplication && !daiyuPhysicalPerformance)) {
+    "生产 Release 不得启用隔离或性能配置"
+}
 check(!daiyuPhysicalPerformance || daiyuSyntheticApplication) {
     "物理性能构建必须启用 daiyuSyntheticApplication=true"
 }
@@ -54,7 +60,7 @@ android {
     namespace = "app.daiyu.android"
     compileSdk { version = release(37) { minorApiLevel = 2 } }
     buildToolsVersion = "37.0.0"
-    if (daiyuPhysicalPerformance) testBuildType = "release"
+    if (daiyuPhysicalPerformance || daiyuProductionRelease) testBuildType = "release"
     defaultConfig {
         applicationId = "app.daiyu.android"
         minSdk = 26
@@ -112,6 +118,7 @@ android {
     check(signingValues.all { it == null } || fixedSigning) { "固定签名配置不完整" }
     check(System.getenv("DAIYU_REQUIRE_SIGNING") != "true" || fixedSigning) { "交付构建必须配置固定签名" }
     check(!daiyuPhysicalPerformance || fixedSigning) { "物理性能构建必须配置固定签名" }
+    check(!daiyuProductionRelease || fixedSigning) { "生产 Release 必须配置固定签名" }
     if (fixedSigning) {
         signingConfigs.create("release") {
             storeFile = file(signingValues[0]!!)

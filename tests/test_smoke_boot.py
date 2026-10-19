@@ -82,7 +82,7 @@ class SourceTests(unittest.TestCase):
 
     def test_identity_and_unchanged_application(self):
         env = dict(SOURCE_SHA='a' * 40, SOURCE_RUN_ID='123')
-        record = dict(source_sha='a' * 40, run_id='123', attempt='1', application_id='app.daiyu.android')
+        record = dict(source_sha='a' * 40, run_id='123', attempt='1', application_id='app.daiyu.android', variant='debug', debuggable=True)
         run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main', workflow_id=383377276, status='completed', conclusion='success')
         jobs = [dict(name='单测、检查与开发包', conclusion='success')]
         source.verify(env, record, run, jobs, ['scripts/smoke_boot.sh', 'docs/acceptance/final-delivery-entry.md',
@@ -113,6 +113,30 @@ class SourceTests(unittest.TestCase):
             source.verify(env, record, run, [], [])
         with self.assertRaises(ValueError):
             source.verify(env, dict(record, attempt='2'), run, jobs, [])
+
+    def test_reuse_requires_explicit_matching_release_variant(self):
+        env = dict(SOURCE_SHA='a' * 40, SOURCE_RUN_ID='123', SOURCE_VARIANT='release')
+        record = dict(source_sha='a' * 40, run_id='123', attempt='1', application_id='app.daiyu.android',
+                      variant='release', debuggable=False, production_delivery=True, profileable=False,
+                      test_application_id='app.daiyu.android.test')
+        run = dict(id=123, run_attempt=1, head_sha='a' * 40, head_branch='main', workflow_id=383377276,
+                   status='completed', conclusion='failure')
+        jobs = [dict(name='单测、检查与生产Release', conclusion='success')]
+        source.verify(env, record, run, jobs, ['tests/test_release_package.py'])
+        for field, value in (('variant', 'debug'), ('debuggable', True), ('debuggable', 0),
+                             ('production_delivery', False), ('profileable', True),
+                             ('test_application_id', 'app.daiyu.android.synthetic.test')):
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                source.verify(env, dict(record, **{field: value}), run, jobs, [])
+        for variant in ('debug', 'performance', ''):
+            with self.subTest(variant=variant), self.assertRaises(ValueError):
+                source.verify(dict(env, SOURCE_VARIANT=variant), record, run, jobs, [])
+        with self.assertRaises(ValueError):
+            source.verify(env, record, run, [dict(name='单测、检查与开发包', conclusion='success')], [])
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        smoke = workflow.split('  smoke:\n', 1)[1]
+        self.assertIn("inputs.mode == 'smoke' && inputs.source_variant == 'release'", smoke)
+        self.assertIn('SOURCE_VARIANT: ${{ inputs.source_variant }}', smoke)
 
 
 @unittest.skipIf(os.name == 'nt', 'POSIX executable/shebang fixtures; smoke runs on Ubuntu')

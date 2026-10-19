@@ -18,6 +18,7 @@ import zlib
 # Existing scripts remain the authoritative signing/reuse policy implementations.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import verify_signing
+import verify_release_package
 import verify_license_bundle
 import verify_smoke_source
 import cloud_report
@@ -96,13 +97,16 @@ def run_and_job(files, run_ref, jobs_ref, expected, name, *, mode="full_build"):
 
 
 def delivery(files, document, expected, repo_root, *, mode="full_build"):
-    shape(document, ("run", "jobs", "artifact", "archive", "record", "sums", "signature", "app", "test"),
+    release = mode == "production_release"
+    extra = ("app_manifest", "test_manifest") if release else ()
+    shape(document, ("run", "jobs", "artifact", "archive", "record", "sums", "signature", "app", "test", *extra),
           "invalid_delivery")
-    run, jobs, job = run_and_job(files, document["run"], document["jobs"], expected, "单测、检查与开发包", mode=mode)
+    job_name = "单测、检查与生产Release" if release else "单测、检查与开发包"
+    run, jobs, job = run_and_job(files, document["run"], document["jobs"], expected, job_name, mode=mode)
     meta = files.json(document["artifact"])
     archive_path = pinned_large(files.root, document["archive"])
     require(isinstance(meta, dict) and type(meta.get("id")) is int and meta["id"] > 0
-            and meta.get("name") == "代鱼开发包" and meta.get("expired") is False
+            and meta.get("name") == ("代鱼正式候选包" if release else "代鱼开发包") and meta.get("expired") is False
             and meta.get("digest") == "sha256:" + document["archive"]["sha256"], "artifact_metadata_mismatch")
     workflow = meta.get("workflow_run")
     require(isinstance(workflow, dict), "artifact_revision_mismatch")
@@ -116,12 +120,26 @@ def delivery(files, document, expected, repo_root, *, mode="full_build"):
             and str(record.get("attempt")) == str(expected["attempt"])
             and record.get("application_id") == "app.daiyu.android"
             and record.get("certificate_sha256") == verify_signing.EXPECTED_CERT
-            and record.get("signing") == "daiyu-fixed" and record.get("variant") == "debug"
-            and record.get("debuggable") is True, "delivery_record_mismatch")
+            and record.get("signing") == "daiyu-fixed"
+            and record.get("variant") == ("release" if release else "debug")
+            and record.get("debuggable") is (False if release else True), "delivery_record_mismatch")
     app_name = "代鱼-0.1.0-" + expected["sha"][:8] + ".apk"
     members = {"构建记录.json": document["record"], "SHA256SUMS": document["sums"],
                "签名证据.txt": document["signature"], app_name: document["app"],
                "tests/platform-test.apk": document["test"]}
+    if release:
+        members.update({"app-manifest.xml": document["app_manifest"], "test-manifest.xml": document["test_manifest"]})
+        require(record.get("production_delivery") is True and record.get("profileable") is False
+                and record.get("version_name") == "0.1.0" and type(record.get("version_code")) is int
+                and record["version_code"] == 1 and record.get("test_application_id") == "app.daiyu.android.test"
+                and record.get("sha256") == {app_name: document["app"]["sha256"],
+                    "tests/platform-test.apk": document["test"]["sha256"]}
+                and record.get("manifest_sha256") == {"app-manifest.xml": document["app_manifest"]["sha256"],
+                    "test-manifest.xml": document["test_manifest"]["sha256"]}, "release_record_mismatch")
+        try:
+            verify_release_package.verify_manifests(files.read(document["app_manifest"]), files.read(document["test_manifest"]))
+        except (ValueError, verify_release_package.ET.ParseError):
+            raise InvalidEvidence("release_manifest_mismatch") from None
     for name, ref in members.items():
         if name.endswith(".apk"):
             pinned_large(files.root, ref)
@@ -207,15 +225,15 @@ def verify(manifest_path, manifest_sha256, repo_root, evidence_root,
     require(type(doc["schema_version"]) is int and doc["schema_version"] == 1, "invalid_schema")
     identity(doc["build"], build_sha, build_run, build_attempt)
     identity(doc["check"], check_sha, check_run, check_attempt)
-    require(doc["mode"] in ("full_build", "old_apk_recheck"), "invalid_mode")
-    if doc["mode"] == "full_build":
+    require(doc["mode"] in ("full_build", "old_apk_recheck", "production_release"), "invalid_mode")
+    if doc["mode"] in ("full_build", "production_release"):
         require(doc["build"] == doc["check"], "full_build_identity_mismatch")
     else:
         require(doc["build"] != doc["check"], "recheck_identity_required")
     files = Files(evidence_root)
     source = source_gate.verify(repo_root, check_sha)
     record, run, jobs, apk = delivery(files, doc["delivery"], doc["build"], repo_root, mode=doc["mode"])
-    reuse_ok = doc["mode"] == "full_build"
+    reuse_ok = doc["mode"] in ("full_build", "production_release")
     if not reuse_ok and source["source_bound"]:
         reuse(repo_root, doc["build"], doc["check"], record, run, jobs)
         reuse_ok = True

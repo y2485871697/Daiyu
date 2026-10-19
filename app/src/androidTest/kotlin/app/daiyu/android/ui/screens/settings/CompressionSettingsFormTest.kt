@@ -19,6 +19,7 @@ import app.daiyu.android.ui.app.AgentAppTheme
 /** Exercises actual form controls and captured requests, without a provider or persistence. */
 class CompressionSettingsFormTest : WiredActivityTestCase() {
     private var submitted: CompressionSettingsEditor.SaveRequest? = null
+    private var pickerOpens = 0
     private var observed: CompressionSettingsDraftUi? = null
 
     private fun draft() = CompressionSettingsDraftUi(
@@ -30,6 +31,7 @@ class CompressionSettingsFormTest : WiredActivityTestCase() {
 
     private fun show(initial: CompressionSettingsDraftUi) {
         submitted = null
+        pickerOpens = 0
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -38,42 +40,49 @@ class CompressionSettingsFormTest : WiredActivityTestCase() {
                         onSave = {
                             submitted = CompressionSettingsEditor.SaveRequest(it.compression(), it.summary(),
                                 it.protocolChangeAuthorized, it.requestOptionsReplacementAuthorized)
-                        }, onBack = {}, enabled = true, notice = null, error = false)
+                        }, onBack = {}, enabled = true, notice = null, error = false,
+                        onChooseModel = { pickerOpens++ })
                 }
             }
         }
         ui.waitForIdle()
     }
 
-    fun testUnavailableStoredProtocolRequiresAndCarriesExplicitRebind() {
-        show(draft()) // An unavailable profile does not disclose the old stored protocol.
-        reveal("compression-summary-config", "上下文压缩").performClick()
+    fun testFirstScreenHasOriginalControlsWithoutParameterOrConnectionForms() {
+        show(draft())
+        node("settings-switch:自动压缩").assertExists()
+        node("compression-protocol").assertExists()
+        node("settings-switch:使用独立摘要配置").assertExists()
+        node("compression-summary-config").assertExists()
+        node("compression-policy-config").assertDoesNotExist()
+        node("compression-model-budget").assertDoesNotExist()
+        node("settings-field:摘要 Base URL").assertDoesNotExist()
+        node("settings-field:摘要 API Key").assertDoesNotExist()
+        node("compression-save").assertDoesNotExist()
         assertNull(submitted)
-        reveal("settings-switch:重输摘要密钥并绑定新协议", "上下文压缩").performClick()
-        assertNull(submitted)
-        reveal("compression-save", "上下文压缩").performClick()
-        ui.waitForIdle()
-        val request = checkNotNull(submitted)
-        assertTrue(request.protocolChangeAuthorized)
-        assertEquals(ProviderProtocol.RESPONSES, request.profile!!.provider.protocol)
-        request.profile!!.configuration()
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testCrossProtocolOptionsOnlyResetAfterExplicitAction() {
-        val initial = draft().copy(savedProtocol = ProviderProtocol.RESPONSES,
-            provider = draft().provider.copy(requestOptions = ProviderRequestOptions(speedMode = GptSpeedMode.FAST)))
-        show(initial)
+    fun testModelRowOpensPickerWithoutSavingOrRequestingProvider() {
+        show(draft())
         reveal("compression-summary-config", "上下文压缩").performClick()
-        reveal("settings-radio:Anthropic Messages", "上下文压缩").performClick()
-        mainThread { assertEquals(GptSpeedMode.FAST, observed!!.provider.requestOptions.speedMode) }
-        reveal("settings-field:摘要 API Key", "上下文压缩").performTextReplacement("replacement-synthetic-key")
-        reveal("settings-switch:重输摘要密钥并绑定新协议", "上下文压缩").performClick()
-        reveal("settings-row:重置摘要请求策略并授权替换", "上下文压缩").performClick()
-        assertNull(submitted)
-        reveal("compression-save", "上下文压缩").performClick()
         ui.waitForIdle()
-        val request = checkNotNull(submitted)
+        assertEquals(1, pickerOpens)
+        assertNull(submitted)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testDraftProtocolAuthorizationAndRequestPolicyResetRemainExplicit() {
+        val original = draft().copy(savedProtocol = ProviderProtocol.RESPONSES,
+            provider = draft().provider.copy(requestOptions = ProviderRequestOptions(speedMode = GptSpeedMode.FAST)))
+        val changed = original.selectProtocol(ProviderProtocol.MESSAGES)
+        assertFalse(changed.protocolChangeAuthorized)
+        assertEquals("", changed.provider.apiKey)
+        assertEquals(GptSpeedMode.FAST, changed.provider.requestOptions.speedMode)
+        val authorized = changed.copy(provider = changed.provider.copy(apiKey = "replacement-synthetic-key"),
+            protocolChangeAuthorized = true).resetRequestOptions()
+        val request = CompressionSettingsEditor.SaveRequest(authorized.compression(), authorized.summary(),
+            authorized.protocolChangeAuthorized, authorized.requestOptionsReplacementAuthorized)
         assertTrue(request.protocolChangeAuthorized)
         assertTrue(request.requestOptionsReplacementAuthorized)
         assertEquals(ProviderRequestOptions(), request.profile!!.provider.requestOptions)

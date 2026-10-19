@@ -145,23 +145,12 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
         }
         openSettings()
         reveal("settings-row:鲸鱼女仆", "设置").performClick()
-        ui.waitUntil(timeoutMillis = 5_000) {
-            var found = false
-            instrumentation.runOnMainSync {
-                found = current.window.decorView.findViewWithTag<android.view.View>("pet-settings-view") != null
-            }
-            found
-        }
-        mainThread { assertNotNull(current.window.decorView.findViewWithTag<android.view.View>("pet-settings-view")) }
+        awaitUniqueTag("pet-settings-view")
+        node("pet-settings-view").assertIsDisplayed()
         backToPage(current, "page:设置") // Pet settings BackHandler returns to the actual SettingsHome.
         reveal("settings-row:辅助视觉模型", "设置").performClick()
-        ui.waitUntil(timeoutMillis = 5_000) {
-            var found = false
-            instrumentation.runOnMainSync {
-                found = current.window.decorView.findViewWithTag<android.view.View>("independent-model-vision") != null
-            }
-            found
-        }
+        awaitUniqueTag("independent-model-vision")
+        node("independent-model-vision").assertIsDisplayed()
         activity = recreateActivity(current)
         mainThread {
             val replacement = checkNotNull(activity)

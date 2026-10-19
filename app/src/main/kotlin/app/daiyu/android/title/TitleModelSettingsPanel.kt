@@ -1,17 +1,11 @@
 package app.daiyu.android.title
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.*
+import app.daiyu.android.ui.components.MiuixScaffoldPage
+import app.daiyu.android.ui.screens.settings.*
+import androidx.compose.ui.Modifier
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.storage.ModelSettings
 
@@ -32,9 +26,6 @@ data class TitleModelDraft(
     override fun toString(): String = "TitleModelDraft(binding=$binding, protocol=$protocol, apiKey=<redacted>)"
 }
 
-/** Stateless settings surface. onSave/onDisable must be admitted by the parent's owner/revision
- * gate and run on its worker. No preferences/keystore read or write occurs during composition.
- * The host clears the key draft after success/disposal and ignores revoked page callbacks. */
 @Composable
 fun TitleModelSettingsPanel(
     settings: TitleModelSettings,
@@ -45,38 +36,20 @@ fun TitleModelSettingsPanel(
     busy: Boolean,
     notice: String? = null,
     modifier: Modifier = Modifier,
+    onBack: () -> Unit = {},
+    modelLabel: String? = null,
+    onChooseModel: () -> Unit = {},
 ) {
-    Column(modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(if (settings.enabled) "已启用独立固定绑定" else "默认关闭；不会使用聊天主模型")
-        Text("手动改名优先。模型失绑定会明确拒绝；保存仅写本地配置，不发送供应商请求。")
-        OutlinedTextField(draft.endpoint, { onDraftChange(draft.copy(endpoint = it)) },
-            label = { Text("独立服务 HTTPS 地址") }, enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(draft.model, { onDraftChange(draft.copy(model = it)) },
-            label = { Text("固定模型名称") }, enabled = !busy, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(draft.apiKey, { onDraftChange(draft.copy(apiKey = it)) },
-            label = { Text("独立密钥（重新保存需明确填写）") }, enabled = !busy, singleLine = true,
-            visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
-        Text("协议：${draft.protocol.wireName}")
-        listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI).forEach { protocol ->
-            OutlinedButton(onClick = {
-                if (protocol != draft.protocol) onDraftChange(draft.copy(protocol = protocol, apiKey = "",
-                    responsesPath = if (protocol == ProviderProtocol.RESPONSES) draft.responsesPath else "", protocolChangeAuthorized = false))
-            }, enabled = !busy) { Text(protocol.wireName) }
-        }
-        if (draft.protocol == ProviderProtocol.RESPONSES) {
-            app.daiyu.android.ui.screens.settings.ResponsesPathRow("Responses 路径", draft.responsesPath, !busy) {
-                onDraftChange(draft.copy(responsesPath = it))
+    MiuixScaffoldPage(title = "标题模型", onBack = onBack, modifier = modifier) {
+        item("title-model-intro") { SettingsNote("为新会话自动生成简短标题。") }
+        notice?.let { item("title-model-status") { SettingsNote(it) } }
+        item("title-model-summary") {
+            SettingsCard(Modifier.padding(top = 12.dp)) {
+                SettingsSwitchRow("使用自定义模型", settings.enabled, !busy,
+                    tag = "title-model-enabled") { requested -> if (requested) onChooseModel() else onDisable() }
+                SettingsRow("选择模型", summary = modelLabel ?: "选择模型", tag = "title-model-configure",
+                    onClick = if (busy) null else onChooseModel)
             }
         }
-        // These are explicit authorizations, not a guessed migration or automatic repair.
-        OutlinedButton(onClick = { onDraftChange(draft.copy(protocolChangeAuthorized = !draft.protocolChangeAuthorized)) }, enabled = !busy) {
-            Text(if (draft.protocolChangeAuthorized) "已明确允许协议替换" else "允许协议替换（需明确确认）")
-        }
-        OutlinedButton(onClick = { onDraftChange(draft.copy(requestOptionsReplacementAuthorized = !draft.requestOptionsReplacementAuthorized)) }, enabled = !busy) {
-            Text(if (draft.requestOptionsReplacementAuthorized) "已明确允许请求策略替换" else "允许请求策略替换（需明确确认）")
-        }
-        Button(onClick = { onSave(draft) }, enabled = !busy) { Text("保存并启用独立标题模型") }
-        OutlinedButton(onClick = onDisable, enabled = !busy) { Text("关闭自动标题") }
-        notice?.let { Text(it) }
     }
 }

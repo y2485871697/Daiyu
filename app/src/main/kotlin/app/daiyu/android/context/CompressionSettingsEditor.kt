@@ -79,13 +79,17 @@ class CompressionSettingsEditor internal constructor(
     fun prepareLoad(): Work? = prepare(null)
     fun prepareSave(request: SaveRequest): Work? = prepare(request)
 
-    private fun prepare(request: SaveRequest?): Work? {
+    /** Selection is durable even while the existing backend has no capacity record for the model. */
+    internal fun prepareSelection(settings: ProductionCompressionSettings, selected: () -> Unit): Work? =
+        prepare(SaveRequest(settings), selected)
+
+    private fun prepare(request: SaveRequest?, selected: (() -> Unit)? = null): Work? {
         while (true) {
             val before = state.get()
             if (before !is Ready) return null
             val queued = Queued(Identity(ownerIdentity))
             if (state.compareAndSet(before, queued)) {
-                return Work(queued.identity) { runWorker(queued, request) }
+                return Work(queued.identity) { runWorker(queued, request, selected) }
             }
         }
     }
@@ -113,11 +117,16 @@ class CompressionSettingsEditor internal constructor(
         }
     }
 
-    private fun runWorker(queued: Queued, request: SaveRequest?): Result {
+    private fun runWorker(queued: Queued, request: SaveRequest?, selected: (() -> Unit)?): Result {
         val admitted = Admitted(queued.identity)
         if (!state.compareAndSet(queued, admitted)) return Result(queued.identity, Outcome.Revoked)
         val outcome = try {
-            if (request == null) load() else save(request)
+            if (selected != null) {
+                try { selected() } catch (_: Exception) {
+                    return Result(queued.identity, Outcome.Failed(Stage.VALIDATE_SAVE, false))
+                }
+            }
+            if (request == null) load() else save(request, selectionOnly = selected != null)
         } finally {
             // In particular, never resurrect an owner revoked during admitted I/O.
             state.compareAndSet(admitted, Ready(queued.identity))
@@ -138,7 +147,7 @@ class CompressionSettingsEditor internal constructor(
         }
     }
 
-    private fun save(request: SaveRequest): Outcome {
+    private fun save(request: SaveRequest, selectionOnly: Boolean = false): Outcome {
         // Only relationship validation belongs here. All numeric/protocol/tool validation is
         // performed by the existing settings/profile types and stores, not a parallel policy.
         if (request.profile != null && request.settings.summaryModel != request.profile.binding) {
@@ -160,7 +169,11 @@ class CompressionSettingsEditor internal constructor(
         return try {
             val settings = compressionStore().snapshot()
             check(settings == request.settings)
-            val profile = settings.summaryModel?.let { profileStore().load(it) }
+            val profile = try { settings.summaryModel?.let { profileStore().load(it) } }
+            catch (failure: SummaryProfileUnavailableException) {
+                if (!selectionOnly) throw failure
+                return Outcome.Saved(Snapshot(settings, null, failure.reason))
+            }
             if (request.profile != null) check(profile == request.profile)
             Outcome.Saved(Snapshot(settings, profile))
         } catch (failure: Exception) {

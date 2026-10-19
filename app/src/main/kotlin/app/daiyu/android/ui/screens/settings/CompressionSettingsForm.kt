@@ -1,12 +1,12 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.testTag
-import top.yukonga.miuix.kmp.basic.TextButton
 import androidx.compose.ui.Modifier
 import app.daiyu.android.context.ProductionCompressionSettings
 import app.daiyu.android.context.SummaryModelBinding
@@ -61,7 +61,7 @@ internal data class CompressionSettingsDraftUi(
     override fun toString(): String = "CompressionSettingsDraftUi(binding=$binding, automatic=$automatic, provider=<redacted>)"
 }
 
-/** Controlled form: no preferences, credentials, model calls, or automatic saves. */
+/** The form only presents original controls; providers own connection and model settings. */
 @Composable
 internal fun CompressionSettingsForm(
     draft: CompressionSettingsDraftUi,
@@ -72,89 +72,48 @@ internal fun CompressionSettingsForm(
     notice: String?,
     error: Boolean,
     modifier: Modifier = Modifier,
+    modelLabel: String? = null,
+    onChooseModel: () -> Unit = {},
+    onChooseProtocol: (ProviderProtocol) -> Unit = {},
 ) {
-    var summaryExpanded by remember { mutableStateOf(false) }
-    var diagnosticsExpanded by remember { mutableStateOf(false) }
+    var showProtocol by remember { mutableStateOf(false) }
     MiuixScaffoldPage(title = "上下文压缩", onBack = onBack, modifier = modifier) {
-        notice?.let { item(key = "compression-notice") { SettingsNote(it, error = error) } }
-        if (!enabled) item(key = "compression-busy") { SettingsNote("正在读取或保存设置…") }
-        item(key = "compression-policy") {
-            SettingsSectionTitle("当前会话发送预算")
-            SettingsCard {
-                SettingsSwitchRow("自动压缩", draft.automatic, enabled) { onChange(draft.copy(automatic = it)) }
-                SettingsTextField("上下文窗口 tokens", draft.window, { onChange(draft.copy(window = it)) },
-                    hint = "留空表示未知；不会猜测模型容量", enabled = enabled)
-                SettingsTextField("发送预留 tokens", draft.reserve, { onChange(draft.copy(reserve = it)) }, enabled = enabled)
-                SettingsTextField("触发百分比", draft.trigger, { onChange(draft.copy(trigger = it)) }, enabled = enabled)
-                SettingsTextField("保留完整轮数", draft.keepTurns, { onChange(draft.copy(keepTurns = it)) }, enabled = enabled)
-            }
-            SettingsNote("开启自动压缩后，达到阈值时压缩。关闭后仍会检查已知窗口的发送预算。")
-        }
-        item(key = "compression-profile") {
-            SettingsSectionTitle("独立摘要模型")
-            SettingsCard {
-                SettingsSwitchRow("使用独立摘要配置", draft.configureSummary, enabled) {
-                    summaryExpanded = it
-                    onChange(draft.copy(configureSummary = it))
-                }
-                if (draft.configureSummary) {
-                    SettingsRow("摘要模型配置",
-                        summary = if (summaryExpanded) "收起连接与预算设置" else
-                            draft.provider.model.takeIf { it.isNotBlank() }?.let { "模型：$it · 展开编辑" } ?: "尚未填写模型 · 展开编辑",
-                        tag = "compression-summary-config", onClick = { summaryExpanded = !summaryExpanded })
-                }
-                if (draft.configureSummary && summaryExpanded) {
-                    SettingsRadioRow("OpenAI Responses", draft.provider.protocol == ProviderProtocol.RESPONSES, enabled) {
-                        onChange(draft.selectProtocol(ProviderProtocol.RESPONSES))
-                    }
-                    SettingsRadioRow("Anthropic Messages", draft.provider.protocol == ProviderProtocol.MESSAGES, enabled) {
-                        onChange(draft.selectProtocol(ProviderProtocol.MESSAGES))
-                    }
-                    if (draft.needsProtocolAuthorization) {
-                        SettingsSwitchRow("重输摘要密钥并绑定新协议", draft.protocolChangeAuthorized, enabled) {
-                            onChange(draft.copy(protocolChangeAuthorized = it))
-                        }
-                    }
-                    SettingsTextField("摘要 Base URL", draft.provider.endpoint,
-                        { onChange(draft.copy(provider = draft.provider.copy(endpoint = it))) }, enabled = enabled)
-                    if (draft.provider.protocol == ProviderProtocol.RESPONSES) {
-                        ResponsesPathRow("摘要 Responses 路径", draft.provider.responsesPath, enabled) {
-                            onChange(draft.copy(provider = draft.provider.copy(responsesPath = it)))
-                        }
-                    }
-                    SettingsTextField("摘要模型名", draft.provider.model,
-                        { onChange(draft.copy(provider = draft.provider.copy(model = it))) }, enabled = enabled)
-                    SettingsTextField("摘要 API Key", draft.provider.apiKey,
-                        { onChange(draft.copy(provider = draft.provider.copy(apiKey = it))) }, password = true, enabled = enabled)
-                    SettingsNote("请按摘要模型容量填写预算：输入预算 = 摘要窗口 − 输出、推理及协议预留。")
-                    SettingsTextField("摘要窗口 tokens", draft.summaryWindow, { onChange(draft.copy(summaryWindow = it)) }, enabled = enabled)
-                    SettingsTextField("摘要输入预算 tokens", draft.inputBudget, { onChange(draft.copy(inputBudget = it)) }, enabled = enabled)
-                    SettingsTextField("摘要最大输出 tokens", draft.outputBudget, { onChange(draft.copy(outputBudget = it)) }, enabled = enabled)
-                    SettingsTextField("摘要推理预留 tokens", draft.reasoningBudget, { onChange(draft.copy(reasoningBudget = it)) }, enabled = enabled)
-                    SettingsTextField("摘要协议预留 tokens", draft.overheadBudget, { onChange(draft.copy(overheadBudget = it)) }, enabled = enabled)
-                    SettingsTextField("摘要截止时间毫秒", draft.deadlineMillis, { onChange(draft.copy(deadlineMillis = it)) }, enabled = enabled)
-                    SettingsRow("重置摘要请求策略并授权替换",
-                        summary = if (draft.requestOptionsReplacementAuthorized) "已重置草稿；点击保存才写入" else "清除自定义请求参数；点击保存才写入",
-                        onClick = if (enabled) ({ onChange(draft.resetRequestOptions()) }) else null)
-
+        notice?.let { item("compression-notice") { SettingsNote(it, error = error) } }
+        item("compression-automatic") {
+            SettingsCard(Modifier.padding(top = 12.dp)) {
+                SettingsSwitchRow("自动压缩上下文", draft.automatic, enabled,
+                    tag = "settings-switch:自动压缩", summary = "达到阈值时，自动摘要较早对话。") {
+                    onSave(draft.copy(automatic = it))
                 }
             }
-            SettingsNote("摘要配置与聊天配置独立，不会使用聊天模型密钥。保存不会发起摘要请求。")
         }
-        item(key = "compression-save") {
-            SettingsCard { TextButton(text = "保存配置", enabled = enabled,
-                modifier = Modifier.testTag("compression-save"), onClick = { onSave(draft) }) }
+        item("compression-protocol") {
+            SettingsCard(Modifier.padding(top = 12.dp)) {
+                SettingsRow("请求接口", summary = protocolLabel(draft.provider.protocol),
+                    tag = "compression-protocol", onClick = if (enabled) ({ showProtocol = true }) else null)
+            }
         }
-        item(key = "compression-diagnostics") {
-            SettingsCard {
-                SettingsRow("诊断详情", summary = if (diagnosticsExpanded) "收起阈值计算与兼容说明" else "展开阈值计算与兼容说明",
-                    tag = "compression-diagnostics", onClick = { diagnosticsExpanded = !diagnosticsExpanded })
-                if (diagnosticsExpanded) {
-                    SettingsNote("压缩阈值按上下文窗口减去发送预留后计算；窗口留空表示容量未知，不会自动推测。")
-                    SettingsNote("旧版消息数不会自动换算为完整轮数。请确认保留轮数后保存。")
-                    SettingsNote("摘要协议、端点和预算可在「摘要模型配置」中编辑。更换协议需重输摘要密钥并授权；保存后会重新读取设置确认结果。")
+        item("compression-profile") {
+            SettingsCard(Modifier.padding(top = 12.dp)) {
+                SettingsSwitchRow("自定义压缩模型", draft.configureSummary, enabled,
+                    tag = "settings-switch:使用独立摘要配置") {
+                    if (it && modelLabel == null) onChooseModel() else onSave(draft.copy(configureSummary = it))
                 }
+                SettingsRow("压缩模型", summary = modelLabel ?: "选择模型", tag = "compression-summary-config",
+                    onClick = if (enabled) onChooseModel else null)
             }
         }
     }
+    if (showProtocol) app.daiyu.android.ui.components.DaiyuChoiceSheet("请求接口",
+        listOf("OpenAI Responses", "Anthropic Messages"), onSelect = { index ->
+            val selected = if (index == 0) ProviderProtocol.RESPONSES else ProviderProtocol.MESSAGES
+            if (selected != draft.provider.protocol) onChooseProtocol(selected)
+            showProtocol = false
+        }, onDismiss = { showProtocol = false })
+}
+
+private fun protocolLabel(protocol: ProviderProtocol): String = when (protocol) {
+    ProviderProtocol.RESPONSES -> "OpenAI Responses"
+    ProviderProtocol.MESSAGES -> "Anthropic Messages"
+    else -> protocol.wireName
 }

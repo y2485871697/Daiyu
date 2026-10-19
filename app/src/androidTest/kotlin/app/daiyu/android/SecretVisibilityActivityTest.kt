@@ -1,11 +1,6 @@
 package app.daiyu.android
 
 import android.content.ContextWrapper
-import android.text.method.PasswordTransformationMethod
-import android.view.View
-import android.widget.Button
-import android.widget.EditText
-import android.widget.Spinner
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import app.daiyu.android.storage.IndependentModelSettings
@@ -47,34 +42,23 @@ class SecretVisibilityActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testIndependentVisibilityPreservesValueSelectionCapabilityAndStoredBinding() {
+    fun testIndependentSelectorDoesNotExposeSecretsOrMutateStoredBinding() {
         val slot = IndependentModelSettings.Slot.VISION
         val saved = fixture.settings.load().copy(apiKey = "independent-secret-canary")
         fixture.controller.independentModels.save(slot, saved, null, true, true)
         val binding = fixture.controller.independentModels.record(slot)
         openSettings(); node("settings-search").performTextReplacement("辅助视觉模型")
         reveal("settings-row:辅助视觉模型", "设置").performClick()
-        ui.waitUntil(5_000) {
-            ui.runOnIdle { activity.window.decorView.findViewWithTag<View>("independent-model-secret") != null }
-        }
-        mainThread {
-            val key = checkNotNull(activity.window.decorView.findViewWithTag<EditText>("independent-model-secret"))
-            val button = checkNotNull(activity.window.decorView.findViewWithTag<Button>("independent-model-secret-visibility"))
-            val images = checkNotNull(activity.window.decorView.findViewWithTag<Spinner>("independent-model-image-capability"))
-            assertTrue(key.transformationMethod is PasswordTransformationMethod)
-            assertFalse(key.isSaveEnabled); key.setSelection(2, 5)
-            assertTrue(button.performClick())
-            assertNull(key.transformationMethod); assertEquals(saved.apiKey, key.text.toString())
-            assertEquals(2, key.selectionStart); assertEquals(5, key.selectionEnd)
-            assertEquals(1, images.selectedItemPosition)
-        }
+        awaitUniqueTag("independent-model-vision")
+        node("independent-model-configure").assertIsDisplayed()
+        ui.onNodeWithText(saved.apiKey).assertDoesNotExist()
+        node("settings-field:API 密钥").assertDoesNotExist()
+        node("independent-model-secret-visibility").assertDoesNotExist()
+        node("independent-model-configure").performClick()
+        awaitUniqueTag("settings-model-picker")
+        ui.onNodeWithText(saved.apiKey).assertDoesNotExist()
         realPauseResume(activity)
-        mainThread {
-            val key = checkNotNull(activity.window.decorView.findViewWithTag<EditText>("independent-model-secret"))
-            val images = checkNotNull(activity.window.decorView.findViewWithTag<Spinner>("independent-model-image-capability"))
-            assertTrue(key.transformationMethod is PasswordTransformationMethod)
-            assertEquals(saved.apiKey, key.text.toString()); assertEquals(1, images.selectedItemPosition)
-        }
+        ui.onNodeWithText(saved.apiKey).assertDoesNotExist()
         assertEquals(binding, fixture.controller.independentModels.record(slot))
         assertEquals(saved, fixture.controller.independentModels.editing(slot).settings)
         assertEquals(0, fixture.opens.get())

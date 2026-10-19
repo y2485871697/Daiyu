@@ -1433,23 +1433,24 @@ class MainActivity : ComponentActivity() {
                             top.yukonga.miuix.kmp.basic.Text("正在读取独立余额配置")
                         }
                     }
-                    "pet-settings" -> Column(Modifier.fillMaxSize()) {
-                        top.yukonga.miuix.kmp.basic.TextButton(text = "返回", onClick = { retainedPage = "settings" })
-                        top.yukonga.miuix.kmp.basic.TextButton(text = "配置独立助手 / 服务商 / 模型", onClick = { retainedPage = "pet-model-settings" })
-                        top.yukonga.miuix.kmp.basic.TextButton(text = "允许本次进程全局悬浮", onClick = { pets.setOverlayAllowed(true) })
-                        top.yukonga.miuix.kmp.basic.TextButton(text = "禁止本次进程全局悬浮", onClick = { pets.setOverlayAllowed(false) })
-                        top.yukonga.miuix.kmp.basic.TextButton(text = "打开系统悬浮窗授权（仍需上方明确允许）", onClick = {
+                    "pet-settings" -> app.daiyu.android.ui.screens.settings.PetSettingsScreen(
+                        host = pets.host, modifier = Modifier.fillMaxSize(),
+                        onBack = { retainedPage = "settings" },
+                        onOpenModel = { retainedPage = "pet-model-settings" },
+                        overlayAllowed = { pets.overlayAllowed },
+                        onOverlayAllowedChange = { pets.setOverlayAllowed(it) },
+                        onOpenOverlayPermission = {
                             startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                                 Uri.parse("package:$packageName")))
-                        })
-                        app.daiyu.android.ui.screens.settings.PetSettingsScreen(pets.host, Modifier.weight(1f))
-                    }
+                        },
+                    )
                     "pet-model-settings", "vision-settings" -> key(retainedPage) {
                         val petModel = retainedPage == "pet-model-settings"
                         app.daiyu.android.ui.screens.settings.IndependentModelScreen(controller.independentModels,
-                            if (petModel) app.daiyu.android.storage.IndependentModelSettings.Slot.PET
+                            source = remember(retainedPage) { app.daiyu.android.ui.screens.settings.SettingsModelSource(applicationContext, controller.providers) },
+                            slot = if (petModel) app.daiyu.android.storage.IndependentModelSettings.Slot.PET
                             else app.daiyu.android.storage.IndependentModelSettings.Slot.VISION,
-                            assistantProfiles, pets,
+                            assistants = assistantProfiles, pets = pets,
                             onBack = { retainedPage = if (petModel) "pet-settings" else "settings" },
                             modifier = Modifier.fillMaxSize())
                     }
@@ -1575,12 +1576,16 @@ class MainActivity : ComponentActivity() {
                         )
                     } }
                     "title-model-settings" -> titleSettingsPageOwner?.let { page -> key(page) {
-                        app.daiyu.android.title.TitleModelSettingsScreen(page, ownerCurrent = {
+                        app.daiyu.android.title.TitleModelSettingsScreen(page, source = remember(page) {
+                            app.daiyu.android.ui.screens.settings.SettingsModelSource(applicationContext, controller.providers)
+                        }, ownerCurrent = {
                             activityUsable() && titleSettingsPageOwner === page && retainedPage == "title-model-settings"
                         }, onBack = { retainedPage = "settings" })
                     } }
                     "compression-settings" -> compressionSettingsPageOwner?.let { page -> key(page) {
-                        CompressionSettingsScreen(page, onBack = {
+                        CompressionSettingsScreen(page, source = remember(page) {
+                            app.daiyu.android.ui.screens.settings.SettingsModelSource(applicationContext, controller.providers)
+                        }, onBack = {
                             if (activityUsable() && compressionSettingsPageOwner === page && retainedPage == "compression-settings")
                                 retainedPage = "settings"
                         }, ownerCurrent = {
@@ -4722,7 +4727,7 @@ class MainActivity : ComponentActivity() {
             FeatureRoute.CONVERSATION_SEARCH -> searchConversations()
             FeatureRoute.FOLDERS -> browseFolders()
             FeatureRoute.SKILLS -> openSkillManagement()
-            FeatureRoute.TERMINAL -> openTerminal()
+            FeatureRoute.TERMINAL -> Unit
             FeatureRoute.LINUX_SETTINGS -> openLinuxSettings()
             FeatureRoute.MCP_SETTINGS -> {
                 requireActivityUsable()

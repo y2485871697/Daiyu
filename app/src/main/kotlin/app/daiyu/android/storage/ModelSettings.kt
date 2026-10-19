@@ -25,7 +25,13 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 import app.daiyu.android.model.ProviderHeaders
 
-data class ModelSettings(val endpoint: String, val model: String, val apiKey: String, val batteryEnabled: Boolean, val responsesPath: String = "", val deviceStatusEnabled: Boolean = false, val protocol: ProviderProtocol = ProviderProtocol.RESPONSES, val requestOptions: ProviderRequestOptions = ProviderRequestOptions(), val customHeaders: ProviderHeaders = ProviderHeaders.EMPTY) {
+data class ModelSettings(val endpoint: String, val model: String, val apiKey: String, val batteryEnabled: Boolean, val responsesPath: String = "", val deviceStatusEnabled: Boolean = false, val protocol: ProviderProtocol = ProviderProtocol.RESPONSES, val requestOptions: ProviderRequestOptions = ProviderRequestOptions(), val customHeaders: ProviderHeaders = ProviderHeaders.EMPTY,
+    // Run-local catalog projection; these values are not stored in connection preferences.
+    val contextWindowOverride: Int? = null,
+    val reasoningOverride: Boolean? = null,
+    val visionOverride: Boolean? = null,
+) {
+    val hasModelOverrides: Boolean get() = contextWindowOverride != null || reasoningOverride != null || visionOverride != null
     fun enabledTools(): Set<ReadOnlyTool> = buildSet {
         if (batteryEnabled) add(ReadOnlyTool.BATTERY)
         if (deviceStatusEnabled) add(ReadOnlyTool.DEVICE_STATUS)
@@ -46,6 +52,11 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
     fun validate() {
         val resolvedEndpoint = requestEndpoint()
         requestOptions.validate(protocol)
+        require(contextWindowOverride == null || contextWindowOverride > 0) { "上下文窗口必须为正整数" }
+        if (hasModelOverrides && requestOptions.customBody.isNotEmpty()) {
+            val body = app.daiyu.android.model.MessagesRequest.jsonObject(requestOptions.customBody)
+            require(!body.has("model") || body.opt("model") == model) { "自定义请求体 model 与能力声明所选模型冲突" }
+        }
         if (requestOptions.openAiWebSearchEnabled) app.daiyu.android.model.ResponsesSearchProtocol.requireEndpoint(resolvedEndpoint)
         require(model.isNotBlank() && model.length<=200 && apiKey.isNotBlank() && apiKey.length<=8192) {"请填写模型和密钥"}
         require(!apiKey.contains('\n') && !apiKey.contains('\r')) {"密钥含非法换行"}
@@ -98,6 +109,13 @@ class ModelSettingsStore internal constructor(
         checkCatalogConfiguration()
         modelCatalog.current()
     }
+    internal fun loadForRun(): ModelSettings = modelCatalog.readConfiguration {
+        val current = load()
+        val selected = modelCatalog.readRegisteredModel(current.model)?.settings
+        current.copy(contextWindowOverride = selected?.contextWindowOverride,
+            reasoningOverride = selected?.reasoningOverride, visionOverride = selected?.visionOverride)
+    }
+
     internal fun checkCatalogConfiguration() = synchronized(lock) {
         check(!catalogRecoveryRequired()) { "提供商保存未完成；请重新输入密钥并保存配置" }
     }

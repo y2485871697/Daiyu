@@ -39,8 +39,10 @@ internal object ImageRequestPreflight {
     fun bytes(request: JSONObject, settings: ModelSettings, plan: FrozenMessageImagePlan?,
               isCancelled: () -> Boolean): ByteArray {
         checkCancelled(isCancelled)
-        if (plan?.hasImages == true) {
-            require(request.opt("model") == settings.model) { "Custom body cannot change the image model" }
+        if (plan?.hasImages == true || settings.hasModelOverrides) {
+            if (settings.protocol != ProviderProtocol.GEMINI || request.has("model")) {
+                require(request.opt("model") == settings.model) { "Custom body cannot change the model bound to images or capability declarations" }
+            }
         }
         MessagesRequest.validateObject(request, MessagesRequest.MAX_JSON_CONTAINER_DEPTH)
         val bytes = request.toString().toByteArray(Charsets.UTF_8)

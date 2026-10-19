@@ -448,8 +448,8 @@ jobs:
         run: sdkmanager 'platforms/android-37.2' 'build-tools/37.0.0'
       - name: 准备固定离线语音 JNI（不打包）
         run: ./gradlew --no-daemon :app:prepareOfflineSpeechRuntime
-      - name: 定向语音释放单测
-        run: ./gradlew --no-daemon :app:testDebugUnitTest --tests 'app.daiyu.android.VoiceHostGateTest'
+      - name: 定向语音及模型能力单测
+        run: ./gradlew --no-daemon :app:testDebugUnitTest --tests 'app.daiyu.android.VoiceHostGateTest' --tests 'app.daiyu.android.model.RuntimeModelOverridesTest' --tests 'app.daiyu.android.model.ProviderSnapshotContractTest' --tests 'app.daiyu.android.model.catalog.CatalogModelParametersTest'
       - name: 准备固定签名
         env:
           DAIYU_RELEASE_KEYSTORE_BASE64: ${{ secrets.DAIYU_RELEASE_KEYSTORE_BASE64 }}

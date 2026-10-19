@@ -210,7 +210,7 @@ class ResponsesModel internal constructor(
             } else require(!request.has("background") || request.opt("background") == false) { "Background mode requires explicit informed opt-in" }
             val finalUrl = settings.requestEndpoint()
             SessionGateway.applyResponses(request, finalUrl, settings.requestOptions.sessionGateway, sessionContext)
-            ReasoningRequestPolicy.validate(request, ProviderProtocol.RESPONSES)
+            ReasoningRequestPolicy.validate(request, ProviderProtocol.RESPONSES, settings.reasoningOverride)
             val sessionHeaders = SessionGateway.headers(finalUrl, sessionContext)
             // Video-only allowlist and exact history binding apply to the final merged payload
             // on EVERY round, before serialization/connect. Ordinary provider options stay flexible.

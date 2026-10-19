@@ -71,6 +71,15 @@ internal class FileSavedModelCatalogPersistence<T>(
         block(readDocument()?.revision ?: -1)
     }
 
+    /** Runtime lookup does not register a directory or decode unrelated records. */
+    internal fun readRegisteredModel(id: String): SavedCatalogModel<T>? = exclusive {
+        val document = readDocument()?.takeIf { it.identity != null } ?: return@exclusive null
+        val encoded = checkNotNull(document.models.singleOrNull { it.id == id }) {
+            "当前模型不在本地目录中，请重新选择模型"
+        }
+        SavedCatalogModel(encoded.id, encoded.name, codec.decode(encoded.record))
+    }
+
     override fun current(): SavedModelCatalogSnapshot<T>? = exclusive {
         readDocument()?.takeIf { it.identity != null }?.let(::snapshot)
     }

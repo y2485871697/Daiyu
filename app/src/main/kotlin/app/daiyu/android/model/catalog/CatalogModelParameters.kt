@@ -20,6 +20,9 @@ internal data class CatalogModelParameters(
     fun applyTo(current: ModelSettings, model: String): ModelSettings = current.copy(
         model = model, batteryEnabled = batteryEnabled, deviceStatusEnabled = deviceStatusEnabled,
         requestOptions = requestOptions,
+        contextWindowOverride = contextWindowOverride,
+        reasoningOverride = reasoningOverride,
+        visionOverride = visionOverride,
     )
 
     companion object {

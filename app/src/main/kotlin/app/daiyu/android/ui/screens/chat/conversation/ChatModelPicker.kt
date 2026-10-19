@@ -58,16 +58,12 @@ internal fun ChatModelPicker(
     WindowDialog(show = true, title = "选择模型", onDismissRequest = onDismiss) {
         Column(Modifier.testTag("chat-model-picker").fillMaxWidth()
             .heightIn(max = minOf(520.dp, (LocalConfiguration.current.screenHeightDp * 0.72f).dp))) {
-            Column(Modifier.testTag("chat-model-current").fillMaxWidth().padding(bottom = 10.dp)
-                .clip(RoundedCornerShape(12.dp)).background(colors.primary.copy(alpha = .08f)).padding(12.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text("当前使用", style = MiuixTheme.textStyles.footnote1, color = colors.onSurfaceVariantSummary)
-                Text(state.models.firstOrNull { it.id == state.current }?.displayName ?: state.current.ifBlank { "未选择模型" },
-                    style = MiuixTheme.textStyles.body1, color = colors.onSurface, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            }
             TextField(value = query, onValueChange = { query = it }, label = "搜索模型",
                 useLabelAsPlaceholder = true, singleLine = true,
                 modifier = Modifier.testTag("chat-model-search").fillMaxWidth())
+            if (!state.loading && state.current.isNotBlank() && state.models.none { it.id == state.current })
+                Text("当前模型不在本地目录：${state.current}", style = MiuixTheme.textStyles.footnote1,
+                    color = colors.onSurfaceVariantSummary, maxLines = 2, overflow = TextOverflow.Ellipsis)
             val status = when {
                 state.loading -> "正在读取模型目录…"
                 state.message != null -> state.message
@@ -83,15 +79,15 @@ internal fun ChatModelPicker(
                         .clip(RoundedCornerShape(12.dp)).background(if (model.id == state.current) colors.primary.copy(alpha = .08f) else colors.surfaceContainer).selectable(
                             selected = model.id == state.current, enabled = state.enabled && !state.loading,
                             role = Role.RadioButton, onClick = { onSelect(model.id) })
-                        .heightIn(min = 56.dp).padding(12.dp),
+                        .heightIn(min = 48.dp).padding(horizontal = 12.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                         Column(Modifier.weight(1f)) {
                             Text(model.displayName, color = colors.onSurface, maxLines = 2,
-                                overflow = TextOverflow.Ellipsis, style = MiuixTheme.textStyles.body1)
-                            if (model.displayName != model.id) Text(model.id,
-                                color = colors.onSurfaceVariantSummary, maxLines = 1,
-                                overflow = TextOverflow.Ellipsis, style = MiuixTheme.textStyles.footnote1)
+                                overflow = TextOverflow.Ellipsis, style = MiuixTheme.textStyles.body2)
+                            if (state.models.count { it.displayName == model.displayName } > 1 && model.displayName != model.id)
+                                Text(model.id, style = MiuixTheme.textStyles.footnote1, maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis, color = colors.onSurfaceVariantSummary)
                         }
                         if (model.id == state.current) Icon(DaiyuIcons.Check, "当前模型",
                             Modifier.size(20.dp), tint = colors.primary)

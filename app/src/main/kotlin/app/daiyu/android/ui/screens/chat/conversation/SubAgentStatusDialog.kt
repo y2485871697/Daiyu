@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -81,18 +82,26 @@ internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolea
                     (LocalConfiguration.current.screenHeightDp * 0.6f).dp)).testTag("subagent-status-list"),
                     verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     items(rows, key = { subAgentStatusItemKey(it.owner) }) { row ->
-                        Row(Modifier.fillMaxWidth().padding(vertical = 10.dp).testTag("subagent-status:${row.owner.childRunId}"),
+                        var expanded by remember(subAgentStatusItemKey(row.owner)) { mutableStateOf(false) }
+                        Column(Modifier.fillMaxWidth()) {
+                        Row(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 10.dp).testTag("subagent-status:${row.owner.childRunId}"),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             Box(Modifier.size(7.dp).background(if (row.completed) colors.primary else colors.onSurfaceVariantSummary, CircleShape))
-                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                Text(row.model, style = MiuixTheme.textStyles.body2, color = colors.onSurface)
-                                Text("${row.agent} · ${row.owner.childRunId.take(6)}", maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis, style = MiuixTheme.textStyles.footnote1,
-                                    color = colors.onSurfaceVariantSummary)
-                            }
+                            Text(ToolRichDetails.scrub(row.agent, limit = 100), Modifier.weight(1f),
+                                style = MiuixTheme.textStyles.body2, color = colors.onSurface,
+                                maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Text(row.status, style = MiuixTheme.textStyles.footnote1,
                                 color = if (row.completed) colors.primary else colors.onSurfaceVariantSummary)
+                        }
+                        if (expanded) androidx.compose.foundation.text.selection.SelectionContainer {
+                            Column(Modifier.padding(start = 17.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(ToolRichDetails.scrub(row.model, limit = 160), style = MiuixTheme.textStyles.footnote1,
+                                    color = colors.onSurfaceVariantSummary)
+                                Text(row.owner.childRunId, style = MiuixTheme.textStyles.footnote1,
+                                    color = colors.onSurfaceVariantSummary)
+                            }
+                        }
                         }
                     }
                 }

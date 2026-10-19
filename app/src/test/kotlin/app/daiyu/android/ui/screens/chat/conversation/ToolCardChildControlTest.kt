@@ -40,7 +40,7 @@ class ToolCardChildControlTest {
         val record = record("child")
         val request = step.actionRequest(ToolCardAction.PAUSE_TASK, subAgentStatusItemKey(record.owner))
         for (invalid in listOf(request.copy(assetKey = null), request.copy(assetKey = ""),
-                request.copy(action = ToolCardAction.OPEN_TERMINAL), request.copy(owner = null)))
+                request.copy(action = ToolCardAction.OPEN_IMAGE), request.copy(owner = null)))
             assertNull(resolveChildTaskControlTarget(step, invalid, listOf(record)))
         val nonChild = step.copy(toolName = "terminal")
         assertNull(resolveChildTaskControlTarget(nonChild,

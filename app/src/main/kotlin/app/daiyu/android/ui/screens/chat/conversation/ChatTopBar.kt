@@ -71,6 +71,7 @@ internal fun ChatIconButton(
     tint: Color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
     onLongClick: (() -> Unit)? = null,
     containerColor: Color? = null,
+    iconSize: androidx.compose.ui.unit.Dp? = null,
 ) {
     Box(modifier.size(48.dp).clip(CircleShape).combinedClickable(
         enabled = enabled, role = Role.Button, onClickLabel = label,
@@ -78,7 +79,7 @@ internal fun ChatIconButton(
     ), contentAlignment = Alignment.Center) {
         Box(if (containerColor == null) Modifier else Modifier.size(24.dp).background(containerColor, CircleShape),
             contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = label, modifier = Modifier.size(if (containerColor == null) 20.dp else 14.dp),
+            Icon(icon, contentDescription = label, modifier = Modifier.size(iconSize ?: if (containerColor == null) 20.dp else 14.dp),
                 tint = if (enabled) tint else tint.copy(alpha = 0.38f))
         }
     }

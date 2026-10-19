@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.assistants
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.rememberScrollState
@@ -37,7 +40,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
@@ -150,13 +152,14 @@ internal fun AssistantProfileCard(
 ) {
     val view = LocalView.current
     val bitmap = remember(profile.avatarFileName) { assets.avatarBitmap(profile.avatarFileName) }
-    Card(modifier = modifier.fillMaxWidth()) {
+    Column(modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+        .background(if (selected) MiuixTheme.colorScheme.primary.copy(alpha = .08f) else MiuixTheme.colorScheme.surfaceContainer)) {
         Row(modifier = Modifier.fillMaxWidth().combinedClickable(hapticFeedbackEnabled = false,
             onClick = { TouchHaptics.click(view); onClick() },
             onLongClick = { TouchHaptics.longPress(view); onLongClick() }).padding(horizontal = 16.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             AssistantAvatar(bitmap = bitmap, size = 32.dp)
-            Text(text = profile.name, style = MiuixTheme.textStyles.title3, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            Text(text = profile.name, style = MiuixTheme.textStyles.body2, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f).padding(start = 12.dp, end = 8.dp))
             if (selected) Text(text = stringResource(R.string.assistant_current), style = MiuixTheme.textStyles.footnote1,
                 color = MiuixTheme.colorScheme.primary, maxLines = 1)

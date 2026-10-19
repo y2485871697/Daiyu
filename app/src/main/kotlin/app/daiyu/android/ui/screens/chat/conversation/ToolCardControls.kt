@@ -35,23 +35,6 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun ToolCardControls(step: WorkStepUi, onAction: (ToolCardActionRequest) -> Unit) {
-    val actions = toolCardActions(step.category)
-    if (actions.isNotEmpty()) FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        actions.forEach { action ->
-            TextButton(text = action.label, modifier = Modifier.heightIn(min = 44.dp).testTag("tool-action:${action.name}"),
-                onClick = { onAction(step.actionRequest(action)) })
-        }
-    }
-    when (step.category) {
-        "image_read" -> ToolMediaSurface(step, null, false, null, null, onAction = onAction)
-        "browser" -> if (step.categoryDetails?.rich?.fields?.any { it.label == "动作" && it.value == "screenshot" } == true)
-            ToolMediaSurface(step, null, false, null, null, onAction = onAction)
-        "speech" -> ToolAudioControls(step, onAction = onAction)
-    }
-}
-
-@Composable
 internal fun ToolMediaSurface(step: WorkStepUi, thumbnail: Bitmap?, video: Boolean, durationMs: Long?,
     assetKey: String?, onPreview: (() -> Unit)? = null, onAction: (ToolCardActionRequest) -> Unit) {
     val action = if (video) ToolCardAction.PLAY_VIDEO else ToolCardAction.OPEN_IMAGE

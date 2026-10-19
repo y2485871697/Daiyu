@@ -2,6 +2,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -19,6 +20,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ChatController
 import app.daiyu.android.data.repository.RecordedUsageProjection
+import app.daiyu.android.data.repository.formatReportedUsage
+import app.daiyu.android.data.repository.formatTokenCount
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import app.daiyu.android.domain.ConversationId
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -35,6 +39,7 @@ internal fun ChatUsageDialog(controller: ChatController, conversationId: String?
     var projection by remember(all, conversationId) { mutableStateOf<RecordedUsageProjection?>(null) }
     var loading by remember(all, conversationId) { mutableStateOf(true) }
     var refresh by remember { mutableStateOf(0) }
+    var details by remember(all, conversationId) { mutableStateOf(false) }
     LaunchedEffect(controller, conversationId, all, refresh) {
         loading = true
         projection = withContext(Dispatchers.IO) { runCatching {
@@ -54,11 +59,36 @@ internal fun ChatUsageDialog(controller: ChatController, conversationId: String?
                 TextButton(text = if (all) "统计对象：全部会话" else "统计对象：本会话",
                     onClick = { scopePicker = true })
                 if (loading) Text("正在读取已记录用量…")
-                else app.daiyu.android.ui.screens.stats.RecordedUsagePane(projection, modelView = false)
-                Text("累计用量不是当前上下文窗口占用；缺报字段不按 0 处理。", Modifier.padding(horizontal = 4.dp))
+                else projection?.let { usage ->
+                    if (usage.combined.requestSnapshotCount == 0L) Text("暂无已报告用量", style = MiuixTheme.textStyles.body2)
+                    else {
+                        UsageLine("输入 Token", usage.combined.input.reportedTokens?.let(::formatTokenCount) ?: "—")
+                        UsageLine("输出 Token", usage.combined.output.reportedTokens?.let(::formatTokenCount) ?: "—")
+                        TextButton(text = if (details) "收起详细用量" else "详细用量", onClick = { details = !details },
+                            modifier = Modifier.testTag("usage-details-toggle"))
+                        if (details) {
+                            UsageLine("缓存读取", formatReportedUsage(usage.combined.cached))
+                            UsageLine("主请求输入", formatReportedUsage(usage.main.input))
+                            UsageLine("主请求输出", formatReportedUsage(usage.main.output))
+                            UsageLine("子任务输入", formatReportedUsage(usage.child.input))
+                            UsageLine("子任务输出", formatReportedUsage(usage.child.output))
+                            Text("缓存写入、独立推理、费用：—（未记录）", style = MiuixTheme.textStyles.footnote1)
+                            Text(usage.coverageDescription, style = MiuixTheme.textStyles.footnote1)
+                        }
+                    }
+                } ?: Text("用量读取失败", color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.body2)
+                Text("已报告小计；缺报显示 —", style = MiuixTheme.textStyles.footnote1)
                 TextButton(text = "刷新", onClick = { refresh++ }, enabled = !loading)
             }
             TextButton(text = "关闭", onClick = onDismiss, modifier = Modifier.fillMaxWidth())
         }
+    }
+}
+
+@Composable
+private fun UsageLine(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text(label, Modifier.weight(1f), style = MiuixTheme.textStyles.body2)
+        Text(value, Modifier.weight(1.5f), style = MiuixTheme.textStyles.body2)
     }
 }

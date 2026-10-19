@@ -58,8 +58,8 @@ internal fun DaiyuTextInputDialog(
     var value by remember(title, initial) { mutableStateOf(initial) }
     if (preview) {
         ChatSelectionSheet(title, onDismiss, footer = {
-            AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f))
-            AssistantPreviewButton(confirmText, { onConfirm(value) }, Modifier.weight(1f), primary = true)
+            AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f).testTag("dialog-cancel"))
+            AssistantPreviewButton(confirmText, { onConfirm(value) }, Modifier.weight(1f).testTag("dialog-confirm"), primary = true)
         }) {
             AssistantPreviewField(value, { value = it }, hint, Modifier.fillMaxWidth(), fieldModifier = Modifier.testTag("prompt-input"))
         }
@@ -97,8 +97,8 @@ internal fun DaiyuConfirmDialog(
 ) {
     if (preview) {
         ChatSelectionSheet(title, onDismiss, footer = {
-            AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f))
-            AssistantPreviewButton(confirmText, onConfirm, Modifier.weight(1f), primary = !destructive, danger = destructive)
+            AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f).testTag("dialog-cancel"))
+            AssistantPreviewButton(confirmText, onConfirm, Modifier.weight(1f).testTag("dialog-confirm"), primary = !destructive, danger = destructive)
         }) { Text(message, fontSize = 12.sp, lineHeight = 19.2.sp, modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) }
         return
     }

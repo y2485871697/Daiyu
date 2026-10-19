@@ -115,3 +115,15 @@ The same trusted operation-sequence rule applies to `resize(controlSequence)` an
 `interrupt(controlSequence)`: a new foreground interrupt or restoring an earlier
 size is a new action and advances the sequence; retrying an uncertain action keeps
 it. Default zero intentionally reuses same-argument controls conservatively.
+
+### Root chroot procfs
+
+The explicit root-scope path accepts only the fixed `/system/bin/chroot ROOTFS /bin/sh`
+transport. After entering its owned cgroup, the child creates a private mount
+namespace and mounts procfs at a pinned, non-symlink `ROOTFS/proc` directory with
+`nosuid,nodev,noexec`. A missing `proc` directory is created; unsafe targets or a
+mount refusal fail through the existing startup-cleanup protocol. The monitor
+never mounts into the host namespace. No PID namespace is created: guest procfs
+is not a promise to hide host processes. Private mounts disappear with their
+namespace references; the D receipt continues to prove owned-process drain,
+not an additional explicit-unmount guarantee.

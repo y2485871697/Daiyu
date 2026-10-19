@@ -113,6 +113,22 @@ static int root_enter(void) {
     if(result<0 || unshare(CLONE_NEWNS)<0 || mount(NULL,"/",NULL,MS_REC|MS_PRIVATE,NULL)<0) return -1;
     return 0;
 }
+/* Only the fixed chroot transport calls this, after root_enter made mounts private. */
+static int root_mount_proc(const char *rootfs) {
+    int rootfd=open(rootfs,O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
+    if(rootfd<0) return -1;
+    if(mkdirat(rootfd,"proc",0555)<0 && errno!=EEXIST) {
+        int saved=errno; close(rootfd); errno=saved; return -1;
+    }
+    int procfd=openat(rootfd,"proc",O_RDONLY|O_DIRECTORY|O_CLOEXEC|O_NOFOLLOW);
+    int saved=errno; close(rootfd); errno=saved;
+    if(procfd<0) return -1;
+    char target[64];
+    snprintf(target,sizeof(target),"/proc/self/fd/%d",procfd);
+    int result=mount("proc",target,"proc",MS_NOSUID|MS_NODEV|MS_NOEXEC,NULL);
+    saved=errno; close(procfd); errno=saved;
+    return result;
+}
 static int root_populated(void) {
     char bytes[1024];
     if(root_read(root_scope.events,bytes,sizeof(bytes))<0) return -1;

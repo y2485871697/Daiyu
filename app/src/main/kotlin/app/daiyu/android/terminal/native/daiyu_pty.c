@@ -78,6 +78,8 @@ int main(int argc, char **argv) {
         --argc; ++argv;
     }
     if(argc<5 || strcmp(argv[3],"--") || argv[4][0]!='/') return root_pre_scope_failure(64);
+    if(root_mode && (argc<7 || strcmp(argv[4],"/system/bin/chroot") ||
+        argv[5][0]!='/' || strcmp(argv[6],"/bin/sh"))) return root_pre_scope_failure(64);
     int rows=positive(argv[1]), cols=positive(argv[2]);
     if(rows<0 || cols<0) return root_pre_scope_failure(64);
     pid_t parent=getppid();
@@ -109,7 +111,7 @@ int main(int argc, char **argv) {
             signal(SIGTERM,SIG_DFL); signal(SIGHUP,SIG_DFL); signal(SIGINT,SIG_DFL);
             if(prctl(PR_SET_PDEATHSIG,SIGKILL)<0) goto child_error;
             if(getppid()!=supervisor || interrupted) { errno=ECANCELED; goto child_error; }
-            if(root_enter()<0) goto child_error;
+            if(root_enter()<0 || root_mount_proc(argv[5])<0) goto child_error;
         }
         if(setsid()<0) goto child_error;
         int slave=open(slave_name,O_RDWR|O_NOCTTY);

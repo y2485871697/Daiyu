@@ -145,7 +145,7 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertIn('if (daiyuPhysicalPerformance || daiyuProductionRelease) testBuildType = "release"', gradle)
         self.assertIn('check(!daiyuProductionRelease || fixedSigning)', gradle)
 
-    def test_focused_window_uses_activity_layout_token_for_dialog_ownership(self):
+    def test_focused_window_requires_exact_activity_ownership_and_cross_checks_available_tokens(self):
         harness = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
         focus = harness.split('protected fun focusedWindowRoot()', 1)[1].split('protected fun dismissIme()', 1)[0]
         for fragment in ('candidate.windowLayoutParams.orNull() ?: return false',
@@ -158,10 +158,19 @@ class ReleasePackageTests(unittest.TestCase):
             self.assertIn(fragment, focus)
         self.assertNotIn('candidate.decorView.applicationWindowToken == host.window.decorView.applicationWindowToken', focus)
         lifecycle = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ActivityLifecycleTest.kt').read_text()
-        regression = lifecycle.split('fun testFocusedRootBelongsToHostWhenImportDialogOwnsFocus()', 1)[1].split('    fun ', 1)[0]
+        entry = lifecycle.split('fun testFocusedRootBelongsToHostWhenImportDialogOwnsFocus()', 1)[1].split('    private fun ', 1)[0]
+        self.assertEqual(entry.strip(), '{\n        verifyFocusedImportDialogHost()\n    }')
+        regression = lifecycle.split('private fun verifyFocusedImportDialogHost()', 1)[1].split('\n    }', 1)[0]
         for fragment in ('start(open = true)', 'confirmation()', 'focusedWindowRoot()',
                          'assertNotSame(current.window.decorView, focused)',
-                         'assertEquals(current.window.attributes.token, params.token)'):
+                         'assertTrue(focused.isAttachedToWindow && focused.hasWindowFocus())',
+                         'generateSequence(focused.context)',
+                         '(it as? android.content.ContextWrapper)?.baseContext',
+                         '.filterIsInstance<android.app.Activity>().firstOrNull()',
+                         'assertSame(current, focusedHost)',
+                         'val hostToken = current.window.attributes.token',
+                         'assertNotNull(hostToken)',
+                         'params.token?.let { assertEquals(hostToken, it) }'):
             self.assertIn(fragment, regression)
 
     def test_both_cross_process_receivers_use_framework_parcelable_identity(self):

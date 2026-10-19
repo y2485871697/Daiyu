@@ -59,6 +59,66 @@ class MemoryCollectorContract(unittest.TestCase):
         self.assertIn('== 10', source)
 
 
+class PersistentColdStartContract(unittest.TestCase):
+    def test_cold_start_uses_default_controller_and_external_monotonic_start(self):
+        source = (PERFORMANCE / 'PersistentColdStartPerformanceTest.kt').read_text()
+        sample = source.split('fun testCollectOneColdStart()', 1)[1]
+        for fragment in ('daiyuColdStartElapsedNs', 'SystemClock.elapsedRealtimeNanos()',
+                         'android.os.Process.getStartElapsedRealtime()', 'fresh_process_required',
+                         'awaitReady(app.controller)', 'includes_instrumentation_startup',
+                         'hasSetTextAction()', 'nextElapsedDraw(', 'verify(app, owner)'):
+            self.assertIn(fragment, sample)
+        self.assertLess(sample.index('val inputReady ='), sample.index('verify(app, owner)'))
+        self.assertNotIn('application.controller =', source)
+        self.assertNotIn('PerformanceFixture(', source)
+        self.assertNotIn('recreate()', source)
+        self.assertNotIn('deleteDatabase', source)
+        self.assertNotIn('clear()', source)
+
+    def test_preparation_requires_fresh_owned_synthetic_data_and_preserves_dataset(self):
+        source = (PERFORMANCE / 'PersistentColdStartPerformanceTest.kt').read_text()
+        for fragment in ('existing_synthetic_data_retained', 'existing_cold_start_owner_retained',
+                         'existing_synthetic_selection_retained', 'daiyuColdStartOptIn',
+                         'FullPerformanceDataset.buildPackage(', 'FullPerformanceDataset.snapshot(',
+                         'AtomicFile(marker(app))', 'atomic.finishWrite(stream)',
+                         '"state", "preparing"', '"state", "prepared"',
+                         '"dataset_sha256"', '"production_delivery", false'):
+            self.assertIn(fragment, source)
+        self.assertIn('check(!output.exists())', source)
+
+    def test_owner_recovery_and_sample_publication_are_paired(self):
+        source = (PERFORMANCE / 'PersistentColdStartPerformanceTest.kt').read_text()
+        self.assertIn('AtomicFile(marker(app)).openRead()', source)
+        self.assertNotIn('marker(app).readText()', source)
+        self.assertIn('stream.fd.sync()', source)
+        self.assertLess(source.index('stream.fd.sync()'), source.index('pending.renameTo(output)'))
+        self.assertIn('publishSample(output, sample)', source)
+        self.assertNotIn('output.writeText(sample', source)
+        self.assertIn('"dataset_deletion_attempted", false', source)
+        self.assertIn('"dataset_integrity_verified", completed', source)
+        self.assertIn('"prepared_process_start_ns"', source)
+        sample = source.split('fun testCollectOneColdStart()', 1)[1]
+        self.assertLess(sample.index('ui.onNodeWithTag("chat-turn:p-a-1003")'), sample.index('val inputReady ='))
+
+
+class LongEntryContract(unittest.TestCase):
+    def test_full_scale_long_entry_requires_exact_tail_action_and_20_rounds(self):
+        source = (PERFORMANCE / 'ReleaseSyntheticPerformanceTest.kt').read_text()
+        entry = source.split('private fun collectLongConversationEntries(', 1)[1].split('private fun collect(fullScale:', 1)[0]
+        for fragment in ('repeat(20)', 'ConversationId("p-c-1")', 'ConversationId("p-c-0")',
+                         '"chat-turn:p-a-1003"', 'assertDoesNotExist()', 'activity.select(short)',
+                         'activity.select(long)', 'hasAnyAncestor(hasTestTag(tail))',
+                         'copy.assertIsDisplayed().assertIsEnabled().assertHasClickAction()',
+                         '"tail_operable_verified_ns"', '"instrumented_upper_bound"',
+                         '.put("present_latency", false)'):
+            self.assertIn(fragment, entry)
+        self.assertLess(entry.index('val start = System.nanoTime()'), entry.index('activity.select(long)'))
+        self.assertLess(entry.index('assertHasClickAction()'), entry.index('val draw = nextDrawNs(activity)'))
+        call = source.index('collectLongConversationEntries(launched, activeFixture.database, inputs)')
+        self.assertIn('stage = "long_conversation_entry"', source[:call].rsplit('if (fullScale)', 1)[1])
+        self.assertLess(source.index('val captured = SyntheticFrameCollector'), call)
+
+
 class ControlledWorkloadContract(unittest.TestCase):
     def test_controlled_transport_has_no_network_fallback_and_is_full_scale_only(self):
         source = (PERFORMANCE / 'ReleaseSyntheticPerformanceTest.kt').read_text()

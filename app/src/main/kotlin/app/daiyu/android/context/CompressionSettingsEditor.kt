@@ -11,11 +11,13 @@ import java.util.concurrent.atomic.AtomicReference
 class CompressionSettingsEditor internal constructor(
     private val compressionStore: () -> ProductionCompressionSettingsStore,
     private val profileStore: () -> SummaryProfileStore,
+    private val validateDirectory: (SummaryModelBinding) -> Unit = { error("directory summary validation is not installed") },
 ) {
     /** No preferences or credentials are opened until a worker has won admission. */
     constructor(context: Context) : this(
         compressionStore = { ProductionCompressionSettingsStore(context.applicationContext) },
         profileStore = { SummaryProfileStore(context.applicationContext) },
+        validateDirectory = { catalogSummaryConfiguration(context.applicationContext, it); Unit },
     )
 
     /** All fields are explicit immutable values; no main-model lookup or budget inference.
@@ -134,12 +136,25 @@ class CompressionSettingsEditor internal constructor(
         return Result(queued.identity, outcome)
     }
 
+    private fun loadSelectedProfile(binding: SummaryModelBinding): SummaryProfileSettings? {
+        if (!binding.providerId.startsWith("catalog-summary:")) return profileStore().load(binding)
+        try {
+            checkNotNull(CatalogSummaryBindings.decode(binding))
+            validateDirectory(binding)
+        } catch (failure: SummaryProfileUnavailableException) {
+            throw failure
+        } catch (_: Exception) {
+            throw SummaryProfileUnavailableException(SummaryProfileUnavailableReason.INVALID_CONFIGURATION)
+        }
+        return null
+    }
+
     private fun load(): Outcome {
         val settings = try { compressionStore().snapshot() }
         catch (_: Exception) { return Outcome.Failed(Stage.LOAD_SETTINGS, false) }
         val binding = settings.summaryModel ?: return Outcome.Loaded(Snapshot(settings, null))
         return try {
-            Outcome.Loaded(Snapshot(settings, profileStore().load(binding)))
+            Outcome.Loaded(Snapshot(settings, loadSelectedProfile(binding)))
         } catch (failure: SummaryProfileUnavailableException) {
             Outcome.Loaded(Snapshot(settings, null, failure.reason))
         } catch (_: Exception) {
@@ -150,7 +165,8 @@ class CompressionSettingsEditor internal constructor(
     private fun save(request: SaveRequest, selectionOnly: Boolean = false): Outcome {
         // Only relationship validation belongs here. All numeric/protocol/tool validation is
         // performed by the existing settings/profile types and stores, not a parallel policy.
-        if (request.profile != null && request.settings.summaryModel != request.profile.binding) {
+        if (request.profile != null && (request.settings.summaryModel != request.profile.binding ||
+            request.profile.binding.providerId.startsWith("catalog-summary:"))) {
             return Outcome.Failed(Stage.VALIDATE_SAVE, false)
         }
         if (request.profile != null) {
@@ -169,9 +185,11 @@ class CompressionSettingsEditor internal constructor(
         return try {
             val settings = compressionStore().snapshot()
             check(settings == request.settings)
-            val profile = try { settings.summaryModel?.let { profileStore().load(it) } }
+            val profile = try { settings.summaryModel?.let { loadSelectedProfile(it) } }
             catch (failure: SummaryProfileUnavailableException) {
-                if (!selectionOnly) throw failure
+                val directoryOnly = request.profile == null &&
+                    settings.summaryModel?.providerId?.startsWith("catalog-summary:") == true
+                if (!selectionOnly && !directoryOnly) throw failure
                 return Outcome.Saved(Snapshot(settings, null, failure.reason))
             }
             if (request.profile != null) check(profile == request.profile)

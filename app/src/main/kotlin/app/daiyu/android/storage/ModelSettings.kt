@@ -109,11 +109,12 @@ class ModelSettingsStore internal constructor(
         checkCatalogConfiguration()
         modelCatalog.current()
     }
-    internal fun loadForRun(): ModelSettings = modelCatalog.readConfiguration {
+    internal fun loadForRun(modelId: String? = null): ModelSettings = modelCatalog.readConfiguration {
         val current = load()
-        val selected = modelCatalog.readRegisteredModel(current.model)?.settings
-        current.copy(contextWindowOverride = selected?.contextWindowOverride,
-            reasoningOverride = selected?.reasoningOverride, visionOverride = selected?.visionOverride)
+        val selected = modelCatalog.readRegisteredModel(modelId ?: current.model)
+        if (modelId == null) current.copy(contextWindowOverride = selected?.settings?.contextWindowOverride,
+            reasoningOverride = selected?.settings?.reasoningOverride, visionOverride = selected?.settings?.visionOverride)
+        else checkNotNull(selected) { "摘要模型不在本地目录中" }.let { it.settings.applyTo(current, it.id) }
     }
 
     internal fun checkCatalogConfiguration() = synchronized(lock) {

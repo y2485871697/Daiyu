@@ -536,7 +536,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         dismissIme()
         val monitor = instrumentation.addMonitor(MainActivity::class.java.name, null, false)
         try {
-            mainThread { activity.recreate() }
+            mainThread { androidx.core.app.ActivityCompat.recreate(activity) }
             awaitControl("original Activity destroyed before recreated UI waits") { activity.isDestroyed }
             afterDestroyed()
             val replacement = instrumentation.waitForMonitorWithTimeout(monitor, 5000) as? MainActivity

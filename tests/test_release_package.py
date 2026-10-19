@@ -173,6 +173,20 @@ class ReleasePackageTests(unittest.TestCase):
                          'params.token?.let { assertEquals(hostToken, it) }'):
             self.assertIn(fragment, regression)
 
+    def test_recreation_uses_platform_compatibility_without_dismissing_modal_or_skipping_focus(self):
+        harness = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
+        recreate = harness.split('protected fun recreateActivity(', 1)[1].split('protected fun startMain(', 1)[0]
+        self.assertIn('androidx.core.app.ActivityCompat.recreate(activity)', recreate)
+        self.assertNotIn('activity.recreate()', recreate)
+        for fragment in ('dismissIme()', 'activity.isDestroyed', 'afterDestroyed()',
+                         'waitForMonitorWithTimeout(monitor, 5000)', 'currentHost = created',
+                         'awaitHostWindowFocus(created)', 'created.finish()',
+                         'failed-recreation Activity destroyed'):
+            self.assertIn(fragment, recreate)
+        self.assertLess(recreate.index('activity.isDestroyed'), recreate.index('afterDestroyed()'))
+        self.assertLess(recreate.index('currentHost = created'), recreate.index('awaitHostWindowFocus(created)'))
+        self.assertNotIn('dismissDialog', recreate)
+
     def test_both_cross_process_receivers_use_framework_parcelable_identity(self):
         cover = (ROOT / 'app/src/androidTest/java/app/daiyu/android/ReleaseLifecycleCoverActivity.java').read_text()
         harness = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()

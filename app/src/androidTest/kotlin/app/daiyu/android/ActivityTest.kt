@@ -100,7 +100,7 @@ class ActivityTest : WiredActivityTestCase() {
         val firstAEditor = retainedControls(activity)
         mainThread { activity.select(b) }; setDraft(" B草稿\n "); setSelection(0, 1)
         val oldBEditor = retainedControls(activity)
-        menu("新建会话"); ui.waitForIdle()
+        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.NEW_CHAT) }; ui.waitForIdle()
         mainThread { oldBEditor.onTextChange("stale B"); oldBEditor.onSelectionChange(0, 0) }
         mainThread {
             assertNull("new-chat menu must select the unattached slot", fixture.controller.preferences.getString("selected", null))
@@ -133,7 +133,7 @@ class ActivityTest : WiredActivityTestCase() {
         activity = recreateActivity(activity)
         assertDraft(" B新稿\n "); assertSelection(1, 2)
         mainThread { activity.select(a) }; assertDraft("A下一条"); ui.onNodeWithText("A回复").assertExists()
-        menu("新建会话"); assertDraft(unattached); assertSelection(2, 4)
+        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.NEW_CHAT) }; assertDraft(unattached); assertSelection(2, 4)
         assertEquals(2, fixture.database.conversations().size)
         mainThread {
             val expected = highestSupportedRefreshRate(activity.window.decorView.display?.supportedModes?.map { it.refreshRate }.orEmpty())
@@ -176,7 +176,7 @@ class ActivityTest : WiredActivityTestCase() {
             activity = recreateActivity(activity); node("chat-draft").assertIsNotEnabled()
             release.countDown(); awaitControl("import completes") { !fixture.controller.dataBusy && fixture.controller.dataRevision > 0 }
             ui.waitForIdle(); node("chat-draft").assertIsEnabled(); assertDraft(imported)
-            menu("新建会话"); assertDraft(imported)
+            mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.NEW_CHAT) }; assertDraft(imported)
             val conversation = fixture.database.create(); fixture.database.organize(conversation.id, "测试文件夹", true)
             mainThread { activity.select(conversation); activity.select(null) }; assertDraft(imported)
             assertTrue(fixture.database.conversations().single().pinned); assertEquals("测试文件夹", fixture.database.conversations().single().folder)

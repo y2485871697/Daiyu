@@ -39,6 +39,60 @@ class NeutralBackupServiceTest : InstrumentationTestCase() {
             .put("sha256", PrivateBlobs.digest(raw.toByteArray(Charsets.UTF_8))).toString()
     }
     private fun reject(block: () -> Unit) { try { block(); fail("must reject") } catch (_: Exception) {} }
+    private fun completeImportStages() = listOf("正在解析备份包", "正在校验备份内容", "正在检查目标状态",
+        "正在恢复并核验原件", "正在写入导入数据", "正在复核导入回执", "正在提交导入事务")
+
+    fun testImportStagesFollowActualWorkAndObserverFailureRollsBackBeforeCommit() {
+        val (_, source, exporter) = fresh()
+        val owner = seed(source, 1)
+        val incoming = byteArrayOf(2, 4, 6, 8)
+        exporter.attach("incoming-progress-asset", source.messages(owner).first().second.id.value,
+            "application/octet-stream", incoming)
+        val text = exporter.exportPackage()
+        val sourceBefore = source.exportBackup()
+        for (failingStage in completeImportStages() + null) {
+            val (context, target, importer) = fresh()
+            seed(target, 1)
+            val before = importer.exportPackage()
+            val seen = mutableListOf<String>()
+            val expected = IllegalStateException("observer failure: $failingStage")
+            var closed = false
+            try {
+                importer.importPackageFrom(open = {
+                    object : java.io.ByteArrayInputStream(text.toByteArray(Charsets.UTF_8)) {
+                        override fun close() { closed = true; super.close() }
+                    }
+                }, onStage = { stage ->
+                    seen += stage
+                    if (stage == "正在解析备份包" || stage == "正在校验备份内容") assertFalse(closed)
+                    else assertTrue(closed)
+                    if (stage == "正在复核导入回执" || stage == "正在提交导入事务")
+                        assertTrue(target.writableDatabase.inTransaction())
+                    else assertFalse(target.writableDatabase.inTransaction())
+                    if (stage == failingStage) throw expected
+                })
+                assertNull("observer must reject before commit", failingStage)
+            } catch (actual: IllegalStateException) { assertSame(expected, actual) }
+            assertTrue(closed); assertFalse(target.writableDatabase.inTransaction())
+            val expectedStages = if (failingStage == null) completeImportStages()
+                else completeImportStages().take(completeImportStages().indexOf(failingStage) + 1)
+            assertEquals(expectedStages, seen)
+            if (failingStage != null) assertEquals(before, importer.exportPackage())
+            assertEquals(sourceBefore, source.exportBackup())
+            target.close()
+            val reopened = ConversationDatabase(context)
+            try {
+                val restored = NeutralBackupService(context, reopened)
+                if (failingStage != null) {
+                    assertEquals(before, restored.exportPackage())
+                    assertFalse(restored.importPackageFrom { text.byteInputStream() }.alreadyImported)
+                }
+                assertTrue(restored.importPackageFrom { text.byteInputStream() }.alreadyImported)
+                assertTrue(incoming.contentEquals(restored.attachment("incoming-progress-asset")))
+            } finally { reopened.close() }
+        }
+    }
+
     fun testHundredMiBCompleteFileRoundTripReopenDuplicateAndCleanup() {
         if (androidx.test.platform.app.InstrumentationRegistry.getArguments()
                 .getString("daiyuLargeBackupOptIn") != "true") return

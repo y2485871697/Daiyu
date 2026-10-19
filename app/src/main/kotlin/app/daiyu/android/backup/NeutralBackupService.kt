@@ -244,12 +244,17 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         val envelope = spool.read(source)
         importParsed(validatePayload(envelope.version, envelope.id, envelope.payload, spool.bytes))
     }
-    internal fun importPackageFrom(open: () -> InputStream): ImportResult = withImportSpool { spool ->
+    internal fun importPackageFrom(open: () -> InputStream): ImportResult =
+        importPackageFrom(open, onStage = {})
+
+    internal fun importPackageFrom(open: () -> InputStream, onStage: (String) -> Unit): ImportResult = withImportSpool { spool ->
         val parsed = open().use { source ->
+            onStage("正在解析备份包")
             val envelope = spool.read(source)
+            onStage("正在校验备份内容")
             validatePayload(envelope.version, envelope.id, envelope.payload, spool.bytes)
         }
-        importParsed(parsed)
+        importParsed(parsed, onStage)
     }
     fun importPackage(text: String): ImportResult {
         Utf8Payload.byteCount(text, MAX_PACKAGE)
@@ -269,7 +274,8 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             result.copy(cleanupProblem = "导入已确认，但私有暂存文件清理未完成")
         }
     }
-    private fun importParsed(parsed: Parsed): ImportResult {
+    private fun importParsed(parsed: Parsed, onStage: (String) -> Unit = {}): ImportResult {
+        onStage("正在检查目标状态")
         val access = if (parsed.images.isEmpty()) null else requireNotNull(imageAssets) { "消息原图存储未接入；不能恢复图片引用" }
         val video = if (parsed.videos.sidecars.isEmpty()) null else requireNotNull(videoIntegration) { "原视频存储未接入；不能恢复视频引用" }
         val db = transactions.database()
@@ -294,6 +300,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
         var publicationUnknown = false
         try {
             // Original phase: no cursor, SQL transaction or controller monitor is retained.
+            onStage(if (duplicateSnapshot) "正在核验已有原件" else "正在恢复并核验原件")
             if (duplicateSnapshot) {
                 verifyPrivateContents(parsed)
                 parsed.static.forEach { output ->
@@ -319,6 +326,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
                 if (!duplicateSnapshot) destination.restore(owner, references, references.map { parsed.bytes.getValue(it.sha256) })
                 references.forEach { reference -> BackupVideoManifest.verify(reference, destination.read(owner, reference)) }
             }
+            onStage(if (duplicateSnapshot) "正在复核已导入数据" else "正在写入导入数据")
             attempted = true; db.beginTransaction()
             var successful = false
             try {
@@ -374,6 +382,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             check(db.insertOrThrow("neutral_imports", null, ContentValues().apply {
                 put("id", parsed.id); put("created", importedAt)
             }) != -1L) { "备份导入标记未写入" }
+            onStage("正在复核导入回执")
             // The last SQL write can run triggers too. In particular, reject typed receipt
             // corruption before publishing owner asset batches; recheck all receipts below.
             check(db.rawQuery("SELECT 1 FROM neutral_imports WHERE id=? AND created=?",
@@ -393,6 +402,7 @@ class NeutralBackupService(private val store: ConversationDatabase, private val 
             BackupVideoManifest.verifySidecars(db, parsed.videos.sidecars)
             ImportResult(parsed.id, parsed.inventory, false)
             }
+            onStage("正在提交导入事务")
             db.setTransactionSuccessful(); successful = true
             // Return is evaluated now, but finally confirms COMMIT before delivery.
             return result

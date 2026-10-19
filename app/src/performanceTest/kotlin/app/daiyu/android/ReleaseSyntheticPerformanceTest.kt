@@ -74,7 +74,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
 
     private fun collectControlledWorkloads(activity: MainActivity, controller: ChatController,
         database: ConversationDatabase, model: ControlledPerformanceModel,
-        captured: SyntheticFrameCollector, records: MutableList<JSONObject>) {
+        captured: SyntheticFrameCollector, records: MutableList<JSONObject>, verifyRefresh: () -> Unit) {
         fun start(label: String): Pair<ControlledPerformanceModel.Session, Message> {
             val session = model.enqueue()
             ui.onNodeWithTag("chat-draft").performTextReplacement(label)
@@ -93,6 +93,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
             }) { "synthetic_stop_not_persisted" }
         }
         val (stream, streamOwner) = start("synthetic streaming")
+        verifyRefresh()
         captured.scenario("synthetic_streaming")
         val streamStart = System.nanoTime()
         val initialEvents = stream.emitted.get()
@@ -101,6 +102,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
             val deadline = streamStart + TimeUnit.SECONDS.toNanos(30)
             while (System.nanoTime() < deadline) {
                 check(stream.drained.count != 0L) { "synthetic_stream_ended_early" }
+                ui.waitForIdle()
                 Thread.sleep(20)
             }
             check(stream.emitted.get() > initialEvents) { "synthetic_stream_did_not_grow" }
@@ -113,6 +115,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                 .put("delta_interval_ms", ControlledPerformanceModel.INTERVAL_MS)
                 .put("transport_kind", "controlled_synthetic_model_session").put("real_provider_transport", false))
             stop(stream, streamOwner)
+            verifyRefresh()
         }
 
         ui.onNodeWithTag("chat-draft").performTextReplacement("")
@@ -125,6 +128,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                 "synthetic_editor_connection_missing"
             }
         }
+        verifyRefresh()
         captured.scenario("synthetic_input_connection")
         val inputStart = System.nanoTime()
         var commits = 0; var inputCompleted = false
@@ -132,7 +136,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
             val deadline = inputStart + TimeUnit.SECONDS.toNanos(30)
             while (System.nanoTime() < deadline) {
                 main { check(connection.commitText("字", 1)) { "synthetic_commit_rejected" } }
-                commits++; Thread.sleep(50)
+                commits++; ui.waitForIdle(); Thread.sleep(50)
             }
             val expected = "字".repeat(commits)
             ui.waitUntil(5_000) { ui.onNodeWithTag("chat-draft").fetchSemanticsNode()
@@ -145,8 +149,10 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                 .put("method", "direct_editor_input_connection_commitText").put("semantics_injection", false)
                 .put("hardware_input_latency", false).put("ime_service_round_trip_measured", false))
             main { connection.closeConnection() }
+            verifyRefresh()
         }
         ui.onNodeWithTag("chat-draft").performTextReplacement("")
+        verifyRefresh()
         captured.scenario("synthetic_stop_upper_bound")
         repeat(20) { round ->
             val (session, owner) = start("synthetic stop $round")
@@ -311,6 +317,12 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
         } else null
         val diagnosticsMode = InstrumentationRegistry.getArguments().getString("daiyuDiagnostics") ?: "off"
         require(diagnosticsMode in setOf("off", "on")) { "invalid_diagnostics_mode" }
+        val requestedRefreshRate = when (InstrumentationRegistry.getArguments().getString("daiyuRefreshRate")) {
+            null -> null
+            "60" -> 60
+            "120" -> 120
+            else -> error("invalid_synthetic_refresh_rate")
+        }
         val application = target.applicationContext as ChatApplication
         val original = main { application.controller }
         val id = UUID.randomUUID().toString()
@@ -318,6 +330,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
         var fixture: PerformanceFixture? = null
         var activity: MainActivity? = null; var collector: SyntheticFrameCollector? = null
         var setupActivity: MainActivity? = null
+        var refreshOverride: SyntheticRefreshRateOverride? = null
         fun finishActivity(closing: MainActivity) {
             main { closing.finish() }; instrumentation.waitForIdleSync()
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
@@ -382,6 +395,11 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
             activity = launched; ui.waitForIdle(); main { launched.select(conversation) }; ui.waitForIdle()
             ui.onNodeWithTag("chat-draft").assertIsDisplayed().assertIsEnabled()
             ui.onNodeWithTag("chat-messages").assertIsDisplayed()
+            requestedRefreshRate?.let { rate ->
+                val override = SyntheticRefreshRateOverride(instrumentation, launched.window, rate)
+                refreshOverride = override
+                override.apply(); ui.waitForIdle(); override.verify()
+            }
             main { refreshRate = launched.window.decorView.display.refreshRate; preferredRate = launched.window.attributes.preferredRefreshRate }
             val captured = SyntheticFrameCollector(instrumentation, launched.window); collector = captured
             if (fullScale) {
@@ -389,6 +407,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                 captured.scenario("synthetic_long_entry")
                 collectLongConversationEntries(launched, activeFixture.database, inputs)
             }
+            refreshOverride?.verify()
             stage = "scroll"
             captured.scenario("synthetic_scroll"); scrollStart = System.nanoTime()
             val deadline = scrollStart + TimeUnit.SECONDS.toNanos(30)
@@ -400,6 +419,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                 direction = !direction
             }
             ui.waitForIdle(); scrollEnd = System.nanoTime(); captured.scenario("synthetic_semantics_input")
+            refreshOverride?.verify()
             stage = "semantics_input"
             repeat(20) { round ->
                 val text = "SYNTHETIC-$round"; val start = System.nanoTime()
@@ -416,15 +436,20 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                     .put("upper_bound_ns", draw - start))
             }
             if (fullScale) {
+                refreshOverride?.verify()
                 stage = "streaming_input_connection_stop"
                 collectControlledWorkloads(launched, activeFixture.controller, activeFixture.database,
-                    checkNotNull(controlledModel), captured, inputs)
+                    checkNotNull(controlledModel), captured, inputs, verifyRefresh = { refreshOverride?.verify() })
             }
             if (systemImeEnabled) {
                 stage = "system_ime_user_input"
+                refreshOverride?.verify()
                 collectSystemImeWindow(launched, checkNotNull(expectedIme), captured, inputs)
+                refreshOverride?.verify()
             }
             captured.close()
+            refreshOverride?.verify()
+            refreshOverride?.close()
             inputs.filter { it.optString("type") == "scenario_window" }.forEach { window ->
                 val count = captured.framesBetween(window.getLong("start_ns"), window.getLong("end_ns"))
                 window.put("frame_count_by_intended_vsync", count)
@@ -482,6 +507,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
             cleanup { fixture?.stopController() }
             cleanup { controlledModel?.close() }
             cleanup { collector?.close() }
+            cleanup { refreshOverride?.close() }
             cleanup {
                 if (memoryReport == null) memoryCollector?.let { memory ->
                     File(output.parentFile, "memory-$id.json").also { report ->
@@ -516,6 +542,10 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                         .put("activity", MainActivity::class.java.name).put("debuggable", false).put("profileable", true)
                         .put("sdk", Build.VERSION.SDK_INT).put("manufacturer", Build.MANUFACTURER).put("model", Build.MODEL)
                         .put("refresh_rate_hz_at_start", refreshRate).put("preferred_refresh_rate_hz_at_start", preferredRate)
+                        .put("refresh_control", if (requestedRefreshRate == null) "production_default" else "test_window_override")
+                        .put("requested_refresh_rate_hz", requestedRefreshRate ?: JSONObject.NULL)
+                        .put("refresh_rate_verified", refreshOverride?.verified() == true)
+                        .put("refresh_rate_observations", refreshOverride?.observations() ?: org.json.JSONArray())
                         .put("expected_fixture_messages", if (fullScale) 10000 else 160)
                         .put("expected_fixture_conversations", if (fullScale) 1000 else 1)
                         .put("fixture_matches_approved_dataset", false)

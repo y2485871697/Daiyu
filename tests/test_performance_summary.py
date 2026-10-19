@@ -87,7 +87,78 @@ def memory(slope=0):
                          'total_pss_kib': 1000 + slope * i} for i, (phase, n) in enumerate(phases)]}
 
 
+def controlled_refresh(rows, rate=60):
+    env = rows[0]['environment']
+    env.update(refresh_control='test_window_override', requested_refresh_rate_hz=rate,
+               refresh_rate_verified=True, refresh_rate_observations=[{
+                   'observed_ns': stamp, 'display_mode_id': 3, 'preferred_display_mode_id': 3,
+                   'refresh_rate_hz': rate, 'display_mode_refresh_rate_hz': rate,
+                   'preferred_refresh_rate_hz': rate} for stamp in (0, 45_000_000_000, 90_000_000_000)])
+    return rows
+
+
 class SummaryTests(unittest.TestCase):
+    def test_refresh_legacy_default_and_both_controlled_rates(self):
+        legacy = summary.summarize(capture())
+        self.assertFalse(legacy['refresh_rate']['controlled'])
+        self.assertEqual('unreported', legacy['refresh_rate']['refresh_control'])
+        rows = capture()
+        rows[0]['environment'].update(refresh_control='production_default', requested_refresh_rate_hz=None,
+                                      refresh_rate_verified=False, refresh_rate_observations=[])
+        self.assertFalse(summary.summarize(rows)['refresh_rate']['controlled'])
+        for rate in (60, 120):
+            report = summary.summarize(controlled_refresh(capture(), rate))
+            self.assertTrue(report['refresh_rate']['controlled'])
+            self.assertEqual(rate, report['refresh_rate']['requested_refresh_rate_hz'])
+            self.assertFalse(report['business_acceptance'])
+            self.assertFalse(report['measurement_ready'])
+
+    def test_refresh_rejects_uncovered_duplicate_time_and_overflow(self):
+        for stamps in ((0, 0), (1, 90_000_000_000), (0, 89_999_999_999),
+                       (100_000_000_000, 101_000_000_000), (0, -1)):
+            rows = controlled_refresh(capture())
+            sample = rows[0]['environment']['refresh_rate_observations'][0]
+            rows[0]['environment']['refresh_rate_observations'] = [dict(sample, observed_ns=t) for t in stamps]
+            with self.subTest(stamps=stamps), self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
+        rows = controlled_refresh(capture())
+        sample = rows[0]['environment']['refresh_rate_observations'][0]
+        rows[0]['environment']['refresh_rate_observations'] = [dict(sample, observed_ns=i) for i in range(1025)]
+        with self.assertRaises(summary.InvalidEvidence): summary.summarize(rows)
+        for remove in (True, False):
+            rows = controlled_refresh(capture())
+            sample = rows[0]['environment']['refresh_rate_observations'][1]
+            if remove: del sample['refresh_rate_hz']
+            else: sample['unexpected'] = 0
+            with self.assertRaises(summary.InvalidEvidence): summary.summarize(rows)
+
+    def test_refresh_rejects_partial_false_identity_types_and_middle_drift(self):
+        valid = controlled_refresh(capture())
+        env = valid[0]['environment']
+        for field in ('refresh_control', 'requested_refresh_rate_hz', 'refresh_rate_verified', 'refresh_rate_observations'):
+            bad = copy.deepcopy(valid); del bad[0]['environment'][field]
+            with self.subTest(missing=field), self.assertRaises(summary.InvalidEvidence): summary.frames(bad)
+        for field, values in {
+            'refresh_control': ('other', None), 'requested_refresh_rate_hz': (True, '60', 90, None),
+            'refresh_rate_verified': (False, 1, None), 'refresh_rate_observations': ([], [env['refresh_rate_observations'][0]], None)
+        }.items():
+            for value in values:
+                bad = copy.deepcopy(valid); bad[0]['environment'][field] = value
+                with self.subTest(field=field, value=value), self.assertRaises(summary.InvalidEvidence): summary.summarize(bad)
+        for field, value in [('refresh_rate_hz', 120), ('display_mode_refresh_rate_hz', 120),
+                             ('preferred_refresh_rate_hz', 120), ('display_mode_id', 4),
+                             ('preferred_display_mode_id', 4), ('observed_ns', True),
+                             ('refresh_rate_hz', True), ('refresh_rate_hz', float('nan'))]:
+            bad = copy.deepcopy(valid); bad[0]['environment']['refresh_rate_observations'][1][field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(summary.InvalidEvidence): summary.summarize(bad)
+        for difference in (-1, 1):
+            good = copy.deepcopy(valid)
+            for field in ('refresh_rate_hz', 'display_mode_refresh_rate_hz', 'preferred_refresh_rate_hz'):
+                good[0]['environment']['refresh_rate_observations'][1][field] = 60 + difference
+            summary.summarize(good)
+        for difference in (-1.01, 1.01):
+            bad = copy.deepcopy(valid); bad[0]['environment']['refresh_rate_observations'][1]['refresh_rate_hz'] = 60 + difference
+            with self.assertRaises(summary.InvalidEvidence): summary.summarize(bad)
+
     def migration_capture(self):
         rows = capture()
         rows[0]['environment'].update(dataset_sha256='a' * 64, migration_package_sha256='b' * 64,

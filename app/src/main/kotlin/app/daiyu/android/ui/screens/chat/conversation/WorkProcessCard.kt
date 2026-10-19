@@ -116,7 +116,9 @@ internal fun WorkStepRow(step: WorkStepUi, onCopy: ((WorkStepUi) -> Unit)? = nul
                 step.state in setOf(WorkStepState.PENDING, WorkStepState.UNKNOWN)) Text("工具回执未确认 · 不重放", color = colors.onSurfaceVariantSummary,
                 style = MiuixTheme.textStyles.footnote1)
             AnimatedVisibility(expanded) {
-                Column(Modifier.padding(top = 6.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Column(Modifier.padding(top = 6.dp, bottom = 8.dp).then(
+                    if (step.categoryDetails != null) Modifier.testTag("tool-category:${step.category}") else Modifier
+                ), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                     step.categoryDetails?.let { ToolCategoryContent(step.category, it) }
                     toolContent(step)
                     if (step.categoryDetails == null) {

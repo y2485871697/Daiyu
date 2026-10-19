@@ -144,6 +144,48 @@ def system_ime_window(rows):
     return row
 
 
+def refresh_rate_summary(env):
+    from math import isfinite
+    fields = {'refresh_control', 'requested_refresh_rate_hz', 'refresh_rate_verified', 'refresh_rate_observations'}
+    present = fields.intersection(env)
+    if not present:
+        return {'refresh_control': 'unreported', 'requested_refresh_rate_hz': None,
+                'refresh_rate_verified': False, 'controlled': False, 'observation_count': 0}
+    require(present == fields, 'incomplete_refresh_metadata')
+    control = env['refresh_control']
+    requested = env['requested_refresh_rate_hz']
+    observed = env['refresh_rate_observations']
+    require(control in ('production_default', 'test_window_override'), 'invalid_refresh_control')
+    if control == 'production_default':
+        require(requested is None and env['refresh_rate_verified'] is False
+                and observed == [], 'invalid_default_refresh_metadata')
+        return {'refresh_control': control, 'requested_refresh_rate_hz': None,
+                'refresh_rate_verified': False, 'controlled': False, 'observation_count': 0}
+    require(type(requested) is int and requested in (60, 120)
+            and env['refresh_rate_verified'] is True, 'refresh_unverified')
+    require(isinstance(observed, list) and 2 <= len(observed) <= 1024, 'invalid_refresh_observations')
+    previous = -1
+    mode = None
+    keys = {'observed_ns', 'display_mode_id', 'refresh_rate_hz', 'display_mode_refresh_rate_hz',
+            'preferred_refresh_rate_hz', 'preferred_display_mode_id'}
+    for row in observed:
+        require(isinstance(row, dict) and set(row) == keys, 'invalid_refresh_observation')
+        timestamp = integer(row['observed_ns'])
+        require(timestamp > previous, 'invalid_refresh_observation_time')
+        previous = timestamp
+        actual_mode = integer(row['display_mode_id'], minimum=1)
+        preferred_mode = integer(row['preferred_display_mode_id'], minimum=1)
+        if mode is None:
+            mode = actual_mode
+        require(actual_mode == preferred_mode == mode, 'refresh_mode_changed')
+        for field in ('refresh_rate_hz', 'display_mode_refresh_rate_hz', 'preferred_refresh_rate_hz'):
+            rate = row[field]
+            require(type(rate) in (int, float) and isfinite(rate) and abs(rate - requested) <= 1,
+                    'refresh_rate_mismatch')
+    return {'refresh_control': control, 'requested_refresh_rate_hz': requested,
+            'refresh_rate_verified': True, 'controlled': True, 'observation_count': len(observed)}
+
+
 def frames(rows):
     require(rows and rows[0].get('type') == 'metadata' and rows[0].get('schema') == SCHEMA, 'raw_schema_mismatch')
     meta = rows[0]
@@ -169,6 +211,7 @@ def frames(rows):
     env = meta.get('environment')
     require(isinstance(env, dict) and env.get('collection_completed') is True
             and env.get('cleanup_succeeded') is True, 'collection_not_complete')
+    refresh_rate_summary(env)
     require(env.get('fixture_mode') == 'full_scale', 'unsupported_fixture_mode')
     require(env.get('scroll_window_includes_driver_idle_time') is True, 'unsupported_scroll_scope')
     collection_id(env.get('collection_id'))
@@ -183,6 +226,10 @@ def frames(rows):
     if system_ime is not None:
         windows.append(('system_ime_user_input', system_ime['start_ns'], system_ime['end_ns'],
                         system_ime.get('frame_count_by_intended_vsync')))
+    if env.get('refresh_control') == 'test_window_override':
+        observed = env['refresh_rate_observations']
+        require(observed[0]['observed_ns'] <= integer(windows[0][1])
+                and observed[-1]['observed_ns'] >= integer(windows[-1][2]), 'refresh_window_not_covered')
     result = []
     previous_end = -1
     for scenario, start, end, count in windows:
@@ -268,6 +315,7 @@ def summarize(rows, memory_report=None, backend_migration_report=None):
     frame_summary = frames(rows)
     env = rows[0]['environment']
     result = {'schema_version': 1, 'frames': frame_summary,
+              'refresh_rate': refresh_rate_summary(env),
               'fixture_mode': 'full_scale', 'collection_id': env['collection_id'], 'diagnostics_mode': env['diagnostics_mode'],
               'latencies': [latency(rows, k) for k in ('input_sample', 'stop_sample', 'long_entry_sample')],
               'measurement_ready': False, 'collection_authenticated': False, 'business_acceptance': False,

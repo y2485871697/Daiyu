@@ -97,4 +97,56 @@ class BackupImportSourceTest {
         try { assertEquals(bytes.size.toLong(), source.open().use { it.readBytes().size.toLong() }) }
         finally { assertTrue(source.delete()) }
     }
+    @Test fun progressCountsOnlyProviderReadsAndPreservesTheStagedBytes() {
+        val bytes = ("{\"format\":\"daiyu-neutral-text\",\"ignored\":\"" + "字😀".repeat(5000) + "\"}").toByteArray()
+        val observations = mutableListOf<Long>()
+        var opens = 0
+        var closed = false
+        val source = BackupImportSource.prepare(temp.root, open = {
+            opens++
+            object : ByteArrayInputStream(bytes) {
+                override fun close() { closed = true; super.close() }
+            }
+        }, onBytesRead = observations::add)
+        try {
+            assertEquals(1, opens)
+            assertTrue(closed)
+            assertEquals(0L, observations.first())
+            assertTrue(observations.size > 2)
+            assertTrue(observations.zipWithNext().all { (before, after) -> after > before })
+            assertEquals(bytes.size.toLong(), observations.last())
+            val beforeLocalReads = observations.toList()
+            repeat(2) { assertArrayEquals(bytes, source.open().use { it.readBytes() }) }
+            assertEquals(beforeLocalReads, observations)
+        } finally { assertTrue(source.delete()) }
+    }
+
+    @Test fun progressObserverFailureClosesProviderAndRemovesStaging() {
+        var closed = false
+        val failure = IllegalStateException("observer failed")
+        val thrown = assertThrows(IllegalStateException::class.java) {
+            BackupImportSource.prepare(temp.root, open = {
+                object : ByteArrayInputStream("{\"format\":\"daiyu-neutral-text\"}".toByteArray()) {
+                    override fun close() { closed = true; super.close() }
+                }
+            }, onBytesRead = { if (it > 0) throw failure })
+        }
+        assertSame(failure, thrown)
+        assertTrue(closed)
+        assertTrue(temp.root.listFiles()!!.isEmpty())
+    }
+
+    @Test fun initialProgressObserverFailureDoesNotOpenProviderAndRemovesStaging() {
+        var opens = 0
+        val expected = IllegalStateException("initial observer failed")
+        val actual = assertThrows(IllegalStateException::class.java) {
+            BackupImportSource.prepare(temp.root, open = {
+                opens++; ByteArrayInputStream("{}".toByteArray())
+            }, onBytesRead = { assertEquals(0L, it); throw expected })
+        }
+        assertSame(expected, actual)
+        assertEquals(0, opens)
+        assertTrue(temp.root.listFiles()!!.isEmpty())
+    }
+
 }

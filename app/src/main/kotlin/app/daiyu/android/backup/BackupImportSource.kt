@@ -12,9 +12,13 @@ internal class BackupImportSource private constructor(private val file: File, va
 
     companion object {
         private const val MAX_BYTES = 112L * 1024 * 1024
-        fun prepare(parent: File, open: () -> InputStream): BackupImportSource {
+        fun prepare(parent: File, open: () -> InputStream): BackupImportSource =
+            prepare(parent, open, onBytesRead = {})
+
+        fun prepare(parent: File, open: () -> InputStream, onBytesRead: (Long) -> Unit): BackupImportSource {
             val file = File.createTempFile("backup-import-", ".stage", parent)
             try {
+                onBytesRead(0L)
                 open().use { source ->
                     FileOutputStream(file).use { target ->
                         val block = ByteArray(8192)
@@ -22,6 +26,7 @@ internal class BackupImportSource private constructor(private val file: File, va
                         while (true) {
                             val count = source.read(block)
                             if (count < 0) break
+                            if (count > 0) onBytesRead(total + count)
                             require(count > 0 && total + count <= MAX_BYTES) { "备份文件超出大小限制或无法读取" }
                             target.write(block, 0, count); total += count
                         }

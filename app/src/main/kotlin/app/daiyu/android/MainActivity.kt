@@ -1247,6 +1247,7 @@ class MainActivity : ComponentActivity() {
     private data class BackupImportResult(val visit: Any, val uri: Uri, val outcome: ChatController.BackupImportOutcome)
     private var pendingBackupImportResult: BackupImportResult? = null
     private var backupBusy by mutableStateOf(false)
+    private var backupStatus by mutableStateOf<String?>(null)
     private var editingSettings: EditingSettings? = null
     private var modelDraft by mutableStateOf<ModelSettingsDraftUi?>(null)
     private var modelError by mutableStateOf<String?>(null)
@@ -1800,6 +1801,7 @@ class MainActivity : ComponentActivity() {
                         onRestoreConfiguration = { confirmConfigurationRestore() },
                         canRestoreConfiguration = configurationRestorePreview?.plan?.isNoOp == false,
                         busy = backupBusy,
+                        statusText = backupStatus,
                     )
                     }
                     "appearance" -> AppearanceSettingsScreen(
@@ -5110,6 +5112,7 @@ class MainActivity : ComponentActivity() {
         }
         trackShizukuPreparation()
         backupBusy = controller.dataBusy
+        backupStatus = controller.dataStatus
         chatModelPicker = chatModelPicker?.let { picker -> picker.copy(enabled = !picker.loading &&
             !chatModelSelectionFailed && chatModelSettings != null && chatModelSession != null && controller.active == null &&
             !controller.dataBusy && controller.ready) }

@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 import app.daiyu.android.domain.*
 import java.util.concurrent.TimeUnit
 
@@ -18,7 +19,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         awaitPage(R.string.history_page_title)
     }
     private fun openMessages() {
-        menu("搜索记录")
+        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.SEARCH) }
         awaitPage(R.string.search_messages_title)
     }
     private fun seed(title: String, key: String, body: String, later: Int = 0): Pair<Conversation, Message> {

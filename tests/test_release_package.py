@@ -145,6 +145,35 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertIn('if (daiyuPhysicalPerformance || daiyuProductionRelease) testBuildType = "release"', gradle)
         self.assertIn('check(!daiyuProductionRelease || fixedSigning)', gradle)
 
+    def test_focused_window_uses_activity_layout_token_for_dialog_ownership(self):
+        harness = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
+        focus = harness.split('protected fun focusedWindowRoot()', 1)[1].split('protected fun dismissIme()', 1)[0]
+        for fragment in ('candidate.windowLayoutParams.orNull() ?: return false',
+                         'activityToken != null && params.token == activityToken',
+                         'hostDecor.windowToken != null && decor.applicationWindowToken == hostDecor.windowToken',
+                         'FIRST_APPLICATION_WINDOW', 'LAST_SUB_WINDOW',
+                         'decor.isAttachedToWindow && decor.hasWindowFocus()'):
+            self.assertIn(fragment, focus)
+        self.assertNotIn('candidate.decorView.applicationWindowToken == host.window.decorView.applicationWindowToken', focus)
+        lifecycle = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ActivityLifecycleTest.kt').read_text()
+        regression = lifecycle.split('fun testFocusedRootBelongsToHostWhenImportDialogOwnsFocus()', 1)[1].split('    fun ', 1)[0]
+        for fragment in ('start(open = true)', 'confirmation()', 'focusedWindowRoot()',
+                         'assertNotSame(current.window.decorView, focused)',
+                         'assertEquals(current.window.attributes.token, params.token)'):
+            self.assertIn(fragment, regression)
+
+    def test_both_cross_process_receivers_use_framework_parcelable_identity(self):
+        cover = (ROOT / 'app/src/androidTest/java/app/daiyu/android/ReleaseLifecycleCoverActivity.java').read_text()
+        harness = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
+        for source, receiver in [(cover, 'control'), (harness, 'reply')]:
+            self.assertIn(receiver + '.writeToParcel(parcel, 0)', source)
+            self.assertIn('parcel.setDataPosition(0)', source)
+            self.assertIn('ResultReceiver.CREATOR.createFromParcel(parcel)', source)
+            self.assertIn('parcel.recycle()', source)
+        self.assertNotIn('data.putParcelable("finish", control)', cover)
+        self.assertNotIn('.putExtra("reply", reply)', harness)
+        self.assertIn('.putExtra("reply", remoteReply)', harness)
+
     def test_cross_process_cover_is_platform_only_and_never_a_production_component(self):
         cover = ROOT / 'app/src/androidTest/java/app/daiyu/android/ReleaseLifecycleCoverActivity.java'
         source = cover.read_text()
@@ -152,7 +181,7 @@ class ReleasePackageTests(unittest.TestCase):
         imports = re.findall(r'^import ([\w.]+);$', source, flags=re.MULTILINE)
         self.assertTrue(imports)
         self.assertTrue(all(name.startswith('android.') for name in imports))
-        for value in ('data.putParcelable("finish", control)', 'data.putInt("task", getTaskId())',
+        for value in ('data.putParcelable("finish", ResultReceiver.CREATOR.createFromParcel(parcel))', 'data.putInt("task", getTaskId())',
                       'data.putInt("pid", android.os.Process.myPid())',
                       'data.putInt("uid", android.os.Process.myUid())',
                       'reply.send(0, data)', 'reply.send(1, null)', 'reply.send(2, null)',

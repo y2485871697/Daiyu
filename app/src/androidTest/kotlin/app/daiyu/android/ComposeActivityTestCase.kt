@@ -92,9 +92,19 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                         override fun describeTo(description: org.hamcrest.Description) {
                             description.appendText("attached window with current focus")
                         }
-                        override fun matchesSafely(candidate: androidx.test.espresso.Root) =
-                            candidate.decorView.isAttachedToWindow && candidate.decorView.hasWindowFocus() &&
-                                candidate.decorView.applicationWindowToken == host.window.decorView.applicationWindowToken
+                        override fun matchesSafely(candidate: androidx.test.espresso.Root): Boolean {
+                            val decor = candidate.decorView
+                            val hostDecor = host.window.decorView
+                            val activityToken = host.window.attributes.token
+                            val params = candidate.windowLayoutParams.orNull() ?: return false
+                            // Dialogs have their own decor token but share the Activity's layout token.
+                            val owned = decor === hostDecor ||
+                                (activityToken != null && params.token == activityToken) ||
+                                (hostDecor.windowToken != null && decor.applicationWindowToken == hostDecor.windowToken)
+                            return owned && params.type in android.view.WindowManager.LayoutParams.FIRST_APPLICATION_WINDOW..
+                                android.view.WindowManager.LayoutParams.LAST_SUB_WINDOW &&
+                                decor.isAttachedToWindow && decor.hasWindowFocus()
+                        }
                     })
                     .perform(object : androidx.test.espresso.ViewAction {
                         override fun getConstraints(): org.hamcrest.Matcher<android.view.View> =
@@ -461,9 +471,15 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         var launched = false
         try {
             mainThread {
+                val parcel = android.os.Parcel.obtain()
+                val remoteReply = try {
+                    reply.writeToParcel(parcel, 0)
+                    parcel.setDataPosition(0)
+                    android.os.ResultReceiver.CREATOR.createFromParcel(parcel)
+                } finally { parcel.recycle() }
                 original.startActivity(Intent().setComponent(android.content.ComponentName(
                     instrumentation.context.packageName, "app.daiyu.android.ReleaseLifecycleCoverActivity"))
-                    .putExtra("reply", reply))
+                    .putExtra("reply", remoteReply))
                 launched = true
             }
             awaitControl("original paused under test APK cover") {
@@ -471,6 +487,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                     original.lifecycle.currentState == androidx.lifecycle.Lifecycle.State.STARTED
             }
             mainThread {
+                assertEquals(android.os.ResultReceiver::class.java, checkNotNull(finishCover).javaClass)
                 assertEquals(original.taskId, coverTask)
                 assertTrue("cover must use another process", coverPid > 0 && coverPid != android.os.Process.myPid())
                 assertEquals(instrumentation.context.applicationInfo.uid, coverUid)

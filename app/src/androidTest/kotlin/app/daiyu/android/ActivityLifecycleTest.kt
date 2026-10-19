@@ -197,6 +197,20 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
         assertEquals("A still owned", controller.database.conversations().single { it.id == a.id }.draft)
         assertEquals(0, modelCalls.get())
     }
+    fun testFocusedRootBelongsToHostWhenImportDialogOwnsFocus() {
+        val current = start(open = true)
+        confirmation()
+        val focused = focusedWindowRoot()
+        mainThread {
+            assertNotSame(current.window.decorView, focused)
+            assertTrue(focused.isAttachedToWindow && focused.hasWindowFocus())
+            val params = focused.layoutParams as android.view.WindowManager.LayoutParams
+            assertNotNull(current.window.attributes.token)
+            assertEquals(current.window.attributes.token, params.token)
+        }
+        assertEquals(0, provider.opens.get())
+        assertEquals(0, modelCalls.get())
+    }
     fun testQueuedImportConfirmationRejectsFinishBeforeListenerDelivery() {
         val current = start(open = true); val before = controller.database.exportBackup(); confirmation()
         val positive = retainedClick(checkNotNull(activity), "dialog-confirm")

@@ -2,6 +2,7 @@
 from contextlib import redirect_stderr, redirect_stdout
 import importlib.util
 import io
+import re
 import json
 from pathlib import Path
 import tempfile
@@ -260,14 +261,21 @@ class RepositoryLicenseInventoryTest(unittest.TestCase):
 
     def test_ci_gates_the_uploaded_main_apk_read_only_before_sums_and_upload(self):
         workflow = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
-        build = workflow.split("  build:\n", 1)[1].split("  smoke:\n", 1)[0]
         gate = 'python3 scripts/verify_license_bundle.py --apk "delivery/代鱼-0.1.0-${short}.apk"'
-        self.assertEqual(build.count(gate), 1)
-        self.assertLess(build.index('cp app/build/outputs/apk/debug/app-debug.apk'), build.index(gate))
-        self.assertLess(build.index(gate), build.index('sha256sum *.apk tests/*.apk'))
-        self.assertLess(build.index(gate), build.index('- name: 上传开发包'))
+        for job, variant, upload in (
+            ("build", "debug", "上传开发包"),
+            ("release", "release", "上传生产Release候选包"),
+        ):
+            with self.subTest(job=job):
+                block = workflow.split(f"  {job}:\n", 1)[1]
+                block = re.split(r"^  [A-Za-z_][A-Za-z0-9_-]*:\s*$", block, maxsplit=1, flags=re.MULTILINE)[0]
+                self.assertEqual(block.count(gate), 1)
+                copy = f"cp app/build/outputs/apk/{variant}/app-{variant}.apk"
+                self.assertLess(block.index(copy), block.index(gate))
+                self.assertLess(block.index(gate), block.index('sha256sum *.apk tests/*.apk'))
+                self.assertLess(block.index(gate), block.index(f'- name: {upload}'))
+                self.assertNotIn("continue-on-error", block)
         self.assertNotIn("--stage", workflow)
-        self.assertNotIn("continue-on-error", build)
         records = BUNDLE.verify_tree(ROOT)
         self.assertTrue(set(BUNDLE.NATIVE_SOURCES) <= set(records))
 

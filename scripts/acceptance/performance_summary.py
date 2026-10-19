@@ -119,15 +119,21 @@ def system_ime_window(rows):
     require(end - start >= 35_000_000_000, 'system_ime_duration_insufficient')
     observed = row.get('observations')
     require(isinstance(observed, list) and 20 <= len(observed) <= 1000, 'invalid_system_ime_observations')
-    previous, changes = start, 0
-    for entry in observed:
+    previous, changes, previous_length = start, 0, 0
+    for index, entry in enumerate(observed):
         require(isinstance(entry, dict) and set(entry) == {
             'observed_ns', 'text_utf16_length', 'selection', 'text_changed'}, 'invalid_system_ime_observation')
         timestamp = integer(entry.get('observed_ns'))
-        require(previous <= timestamp <= end, 'invalid_system_ime_observation_time')
+        require(previous <= timestamp <= end and (index == 0 or timestamp - previous >= 50_000_000),
+                'invalid_system_ime_observation_time')
         previous = timestamp
-        require(integer(entry.get('text_utf16_length')) <= 4096, 'system_ime_text_limit')
+        length = integer(entry.get('text_utf16_length'))
+        require(length <= 4096, 'system_ime_text_limit')
         require(type(entry.get('text_changed')) is bool, 'invalid_system_ime_change')
+        require((entry['text_changed'] or length == previous_length)
+                and (not entry['text_changed'] or length != 0 or previous_length != 0),
+                'inconsistent_system_ime_text_change')
+        previous_length = length
         selection = entry.get('selection')
         require(selection is None or isinstance(selection, str) and len(selection) <= 100,
                 'invalid_system_ime_selection')

@@ -29,7 +29,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalView
-import androidx.compose.ui.window.DialogWindowProvider
+import app.daiyu.android.ui.components.PreviewDialog
 import app.daiyu.android.ui.components.previewGlassBlur
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
@@ -37,8 +37,6 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -67,7 +65,7 @@ internal data class AssistantPreviewPalette(val dark: Boolean) {
     AssistantPreviewPalette(MiuixTheme.colorScheme.background.luminance() < .5f)
 
 @Composable internal fun assistantPreviewScale(): Float =
-    (LocalConfiguration.current.screenWidthDp / 368f).coerceIn(.85f, 1.5f)
+    1f
 
 @Composable
 internal fun AssistantPreviewDialog(
@@ -81,17 +79,11 @@ internal fun AssistantPreviewDialog(
     if (!show) return
     val colors = assistantPreviewPalette()
     val scale = assistantPreviewScale()
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        val window = (LocalView.current.parent as? DialogWindowProvider)?.window
-        SideEffect { window?.setDimAmount(0f) } // CSS scrim is drawn once, below the glass.
-        BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
-            Box(Modifier.fillMaxSize().background(if (colors.dark) Color(0x55000000) else Color(0x2620172D))
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss))
-            AssistantPreviewSheet(title, onDismiss, onBack, footer,
-                modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp * scale)
-                    .fillMaxWidth().height(minOf(520.dp * scale, (maxHeight - 48.dp * scale).coerceAtLeast(180.dp))),
-                content = content)
-        }
+    PreviewDialog(onDismiss) {
+        AssistantPreviewSheet(title, onDismiss, onBack, footer,
+            modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp)
+                .fillMaxWidth().height(minOf(520.dp, (maxHeight - 48.dp).coerceAtLeast(0.dp))),
+            content = content)
     }
 }
 
@@ -124,7 +116,7 @@ internal fun AssistantPreviewSheet(
             horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
             if (onBack != null) AssistantPreviewIcon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", onBack)
             Text(title, modifier = Modifier.weight(1f), color = colors.text,
-                fontSize = (16f * s).sp, fontWeight = FontWeight.Medium)
+                fontSize = (14.4f * s).sp, fontWeight = FontWeight.Medium)
             AssistantPreviewIcon(Icons.Rounded.Close, "关闭", onClose)
         }
         Column(Modifier.fillMaxWidth().weight(1f), content = content)
@@ -168,7 +160,7 @@ internal fun AssistantPreviewButton(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = if (actionRow) Arrangement.Start else Arrangement.Center) {
         if (icon != null) { Icon(icon, null, Modifier.size(13.dp * s), tint = foreground); Spacer(Modifier.width(8.dp * s)) }
-        Text(text, color = foreground, fontSize = (10f * s).sp)
+        Text(text, color = foreground, fontSize = (9f * s).sp, lineHeight = 13.5.sp)
     }
 }
 
@@ -183,19 +175,20 @@ internal fun AssistantPreviewField(
     minLines: Int = 1,
     maxLines: Int = if (singleLine) 1 else 10,
     monospace: Boolean = false,
+    fieldModifier: Modifier = Modifier,
 ) {
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
     var focused by remember { mutableStateOf(false) }
     Column(modifier.padding(bottom = 13.dp * s)) {
-        if (label.isNotBlank()) Text(label, color = colors.text, fontSize = (10f * s).sp,
+        if (label.isNotBlank()) Text(label, color = colors.text, fontSize = (9f * s).sp,
             modifier = Modifier.padding(bottom = 5.dp * s))
         BasicTextField(value, onValueChange, enabled = enabled, singleLine = singleLine, minLines = minLines, maxLines = maxLines,
-            textStyle = TextStyle(color = colors.text, fontSize = (11f * s).sp,
-                lineHeight = (18.15f * s).sp,
+            textStyle = TextStyle(color = colors.text, fontSize = (9.9f * s).sp,
+                lineHeight = (16.335f * s).sp,
                 fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default),
             cursorBrush = SolidColor(colors.accent),
-            modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }
+            modifier = fieldModifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }
                 .clip(RoundedCornerShape(11.dp * s)).background(colors.soft)
                 .border(1.dp, if (focused) colors.accent else colors.line, RoundedCornerShape(11.dp * s))
                 .padding(horizontal = 10.dp * s, vertical = 9.dp * s))
@@ -207,7 +200,7 @@ internal fun AssistantPreviewSwitch(checked: Boolean, enabled: Boolean, label: S
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp * s)) {
-        Text(label, color = colors.muted, fontSize = (9f * s).sp)
+        Text(label, color = colors.muted, fontSize = (8.1f * s).sp)
         Box(Modifier.size(29.dp * s, 18.dp * s).alpha(if (enabled) 1f else .35f)
             .toggleable(checked, enabled = enabled, role = Role.Switch,
                 interactionSource = remember { MutableInteractionSource() }, indication = null, onValueChange = onToggle),
@@ -230,7 +223,7 @@ internal fun AssistantPreviewSection(title: String, content: @Composable ColumnS
         Column(Modifier.fillMaxWidth().border(1.dp, colors.line, RoundedCornerShape(14.dp * s))
             .background(Brush.linearGradient(listOf(colors.soft, Color.Transparent)), RoundedCornerShape(14.dp * s))
             .padding(horizontal = 10.dp * s, vertical = 12.dp * s), content = content)
-        Text(title, color = colors.text, fontSize = (11f * s).sp, fontWeight = FontWeight.Medium,
+        Text(title, color = colors.text, fontSize = (9.9f * s).sp, fontWeight = FontWeight.Medium,
             modifier = Modifier.offset(x = 10.dp * s, y = (-9).dp * s).background(colors.background).padding(horizontal = 5.dp * s))
     }
 }

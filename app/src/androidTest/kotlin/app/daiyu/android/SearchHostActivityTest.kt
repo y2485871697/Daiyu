@@ -14,10 +14,15 @@ class SearchHostActivityTest : WiredActivityTestCase() {
     }
     private fun awaitPage(id: Int) = awaitTag("page:${text(id)}")
     private fun openManage() {
-        ui.onNodeWithContentDescription("打开侧边栏").performClick()
-        ui.onNodeWithText(text(R.string.drawer_manage_chats)).performTouchInput { click() }
+        // Legacy search-route coverage is separate from the drawer's in-place selection UI.
+        mainThread {
+            MainActivity::class.java.getDeclaredMethod("updatePane").apply { isAccessible = true }.invoke(activity)
+            MainActivity::class.java.getDeclaredMethod("setRetainedPage", String::class.java)
+                .apply { isAccessible = true }.invoke(activity, "manage")
+        }
         awaitPage(R.string.history_page_title)
     }
+
     private fun openMessages() {
         mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.SEARCH) }
         awaitPage(R.string.search_messages_title)

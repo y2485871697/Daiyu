@@ -19,9 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
+import app.daiyu.android.ui.components.PreviewDialog
 import app.daiyu.android.ui.components.previewGlassBlur
 import app.daiyu.android.ui.components.usagePalette
 import app.daiyu.android.ui.icons.DaiyuIcons
@@ -38,38 +36,32 @@ internal fun ChatSelectionSheet(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = usagePalette()
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        val window = (LocalView.current.parent as? DialogWindowProvider)?.window
-        SideEffect { window?.setDimAmount(0f) }
-        BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {
-            Box(Modifier.matchParentSize().background(Color(if (colors.dark) 0x55000000 else 0x2620172d))
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss))
-            val available = (maxHeight - 88.dp).coerceAtLeast(0.dp)
-            val shape = RoundedCornerShape(25.dp)
-            Column(Modifier.align(Alignment.BottomCenter).padding(10.dp).fillMaxWidth()
-                .then(if (height == null) Modifier.heightIn(min = minOf(180.dp, available), max = available)
-                    else Modifier.height(minOf(height, available)))
-                .clip(shape).previewGlassBlur(shape, 28f, 1.3f)
-                .background(Brush.linearGradient(colors.sheet)).border(1.dp, colors.edge, shape)
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
-                .padding(start = 15.dp, end = 15.dp, top = 11.dp, bottom = 15.dp)) {
-                Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 17.dp)
-                    .size(29.dp, 3.dp).background(colors.toolbar.copy(alpha = .24f), CircleShape))
-                Row(Modifier.fillMaxWidth().padding(bottom = 13.dp), verticalAlignment = Alignment.Top) {
-                    Column(Modifier.weight(1f)) {
-                        Text(title, color = colors.text, fontSize = 17.sp, lineHeight = 23.8.sp, fontWeight = FontWeight.SemiBold)
-                        subtitle?.let { Text(it, color = colors.muted, fontSize = 10.sp, lineHeight = 16.sp,
-                            modifier = Modifier.padding(top = 4.dp)) }
-                    }
-                    Box(Modifier.size(28.dp).clip(RoundedCornerShape(9.dp))
-                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
-                        contentAlignment = Alignment.Center) {
-                        Icon(DaiyuIcons.Close, "关闭", Modifier.size(15.dp), tint = colors.muted)
-                    }
+    PreviewDialog(onDismiss) {
+        val available = (maxHeight - if (height == null) 70.dp else 88.dp).coerceAtLeast(0.dp)
+        val shape = RoundedCornerShape(25.dp)
+        Column(Modifier.align(Alignment.BottomCenter).padding(10.dp).fillMaxWidth()
+            .then(if (height == null) Modifier.heightIn(min = minOf(180.dp, available), max = available)
+                else Modifier.height(minOf(height, available)))
+            .clip(shape).previewGlassBlur(shape, 28f, 1.3f)
+            .background(Brush.linearGradient(colors.sheet)).border(1.dp, colors.edge, shape)
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+            .padding(start = 15.dp, end = 15.dp, top = 11.dp, bottom = 15.dp)) {
+            Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 17.dp)
+                .size(29.dp, 3.dp).background(colors.toolbar.copy(alpha = .24f), CircleShape))
+            Row(Modifier.fillMaxWidth().padding(bottom = 13.dp), verticalAlignment = Alignment.Top) {
+                Column(Modifier.weight(1f)) {
+                    Text(title, color = colors.text, fontSize = 15.3.sp, lineHeight = 21.42.sp, fontWeight = FontWeight.SemiBold)
+                    subtitle?.let { Text(it, color = colors.muted, fontSize = 9.sp, lineHeight = 14.4.sp,
+                        modifier = Modifier.padding(top = 4.dp)) }
                 }
-                Column(Modifier.fillMaxWidth().weight(1f, fill = height != null), content = content)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), content = footer)
+                Box(Modifier.size(28.dp).clip(RoundedCornerShape(9.dp))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
+                    contentAlignment = Alignment.Center) {
+                    Icon(DaiyuIcons.Close, "关闭", Modifier.size(15.dp), tint = colors.muted)
+                }
             }
+            Column(Modifier.fillMaxWidth().weight(1f, fill = height != null), content = content)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), content = footer)
         }
     }
 }

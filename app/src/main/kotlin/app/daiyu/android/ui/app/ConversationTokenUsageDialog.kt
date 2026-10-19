@@ -35,7 +35,7 @@ internal fun ConversationTokenUsageDialog(
     // Final preview cascade: centered 218px card, plain rows, cache details closed by default.
     UsageGlassDialog(stringResource(R.string.action_token_usage), onDismiss, compact = true) {
         if (!usage.hasUsage) {
-            Text(stringResource(R.string.token_usage_empty), fontSize = 10.sp, color = usagePalette().muted,
+            Text(stringResource(R.string.token_usage_empty), fontSize = 9.sp, color = usagePalette().muted,
                 modifier = Modifier.padding(vertical = 12.dp))
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

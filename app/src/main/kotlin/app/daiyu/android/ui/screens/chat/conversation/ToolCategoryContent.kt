@@ -5,6 +5,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import app.daiyu.android.ui.components.PreviewDialog
+import app.daiyu.android.ui.components.usagePalette
+import app.daiyu.android.ui.components.previewGlassBlur
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.layout.Box
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -186,28 +191,40 @@ private fun Document(document: ToolDisclosureUi) {
                 else surface.padding(vertical = 2.dp), style = style, color = colors.text)
         }
     }
-    if (opened) top.yukonga.miuix.kmp.window.WindowDialog(show = true, title = document.title,
-        onDismissRequest = { opened = false }) {
-        Column(Modifier.fillMaxWidth().testTag("tool-output-dialog"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            SectionTitle("${document.text.count { it == '\n' } + 1} 行")
-            SelectionContainer {
-                Text(document.text, Modifier.fillMaxWidth().heightIn(max = minOf(480.dp,
-                    (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * .55f).dp))
-                    .verticalScroll(rememberScrollState()).testTag("tool-output-text"),
-                    style = style.copy(fontSize = 12.sp, lineHeight = 19.2.sp), color = colors.text)
+    if (opened) PreviewDialog({ opened = false }) {
+        val palette = usagePalette()
+        val shape = RoundedCornerShape(18.dp)
+        val viewportHeight = maxHeight
+        Column(Modifier.align(Alignment.Center).width(minOf(maxWidth * .92f, 620.dp, (maxWidth - 24.dp).coerceAtLeast(0.dp)))
+            .heightIn(max = viewportHeight * .82f).clip(shape).previewGlassBlur(shape)
+            .background(Brush.linearGradient(palette.sheet)).border(1.dp, palette.edge, shape)
+            .conversationClickable {}.padding(16.dp).testTag("tool-output-dialog"),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(document.title, Modifier.weight(1f), fontSize = 13.5.sp, lineHeight = 19.sp,
+                    fontWeight = FontWeight.SemiBold, color = palette.text)
+                Box(Modifier.size(40.dp).testTag("tool-output-close").conversationClickable { opened = false }, contentAlignment = Alignment.Center) {
+                    Icon(DaiyuIcons.Close, "关闭", Modifier.size(16.dp), tint = palette.muted)
+                }
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                ConversationTextButton(text = if (copied) "已复制" else "复制全文",
-                    modifier = Modifier.heightIn(min = 40.dp).testTag("tool-output-copy"), onClick = {
-                        runCatching { clipboard.setText(androidx.compose.ui.text.AnnotatedString(document.text)) }
-                            .onSuccess { copied = true }
-                            .onFailure { android.widget.Toast.makeText(context, "复制失败，可长按选择文本", android.widget.Toast.LENGTH_SHORT).show() }
-                    })
-                ConversationTextButton(text = "关闭", onClick = { opened = false },
-                    modifier = Modifier.heightIn(min = 40.dp).testTag("tool-output-close"))
+            Text("${document.text.count { it == '\n' } + 1} 行", fontSize = 9.9.sp, lineHeight = 15.sp, color = palette.muted)
+            SelectionContainer(Modifier.weight(1f, fill = false)) {
+                Text(document.text, Modifier.fillMaxWidth().heightIn(max = viewportHeight * .58f)
+                    .verticalScroll(rememberScrollState()).testTag("tool-output-text"),
+                    style = style.copy(fontSize = 10.8.sp, lineHeight = 17.28.sp), color = palette.text)
+            }
+            Box(Modifier.align(Alignment.End).heightIn(min = 40.dp).clip(RoundedCornerShape(10.dp))
+                .border(1.dp, palette.line, RoundedCornerShape(10.dp)).testTag("tool-output-copy")
+                .conversationClickable {
+                    runCatching { clipboard.setText(androidx.compose.ui.text.AnnotatedString(document.text)) }
+                        .onSuccess { copied = true }
+                        .onFailure { android.widget.Toast.makeText(context, "复制失败，可长按选择文本", android.widget.Toast.LENGTH_SHORT).show() }
+                }.padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+                Text(if (copied) "已复制" else "复制全文", fontSize = 10.8.sp, lineHeight = 16.sp, color = palette.accent)
             }
         }
     }
+
 }
 
 @Composable

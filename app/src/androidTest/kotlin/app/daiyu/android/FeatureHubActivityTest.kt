@@ -184,14 +184,15 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         node("page:备份与导入").assertExists(); node("page:模型设置").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
-    fun testOriginalManageAndUsagePagesOpenAndBackRestoresRealChatDraft() {
+    fun testInPlaceManageAndUsagePagesPreserveRealChatDraft() {
         setDraft("原聊天草稿")
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
         ui.onNodeWithText(instrumentation.targetContext.getString(R.string.drawer_manage_chats))
             .performTouchInput { click() }
         val managePage = "page:${instrumentation.targetContext.getString(R.string.history_page_title)}"
-        ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodesWithTag(managePage).fetchSemanticsNodes().isNotEmpty() }
-        node(managePage).assertExists()
+        ui.onNodeWithText("完成管理").assertIsDisplayed()
+        node("drawer-selection-count").assertTextEquals("已选择 0 项")
+        node(managePage).assertDoesNotExist()
         backToChat(activity); assertDraft("原聊天草稿")
         openHub(); entry("usage").performClick()
         node("page:${instrumentation.targetContext.getString(R.string.stats_page_title)}").assertExists()

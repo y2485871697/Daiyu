@@ -1,8 +1,13 @@
 package app.daiyu.android.ui.components
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewField
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -29,6 +34,7 @@ import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import top.yukonga.miuix.kmp.basic.Text
@@ -46,9 +52,19 @@ internal fun DaiyuTextInputDialog(
     confirmText: String,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
+    preview: Boolean = false,
 ) {
     // Do not trim or reject empty text: moving out of a folder and clearing search need it.
     var value by remember(title, initial) { mutableStateOf(initial) }
+    if (preview) {
+        ChatSelectionSheet(title, onDismiss, footer = {
+            AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f))
+            AssistantPreviewButton(confirmText, { onConfirm(value) }, Modifier.weight(1f), primary = true)
+        }) {
+            AssistantPreviewField(value, { value = it }, hint, Modifier.fillMaxWidth(), fieldModifier = Modifier.testTag("prompt-input"))
+        }
+        return
+    }
     WindowDialog(show = true, title = title, onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth()) {
             TextField(
@@ -77,7 +93,15 @@ internal fun DaiyuConfirmDialog(
     destructive: Boolean,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    preview: Boolean = false,
 ) {
+    if (preview) {
+        ChatSelectionSheet(title, onDismiss, footer = {
+            AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f))
+            AssistantPreviewButton(confirmText, onConfirm, Modifier.weight(1f), primary = !destructive, danger = destructive)
+        }) { Text(message, fontSize = 10.8.sp, lineHeight = 17.28.sp, modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) }
+        return
+    }
     WindowDialog(show = true, title = title, summary = message, onDismissRequest = onDismiss) {
         MiuixDialogActions(
             confirmText = confirmText,
@@ -98,7 +122,23 @@ internal fun DaiyuChoiceSheet(
     onSelect: (Int) -> Unit,
     onDismiss: () -> Unit,
     engineeringUi: Boolean = false,
+    preview: Boolean = false,
 ) {
+    if (preview) {
+        ChatSelectionSheet(title, onDismiss, footer = {
+            AssistantPreviewButton("取消", onDismiss, Modifier.fillMaxWidth())
+        }) {
+            LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                itemsIndexed(options) { index, option ->
+                    val select = { onSelect(index) }
+                    val retained = if (engineeringUi) Modifier.semantics { this[RetainedChoiceSelect] = select } else Modifier
+                    AssistantPreviewButton(option, select,
+                        Modifier.fillMaxWidth().testTag("prompt-choice:$index").then(retained), actionRow = true)
+                }
+            }
+        }
+        return
+    }
     val colors = MiuixTheme.colorScheme
     Dialog(
         onDismissRequest = onDismiss,

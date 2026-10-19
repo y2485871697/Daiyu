@@ -179,8 +179,8 @@ fun AssistantEditScreen(
                     })
                     Column(Modifier.weight(1f)) {
                         Text(name.trim().ifBlank { stringResource(R.string.assistant_unnamed) }, color = colors.text,
-                            fontSize = (12f * s).sp, fontWeight = FontWeight.Medium)
-                        Text(stringResource(R.string.assistant_preview), color = colors.muted, fontSize = (8f * s).sp,
+                            fontSize = (10.8f * s).sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.assistant_preview), color = colors.muted, fontSize = (7.2f * s).sp,
                             modifier = Modifier.padding(top = 3.dp * s))
                     }
                 }
@@ -189,10 +189,10 @@ fun AssistantEditScreen(
                 AssistantPreviewField(prompt, { if (session.isActive && !saving) prompt = it },
                     stringResource(R.string.assistant_prompt_title), enabled = !saving, singleLine = false, minLines = 5, maxLines = 10)
                 AssistantPreviewSection(stringResource(R.string.route_skills)) {
-                    Text(stringResource(R.string.assistant_skills_summary), color = colors.muted, fontSize = (8f * s).sp, lineHeight = (12.8f * s).sp)
+                    Text(stringResource(R.string.assistant_skills_summary), color = colors.muted, fontSize = (7.2f * s).sp, lineHeight = (11.52f * s).sp)
                     if (installedSkills.isEmpty()) {
                         Text(stringResource(R.string.ui_no_skills_installed_yet_4e960f), color = colors.muted,
-                            fontSize = (10f * s).sp, modifier = Modifier.padding(vertical = 14.dp * s))
+                            fontSize = (9f * s).sp, modifier = Modifier.padding(vertical = 14.dp * s))
                     } else installedSkills.forEachIndexed { index, skill ->
                         if (index > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
                         AssistantSkillSwitchRow(skill, enabledSkillIds.contains(skill.id), !saving) { enabled ->
@@ -208,10 +208,10 @@ fun AssistantEditScreen(
                     Row(Modifier.fillMaxWidth().padding(bottom = 12.dp * s), verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(7.dp * s)) {
                         Column(Modifier.weight(1f)) {
-                            Text(stringResource(R.string.ui_enable_memory_4b69b7), color = colors.text, fontSize = (10f * s).sp,
+                            Text(stringResource(R.string.ui_enable_memory_4b69b7), color = colors.text, fontSize = (9f * s).sp,
                                 fontWeight = FontWeight.Medium)
-                            Text(stringResource(R.string.assistant_memory_summary), color = colors.muted, fontSize = (8f * s).sp,
-                                lineHeight = (12.8f * s).sp, modifier = Modifier.padding(top = 4.dp * s))
+                            Text(stringResource(R.string.assistant_memory_summary), color = colors.muted, fontSize = (7.2f * s).sp,
+                                lineHeight = (11.52f * s).sp, modifier = Modifier.padding(top = 4.dp * s))
                         }
                         AssistantPreviewSwitch(memoryEnabled, !saving, "") {
                             if (session.isActive && !saving) { memoryEnabled = it; persistAssistantToggles(nextMemory = it) }
@@ -221,7 +221,7 @@ fun AssistantEditScreen(
                         if (session.isActive && !saving) { memoryEditor.edit(it); memoryDraft = it }
                     }, "MEMORY.md", enabled = !saving, singleLine = false, minLines = 4, maxLines = 8, monospace = true)
                     if (memoryOverLimit) Text(stringResource(R.string.memory_over_limit), color = colors.danger,
-                        fontSize = (8f * s).sp, modifier = Modifier.padding(top = 8.dp * s))
+                        fontSize = (7.2f * s).sp, modifier = Modifier.padding(top = 8.dp * s))
                 }
             }
         }
@@ -258,9 +258,9 @@ private fun AssistantSkillSwitchRow(skill: AssistantSkill, checked: Boolean, ena
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp * s), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp * s)) {
         Column(Modifier.weight(1f)) {
-            Text(skill.name, color = colors.text, fontSize = (10f * s).sp)
+            Text(skill.name, color = colors.text, fontSize = (9f * s).sp)
             Text(skill.description.ifBlank { stringResource(R.string.skills_no_description) }, color = colors.muted,
-                fontSize = (8f * s).sp, lineHeight = (12.8f * s).sp, modifier = Modifier.padding(top = 3.dp * s))
+                fontSize = (7.2f * s).sp, lineHeight = (11.52f * s).sp, modifier = Modifier.padding(top = 3.dp * s))
         }
         AssistantPreviewSwitch(checked, enabled, "启用", onToggle)
     }

@@ -14,6 +14,7 @@ import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.chat.conversation.*
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 
 class MessageImageRenderingTest : WiredActivityTestCase() {
     private val owner = MessageImageOwner("historical-chat", "historical-user")
@@ -54,18 +55,30 @@ class MessageImageRenderingTest : WiredActivityTestCase() {
     }
 
     fun testMissingAssetOrResolverFailureNeverRendersDiagnosticsAsAnImage() {
-        for (loader in listOf(
-            MessageImageLoader { _, _, _ -> null },
-            MessageImageLoader { _, _, _ -> error("content://private/path") },
-        )) {
-            show { MessageImage(image, 1, loader) }
-            ui.waitUntil(timeoutMillis = 5_000) {
-                ui.onAllNodesWithTag("message-image-unavailable:1").fetchSemanticsNodes().size == 1
-            }
-            ui.onNodeWithContentDescription("消息图片 1").assertDoesNotExist()
-            ui.onNodeWithText("content://", substring = true).assertDoesNotExist()
-            ui.onNodeWithText("private/path", substring = true).assertDoesNotExist()
+        assertUnavailableImage(resolverThrows = false)
+    }
+
+    fun testResolverExceptionNeverRendersDiagnosticsAsAnImage() {
+        assertUnavailableImage(resolverThrows = true)
+    }
+
+    private fun assertUnavailableImage(resolverThrows: Boolean) {
+        val calls = AtomicInteger()
+        val loader = MessageImageLoader { _, _, _ ->
+            calls.incrementAndGet()
+            if (resolverThrows) error("content://private/path")
+            null
         }
+        show { MessageImage(image, 1, loader) }
+        ui.waitUntil(timeoutMillis = 5_000) {
+            ui.onAllNodesWithTag("message-image-unavailable:1", useUnmergedTree = true)
+                .fetchSemanticsNodes().size == 1
+        }
+        assertEquals(1, calls.get())
+        ui.onNodeWithTag("message-image-unavailable:1", useUnmergedTree = true).assertTextEquals("图片不可用")
+        ui.onNodeWithContentDescription("消息图片 1").assertDoesNotExist()
+        ui.onNodeWithText("content://", substring = true).assertDoesNotExist()
+        ui.onNodeWithText("private/path", substring = true).assertDoesNotExist()
     }
 
     fun testInjectedReadOnlyLoaderReceivesHistoricalOwnerAndBoundedPreviewRequest() {
@@ -80,6 +93,6 @@ class MessageImageRenderingTest : WiredActivityTestCase() {
             ui.onAllNodesWithContentDescription("消息图片 1").fetchSemanticsNodes().size == 1
         }
         assertEquals(listOf(Triple(owner, reference, 1024)), requests.toList())
-        ui.onNodeWithTag("message-image-unavailable:1").assertDoesNotExist()
+        ui.onNodeWithTag("message-image-unavailable:1", useUnmergedTree = true).assertDoesNotExist()
     }
 }

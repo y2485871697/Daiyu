@@ -1560,7 +1560,7 @@ class MainActivity : ComponentActivity() {
                             if (activityUsable() && retainedPage == "linux-settings" && linuxSettingsVisit === visit)
                                 retainedPage = "settings"
                         }) else {
-                            LinuxSettingsScreen(ready.application.settings, page, onBack = {
+                            LinuxSettingsScreen(ready.application.settings, page, host = ready.application.terminalOwner.host, onBack = {
                                 if (activityUsable() && retainedPage == "linux-settings" && linuxSettingsPageOwner === page)
                                     retainedPage = "settings"
                             })

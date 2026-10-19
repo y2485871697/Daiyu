@@ -192,10 +192,10 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
     fun testToolsKeepOnlyRequestedEntriesAndSkillsLivesInExtensions() {
         val events = mutableListOf<String>()
         showHome(events)
-        for (title in listOf("工作区与文件", "终端", "Linux 工具环境", "Agent任务偏好")) {
+        for (title in listOf("工作区与文件", "Linux 工具环境", "Agent任务偏好")) {
             reveal("settings-row:$title", "设置").assertHasClickAction().assertIsEnabled()
         }
-        for (title in listOf("浏览器", "平台只读工具与私密出站", "Root 与系统增强", "悬浮窗权限")) {
+        for (title in listOf("终端", "浏览器", "平台只读工具与私密出站", "Root 与系统增强", "悬浮窗权限")) {
             node("settings-row:$title").assertDoesNotExist()
         }
         capture("tools-refined")

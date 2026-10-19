@@ -11,13 +11,14 @@ class SettingsPresentationTest {
     fun retainedSettingsHaveUniqueIdsAndNineGroups() {
         val entries = SettingsCatalog.entries
         // Current inventory includes independent generation/vision, P05 and platform tools.
-        assertEquals(38, entries.size)
+        assertEquals(37, entries.size)
         assertTrue(entries.none { it.id in setOf("permission_check", "accessibility_keep") })
         assertTrue(entries.map { it.id }.containsAll(setOf("platform_tools", "accessibility", "voice", "donate")))
         assertEquals(app.daiyu.android.ui.FeatureRoute.BALANCE_SETTINGS, SettingsCatalog.entry("balance").route)
         assertEquals(entries.size, entries.map { it.id }.toSet().size)
         assertEquals(9, SettingsCatalog.groups.size)
-        assertEquals(listOf("platform_tools", "workspace", "terminal", "browser", "linux", "task_surface"),
+        assertTrue(entries.none { it.id == "terminal" })
+        assertEquals(listOf("platform_tools", "workspace", "browser", "linux", "task_surface"),
             SettingsCatalog.groups.single { it.id == "tools" }.entries.map { it.id })
         assertEquals(listOf("extensions"), SettingsCatalog.groups.filter { group ->
             group.entries.any { it.id == "skills" }
@@ -41,7 +42,7 @@ class SettingsPresentationTest {
         for (engineeringUi in listOf(false, true)) {
             val groups = SettingsCatalog.visibleGroups(engineeringUi = engineeringUi)
             val entries = groups.flatMap { it.entries }
-            assertEquals(31, entries.size)
+            assertEquals(30, entries.size)
             assertTrue(entries.none { it.id in hiddenIds })
             assertTrue(groups.none { it.id == "permissions" })
             assertTrue(entries.map { it.id }.containsAll(setOf(

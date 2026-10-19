@@ -31,11 +31,14 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 
+internal enum class WorkspaceSettingsSection { ALL, FILES, SHARED }
+
 private class WorkspaceRevoke(val uri: Uri)
 
 @Composable
 internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier,
-    suppliedAccess: WorkspaceFilesAccess? = null, engineeringUi: Boolean = false) {
+    suppliedAccess: WorkspaceFilesAccess? = null, engineeringUi: Boolean = false,
+    section: WorkspaceSettingsSection = WorkspaceSettingsSection.ALL, pageTitle: String = "工作区") {
     val context = LocalContext.current
     val access = suppliedAccess ?: remember(context) { WorkspaceFilesAccess(context.applicationContext) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -144,9 +147,9 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
             privateOccupied = it
             if (!it && current() && !loaded) refresh(clearNotice = false)
         })
-    MiuixScaffoldPage(title = "工作区", onBack = back, modifier = modifier) {
-        item(key = "private-workspace") { privatePanel() }
-        if (engineeringUi) {
+    MiuixScaffoldPage(title = pageTitle, onBack = back, modifier = modifier) {
+        if (section != WorkspaceSettingsSection.SHARED) item(key = "private-workspace") { privatePanel() }
+        if (engineeringUi || section == WorkspaceSettingsSection.SHARED) {
         item(key = "sharing") {
             SettingsNote("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。")
             SettingsCard {

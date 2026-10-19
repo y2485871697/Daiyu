@@ -144,3 +144,48 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertIn('!daiyuProductionRelease || (!daiyuSyntheticApplication && !daiyuPhysicalPerformance)', gradle)
         self.assertIn('if (daiyuPhysicalPerformance || daiyuProductionRelease) testBuildType = "release"', gradle)
         self.assertIn('check(!daiyuProductionRelease || fixedSigning)', gradle)
+
+    def test_cross_process_cover_is_platform_only_and_never_a_production_component(self):
+        cover = ROOT / 'app/src/androidTest/java/app/daiyu/android/ReleaseLifecycleCoverActivity.java'
+        source = cover.read_text()
+        self.assertFalse((ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ReleaseLifecycleCoverActivity.kt').exists())
+        imports = re.findall(r'^import ([\w.]+);$', source, flags=re.MULTILINE)
+        self.assertTrue(imports)
+        self.assertTrue(all(name.startswith('android.') for name in imports))
+        for value in ('data.putParcelable("finish", control)', 'data.putInt("task", getTaskId())',
+                      'data.putInt("pid", android.os.Process.myPid())',
+                      'data.putInt("uid", android.os.Process.myUid())',
+                      'reply.send(0, data)', 'reply.send(1, null)', 'reply.send(2, null)',
+                      'handler.removeCallbacks(expiry)'):
+            self.assertIn(value, source)
+        self.assertNotIn('finishAndRemoveTask', source)
+        for name in ('main', 'release'):
+            manifest = ROOT / f'app/src/{name}/AndroidManifest.xml'
+            if manifest.exists():
+                self.assertNotIn('LifecycleCoverActivity', manifest.read_text())
+        harness = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
+        for value in ('coverPid != android.os.Process.myPid()',
+                      'assertEquals(instrumentation.context.applicationInfo.uid, coverUid)',
+                      'coverUid != android.os.Process.myUid()',
+                      'if (cleanupRequested) finishCover?.send(0, null)',
+                      'assertEquals(original.taskId, coverTask)'):
+            self.assertIn(value, harness)
+
+    def test_component_fixtures_do_not_depend_on_the_debug_only_activity(self):
+        sources = list((ROOT / 'app/src/androidTest').rglob('*.kt'))
+        for path in sources:
+            self.assertNotIn('ComponentActivity::class.java', path.read_text(), str(path))
+        fixtures = ('R08PlanEditorScreenTest', 'R08CleanupApprovalScreenTest',
+                    'VirtualDisplayApprovalScreenTest', 'ImageAttachmentsUiTest',
+                    'VideoAttachmentsUiTest', 'MessageMarkdownTest', 'ReportedReasoningCardTest',
+                    'ToolOperationCardTest', 'SubAgentStatusDialogTest', 'ChatMessageListMeasurePhaseTest')
+        for name in fixtures:
+            matches = [p for p in sources if p.stem == name]
+            self.assertEqual(1, len(matches), name)
+            source = matches[0].read_text()
+            self.assertIn(f'class {name} : WiredActivityTestCase()', source)
+            self.assertNotIn('private lateinit var activity', source)
+            self.assertNotIn('activity.finish()', source)
+        for name in ('ImageAttachmentsUiTest', 'VideoAttachmentsUiTest'):
+            source = next(p for p in sources if p.stem == name).read_text()
+            self.assertIn('activity = recreateActivity(activity)', source)

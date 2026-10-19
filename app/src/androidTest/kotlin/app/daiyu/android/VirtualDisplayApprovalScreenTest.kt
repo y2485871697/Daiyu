@@ -1,7 +1,5 @@
 package app.daiyu.android
 
-import android.content.Intent
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
@@ -16,8 +14,7 @@ import app.daiyu.android.vdapproval.VirtualDisplayApprovalScreen
 
 /** Isolated Compose surface, not MainActivity routing and never a root/process test. */
 @Suppress("DEPRECATION")
-class VirtualDisplayApprovalScreenTest : ComposeActivityTestCase() {
-    private lateinit var activity: ComponentActivity
+class VirtualDisplayApprovalScreenTest : WiredActivityTestCase() {
     private val visible = mutableStateOf<VirtualDisplayApprovalRequest?>(null)
     private val decisions = mutableListOf<Pair<VirtualDisplayApprovalRequest, Boolean>>()
     private var acceptCallback = true
@@ -29,8 +26,6 @@ class VirtualDisplayApprovalScreenTest : ComposeActivityTestCase() {
 
     override fun setUp() {
         super.setUp()
-        activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,
-            ComponentActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
         mainThread {
             activity.setContent {
                 MaterialTheme {
@@ -40,9 +35,6 @@ class VirtualDisplayApprovalScreenTest : ComposeActivityTestCase() {
                 }
             }
         }
-    }
-    override fun tearDown() {
-        try { mainThread { activity.finish() } } finally { super.tearDown() }
     }
 
     private fun request(generation: String): VirtualDisplayApprovalRequest {

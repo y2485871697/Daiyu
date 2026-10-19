@@ -1,6 +1,10 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -22,10 +26,12 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
             draft = ModelSettingsDraftUi(protocol = fixture.settings.load().protocol)
             activity.setContent {
                 MiuixTheme {
-                    ModelSettingsScreen(draft, onDraftChange = { draft = it },
-                        onSave = { saved = it; saveCount++ }, onFetchCatalog = { error("no fetch") },
-                        onBack = {}, engineeringUi = true, showCatalog = false,
-                        headerContent = { item { RequestBodyFieldsEditor(draft, true, true) { draft = it } } })
+                    Column(Modifier.fillMaxSize()) {
+                        RequestBodyFieldsEditor(draft, true, true) { draft = it }
+                        ModelSettingsScreen(draft, onDraftChange = { draft = it },
+                            onSave = { saved = it; saveCount++ }, onFetchCatalog = { error("no fetch") },
+                            onBack = {}, modifier = Modifier.weight(1f), engineeringUi = true, showCatalog = false)
+                    }
                 }
             }
         }
@@ -37,7 +43,9 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
         return node(tag).assertIsDisplayed()
     }
     private fun beginField(name: String, type: String, value: String) {
-        reveal("model-body-fields").performClick()
+        node("model-body-fields").assertExists()
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        awaitUniqueTag("model-body-fields-list")
         fieldControl("model-body-field-add", "model-body-fields-list").performClick()
         fieldControl("settings-field:字段名").performTextReplacement(name)
         fieldControl("settings-radio:$type").performClick()
@@ -46,7 +54,9 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
     }
     fun testDismissImeUsesTheOpenFieldDialogWindow() {
         showComponent()
-        reveal("model-body-fields").performClick()
+        node("model-body-fields").assertExists()
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        awaitUniqueTag("model-body-fields-list")
         fieldControl("model-body-field-add", "model-body-fields-list").performClick()
         val field = node("settings-field:字段名")
         field.performClick()

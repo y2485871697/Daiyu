@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 import app.daiyu.android.context.CompressionSettings
 import app.daiyu.android.context.ContextManagementControllerAdapter
 import app.daiyu.android.context.ContextManagementState
@@ -75,9 +76,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             }
             resumed
         }
-        ui.waitUntil(5_000) {
-            ui.onAllNodes(isRoot()).fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
-        }
+        awaitHostWindowFocus(original)
         ui.waitForIdle()
         assertion?.let { throw it }
     }
@@ -99,9 +98,14 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
     private fun awaitLocalReaders() {
         awaitControl("chat local readers idle") { !fixture.controller.dataBusy }
     }
+    private fun retainedCompressionClick(): () -> Unit {
+        val captured = retainedControls(activity).onMenuAction
+        return { captured(ChatMenuAction.COMPRESS_CONTEXT) }
+    }
     private fun openAndAwait(): ContextManagementControllerAdapter {
         awaitLocalReaders()
-        node("chat-context").performClick()
+        ui.onNodeWithContentDescription("更多").performClick()
+        node("chat-menu:COMPRESS_CONTEXT").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
         node("context-management").assertExists()
         lateinit var result: ContextManagementControllerAdapter
         mainThread { result = adapter() }
@@ -114,7 +118,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         val conversation = seedAndSelect()
         val before = fixture.database.exportBackup()
         lateinit var oldClick: () -> Unit
-        mainThread { oldClick = retainedControls(activity).onContextClick }
+        mainThread { oldClick = retainedCompressionClick() }
         val old = openAndAwait()
         assertEquals(conversation.id, old.state.value.owner.conversationId)
         assertEquals(2, old.state.value.snapshot!!.originals.size)
@@ -157,7 +161,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
     fun testActivityRecreationDoesNotRestoreContextVisitOrOldClickAuthority() {
         val conversation = seedAndSelect()
         lateinit var oldClick: () -> Unit
-        mainThread { oldClick = retainedControls(activity).onContextClick }
+        mainThread { oldClick = retainedCompressionClick() }
         val old = openAndAwait()
         activity = recreateActivity(activity)
         node("context-management").assertDoesNotExist()
@@ -178,10 +182,10 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         var generation = -1L
         mainThread {
             generation = editorGeneration()
-            oldClick = retainedControls(activity).onContextClick
+            oldClick = retainedCompressionClick()
             retainedControls(activity).onOpenSidebar()
             oldClick()
-            behindSidebarClick = retainedControls(activity).onContextClick
+            behindSidebarClick = retainedCompressionClick()
             behindSidebarClick()
             assertNoVisit()
         }
@@ -219,11 +223,11 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         var generation = -1L
         mainThread {
             generation = editorGeneration()
-            oldClick = retainedControls(activity).onContextClick
+            oldClick = retainedCompressionClick()
             // Isolate the real page setter from sidebar and selection-generation fences.
             page("settings")
             oldClick()
-            settingsClick = retainedControls(activity).onContextClick
+            settingsClick = retainedCompressionClick()
             settingsClick()
             assertNoVisit()
         }
@@ -250,11 +254,11 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         var generation = -1L
         mainThread {
             generation = editorGeneration()
-            oldClick = retainedControls(activity).onContextClick
+            oldClick = retainedCompressionClick()
         }
         stopped {
             oldClick()
-            backgroundClick = retainedControls(activity).onContextClick
+            backgroundClick = retainedCompressionClick()
             backgroundClick()
             assertNoVisit() // onStop must revoke even when no visit existed.
         }
@@ -303,7 +307,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
     fun testStaleChatClickCannotOpenContextFromAnotherPageOrNewEditor() {
         val conversation = seedAndSelect()
         lateinit var oldClick: () -> Unit
-        mainThread { oldClick = retainedControls(activity).onContextClick }
+        mainThread { oldClick = retainedCompressionClick() }
         openSettings()
         mainThread { oldClick() }
         node("context-management").assertDoesNotExist()

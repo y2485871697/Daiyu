@@ -83,8 +83,14 @@ class VirtualDisplayMainActivityTest : WiredActivityTestCase() {
             assertNull(fixture.controller.virtualDisplayEntry())
         }
         ui.waitForIdle()
-        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        mainThread {
+            assertEquals(true, invoke("getSidebarVisible"))
+            activity.onBackPressedDispatcher.onBackPressed()
+            assertEquals(false, invoke("getSidebarVisible"))
+        }
         ui.waitForIdle()
+        assertNull(fixture.controller.virtualDisplayEntry())
+        assertTrue(fixture.database.conversations().isEmpty())
         assertFalse(activity.isFinishing)
         assertFalse(activity.isDestroyed)
         assertDraft(text)

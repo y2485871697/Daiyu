@@ -20,12 +20,19 @@ class RunControlActivityTest : WiredActivityTestCase() {
         awaitControl("worker paused") { fixture.controller.runState(owner)?.phase == ExecutionPhase.PAUSED }
         ui.waitForIdle(); assertDraft("unsent draft")
         assertEquals(RunStatus.RUNNING, fixture.controller.active!!.status)
-        node("chat-control").assertContentDescriptionEquals("继续"); assertEquals(1, fixture.opens.get())
+        node("chat-control").assertDoesNotExist()
+        node("chat-send").assertIsEnabled().assertContentDescriptionEquals("追加消息")
+        assertEquals(1, fixture.opens.get())
         activity = recreateActivity(activity)
-        assertDraft("unsent draft"); node("chat-control").assertIsEnabled().assertContentDescriptionEquals("继续")
+        assertDraft("unsent draft")
+        node("chat-control").assertDoesNotExist()
+        node("chat-send").assertIsEnabled().assertContentDescriptionEquals("追加消息")
         assertEquals(owner.id, fixture.controller.active!!.id); assertEquals(1, fixture.opens.get())
-        node("chat-control").performClick()
-        assertTrue(second.entered.await(5, TimeUnit.SECONDS)); second.release.countDown()
+        setDraft("")
+        node("chat-control").assertIsEnabled().assertContentDescriptionEquals("继续").performClick()
+        assertTrue(second.entered.await(5, TimeUnit.SECONDS))
+        setDraft("unsent draft")
+        second.release.countDown()
         awaitControl("same run completes") { fixture.controller.active == null }
         ui.waitForIdle(); assertDraft("unsent draft"); node("chat-control").assertDoesNotExist()
         val saved = fixture.database.messages(owner.conversationId).last().second

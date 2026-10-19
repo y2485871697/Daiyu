@@ -27,14 +27,17 @@ class PlatformActionVisitActivityTest : WiredActivityTestCase() {
     }
     private fun sidebar() { host("setSidebarVisible", true); host("setSidebarVisible", false) }
     private fun route() { host("setRetainedPage", "settings"); host("setRetainedPage", "chat") }
-    private fun clickAction(tag: String) {
-        node(tag).assertIsDisplayed().assertIsEnabled().performClick()
+    private fun actionControl(tag: String): SemanticsNodeInteraction {
+        dismissIme()
+        node("chat-extra-actions").performScrollToNode(hasTestTag(tag))
+        return ui.onNodeWithTag(tag).assertIsDisplayed().assertIsEnabled()
     }
+    private fun clickAction(tag: String) { actionControl(tag).performClick() }
     private fun preview(): ControllerPlatformActionPreparation {
         clickAction("platform-action-entry")
         clickAction("platform-action-media")
         var duringClick: ControllerPlatformActionPreparation? = null
-        node("platform-action-preview").assertIsDisplayed().assertIsEnabled()
+        actionControl("platform-action-preview")
             .performSemanticsAction(SemanticsActions.OnClick) { click ->
                 assertTrue(click())
                 duringClick = fixture.controller.platformActionPreparation()

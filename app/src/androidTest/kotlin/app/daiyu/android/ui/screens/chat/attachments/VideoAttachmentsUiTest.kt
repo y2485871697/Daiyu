@@ -1,13 +1,12 @@
 package app.daiyu.android.ui.screens.chat.attachments
 
+import android.content.Intent
 import android.app.Activity
 import android.content.ClipData
-import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
 import android.os.CancellationSignal
 import android.os.Looper
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.compose.setContent
 import androidx.activity.result.ActivityResultRegistry
@@ -34,7 +33,7 @@ import androidx.core.app.ActivityOptionsCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
-import app.daiyu.android.ComposeActivityTestCase
+import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.VideoChatHost
 import app.daiyu.android.VideoDraftOutcome
 import app.daiyu.android.VideoDraftPersistence
@@ -60,7 +59,7 @@ import java.util.concurrent.atomic.AtomicInteger
  * Only provider IO and parent receipt authority are fakes. AndroidVideoAttachments' actual original
  * bytes/decoder are covered by VideoChatHostAndroidTest. Never retain a detached semantics callback.
  */
-class VideoAttachmentsUiTest : ComposeActivityTestCase() {
+class VideoAttachmentsUiTest : WiredActivityTestCase() {
     private class ViewLife : LifecycleOwner {
         val registry = LifecycleRegistry(this)
         override val lifecycle: Lifecycle get() = registry
@@ -125,7 +124,6 @@ class VideoAttachmentsUiTest : ComposeActivityTestCase() {
         }
     }
 
-    private lateinit var activity: ComponentActivity
     private lateinit var host: VideoChatHost
     private lateinit var media: Media
     private lateinit var picker: PickerRegistry
@@ -143,8 +141,6 @@ class VideoAttachmentsUiTest : ComposeActivityTestCase() {
         super.setUp()
         mounted.value = true; text.value = "first exact text"; busy.value = false; conversation.value = null
         handed = null; frozenEditor = null; deliver = null; textRevision.value = 1L
-        activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, ComponentActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
         mainThread {
             media = Media()
             host = VideoChatHost(MemoryJournal(), media)
@@ -157,7 +153,7 @@ class VideoAttachmentsUiTest : ComposeActivityTestCase() {
     override fun tearDown() {
         try {
             media.gate?.countDown()
-            mainThread { activity.finish(); life.registry.currentState = Lifecycle.State.DESTROYED }
+            mainThread { life.registry.currentState = Lifecycle.State.DESTROYED }
         } finally { super.tearDown() }
     }
 
@@ -397,13 +393,7 @@ class VideoAttachmentsUiTest : ComposeActivityTestCase() {
     fun testRealActivityRecreationRetainsHostButNeverRebindsOldPicker() {
         node("video_attachments_select").performClick()
         val old = picker.launches.last()
-        val previous = activity
-        val monitor = instrumentation.addMonitor(ComponentActivity::class.java.name, null, false)
-        try {
-            mainThread { previous.recreate() }
-            activity = checkNotNull(instrumentation.waitForMonitorWithTimeout(monitor, 5_000) as? ComponentActivity)
-            assertTrue(previous.isDestroyed)
-        } finally { instrumentation.removeMonitor(monitor) }
+        activity = recreateActivity(activity)
         show() // Same parent-owned host; no second journal writer, new route binding.
         node("video_attachments_select").performClick()
         val fresh = picker.launches.last()

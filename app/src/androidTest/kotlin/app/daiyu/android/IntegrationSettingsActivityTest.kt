@@ -119,13 +119,18 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         assertEquals(0, calls.savedCredentials.get())
         assertEquals(0, calls.connections.get())
     }
-    private fun awaitChatPickerReady() {
+    private fun awaitChatPickerLoaded() {
+        awaitUniqueTag("chat-model-picker")
+        awaitUniqueTag("chat-model-list")
         ui.waitUntil(5_000) {
-            ui.onAllNodesWithTag("chat-model-option:second").fetchSemanticsNodes().singleOrNull()?.config?.let {
+            ui.onAllNodesWithTag("chat-model-refresh").fetchSemanticsNodes().singleOrNull()?.config?.let {
                 it.getOrNull(SemanticsProperties.Disabled) == null
             } == true
         }
-        node("chat-model-picker").assertExists()
+    }
+    private fun awaitChatPickerReady() {
+        awaitChatPickerLoaded()
+        node("chat-model-list").performScrollToNode(hasTestTag("chat-model-option:second"))
         node("chat-model-option:second").assertIsEnabled()
     }
     // Retain the exact visit's capability, not an ID that could be resolved against a new visit.
@@ -276,7 +281,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         val runningOpens = fixture.opens.get()
         try {
             node("chat-model").performClick()
-            ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-option:first").fetchSemanticsNodes().isNotEmpty() }
+            awaitChatPickerLoaded()
             node("chat-model-picker").assertExists()
             node("chat-model-list").performScrollToNode(hasTestTag("chat-model-option:external-change"))
             node("chat-model-option:external-change").assertIsNotEnabled()

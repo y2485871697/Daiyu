@@ -1,7 +1,5 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import android.content.Intent
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
@@ -26,7 +24,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
-import app.daiyu.android.ComposeActivityTestCase
+import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.MarkdownBlock
 import app.daiyu.android.MarkdownParser
 import java.util.concurrent.CountDownLatch
@@ -39,8 +37,7 @@ import app.daiyu.android.ui.app.AgentAppTheme
 import java.util.concurrent.CopyOnWriteArrayList
 
 /** Real consumers, isolated component host: no model, browser, network or production controller. */
-class MessageMarkdownTest : ComposeActivityTestCase() {
-    private lateinit var activity: ComponentActivity
+class MessageMarkdownTest : WiredActivityTestCase() {
     private val opened = CopyOnWriteArrayList<String>()
     private val uriHandler = object : UriHandler {
         override fun openUri(uri: String) { opened += uri }
@@ -126,13 +123,7 @@ class MessageMarkdownTest : ComposeActivityTestCase() {
 
     override fun setUp() {
         super.setUp()
-        activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, ComponentActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
         opened.clear()
-    }
-
-    override fun tearDown() {
-        try { mainThread { activity.finish() } } finally { super.tearDown() }
     }
 
     private fun show(content: @Composable () -> Unit) {

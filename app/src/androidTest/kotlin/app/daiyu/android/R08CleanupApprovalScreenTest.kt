@@ -1,7 +1,5 @@
 package app.daiyu.android
 
-import android.content.Intent
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
@@ -15,8 +13,7 @@ import app.daiyu.android.vdapproval.*
 
 /** UI identity/lifecycle only. This fixture never approves or executes a real owner operation. */
 @Suppress("DEPRECATION")
-class R08CleanupApprovalScreenTest : ComposeActivityTestCase() {
-    private lateinit var activity: ComponentActivity
+class R08CleanupApprovalScreenTest : WiredActivityTestCase() {
     private val visible = mutableStateOf<R08CleanupApprovalRequest?>(null)
     private val decisions = mutableListOf<Pair<R08CleanupApprovalRequest, Boolean>>()
     private val callback = mutableStateOf<(R08CleanupApprovalRequest, Boolean) -> Boolean>({ req, accepted ->
@@ -25,17 +22,13 @@ class R08CleanupApprovalScreenTest : ComposeActivityTestCase() {
     })
     override fun setUp() {
         super.setUp()
-        activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,
-            ComponentActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
         mainThread {
             activity.setContent {
                 MaterialTheme { visible.value?.let { R08CleanupApprovalScreen(it, callback.value) } }
             }
         }
     }
-    override fun tearDown() {
-        try { mainThread { activity.finish() } } finally { super.tearDown() }
-    }
+
     private fun request(generation: String): R08CleanupApprovalRequest {
         var issued: RunExecutionOwner? = null
         val message = Message(MessageId("cleanup-assistant"), ConversationId("cleanup-conversation"), RunId("cleanup-run"),

@@ -1085,6 +1085,95 @@ class MainActivity : ComponentActivity() {
         val reference: app.daiyu.android.browser.download.BrowserCompletedDownload)
     private var pendingBrowserDownload: BrowserSaveSelection? = null
     private var nextBrowserSaveRequestCode = 14000
+    private var generationMediaVisit: AtomicBoolean? = null
+    private var generationMediaDialog: android.app.Dialog? = null
+    private data class GenerationMediaSave(val requestCode: Int,
+        val binding: app.daiyu.android.storage.GenerationAttemptBinding, val assetKey: String,
+        val active: AtomicBoolean, var pickerHopPending: Boolean = true)
+    private var pendingGenerationMediaOriginal: GenerationMediaSave? = null
+
+    private fun cancelGenerationMedia() {
+        generationMediaVisit?.set(false); generationMediaVisit = null
+        generationMediaDialog?.dismiss(); generationMediaDialog = null
+        pendingGenerationMediaOriginal?.let { if (pendingBackupRequest == it.requestCode) pendingBackupRequest = null }
+        pendingGenerationMediaOriginal = null
+    }
+
+    @Suppress("DEPRECATION") private fun generationMediaAction(step: WorkStepUi, request: ToolCardActionRequest) {
+        val owner = step.owner ?: return
+        val assetKey = request.assetKey ?: return toast("未找到原件")
+        if (step.toolName !in setOf("generate_images", "generate_videos") || GenerationMediaKey.parse(assetKey) == null)
+            return toast("未找到原件")
+        cancelGenerationMedia()
+        val active = AtomicBoolean(true).also { generationMediaVisit = it }
+        val editor = editorGeneration
+        val visit = contextManagementEntryEpoch
+        val binding = app.daiyu.android.storage.GenerationAttemptBinding(owner.conversationId, owner.messageId,
+            owner.runId, step.toolCallId, step.toolName)
+        fun current() = active.get() && generationMediaVisit === active && activityUsable() && voiceForeground &&
+            retainedPage == "chat" && !sidebarVisible && selected?.id?.value == owner.conversationId &&
+            editorGeneration == editor && contextManagementEntryEpoch == visit && resolveToolCardAction(chatState.turns, request) != null
+        val accepted = controller.loadGenerationMediaOriginal(binding, assetKey, active) { original ->
+            if (!current()) { original?.close(); return@loadGenerationMediaOriginal }
+            if (original == null) { cancelGenerationMedia(); toast("原件读取失败"); return@loadGenerationMediaOriginal }
+            val metadata = original.metadata
+            when (request.action) {
+                ToolCardAction.SAVE_MEDIA -> {
+                    original.close()
+                    backupGuard {
+                        check(pendingBackupRequest == null) { "文件选择尚未返回" }
+                        val extension = when (metadata.mimeType) {
+                            "image/png" -> "png"; "image/jpeg" -> "jpg"; "image/webp" -> "webp"
+                            "video/mp4" -> "mp4"; "video/webm" -> "webm"; else -> error("不支持的原件类型")
+                        }
+                        val selection = GenerationMediaSave(allocateOriginalSaveRequestCode(), binding, assetKey, active)
+                        pendingGenerationMediaOriginal = selection; pendingBackupRequest = selection.requestCode
+                        try { startActivityForResult(Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE); type = metadata.mimeType
+                            putExtra(Intent.EXTRA_TITLE, "daiyu-original.$extension")
+                        }, selection.requestCode) } catch (failure: Exception) { cancelGenerationMedia(); throw failure }
+                    }
+                }
+                ToolCardAction.OPEN_IMAGE -> {
+                    if (metadata.kind != app.daiyu.android.model.generation.GenerationKind.IMAGE) {
+                        original.close(); cancelGenerationMedia(); toast("原件不是图片")
+                    } else lifecycleScope.launch {
+                        val bitmap = try { withContext(Dispatchers.IO) {
+                            original.use {
+                                it.requireActive()
+                                android.graphics.BitmapFactory.decodeStream(it.stream, null,
+                                    android.graphics.BitmapFactory.Options().apply {
+                                        var sample = 1
+                                        while (metadata.width.toLong() * metadata.height / sample / sample > 8_000_000) sample *= 2
+                                        inSampleSize = sample
+                                    })
+                            }
+                        } } catch (cancelled: kotlinx.coroutines.CancellationException) { original.close(); throw cancelled }
+                        catch (_: Exception) { null }
+                        if (!current()) { bitmap?.recycle(); return@launch }
+                        if (bitmap == null) { cancelGenerationMedia(); toast("图片读取失败") }
+                        else try {
+                            generationMediaDialog = app.daiyu.android.ui.GenerationMediaDialog.image(this@MainActivity, bitmap) {
+                                active.set(false)
+                            }.also { it.show() }
+                        } catch (_: Exception) { bitmap.recycle(); cancelGenerationMedia(); toast("图片打开失败") }
+                    }.invokeOnCompletion { original.close() }
+                }
+                ToolCardAction.PLAY_VIDEO -> {
+                    if (metadata.kind != app.daiyu.android.model.generation.GenerationKind.VIDEO) {
+                        original.close(); cancelGenerationMedia(); toast("原件不是视频")
+                    } else try {
+                        generationMediaDialog = app.daiyu.android.ui.GenerationMediaDialog.video(this, original, audioGate, VoiceOwner(owner.conversationId, owner.runId)) {
+                            active.set(false)
+                        }.also { it.show() }
+                    } catch (_: Exception) { original.close(); cancelGenerationMedia(); toast("视频播放失败") }
+                }
+                else -> original.close()
+            }
+        }
+        if (!accepted) { cancelGenerationMedia(); toast("原件暂不可读") }
+    }
+
     private var generationOutputsRequest: Any? = null
     private var generationReceiptNotice by mutableStateOf<ChatController.GenerationReceiptNotice?>(null)
     private val supplementDraft = PausedSupplementDraft()
@@ -3138,7 +3227,8 @@ class MainActivity : ComponentActivity() {
         pendingStaticOriginal = null
     }
     private fun cancelGenerationOutputs() = clearGenerationOutputs(false)
-    private fun clearGenerationOutputs(preserveStaticSelection: Boolean) {
+    private fun clearGenerationOutputs(preserveStaticSelection: Boolean, preserveMediaSelection: Boolean = false) {
+        if (!preserveMediaSelection) cancelGenerationMedia()
         if (!preserveStaticSelection) cancelStaticGenerationVisit()
         generationOutputsRequest = null
         generationOutputs = null
@@ -3789,12 +3879,13 @@ class MainActivity : ComponentActivity() {
         mcpInput = input; prompt = input
     }
 
-    private fun cancelBrowserEditor(preserveGenerationSelection: Boolean = false, preserveStaticSelection: Boolean = false) {
+    private fun cancelBrowserEditor(preserveGenerationSelection: Boolean = false, preserveStaticSelection: Boolean = false,
+        preserveMediaSelection: Boolean = false) {
         cancelMcpEditor()
         cancelTerminalEditor()
         cancelVirtualDisplayEditor()
         if (!preserveGenerationSelection) cancelGenerationEditor()
-        clearGenerationOutputs(preserveStaticSelection)
+        clearGenerationOutputs(preserveStaticSelection, preserveMediaSelection)
         browserRequest = null
         browserPreparing = false
         val pending = browserApproval
@@ -4225,6 +4316,7 @@ class MainActivity : ComponentActivity() {
             ToolCardAction.VIEW_TASKS, ToolCardAction.READ_TASK_RESULT -> guard { openChildTaskRecords(owner.conversationId) }
             ToolCardAction.PAUSE_TASK, ToolCardAction.RESUME_TASK, ToolCardAction.STOP_TASK ->
                 controlChildTaskFromCard(step, request)
+            ToolCardAction.OPEN_IMAGE, ToolCardAction.PLAY_VIDEO, ToolCardAction.SAVE_MEDIA -> generationMediaAction(step, request)
             ToolCardAction.VIEW_ASSETS -> openGenerationOutputs()
             ToolCardAction.VIEW_DIFF -> {
                 val documents = step.categoryDetails?.rich?.documents.orEmpty()
@@ -4354,6 +4446,12 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        val mediaPicker = pendingGenerationMediaOriginal
+        val preserveMedia = mediaPicker != null && mediaPicker.pickerHopPending && mediaPicker.active.get() &&
+            generationMediaVisit === mediaPicker.active && pendingBackupRequest == mediaPicker.requestCode &&
+            retainedPage == "chat" && !sidebarVisible && selected?.id?.value == mediaPicker.binding.conversationId
+        mediaPicker?.pickerHopPending = false
+
         revokeChildAuthorization()
         closeBrowserVisualVisit()
         chatReferencePick?.let { request ->
@@ -4404,7 +4502,8 @@ class MainActivity : ComponentActivity() {
         // Only the first DocumentsUI hop survives. A later unrelated pause must revoke even
         // when the picker never returned; a consumed save keeps only its original atomic visit.
         staticPicker?.pickerHopPending = false
-        cancelBrowserEditor(preserveGenerationSelection = selectionOnly, preserveStaticSelection = preserveStatic)
+        cancelBrowserEditor(preserveGenerationSelection = selectionOnly, preserveStaticSelection = preserveStatic,
+            preserveMediaSelection = preserveMedia)
         speechHost.setForeground(false)
         refreshRateWindowResumed = false; window.decorView.removeCallbacks(refreshRateRequest)
         val previous = previousPreferredRefreshRate
@@ -4451,6 +4550,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        cancelGenerationMedia()
         revokeBackupExportPage()
         revokeChildAuthorization()
         closeBrowserVisualVisit()
@@ -5605,6 +5705,21 @@ class MainActivity : ComponentActivity() {
                     checkNotNull(uri), assertUiOwner = {
                         check(visit.active.get()) { "原会话已变化；本次保存已失效" }
                     })
+            }
+            return
+        }
+        val mediaSelection = pendingGenerationMediaOriginal
+        if (mediaSelection?.requestCode == requestCode && pendingBackupRequest == requestCode) {
+            pendingGenerationMediaOriginal = null; pendingBackupRequest = null
+            mediaSelection.pickerHopPending = false
+            if (resultCode != RESULT_OK) { cancelGenerationMedia(); return }
+            backupGuard {
+                val uri = data?.data
+                require(mediaSelection.active.get() && generationMediaVisit === mediaSelection.active &&
+                    activityUsable() && retainedPage == "chat" && !sidebarVisible && uri?.scheme == "content" &&
+                    selected?.id?.value == mediaSelection.binding.conversationId) { "原件选择已失效；未保存或重试" }
+                controller.saveGenerationMediaOriginal(mediaSelection.binding, mediaSelection.assetKey,
+                    checkNotNull(uri), mediaSelection.active)
             }
             return
         }

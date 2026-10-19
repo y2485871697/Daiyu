@@ -1101,8 +1101,13 @@ class MainActivity : ComponentActivity() {
 
     @Suppress("DEPRECATION") private fun generationMediaAction(step: WorkStepUi, request: ToolCardActionRequest) {
         val owner = step.owner ?: return
-        val assetKey = request.assetKey ?: return toast("未找到原件")
-        if (step.toolName !in setOf("generate_images", "generate_videos") || GenerationMediaKey.parse(assetKey) == null)
+        val browser = step.toolName in setOf("browser_read", "browser_write") && step.hasBrowserScreenshot
+        val assetKey = if (browser && request.assetKey == null)
+            app.daiyu.android.media.BrowserScreenshotStore.MEDIA_KEY else request.assetKey ?: return toast("未找到原件")
+        if (browser) {
+            if (assetKey != app.daiyu.android.media.BrowserScreenshotStore.MEDIA_KEY ||
+                request.action !in setOf(ToolCardAction.OPEN_IMAGE, ToolCardAction.SAVE_MEDIA)) return toast("未找到原件")
+        } else if (step.toolName !in setOf("generate_images", "generate_videos") || GenerationMediaKey.parse(assetKey) == null)
             return toast("未找到原件")
         cancelGenerationMedia()
         val active = AtomicBoolean(true).also { generationMediaVisit = it }

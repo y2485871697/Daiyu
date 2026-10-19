@@ -14,7 +14,8 @@ import java.security.MessageDigest
 import java.util.UUID
 
 /** Call-bound originals. A receipt is a locator, never screenshot or file-read authority. */
-internal class BrowserScreenshotStore(private val filesDir: File, private val cacheDir: File) {
+internal class BrowserScreenshotStore(private val filesDir: File, private val cacheDir: File,
+    private val syncDirectory: (File) -> Unit = ::syncDirectoryOnDisk) {
     internal data class Binding(val conversation: String, val message: String, val run: String,
         val call: String, val tool: String, val arguments: String) {
         companion object {
@@ -44,6 +45,7 @@ internal class BrowserScreenshotStore(private val filesDir: File, private val ca
         try {
             FileOutputStream(pending).use { it.write(bytes); it.fd.sync() }
             Files.move(pending.toPath(), target.toPath(), ATOMIC_MOVE)
+            syncDirectory(directory)
         } finally { pending.delete() }
         return JSONObject().put("version", 1).put("asset", id).put("sha256", hash)
             .put("bytes", bytes.size).put("width", bounds.first).put("height", bounds.second)
@@ -75,6 +77,7 @@ internal class BrowserScreenshotStore(private val filesDir: File, private val ca
         for (dir in listOf(root, conversation, result)) {
             if (create && !dir.exists()) check(dir.mkdir() || dir.isDirectory)
             check(Files.isDirectory(dir.toPath(), NOFOLLOW_LINKS) && dir.canonicalFile == dir.absoluteFile)
+            if (create) syncDirectory(checkNotNull(dir.parentFile))
         }
         return result
     }
@@ -108,6 +111,15 @@ internal class BrowserScreenshotStore(private val filesDir: File, private val ca
         return b.outWidth to b.outHeight
     }
     companion object {
+        const val MEDIA_KEY = "browser:screenshot"
+        private fun syncDirectoryOnDisk(directory: File) {
+            val fd = android.system.Os.open(directory.path, android.system.OsConstants.O_RDONLY or
+                android.system.OsConstants.O_CLOEXEC or android.system.OsConstants.O_NOFOLLOW, 0)
+            try {
+                check(android.system.OsConstants.S_ISDIR(android.system.Os.fstat(fd).st_mode))
+                android.system.Os.fsync(fd)
+            } finally { android.system.Os.close(fd) }
+        }
         private const val MAX_BYTES = 8 * 1024 * 1024
         private fun digest(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes)
             .joinToString("") { "%02x".format(it.toInt() and 255) }

@@ -969,15 +969,45 @@ class ChatController internal constructor(private val application:Application,
         }
     }
 
+    private fun openCardMediaOnWorker(binding: GenerationAttemptBinding, assetKey: String,
+        active: java.util.concurrent.atomic.AtomicBoolean): GenerationMediaOriginal {
+        if (binding.toolName !in setOf("browser_read", "browser_write"))
+            return openGenerationMediaOnWorker(binding, requireNotNull(GenerationMediaKey.parse(assetKey)), active)
+        check(assetKey == app.daiyu.android.media.BrowserScreenshotStore.MEDIA_KEY && active.get())
+        check(Looper.myLooper() != Looper.getMainLooper())
+        synchronized(this) { check(!closed && binding.conversationId !in generationConversationPublicationSeals) }
+        val record = committedScreenshotOnWorker(
+            app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi(binding.conversationId, binding.runId,
+                binding.assistantMessageId), binding.toolCallId) ?: error("browser_screenshot_record_missing")
+        check(record.invocation.name == binding.toolName &&
+            record.disposition == app.daiyu.android.domain.runtime.ToolDisposition.SUCCEEDED &&
+            org.json.JSONObject(record.invocation.arguments).optString("action") == "screenshot")
+        val receipt = org.json.JSONObject(checkNotNull(record.result)).getJSONObject("screenshot_receipt")
+        val bytes = app.daiyu.android.media.BrowserScreenshotStore(application.filesDir, application.cacheDir).read(
+            app.daiyu.android.media.BrowserScreenshotStore.Binding(binding.conversationId, binding.assistantMessageId,
+                binding.runId, binding.toolCallId, binding.toolName, record.invocation.arguments), receipt)
+        check(active.get())
+        val metadata = ControllerGenerationOutputMetadata(0, GenerationKind.IMAGE, "image/jpeg", bytes.size.toLong(),
+            receipt.getInt("width"), receipt.getInt("height"), 0)
+        val file = java.io.File.createTempFile("browser-view-", ".jpg", application.cacheDir)
+        try {
+            java.io.FileOutputStream(file).use { it.write(bytes) }
+            check(active.get())
+            return GenerationMediaOriginal(metadata, java.io.FileInputStream(file), active)
+        } finally { file.delete() }
+    }
+
     internal fun loadGenerationMediaOriginal(binding: GenerationAttemptBinding, assetKey: String,
         active: java.util.concurrent.atomic.AtomicBoolean, complete: (GenerationMediaOriginal?) -> Unit): Boolean {
-        val key = GenerationMediaKey.parse(assetKey) ?: return false
+        val browser = binding.toolName in setOf("browser_read", "browser_write")
+        if (browser && assetKey != app.daiyu.android.media.BrowserScreenshotStore.MEDIA_KEY ||
+            !browser && GenerationMediaKey.parse(assetKey) == null) return false
         synchronized(this) {
             if (closed || !ready || dataBusy || !active.get()) return false
             generationReaders++
         }
         try { executor.execute {
-            val result = runCatching { openGenerationMediaOnWorker(binding, key, active) }.getOrNull()
+            val result = runCatching { openCardMediaOnWorker(binding, assetKey, active) }.getOrNull()
             handler.post {
                 synchronized(this) { generationReaders--; if (closed) closeStorageWhenIdle() }
                 if (!active.get()) { result?.close(); complete(null) }
@@ -993,9 +1023,8 @@ class ChatController internal constructor(private val application:Application,
         active: java.util.concurrent.atomic.AtomicBoolean,
         resolver: android.content.ContentResolver = application.contentResolver) {
         require(uri.scheme == "content")
-        val key = requireNotNull(GenerationMediaKey.parse(assetKey))
         dataTask(failureNotice = "原件保存未确认；目标可能不完整，未自动重试", work = {
-            openGenerationMediaOnWorker(binding, key, active).use { original ->
+            openCardMediaOnWorker(binding, assetKey, active).use { original ->
                 original.requireActive()
                 resolver.openOutputStream(uri, "wt")?.use { destination ->
                     val buffer = ByteArray(8192)
@@ -1011,7 +1040,7 @@ class ChatController internal constructor(private val application:Application,
                     destination.flush()
                 } ?: throw java.io.IOException("无法打开目标")
             }
-            "生成原件已保存"
+            if (binding.toolName in setOf("browser_read", "browser_write")) "原件已保存" else "生成原件已保存"
         })
     }
 
@@ -2380,6 +2409,21 @@ class ChatController internal constructor(private val application:Application,
             })
     }
 
+    private fun committedScreenshotOnWorker(owner: app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi,
+        callId: String): app.daiyu.android.domain.runtime.ToolRecord? {
+        val snapshot = SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, owner.messageId)
+            ?: return null
+        val message = database.storedMessage(database.readableDatabase, ConversationId(owner.conversationId), owner.messageId)
+        check(message.role == Message.ASSISTANT_ROLE && message.id == snapshot.message.id &&
+            message.conversationId.value == owner.conversationId && message.runId.value == owner.runId &&
+            snapshot.message.conversationId == message.conversationId && snapshot.message.runId == message.runId)
+        val record = snapshot.tools.singleOrNull { it.invocation.id.value == callId && it.invocation.name in setOf("screen", "browser_read", "browser_write") }
+            ?: return null
+        val blocks = message.blocks + message.historySegments.flatMap { it.blocks }
+        check(blocks.filterIsInstance<MessageBlock.Tool>().any { it.invocation == record.invocation && it.result == record.result })
+        return record
+    }
+
     internal fun loadToolScreenshot(owner: app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi,
         callId: String, complete: (android.graphics.Bitmap?) -> Unit): Boolean {
         val revision = synchronized(this) {
@@ -2388,16 +2432,7 @@ class ChatController internal constructor(private val application:Application,
         }
         try { executor.execute {
             val image = runCatching {
-                val snapshot = SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, owner.messageId)
-                    ?: return@runCatching null
-                val message = database.storedMessage(database.readableDatabase, ConversationId(owner.conversationId), owner.messageId)
-                check(message.role == Message.ASSISTANT_ROLE && message.id == snapshot.message.id &&
-                    message.conversationId.value == owner.conversationId && message.runId.value == owner.runId &&
-                    snapshot.message.conversationId == message.conversationId && snapshot.message.runId == message.runId)
-                val record = snapshot.tools.singleOrNull { it.invocation.id.value == callId && it.invocation.name in setOf("screen", "browser_read", "browser_write") }
-                    ?: return@runCatching null
-                val blocks = message.blocks + message.historySegments.flatMap { it.blocks }
-                check(blocks.filterIsInstance<MessageBlock.Tool>().any { it.invocation == record.invocation && it.result == record.result })
+                val record = committedScreenshotOnWorker(owner, callId) ?: return@runCatching null
                 if (record.invocation.name == "screen") app.daiyu.android.ui.ToolScreenshotReceipt.decode(record)
                 else {
                     check(record.disposition == app.daiyu.android.domain.runtime.ToolDisposition.SUCCEEDED &&

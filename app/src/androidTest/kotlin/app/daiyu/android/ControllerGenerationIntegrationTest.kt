@@ -525,6 +525,66 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
         } finally { saved.delete() }
     }
 
+    fun testBrowserCardOriginalUsesCommittedReceiptAndSavesExactJpeg() = verifyBrowserCardOriginal()
+
+    private fun verifyBrowserCardOriginal() {
+        val conversation = fixture.database.create("default")
+        val messageId = MessageId(UUID.randomUUID().toString())
+        val run = RunId(UUID.randomUUID().toString())
+        val call = ToolInvocation(ToolCallId(UUID.randomUUID().toString()), "browser_read", "{\"action\":\"screenshot\"}")
+        val binding = GenerationAttemptBinding(conversation.id.value, messageId.value, run.value, call.id.value, call.name)
+        val source = File(fixture.application.cacheDir, "browser_screenshots/screenshot_${System.nanoTime()}.jpg")
+        check(source.parentFile!!.mkdirs() || source.parentFile!!.isDirectory)
+        val bitmap = android.graphics.Bitmap.createBitmap(1600, 2, android.graphics.Bitmap.Config.ARGB_8888)
+        try { source.outputStream().use { check(bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 85, it)) } }
+        finally { bitmap.recycle() }
+        val bytes = source.readBytes()
+        val receipt = app.daiyu.android.media.BrowserScreenshotStore(fixture.application.filesDir, fixture.application.cacheDir)
+            .freeze(app.daiyu.android.media.BrowserScreenshotStore.Binding(binding.conversationId, binding.assistantMessageId,
+                binding.runId, binding.toolCallId, binding.toolName, call.arguments), source.path)
+        source.delete()
+        val result = org.json.JSONObject().put("screenshot_receipt", receipt).put("filePath", org.json.JSONObject.NULL).toString()
+        val tool = MessageBlock.Tool(call, result)
+        val assistant = Message(messageId, conversation.id, run, Message.ASSISTANT_ROLE, listOf(tool), RunStatus.COMPLETED,
+            createdAt = 1_700_000_000_123L)
+        fixture.database.save(assistant)
+        val snapshot = app.daiyu.android.domain.runtime.RunCheckpoint(assistant, emptyList(),
+            app.daiyu.android.domain.runtime.ExecutionPhase.TERMINAL,
+            tools = listOf(app.daiyu.android.domain.runtime.ToolRecord(call,
+                app.daiyu.android.domain.runtime.ToolDisposition.SUCCEEDED, result)), owner = "browser-fixture", revision = 1)
+        fixture.database.writableDatabase.insertOrThrow("runtime_checkpoints", null, android.content.ContentValues().apply {
+            put("message_id", messageId.value); put("conversation_id", conversation.id.value); put("run_id", run.value)
+            put("owner", snapshot.owner); put("revision", snapshot.revision); put("phase", snapshot.phase.name)
+            put("process_owner", "browser-fixture"); put("payload", RunCheckpointCodec.encode(snapshot))
+        })
+        val key = app.daiyu.android.media.BrowserScreenshotStore.MEDIA_KEY
+        checkNotNull(loadCardOriginal(controller, binding, key, AtomicBoolean(true))).use {
+            assertEquals("image/jpeg", it.metadata.mimeType); assertEquals(1600, it.metadata.width)
+            assertTrue(bytes.contentEquals(it.stream.readBytes()))
+        }
+        val saved = File(fixture.application.cacheDir, "browser-card-save-${UUID.randomUUID()}.jpg")
+        val documents = CardDocuments(saved).apply {
+            attachInfo(fixture.application, android.content.pm.ProviderInfo().apply { authority = "browser-card-documents" })
+        }
+        val resolver = android.test.mock.MockContentResolver(fixture.application).apply { addProvider("browser-card-documents", documents) }
+        val uri = Uri.parse("content://browser-card-documents/output")
+        try {
+            assertEquals("原件已保存", dataOperation { controller.saveGenerationMediaOriginal(binding, key, uri, AtomicBoolean(true), resolver) })
+            assertTrue(bytes.contentEquals(saved.readBytes()))
+            val wrong = GenerationAttemptBinding(binding.conversationId, binding.assistantMessageId, binding.runId, "other", binding.toolName)
+            assertNull(loadCardOriginal(controller, wrong, key, AtomicBoolean(true)))
+            assertTrue(dataOperation { controller.saveGenerationMediaOriginal(binding, key, uri, AtomicBoolean(false), resolver) }
+                .startsWith("原件保存未确认"))
+            assertEquals(1, documents.opens.get())
+            fixture.database.save(assistant.copy(blocks = listOf(tool.copy(invocation = call.copy(arguments = "{\"action\":\"get_text\"}")))))
+            assertNull(loadCardOriginal(controller, binding, key, AtomicBoolean(true)))
+            assertTrue(dataOperation { controller.saveGenerationMediaOriginal(binding, key, uri, AtomicBoolean(true), resolver) }
+                .startsWith("原件保存未确认"))
+            assertEquals(1, documents.opens.get())
+            assertEquals(0, fixture.opens.get())
+        } finally { saved.delete() }
+    }
+
     private fun loadCardOriginal(target: ChatController, binding: GenerationAttemptBinding, key: String,
         active: AtomicBoolean): GenerationMediaOriginal? {
         val done = CountDownLatch(1)

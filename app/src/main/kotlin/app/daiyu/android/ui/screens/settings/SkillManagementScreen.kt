@@ -25,6 +25,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -67,6 +69,7 @@ internal fun SkillManagementScreen(
     managementFactory: () -> SkillManagement,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    engineeringUi: Boolean = false,
 ) {
     // The controller and its factory belong to this page visit, not to recompositions.
     val controller = remember { SkillManagementPageState(managementFactory) }
@@ -96,7 +99,7 @@ internal fun SkillManagementScreen(
         onBack = onBack,
         modifier = modifier,
         actions = {
-            IconButton(onClick = controller::refresh, enabled = !controller.busy) {
+            if (engineeringUi) IconButton(onClick = controller::refresh, enabled = !controller.busy) {
                 DaiyuIcon(
                     DaiyuIcons.Refresh,
                     contentDescription = "刷新",
@@ -107,7 +110,7 @@ internal fun SkillManagementScreen(
             }
         },
     ) {
-        item(key = "skills_global") {
+        if (engineeringUi) item(key = "skills_global") {
             SkillSettingsCard(Modifier.padding(top = 16.dp)) {
                 SettingsRow("启用技能", trailing = {
                     SkillSwitch(
@@ -120,9 +123,11 @@ internal fun SkillManagementScreen(
                 })
             }
         }
+        item(key = "skills_install_title") { SettingsSectionTitle("安装") }
         item(key = "skills_install") {
             SkillSettingsCard {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (engineeringUi) {
                     Text("从公开 GitHub 仓库安装", color = colors.onSurface)
                     OutlinedTextField(
                         value = controller.url,
@@ -134,6 +139,7 @@ internal fun SkillManagementScreen(
                     )
                     Button(onClick = controller::inspect, enabled = !controller.busy && controller.url.isNotBlank(),
                         modifier = Modifier.testTag("skills-inspect")) { Text("检查仓库") }
+                    }
                     Button(onClick = {
                         val request = controller.beginLocalPick()
                         if (request != null) {
@@ -160,11 +166,26 @@ internal fun SkillManagementScreen(
         }
         if (state?.entriesUnavailable == true) {
             item(key = "skills_unavailable") {
-                SkillSettingsCard { SettingsRow("技能列表暂不可用，请刷新") }
+                SkillSettingsCard { SettingsRow(if (engineeringUi) "技能列表暂不可用，请刷新" else "技能列表暂不可用，请重新进入页面重试") }
             }
         } else if (state != null && state.entries.isEmpty()) {
             item(key = "skills_empty") {
                 SkillSettingsCard { SettingsRow("尚未安装技能") }
+            }
+        } else if (state != null && !engineeringUi) {
+            listOf(true to "内置技能", false to "用户技能").forEach { (builtin, title) ->
+                val entries = state.entries.filter { it.builtin == builtin }
+                if (entries.isNotEmpty()) {
+                    item(key = "skills-heading:$builtin") { SettingsSectionTitle(title) }
+                    item(key = "skills-group:$builtin") {
+                        SkillSettingsCard {
+                            entries.forEach { entry ->
+                                SkillProductRow(entry, !controller.busy && controller.confirmed,
+                                    onDetails = { details = entry }, onRemove = { controller.prepareRemoval(entry) })
+                            }
+                        }
+                    }
+                }
             }
         } else if (state != null) {
             items(state.entries, key = { "skill:${it.id}" }) { entry ->
@@ -222,33 +243,36 @@ internal fun SkillManagementScreen(
         }
     }
 
-    controller.inspection?.let { inspection ->
+    controller.inspection?.takeIf { engineeringUi }?.let { inspection ->
         SkillInstallSheet(controller, inspection)
     }
     controller.localPreview?.let { local -> LocalSkillInstallSheet(controller, local) }
     details?.let { entry ->
-        SkillDetailsSheet(entry = entry, onDismiss = { details = null },
-            canReinstall = switchesEnabled && entry.builtin,
+        SkillDetailsSheet(entry = entry, onDismiss = { if (details === entry) details = null },
+            canReinstall = engineeringUi && switchesEnabled && entry.builtin,
             onReinstall = { details = null; controller.prepareReinstall(entry) },
-            canRemove = switchesEnabled && !entry.builtin,
+            engineeringUi = engineeringUi,
+            canRemove = engineeringUi && switchesEnabled && !entry.builtin,
             onRemove = { details = null; controller.prepareRemoval(entry) })
     }
     controller.reinstall?.let { approved ->
         val entry = approved.entry
-        AlertDialog(onDismissRequest = controller::cancelReinstall,
+        val cancel: () -> Unit = { if (controller.reinstall === approved) controller.cancelReinstall() }
+        AlertDialog(onDismissRequest = cancel,
             title = { Text("重装内置技能") },
             text = { Text("用当前应用自带正文替换 ${entry.skill.name}？\n当前版本：${entry.skill.revision}\n重装会启用此技能，全局开关不变；当前运行保留原快照。此操作需要可读取的已安装版本。") },
             confirmButton = { TextButton(onClick = { controller.reinstall(approved) }, enabled = !controller.busy,
                 modifier = Modifier.testTag("skills-confirm-reinstall")) { Text("确认重装") } },
-            dismissButton = { TextButton(onClick = controller::cancelReinstall, enabled = !controller.busy) { Text("取消") } })
+            dismissButton = { TextButton(onClick = cancel, enabled = !controller.busy) { Text("取消") } })
     }
     controller.removal?.let { removal ->
-        AlertDialog(onDismissRequest = controller::cancelRemoval,
+        val cancel: () -> Unit = { if (controller.removal === removal) controller.cancelRemoval() }
+        AlertDialog(onDismissRequest = cancel,
             title = { Text("删除技能") },
             text = { Text("删除 ${removal.entry.skill.name}？当前运行保留已冻结的正文，新运行不再加载该技能。") },
             confirmButton = { TextButton(onClick = { controller.remove(removal) }, enabled = !controller.busy,
                 modifier = Modifier.testTag("skills-confirm-remove")) { Text("删除") } },
-            dismissButton = { TextButton(onClick = controller::cancelRemoval, enabled = !controller.busy) { Text("取消") } })
+            dismissButton = { TextButton(onClick = cancel, enabled = !controller.busy) { Text("取消") } })
     }
 
 }
@@ -258,7 +282,8 @@ private fun LocalSkillInstallSheet(controller: SkillManagementPageState, preview
     val colors = MiuixTheme.colorScheme
     var approved by remember(preview) { mutableStateOf(false) }
     val change = preview.change
-    AlertDialog(onDismissRequest = { if (!controller.installing) controller.cancelInstall() },
+    val cancel: () -> Unit = { if (!controller.installing && controller.localPreview === preview) controller.cancelInstall() }
+    AlertDialog(onDismissRequest = cancel,
         title = { Text("确认本地技能导入") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -279,7 +304,7 @@ private fun LocalSkillInstallSheet(controller: SkillManagementPageState, preview
         confirmButton = { TextButton(onClick = { controller.installLocal(preview, preview.replacements) },
             enabled = !controller.busy && preview.compatible && (change.previousRevision == null || approved),
             modifier = Modifier.testTag("skills-confirm-local-install")) { Text("确认导入") } },
-        dismissButton = { TextButton(onClick = controller::cancelInstall, enabled = !controller.installing) { Text("取消") } })
+        dismissButton = { TextButton(onClick = cancel, enabled = !controller.installing) { Text("取消") } })
 }
 
 @Composable
@@ -287,7 +312,10 @@ private fun SkillInstallSheet(controller: SkillManagementPageState, inspection: 
     val colors = MiuixTheme.colorScheme
     val preview = controller.preview
     var approved by remember(preview) { mutableStateOf(emptySet<String>()) }
-    Dialog(onDismissRequest = { if (!controller.installing) controller.cancelInstall() },
+    val cancel: () -> Unit = {
+        if (!controller.installing && controller.inspection === inspection && controller.preview === preview) controller.cancelInstall()
+    }
+    Dialog(onDismissRequest = cancel,
         properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(Modifier.padding(16.dp).widthIn(max = 640.dp).fillMaxWidth().heightIn(max = 640.dp)
             .clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerHigh).padding(16.dp)
@@ -336,7 +364,7 @@ private fun SkillInstallSheet(controller: SkillManagementPageState, inspection: 
                 if (controller.busy) Text(if (controller.installing) "安装等待或处理中；离页撤销尚未开始的安装，已开始的安装不回滚。" else "正在静态校验…", color = colors.onSurface)
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TextButton(onClick = controller::cancelInstall, enabled = !controller.installing) { Text("取消") }
+                TextButton(onClick = cancel, enabled = !controller.installing) { Text("取消") }
                 if (preview == null) {
                     Button(onClick = controller::prepareInstall, enabled = !controller.busy && controller.selected.isNotEmpty(),
                         modifier = Modifier.testTag("skills-preview")) { Text("预览安装") }
@@ -351,10 +379,38 @@ private fun SkillInstallSheet(controller: SkillManagementPageState, inspection: 
     }
 }
 
+@Composable
+private fun SkillProductRow(entry: SkillManagement.Entry, enabled: Boolean,
+    onDetails: () -> Unit, onRemove: () -> Unit) {
+    var expanded by remember(entry.id) { mutableStateOf(false) }
+    val colors = MiuixTheme.colorScheme
+    Row(Modifier.fillMaxWidth().padding(16.dp).testTag("skill-row:${entry.id}"),
+        verticalAlignment = Alignment.CenterVertically) {
+        SettingsIcon(DaiyuIcons.Skills)
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(entry.skill.name, style = MiuixTheme.textStyles.body1, color = colors.onSurface)
+            Text(entry.skill.description, style = MiuixTheme.textStyles.body2, color = colors.onSurfaceVariantSummary,
+                maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Box {
+            IconButton(onClick = { expanded = true }, modifier = Modifier.testTag("skill-menu:${entry.id}")) {
+                Text("⋯", modifier = Modifier.semantics { contentDescription = "更多操作" })
+            }
+            DropdownMenu(expanded, onDismissRequest = { expanded = false }) {
+                DropdownMenuItem(text = { Text("查看描述") }, onClick = { expanded = false; onDetails() })
+                if (!entry.builtin) DropdownMenuItem(text = { Text("删除") }, enabled = enabled,
+                    onClick = { expanded = false; onRemove() })
+            }
+        }
+    }
+}
+
 /** Read-only details use the same bounded bottom-surface pattern as DaiyuChoiceSheet. */
 @Composable
 private fun SkillDetailsSheet(entry: SkillManagement.Entry, onDismiss: () -> Unit,
-    canRemove: Boolean, onRemove: () -> Unit, canReinstall: Boolean, onReinstall: () -> Unit) {
+    canRemove: Boolean, onRemove: () -> Unit, canReinstall: Boolean, onReinstall: () -> Unit,
+    engineeringUi: Boolean = false) {
     val colors = MiuixTheme.colorScheme
     Dialog(
         onDismissRequest = onDismiss,
@@ -389,7 +445,7 @@ private fun SkillDetailsSheet(entry: SkillManagement.Entry, onDismiss: () -> Uni
                     Text(entry.skill.description.ifBlank { "暂无描述" },
                         modifier = Modifier.testTag("skill-description:${entry.id}"),
                         style = MiuixTheme.textStyles.body1, color = colors.onSurface)
-                    listOf(
+                    if (engineeringUi) listOf(
                         "ID" to entry.id,
                         "来源" to (entry.skill.source ?: "本地或内置"),
                         "提交" to (entry.skill.commit ?: "无"),
@@ -398,11 +454,11 @@ private fun SkillDetailsSheet(entry: SkillManagement.Entry, onDismiss: () -> Uni
                         Text("$key：$value", style = MiuixTheme.textStyles.body1, color = colors.onSurface)
                     }
                 }
-                if (entry.builtin) {
+                if (entry.builtin && engineeringUi) {
                     TextButton(onClick = onReinstall, enabled = canReinstall,
                         modifier = Modifier.testTag("skill-reinstall:${entry.id}")) { Text("重装内置技能") }
                 }
-                if (!entry.builtin) {
+                if (!entry.builtin && engineeringUi) {
                     TextButton(onClick = onRemove, enabled = canRemove,
                         modifier = Modifier.testTag("skill-remove:${entry.id}")) { Text("删除技能", color = colors.error) }
                 }

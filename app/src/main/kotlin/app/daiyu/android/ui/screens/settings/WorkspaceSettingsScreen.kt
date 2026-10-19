@@ -35,7 +35,7 @@ private class WorkspaceRevoke(val uri: Uri)
 
 @Composable
 internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Modifier,
-    suppliedAccess: WorkspaceFilesAccess? = null) {
+    suppliedAccess: WorkspaceFilesAccess? = null, engineeringUi: Boolean = false) {
     val context = LocalContext.current
     val access = suppliedAccess ?: remember(context) { WorkspaceFilesAccess(context.applicationContext) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -144,8 +144,9 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
             privateOccupied = it
             if (!it && current() && !loaded) refresh(clearNotice = false)
         })
-    MiuixScaffoldPage(title = "工作区与文件", onBack = back, modifier = modifier) {
+    MiuixScaffoldPage(title = "工作区", onBack = back, modifier = modifier) {
         item(key = "private-workspace") { privatePanel() }
+        if (engineeringUi) {
         item(key = "sharing") {
             SettingsNote("选择要共享的目录或文件，访问只读。Linux 目录挂载在 Linux 工具环境中单独配置。")
             SettingsCard {
@@ -196,6 +197,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
                         tag = "workspace-file:$index", onClick = { copy(file.uri) }) }
                 }
             }
+        }
         }
     }
 }

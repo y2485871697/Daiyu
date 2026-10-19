@@ -105,11 +105,13 @@ internal fun AppearanceSettingsScreen(
     val currentChoice = choice
     if (currentChoice != null) DaiyuChoiceSheet(
         title = when (currentChoice) { "palette" -> "色彩风格"; "accent" -> "强调色"; else -> "顶栏模糊样式" },
-        options = when (currentChoice) { "palette" -> palettes; "accent" -> accents; else -> blurStyles },
+        options = when (currentChoice) { "palette" -> listOf("代鱼默认配色") + palettes; "accent" -> listOf("墨绿") + accents; else -> blurStyles },
         onSelect = { index ->
             onChange(when (currentChoice) {
-                "palette" -> state.copy(paletteStyle = AppearancePaletteStyle.entries[index], monetEnabled = true)
-                "accent" -> state.copy(accentColor = AppearanceAccentColor.entries[index], monetEnabled = true)
+                "palette" -> if (index == 0) state.copy(monetEnabled = false)
+                    else state.copy(paletteStyle = AppearancePaletteStyle.entries[index - 1], monetEnabled = true)
+                "accent" -> if (index == 0) state.copy(monetEnabled = false)
+                    else state.copy(accentColor = AppearanceAccentColor.entries[index - 1], monetEnabled = true)
                 else -> state.copy(topBarBlurStyle = AppearanceTopBarBlurStyle.entries[index])
             })
             choice = null

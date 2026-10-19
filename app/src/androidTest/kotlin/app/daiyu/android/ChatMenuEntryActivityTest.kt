@@ -167,8 +167,8 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         instrumentation.addMonitor(monitor)
         try {
             menu(ChatMenuAction.OPEN_WORKSPACE)
-            awaitUniqueTag("page:工作区与文件")
-            node("workspace-pick-directory").assertIsDisplayed().assertIsEnabled()
+            awaitUniqueTag("page:工作区")
+            node("workspace-private-import").assertIsDisplayed().assertIsEnabled()
             node("workspace-pick-file").assertExists().assertIsEnabled()
             assertEquals(0, launches.get())
             assertEquals(grants, PlatformSafGrants(instrumentation.targetContext).grants())
@@ -180,7 +180,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
             assertDraft("menu draft stays unsent")
             openSettings()
             node("page:设置").assertExists()
-            node("page:工作区与文件").assertDoesNotExist()
+            node("page:工作区").assertDoesNotExist()
             backToChat(activity)
             assertEquals(0, launches.get())
         } finally { instrumentation.removeMonitor(monitor) }
@@ -193,11 +193,11 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         val settings = fixture.settings.load()
         realPauseResume(activity, atPause = { menu(ChatMenuAction.OPEN_WORKSPACE) })
         awaitUniqueTag("chat-draft")
-        node("page:工作区与文件").assertDoesNotExist()
+        node("page:工作区").assertDoesNotExist()
         openSettings()
         mainThread { menu(ChatMenuAction.OPEN_WORKSPACE) }
         node("page:设置").assertExists()
-        node("page:工作区与文件").assertDoesNotExist()
+        node("page:工作区").assertDoesNotExist()
         backToChat(activity)
         assertEquals(before, fixture.database.exportBackup())
         val conversation = fixture.database.conversations().single()
@@ -205,7 +205,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         val reentered = fixture.database.exportBackup()
         mainThread { menu(ChatMenuAction.OPEN_WORKSPACE) }
         node("chat-draft").assertExists()
-        node("page:工作区与文件").assertDoesNotExist()
+        node("page:工作区").assertDoesNotExist()
         assertDraft("menu draft stays unsent")
         assertEquals(reentered, fixture.database.exportBackup())
         assertEquals(settings, fixture.settings.load())

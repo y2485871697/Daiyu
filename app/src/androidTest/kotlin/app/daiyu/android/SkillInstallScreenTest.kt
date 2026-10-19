@@ -2,6 +2,7 @@ package app.daiyu.android
 
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
@@ -33,16 +34,17 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
         try { super.tearDown() } finally { skills.close() }
     }
 
-    private fun show() {
+    private fun show(engineeringUi: Boolean = true) {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     if (visible.value) SkillManagementScreen(
+                        engineeringUi = engineeringUi,
                         managementFactory = { skills.manager }, onBack = { visible.value = false })
                 }
             }
         }
-        ready("skills-global")
+        ready(if (engineeringUi) "skills-global" else "skills-import-zip")
     }
 
     private fun ready(tag: String) {
@@ -109,6 +111,30 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
         ready("skills-global")
         node("skill-row:user:demo").assertDoesNotExist()
         assertTrue(skills.manager.snapshot().entries.isEmpty())
+    }
+
+    fun testProductMenuDescriptionAndRetainedRemovalCancel() {
+        val old = skills.user.install(listOf(skills.oldBundle())).single()
+        show(engineeringUi = false)
+        node("skills-global").assertDoesNotExist()
+        reveal("skill-menu:user:demo", "技能").performClick()
+        ui.onNodeWithText("查看描述").performClick()
+        node("skill-remove:user:demo").assertDoesNotExist()
+        ui.onNodeWithText("关闭").performClick()
+        fun openRemoval() {
+            reveal("skill-menu:user:demo", "技能").performClick()
+            ui.onNodeWithText("删除", useUnmergedTree = true).performClick()
+            ready("skills-confirm-remove")
+        }
+        openRemoval()
+        val oldCancel = checkNotNull(ui.onNodeWithText("取消").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        ui.onNodeWithText("取消").performClick()
+        openRemoval()
+        mainThread { oldCancel() }
+        node("skills-confirm-remove").assertExists()
+        assertEquals(old, skills.user.list().single())
+        ui.onNodeWithText("取消").performClick()
+        node("skills-confirm-remove").assertDoesNotExist()
     }
 
     fun testBuiltinDetailsDoNotOfferUserRemoval() {
@@ -441,7 +467,7 @@ class SkillInstallScreenTest : WiredActivityTestCase() {
                     androidx.compose.ui.platform.LocalContext provides context,
                     androidx.activity.compose.LocalActivityResultRegistryOwner provides picker,
                 ) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    SkillManagementScreen(managementFactory = { skills.manager }, onBack = {})
+                    SkillManagementScreen(managementFactory = { skills.manager }, onBack = {}, engineeringUi = true)
                 } }
             } }
             ready("skills-import-zip")

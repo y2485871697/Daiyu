@@ -1,6 +1,8 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.testTag
+import top.yukonga.miuix.kmp.basic.TextButton
 import androidx.compose.ui.Modifier
 import app.daiyu.android.context.ProductionCompressionSettings
 import app.daiyu.android.context.SummaryModelBinding
@@ -124,8 +126,8 @@ internal fun CompressionSettingsForm(
             SettingsNote("摘要模型与聊天模型独立保存，不回退到聊天密钥。输入预算必须等于摘要窗口减去输出、推理和协议预留；这些数值需按你的模型明确填写。保存只更新设置，不发起摘要请求。")
         }
         item(key = "compression-save") {
-            SettingsCard { SettingsRow("保存并回读", tag = "compression-save",
-                onClick = if (enabled) ({ onSave(draft) }) else null) }
+            SettingsCard { TextButton(text = "保存配置", enabled = enabled,
+                modifier = Modifier.testTag("compression-save"), onClick = { onSave(draft) }) }
         }
         notice?.let { item(key = "compression-notice") { SettingsNote(it, error = error) } }
     }

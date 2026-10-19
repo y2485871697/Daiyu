@@ -25,7 +25,7 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
     private fun workspaceControl(tag: String): SemanticsNodeInteraction {
         ui.waitUntil(5_000) {
             try {
-                node("page:工作区与文件").performScrollToNode(hasTestTag(tag))
+                node("page:工作区").performScrollToNode(hasTestTag(tag))
                 node(tag).assertIsDisplayed()
                 true
             } catch (_: AssertionError) { false }
@@ -39,13 +39,14 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
         openSettings()
         node("settings-search").performTextReplacement("工作区与文件")
         reveal("settings-row:工作区与文件", "设置").performClick()
-        awaitUniqueTag("page:工作区与文件")
+        awaitUniqueTag("page:工作区")
     }
     fun testRealWorkspaceEntryPreservesChatAndDoesNotReadOrChangeModelConfiguration() {
         setDraft("workspace unsent draft")
         val database = fixture.database.exportBackup(); val saved = fixture.settings.load()
         openWorkspace()
-        node("workspace-pick-directory").assertExists(); node("workspace-pick-file").assertExists()
+        node("workspace-private-import").assertExists()
+        node("workspace-pick-directory").assertDoesNotExist(); node("workspace-pick-file").assertDoesNotExist()
         assertEquals(database, fixture.database.exportBackup()); assertEquals(saved, fixture.settings.load())
         assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
         backToPage(activity, "page:设置"); backToChat(activity)
@@ -67,7 +68,10 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
         }
         instrumentation.addMonitor(monitor)
         try {
-            openWorkspace(); workspaceClick("workspace-pick-directory")
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), false) {
+                WorkspaceSettingsScreen(onBack = {}, engineeringUi = true)
+            } } }
+            workspaceClick("workspace-pick-directory")
             ui.waitUntil(5_000) { launches.get() == 1 }; ui.waitForIdle()
             workspaceClick("workspace-pick-file")
             ui.waitUntil(5_000) { ui.onAllNodesWithText("未取得有效的持久只读授权，请重新选择").fetchSemanticsNodes().isNotEmpty() }
@@ -86,11 +90,14 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
         }
         instrumentation.addMonitor(monitor)
         try {
-            openWorkspace()
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), false) {
+                WorkspaceSettingsScreen(onBack = { activity.setContent {} }, engineeringUi = true)
+            } } }
+            workspaceControl("workspace-pick-directory")
             val click = checkNotNull(node("workspace-pick-directory").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
             realPauseResume(activity, atPause = { click() })
             assertEquals(0, launches.get())
-            backToPage(activity, "page:设置")
+            mainThread { activity.setContent {} }
             mainThread { click() }; assertEquals(0, launches.get())
         } finally { instrumentation.removeMonitor(monitor) }
     }
@@ -116,7 +123,7 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
         }
         try {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
-                WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access)
+                WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access, engineeringUi = true)
             } } }
             workspaceControl("workspace-browse:0")
             workspaceClick("workspace-browse:0"); assertTrue(entered.await(5, TimeUnit.SECONDS))
@@ -127,7 +134,7 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
             workspaceClick("workspace-browse:0")
             ui.waitUntil(5_000) {
                 try {
-                    reveal("workspace-file:0", "工作区与文件")
+                    reveal("workspace-file:0", "工作区")
                         .assertTextContains("local-only.txt").assertIsDisplayed()
                     true
                 } catch (_: AssertionError) { false }
@@ -147,7 +154,7 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
         val access = WorkspaceFilesAccess(registry) { _, _ -> error("must not read directory") }
         try {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
-                WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access)
+                WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access, engineeringUi = true)
             } } }
             workspaceControl("workspace-revoke:0")
             workspaceClick("workspace-revoke:0")
@@ -175,7 +182,7 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
         val access = WorkspaceFilesAccess(registry) { _, _ -> queries.incrementAndGet(); error("stale browse must not read") }
         try {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
-                WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access)
+                WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access, engineeringUi = true)
             } } }
             workspaceControl("workspace-browse:0")
             val browse = checkNotNull(node("workspace-browse:0").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
@@ -204,7 +211,7 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
         val access = WorkspaceFilesAccess(registry) { _, _ -> error("must not read directory") }
         try {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
-                WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access)
+                WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access, engineeringUi = true)
             } } }
             workspaceControl("workspace-revoke:0")
             workspaceClick("workspace-revoke:0"); node("dialog-confirm").performClick()

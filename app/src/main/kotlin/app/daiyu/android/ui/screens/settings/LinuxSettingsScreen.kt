@@ -62,17 +62,21 @@ internal fun LinuxSettingsScreen(
         if (page.discardPreview()) draft = next
     }
 
-    MiuixScaffoldPage(title = "Linux 本地配置", onBack = leave, modifier = modifier) {
+    MiuixScaffoldPage(title = "Linux 工具环境", onBack = leave, modifier = modifier) {
         installState?.let { installation ->
             item(key = "linux_install") {
-                LinuxInstallPanel(installation, page, enabled && !hasPending && state.preview == null,
-                    otherBlocked = controller.chrootInstallation?.blocksManual == true)
+                SettingsCard {
+                    LinuxInstallPanel(installation, page, enabled && !hasPending && state.preview == null,
+                        otherBlocked = controller.chrootInstallation?.blocksManual == true)
+                }
             }
         }
         chrootInstallState?.let { installation ->
             item(key = "linux_chroot_install") {
-                LinuxInstallPanel(installation, page, enabled && !hasPending && state.preview == null,
-                    LinuxExecutionMode.CHROOT, otherBlocked = controller.installation?.blocksManual == true)
+                SettingsCard {
+                    LinuxInstallPanel(installation, page, enabled && !hasPending && state.preview == null,
+                        LinuxExecutionMode.CHROOT, otherBlocked = controller.installation?.blocksManual == true)
+                }
             }
         }
         item(key = "linux_scope") {
@@ -84,50 +88,52 @@ internal fun LinuxSettingsScreen(
         }
         item(key = "linux_form") {
             SettingsSectionTitle("完整本地配置（共享目录默认空）")
-            Column(Modifier.padding(horizontal = 16.dp)) {
-                TextButton(enabled = editEnabled, modifier = Modifier.testTag("linux-mode"), onClick = {
-                    edit(draft.copy(executionMode = if (draft.executionMode == LinuxExecutionMode.PROOT)
-                        LinuxExecutionMode.CHROOT else LinuxExecutionMode.PROOT, proot = "", prootSha256 = "",
-                        loader = "", loaderSha256 = "", guestWorkingDirectory = "/", sharedMounts = emptyList()))
-                }) { Text("执行方式：${draft.executionMode.wire}（点击切换）") }
-                if (draft.executionMode == LinuxExecutionMode.CHROOT) {
-                    Text("chroot 使用 Android Root，仅接受应用私有安装目录；不开放宿主 root 命令或共享挂载。chroot 不是安全沙箱，只运行可信 rootfs。")
-                }
-                LinuxSettingsField("配置标签（字母、数字、下划线、短横线）", draft.distribution, "linux-distribution", editEnabled) {
-                    edit(draft.copy(distribution = it))
-                }
-                LinuxSettingsField("环境 ID", draft.environmentId, "linux-environment", editEnabled) { edit(draft.copy(environmentId = it)) }
-                LinuxSettingsField("rootfs 完整宿主路径", draft.rootfs, "linux-rootfs", editEnabled) { edit(draft.copy(rootfs = it)) }
-                if (draft.executionMode == LinuxExecutionMode.PROOT) {
-                LinuxSettingsField("proot 完整宿主路径", draft.proot, "linux-proot", editEnabled) { edit(draft.copy(proot = it)) }
-                LinuxSettingsField("proot 期望 SHA-256（64 位小写）", draft.prootSha256, "linux-proot-digest", editEnabled) {
-                    edit(draft.copy(prootSha256 = it))
-                }
-                LinuxSettingsField("loader 完整宿主路径", draft.loader, "linux-loader", editEnabled) { edit(draft.copy(loader = it)) }
-                LinuxSettingsField("loader 期望 SHA-256（64 位小写）", draft.loaderSha256, "linux-loader-digest", editEnabled) {
-                    edit(draft.copy(loaderSha256 = it))
-                }
-                }
-                LinuxSettingsField("guest cwd（绝对路径）", draft.guestWorkingDirectory, "linux-cwd", editEnabled) {
-                    edit(draft.copy(guestWorkingDirectory = it))
-                }
-                draft.sharedMounts.forEachIndexed { index, mount ->
-                    LinuxSettingsField("共享 ${index + 1}：宿主完整路径", mount.host, "linux-mount-host-$index", editEnabled) { value ->
-                        edit(draft.copy(sharedMounts = draft.sharedMounts.mapIndexed { i, old -> if (i == index) old.copy(host = value) else old }))
+            SettingsCard {
+                Column(Modifier.padding(horizontal = 16.dp)) {
+                    TextButton(enabled = editEnabled, modifier = Modifier.testTag("linux-mode"), onClick = {
+                        edit(draft.copy(executionMode = if (draft.executionMode == LinuxExecutionMode.PROOT)
+                            LinuxExecutionMode.CHROOT else LinuxExecutionMode.PROOT, proot = "", prootSha256 = "",
+                            loader = "", loaderSha256 = "", guestWorkingDirectory = "/", sharedMounts = emptyList()))
+                    }) { Text("执行方式：${draft.executionMode.wire}（点击切换）") }
+                    if (draft.executionMode == LinuxExecutionMode.CHROOT) {
+                        Text("chroot 使用 Android Root，仅接受应用私有安装目录；不开放宿主 root 命令或共享挂载。chroot 不是安全沙箱，只运行可信 rootfs。")
                     }
-                    LinuxSettingsField("共享 ${index + 1}：guest 绝对路径", mount.guest, "linux-mount-guest-$index", editEnabled) { value ->
-                        edit(draft.copy(sharedMounts = draft.sharedMounts.mapIndexed { i, old -> if (i == index) old.copy(guest = value) else old }))
+                    LinuxSettingsField("配置标签（字母、数字、下划线、短横线）", draft.distribution, "linux-distribution", editEnabled) {
+                        edit(draft.copy(distribution = it))
                     }
-                    TextButton(enabled = editEnabled, onClick = { edit(draft.copy(sharedMounts = draft.sharedMounts.filterIndexed { i, _ -> i != index })) }) {
-                        Text("移除此共享映射")
+                    LinuxSettingsField("环境 ID", draft.environmentId, "linux-environment", editEnabled) { edit(draft.copy(environmentId = it)) }
+                    LinuxSettingsField("rootfs 完整宿主路径", draft.rootfs, "linux-rootfs", editEnabled) { edit(draft.copy(rootfs = it)) }
+                    if (draft.executionMode == LinuxExecutionMode.PROOT) {
+                    LinuxSettingsField("proot 完整宿主路径", draft.proot, "linux-proot", editEnabled) { edit(draft.copy(proot = it)) }
+                    LinuxSettingsField("proot 期望 SHA-256（64 位小写）", draft.prootSha256, "linux-proot-digest", editEnabled) {
+                        edit(draft.copy(prootSha256 = it))
+                    }
+                    LinuxSettingsField("loader 完整宿主路径", draft.loader, "linux-loader", editEnabled) { edit(draft.copy(loader = it)) }
+                    LinuxSettingsField("loader 期望 SHA-256（64 位小写）", draft.loaderSha256, "linux-loader-digest", editEnabled) {
+                        edit(draft.copy(loaderSha256 = it))
+                    }
+                    }
+                    LinuxSettingsField("guest cwd（绝对路径）", draft.guestWorkingDirectory, "linux-cwd", editEnabled) {
+                        edit(draft.copy(guestWorkingDirectory = it))
+                    }
+                    draft.sharedMounts.forEachIndexed { index, mount ->
+                        LinuxSettingsField("共享 ${index + 1}：宿主完整路径", mount.host, "linux-mount-host-$index", editEnabled) { value ->
+                            edit(draft.copy(sharedMounts = draft.sharedMounts.mapIndexed { i, old -> if (i == index) old.copy(host = value) else old }))
+                        }
+                        LinuxSettingsField("共享 ${index + 1}：guest 绝对路径", mount.guest, "linux-mount-guest-$index", editEnabled) { value ->
+                            edit(draft.copy(sharedMounts = draft.sharedMounts.mapIndexed { i, old -> if (i == index) old.copy(guest = value) else old }))
+                        }
+                        TextButton(enabled = editEnabled, onClick = { edit(draft.copy(sharedMounts = draft.sharedMounts.filterIndexed { i, _ -> i != index })) }) {
+                            Text("移除此共享映射")
+                        }
+                    }
+                    TextButton(enabled = editEnabled && draft.executionMode == LinuxExecutionMode.PROOT && draft.sharedMounts.size < 32, modifier = Modifier.testTag("linux-add-mount"),
+                        onClick = { edit(draft.copy(sharedMounts = draft.sharedMounts + LinuxSettingsMount())) }) { Text("显式添加共享映射") }
+                    TextButton(enabled = editEnabled, modifier = Modifier.testTag("linux-preview"), onClick = { page.preview(draft) }) {
+                        Text("冻结完整配置并预览（尚不批准）")
                     }
                 }
-                TextButton(enabled = editEnabled && draft.executionMode == LinuxExecutionMode.PROOT && draft.sharedMounts.size < 32, modifier = Modifier.testTag("linux-add-mount"),
-                    onClick = { edit(draft.copy(sharedMounts = draft.sharedMounts + LinuxSettingsMount())) }) { Text("显式添加共享映射") }
-                TextButton(enabled = editEnabled, modifier = Modifier.testTag("linux-preview"), onClick = { page.preview(draft) }) {
-                    Text("冻结完整配置并预览（尚不批准）")
-                }
-            }
+        }
         }
         state.preview?.let { approval ->
             item(key = "linux_frozen_preview") {

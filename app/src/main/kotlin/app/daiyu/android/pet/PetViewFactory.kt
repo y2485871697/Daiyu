@@ -160,7 +160,23 @@ private class PetSettingsView(context: Context, private val host: PetHost) : Obs
     init {
         val body = LinearLayout(context).apply { orientation = VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(8)) }
         addView(ScrollView(context).apply { addView(body) })
-        fun add(view: View) { body.addView(view, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)) }
+        var section = body
+        fun group(title: String) {
+            body.addView(TextView(context).apply {
+                text = title; textSize = 14f; setPadding(dp(8), dp(20), dp(8), dp(8))
+            })
+            section = LinearLayout(context).apply {
+                orientation = VERTICAL; setPadding(dp(16), dp(12), dp(16), dp(12))
+                val surface = android.util.TypedValue()
+                context.theme.resolveAttribute(android.R.attr.colorBackground, surface, true)
+                background = android.graphics.drawable.GradientDrawable().apply {
+                    cornerRadius = dp(16).toFloat(); setColor(surface.data)
+                }
+            }
+            body.addView(section, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
+        }
+        fun add(view: View) { section.addView(view, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT)) }
+        group("状态与开关")
         add(status); add(permission); add(TextView(context).apply { text = host.resources.status })
         listOf(enabled, work, global, audio).forEach(::add)
         enabled.setOnCheckedChangeListener { _, value -> if (!rendering) host.setEnabled(value) }
@@ -168,12 +184,14 @@ private class PetSettingsView(context: Context, private val host: PetHost) : Obs
         global.setOnCheckedChangeListener { _, value -> if (!rendering) host.setGlobalVisible(value) }
         audio.setOnCheckedChangeListener { _, value -> if (!rendering) controller.updateSettings(controller.snapshot().state.settings.copy(audioEnabled = value)) }
         add(Button(context).apply { text = "刷新系统悬浮权限状态（不跳转设置）"; setOnClickListener { host.refreshOverlayPermission() } })
+        group("独立模型")
         add(assistant); add(provider); add(model)
         add(Button(context).apply { text = "保存独立模型选择"; setOnClickListener {
             val fields = listOf(assistant.text.toString().trim(), provider.text.toString().trim(), model.text.toString().trim())
             if (fields.any { it.length > 200 }) { status.text = "ID不能超过200字符"; return@setOnClickListener }
             controller.updateSettings(controller.snapshot().state.settings.copy(model = PetModelSelection(fields[0], fields[1], fields[2])))
         } })
+        group("投喂")
         val cupboard = LinearLayout(context).apply {
             orientation = VERTICAL; setPadding(dp(12), dp(12), dp(12), dp(12))
             host.resources.cupboard()?.let { background = BitmapDrawable(context.resources, it) }
@@ -193,6 +211,7 @@ private class PetSettingsView(context: Context, private val host: PetHost) : Obs
             }, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
             cupboard.addView(row)
         }
+        group("外观与记忆")
         add(TextView(context).apply { text = "缩放 50%–180%" }); add(scale)
         scale.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(bar: SeekBar?, progress: Int, fromUser: Boolean) { if (fromUser) controller.setScale(.5f + progress * .05f) }

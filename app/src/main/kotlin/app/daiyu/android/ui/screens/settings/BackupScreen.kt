@@ -41,9 +41,9 @@ internal fun BackupScreen(
         item(key = "backup_actions_title") { SettingsSectionTitle("操作") }
         item(key = "backup_actions") {
             SettingsCard {
-                SettingsRow("导出备份", summary = "保存当前数据备份", tag = "backup-export", onClick = if (busy) null else onExportComplete,
+                SettingsRow("导出备份", summary = if (busy) "处理中，请稍候" else "保存当前数据备份", tag = "backup-export", onClick = if (busy) null else onExportComplete,
                     leading = { SettingsIcon(DaiyuIcons.Export) })
-                SettingsRow("导入备份", summary = "从备份文件恢复数据", tag = "backup-import", onClick = if (busy) null else onImport,
+                SettingsRow("导入备份", summary = if (busy) "处理中，请稍候" else "从备份文件恢复数据", tag = "backup-import", onClick = if (busy) null else onImport,
                     leading = { SettingsIcon(DaiyuIcons.Import) })
             }
         }

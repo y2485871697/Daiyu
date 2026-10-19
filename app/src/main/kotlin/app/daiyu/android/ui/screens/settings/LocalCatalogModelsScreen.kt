@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.*
@@ -137,6 +140,7 @@ internal fun <T> LocalCatalogModelsScreen(
                 SettingsCard {
                     SettingsRow(model.displayName, summary = model.id + if (model.id == actions.currentModelId) " · 当前模型" else "",
                         tag = "local-model:${model.id}")
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (actions.select != null) TextButton("设为当前模型",
                         enabled = enabled && request == null && model.id != actions.currentModelId,
                         modifier = Modifier.testTag("local-model-select:${model.id}"), onClick = {
@@ -160,6 +164,7 @@ internal fun <T> LocalCatalogModelsScreen(
                     TextButton("删除", enabled = enabled && request == null && model.id != actions.currentModelId,
                         modifier = Modifier.testTag("local-model-delete:${model.id}"),
                         onClick = { if (current() && currentEnabled && request == null && selection != null && matches(selection) && model.id != actions.currentModelId) deleting = selection })
+                    }
                 }
             }
         }

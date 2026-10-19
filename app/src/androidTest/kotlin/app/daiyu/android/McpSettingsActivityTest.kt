@@ -22,6 +22,8 @@ class McpSettingsActivityTest : WiredActivityTestCase() {
     fun testRealRouteDoesNotStartModelOrWriteConversationAndNeverPrefillsSavedBearer() {
         val before = fixture.database.exportBackup()
         enter()
+        node("mcp-server-bearer").assertDoesNotExist()
+        node("mcp-settings-add").performClick()
         val field = node("mcp-server-bearer").performScrollTo().fetchSemanticsNode()
         assertEquals("", field.config[androidx.compose.ui.semantics.SemanticsProperties.EditableText].text)
         assertEquals(before, fixture.database.exportBackup())

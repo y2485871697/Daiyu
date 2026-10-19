@@ -1,7 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -125,7 +124,7 @@ internal fun GuiSettingsPanel(
                         session.close(); frozen = true; notice = "已撤销本次授权；不会撤销系统服务开关。"
                     } })
                 }
-                notice?.let { Text(it) }
+                notice?.let { SettingsNote(it) }
             }
         }
     }

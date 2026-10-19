@@ -125,10 +125,10 @@ internal fun SettingsDiagnosticRow(entry: SettingsEntry, ui: SettingsDiagnostics
     when (entry.id) {
         "logging" -> SettingsSwitchRow(entry.title, ui.state.enabled, enabled = available,
             tag = "settings-row:${entry.title}", summary = status ?: "仅记录状态与故障类别，不记录聊天、密钥或路径",
-            onCheckedChange = ui.toggle)
-        "export_logs" -> SettingsRow(entry.title, onClick = if (available) ui.export else null,
+            leading = { SettingsIcon(entry.icon) }, onCheckedChange = ui.toggle)
+        "export_logs" -> SettingsRow(entry.title, leading = { SettingsIcon(entry.icon) }, onClick = if (available) ui.export else null,
             summary = status ?: "导出诊断事件 JSON；不包含聊天、密钥或路径")
-        "clear_logs" -> SettingsRow(entry.title,
+        "clear_logs" -> SettingsRow(entry.title, leading = { SettingsIcon(entry.icon) },
             onClick = if (ui.state.loaded && !ui.busy) ui.clear else null,
             summary = status ?: "只清除诊断日志，不影响聊天与执行记录")
     }

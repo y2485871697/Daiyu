@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
@@ -132,6 +133,8 @@ private fun LegacyTextPages(section: LegacyTextSection, contentKey: Any?) {
     val safeEnd = if (end > 0 && end < section.text.length && section.text[end].isLowSurrogate() &&
         section.text[end - 1].isHighSurrogate()) end - 1 else end
     SettingsNote(if (section.text.isEmpty()) "（空）" else section.text.substring(safeStart, safeEnd))
-    TextButton(text = "上一页", onClick = { page = selected - 1 }, enabled = selected > 0)
-    TextButton(text = "下一页", onClick = { page = selected + 1 }, enabled = selected + 1 < pages)
+    Row {
+        TextButton(text = "上一页", onClick = { page = selected - 1 }, enabled = selected > 0)
+        TextButton(text = "下一页", onClick = { page = selected + 1 }, enabled = selected + 1 < pages)
+    }
 }

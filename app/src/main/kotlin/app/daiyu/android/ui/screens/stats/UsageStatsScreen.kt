@@ -138,7 +138,7 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
                 )
             }
         } else {
-            item(key = "heatmap") {
+            if (stats.heatmapAvailable) item(key = "heatmap") {
                 Card(modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
                     Column(
                         modifier = Modifier.padding(16.dp),

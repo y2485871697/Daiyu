@@ -6,21 +6,32 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import app.daiyu.android.assistants.AssistantProfile
+import app.daiyu.android.domain.pet.PetCommandResult
 import app.daiyu.android.domain.pet.PetModelSelection
 import app.daiyu.android.pet.PetApplicationHost
 import app.daiyu.android.storage.IndependentModelSettings
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-/** Purpose-specific selection reuses configured providers; there is no second connection form. */
+internal data class IndependentModelControls(
+    val enabled: Boolean,
+    val busy: Boolean,
+    val label: String?,
+    val problem: String?,
+    val onEnabledChange: (Boolean) -> Unit,
+    val onChoose: () -> Unit,
+)
+
+/** One selection owner shared by the standalone visual page and the pet's original five rows. */
 @Composable
-internal fun IndependentModelScreen(store: IndependentModelSettings, slot: IndependentModelSettings.Slot,
-    assistants: List<AssistantProfile>, pets: PetApplicationHost, onBack: () -> Unit,
-    source: SettingsModelSource, modifier: Modifier = Modifier) {
+internal fun IndependentModelSelection(store: IndependentModelSettings, slot: IndependentModelSettings.Slot,
+    assistants: List<AssistantProfile>, pets: PetApplicationHost, source: SettingsModelSource,
+    content: @Composable (IndependentModelControls) -> Unit) {
     val scope = rememberCoroutineScope()
     val feature = "independent-${slot.key}"
     var record by remember(store, slot) { mutableStateOf<IndependentModelSettings.Record?>(null) }
@@ -36,6 +47,16 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
         catch (_: Exception) { problem = "配置读取失败，请重新进入。" }
         finally { busy = false }
     }
+    fun applyPetModel(selection: PetModelSelection) {
+        when (val result = pets.updateSettings(pets.host.snapshot().pet.state.settings.copy(model = selection))) {
+            PetCommandResult.Applied -> Unit
+            is PetCommandResult.Rejected -> error(result.reason)
+            is PetCommandResult.Failed -> error(result.reason)
+        }
+    }
+    suspend fun refreshAfterFailure() {
+        record = withContext(NonCancellable + Dispatchers.IO) { runCatching { store.record(slot) }.getOrNull() }
+    }
     fun select(choice: SettingsModelChoice, assistantId: String?) {
         if (busy) return
         picker = false
@@ -45,19 +66,21 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
         val images = if (choice.key == selectedKey) record?.imageInput else null
         scope.launch {
             try {
-                val saved = withContext(Dispatchers.IO) {
-                    source.withModel(choice) { settings -> store.save(slot, settings, assistantId, true, images) }
-                    source.remember(feature, choice)
-                    store.record(slot)
+                // Once committed, finish the short host synchronization even if the page closes.
+                withContext(NonCancellable) {
+                    val saved = withContext(Dispatchers.IO) {
+                        source.withModel(choice) { settings -> store.save(slot, settings, assistantId, true, images) }
+                        store.record(slot)
+                    }
+                    if (slot == IndependentModelSettings.Slot.PET) applyPetModel(PetModelSelection(
+                        checkNotNull(saved.assistantId), saved.providerId, saved.localModelId))
+                    withContext(Dispatchers.IO) { source.remember(feature, choice) }
+                    record = saved
+                    label = choice.label
+                    selectedKey = choice.key
                 }
-                record = saved
-                label = choice.label
-                selectedKey = choice.key
-                if (slot == IndependentModelSettings.Slot.PET) pets.updateSettings(
-                    pets.host.snapshot().pet.state.settings.copy(model = PetModelSelection(
-                        checkNotNull(saved.assistantId), saved.providerId, saved.localModelId)))
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { problem = "模型选择未保存，请重新选择。" }
+            catch (_: Exception) { refreshAfterFailure(); problem = "模型配置更新未完成，请重新选择。" }
             finally { busy = false }
         }
     }
@@ -66,25 +89,20 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
         busy = true
         scope.launch {
             try {
-                record = withContext(Dispatchers.IO) { store.disable(slot); store.record(slot) }
-                problem = null
+                withContext(NonCancellable) {
+                    record = withContext(Dispatchers.IO) { store.disable(slot); store.record(slot) }
+                    if (slot == IndependentModelSettings.Slot.PET) applyPetModel(PetModelSelection())
+                    problem = null
+                }
             } catch (cancelled: CancellationException) { throw cancelled }
-            catch (_: Exception) { problem = "停用未确认，请重试。" }
+            catch (_: Exception) { refreshAfterFailure(); problem = "停用未确认，请重试。" }
             finally { busy = false }
         }
     }
+    content(IndependentModelControls(record?.enabled == true, busy, label, problem,
+        onEnabledChange = { if (!busy) { if (it) picker = true else disable() } },
+        onChoose = { if (!busy) picker = true }))
     val title = if (slot == IndependentModelSettings.Slot.PET) "说话模型" else "辅助视觉模型"
-    MiuixScaffoldPage(title, onBack, modifier = modifier.testTag("independent-model-${slot.key}")) {
-        problem?.let { item("independent-model-status") { SettingsNote(it, error = true) } }
-        item("independent-model-selection") {
-            SettingsCard(Modifier.padding(top = 12.dp)) {
-                SettingsSwitchRow("使用自定义模型", record?.enabled == true, !busy,
-                    tag = "independent-model-enabled") { if (it) picker = true else disable() }
-                SettingsRow("选择模型", summary = label ?: "选择模型", tag = "independent-model-configure",
-                    onClick = if (busy) null else ({ picker = true }))
-            }
-        }
-    }
     if (picker) SettingsModelPicker(title, source, selectedKey, onSelect = { choice ->
         if (!busy) {
             val assistant = record?.assistantId?.takeIf { id -> assistants.any { it.id == id } }
@@ -98,5 +116,26 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
         DaiyuChoiceSheet("选择助手", assistants.map { it.name }, onSelect = { index ->
             select(choice, assistants[index].id)
         }, onDismiss = { pendingAssistant = null })
+    }
+}
+
+
+@Composable
+internal fun IndependentModelScreen(store: IndependentModelSettings, slot: IndependentModelSettings.Slot,
+    assistants: List<AssistantProfile>, pets: PetApplicationHost, onBack: () -> Unit,
+    source: SettingsModelSource, modifier: Modifier = Modifier) {
+    IndependentModelSelection(store, slot, assistants, pets, source) { controls ->
+        val title = if (slot == IndependentModelSettings.Slot.PET) "说话模型" else "辅助视觉模型"
+        MiuixScaffoldPage(title, onBack, modifier = modifier.testTag("independent-model-${slot.key}")) {
+            controls.problem?.let { item("independent-model-status") { SettingsNote(it, error = true) } }
+            item("independent-model-selection") {
+                SettingsCard(Modifier.padding(top = 12.dp)) {
+                    SettingsSwitchRow("使用自定义模型", controls.enabled, !controls.busy,
+                        tag = "independent-model-enabled", onCheckedChange = controls.onEnabledChange)
+                    SettingsRow("选择模型", summary = controls.label ?: "选择模型", tag = "independent-model-configure",
+                        onClick = if (controls.busy) null else controls.onChoose)
+                }
+            }
+        }
     }
 }

@@ -111,11 +111,13 @@ internal fun SettingsRow(
 @Composable
 internal fun SettingsSwitchRow(title: String, checked: Boolean, enabled: Boolean = true,
     tag: String = "settings-switch:$title", summary: String? = null,
-    leading: (@Composable () -> Unit)? = null, onCheckedChange: (Boolean) -> Unit) {
+    leading: (@Composable () -> Unit)? = null, accessory: (@Composable () -> Unit)? = null,
+    onCheckedChange: (Boolean) -> Unit) {
     val colors = MiuixTheme.colorScheme
     SettingsRow(title = title, tag = tag, summary = summary, leading = leading, modifier = Modifier.toggleable(
         value = checked, role = Role.Switch, enabled = enabled, onValueChange = onCheckedChange
     ), trailing = {
+        accessory?.invoke()
         Switch(
             checked = checked,
             enabled = enabled,

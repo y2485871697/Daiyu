@@ -43,9 +43,15 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         openLocalModels()
         val current = checkNotNull(fixture.settings.localModelCatalogSnapshot()).models.single { it.id == saved.model }
         val extra = checkNotNull(fixture.settings.localModelCatalogSnapshot()).models.single { it.id == "extra-local" }
-        reveal("local-model-delete:${saved.model}").assertIsNotEnabled()
+        reveal("local-model-rename:${saved.model}").performClick()
+        node("catalog-model-editor").performScrollToNode(hasTestTag("local-model-delete:${saved.model}"))
+        node("local-model-delete:${saved.model}").assertIsNotEnabled()
+        node("catalog-model-editor").performScrollToNode(hasTestTag("dialog-cancel"))
+        node("catalog-model-editor").performScrollToNode(hasTestTag("dialog-cancel"))
+        node("dialog-cancel").performClick()
         reveal("local-model-rename:extra-local").performClick()
-        node("prompt-input").performTextReplacement("Renamed local model")
+        node("settings-field:展示名称").performTextReplacement("Renamed local model")
+        node("catalog-model-editor").performScrollToNode(hasTestTag("dialog-confirm"))
         node("dialog-confirm").performClick()
         awaitControl("local rename completed") { !fixture.controller.dataBusy }
         ui.waitUntil(5_000) {
@@ -55,7 +61,9 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         val renamed = checkNotNull(fixture.settings.localModelCatalogSnapshot())
         assertEquals(extra.copy(displayName = "Renamed local model"), renamed.models.single { it.id == extra.id })
         assertEquals(current, renamed.models.single { it.id == current.id })
-        reveal("local-model-delete:extra-local").performClick()
+        reveal("local-model-rename:extra-local").performClick()
+        node("catalog-model-editor").performScrollToNode(hasTestTag("local-model-delete:extra-local"))
+        node("local-model-delete:extra-local").performClick()
         node("dialog-confirm").performClick()
         awaitControl("local delete completed") { !fixture.controller.dataBusy }
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("local-model:extra-local").fetchSemanticsNodes().isEmpty() }
@@ -73,25 +81,33 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         val before = fixture.settings.localModelCatalogSnapshot(); val saved = fixture.settings.load()
         reveal("local-model-rename:extra-local").performClick()
         for (value in listOf(" ", "x".repeat(201))) {
-            node("prompt-input").performTextReplacement(value)
-            node("dialog-confirm").performClick()
-            node("prompt-input").assertExists()
+            node("settings-field:展示名称").performTextReplacement(value)
+            node("catalog-model-editor").performScrollToNode(hasTestTag("dialog-confirm"))
+            node("dialog-confirm").assertIsNotEnabled()
+            node("catalog-model-editor").performScrollToNode(hasTestTag("settings-field:展示名称"))
+            node("settings-field:展示名称").assertExists()
             assertEquals(before, fixture.settings.localModelCatalogSnapshot())
         }
         node("dialog-cancel").performClick()
-        reveal("local-model-delete:extra-local").performClick()
+        reveal("local-model-rename:extra-local").performClick()
+        node("catalog-model-editor").performScrollToNode(hasTestTag("local-model-delete:extra-local"))
+        node("local-model-delete:extra-local").performClick()
         node("dialog-cancel").performClick()
         assertEquals(before, fixture.settings.localModelCatalogSnapshot()); assertEquals(saved, fixture.settings.load())
         assertEquals(0, fixture.opens.get())
     }
     fun testOldConfirmationAfterPauseCannotModifyOrDismissFreshConfirmation() {
         openLocalModels()
-        reveal("local-model-delete:extra-local").performClick()
+        reveal("local-model-rename:extra-local").performClick()
+        node("catalog-model-editor").performScrollToNode(hasTestTag("local-model-delete:extra-local"))
+        node("local-model-delete:extra-local").performClick()
         val stale = checkNotNull(node("dialog-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
         realPauseResume(activity)
         awaitModelEditor()
         openLocalModelTab()
-        reveal("local-model-delete:extra-local").performClick()
+        reveal("local-model-rename:extra-local").performClick()
+        node("catalog-model-editor").performScrollToNode(hasTestTag("local-model-delete:extra-local"))
+        node("local-model-delete:extra-local").performClick()
         val before = fixture.settings.localModelCatalogSnapshot()
         mainThread { assertTrue(stale()) }
         node("dialog-confirm").assertExists()

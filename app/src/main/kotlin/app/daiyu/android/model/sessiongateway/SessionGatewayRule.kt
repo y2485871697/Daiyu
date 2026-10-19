@@ -12,7 +12,11 @@ data class SessionGatewayRule(
     val keyField: String = DEFAULT_FIELD,
 ) {
     fun matches(model: String, url: String): Boolean =
-        runCatching { Regex(modelPattern).matches(model) && Regex(pathPattern).containsMatchIn(url) }.getOrDefault(false)
+        modelPattern.lineSequence().filter { it.isNotBlank() }.any { pattern ->
+            runCatching { Regex(pattern).matches(model) }.getOrDefault(false)
+        } && pathPattern.lineSequence().filter { it.isNotBlank() }.any { pattern ->
+            runCatching { Regex(pattern).containsMatchIn(url) }.getOrDefault(false)
+        }
 
     /** A literal top-level JSON key, never a JSON path. Invalid syntax retains the frozen fallback. */
     fun safeKeyField(): String {

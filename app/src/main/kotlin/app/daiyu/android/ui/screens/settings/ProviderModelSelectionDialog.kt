@@ -47,13 +47,13 @@ internal fun ProviderModelSelectionDialog(
     val editable = enabled && !isSaving
     val dismiss = { if (!isSaving) onDismiss() }
     val colors = MiuixTheme.colorScheme
-    WindowDialog(show = true, title = "导入远端模型", onDismissRequest = dismiss) {
+    WindowDialog(show = true, title = "选择要添加的模型", onDismissRequest = dismiss) {
         Column(Modifier.fillMaxWidth().testTag("provider-model-selection")) {
             TextField(
                 value = selection.query,
                 onValueChange = { if (editable) onSelectionChange(selection.withQuery(it)) },
                 enabled = editable,
-                label = "搜索模型名称或 ID",
+                label = "搜索模型",
                 useLabelAsPlaceholder = true,
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().testTag("provider-model-search"),
@@ -67,7 +67,7 @@ internal fun ProviderModelSelectionDialog(
                     modifier = Modifier.testTag("provider-model-invert"))
             }
             Text(
-                text = "已选 ${selection.selectedCount}/${selection.totalCount} · 显示 ${selection.visibleCount}",
+                text = "${selection.selectedCount}/${selection.totalCount}",
                 style = MiuixTheme.textStyles.body2,
                 color = colors.onSurfaceVariantSummary,
                 modifier = Modifier.padding(vertical = 8.dp).testTag("provider-model-count"),
@@ -85,7 +85,7 @@ internal fun ProviderModelSelectionDialog(
                             tag = "provider-model-option:${model.id}",
                             modifier = Modifier.toggleable(value = checked, enabled = editable, role = Role.Checkbox,
                                 onValueChange = { if (editable) onSelectionChange(selection.toggle(model.id)) }),
-                            trailing = {
+                            leading = {
                                 Checkbox(checked = checked, onCheckedChange = null, enabled = editable,
                                     colors = CheckboxDefaults.colors(checkedColor = colors.primary,
                                         checkmarkColor = colors.onPrimary, uncheckedColor = colors.onSurfaceVariantSummary))
@@ -96,7 +96,7 @@ internal fun ProviderModelSelectionDialog(
             }
             if (!errorText.isNullOrBlank()) SettingsNote(errorText, error = true)
             MiuixDialogActions(
-                confirmText = if (isSaving) "导入中" else "导入所选",
+                confirmText = if (isSaving) "添加中" else "添加",
                 onCancel = dismiss,
                 onConfirm = { if (editable && selection.canConfirm) onConfirm(selection) },
                 cancelEnabled = !isSaving,

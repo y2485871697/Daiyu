@@ -58,12 +58,13 @@ private fun ModelSettings.providerDraft() = ModelSettingsDraftUi(protocol = prot
     speedMode = requestOptions.speedMode, codex = requestOptions.codex,
     anthropicVersion = requestOptions.anthropicVersion.orEmpty(),
     openAiWebSearchEnabled = requestOptions.openAiWebSearchEnabled,
+    sessionGateway = requestOptions.sessionGateway,
     customHeaders = if (customHeaders.isEmpty) "" else customHeaders.encode())
 private fun ModelSettingsDraftUi.providerSettings(base: ModelSettings) = base.copy(endpoint = endpoint.trim(),
     responsesPath = responsesPath.trim(), model = model.trim(), apiKey = apiKey, protocol = protocol,
     batteryEnabled = batteryEnabled, deviceStatusEnabled = deviceStatusEnabled,
     customHeaders = app.daiyu.android.model.ProviderHeaders.parse(customHeaders),
-    requestOptions = base.requestOptions.copy(customBody = customBody, speedMode = speedMode, codex = codex,
+    requestOptions = base.requestOptions.copy(sessionGateway = sessionGateway, customBody = customBody, speedMode = speedMode, codex = codex,
         anthropicVersion = anthropicVersion.takeIf { it.isNotEmpty() }, openAiWebSearchEnabled = openAiWebSearchEnabled))
 
 @Composable
@@ -221,6 +222,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         val save: (ModelSettingsDraftUi) -> Unit = { submitted ->
             if (live() && enabled && d.draft === submitted) {
                 val value = runCatching {
+                    require(submitted.headerFieldsValid && submitted.bodyFieldsValid) { "请先修正请求头或请求体字段。" }
                     require(submitted.savedProtocol == saved.protocol) { "编辑基线已变化，请重新打开详情。" }
                     require(submitted.protocol == saved.protocol || submitted.protocolChangeAuthorized) {
                         "切换协议须重新输入密钥并明确确认"
@@ -253,11 +255,11 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 }
             }
         }
-        val change: (ModelSettingsDraftUi) -> Unit = { if (live() && enabled) d.draft = it }
+        val change: (ModelSettingsDraftUi) -> Unit = { if (live() && enabled && d.draft === draft) d.draft = it }
         fun connectionSettings(value: ModelSettingsDraftUi): ModelSettings? = try { value.providerSettings(saved) }
             catch (_: IllegalArgumentException) { notice = "自定义请求头无效，请检查后重试。"; null }
         val connection: ModelConnectionTester = { value, requestCancelled, deliver ->
-            if (!live() || !enabled || requestCancelled() || d.draft !== value) false
+            if (!live() || !enabled || !value.headerFieldsValid || !value.bodyFieldsValid || requestCancelled() || d.draft !== value) false
             else connectionSettings(value)?.let { settings ->
                 controller.testModelConnection(settings,
                     { cancelled() || requestCancelled() || d.draft !== value }) {
@@ -292,6 +294,16 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         }
                     } catch (_: Exception) { if (busy === ticket) busy = null; complete(false) }
                 } else complete(false)
+            }, form = { app.daiyu.android.model.catalog.CatalogModelEdit.from(it) },
+            update = { selection, value, requestCancelled, complete ->
+                if (live() && enabled && !requestCancelled()) controller.updateProviderCatalogModel(d.editor, selection, value,
+                    { cancelled() || requestCancelled() }) { if (live() && !requestCancelled()) complete(it) }
+                else complete(CatalogLocalEditResult.CANCELLED)
+            }, add = { snapshot, value, requestCancelled, complete ->
+                if (live() && enabled && !requestCancelled()) controller.addProviderCatalogModel(d.editor,
+                    snapshot.providerIdentity, snapshot.revision, value, { cancelled() || requestCancelled() }) {
+                    if (live() && !requestCancelled()) complete(it)
+                } else complete(CatalogLocalEditResult.CANCELLED)
             })
         if (d.catalogIdentity == null) {
             val twoTabs = initialSlot != ProviderRegistry.PRIMARY
@@ -332,7 +344,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 catalogEnabled = false, errorText = notice)
         } else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
             createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
-                if (!live() || !enabled || requestCancelled() || d.draft !== value) false
+                if (!live() || !enabled || !value.headerFieldsValid || !value.bodyFieldsValid || requestCancelled() || d.draft !== value) false
                 else connectionSettings(value)?.let { settings ->
                     controller.fetchModelCatalog(settings,
                         { cancelled() || requestCancelled() || d.draft !== value }) {

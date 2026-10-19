@@ -4035,6 +4035,33 @@ class ChatController internal constructor(private val application:Application,
     ) = editConfiguredCatalogModel(cancelled, completed) {
         providers.withEditor(editor) { it.renameCatalogModel(ticket, name, cancelled) }
     }
+    internal fun updateProviderCatalogModel(editor: ProviderEditorSlot,
+        ticket: app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>,
+        value: app.daiyu.android.model.catalog.CatalogModelEdit, cancelled: () -> Boolean,
+        completed: (app.daiyu.android.model.catalog.CatalogLocalEditResult) -> Unit,
+    ) = editConfiguredCatalogModel(cancelled, completed) {
+        providers.withEditor(editor) { store ->
+            store.checkCatalogConfiguration()
+            store.modelCatalog.replaceSelection(ticket, value.applyTo(ticket.record), cancelled)
+        }
+    }
+    internal fun addProviderCatalogModel(editor: ProviderEditorSlot, identity: String, revision: Long,
+        value: app.daiyu.android.model.catalog.CatalogModelEdit, cancelled: () -> Boolean,
+        completed: (app.daiyu.android.model.catalog.CatalogLocalEditResult) -> Unit,
+    ) = editConfiguredCatalogModel(cancelled, completed) {
+        providers.withEditor(editor) { store ->
+            store.checkCatalogConfiguration()
+            val snapshot = store.modelCatalog.read(identity)
+            if (snapshot == null || snapshot.revision != revision) app.daiyu.android.model.catalog.CatalogLocalEditResult.STALE
+            else if (snapshot.models.any { it.id == value.id }) app.daiyu.android.model.catalog.CatalogLocalEditResult.FAILED
+            else when (store.modelCatalog.compareAndAppend(identity, revision, listOf(value.newRecord()), cancelled)) {
+                app.daiyu.android.model.catalog.CatalogCommitResult.COMMITTED -> app.daiyu.android.model.catalog.CatalogLocalEditResult.APPLIED
+                app.daiyu.android.model.catalog.CatalogCommitResult.STALE -> app.daiyu.android.model.catalog.CatalogLocalEditResult.STALE
+                app.daiyu.android.model.catalog.CatalogCommitResult.CANCELLED -> app.daiyu.android.model.catalog.CatalogLocalEditResult.CANCELLED
+                app.daiyu.android.model.catalog.CatalogCommitResult.FAILED -> app.daiyu.android.model.catalog.CatalogLocalEditResult.FAILED
+            }
+        }
+    }
     internal fun deleteProviderCatalogModel(editor: ProviderEditorSlot,
         ticket: app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>,
         cancelled: () -> Boolean, completed: (app.daiyu.android.model.catalog.CatalogLocalEditResult) -> Unit,

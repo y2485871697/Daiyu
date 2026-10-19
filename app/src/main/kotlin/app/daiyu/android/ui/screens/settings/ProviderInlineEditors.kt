@@ -1,0 +1,147 @@
+package app.daiyu.android.ui.screens.settings
+
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.platform.testTag
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.daiyu.android.model.ProviderHeaders
+import app.daiyu.android.model.ProviderRequestOptions
+import app.daiyu.android.model.RequestBodyFields
+import app.daiyu.android.model.RequestBodyValueType
+import app.daiyu.android.model.sessiongateway.SessionGatewayRule
+import app.daiyu.android.ui.icons.DaiyuIcon
+import app.daiyu.android.ui.icons.DaiyuIcons
+import java.util.concurrent.atomic.AtomicBoolean
+import org.json.JSONObject
+import top.yukonga.miuix.kmp.basic.TextButton
+
+internal data class ProviderFieldRow(val id: Long, val name: String, val value: String) {
+    override fun toString() = "ProviderFieldRow(<redacted>)"
+}
+
+@Composable
+internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean, headers: Boolean,
+    onDraftChange: (ModelSettingsDraftUi) -> Unit,
+) {
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val visit = remember(headers, draft.protocol) { AtomicBoolean(true) }
+    var epoch by remember { mutableStateOf(0L) }
+    val callbackEpoch = epoch
+    val raw = if (headers) draft.customHeaders else draft.customBody
+    val prefix = if (headers) "model-header" else "model-body-field"
+    fun read(value: String): List<ProviderFieldRow> = if (headers) {
+        ProviderHeaders.parse(value)
+        val json = JSONObject(value.ifBlank { "{}" })
+        json.keys().asSequence().mapIndexed { index, name -> ProviderFieldRow(index.toLong(), name, json.getString(name)) }.toList()
+    } else RequestBodyFields.read(value).mapIndexed { index, field ->
+        ProviderFieldRow(index.toLong(), field.name,
+            if (field.type == RequestBodyValueType.STRING) JSONObject.quote(field.text) else field.text)
+    }
+    val parsed = runCatching { read(raw) }
+    val rows = (if (headers) draft.headerFieldRows else draft.bodyFieldRows) ?: parsed.getOrDefault(emptyList())
+    val nextId = (rows.maxOfOrNull { it.id } ?: -1L) + 1L
+    var expanded by rememberSaveable(headers, draft.protocol) { mutableStateOf(false) }
+    val notice = (if (headers) draft.headerFieldsError else draft.bodyFieldsError)
+        ?: if (parsed.isFailure) "原配置无效，请修正或清除后保存。" else null
+    val latestDraft by rememberUpdatedState(draft)
+    val latestEnabled by rememberUpdatedState(enabled)
+    val latestChange by rememberUpdatedState(onDraftChange)
+    DisposableEffect(lifecycle, visit) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_PAUSE) { expanded = false; epoch++ } }
+        lifecycle.addObserver(observer)
+        onDispose { visit.set(false); lifecycle.removeObserver(observer) }
+    }
+    fun current() = visit.get() && epoch == callbackEpoch && latestEnabled && latestDraft === draft && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+    fun update(value: List<ProviderFieldRow>) {
+        if (!current()) return
+        val problem = value.mapIndexedNotNull { index, row -> when {
+            row.name.isBlank() -> "第 ${index + 1} 项${if (headers) "请求头名称" else "请求体字段名"}不能为空"
+            value.take(index).any { if (headers) it.name.equals(row.name, true) else it.name == row.name } -> "第 ${index + 1} 项名称重复"
+            else -> null
+        } }.firstOrNull()
+        val encoded = if (problem == null) runCatching {
+            if (headers) {
+                val json = JSONObject()
+                value.forEach { json.put(it.name, it.value) }
+                ProviderHeaders.parse(json.toString()).encode()
+            } else {
+                val body = value.joinToString(",", "{", "}") { "${JSONObject.quote(it.name)}:${it.value}" }
+                RequestBodyFields.read(body)
+                ProviderRequestOptions(customBody = body).validate(draft.protocol)
+                body
+            }
+        } else null
+        val error = problem ?: if (encoded?.isFailure == true)
+            if (headers) "请求头名称或值无效；认证与传输请求头由系统管理。" else "字段值须为有效 JSON，且不能覆盖系统字段。"
+            else null
+        val result = encoded?.getOrNull()
+        latestChange(if (headers) draft.copy(customHeaders = result ?: draft.customHeaders, headerFieldsValid = error == null, headerFieldRows = value, headerFieldsError = error)
+            else draft.copy(customBody = result ?: draft.customBody, bodyFieldsValid = error == null, bodyFieldRows = value, bodyFieldsError = error))
+    }
+    SettingsRow(if (rows.isEmpty()) "未设置" else "已设置 ${rows.size} 项",
+        summary = if (headers) "可覆盖 User-Agent；认证与传输请求头由系统管理。" else "值使用 JSON 格式，字符串请加双引号；不是请求头。",
+        tag = if (headers) "model-custom-headers" else "model-body-fields",
+        onClick = if (enabled) ({ expanded = !expanded }) else null,
+        trailing = { DaiyuIcon(DaiyuIcons.ChevronDown, null, modifier = Modifier.rotate(if (expanded) 180f else 0f)) })
+    if (expanded) {
+        rows.forEachIndexed { index, row -> key(row.id) {
+            Row {
+                Column(Modifier.weight(1f)) {
+                    SettingsTextField(if (headers) "名称" else "字段名", row.name, { value ->
+                        update(rows.map { if (it.id == row.id) it.copy(name = value) else it })
+                    }, enabled = enabled, tag = "$prefix-name:$index")
+                    SettingsTextField(if (headers) "值" else "值（JSON）", row.value, { value ->
+                        update(rows.map { if (it.id == row.id) it.copy(value = value) else it })
+                    }, password = headers, multiline = !headers, enabled = enabled, tag = "$prefix-value:$index", secretLabel = "值")
+                }
+                TextButton("删除", enabled = enabled, modifier = Modifier.testTag("$prefix-delete:$index"), onClick = {
+                    update(rows.filter { it.id != row.id })
+                })
+            }
+        } }
+        notice?.let { SettingsNote(it, error = true) }
+        if (parsed.isFailure) TextButton("清除无效配置", enabled = enabled, onClick = { update(emptyList()) })
+        TextButton(if (headers) "添加请求头" else "添加请求体字段", enabled = enabled && rows.size < 32,
+            modifier = Modifier.testTag("$prefix-add"), onClick = {
+                if (current() && rows.size < 32) update(rows + ProviderFieldRow(nextId, "", ""))
+            })
+    }
+}
+
+@Composable
+internal fun ProviderGatewayEditor(draft: SessionGatewayRule, enabled: Boolean,
+    onDraftChange: (SessionGatewayRule) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    SettingsRow("网关", summary = "${draft.modelPattern} · ${draft.keyField}", tag = "provider-session-gateway",
+        onClick = if (enabled) ({ expanded = !expanded }) else null,
+        trailing = { DaiyuIcon(DaiyuIcons.ChevronDown, null, modifier = Modifier.rotate(if (expanded) 180f else 0f)) })
+    if (expanded) SessionGatewayFields(draft, enabled, onDraftChange)
+}
+
+@Composable
+internal fun SessionGatewayFields(draft: SessionGatewayRule, enabled: Boolean,
+    onDraftChange: (SessionGatewayRule) -> Unit,
+) {
+    SettingsTextField("模型正则（每一行一个）", draft.modelPattern,
+        { onDraftChange(draft.copy(modelPattern = it)) }, multiline = true, enabled = enabled)
+    SettingsTextField("路径正则（每一行一个）", draft.pathPattern,
+        { onDraftChange(draft.copy(pathPattern = it)) }, multiline = true, enabled = enabled)
+    SettingsTextField("会话保持", draft.retention,
+        { onDraftChange(draft.copy(retention = it)) }, enabled = enabled)
+    Row {
+        Column(Modifier.weight(1f)) {
+            SettingsTextField("Key 来源", draft.keySource, { onDraftChange(draft.copy(keySource = it)) }, enabled = enabled)
+        }
+        Column(Modifier.weight(1f)) {
+            SettingsTextField("字段", draft.keyField, { onDraftChange(draft.copy(keyField = it)) }, enabled = enabled)
+        }
+    }
+    if (runCatching { draft.validate() }.isFailure) SettingsNote("请检查网关字段。", error = true)
+}

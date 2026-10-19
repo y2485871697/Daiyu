@@ -130,6 +130,28 @@ internal class FileSavedModelCatalogPersistence<T>(
         if (Thread.currentThread().isInterrupted) CatalogLocalEditResult.CANCELLED else CatalogLocalEditResult.FAILED
     }
 
+    fun replaceSelection(selection: CatalogModelSelection<T>, replacement: SavedCatalogModel<T>,
+        isCancelled: () -> Boolean,
+    ): CatalogLocalEditResult = try {
+        exclusive {
+            if (cancelled(isCancelled)) return@exclusive CatalogLocalEditResult.CANCELLED
+            require(replacement.id == selection.record.id)
+            val old = readDocument()
+            if (old == null || old.identity != selection.providerIdentity || old.revision != selection.expectedRevision)
+                return@exclusive CatalogLocalEditResult.STALE
+            val previous = old.models.singleOrNull { it.id == selection.record.id }
+                ?: return@exclusive CatalogLocalEditResult.STALE
+            if (SavedCatalogModel(previous.id, previous.name, codec.decode(previous.record)) != selection.record)
+                return@exclusive CatalogLocalEditResult.STALE
+            val encoded = encodeModels(listOf(replacement)).single()
+            val models = old.models.map { if (it.id == encoded.id) encoded else it }
+            if (writeDocument(old.copy(revision = nextRevision(old.revision), models = models)) { cancelled(isCancelled) })
+                CatalogLocalEditResult.APPLIED else CatalogLocalEditResult.CANCELLED
+        }
+    } catch (_: Exception) {
+        if (cancelled(isCancelled)) CatalogLocalEditResult.CANCELLED else CatalogLocalEditResult.FAILED
+    }
+
     /**
      * Host save synchronization, NOT import. Only one record is re-encoded; every other record
      * remains byte-for-byte intact. update receives the existing local UUID/name when present.

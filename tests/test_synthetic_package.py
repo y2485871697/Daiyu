@@ -129,7 +129,7 @@ class SyntheticPackageTests(unittest.TestCase):
         synthetic = workflow.split('  synthetic:\n', 1)[1].split('  smoke:\n', 1)[0]
         self.assertIn('check(!daiyuPhysicalPerformance || daiyuSyntheticApplication)', gradle)
         self.assertIn('check(!daiyuPhysicalPerformance || fixedSigning)', gradle)
-        self.assertIn('if (daiyuPhysicalPerformance) testBuildType = "release"', gradle)
+        self.assertIn('if (daiyuPhysicalPerformance || daiyuProductionRelease) testBuildType = "release"', gradle)
         self.assertIn('setRoot("src/performanceTest")', gradle)
         release = gradle.split('        release {', 1)[1].split('\n        }', 1)[0]
         self.assertIn('isDebuggable = false', release)

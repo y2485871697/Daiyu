@@ -70,6 +70,18 @@ class VideoPostApprovalTest {
             "data: $terminal\n\n"
     }
 
+    @Test fun hostApprovalAndPermitFailuresAreNotTransportFailures() {
+        for (atConsume in listOf(false, true)) for (original in listOf(
+            java.io.IOException("host failure"), ModelRequestException(ModelFailure.PERMISSION))) {
+            val target = session(VideoPostApprovalProvider { request ->
+                if (atConsume) request.bindPermitConsumption { throw original } else throw original
+            })
+            assertSame(original, rejected { target.next(emptyList()) {} })
+            assertEquals(0, connections)
+            assertTrue(rejected { target.next(emptyList()) {} } is IllegalStateException)
+        }
+    }
+
     @Test fun explicitConversationHeadersDoNotBypassFreshVideoApproval() {
         val context = app.daiyu.android.model.sessiongateway.SessionGatewayContext(row.conversationId)
         var approvals = 0

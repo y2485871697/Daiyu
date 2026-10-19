@@ -73,6 +73,7 @@ class NativeCompletionModel internal constructor(
                 try { sink(event) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
             }
             var owned: HttpsURLConnection? = null
+            var configuringRequest = true
             try {
                 checkCancelled()
                 val conn = connect(URL(endpoint)); owned = conn; connection = conn
@@ -85,7 +86,8 @@ class NativeCompletionModel internal constructor(
                 conn.setRequestProperty("Content-Type", "application/json")
                 conn.setRequestProperty("Accept", "text/event-stream")
                 headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }
-                conn.outputStream.use { it.write(bytes) }
+                configuringRequest = false
+                conn.outputStream.useProviderResource { it.write(bytes) }
                 checkCancelled()
                 val status = conn.responseCode
                 checkCancelled()
@@ -97,7 +99,7 @@ class NativeCompletionModel internal constructor(
                 })
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", true) != true)
                     throw ModelRequestException(ModelFailure.PROTOCOL)
-                conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                conn.inputStream.bufferedReader(Charsets.UTF_8).useProviderResource { reader ->
                     val row = NativeCompletionStream.read(settings.protocol, reader, cancelled::get, deliver)
                     checkCancelled()
                     app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImageNode(row)
@@ -110,12 +112,7 @@ class NativeCompletionModel internal constructor(
             } catch (failure: Exception) {
                 if (failure === deliveryFailure) throw failure
                 checkCancelled()
-                throw when (failure) {
-                    is java.net.SocketTimeoutException -> ModelRequestException(ModelFailure.TIMEOUT)
-                    is javax.net.ssl.SSLException -> ModelRequestException(ModelFailure.TLS)
-                    is java.io.IOException -> ModelRequestException(ModelFailure.NETWORK)
-                    else -> failure
-                }
+                throw providerTransportFailure(failure, configuringRequest)
             } finally {
                 try { owned?.errorStream?.close() } catch (_: Exception) {}
                 try { owned?.disconnect() } catch (_: Exception) {} finally { connection = null }

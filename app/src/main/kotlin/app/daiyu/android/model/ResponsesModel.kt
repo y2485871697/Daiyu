@@ -99,6 +99,11 @@ class ResponsesModel internal constructor(
             val id = requireNotNull(decoder.responseId)
             val sequence = requireNotNull(decoder.acknowledgedSequence)
             var conn: HttpsURLConnection? = null
+            var configuringRequest = true
+            var deliveryFailure: Exception? = null
+            val deliver: (ModelEventBatch) -> ModelDeliveryAck = { batch ->
+                try { sink(batch) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
+            }
             try {
                 val url = settings.requestEndpoint() + "/$id?stream=true&starting_after=$sequence"
                 conn = connect(URL(url))
@@ -109,6 +114,7 @@ class ResponsesModel internal constructor(
                 settings.customHeaders.applyTo(conn)
                 conn.setRequestProperty("Accept", "text/event-stream")
                 checkCancelled()
+                configuringRequest = false
                 val status = conn.responseCode
                 if (status !in 200..299) {
                     resumeAllowed = false
@@ -116,6 +122,7 @@ class ResponsesModel internal constructor(
                         401 -> ModelFailure.AUTHENTICATION
                         403 -> ModelFailure.PERMISSION
                         404, 405, 410 -> ModelFailure.ENDPOINT
+                        in 300..399 -> ModelFailure.REDIRECT
                         else -> ModelFailure.PROTOCOL
                     })
                 }
@@ -123,15 +130,16 @@ class ResponsesModel internal constructor(
                     resumeAllowed = false
                     throw ModelRequestException(ModelFailure.PROTOCOL)
                 }
-                val items = conn.inputStream.bufferedReader(Charsets.UTF_8).use {
-                    decoder.read(it, cancelled::get, prefix = ownItems.toList(), acknowledgedSink = sink)
+                val items = conn.inputStream.bufferedReader(Charsets.UTF_8).useProviderResource {
+                    decoder.read(it, cancelled::get, prefix = ownItems.toList(), acknowledgedSink = deliver)
                 }
                 acceptItems(items)
                 usable = true
                 resumeAllowed = false
             } catch (failure: Exception) {
+                if (failure === deliveryFailure) throw failure
                 checkCancelled()
-                val classified = classify(failure)
+                val classified = providerTransportFailure(failure, configuringRequest)
                 if (classified !is ModelDeliveryRejectedException &&
                     (classified as? ModelRequestException)?.failure !in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT)) resumeAllowed = false
                 throw classified
@@ -139,13 +147,6 @@ class ResponsesModel internal constructor(
                 synchronized(postLock) { if (connection === conn) connection = null }
                 try { conn?.disconnect() } catch (_: Exception) {}
             }
-        }
-        private fun classify(failure: Exception): Exception = when(failure) {
-            is java.net.SocketTimeoutException -> ModelRequestException(ModelFailure.TIMEOUT)
-            is javax.net.ssl.SSLException -> ModelRequestException(ModelFailure.TLS)
-            is java.io.IOException -> ModelRequestException(ModelFailure.NETWORK)
-            is org.json.JSONException -> ModelRequestException(ModelFailure.PROTOCOL)
-            else -> failure
         }
         private fun acceptItems(items: List<String>) {
             val calls = mutableSetOf<String>()
@@ -220,7 +221,14 @@ class ResponsesModel internal constructor(
                 checkCancelled()
                 try { sink(event) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
             }
+            val deliverAcknowledged = acknowledgedSink?.let { target ->
+                { batch: ModelEventBatch ->
+                    try { target(batch) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
+                }
+            }
             var ownedConnection: HttpsURLConnection? = null
+            var configuringRequest = false
+            var transportStarted = false
             var post: VideoPostRequest? = null
             try {
                 checkCancelled()
@@ -264,6 +272,8 @@ class ResponsesModel internal constructor(
                     pendingPost.consume(approval)
                 }
                 checkCancelled()
+                transportStarted = true
+                configuringRequest = true
                 val conn = connect(URL(finalUrl))
                 // Own the result before checking cancellation so a late factory return is always
                 // disconnected by finally, even when it must never be published or write a body.
@@ -283,7 +293,8 @@ class ResponsesModel internal constructor(
                 conn.setRequestProperty("Content-Type", "application/json"); conn.setRequestProperty("Accept", "text/event-stream")
                 sessionHeaders.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 checkCancelled()
-                conn.outputStream.use { it.write(requestBytes) }
+                configuringRequest = false
+                conn.outputStream.useProviderResource { it.write(requestBytes) }
                 checkCancelled()
                 val status = conn.responseCode
                 checkCancelled()
@@ -298,10 +309,10 @@ class ResponsesModel internal constructor(
                 })
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", ignoreCase = true) != true)
                     throw ModelRequestException(ModelFailure.PROTOCOL)
-                conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                conn.inputStream.bufferedReader(Charsets.UTF_8).useProviderResource { reader ->
                     resumeAllowed = backgroundResume != null
                     val items = if (backgroundResume != null) decoder.read(reader, cancelled::get,
-                        prefix = ownItems.toList(), acknowledgedSink = requireNotNull(acknowledgedSink))
+                        prefix = ownItems.toList(), acknowledgedSink = requireNotNull(deliverAcknowledged))
                     else ResponsesStream.read(reader, cancelled::get, deliver)
                     checkCancelled()
                     acceptItems(items)
@@ -313,7 +324,8 @@ class ResponsesModel internal constructor(
             } catch (failure: Exception) {
                 if (failure === deliveryFailure) throw failure
                 checkCancelled()
-                val classified = classify(failure)
+                if (!transportStarted) throw failure
+                val classified = providerTransportFailure(failure, configuringRequest)
                 if (classified !is ModelDeliveryRejectedException &&
                     (classified as? ModelRequestException)?.failure !in setOf(ModelFailure.NETWORK, ModelFailure.TIMEOUT)) resumeAllowed = false
                 throw classified

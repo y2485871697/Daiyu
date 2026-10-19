@@ -8,6 +8,16 @@
 
 旧包补检只用 `mode=old_apk_recheck`，保留独立 build/check 身份；cloud 快照的 `head_sha` 是 CHECK_SHA，开发包记录/81 项 ledger 的 `build_sha` 仍是 BUILD_SHA。即使检查脚本更新，也不重写历史构建身份。旧包限定源构建 attempt=1（复用既有策略），检查 attempt 可不同。工具重新检查 BUILD_SHA 是 CHECK_SHA 的祖先和真实 Git 差异，不信 manifest 自报 changed-files。
 
+### 生产 Release 候选（mode=production_release）
+
+最终正式版不得把开发包重命名交付。云端工作流 `mode=release` 独立执行 Release 单测/Lint、`-PdaiyuProductionRelease=true :app:assembleRelease :app:assembleReleaseAndroidTest` 与未过滤的 API26/37.2 四分片矩阵；默认 `mode=build` 仍只产开发包。UI 合流后的调度方需绑定准确 main SHA、唯一 check_id；本说明不自动调度任何运行。
+
+Release 产物固定为 `代鱼正式候选包`，主 APK 名称和测试 APK 布局不变。工作流的 `verify_release_package.py` 从两只实际 APK 执行 apkanalyzer/apksigner，写 `app-manifest.xml`、`test-manifest.xml`、`签名证据.txt`、含两包及manifest摘要的 `构建记录.json`。生产包必须是 `release`、`debuggable=false`、`profileable=false`、`production_delivery=true`，不得使用 synthetic/performance 包。
+
+离线 manifest 选择 `mode=production_release`，其 delivery 除原字段外必须增加 `app_manifest` 与 `test_manifest` 两个 pin住的引用，且两者是同一 artifact ZIP 内的同名成员。build/check 必须是同 run/attempt/完整SHA，构建 job 为 `单测、检查与生产Release`。该模式继续执行所有公共 source/tool/cloud/business 门槛，下面的81项规则及固定 false 的可信采集/最终验收标志不变。manifest XML和签名文本的归档一致性不能代替独立对实际APK复验。
+
+仅定向追查失败时可使用 `mode=smoke` 并指定 `source_variant=release`、准确 `source_run_id/source_sha`，默认仍为debug。入口按源变体下载artifact并核对对应构建job、记录和原有应用输入白名单，不隐式重新打包。定向补检、不同源码SHA的测试补检都不自动满足 production_release 的最终同源码完整回归要求。
+
 ### 三层结果不能混同
 
 | 层 | 实际验证 | 不证明什么 |

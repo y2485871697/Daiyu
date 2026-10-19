@@ -112,6 +112,7 @@ class PtySession internal constructor(
         return JSONObject().put("session_created", true)
             .put("failure", failure ?: JSONObject.NULL).put("exec_errno", execErrno ?: JSONObject.NULL)
             .put("launcher_exit", exit ?: JSONObject.NULL).put("scope_seen", nativeScope != null)
+            .put("root_scope", nativeScope ?: JSONObject.NULL)
             .put("hello_seen", helloSeen).put("reader_finished", readerFinished.count == 0L)
             .put("protocol_broken", protocolBroken).put("root_drained", rootDrained)
     }

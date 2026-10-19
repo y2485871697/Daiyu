@@ -111,6 +111,58 @@ class LinuxChrootProductionDeviceTest : InstrumentationTestCase() {
             assertFalse(status.getBoolean("host_root_verified"))
             val auth = TaskAuthorization("chroot-device-$token", token)
             val owner = PtyRunOwner(ConversationId("chroot-device-$token"), auth, environment, "g1")
+            val failedStarts = org.json.JSONArray()
+            report.put("proc_startup_failures", failedStarts)
+            for (kind in listOf("symlink", "file")) {
+                val proc = File(rootfs, "proc")
+                val rootPath = rootfs.canonicalPath
+                check(!Files.exists(proc.toPath(), java.nio.file.LinkOption.NOFOLLOW_LINKS))
+                if (kind == "symlink") Files.createSymbolicLink(proc.toPath(), Paths.get("tmp"))
+                else proc.writeText("not a directory\n")
+                joined = false
+                val failure = try {
+                    session = AndroidPtyHost.openLinux(context, owner, persisted,
+                        LinuxGenerationRef(environment, "g1"), work, work,
+                        File(work, "journal-proc-$kind"), "${token}_proc_$kind", 31, 97)
+                    error("proc_${kind}_startup_unexpectedly_succeeded")
+                } catch (failure: LinuxPtyStartupFailure) {
+                    startup = failure.cleanup
+                    failure
+                }
+                val cleanup = checkNotNull(startup)
+                val diagnostics = checkNotNull((failure.cause as? PtyStartupFailure)?.diagnostics)
+                val evidence = JSONObject().put("kind", kind).put("startup_diagnostics", diagnostics)
+                failedStarts.put(evidence)
+                assertTrue(diagnostics.getBoolean("session_created"))
+                assertEquals("pty_exec_failed", diagnostics.getString("failure"))
+                assertTrue(diagnostics.getInt("exec_errno") > 0)
+                assertTrue(diagnostics.getBoolean("scope_seen"))
+                assertFalse(diagnostics.getBoolean("protocol_broken"))
+                val failedScope = diagnostics.getString("root_scope")
+                check(failedScope.matches(Regex("daiyu-[0-9a-f]{32}")))
+                evidence.put("scope", failedScope)
+                cleanup.requestClose()
+                leased(persisted)
+                leased(LinuxEnvironmentStore(selected, policy))
+                joined = cleanup.awaitTermination(30_000)
+                evidence.put("joined", joined)
+                assertTrue("failed startup must drain scope and exit launcher", joined)
+                val scopeAfter = rootObservation("set -eu; test \"$(/system/bin/id -u)\" = 0; " +
+                    "test ! -e /sys/fs/cgroup/uid_0/$failedScope; " +
+                    "test ! -L /sys/fs/cgroup/uid_0/$failedScope; printf 'original_scope_gone\\n'")
+                assertEquals("original_scope_gone", scopeAfter.trim())
+                val hostMountsAfter = rootObservation("awk '\$5 == \"$rootPath\" || " +
+                    "index(\$5, \"$rootPath/\") == 1' /proc/self/mountinfo")
+                assertEquals("host must have no proc mount", "", hostMountsAfter.trim())
+                persisted.clearSelection()
+                evidence.put("selection_lease_released", true)
+                persisted.select(LinuxInstallation("busybox", environment, "g1", rootfs.canonicalFile,
+                    executionMode = LinuxExecutionMode.CHROOT))
+                evidence.put("scope", failedScope).put("scope_after", scopeAfter)
+                    .put("host_mountinfo_after", hostMountsAfter).put("passed", true)
+                check(proc.delete())
+                startup = null
+            }
             val active = AndroidPtyHost.openLinux(context, owner, persisted,
                 LinuxGenerationRef(environment, "g1"), work, work, File(work, "journal"), token, 31, 97)
             session = active

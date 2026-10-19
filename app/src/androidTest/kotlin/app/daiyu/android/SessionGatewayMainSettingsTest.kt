@@ -6,6 +6,7 @@ import app.daiyu.android.model.sessiongateway.SessionGatewayRule
 /** Real Main navigation + Controller worker + encrypted synthetic fixture settings. No provider. */
 @Suppress("DEPRECATION")
 class SessionGatewayMainSettingsTest : WiredActivityTestCase() {
+    override val engineeringUi = true
     private val page = "保留会话网关"
     private fun openGateway() {
         openSettings()

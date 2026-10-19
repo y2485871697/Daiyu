@@ -1,20 +1,17 @@
 package app.daiyu.android
 
-import app.daiyu.android.ui.components.RetainedChoiceSelect
 import androidx.compose.ui.test.*
 
 class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
     override val engineeringUi = true
-    fun testFutureOAuthIsInertAndApiKeyStillRegistersThroughTheExistingFlow() {
+    fun testAddOpensNamePromptWithoutUnsupportedAuthenticationOptions() {
         openProviderManagement()
         val before = fixture.controller.providers.snapshot()
         reveal("provider-add", "提供商").performClick()
-        awaitUniqueTag("prompt-choice:1")
-        node("prompt-choice:1").assertIsEnabled().performClick()
-        node("prompt-choice:0").assertExists()
+        node("prompt-choice:0").assertDoesNotExist()
+        node("prompt-choice:1").assertDoesNotExist()
         assertEquals(before, fixture.controller.providers.snapshot())
         assertEquals(0, fixture.opens.get())
-        node("prompt-choice:0").performClick()
         awaitUniqueTag("prompt-input")
         node("prompt-input").performTextReplacement("API Key fixture")
         ui.onNodeWithText("保存").performClick()
@@ -27,14 +24,13 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testPausedAuthenticationChoiceCannotReopenTheNamePrompt() {
+    fun testPausedAddCannotRegisterOrRestoreTheNamePrompt() {
         openProviderManagement()
         val before = fixture.controller.providers.snapshot()
         reveal("provider-add", "提供商").performClick()
-        awaitUniqueTag("prompt-choice:0")
-        val choose = node("prompt-choice:0").fetchSemanticsNode().config[RetainedChoiceSelect]
-        realPauseResume(activity, atPause = { choose() })
-        mainThread { choose() }
+        awaitUniqueTag("prompt-input")
+        node("prompt-input").performTextReplacement("must not register")
+        realPauseResume(activity, atPause = { })
         node("prompt-input").assertDoesNotExist()
         node("prompt-choice:0").assertDoesNotExist()
         assertEquals(before, fixture.controller.providers.snapshot())

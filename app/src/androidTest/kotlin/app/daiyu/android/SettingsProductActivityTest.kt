@@ -44,17 +44,27 @@ class SettingsProductActivityTest : WiredActivityTestCase() {
         assertDraft("product backup unsent")
     }
 
-    fun testProductModelFormShowsDeviceAndSearchControlsAndBodyRemainsEditable() {
+    fun testProductModelFormExcludesDeviceToolsAndEditsTypedBodyFields() {
         setDraft("product models unsent")
         val savedSettings = fixture.settings.load()
         val before = fixture.database.exportBackup()
         openModels()
         for (title in listOf("电量查询", "设备状态查询"))
-            reveal("settings-switch:$title").assertExists().assertIsEnabled()
-        modelField("自定义请求体").assertExists().assertIsEnabled()
-        val body = """{"metadata":{"settings_product":true}}"""
-        editModel("自定义请求体", body)
-        modelField("自定义请求体").assertEditableText(body)
+            node("settings-switch:$title").assertDoesNotExist()
+        node("settings-field:自定义请求体").assertDoesNotExist()
+        reveal("model-body-fields").performClick()
+        node("model-body-fields-list").performScrollToNode(hasTestTag("model-body-field-add"))
+        node("model-body-field-add").performClick()
+        node("settings-field:字段名").performTextReplacement("metadata")
+        dismissIme()
+        node("model-body-field-editor-list").performScrollToNode(hasTestTag("settings-radio:对象"))
+        node("settings-radio:对象").performClick()
+        dismissIme()
+        node("model-body-field-editor-list").performScrollToNode(hasTestTag("settings-field:字段值"))
+        node("settings-field:字段值").performTextReplacement("""{"settings_product":true}""")
+        dismissIme()
+        node("model-body-field-editor-list").performScrollToNode(hasTestTag("model-body-field-apply"))
+        node("model-body-field-apply").performClick()
         reveal("settings-switch:原生网页搜索").assertExists().assertIsEnabled()
         assertEquals(savedSettings, fixture.settings.load())
         assertEquals(before, fixture.database.exportBackup())

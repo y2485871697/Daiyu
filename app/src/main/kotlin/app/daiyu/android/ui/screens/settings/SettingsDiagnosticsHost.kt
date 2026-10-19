@@ -17,7 +17,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 internal data class SettingsDiagnosticsUi(val state: DiagnosticLogState, val busy: Boolean,
-    val notice: String?, val toggle: (Boolean) -> Unit, val export: () -> Unit, val clear: () -> Unit)
+    val notice: String?, val toggle: (Boolean) -> Unit, val export: () -> Unit,
+    val clear: () -> Unit, val retirePicker: () -> Unit = {})
 
 /** One settings visit; the picker roundtrip survives its own pause, never a replacement visit. */
 @Composable
@@ -31,6 +32,7 @@ internal fun rememberSettingsDiagnostics(store: DiagnosticLogStore?, isCurrent: 
     var notice by remember { mutableStateOf<String?>(null) }
     var confirming by remember { mutableStateOf(false) }
     var pickerPending by remember { mutableStateOf(false) }
+    var pickerRetired by remember { mutableStateOf(false) }
     var pendingUri by remember { mutableStateOf<Uri?>(null) }
     var resumed by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     fun admitted() = current() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
@@ -44,7 +46,7 @@ internal fun rememberSettingsDiagnostics(store: DiagnosticLogStore?, isCurrent: 
     }
     LaunchedEffect(store) { if (store != null) withContext(Dispatchers.IO) { store.load() } }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
-        if (pickerPending && current()) {
+        if (pickerPending && !pickerRetired && current()) {
             pendingUri = uri
             if (uri == null) pickerPending = false
         } else { pendingUri = null; pickerPending = false }
@@ -96,11 +98,19 @@ internal fun rememberSettingsDiagnostics(store: DiagnosticLogStore?, isCurrent: 
             mutate(if (enabled) "已开启诊断记录" else "已关闭诊断记录") { checkNotNull(store).setEnabled(enabled) } },
         export = {
             if (admitted() && state.loaded && !state.unavailable && !busy && !pickerPending && store != null) {
-                pickerPending = true; notice = null
+                pickerRetired = false; pickerPending = true; notice = null
                 try { picker.launch("daiyu-diagnostics.json") }
                 catch (_: Exception) { pickerPending = false; notice = "无法打开文件保存位置" }
             }
-        }, clear = { if (admitted() && state.loaded && !busy && !pickerPending && store != null) confirming = true })
+        }, clear = {
+            if (admitted() && state.loaded && !busy && !pickerPending && store != null) confirming = true
+        }, retirePicker = {
+            pickerRetired = true
+            confirming = false
+            // Keep an outstanding launcher slot occupied until its original result drains.
+            if (pendingUri != null) pickerPending = false
+            pendingUri = null
+        })
 }
 
 @Composable
@@ -117,7 +127,7 @@ internal fun SettingsDiagnosticRow(entry: SettingsEntry, ui: SettingsDiagnostics
             tag = "settings-row:${entry.title}", summary = status ?: "仅记录状态与故障类别，不记录聊天、密钥或路径",
             onCheckedChange = ui.toggle)
         "export_logs" -> SettingsRow(entry.title, onClick = if (available) ui.export else null,
-            summary = status ?: "导出本机已记录的诊断事件")
+            summary = status ?: "导出诊断事件 JSON；不包含聊天、密钥或路径")
         "clear_logs" -> SettingsRow(entry.title,
             onClick = if (ui.state.loaded && !ui.busy) ui.clear else null,
             summary = status ?: "只清除诊断日志，不影响聊天与执行记录")

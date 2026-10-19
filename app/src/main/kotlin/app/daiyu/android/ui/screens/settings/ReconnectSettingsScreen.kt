@@ -59,6 +59,7 @@ internal fun ReconnectSettingsScreen(
                     failed = false
                 }.onFailure {
                     val restored = withContext(Dispatchers.IO) { runCatching { store.snapshot() } }
+                    if (!canAct()) return@launch
                     draft = restored.getOrElse { previous }
                     durationConfirmed = restored.isSuccess
                     failed = true
@@ -95,11 +96,7 @@ internal fun ReconnectSettingsScreen(
                         }) else null,
                         trailing = { RadioButton(selected = durationConfirmed && draft.duration == duration, onClick = null, enabled = !busy) })
                 }
-                SettingsRow("OpenAI Responses 后台请求（默认关闭）",
-                    tag = "reconnect-background", onClick = if (!busy && durationConfirmed) ({
-                        saveImmediately(draft.copy(responsesBackgroundEnabled = !draft.responsesBackgroundEnabled))
-                    }) else null,
-                    trailing = { RadioButton(selected = durationConfirmed && draft.responsesBackgroundEnabled, onClick = null, enabled = !busy && durationConfirmed) })
+
             }
         }
         notice?.let { text -> item(key = "reconnect-notice") { SettingsNote(text, error = failed) } }

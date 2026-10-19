@@ -129,6 +129,7 @@ class MainActivity : ComponentActivity() {
     private var linuxSettingsVisit: Any? = null
     private var linuxSettingsPageOwner by mutableStateOf<app.daiyu.android.terminal.LinuxSettingsPageOwner?>(null)
     private var terminalPageOwner: Any? = null
+    private var terminalReturnPage = "settings"
     private val mcpSettings by lazy { app.daiyu.android.mcp.McpSettingsStore(applicationContext) }
     private var mcpSettingsPageOwner: app.daiyu.android.mcp.McpSettingsOwner? = null
     private val engineeringUi get() = (application as ChatApplication).engineeringUiForTests
@@ -779,6 +780,7 @@ class MainActivity : ComponentActivity() {
 
     private var retainedPageState by mutableStateOf("chat")
     private var offlineSpeechReturnPage = "chat"
+    private var usageReturnPage = "chat"
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
@@ -1347,6 +1349,8 @@ class MainActivity : ComponentActivity() {
         }
         if (state?.getBoolean("terminal-page", false) == true) {
             terminalPageOwner = Any()
+            terminalReturnPage = state.getString("terminal-return-page")
+                ?.takeIf { it == "settings" || it == "chat" } ?: "settings"
             retainedPageState = "terminal"
         }
         hapticsHost = app.daiyu.android.haptics.HapticsActivityHost(
@@ -1397,7 +1401,9 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "backup", "skills", "subagents", "providers", "appearance", "haptics", "voice-settings", "terminal", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
+                        "backup", "skills", "subagents", "providers", "appearance", "haptics", "voice-settings", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
+                        "terminal" -> closeTerminalPage()
+                        "usage" -> closeUsagePage()
                         "offline-speech" -> retainedPage = offlineSpeechReturnPage
                         "pet-model-settings" -> retainedPage = "pet-settings"
                         "app-icon" -> retainedPage = "appearance"
@@ -1488,7 +1494,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                     }
-                    "usage" -> UsageStatsScreen(onBack = { returnToChat() }, load = { retainedData.stats() })
+                    "usage" -> UsageStatsScreen(onBack = { closeUsagePage() }, load = { retainedData.stats() })
                     "conversation-export" -> exportConversationId?.let { id ->
                         ConversationExportScreen(
                             conversationTitle = exportConversationTitle,
@@ -1527,7 +1533,7 @@ class MainActivity : ComponentActivity() {
                         val ready = state as? app.daiyu.android.terminal.TerminalApplicationState.Ready
                         if (ready == null) TerminalLoadingPage(state, onBack = {
                             if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
-                                retainedPage = "settings"
+                                closeTerminalPage()
                         }) else {
                             val owner = ready.application.terminalOwner
                             val caller by owner.caller.collectAsStateWithLifecycle()
@@ -1538,7 +1544,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenLinux = { reference -> openTerminalLinux(page, reference) },
                                 onBack = {
                                     if (activityUsable() && retainedPage == "terminal" && terminalPageOwner === page)
-                                        retainedPage = "settings"
+                                        closeTerminalPage()
                                 },
                             )
                         }
@@ -1674,7 +1680,7 @@ class MainActivity : ComponentActivity() {
                     "settings" -> {
                         var defaultReasoningResult by remember { mutableStateOf(runCatching { reasoningPreference.snapshot(null) }) }
                         Column(Modifier.fillMaxSize()) {
-                        top.yukonga.miuix.kmp.basic.TextButton(text = "保留会话网关",
+                        if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "保留会话网关",
                             modifier = Modifier.testTag("open-session-gateway"), onClick = { guard { openSessionGateway() } })
                         Box(Modifier.weight(1f)) { DaiyuSettingsScreen(
                         diagnostics = controller.diagnostics,
@@ -1869,7 +1875,7 @@ class MainActivity : ComponentActivity() {
                         onOpenAssistants = { dismissSidebar(); openAssistantPicker(global = true) },
                         onOpenSettings = { dismissSidebar(); retainedPage = "settings" },
                         onOpenModelProviders = { dismissSidebar(); guard { modelSettings() } },
-                        onOpenUsageStats = { dismissSidebar(); retainedPage = "usage" },
+                        onOpenUsageStats = { dismissSidebar(); openUsagePage("chat") },
                         onOpenSkills = { dismissSidebar(); guard { openSkillManagement() } },
                         onOpenPermissions = { dismissSidebar(); retainedPage = "settings" },
                     ) {
@@ -4381,6 +4387,7 @@ class MainActivity : ComponentActivity() {
         state.putInt("browser-save-next", nextBrowserSaveRequestCode)
 
         state.putBoolean("terminal-page", retainedPage == "terminal")
+        state.putString("terminal-return-page", terminalReturnPage)
         state.putBoolean("balance-page", retainedPage == "balance-settings") // Route only, no balance credentials.
         state.putInt("legacy-next-code", nextLegacyCode)
         state.putInt("pending-backup-request", pendingBackupRequest?.takeUnless { it == 101 || it == 103 } ?: 0)
@@ -4688,8 +4695,19 @@ class MainActivity : ComponentActivity() {
     }
     private fun openTerminal() {
         requireActivityUsable()
+        terminalReturnPage = if (retainedPage == "settings") "settings" else "chat"
         terminalPageOwner = Any()
         retainedPage = "terminal"
+    }
+    private fun closeTerminalPage() {
+        if (terminalReturnPage == "settings") retainedPage = "settings" else returnToChat()
+    }
+    private fun openUsagePage(returnPage: String) {
+        usageReturnPage = returnPage
+        retainedPage = "usage"
+    }
+    private fun closeUsagePage() {
+        if (usageReturnPage == "settings") retainedPage = "settings" else returnToChat()
     }
     private fun openSettingsRoute(route: FeatureRoute) {
         when (route) {
@@ -4698,7 +4716,7 @@ class MainActivity : ComponentActivity() {
             FeatureRoute.BACKUP -> backupMenu()
             FeatureRoute.SIDEBAR -> { returnToChat(); openSidebar() }
             FeatureRoute.MANAGE_CHATS -> { updatePane(); retainedPage = "manage" }
-            FeatureRoute.USAGE_STATS -> retainedPage = "usage"
+            FeatureRoute.USAGE_STATS -> openUsagePage("settings")
             FeatureRoute.CONVERSATIONS -> chooseConversation()
             FeatureRoute.CONVERSATION_SEARCH -> searchConversations()
             FeatureRoute.FOLDERS -> browseFolders()
@@ -5630,7 +5648,11 @@ class MainActivity : ComponentActivity() {
     private fun confirmBackupImportAuto(uri: Uri, visit: Any = Any()) {
         checkBackupAvailable(); cancelRestorePreview()
         backupImportVisit = visit
-        prompt = ConfirmPrompt("导入备份", "导入会添加聊天记录，现有记录不会被覆盖。", "导入", action = {
+        prompt = ConfirmPrompt("导入备份",
+            "将识别所选文件。代鱼备份会添加聊天记录，不覆盖现有记录；" +
+                "若包含可恢复的模型配置，将另行确认。" +
+                "旧版格式会转入兼容资料库流程，不直接成为当前聊天记录。",
+            "导入", action = {
             backupGuard {
                 check(backupImportVisit === visit && retainedPage == "backup" &&
                     lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED))

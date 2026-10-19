@@ -61,7 +61,7 @@ internal fun RequestBodyFieldsEditor(draft: ModelSettingsDraftUi, enabled: Boole
         val previous = owner
         onDispose { previous?.revoke() }
     }
-    SettingsRow("逐字段编辑", tag = "model-body-fields", summary = "编辑顶层字段，保留 JSON 类型",
+    SettingsRow("自定义请求体", tag = "model-body-fields", summary = "逐字段编辑",
         onClick = if (enabled) ({
             close()
             owner = RequestBodyFieldEditorOwner(draft)

@@ -49,12 +49,8 @@ class ReconnectSettingsActivityTest : WiredActivityTestCase() {
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
         assertNull(fixture.controller.active)
-        reveal("reconnect-background", "错误重连").performClick()
-        ui.waitUntil(timeoutMillis = 5_000) { store.snapshot().responsesBackgroundEnabled }
-        reveal("reconnect-background", "错误重连").performClick()
-        ui.waitUntil(timeoutMillis = 5_000) { !store.snapshot().responsesBackgroundEnabled }
-        assertEquals(before, fixture.database.exportBackup())
-        assertEquals(0, fixture.opens.get())
+        node("reconnect-background").assertDoesNotExist()
+        assertFalse(store.snapshot().responsesBackgroundEnabled)
     }
 
     fun testLeavingAndReenteringRevokesRatherThanReusesSaveOwner() {

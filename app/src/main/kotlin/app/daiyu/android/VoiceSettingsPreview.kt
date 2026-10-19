@@ -68,7 +68,7 @@ internal fun VoiceSettingsPreview(runtime: ControllerVoiceRuntime, profile: Voic
     }
     DisposableEffect(host, lifecycle) {
         host.setForeground(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED))
-        val revoke = installRevoke { stop(); host.setVisible(false) }
+        val revoke = installRevoke { stop() }
         val unobserve = runtime.observeInvalidation { changed ->
             if (changed == null || changed == profile) releaseOnMain(Handler(Looper.getMainLooper())) { check(stop()) { "settings_preview_release_unconfirmed" } }
         }

@@ -4337,7 +4337,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         ToolCardControls(step, action)
-        if (step.toolName == "screen" && step.state == WorkStepState.OK && activityUsable() && voiceForeground &&
+        if ((step.toolName == "screen" || step.hasBrowserScreenshot) && step.state == WorkStepState.OK && activityUsable() && voiceForeground &&
             retainedPage == "chat" && step.owner?.conversationId == selected?.id?.value) {
             app.daiyu.android.ui.screens.chat.conversation.ToolScreenshotContent(controller, step)
         }

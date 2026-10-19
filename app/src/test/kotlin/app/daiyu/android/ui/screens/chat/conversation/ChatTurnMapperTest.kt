@@ -23,6 +23,17 @@ class ChatTurnMapperTest {
     )
     private fun mapped(message: Message) = ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant
 
+    @Test fun browserScreenshotFlagUsesOnlyExactToolAndAction() {
+        for (name in listOf("browser_read", "browser_write", "screen", "search")) {
+            for (args in listOf("{\"action\":\"screenshot\"}", "{\"action\":\"navigate\"}", "bad json")) {
+                val turn = mapped(message(MessageBlock.Tool(ToolInvocation(ToolCallId("capture"), name, args), "{}")))
+                val step = turn.workProcess!!.segments.single().steps.single()
+                assertEquals(name in setOf("browser_read", "browser_write") && args == "{\"action\":\"screenshot\"}",
+                    step.hasBrowserScreenshot)
+            }
+        }
+    }
+
     @Test fun textOnlyHasNoWorkCardAndPreservesAllText() {
         val turn = mapped(message(text("a", "Hello"), text("b", "world")))
         assertNull(turn.workProcess)

@@ -50,6 +50,7 @@ class BrowserUseManager(
 ) {
     companion object {
         private const val TAG = "BrowserUseManager"
+        private val captureSequence = java.util.concurrent.atomic.AtomicLong(System.currentTimeMillis())
         private const val NAVIGATION_TIMEOUT_MS = 30_000L
         private const val SCREENSHOT_QUALITY = 80        // Explicit screenshot action (iOS: 0.8)
         private const val SNAPSHOT_QUALITY = 70          // Auto-snapshot after visual-change actions (iOS: 0.7)
@@ -977,12 +978,21 @@ class BrowserUseManager(
     }
 
     private fun saveBitmapToFile(bitmap: Bitmap, prefix: String, quality: Int = SCREENSHOT_QUALITY): File {
-        val filename = "${prefix}_${System.currentTimeMillis()}.jpg"
-        val file = File(screenshotsDir, filename)
-        file.outputStream().use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
+        // Reserve a unique source across tabs, hosts and processes; never overwrite an earlier capture.
+        var file: File
+        do {
+            val id = captureSequence.updateAndGet { maxOf(it + 1, System.currentTimeMillis()) }
+            file = File(screenshotsDir, "${prefix}_${id}.jpg")
+        } while (!file.createNewFile())
+        try {
+            file.outputStream().use { out ->
+                check(bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)) { "Screenshot encoding failed" }
+            }
+            return file
+        } catch (failure: Exception) {
+            file.delete()
+            throw failure
         }
-        return file
     }
 
     // -- Click --

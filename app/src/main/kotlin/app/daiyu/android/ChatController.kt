@@ -2394,16 +2394,25 @@ class ChatController internal constructor(private val application:Application,
                 check(message.role == Message.ASSISTANT_ROLE && message.id == snapshot.message.id &&
                     message.conversationId.value == owner.conversationId && message.runId.value == owner.runId &&
                     snapshot.message.conversationId == message.conversationId && snapshot.message.runId == message.runId)
-                val record = snapshot.tools.singleOrNull { it.invocation.id.value == callId && it.invocation.name == "screen" }
+                val record = snapshot.tools.singleOrNull { it.invocation.id.value == callId && it.invocation.name in setOf("screen", "browser_read", "browser_write") }
                     ?: return@runCatching null
                 val blocks = message.blocks + message.historySegments.flatMap { it.blocks }
                 check(blocks.filterIsInstance<MessageBlock.Tool>().any { it.invocation == record.invocation && it.result == record.result })
-                app.daiyu.android.ui.ToolScreenshotReceipt.decode(record)
+                if (record.invocation.name == "screen") app.daiyu.android.ui.ToolScreenshotReceipt.decode(record)
+                else {
+                    check(record.disposition == app.daiyu.android.domain.runtime.ToolDisposition.SUCCEEDED &&
+                        org.json.JSONObject(record.invocation.arguments).optString("action") == "screenshot")
+                    val receipt = org.json.JSONObject(checkNotNull(record.result)).getJSONObject("screenshot_receipt")
+                    app.daiyu.android.media.BrowserScreenshotStore(application.filesDir, application.cacheDir).thumbnail(
+                        app.daiyu.android.media.BrowserScreenshotStore.Binding(owner.conversationId, owner.messageId,
+                            owner.runId, record.invocation.id.value, record.invocation.name, record.invocation.arguments), receipt)
+                }
             }.getOrNull()
             handler.post {
                 val valid = synchronized(this) {
                     generationReaders--; if (closed) closeStorageWhenIdle(); !closed && !dataBusy && dataRevision == revision
                 }
+                if (!valid) image?.recycle()
                 complete(if (valid) image else null)
             }
         } } catch (_: java.util.concurrent.RejectedExecutionException) {

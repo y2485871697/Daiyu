@@ -115,6 +115,67 @@ class CatalogBrowserBindingAndroidTest : InstrumentationTestCase() {
         } finally { Files.delete(files.toPath()) }
     }
 
+    fun testProductionScreenshotReceiptSurvivesHostCloseAndSourceRemoval() = verifyScreenshotReceipt()
+
+    private fun verifyScreenshotReceipt() {
+        val base = instrumentation.targetContext
+        val root = Files.createTempDirectory(base.cacheDir.toPath(), "browser-receipt-").toFile()
+        val files = java.io.File(root, "files").apply { mkdirs() }
+        val cache = java.io.File(root, "cache").apply { mkdirs() }
+        val context = object : android.content.ContextWrapper(base) {
+            override fun getApplicationContext(): android.content.Context = this
+            override fun getFilesDir(): java.io.File = files
+            override fun getCacheDir(): java.io.File = cache
+        }
+        val identity = BrowserRunIdentity(ConversationId("receipt-conversation"), RunId("receipt-run"),
+            "receipt-profile", MessageId("receipt-message"))
+        val grant = BrowserGrant(BrowserOwner(identity.runId.value, BrowserOwnerKind.MAIN), BrowserAccess.FULL)
+        val preparation = BrowserRunPreparation.prepare(identity, BrowserSettings(BrowserAccess.FULL),
+            grant, setOf("screenshot"))
+        val token = preparation.confirm(preparation.preview)
+        var binding: CatalogBrowserBinding? = null
+        try {
+            val privateRoot = app.daiyu.android.ControllerBrowserPreparation.preparePrivateRootOnWorker(context)
+            val opened = main { CatalogBrowserBinding.open(context, privateRoot,
+                AssistantProfile(identity.assistantId, "Screenshot", ""), token) }
+            binding = opened
+            assertTrue(opened.session.execute(mapOf("action" to "new_tab")) is
+                app.daiyu.android.browser.bridge.BrowserOutcome.Confirmed)
+            val executionOwner = owner(identity)
+            val catalog = opened.bindOwner(executionOwner)
+            val ledger = app.daiyu.android.domain.tools.InMemoryToolLedgerStore()
+            val dispatcher = app.daiyu.android.domain.tools.ToolDispatcher(
+                app.daiyu.android.domain.tools.ToolRegistry().apply { catalog.tools.forEach { register(it) } }.snapshot(),
+                app.daiyu.android.domain.tools.SessionCapabilities(identity.runId.value,
+                    setOf("browser.read", "browser.write")), app.daiyu.android.domain.tools.ToolLedger(ledger))
+            val invocation = ToolInvocation(ToolCallId("receipt-call"), "browser_read", "{\"action\":\"screenshot\"}")
+            val outcome = dispatcher.dispatchOwned(catalog.taskAuthorization, listOf(invocation), executionOwner).single().outcome
+            assertTrue("real screenshot must freeze before Confirmed: $outcome",
+                outcome is app.daiyu.android.domain.tools.DispatchOutcome.Confirmed)
+            val payload = org.json.JSONObject((outcome as app.daiyu.android.domain.tools.DispatchOutcome.Confirmed).payload)
+            assertTrue(payload.isNull("filePath"))
+            val receipt = payload.getJSONObject("screenshot_receipt")
+            val assetBinding = app.daiyu.android.media.BrowserScreenshotStore.Binding.from(executionOwner, invocation)
+            val store = app.daiyu.android.media.BrowserScreenshotStore(files, cache)
+            val original = store.read(assetBinding, receipt)
+            opened.close()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (!opened.closeStatus().successful && System.nanoTime() < deadline) Thread.sleep(10)
+            assertTrue(opened.closeStatus().successful)
+            java.io.File(cache, "browser_screenshots").deleteRecursively()
+            val reopened = app.daiyu.android.media.BrowserScreenshotStore(files, cache)
+            assertTrue(original.contentEquals(reopened.read(assetBinding, receipt)))
+            assertTrue(runCatching { reopened.read(assetBinding.copy(call = "other-call"), receipt) }.isFailure)
+            val thumbnail = reopened.thumbnail(assetBinding, receipt)
+            assertNotNull(thumbnail)
+            thumbnail!!.recycle()
+        } finally {
+            binding?.close()
+            main { Unit }
+            root.deleteRecursively()
+        }
+    }
+
     private fun owner(identity: BrowserRunIdentity): RunExecutionOwner {
         var captured: RunExecutionOwner? = null
         val receiver = object : ReceiptBatchToolExecutor {

@@ -107,21 +107,15 @@ class RunBrowserToolsTest {
         }
     }
 
-    @Test fun existingSessionDefaultReadAndResultIncludingFilePathArePreserved() {
+    @Test fun screenshotWithoutStoreRejectsBeforeBrowserExecution() {
         Fixture().use { f ->
             f.hostTab()
-            f.port.result = BrowserExecutionResult("quoted \"text\"\n原文", "/private/result.png")
-            val result = f.dispatch("""{"action":"screenshot","full_page":true}""") as DispatchOutcome.Confirmed
-            val payload = JSONObject(result.payload)
-            assertEquals(f.port.result.text, payload.getString("text"))
-            assertEquals(f.port.result.filePath, payload.getString("filePath"))
-            val (command, lease) = f.port.calls.single()
-            assertEquals("screenshot", command.action)
-            assertEquals(true, command.arguments["full_page"])
-            assertEquals(f.session.currentTab, lease)
-            assertEquals(1, f.resources.created.size) // No second session/host/tab.
-            assertTrue((f.dispatch("""{"action":"screenshot","full_page":true}""") as DispatchOutcome.Confirmed).replayed)
-            assertEquals(1, f.port.calls.size)
+            val json = """{"action":"screenshot","full_page":true}"""
+            repeat(2) {
+                assertEquals(DispatchOutcome.NotExecuted("browser_screenshot_store_unavailable"), f.dispatch(json))
+            }
+            assertTrue(f.port.calls.isEmpty())
+            assertEquals(1, f.resources.created.size)
         }
     }
 
@@ -246,7 +240,7 @@ class RunBrowserToolsTest {
     @Test fun confirmedReadAndWriteReplayRequireExactOwnerAndAuthorizationBeforeLedgerAccess() {
         for (write in listOf(false, true)) {
             val json = if (write) """{"action":"navigate","tab_id":0,"url":"https://example.invalid/"}"""
-                else """{"action":"screenshot","tab_id":0}"""
+                else """{"action":"get_text","tab_id":0}"""
             Fixture(approved = if (write) listOf(json) else emptyList()).use { f ->
                 f.hostTab()
                 f.port.result = BrowserExecutionResult("private browser payload", "/private/result.png")

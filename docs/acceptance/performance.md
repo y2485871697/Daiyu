@@ -172,3 +172,9 @@ scroll/streaming/ime和诊断off/on分别判定，不混合稀释；样本口径
 沿用60Hz policy的100ms停止反馈p95门槛；按用户选择`after_stop_recognized`，从长按被识别或停止请求被接收，计至停止反馈首次可见。每组采集前固定入口，不能事后选择更晚的起点。保留现有长按停止，不缩短或取消识别等待；另行报告从pointer-down到反馈的完整手势耗时，不将其套用100ms门槛。仅记录函数返回、语义可见或下一次draw时，必须明确所测端点与上界，不称为硬件呈现时间。
 
 批准来源：`question-001b2812-081f-4b18-ad71-6f4dd0ed57ee`，选项`after_stop_recognized`。此补充仅冻结端点，不产生样本，不改变`measurement_status=not_run`或验收状态；120Hz候选门槛仍未获批准。
+
+## 隔离完整规模采集的受控负载
+
+`testCollectFullScaleScrollInputAndBackendMigration` 的显式 opt-in 路径在原滚动和20轮语义输入后，增加30秒真实Controller/Runner驱动的受控文本流、30秒真实编辑器 `InputConnection.commitText` 与20轮 owner 绑定停止反馈上界。小规模默认入口不增加这些长负载。受控模型仅在测试APK中存在，没有真实供应商请求或网络回退；发送仍走生产Composer/准备/持久化链。
+
+原始记录分别保留窗口起止、输出/提交计数与负载节奏；帧按 `INTENDED_VSYNC_TIMESTAMP` 统计窗口活性，callback场景名仅作提示。InputConnection不覆盖系统IME进程往返或硬件输入。停止从 `controller.stop(owner)` 调用前计时，等待原owner的STOPPED持久化与空闲语义，再取下一次draw；明确标为上界，不是首次可见或硬件呈现。原100会话切换、诊断off/on与后端迁移保留；新增负载不自动生成baseline、不改变阈值、不自动通过AC-072/073。

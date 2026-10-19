@@ -59,5 +59,56 @@ class MemoryCollectorContract(unittest.TestCase):
         self.assertIn('== 10', source)
 
 
+class ControlledWorkloadContract(unittest.TestCase):
+    def test_controlled_transport_has_no_network_fallback_and_is_full_scale_only(self):
+        source = (PERFORMANCE / 'ReleaseSyntheticPerformanceTest.kt').read_text()
+        self.assertIn('if (fullScale) ControlledPerformanceModel() else null', source)
+        self.assertIn('controlledModel?.port ?: error("external_model_request_forbidden")', source)
+        call = source.index('collectControlledWorkloads(launched, activeFixture.controller')
+        self.assertIn('if (fullScale)', source[call - 120:call])
+        model = (PERFORMANCE / 'ControlledPerformanceModel.kt').read_text()
+        self.assertIn('checkNotNull(queued.pollFirst())', model)
+        self.assertIn('ModelEvent.TextDelta("body"', model)
+        self.assertIn('finally { drained.countDown() }', model)
+        for forbidden in ('OkHttp', 'HttpURLConnection', 'ModelFactory'):
+            self.assertNotIn(forbidden, model)
+
+    def test_input_connection_never_falls_back_to_semantics(self):
+        source = (PERFORMANCE / 'ReleaseSyntheticPerformanceTest.kt').read_text()
+        start = source.index('val connection = main')
+        end = source.index('captured.scenario("synthetic_stop_upper_bound")')
+        window = source[start:end]
+        self.assertIn('editor.onCheckIsTextEditor()', window)
+        self.assertIn('editor.onCreateInputConnection(', window)
+        self.assertIn('connection.commitText("字", 1)', window)
+        self.assertIn('connection.closeConnection()', window)
+        self.assertIn('TimeUnit.SECONDS.toNanos(30)', window)
+        self.assertIn('"字".repeat(commits)', window)
+        self.assertNotIn('performTextReplacement', window[:window.index('finally')])
+        self.assertIn('.put("ime_service_round_trip_measured", false)', window)
+
+    def test_stop_keeps_owner_persistence_and_upper_bound_endpoint(self):
+        source = (PERFORMANCE / 'ReleaseSyntheticPerformanceTest.kt').read_text()
+        stop = source.split('captured.scenario("synthetic_stop_upper_bound")', 1)[1].split('private fun collect(', 1)[0]
+        self.assertIn('repeat(20)', stop)
+        self.assertLess(stop.index('requestNs = System.nanoTime()'), stop.index('controller.stop(owner)'))
+        self.assertIn('session.drained.await', stop)
+        self.assertIn('saved.id == owner.id && saved.runId == owner.runId && saved.status == RunStatus.STOPPED', stop)
+        self.assertIn('.put("latency_kind", "instrumented_upper_bound")', stop)
+        self.assertIn('.put("first_visible_feedback_measured", false)', stop)
+        self.assertNotIn('.put("present_latency", true)', source)
+
+    def test_windows_use_vsync_not_callback_labels_and_alias_cleanup_is_scoped(self):
+        source = (PERFORMANCE / 'SyntheticFrameCollector.kt').read_text()
+        counter = source.split('fun framesBetween(', 1)[1].split('fun scenario(', 1)[0]
+        self.assertIn('"intended_vsync_timestamp_ns"', counter)
+        self.assertNotIn('.label', counter)
+        fixture = (PERFORMANCE / 'ReleaseSyntheticPerformanceTest.kt').read_text()
+        self.assertIn('it == keyAlias || it.startsWith("$keyAlias.")', fixture)
+        self.assertIn('cleanup { controlledModel?.close() }', fixture)
+        self.assertLess(fixture.index('cleanup { fixture?.stopController() }'), fixture.index('cleanup { controlledModel?.close() }'))
+        self.assertIn('window.put("frame_count_by_intended_vsync", count)', fixture)
+
+
 if __name__ == '__main__':
     unittest.main()

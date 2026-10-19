@@ -18,6 +18,7 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.test.platform.app.InstrumentationRegistry
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ConversationDatabase
+import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.storage.ModelSettingsStore
 import app.daiyu.android.tasksurface.*
 import org.json.JSONObject
@@ -64,6 +65,117 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
         collect(fullScale = true)
     }
 
+    private fun awaitState(label: String, predicate: () -> Boolean) {
+        val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (!main(predicate)) {
+            check(System.nanoTime() < deadline) { label }; Thread.sleep(10)
+        }
+    }
+
+    private fun collectControlledWorkloads(activity: MainActivity, controller: ChatController,
+        database: ConversationDatabase, model: ControlledPerformanceModel,
+        captured: SyntheticFrameCollector, records: MutableList<JSONObject>) {
+        fun start(label: String): Pair<ControlledPerformanceModel.Session, Message> {
+            val session = model.enqueue()
+            ui.onNodeWithTag("chat-draft").performTextReplacement(label)
+            ui.onNodeWithTag("chat-send").performClick()
+            check(session.entered.await(5, TimeUnit.SECONDS)) { "synthetic_session_not_entered" }
+            awaitState("synthetic_running_owner_missing") { controller.active?.status == RunStatus.RUNNING }
+            ui.onNodeWithTag("chat-control").assertIsDisplayed()
+            return session to main { checkNotNull(controller.active) }
+        }
+        fun stop(session: ControlledPerformanceModel.Session, owner: Message) {
+            main { check(controller.stop(owner)) { "synthetic_stop_owner_rejected" } }
+            check(session.drained.await(5, TimeUnit.SECONDS)) { "synthetic_session_drain_missing" }
+            awaitState("synthetic_stop_not_idle") { controller.active == null }
+            check(database.messages(owner.conversationId).last().second.let {
+                it.id == owner.id && it.runId == owner.runId && it.status == RunStatus.STOPPED
+            }) { "synthetic_stop_not_persisted" }
+        }
+        val (stream, streamOwner) = start("synthetic streaming")
+        captured.scenario("synthetic_streaming")
+        val streamStart = System.nanoTime()
+        val initialEvents = stream.emitted.get()
+        var streamCompleted = false
+        try {
+            val deadline = streamStart + TimeUnit.SECONDS.toNanos(30)
+            while (System.nanoTime() < deadline) {
+                check(stream.drained.count != 0L) { "synthetic_stream_ended_early" }
+                Thread.sleep(20)
+            }
+            check(stream.emitted.get() > initialEvents) { "synthetic_stream_did_not_grow" }
+            check(main { controller.active?.id == streamOwner.id })
+            streamCompleted = true
+        } finally {
+            records.add(JSONObject().put("type", "scenario_window").put("scenario", "synthetic_streaming")
+                .put("start_ns", streamStart).put("end_ns", System.nanoTime())
+                .put("completed", streamCompleted).put("emitted_deltas", stream.emitted.get() - initialEvents)
+                .put("delta_interval_ms", ControlledPerformanceModel.INTERVAL_MS)
+                .put("transport_kind", "controlled_synthetic_model_session").put("real_provider_transport", false))
+            stop(stream, streamOwner)
+        }
+
+        ui.onNodeWithTag("chat-draft").performTextReplacement("")
+        ui.onNodeWithTag("chat-draft").performClick()
+        ui.onNodeWithTag("chat-draft").assertIsFocused()
+        val connection = main {
+            val editor = checkNotNull(activity.window.decorView.findFocus())
+            check(editor.onCheckIsTextEditor()) { "synthetic_focused_view_not_editor" }
+            checkNotNull(editor.onCreateInputConnection(android.view.inputmethod.EditorInfo())) {
+                "synthetic_editor_connection_missing"
+            }
+        }
+        captured.scenario("synthetic_input_connection")
+        val inputStart = System.nanoTime()
+        var commits = 0; var inputCompleted = false
+        try {
+            val deadline = inputStart + TimeUnit.SECONDS.toNanos(30)
+            while (System.nanoTime() < deadline) {
+                main { check(connection.commitText("字", 1)) { "synthetic_commit_rejected" } }
+                commits++; Thread.sleep(50)
+            }
+            val expected = "字".repeat(commits)
+            ui.waitUntil(5_000) { ui.onNodeWithTag("chat-draft").fetchSemanticsNode()
+                .config.getOrNull(SemanticsProperties.EditableText)?.text == expected }
+            inputCompleted = true
+        } finally {
+            records.add(JSONObject().put("type", "scenario_window").put("scenario", "synthetic_input_connection")
+                .put("start_ns", inputStart).put("end_ns", System.nanoTime()).put("commits", commits)
+                .put("commit_interval_ms", 50).put("completed", inputCompleted)
+                .put("method", "direct_editor_input_connection_commitText").put("semantics_injection", false)
+                .put("hardware_input_latency", false).put("ime_service_round_trip_measured", false))
+            main { connection.closeConnection() }
+        }
+        ui.onNodeWithTag("chat-draft").performTextReplacement("")
+        captured.scenario("synthetic_stop_upper_bound")
+        repeat(20) { round ->
+            val (session, owner) = start("synthetic stop $round")
+            var requestNs = 0L
+            main {
+                check(controller.active?.id == owner.id)
+                requestNs = System.nanoTime()
+                check(controller.stop(owner)) { "synthetic_stop_owner_rejected" }
+            }
+            check(session.drained.await(5, TimeUnit.SECONDS)) { "synthetic_session_drain_missing" }
+            awaitState("synthetic_stop_not_idle") { controller.active == null }
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-control").fetchSemanticsNodes().isEmpty() }
+            ui.onNodeWithTag("chat-send").assertIsDisplayed()
+            ui.onNodeWithTag("chat-draft").assertIsEnabled()
+            val verifiedNs = System.nanoTime()
+            val drawNs = nextDrawNs(activity)
+            val saved = database.messages(owner.conversationId).last().second
+            check(saved.id == owner.id && saved.runId == owner.runId && saved.status == RunStatus.STOPPED)
+            records.add(JSONObject().put("type", "stop_sample").put("round", round)
+                .put("owner_message_id", owner.id.value).put("owner_run_id", owner.runId.value)
+                .put("method", "controller_stop_request_to_verified_idle_next_draw")
+                .put("latency_kind", "instrumented_upper_bound").put("start_ns", requestNs)
+                .put("semantics_verified_ns", verifiedNs).put("next_draw_ns", drawNs)
+                .put("upper_bound_ns", drawNs - requestNs).put("present_latency", false)
+                .put("first_visible_feedback_measured", false).put("long_press_gesture_measured", false))
+        }
+        check(records.count { it.optString("type") == "stop_sample" } == 20)
+    }
+
     private fun collect(fullScale: Boolean) {
         val target = instrumentation.targetContext
         check(target.packageName == "app.daiyu.android.synthetic") { "non_synthetic_target_refused" }
@@ -98,6 +210,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
         var migrationPackageFile: File? = null
         var scrollStart = 0L; var scrollEnd = 0L; var refreshRate = 0f; var preferredRate = 0f
         val inputs = ArrayList<JSONObject>()
+        val controlledModel = if (fullScale) ControlledPerformanceModel() else null
         var dataset: FullPerformanceDataset.Snapshot? = null
         var migration: FullPerformanceDataset.Package? = null
         try {
@@ -107,7 +220,7 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
             ui.waitForIdle()
             awaitReady(original)
-            val activeFixture = PerformanceFixture(target, id, diagnosticsEnabled = diagnosticsMode == "on", onConstructionCleanupFailure = { cleanupFailed = true }).also { fixture = it }
+            val activeFixture = PerformanceFixture(target, id, diagnosticsEnabled = diagnosticsMode == "on", controlledModel = controlledModel, onConstructionCleanupFailure = { cleanupFailed = true }).also { fixture = it }
             stage = "dataset_setup"
             awaitReady(activeFixture.controller)
             val diagnosticState = checkNotNull(activeFixture.controller.diagnostics).load()
@@ -171,9 +284,19 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                     .put("start_ns", start).put("semantics_verified_ns", verified).put("next_draw_ns", draw)
                     .put("upper_bound_ns", draw - start))
             }
+            if (fullScale) {
+                stage = "streaming_input_connection_stop"
+                collectControlledWorkloads(launched, activeFixture.controller, activeFixture.database,
+                    checkNotNull(controlledModel), captured, inputs)
+            }
             captured.close()
+            inputs.filter { it.optString("type") == "scenario_window" }.forEach { window ->
+                val count = captured.framesBetween(window.getLong("start_ns"), window.getLong("end_ns"))
+                window.put("frame_count_by_intended_vsync", count)
+                check(count > 0) { "synthetic_scenario_frames_missing" }
+            }
             assertTrue("raw frames missing", captured.frameCount > 0)
-            assertEquals(0L, captured.overflow); assertEquals(0L, captured.droppedReports); assertEquals(20, inputs.size)
+            assertEquals(0L, captured.overflow); assertEquals(0L, captured.droppedReports); assertEquals(20, inputs.count { it.optString("type") == "input_sample" })
             if (fullScale) {
                 stage = "conversation_switch_memory"
                 val candidates = activeFixture.database.conversations().take(100)
@@ -221,6 +344,8 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                     if (first == null) primaryFailure = failure else if (first !== failure) first.addSuppressed(failure)
                 }
             }
+            cleanup { fixture?.stopController() }
+            cleanup { controlledModel?.close() }
             cleanup { collector?.close() }
             cleanup {
                 if (memoryReport == null) memoryCollector?.let { memory ->
@@ -318,8 +443,10 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
 
 private class PerformanceFixture(private val base: Context, id: String, createController: Boolean = true,
     diagnosticsEnabled: Boolean = false,
+    controlledModel: ControlledPerformanceModel? = null,
     private val onConstructionCleanupFailure: () -> Unit = {}) : AutoCloseable {
     private val prefix = "performance-$id-"
+    private val keyAlias = "app.daiyu.android.synthetic.performance.$id"
     private var controllerConstructionStarted = false
     private val root = File(base.cacheDir, "performance-fixture-$id")
     private val databases = java.util.Collections.synchronizedSet(linkedSetOf<String>())
@@ -361,14 +488,16 @@ private class PerformanceFixture(private val base: Context, id: String, createCo
                     @Synchronized override fun read() = record
                     @Synchronized override fun write(record: String) { this.record = record }
                 }).apply { check(save(TaskSurfacePreference.FOREGROUND)) }
-                val modelSettings = ModelSettingsStore(application, "app.daiyu.android.synthetic.performance.$id")
+                val modelSettings = ModelSettingsStore(application, keyAlias)
+                if (controlledModel != null) modelSettings.save(
+                    ModelSettings("https://example.invalid", "performance", "synthetic-key", false))
                 val uiPreferences = application.getSharedPreferences("conversation-ui", 0)
                 val diagnostics = app.daiyu.android.diagnostics.DiagnosticLogStore(
                     File(application.noBackupFilesDir, "diagnostics-v1/state.json"))
                 diagnostics.setEnabled(diagnosticsEnabled)
                 controllerConstructionStarted = true
                 controller = ChatController(application, database, modelSettings, uiPreferences,
-                    { error("external_model_request_forbidden") }, taskSurfaceStore = surfaces, diagnostics = diagnostics)
+                    { controlledModel?.port ?: error("external_model_request_forbidden") }, taskSurfaceStore = surfaces, diagnostics = diagnostics)
             }
         } catch (failure: Throwable) {
             try { close() } catch (cleanup: Throwable) {
@@ -378,6 +507,8 @@ private class PerformanceFixture(private val base: Context, id: String, createCo
             throw failure
         }
     }
+
+    fun stopController() { if (::controller.isInitialized) controller.stop() }
 
     override fun close() {
         if (::controller.isInitialized) {
@@ -405,6 +536,11 @@ private class PerformanceFixture(private val base: Context, id: String, createCo
         }
         synchronized(preferences) { preferences.toList() }.forEach { name ->
             attempt { check(base.deleteSharedPreferences(name)) { "synthetic_preferences_cleanup_failed" } }
+        }
+        attempt {
+            val keys = java.security.KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+            java.util.Collections.list(keys.aliases()).filter { it == keyAlias || it.startsWith("$keyAlias.") }
+                .forEach { keys.deleteEntry(it) }
         }
         attempt { check(!root.exists() || root.deleteRecursively()) { "synthetic_cache_cleanup_failed" } }
         failure?.let { throw it }

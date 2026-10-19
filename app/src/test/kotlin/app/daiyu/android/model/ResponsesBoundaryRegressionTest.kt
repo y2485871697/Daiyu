@@ -16,8 +16,10 @@ class ResponsesBoundaryRegressionTest {
     private class Connection(private val status:Int=200,
         private val stream:String="data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n"):HttpsURLConnection(URL("https://example.invalid")) {
         val body=ByteArrayOutputStream()
+        var disconnected=false
+        var inputClosed=false
         override fun connect() {}
-        override fun disconnect() {}
+        override fun disconnect() {disconnected=true}
         override fun usingProxy()=false
         override fun getCipherSuite()="fixture"
         override fun getLocalCertificates():Array<Certificate>?=null
@@ -25,7 +27,35 @@ class ResponsesBoundaryRegressionTest {
         override fun getOutputStream()=body
         override fun getResponseCode()=status
         override fun getContentType()="text/event-stream"
-        override fun getInputStream()=ByteArrayInputStream(stream.toByteArray())
+        override fun getInputStream()=object : ByteArrayInputStream(stream.toByteArray(Charsets.UTF_8)) {
+            override fun close() {inputClosed=true;super.close()}
+        }
+    }
+    @Test fun initialUtf8BomPreservesCompletedProtocolOutput() {
+        val terminal="data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n"
+        fun read(prefix:String):List<ModelEvent> {
+            val connection=Connection(stream=prefix+terminal)
+            val events=mutableListOf<ModelEvent>()
+            ResponsesModel(config) {connection}.open(emptyList()).next(emptyList()) {events.add(it)}
+            assertTrue(connection.inputClosed);assertTrue(connection.disconnected)
+            return events
+        }
+        val plain=read("");val bom=read("\uFEFF")
+        assertEquals(plain,bom)
+        assertEquals(1,bom.filterIsInstance<ModelEvent.ProtocolOutput>().size)
+    }
+    @Test fun oversizedSseLineClosesTransportAndCannotRepost() {
+        val connection=Connection(stream="data: "+"x".repeat(1_048_576))
+        var connections=0
+        val events=mutableListOf<ModelEvent>()
+        val session=ResponsesModel(config) {connections++;connection}.open(emptyList())
+        try {session.next(emptyList()) {events.add(it)};fail("oversized line accepted")}
+        catch(failure:ModelRequestException) {assertEquals(ModelFailure.PROTOCOL,failure.failure)}
+        assertTrue(connection.inputClosed);assertTrue(connection.disconnected)
+        assertTrue(events.none {it is ModelEvent.ToolReady || it is ModelEvent.ProtocolOutput})
+        try {session.next(emptyList()) {};fail("failed request reposted")}
+        catch(_:IllegalStateException) {}
+        assertEquals(1,connections)
     }
     @Test fun genericDefinitionsReachRequest() {
         val connection=Connection()

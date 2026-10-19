@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.foundation.border
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -152,7 +155,10 @@ private fun Document(document: ToolDisclosureUi) {
         else MiuixTheme.textStyles.footnote1
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         SectionTitle(document.title)
-        val surface = Modifier.fillMaxWidth().background(MiuixTheme.colorScheme.surfaceVariant.copy(alpha = .35f))
+        val shape = RoundedCornerShape(8.dp)
+        val surface = Modifier.fillMaxWidth().clip(shape)
+            .background(MiuixTheme.colorScheme.surfaceVariant)
+            .border(1.dp, MiuixTheme.colorScheme.outline, shape)
         if (tappable) Column(surface.testTag("tool-document:${document.title}")
             .clickable(role = Role.Button, onClickLabel = "查看${document.title}") { opened = true }.padding(8.dp)) {
             Text(preview.text, modifier = Modifier.testTag("tool-output-preview:${document.title}"), style = style, maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,

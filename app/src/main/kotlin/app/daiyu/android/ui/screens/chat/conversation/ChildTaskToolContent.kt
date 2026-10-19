@@ -1,5 +1,14 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import app.daiyu.android.ui.icons.DaiyuIcons
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
@@ -69,16 +78,13 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
             failed -> Text("子任务记录读取失败", color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1)
             rows.isEmpty() -> Text("暂无子任务记录", style = MiuixTheme.textStyles.footnote1)
             else -> rows.forEach { row -> key(row.owner) {
-                Column(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(ToolRichDetails.scrub(row.agent, limit = 80), Modifier.weight(1f), style = MiuixTheme.textStyles.footnote1)
-                        Text(row.status, color = if (row.completed) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            style = MiuixTheme.textStyles.footnote1)
-                    }
-                    Text(ToolRichDetails.scrub(row.model, limit = 160) + " · " + row.owner.childRunId.take(8), style = MiuixTheme.textStyles.footnote1)
+                ChildTaskDisclosure(row, details = {
+                    Text(ToolRichDetails.scrub(row.model, limit = 160) + " · " + row.owner.childRunId.take(8),
+                        style = MiuixTheme.textStyles.footnote1)
                     records.firstOrNull { it.owner == row.owner }?.text?.takeIf { it.isNotBlank() }?.let {
                         ToolDocument(ToolDisclosureUi("子任务输出", ToolRichDetails.scrub(it)))
                     }
+                }, controls = {
                     val actions = when (row.status) {
                         "已暂停" -> listOf(ToolCardAction.RESUME_TASK, ToolCardAction.STOP_TASK)
                         "执行中", "排队中" -> listOf(ToolCardAction.PAUSE_TASK, ToolCardAction.STOP_TASK)
@@ -89,8 +95,33 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
                         actions.forEach { action -> TextButton(text = action.label, modifier = Modifier.heightIn(min = 44.dp),
                             onClick = { onAction(step.actionRequest(action, subAgentStatusItemKey(row.owner))) }) }
                     }
-                }
+                })
             } }
         }
+    }
+}
+
+@Composable
+internal fun ChildTaskDisclosure(
+    row: SubAgentStatusRow,
+    details: @Composable () -> Unit,
+    controls: @Composable () -> Unit,
+) {
+    var expanded by remember(row.owner) { mutableStateOf(false) }
+    val colors = MiuixTheme.colorScheme
+    Column(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().testTag("tool-child-summary:${row.owner.childRunId}")
+            .heightIn(min = 44.dp).semantics { stateDescription = if (expanded) "已展开" else "已折叠" }
+            .clickable(role = Role.Button, onClickLabel = if (expanded) "折叠子任务" else "展开子任务") { expanded = !expanded },
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(ToolRichDetails.scrub(row.agent, limit = 80), Modifier.weight(1f), style = MiuixTheme.textStyles.footnote1)
+            Text(row.status, color = if (row.completed) colors.primary else colors.onSurfaceVariantSummary,
+                style = MiuixTheme.textStyles.footnote1)
+            Icon(DaiyuIcons.ChevronDown, null, Modifier.size(14.dp).rotate(if (expanded) 180f else 0f),
+                tint = colors.onSurfaceVariantSummary)
+        }
+        if (expanded) details()
+        controls()
     }
 }

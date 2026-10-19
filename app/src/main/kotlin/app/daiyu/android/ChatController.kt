@@ -905,6 +905,116 @@ class ChatController internal constructor(private val application:Application,
         return generationOutputReader(scope, binding).readBackup(reference)
     }
 
+    /** Exact, read-only originals; never converts imported provenance into execution authority. */
+    private fun openGenerationMediaOnWorker(binding: GenerationAttemptBinding, key: GenerationMediaKey,
+        active: java.util.concurrent.atomic.AtomicBoolean): GenerationMediaOriginal {
+        fun authorize() {
+            check(active.get())
+            synchronized(this) { check(!closed && binding.conversationId !in generationConversationPublicationSeals) }
+        }
+        check(Looper.myLooper() != Looper.getMainLooper())
+        authorize()
+        fun fromBytes(metadata: ControllerGenerationOutputMetadata, bytes: ByteArray): GenerationMediaOriginal {
+            authorize()
+            val file = java.io.File.createTempFile("generation-view-", ".media", application.cacheDir)
+            try {
+                java.io.FileOutputStream(file).use { it.write(bytes) }
+                authorize()
+                return GenerationMediaOriginal(metadata, java.io.FileInputStream(file), active)
+            } finally { file.delete() }
+        }
+        return when (key.source) {
+            "live" -> {
+                val scope = checkNotNull(GenerationSettingsStore(application).readAccountScope())
+                val retained = retainGenerationResources(scope)
+                val attempt = retained.database().rawQuery(
+                    "SELECT fingerprint,protocol FROM generation_outputs WHERE account_scope=? AND conversation_id=? " +
+                        "AND assistant_id=? AND run_id=? AND tool_call_id=? AND tool_name=? AND item_id=? AND output_index=?",
+                    arrayOf(scope, binding.conversationId, binding.assistantMessageId, binding.runId, binding.toolCallId,
+                        binding.toolName, key.itemId, key.outputIndex.toString())).use { rows ->
+                    check(rows.moveToFirst())
+                    val value = GenerationAttempt(binding.identity(key.itemId), rows.getString(0), GenerationProtocol.valueOf(rows.getString(1)))
+                    check(!rows.moveToNext())
+                    value
+                }
+                val reader = generationOutputReader(scope, binding)
+                val metadata = checkNotNull(reader.metadata(attempt, key.outputIndex))
+                val stream = checkNotNull(reader.openOriginal(attempt, key.outputIndex))
+                try { authorize(); GenerationMediaOriginal(metadata, stream, active) }
+                catch (failure: Exception) { stream.close(); throw failure }
+            }
+            "history" -> {
+                val history = checkNotNull(neutralBackup.historicalGenerationOutputs(ConversationId(binding.conversationId)).singleOrNull {
+                    it.conversationId == binding.conversationId && it.assistantMessageId == binding.assistantMessageId &&
+                        it.runId == binding.runId && it.toolCallId == binding.toolCallId && it.source.toolName == binding.toolName &&
+                        it.identity.itemId == key.itemId && it.outputIndex == key.outputIndex
+                })
+                val bytes = neutralBackup.historicalGenerationOriginal(history)
+                fromBytes(ControllerGenerationOutputMetadata(history.outputIndex, history.kind, history.mimeType,
+                    history.bytes, history.width, history.height, history.durationMs), bytes)
+            }
+            "static" -> {
+                val output = checkNotNull(neutralBackup.staticGenerationOutputs(ConversationId(binding.conversationId)).singleOrNull {
+                    val target = it.destination
+                    target.conversationId == binding.conversationId && target.assistantMessageId == binding.assistantMessageId &&
+                        target.runId == binding.runId && target.toolCallId == binding.toolCallId && target.toolName == binding.toolName &&
+                        it.source.itemId == key.itemId && it.source.outputIndex == key.outputIndex
+                })
+                val bytes = neutralBackup.staticGenerationOriginal(output)
+                val source = output.source
+                fromBytes(ControllerGenerationOutputMetadata(source.outputIndex, source.kind, source.mimeType,
+                    source.bytes, source.width, source.height, source.durationMs), bytes)
+            }
+            else -> error("generation_media_source_invalid")
+        }
+    }
+
+    internal fun loadGenerationMediaOriginal(binding: GenerationAttemptBinding, assetKey: String,
+        active: java.util.concurrent.atomic.AtomicBoolean, complete: (GenerationMediaOriginal?) -> Unit): Boolean {
+        val key = GenerationMediaKey.parse(assetKey) ?: return false
+        synchronized(this) {
+            if (closed || !ready || dataBusy || !active.get()) return false
+            generationReaders++
+        }
+        try { executor.execute {
+            val result = runCatching { openGenerationMediaOnWorker(binding, key, active) }.getOrNull()
+            handler.post {
+                synchronized(this) { generationReaders--; if (closed) closeStorageWhenIdle() }
+                if (!active.get()) { result?.close(); complete(null) }
+                else try { complete(result) } catch (failure: Exception) { result?.close(); throw failure }
+            }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { generationReaders-- }; return false
+        }
+        return true
+    }
+
+    internal fun saveGenerationMediaOriginal(binding: GenerationAttemptBinding, assetKey: String, uri: Uri,
+        active: java.util.concurrent.atomic.AtomicBoolean,
+        resolver: android.content.ContentResolver = application.contentResolver) {
+        require(uri.scheme == "content")
+        val key = requireNotNull(GenerationMediaKey.parse(assetKey))
+        dataTask(failureNotice = "原件保存未确认；目标可能不完整，未自动重试", work = {
+            openGenerationMediaOnWorker(binding, key, active).use { original ->
+                original.requireActive()
+                resolver.openOutputStream(uri, "wt")?.use { destination ->
+                    val buffer = ByteArray(8192)
+                    var total = 0L
+                    while (true) {
+                        original.requireActive()
+                        val count = original.stream.read(buffer)
+                        if (count < 0) break
+                        destination.write(buffer, 0, count); total += count
+                    }
+                    original.requireActive()
+                    check(total == original.metadata.bytes)
+                    destination.flush()
+                } ?: throw java.io.IOException("无法打开目标")
+            }
+            "生成原件已保存"
+        })
+    }
+
     internal data class HistoricalGenerationAssetDisplay(
         val history: app.daiyu.android.backup.HistoricalGenerationOutput,
         val thumbnail: android.graphics.Bitmap?,

@@ -432,6 +432,112 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
         return ExistingOutput(conversation, owner, attempt, resources, assets, png)
     }
 
+    fun testCardOriginalReaderRequiresExactLiveCallAndAsset() {
+        verifyCardOriginalReader()
+    }
+
+    private fun verifyCardOriginalReader() {
+        val output = existingOutput()
+        val binding = output.owner.binding
+        val active = AtomicBoolean(true)
+        val original = checkNotNull(loadCardOriginal(controller, binding, "live:item:0", active))
+        original.use {
+            assertEquals(output.png.size.toLong(), it.metadata.bytes)
+            assertTrue(output.png.contentEquals(it.stream.readBytes()))
+        }
+        val wrong = GenerationAttemptBinding(binding.conversationId, binding.assistantMessageId,
+            binding.runId, "other-call", binding.toolName)
+        assertNull(loadCardOriginal(controller, wrong, "live:item:0", active))
+        assertNull(loadCardOriginal(controller, binding, "live:other:0", active))
+        assertNull(loadCardOriginal(controller, binding, "history:item:0", active))
+        assertNull(loadCardOriginal(controller, binding, "static:item:0", active))
+        controlMain {
+            assertFalse(controller.loadGenerationMediaOriginal(binding, "live:item:32", active) { fail("invalid key callback") })
+            active.set(false)
+            assertFalse(controller.loadGenerationMediaOriginal(binding, "live:item:0", active) { fail("revoked visit callback") })
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testCardStaticOriginalReaderUsesDestinationCallWithoutRevivingLiveAuthority() {
+        verifyCardStaticOriginalReader()
+    }
+
+    private fun verifyCardStaticOriginalReader() {
+        val output = existingOutput()
+        val branch = branchThroughProduction(controller, output.conversation.id)
+        val item = staticThroughProduction(controller, branch.id).output
+        val target = item.destination
+        val binding = GenerationAttemptBinding(target.conversationId, target.assistantMessageId,
+            target.runId, target.toolCallId, target.toolName)
+        val active = AtomicBoolean(true)
+        checkNotNull(loadCardOriginal(controller, binding, "static:item:0", active)).use {
+            assertTrue(output.png.contentEquals(it.stream.readBytes()))
+        }
+        assertNull(loadCardOriginal(controller, binding, "live:item:0", active))
+        assertNull(loadCardOriginal(controller, output.owner.binding, "static:item:0", active))
+        assertEquals(0, fixture.opens.get())
+    }
+
+    private class CardDocuments(private val destination: File) : android.content.ContentProvider() {
+        val opens = AtomicInteger()
+        override fun onCreate() = true
+        override fun getType(uri: Uri) = "image/png"
+        override fun openFile(uri: Uri, mode: String): android.os.ParcelFileDescriptor {
+            opens.incrementAndGet()
+            return android.os.ParcelFileDescriptor.open(destination, android.os.ParcelFileDescriptor.parseMode(mode))
+        }
+        override fun query(uri: Uri, projection: Array<out String>?, selection: String?, args: Array<out String>?, sort: String?): android.database.Cursor? = null
+        override fun insert(uri: Uri, values: android.content.ContentValues?): Uri? = error("unused")
+        override fun delete(uri: Uri, selection: String?, args: Array<out String>?) = error("unused")
+        override fun update(uri: Uri, values: android.content.ContentValues?, selection: String?, args: Array<out String>?) = error("unused")
+    }
+
+    fun testCardOriginalSaveRevalidatesCallAndRevokedVisitBeforeOpeningTarget() {
+        verifyCardOriginalSave()
+    }
+
+    private fun verifyCardOriginalSave() {
+        val output = existingOutput()
+        val saved = File(fixture.application.cacheDir, "card-save-${UUID.randomUUID()}.png")
+        val documents = CardDocuments(saved).apply {
+            attachInfo(fixture.application, android.content.pm.ProviderInfo().apply { authority = "card-documents" })
+        }
+        val resolver = android.test.mock.MockContentResolver(fixture.application).apply { addProvider("card-documents", documents) }
+        val uri = Uri.parse("content://card-documents/output")
+        try {
+            assertEquals("生成原件已保存", dataOperation {
+                controller.saveGenerationMediaOriginal(output.owner.binding, "live:item:0", uri, AtomicBoolean(true), resolver)
+            })
+            assertTrue(output.png.contentEquals(saved.readBytes()))
+            assertEquals(1, documents.opens.get())
+            val wrong = output.owner.binding.let { GenerationAttemptBinding(it.conversationId, it.assistantMessageId,
+                it.runId, "wrong-call", it.toolName) }
+            assertTrue(dataOperation {
+                controller.saveGenerationMediaOriginal(wrong, "live:item:0", uri, AtomicBoolean(true), resolver)
+            }.startsWith("原件保存未确认"))
+            assertTrue(dataOperation {
+                controller.saveGenerationMediaOriginal(output.owner.binding, "live:item:0", uri, AtomicBoolean(false), resolver)
+            }.startsWith("原件保存未确认"))
+            assertEquals(1, documents.opens.get())
+            assertTrue(output.png.contentEquals(saved.readBytes()))
+            assertEquals(0, fixture.opens.get())
+        } finally { saved.delete() }
+    }
+
+    private fun loadCardOriginal(target: ChatController, binding: GenerationAttemptBinding, key: String,
+        active: AtomicBoolean): GenerationMediaOriginal? {
+        val done = CountDownLatch(1)
+        val result = AtomicReference<GenerationMediaOriginal?>()
+        controlMain {
+            assertTrue(target.loadGenerationMediaOriginal(binding, key, active) {
+                result.set(it); done.countDown()
+            })
+        }
+        assertTrue("original read completion", done.await(10, TimeUnit.SECONDS))
+        return result.get()
+    }
+
     private fun loadOutputs(id: ConversationId): List<ChatController.GenerationAssetDisplay>? {
         val done = CountDownLatch(1)
         val result = AtomicReference<List<ChatController.GenerationAssetDisplay>?>()
@@ -579,6 +685,14 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
             assertEquals("original-parent-owner", receipt.task.parentOwnerId)
             listOf(image, video).forEach { original ->
                 val display = historicalOutputs(target.controller, original.conversation.id).single()
+                val historyBinding = GenerationAttemptBinding(display.history.conversationId, display.history.assistantMessageId,
+                    display.history.runId, display.history.toolCallId, display.history.source.toolName)
+                checkNotNull(loadCardOriginal(target.controller, historyBinding,
+                    "history:${display.history.identity.itemId}:${display.history.outputIndex}", AtomicBoolean(true))).use {
+                    assertTrue(original.png.contentEquals(it.stream.readBytes()))
+                }
+                assertNull(loadCardOriginal(target.controller, historyBinding,
+                    "live:${display.history.identity.itemId}:${display.history.outputIndex}", AtomicBoolean(true)))
                 assertTrue(display.history.historicalOnly)
                 assertEquals(original.png.size.toLong(), display.history.bytes)
                 if (original === image) assertNotNull(display.thumbnail) else assertEquals(GenerationKind.VIDEO, display.history.kind)

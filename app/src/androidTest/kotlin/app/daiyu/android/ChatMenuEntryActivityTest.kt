@@ -19,6 +19,8 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
 
     private fun menu(action: ChatMenuAction) {
         ui.onNodeWithContentDescription("更多").performClick()
+        if (action == ChatMenuAction.OPEN_TERMINAL) node("chat-menu:${action.name}").assertTextContains("打开终端")
+        if (action == ChatMenuAction.OPEN_BROWSER) node("chat-menu:${action.name}").assertTextContains("打开浏览器")
         node("chat-menu:${action.name}").performScrollTo().performClick()
     }
 
@@ -38,7 +40,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         val before = fixture.database.exportBackup()
         menu(ChatMenuAction.OPEN_BROWSER)
         node("browser-visual-page").assertExists()
-        node("browser-visual-status").assertExists()
+        node("browser-visual-empty").assertTextEquals("没有打开的标签页")
         node("browser-visual-takeover").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
         assertEquals(before, fixture.database.exportBackup())

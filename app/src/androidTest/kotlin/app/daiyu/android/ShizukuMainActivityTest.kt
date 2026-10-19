@@ -108,6 +108,7 @@ class ShizukuMainActivityTest : WiredActivityTestCase() {
 
     private fun verifyRecreationCancelsQueuedPreparation() {
         val p = preview()
+        dismissIme()
         val executor = ChatController::class.java.getDeclaredField("executor")
             .apply { isAccessible = true }.get(fixture.controller) as java.util.concurrent.ExecutorService
         val entered = java.util.concurrent.CountDownLatch(1)

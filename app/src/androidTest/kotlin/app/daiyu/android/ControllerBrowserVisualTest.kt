@@ -56,6 +56,21 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
         override fun close() { controller.revoke(); binding.close() }
     }
 
+    fun testTabSnapshotListsOnlyOriginalSessionWithoutOpeningOrExecuting() = main {
+        val f = Fixture()
+        try {
+            val visit = requireNotNull(f.controller.openVisit())
+            assertEquals(listOf(f.session.currentTab), visit.snapshot().tabs)
+            assertNull(visit.snapshot().page)
+            repeat(3) { visit.snapshot() }
+            assertEquals(1, f.allocations)
+            assertEquals(0, f.calls)
+            assertEquals(0, f.pauses)
+            visit.close()
+            assertTrue(visit.snapshot().tabs.isEmpty())
+        } finally { f.close() }
+    }
+
     fun testTakeoverWaitsForOriginalPausedBoundaryWithoutReplacingOrExecutingPage() = main {
         val f = Fixture()
         try {

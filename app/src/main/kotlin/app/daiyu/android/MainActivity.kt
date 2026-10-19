@@ -786,6 +786,7 @@ class MainActivity : ComponentActivity() {
         get() = retainedPageState
         set(value) {
             if (value != retainedPageState) {
+                revokeTerminalJobsVisit()
                 childStatusVisit = null
                 usageVisit = null
                 revokeBackupExportPage()
@@ -1522,15 +1523,6 @@ class MainActivity : ComponentActivity() {
                         onBack = { returnToChat() },
                         onReady = { _, commands -> commands.close() }, // No run is owned by this permission page.
                     )
-                    "browser" -> {
-                        val original = browserVisualVisit
-                        key(original) {
-                            app.daiyu.android.ui.screens.browser.BrowserVisualScreen(original,
-                                ownerCurrent = { original != null && browserVisualPageCurrent(original) },
-                                onBack = { if (activityUsable() && retainedPage == "browser") returnToChat() },
-                                modifier = Modifier.fillMaxSize())
-                        }
-                    }
                     "terminal" -> terminalPageOwner?.let { page ->
                         val state by terminalProvider.state.collectAsStateWithLifecycle()
                         val ready = state as? app.daiyu.android.terminal.TerminalApplicationState.Ready
@@ -1543,6 +1535,7 @@ class MainActivity : ComponentActivity() {
                             app.daiyu.android.ui.screens.terminal.TerminalScreen(
                                 host = owner.host, caller = caller,
                                 isCurrent = { activityUsable() && retainedPage == "terminal" && terminalPageOwner === page },
+                                onOpenTasks = if (selected?.id == null) null else ({ openTerminalTasks(page) }),
                                 onOpenAndroid = { openTerminalAndroid(page) },
                                 onOpenLinux = { reference -> openTerminalLinux(page, reference) },
                                 onBack = {
@@ -1920,6 +1913,15 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                if (retainedPage == "browser") {
+                    val original = browserVisualVisit
+                    key(original) {
+                        app.daiyu.android.ui.screens.browser.BrowserVisualScreen(original,
+                            ownerCurrent = { original != null && browserVisualPageCurrent(original) },
+                            onBack = { if (activityUsable() && retainedPage == "browser") returnToChat() })
+                    }
+                }
+                TerminalTasksSurface()
                 PromptSurface()
                 UnknownBranchSurface()
                 VirtualDisplayR08Surfaces()
@@ -2818,7 +2820,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private class TerminalJobsVisit(val conversation: ConversationId, val editorGeneration: Long,
-        sessions: List<app.daiyu.android.integration.tools.TerminalJobSession>) {
+        sessions: List<app.daiyu.android.integration.tools.TerminalJobSession>, val terminalPage: Any? = null) {
         var sessions by mutableStateOf(sessions)
         var history by mutableStateOf(emptyList<app.daiyu.android.terminal.TerminalJobHistoryReader.Record>())
         var historyNotice by mutableStateOf("正在只读扫描本会话历史…")
@@ -2836,8 +2838,54 @@ class MainActivity : ComponentActivity() {
         terminalJobsVisit = null
     }
     private fun terminalJobsCurrent(visit: TerminalJobsVisit) = activityUsable() && voiceForeground &&
-        retainedPage == "chat" && !sidebarVisible && terminalJobsVisit === visit && !visit.revoked.get() &&
+        (if (visit.terminalPage == null) retainedPage == "chat" else retainedPage == "terminal" && terminalPageOwner === visit.terminalPage) &&
+        !sidebarVisible && terminalJobsVisit === visit && !visit.revoked.get() &&
         selected?.id == visit.conversation && editorGeneration == visit.editorGeneration
+    private fun openTerminalTasks(page: Any) {
+        val conversation = selected?.id ?: return
+        if (!activityUsable() || !voiceForeground || retainedPage != "terminal" || terminalPageOwner !== page) return
+        revokeTerminalJobsVisit()
+        val visit = TerminalJobsVisit(conversation, editorGeneration, controller.terminalJobRuns(conversation), page)
+        terminalJobsVisit = visit
+        refreshTerminalJobs(visit)
+    }
+    @Composable private fun TerminalTasksSurface() {
+        val visit = terminalJobsVisit?.takeIf { it.terminalPage != null && terminalJobsCurrent(it) } ?: return
+        app.daiyu.android.ui.screens.terminal.TerminalTasksDialog(
+            busy = visit.busy,
+            rows = visit.sessions.map { session -> app.daiyu.android.ui.screens.terminal.TerminalTaskRow(
+                session.plan.command, if (session.plan.mode == "daemon") "守护任务" else "后台任务",
+                onRead = { if (terminalJobsCurrent(visit)) terminalJobAction(visit, session, false) },
+                onStop = if (session.jobId == null) null else ({ if (terminalJobsCurrent(visit)) visit.stop = session }))
+            } + visit.history.mapIndexed { index, record -> app.daiyu.android.ui.screens.terminal.TerminalTaskRow(
+                "历史任务 ${index + 1}", "只读记录 · 运行状态未知",
+                onRead = { if (terminalJobsCurrent(visit)) terminalHistoryPage(visit, record, 0) }) },
+            output = terminalTaskOutput(visit.output),
+            error = visit.historyNotice.takeIf { it.startsWith("历史读取") || it.startsWith("历史日志") },
+            onRefresh = { if (terminalJobsCurrent(visit)) refreshTerminalJobs(visit) },
+            onNext = if (visit.historyPage != null && visit.hasMore) ({
+                visit.historyPage?.let { if (terminalJobsCurrent(visit)) terminalHistoryPage(visit, it, visit.nextOffset) }
+            }) else null,
+            onDismiss = { if (terminalJobsVisit === visit) revokeTerminalJobsVisit() })
+        val stop = visit.stop
+        if (stop != null) app.daiyu.android.ui.components.DaiyuConfirmDialog("停止任务？", stop.plan.command,
+            "停止", true, onConfirm = {
+                if (terminalJobsCurrent(visit) && !visit.busy && visit.stop === stop) {
+                    visit.stop = null; terminalJobAction(visit, stop, true)
+                }
+            }, onDismiss = { visit.stop = null })
+    }
+    private fun terminalTaskOutput(raw: String): String {
+        if (raw.isBlank()) return ""
+        val result = try { org.json.JSONObject(raw) } catch (_: Exception) { return raw }
+        val output = result.optString("stdout")
+        if (output.isNotEmpty()) return output
+        return if (!result.optBoolean("ok")) "任务状态或日志暂不可读取。" else when (result.optString("state")) {
+            "running" -> "任务正在运行，暂无输出。"
+            "exited" -> "任务已退出。"
+            else -> "请求已处理，暂无日志；具体退出状态尚未确认。"
+        }
+    }
     @Composable private fun TerminalJobsPanel() {
         val conversation = selected?.id ?: return
         val generation = editorGeneration

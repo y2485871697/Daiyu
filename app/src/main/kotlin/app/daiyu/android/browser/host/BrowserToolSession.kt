@@ -89,6 +89,11 @@ class BrowserToolSession(
     /** Snapshot for trusted host code; may be a taken-over lease, never an execution authority. */
     val currentTab: BrowserTabLease? get() = synchronized(lock) { current?.lease }
 
+    val visibleTabs: List<BrowserTabLease> get() = synchronized(lock) {
+        if (closed) emptyList() else slots.values.filter { it.phase == Phase.READY || it.phase == Phase.TAKEN_OVER }
+            .map { it.lease }.sortedBy { it.tabId }
+    }
+
     /** Trusted host only: resolve the exact token to its original allocation. */
     fun <T> withTakenOverTab(
         token: BrowserToolTakeoverToken,

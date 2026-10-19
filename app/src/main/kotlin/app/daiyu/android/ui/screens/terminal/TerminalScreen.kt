@@ -1,35 +1,36 @@
 package app.daiyu.android.ui.screens.terminal
 
-import android.os.Process
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
-import androidx.compose.material3.Button
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.daiyu.android.domain.tools.TaskAuthorization
 import app.daiyu.android.terminal.LinuxGenerationRef
 import app.daiyu.android.terminal.TerminalEnvironmentHost
 import app.daiyu.android.terminal.TerminalEnvironmentState
-import app.daiyu.android.ui.components.MiuixScaffoldPage
+import app.daiyu.android.ui.components.*
+import app.daiyu.android.ui.icons.DaiyuIcons
+import top.yukonga.miuix.kmp.window.WindowDialog
+import app.daiyu.android.ui.screens.settings.*
 
 /**
  * Parent retains host across navigation/configuration recreation and supplies trusted authorization.
@@ -46,6 +47,7 @@ fun TerminalScreen(
     onOpenLinux: (LinuxGenerationRef) -> Unit,
     onBack: () -> Unit,
     isCurrent: () -> Boolean = { true },
+    onOpenTasks: (() -> Unit)? = null,
 ) {
     val state by host.state.collectAsStateWithLifecycle()
     LaunchedEffect(host) { if (isCurrent()) host.refreshLinux() }
@@ -56,10 +58,11 @@ fun TerminalScreen(
         onRefresh = { if (isCurrent()) host.refreshLinux() },
         onSend = { if (isCurrent()) host.send(caller, it) },
         onClose = { if (isCurrent()) host.requestClose(caller) },
-        onBack = { if (isCurrent()) onBack() })
+        onBack = { if (isCurrent()) onBack() },
+        onOpenTasks = onOpenTasks?.let { action -> { if (isCurrent()) action() } })
 }
 
-/** Stateless rendering seam for parent previews and UI tests; entering it has no side effects. */
+/** Entering this surface observes the retained host; only explicit controls open a shell. */
 @Composable
 fun TerminalScreenContent(
     state: TerminalEnvironmentState,
@@ -70,74 +73,143 @@ fun TerminalScreenContent(
     onSend: (String) -> Unit,
     onClose: () -> Unit,
     onBack: () -> Unit,
+    onOpenTasks: (() -> Unit)? = null,
 ) {
-    var input by remember { mutableStateOf("") } // Deliberately not persisted to saved instance state.
-    MiuixScaffoldPage(title = "终端", onBack = onBack, modifier = Modifier.testTag("terminal-screen")) {
-        item(key = "identity") {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Android 应用身份 · UID ${Process.myUid()}", modifier = Modifier.testTag("terminal-identity"))
-                Text("仅明确打开后启动交互式 PTY。输入会直接交给终端，不经过模型；Android 终端不提供 Root；Linux chroot 会启动经授权的 Root 子进程，不提供任意后台任务入口。")
-                Text("状态：${state.phase}", modifier = Modifier.testTag("terminal-state"))
-                state.environment?.let { Text("当前/最近运行环境：$it") }
-                when {
-                    state.exitCode != null -> Text("Shell 退出码：${state.exitCode}")
-                    state.exitSignal != null -> Text("Shell 退出信号：${state.exitSignal}")
-                    state.terminationConfirmed -> Text("进程已终止；没有可信的 shell 退出码（未知）。")
-                }
-                if (state.ownsResources && !state.acceptsInput) Text("仍保留进程/清理责任；等待实际退出，不能开启替代会话。")
-                state.error?.let { Text("错误：$it", modifier = Modifier.testTag("terminal-error")) }
-                Button(onClick = onOpenAndroid, enabled = state.canOpen,
-                    modifier = Modifier.testTag("terminal-open-android")) { Text("打开 Android 终端") }
-                OutlinedButton(onClick = onClose, enabled = state.ownsResources && !state.disposed,
-                    modifier = Modifier.testTag("terminal-close")) { Text("请求关闭") }
-            }
-        }
-        item(key = "linux") {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Linux：${state.linux.state}", modifier = Modifier.testTag("terminal-linux-state"))
-                Text("安装与本地配置请到设置→工具→Linux 环境；须单独确认安装及注册，不会自动下载。PRoot 需要 API34+，仅模拟 guest UID 0；chroot 需要 API26+、64位进程、Android Root 和 cgroup2。文件就绪不等于工具验证成功；应用 UID 不变，但 chroot 子进程具有 Root 权限，须信任整个 rootfs。")
-                state.linux.distribution?.let { Text("已选择：$it · ${state.linux.selected?.generation}") }
-                state.linux.error?.let { Text("检查：$it") }
-                state.linux.choices.forEach { choice ->
-                    OutlinedButton(onClick = { onSelectLinux(choice.reference) }, enabled = state.canOpen,
-                        modifier = Modifier.testTag("terminal-select-${choice.reference.environmentId}-${choice.reference.generation}")) {
-                        Text("选择已安装配置：${choice.label} · ${choice.executionMode.wire} · ${choice.reference.generation}")
+    var input by remember { mutableStateOf("") }
+    var linux by remember { mutableStateOf(state.environment?.startsWith("Linux:") == true) }
+    var panel by remember { mutableStateOf<String?>(null) }
+    var clearOffset by remember { mutableIntStateOf(0) }
+    val commands = remember { mutableStateListOf<String>() }
+    val keyboard = LocalSoftwareKeyboardController.current
+    val outputScroll = rememberScrollState()
+    val linuxLabel = state.linux.distribution?.replaceFirstChar { it.uppercase() } ?: "Linux"
+    val output = state.output.drop(clearOffset.coerceAtMost(state.output.length))
+    val canOpenSelected = state.canOpen && (!linux ||
+        (state.linux.selected != null && state.linux.state == "FILES_READY"))
+    LaunchedEffect(state.environment, state.phase) {
+        if (state.ownsResources) linux = state.environment?.startsWith("Linux:") == true
+        if (state.phase == "OPENING") clearOffset = 0
+    }
+    var followingOutput by remember { mutableStateOf(true) }
+    LaunchedEffect(outputScroll) {
+        snapshotFlow { outputScroll.isScrollInProgress to (outputScroll.value >= outputScroll.maxValue - 24) }
+            .collect { (scrolling, bottom) -> if (scrolling) followingOutput = bottom }
+    }
+    LaunchedEffect(output) { if (followingOutput) outputScroll.scrollTo(outputScroll.maxValue) }
+    fun send() {
+        if (!state.acceptsInput || input.isBlank()) return
+        val command = input
+        onSend(command + "\n")
+        commands.remove(command); commands.add(0, command)
+        if (commands.size > 50) commands.removeAt(commands.lastIndex)
+        input = ""
+    }
+    WithoutPressRipple {
+        MiuixScaffold(title = "终端", onBack = onBack, modifier = Modifier.testTag("terminal-screen")) { padding, _, side ->
+            Column(Modifier.fillMaxSize().padding(top = padding.calculateTopPadding(),
+                start = side, end = side).navigationBarsPadding().imePadding().testTag("page:终端")) {
+                Box(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp)) {
+                    if (output.isEmpty()) Text(
+                        "常驻 Shell 会话：命令之间保留工作目录与环境，切出页面不中断运行。",
+                        style = MaterialTheme.typography.bodySmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.Center).testTag("terminal-empty"))
+                    else SelectionContainer(Modifier.fillMaxSize().verticalScroll(outputScroll)) {
+                        Text(output, fontFamily = FontFamily.Monospace,
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).testTag("terminal-output"))
                     }
                 }
-                if (state.linux.choices.isEmpty()) Text("父层未提供可信的已安装配置。")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onRefresh, modifier = Modifier.testTag("terminal-refresh")) { Text("只读检查") }
-                    OutlinedButton(onClick = { onSelectLinux(null) }, enabled = state.canOpen) { Text("清除选择") }
+                val status = when {
+                    state.phase == "OPENING" -> "正在打开终端…"
+                    state.phase == "CLOSING" -> "正在关闭终端…"
+                    state.error != null -> "终端暂不可用，请查看终端详情。"
+                    state.ownsResources && !state.acceptsInput -> "正在等待终端响应，请勿重复启动。"
+                    state.terminationConfirmed -> "会话已结束"
+                    else -> null
                 }
-                Button(onClick = { state.linux.selected?.let(onOpenLinux) },
-                    enabled = state.canOpen && state.linux.state == "FILES_READY" && state.linux.selected != null,
-                    modifier = Modifier.testTag("terminal-open-linux")) { Text("打开所选 Linux 终端") }
+                status?.let { Text(it, Modifier.padding(horizontal = 16.dp).testTag("terminal-state"),
+                    style = MaterialTheme.typography.bodySmall) }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    listOf(false to "Android", true to linuxLabel).forEach { (target, label) ->
+                        Text(label, Modifier.testTag(if (target) "terminal-env-linux" else "terminal-env-android")
+                            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                                enabled = state.canOpen, onClick = { linux = target })
+                            .padding(horizontal = 10.dp, vertical = 12.dp),
+                            color = if (linux == target) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelMedium)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    PlainToolButton(DaiyuIcons.Copy, "会话", "terminal-sessions") { panel = "sessions" }
+                    PlainToolButton(DaiyuIcons.Chart, "守护任务", "terminal-tasks", enabled = onOpenTasks != null) { onOpenTasks?.invoke() }
+                    PlainToolButton(DaiyuIcons.Terminal, "终端控制", "terminal-controls") { panel = "controls" }
+                }
+                Row(Modifier.padding(start = 12.dp, end = 12.dp, bottom = 8.dp).fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(24.dp))
+                    .padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    BasicTextField(value = input, onValueChange = { if (it.length <= 16000) input = it },
+                        modifier = Modifier.weight(1f).heightIn(min = 48.dp).padding(vertical = 14.dp).testTag("terminal-input"),
+                        maxLines = 4, textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface, fontFamily = FontFamily.Monospace),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { send() }),
+                        decorationBox = { field -> Box { if (input.isEmpty()) Text("输入命令", color = MaterialTheme.colorScheme.onSurfaceVariant); field() } })
+                    PlainToolButton(DaiyuIcons.Send, "发送命令", "terminal-send", state.acceptsInput && input.isNotBlank()) { send() }
+                }
             }
         }
-        item(key = "output") {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("真实 PTY 输出（可选择文本；非完整 ANSI/全屏终端模拟器）")
-                if (state.outputTruncated) Text("输出达到 PTY 日志上限，后续内容已截断。")
-                SelectionContainer {
-                    Text(state.output.ifEmpty { "（尚无输出）" }, fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 120.dp)
-                            .horizontalScroll(rememberScrollState()).testTag("terminal-output"))
-                }
-                state.lastOperation?.let { Text("输入结果：$it（写入不代表命令完成）", modifier = Modifier.testTag("terminal-operation")) }
-            }
-        }
-        item(key = "input") {
-            Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = input, onValueChange = { if (it.length <= 16000) input = it },
-                    enabled = state.acceptsInput, label = { Text("发送到终端的文本") },
-                    modifier = Modifier.fillMaxWidth().testTag("terminal-input"))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { onSend(input + "\n"); input = "" }, enabled = state.acceptsInput && input.isNotEmpty(),
-                        modifier = Modifier.testTag("terminal-send")) { Text("发送并换行") }
-                    OutlinedButton(onClick = { onSend("\u0003") }, enabled = state.acceptsInput,
-                        modifier = Modifier.testTag("terminal-interrupt")) { Text("Ctrl-C") }
-                    OutlinedButton(onClick = { onSend("\u0004") }, enabled = state.acceptsInput,
-                        modifier = Modifier.testTag("terminal-eof")) { Text("Ctrl-D") }
+        if (panel != null) WindowDialog(show = true, title = when (panel) {
+            "sessions" -> "会话"; "commands" -> "快捷键"; "details" -> "终端详情"; else -> "终端工具"
+        }, onDismissRequest = { panel = null }) {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
+                when (panel) {
+                    "sessions" -> {
+                        SettingsRow(if (state.ownsResources) "当前会话 · ${if (linux) linuxLabel else "Android"}" else "没有运行中的会话")
+                        SettingsRow("打开 Android 终端", tag = "terminal-open-android", onClick = if (!state.canOpen) null else ({
+                            linux = false; panel = null; onOpenAndroid()
+                        }))
+                        SettingsRow("打开 $linuxLabel 终端", tag = "terminal-open-linux", onClick = if (!state.canOpen || state.linux.state != "FILES_READY" || state.linux.selected == null) null else ({
+                            linux = true; panel = null; state.linux.selected?.let(onOpenLinux)
+                        }))
+                        if (state.linux.choices.isEmpty()) SettingsNote("使用 Linux 前，请到设置 → 工具 → Linux 环境安装。")
+                        state.linux.choices.forEach { choice ->
+                            SettingsRadioRow(choice.label, state.linux.selected == choice.reference, state.canOpen) { onSelectLinux(choice.reference) }
+                        }
+                        SettingsRow("重启会话")
+                        SettingsRow("刷新环境", tag = "terminal-refresh", onClick = onRefresh)
+                        SettingsRow("关闭当前会话", tag = "terminal-close", onClick = if (state.ownsResources && !state.disposed) ({ panel = null; onClose() }) else null)
+                    }
+                    "commands" -> {
+                        SettingsRow("中断命令 · Ctrl-C", tag = "terminal-interrupt", onClick = if (state.acceptsInput) ({ onSend("\u0003"); panel = null }) else null)
+                        SettingsRow("结束输入 · Ctrl-D", tag = "terminal-eof", onClick = if (state.acceptsInput) ({ onSend("\u0004"); panel = null }) else null)
+                        listOf("Esc" to "\u001b", "Tab" to "\t", "←" to "\u001b[D", "↑" to "\u001b[A", "↓" to "\u001b[B", "→" to "\u001b[C").forEach { (label, text) ->
+                            SettingsRow(label, onClick = if (state.acceptsInput) ({ onSend(text); panel = null }) else null)
+                        }
+                        SettingsSectionTitle("本页输入历史")
+                        if (commands.isEmpty()) SettingsNote("暂无命令")
+                        commands.forEach { command -> SettingsRow(command, onClick = { input = command; panel = null }) }
+                    }
+                    "details" -> SelectionContainer {
+                        Text(buildString {
+                            appendLine("状态：${state.phase}")
+                            state.environment?.let { appendLine("环境：$it") }
+                            state.exitCode?.let { appendLine("退出码：$it") }
+                            state.exitSignal?.let { appendLine("退出信号：$it") }
+                            state.error?.let { appendLine(it) }
+                            appendLine("Linux：${state.linux.state}")
+                            state.linux.error?.let { appendLine(it) }
+                            state.lastOperation?.let { appendLine("输入结果：$it") }
+                            if (state.outputTruncated) appendLine("输出达到日志上限，后续内容已截断。")
+                        }, Modifier.testTag("terminal-details"), style = MaterialTheme.typography.bodySmall)
+                    }
+                    else -> {
+                        SettingsRow("打开${if (linux) linuxLabel else " Android"}终端", tag = "terminal-open-selected", onClick = if (canOpenSelected) ({
+                            panel = null; if (linux) state.linux.selected?.let(onOpenLinux) else onOpenAndroid()
+                        }) else null)
+                        SettingsRow("快捷键", onClick = { panel = "commands" })
+                        SettingsRow("清空屏幕", onClick = { clearOffset = state.output.length; panel = null })
+                        SettingsRow("收起键盘", onClick = { keyboard?.hide(); panel = null })
+                        SettingsRow("终端详情", onClick = { panel = "details" })
+                    }
                 }
             }
         }

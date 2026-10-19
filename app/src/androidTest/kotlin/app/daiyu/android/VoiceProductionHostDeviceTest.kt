@@ -39,6 +39,18 @@ class VoiceProductionHostDeviceTest : InstrumentationTestCase() {
     private fun configured() = VoiceConfiguration(engine = "OPENAI", endpoint = "https://speech.invalid/v1",
         key = "fixture-voice-only-key", model = "exact-model-" + "x".repeat(220), provider = "voice-account-A", voice = "exact-voice")
 
+    fun testFreshProfileLoadPublishesBothDefaultsAndTerminalState() = verifyFreshProfileLoad()
+
+    private fun verifyFreshProfileLoad() = runBlocking {
+        val runtime = ControllerVoiceRuntime(context)
+        assertEquals(ControllerVoiceRuntime.LoadState.NOT_STARTED, runtime.loadState)
+        runtime.load()
+        assertEquals(ControllerVoiceRuntime.LoadState.LOADED, runtime.loadState)
+        assertNull(runtime.loadFailureType)
+        assertEquals("SYSTEM", runtime.snapshot(VoicePlaybackProfile.READ_ALOUD).engine)
+        assertEquals("SYSTEM", runtime.snapshot(VoicePlaybackProfile.CONVERSATION).engine)
+    }
+
     fun testIndependentEncryptedEnvelopeAndFrozenRevision() = runBlocking {
         val runtime = ControllerVoiceRuntime(context)
         runtime.save(configured())
@@ -67,6 +79,8 @@ class VoiceProductionHostDeviceTest : InstrumentationTestCase() {
         check(prefs.edit().remove("key").commit())
         val reopened = ControllerVoiceRuntime(context)
         reopened.load()
+        assertEquals(ControllerVoiceRuntime.LoadState.FAILED, reopened.loadState)
+        assertEquals("CredentialUnavailableException", reopened.loadFailureType)
         assertNull(reopened.configuration.value)
         try { reopened.prepareSpeech(); fail("missing credentials cannot silently select SYSTEM") }
         catch (_: IllegalStateException) { }

@@ -11,10 +11,19 @@ import java.util.concurrent.CopyOnWriteArrayList
 class P32ProductionEntryActivityTest : WiredActivityTestCase() {
     override fun setUp() {
         super.setUp()
-        awaitControl("independent voice profiles loaded") {
-            fixture.controller.voiceRuntime.configuration.value != null &&
-                fixture.controller.voiceRuntime.conversationConfiguration.value != null
+        val runtime = fixture.controller.voiceRuntime
+        ui.waitForIdle()
+        try {
+            awaitControl("independent voice profiles reached a terminal load state") {
+                runtime.loadState in setOf(ControllerVoiceRuntime.LoadState.LOADED, ControllerVoiceRuntime.LoadState.FAILED,
+                    ControllerVoiceRuntime.LoadState.CANCELLED)
+            }
+        } catch (failure: Throwable) {
+            throw AssertionError("voice load state=${runtime.loadState}, failureType=${runtime.loadFailureType}", failure)
         }
+        assertEquals("voice load failureType=${runtime.loadFailureType}", ControllerVoiceRuntime.LoadState.LOADED, runtime.loadState)
+        assertNotNull(runtime.configuration.value)
+        assertNotNull(runtime.conversationConfiguration.value)
     }
     private fun field(name: String): Any? = MainActivity::class.java.getDeclaredField(name)
         .apply { isAccessible = true }.get(activity)

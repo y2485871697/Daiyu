@@ -103,7 +103,7 @@ class BrowserScreenshotStoreTest : AndroidTestCase() {
     }
 
     private fun fixture(body: (File, File, BrowserScreenshotStore.Binding, BrowserScreenshotStore) -> Unit) {
-        val root = File(context.cacheDir, "browser-sidecar-test-${UUID.randomUUID()}")
+        val root = File(context.cacheDir, "browser-sidecar-test-${UUID.randomUUID()}").canonicalFile
         val files = File(root, "files").apply { mkdirs() }
         val cache = File(root, "cache").apply { mkdirs() }
         val source = File(cache, "browser_screenshots/screenshot_123.jpg").apply { parentFile!!.mkdirs() }
@@ -137,6 +137,8 @@ class BrowserScreenshotStoreTest : AndroidTestCase() {
         assertTrue(runCatching { store.read(binding, receipt) }.isFailure)
     }
     private fun verifyInvalid() = fixture { _, source, binding, store ->
+        val receipt = store.freeze(binding, source.path)
+        assertTrue(source.readBytes().contentEquals(store.read(binding, receipt)))
         val foreign = File(source.parentFile, "snapshot_124.jpg").apply { writeBytes(source.readBytes()) }
         assertTrue(runCatching { store.freeze(binding, foreign.path) }.isFailure)
         val linked = File(source.parentFile, "screenshot_125.jpg")

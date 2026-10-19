@@ -1333,10 +1333,16 @@ class MainActivity : ComponentActivity() {
         controller.virtualDisplayEntry()?.let(controller::cancelVirtualDisplay)
         controller.guiEntry()?.let(controller::cancelGui)
         app.daiyu.android.voice.offline.OfflineSpeechPack.initialize(applicationContext)
+        val voiceController = controller
         lifecycleScope.launch {
-            try { withContext(Dispatchers.IO) { controller.voiceAccounts.voices.load() } }
+            try { withContext(Dispatchers.IO) { voiceController.voiceAccounts.voices.load() } }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) { /* Personal account voices fail closed; settings reports local recovery. */ }
-            try { voiceRuntime.load() } catch (_: Exception) { /* Settings page offers explicit repair. */ }
+        }
+        lifecycleScope.launch {
+            try { voiceController.voiceRuntime.load() }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Settings page offers explicit repair. */ }
         }
         if (state?.getBoolean("terminal-page", false) == true) {
             terminalPageOwner = Any()

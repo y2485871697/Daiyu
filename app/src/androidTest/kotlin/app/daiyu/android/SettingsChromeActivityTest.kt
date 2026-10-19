@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import android.content.res.Configuration
+import app.daiyu.android.data.model.AppearancePaletteStyle
 import app.daiyu.android.data.model.AppearanceAccentColor
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
@@ -144,6 +145,15 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         reveal("settings-row:强调色", "外观与主题").performClick()
         ui.onNodeWithText("绿色").performClick()
         ui.runOnIdle { assertEquals(AppearanceAccentColor.GREEN, state.accentColor); assertTrue(state.monetEnabled) }
+        reveal("settings-row:强调色", "外观与主题").performClick()
+        ui.onNodeWithText("墨绿").performClick()
+        ui.runOnIdle { assertFalse(state.monetEnabled); assertEquals(AppearanceAccentColor.GREEN, state.accentColor) }
+        reveal("settings-row:色彩风格", "外观与主题").performClick()
+        ui.onNodeWithText("内容", useUnmergedTree = true).performScrollTo().performClick()
+        ui.runOnIdle { assertTrue(state.monetEnabled); assertEquals(AppearancePaletteStyle.CONTENT, state.paletteStyle) }
+        reveal("settings-row:色彩风格", "外观与主题").performClick()
+        ui.onNodeWithText("代鱼默认配色").performClick()
+        ui.runOnIdle { assertFalse(state.monetEnabled); assertEquals(AppearancePaletteStyle.CONTENT, state.paletteStyle) }
         reveal("settings-switch:消息时间戳", "外观与主题").performClick().assertIsOn()
         reveal("settings-switch:圆形加载指示器", "外观与主题").performClick()
         reveal("settings-switch:仅消息生成前", "外观与主题").performClick().assertIsOn()

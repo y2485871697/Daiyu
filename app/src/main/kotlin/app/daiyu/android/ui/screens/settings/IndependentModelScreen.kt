@@ -7,6 +7,12 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import android.widget.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import app.daiyu.android.ui.components.MiuixScaffold
+import app.daiyu.android.ui.layout.horizontalCutoutPadding
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.viewinterop.AndroidView
@@ -75,7 +81,8 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
         }
         return
     }
-    AndroidView(modifier = modifier, factory = { context ->
+    val form: @Composable (Modifier) -> Unit = { formModifier ->
+    AndroidView(modifier = formModifier, factory = { context ->
         val column = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 24, 24, 24) }
         fun label(text: String) { column.addView(TextView(context).apply { this.text = text }) }
         fun field(hint: String, value: String, secret: Boolean = false): EditText = EditText(context).also {
@@ -206,7 +213,14 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
                 }
             }
         })
-        column.addView(Button(context).apply { text = "返回"; setOnClickListener { onBack() } })
+        if (slot == IndependentModelSettings.Slot.PET) column.addView(Button(context).apply { text = "返回"; setOnClickListener { onBack() } })
         ScrollView(context).apply { tag = "independent-model-${slot.key}"; addView(column) }
     })
+    }
+    if (slot == IndependentModelSettings.Slot.VISION) {
+        MiuixScaffold(title = "辅助视觉模型", onBack = onBack, modifier = modifier) { padding, _, sidePadding ->
+            form(Modifier.fillMaxSize().padding(padding).padding(horizontal = sidePadding)
+                .horizontalCutoutPadding().navigationBarsPadding().imePadding())
+        }
+    } else form(modifier)
 }

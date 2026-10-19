@@ -91,8 +91,6 @@ private fun OriginalSettingsRow(entry: SettingsEntry, defaultReasoning: Reasonin
             enabled = defaultReasoningError == null, tag = "settings-row:${entry.title}",
             summary = "与独立草稿共用；不改既有会话。关闭时由模型配置决定", onCheckedChange = onDefaultReasoningToggle)
         if (defaultReasoningError != null) SettingsNote(defaultReasoningError, error = true)
-        top.yukonga.miuix.kmp.basic.TextButton(text = "选择默认推理强度",
-            modifier = Modifier.testTag("reasoning-default-select"), onClick = { onDefaultReasoningToggle(true) })
         return
     }
     SettingsRow(entry.title, onClick = if (entry.id == "donate") null else onClick,
@@ -101,7 +99,13 @@ private fun OriginalSettingsRow(entry: SettingsEntry, defaultReasoning: Reasonin
             "accessibility" -> "查看服务与授权边界；进入设置不向模型授权"
             "task_surface" -> "前台、后台或每次运行询问；不改变当前运行"
             else -> null
-        }, leading = { SettingsIcon(entry.icon) })
+        }, leading = { SettingsIcon(entry.icon) }, trailing = when (entry.id) {
+            "telegram", "qq", "source" -> ({
+                Text(when (entry.id) { "telegram" -> "Telegram"; "qq" -> "QQ"; else -> "GitHub" },
+                    style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            })
+            else -> null
+        })
 }
 
 @Composable
@@ -210,11 +214,25 @@ internal fun DaiyuSettingsScreen(
             item(key = "settings_group_${group.id}") { SettingsSectionTitle(group.title) }
             item(key = "settings_entries_${group.id}") {
                 SettingsCard {
-                    group.entries.filter { query.isNotBlank() || relayExpanded || it.id !in setOf("relay_st", "relay_moyu") }
-                        .forEach { entry ->
-                            OriginalSettingsRow(entry, defaultReasoning, defaultReasoningError,
+                    group.entries.forEach { entry ->
+                        when {
+                            entry.id in setOf("relay_st", "relay_moyu") && query.isBlank() -> Unit
+                            entry.id == "relay" && query.isBlank() -> {
+                                SettingsRow(entry.title, leading = { SettingsIcon(entry.icon) }, onClick = { open(entry) },
+                                    trailing = {
+                                        DaiyuIcon(if (relayExpanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight,
+                                            if (relayExpanded) "收起" else "展开", size = 20.dp)
+                                    })
+                                if (relayExpanded) Column(Modifier.padding(start = 66.dp)) {
+                                    group.entries.filter { it.id in setOf("relay_st", "relay_moyu") }.forEach { child ->
+                                        SettingsRow(child.title, onClick = { open(child) })
+                                    }
+                                }
+                            }
+                            else -> OriginalSettingsRow(entry, defaultReasoning, defaultReasoningError,
                                 defaultReasoningToggle, diagnosticsUi) { open(entry) }
                         }
+                    }
                 }
             }
         }

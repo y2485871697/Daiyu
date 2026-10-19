@@ -18,7 +18,11 @@ class DefaultReasoningSettingsActivityTest : WiredActivityTestCase() {
         mainThread { activity.select(conversation) }
         awaitControl("selected readers finish") { !fixture.controller.dataBusy }
         val before = fixture.database.exportBackup()
-        openSettings(); revealDefault().assertIsOff().performClick()
+        openSettings()
+        revealDefault().assertIsOff()
+        node("reasoning-default-select").assertDoesNotExist()
+        ui.onNodeWithText("选择默认推理强度").assertDoesNotExist()
+        revealDefault().performClick()
         assertEquals(ReasoningEffort.DEFAULT, fixture.controller.reasoningPreference.snapshot(null))
         ui.onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.SetProgress)).performTouchInput {
             click(Offset(width * 0.2f, height / 2f))

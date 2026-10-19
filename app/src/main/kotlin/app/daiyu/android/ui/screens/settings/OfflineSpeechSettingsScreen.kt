@@ -50,12 +50,13 @@ internal fun OfflineSpeechSettingsScreen(
                 }
                 if (pack.downloading) SettingsRow("取消下载", tag = "offline-speech-cancel-download",
                     onClick = { if (canAct()) OfflineSpeechPack.cancelDownload() })
-                SettingsRow(if (pack.enabled) "关闭离线听写" else "启用离线听写",
+                SettingsSwitchRow("离线听写", checked = pack.enabled,
+                    enabled = pack.enabled || SpeechInputPolicy.canEnable(pack.ready, pack.checking, pack.downloading),
                     tag = "offline-speech-enable",
-                    summary = if (pack.enabled) "已独立启用；仅主动点击麦克风才会录音" else "下载完成后仍需单独启用",
-                    onClick = if (pack.enabled || SpeechInputPolicy.canEnable(pack.ready, pack.checking, pack.downloading)) ({
-                        if (canAct()) OfflineSpeechPack.setEnabled(context, !OfflineSpeechPack.state.value.enabled)
-                    }) else null)
+                    summary = if (pack.enabled) "已独立启用；仅主动点击麦克风才会录音" else "下载完成后仍需单独启用") { value ->
+                    if (canAct()) OfflineSpeechPack.setEnabled(context, value)
+                }
+
             }
             SettingsNote("真实 16 kHz 单声道 PCM、CPU 原生识别，不调用系统 SpeechRecognizer。录音及识别不联网、不保存音频。结果仅填入捕获的草稿选区，不自动发送；编辑、切换页面、后台或再次点击会取消。无文本 8 秒、单次最长 60 秒。")
         }

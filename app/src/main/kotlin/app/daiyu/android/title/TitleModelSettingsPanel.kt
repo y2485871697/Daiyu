@@ -3,6 +3,7 @@ package app.daiyu.android.title
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -45,8 +46,7 @@ fun TitleModelSettingsPanel(
     notice: String? = null,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("独立标题模型")
+    Column(modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(if (settings.enabled) "已启用独立固定绑定" else "默认关闭；不会使用聊天主模型")
         Text("手动改名优先。模型失绑定会明确拒绝；保存仅写本地配置，不发送供应商请求。")
         OutlinedTextField(draft.endpoint, { onDraftChange(draft.copy(endpoint = it)) },

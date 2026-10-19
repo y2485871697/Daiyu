@@ -103,7 +103,11 @@ internal fun HapticsSettingsScreen(
                     save { copy(generation = it) }
                 }
                 SettingsRow("后台震动", tag = "settings-switch:后台震动",
-                    summary = if (settings.backgroundReasoning) "正文、工具与推理过程" else "正文、工具与推理完成",
+                    summary = when {
+                        !settings.backgroundOn -> "未启用"
+                        settings.backgroundReasoning -> "正文、工具与推理过程"
+                        else -> "正文、工具与推理完成"
+                    },
                     onClick = if (settings.generationOn) ({
                         if (canAct()) {
                             if (!settings.backgroundOn) { save { copy(background = true) }; expanded = true }
@@ -138,8 +142,6 @@ internal fun HapticsSettingsScreen(
                             }
                         })
                 }
-                SettingsRow("试听当前强度", summary = "关闭应用总开关仍可试听，不绕过系统触感设置",
-                    onClick = { preview(runtime.store.read().intensity) })
             }
             SettingsNote("系统默认使用系统触感主题；低、中、高优先使用设备支持的震动原语，无振幅控制时使用系统振幅。")
         }

@@ -57,6 +57,7 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             assertTrue(methods.isEmpty())
             node("mcp-server-enabled:server").assertDoesNotExist()
             node("mcp-tool-enabled:server:erase").assertDoesNotExist()
+            click("mcp-server:server")
             click("mcp-refresh:server")
             awaitStatus("工具目录已刷新；未授予任何工具权限。")
             assertEquals(listOf("initialize", "notifications/initialized", "tools/list"), methods.toList())
@@ -82,7 +83,11 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
                 McpSettingsScreen(store, owner, ownerCurrent = { true }, onBack = {})
             } } }
             ui.waitUntil(5_000) { ui.onAllNodes(hasTestTag("mcp-settings-status") and hasText("保存只配置服务器，不授予工具权限。")).fetchSemanticsNodes().isNotEmpty() }
-            node("mcp-server-id").performScrollTo().performTextReplacement("fixture")
+            node("mcp-server-label").assertDoesNotExist()
+            node("mcp-server-id").assertDoesNotExist()
+            node("mcp-settings-clear").assertDoesNotExist()
+            node("mcp-settings-add").performClick()
+            node("mcp-server-id").assertDoesNotExist()
             node("mcp-server-label").performScrollTo().performTextReplacement("Synthetic fixture")
             node("mcp-server-endpoint").performScrollTo().performTextReplacement("https://fixture.invalid/mcp")
             node("mcp-server-bearer").performScrollTo().performTextReplacement("synthetic-fixture-token")
@@ -92,7 +97,9 @@ class McpSettingsScreenTest : WiredActivityTestCase() {
             assertEquals(1, saved.servers.size); assertEquals("synthetic-fixture-token", saved.servers.single().bearer)
             assertEquals(saved.revision, McpSettingsStore(context) { key }.snapshot().revision)
             assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
-            node("mcp-settings-back").performScrollTo().performClick()
+            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+            assertTrue(owner.current())
+            mainThread { activity.onBackPressedDispatcher.onBackPressed() }
             assertFalse(owner.current())
             try { store.save(emptyList(), owner, saved); fail("revoked settings page saved") } catch (_: IllegalStateException) { }
             assertEquals(1, store.snapshot().servers.size)

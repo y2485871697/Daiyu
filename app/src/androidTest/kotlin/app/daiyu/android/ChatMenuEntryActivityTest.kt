@@ -87,7 +87,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         val before = fixture.database.exportBackup()
         menu(ChatMenuAction.OPEN_BROWSER)
         node("browser-visual-page").assertExists()
-        node("browser-visual-empty").assertTextEquals("没有打开的标签页")
+        ui.onNodeWithTag("browser-visual-empty", useUnmergedTree = true).assertTextEquals("没有打开的标签页")
         node("browser-visual-takeover").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
         assertEquals(before, fixture.database.exportBackup())

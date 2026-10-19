@@ -32,7 +32,7 @@ class CompressionSettingsActivityTest : WiredActivityTestCase() {
         reveal("settings-row:上下文压缩", "设置").performClick()
         node("page:上下文压缩").assertExists()
         ui.waitUntil(timeoutMillis = 5000) {
-            ui.onAllNodes(hasTestTag("settings-field:上下文窗口 tokens") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
+            ui.onAllNodes(hasTestTag("settings-switch:自动压缩") and isEnabled()).fetchSemanticsNodes().isNotEmpty()
         }
     }
 

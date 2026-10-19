@@ -17,7 +17,7 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
             }
         }
         node("browser-visual-page").assertIsDisplayed()
-        node("browser-visual-empty").assertTextEquals("没有打开的标签页")
+        ui.onNodeWithTag("browser-visual-empty", useUnmergedTree = true).assertTextEquals("没有打开的标签页")
         node("browser-visual-tabs").assertTextEquals("0/3")
         node("browser-visual-address").assertIsDisplayed()
         node("browser-visual-container").assertDoesNotExist()

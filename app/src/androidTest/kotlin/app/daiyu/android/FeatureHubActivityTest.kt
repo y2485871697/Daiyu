@@ -36,7 +36,19 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     }
     fun testOriginalSettingsAppearOutsideExistingChatTreeWithoutStateLabels() {
         openHub()
-        assertEquals(31, entries.size)
+        val expectedIds = listOf(
+            "providers", "default_reasoning",
+            "compression", "vision", "subagents", "title_model", "reconnect",
+            "pet", "assistants", "skills", "mcp",
+            "voice", "appearance", "usage", "backup",
+            "workspace", "linux", "task_surface", "haptics",
+            "logging", "export_logs", "clear_logs",
+            "updates", "telegram", "qq", "source", "relay", "relay_st", "relay_moyu", "donate",
+        )
+        assertEquals(30, entries.size)
+        for (engineering in listOf(false, true)) {
+            assertEquals(expectedIds, SettingsCatalog.visibleGroups(engineering).flatMap { it.entries }.map { it.id })
+        }
         val hidden = setOf("balance", "generation", "platform_tools", "browser", "overlay", "enhancements", "accessibility")
         for (engineering in listOf(false, true)) assertTrue(SettingsCatalog.visibleGroups(engineering)
             .flatMap { it.entries }.none { it.id in hidden })

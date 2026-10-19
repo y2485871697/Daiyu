@@ -149,9 +149,11 @@ internal class BrowserScreenshotStore(private val filesDir: File, private val ca
     }
     companion object {
         const val MEDIA_KEY = "browser:screenshot"
+        // Linux ABI flag; OsConstants exposes this field only from Android API 27.
+        private const val LINUX_O_CLOEXEC = 0x80000
         private fun syncDirectoryOnDisk(directory: File) {
             val fd = android.system.Os.open(directory.path, android.system.OsConstants.O_RDONLY or
-                android.system.OsConstants.O_CLOEXEC or android.system.OsConstants.O_NOFOLLOW, 0)
+                LINUX_O_CLOEXEC or android.system.OsConstants.O_NOFOLLOW, 0)
             try {
                 check(android.system.OsConstants.S_ISDIR(android.system.Os.fstat(fd).st_mode))
                 android.system.Os.fsync(fd)

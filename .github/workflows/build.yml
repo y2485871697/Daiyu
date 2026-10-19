@@ -1,5 +1,5 @@
 name: 代鱼构建
-run-name: ${{ inputs.mode == 'smoke' && format('代鱼双API补检 {0}{1}', inputs.check_id, inputs.smoke_classes != '' && '-filtered' || '') || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || inputs.mode == 'performance' && format('代鱼性能包 {0}', inputs.check_id) || inputs.mode == 'release' && format('代鱼正式候选 {0}', inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
+run-name: ${{ inputs.mode == 'candidate' && format('代鱼定向候选 {0}-filtered', inputs.check_id) || inputs.mode == 'smoke' && format('代鱼双API补检 {0}{1}', inputs.check_id, inputs.smoke_classes != '' && '-filtered' || '') || inputs.mode == 'checks' && format('代鱼检查 {0} {1}', inputs.check_scope, inputs.check_id) || inputs.mode == 'performance' && format('代鱼性能包 {0}', inputs.check_id) || inputs.mode == 'release' && format('代鱼正式候选 {0}', inputs.check_id) || format('代鱼构建 {0}', inputs.check_id) }}
 on:
   workflow_dispatch:
     inputs:
@@ -8,6 +8,7 @@ on:
         type: choice
         options:
           - build
+          - candidate
           - checks
           - smoke
           - synthetic
@@ -16,12 +17,12 @@ on:
         default: build
         required: true
       smoke_api:
-        description: 仅启动补检的API（完整构建始终覆盖双API）
+        description: smoke/candidate目标API（正式构建始终双API）
         type: choice
         options: [all, '26', '37.2']
         default: all
       smoke_classes:
-        description: 仅smoke定向复验的完整测试类名（逗号分隔；空为全量，定向不计正式验收）
+        description: smoke/candidate完整测试类名（candidate必填；定向不计正式验收）
         type: string
         default: ''
       check_scope:
@@ -404,20 +405,101 @@ jobs:
           name: 代鱼Release性能测试包
           path: performance-delivery/
           if-no-files-found: error
+  candidate:
+    name: 定向候选编译（非正式交付）
+    if: inputs.mode == 'candidate' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    steps:
+      - name: 限定候选模式及必填测试类
+        shell: bash
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_VARIANT: ${{ inputs.source_variant }}
+        run: |
+          test "$SMOKE_MODE" = candidate
+          test -n "$SMOKE_TEST_CLASSES"
+          test -z "$SOURCE_RUN_ID"
+          test -z "$SOURCE_SHA"
+          test "$SOURCE_VARIANT" = debug
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: 核对完整构建源码身份
+        env:
+          EXPECTED_SHA: ${{ inputs.expected_sha }}
+        run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            27
+          check-latest: true
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: 安装固定 SDK
+        run: sdkmanager 'platforms/android-37.2' 'build-tools/37.0.0'
+      - name: 准备固定离线语音 JNI（不打包）
+        run: ./gradlew --no-daemon :app:prepareOfflineSpeechRuntime
+      - name: 定向语音释放单测
+        run: ./gradlew --no-daemon :app:testDebugUnitTest --tests 'app.daiyu.android.VoiceHostGateTest'
+      - name: 准备固定签名
+        env:
+          DAIYU_RELEASE_KEYSTORE_BASE64: ${{ secrets.DAIYU_RELEASE_KEYSTORE_BASE64 }}
+          DAIYU_RELEASE_KEY_ALIAS: ${{ secrets.DAIYU_RELEASE_KEY_ALIAS }}
+          DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
+          DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
+        run: python3 scripts/prepare_signing.py
+      - name: 构建开发 APK
+        env:
+          DAIYU_REQUIRE_SIGNING: 'true'
+          DAIYU_RELEASE_STORE_FILE: ${{ runner.temp }}/daiyu-release.p12
+          DAIYU_RELEASE_KEY_ALIAS: ${{ secrets.DAIYU_RELEASE_KEY_ALIAS }}
+          DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
+          DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
+        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: 清理临时签名文件
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/daiyu-release.p12"
+      - name: 打包隔离定向候选（不可正式交付）
+        shell: bash
+        run: |
+          mkdir -p candidate-delivery/tests
+          cp app/build/outputs/apk/debug/app-debug.apk "candidate-delivery/candidate-${GITHUB_SHA:0:8}.apk"
+          cp app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk candidate-delivery/tests/platform-test.apk
+          python3 scripts/candidate_package.py create --directory candidate-delivery --apksigner "$ANDROID_HOME/build-tools/37.0.0/apksigner"
+      - name: 上传隔离定向候选
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼定向候选包-filtered
+          path: candidate-delivery/
+          if-no-files-found: error
   smoke:
-    name: 启动验证 API ${{ matrix.api }} 分片${{ matrix.shard }}${{ inputs.smoke_classes != '' && '-filtered' || '' }}
-    needs: [build, release]
-    if: always() && github.ref == 'refs/heads/main' && ((inputs.mode == 'build' && needs.build.result == 'success') || (inputs.mode == 'release' && needs.release.result == 'success') || inputs.mode == 'smoke')
+    name: ${{ inputs.mode == 'candidate' && '定向候选验证' || '启动验证' }} API ${{ matrix.api }} 分片${{ matrix.shard }}${{ inputs.smoke_classes != '' && '-filtered' || '' }}
+    needs: [build, release, candidate]
+    if: always() && github.ref == 'refs/heads/main' && ((inputs.mode == 'build' && needs.build.result == 'success') || (inputs.mode == 'release' && needs.release.result == 'success') || (inputs.mode == 'candidate' && needs.candidate.result == 'success') || inputs.mode == 'smoke')
     runs-on: ubuntu-26.04
     timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.mode == 'smoke' && inputs.smoke_api == '26' && '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3}]' || inputs.mode == 'smoke' && inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]' || '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]') }}
+        include: ${{ fromJSON(inputs.mode == 'candidate' && inputs.smoke_api == '26' && '[{"api":"26","target":"google_apis","ram":4096,"shard":0}]' || inputs.mode == 'candidate' && inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0}]' || inputs.mode == 'candidate' && '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0}]' || inputs.mode == 'smoke' && inputs.smoke_api == '26' && '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3}]' || inputs.mode == 'smoke' && inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]' || '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"26","target":"google_apis","ram":4096,"shard":1},{"api":"26","target":"google_apis","ram":4096,"shard":2},{"api":"26","target":"google_apis","ram":4096,"shard":3},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":1},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":2},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":3}]') }}
     steps:
-      - name: 限定定向过滤仅用于smoke补检
+      - name: 限定定向过滤仅用于smoke或candidate
         shell: bash
-        run: test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke
+        run: |
+          if test "$SMOKE_MODE" = candidate; then
+            test -n "$SMOKE_TEST_CLASSES"
+          else
+            test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke
+          fi
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
@@ -438,7 +520,7 @@ jobs:
           if-no-files-found: error
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
-          name: ${{ (inputs.mode == 'release' || (inputs.mode == 'smoke' && inputs.source_variant == 'release')) && '代鱼正式候选包' || '代鱼开发包' }}
+          name: ${{ inputs.mode == 'candidate' && '代鱼定向候选包-filtered' || (inputs.mode == 'release' || (inputs.mode == 'smoke' && inputs.source_variant == 'release')) && '代鱼正式候选包' || '代鱼开发包' }}
           path: delivery
           run-id: ${{ inputs.mode == 'smoke' && inputs.source_run_id || github.run_id }}
           github-token: ${{ github.token }}
@@ -450,6 +532,9 @@ jobs:
           SOURCE_SHA: ${{ inputs.source_sha }}
           SOURCE_VARIANT: ${{ inputs.source_variant }}
         run: python3 scripts/verify_smoke_source.py
+      - name: 核对同run定向候选身份
+        if: inputs.mode == 'candidate'
+        run: python3 scripts/candidate_package.py verify --directory delivery
       - name: 校验 APK 摘要
         run: cd delivery && sha256sum -c SHA256SUMS
       - name: 启用模拟器加速
@@ -479,7 +564,7 @@ jobs:
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
           EMULATOR_RAM_MB: ${{ matrix.ram }}
-          SMOKE_SHARD_COUNT: 4
+          SMOKE_SHARD_COUNT: ${{ inputs.mode == 'candidate' && 1 || 4 }}
           SMOKE_SHARD_INDEX: ${{ matrix.shard }}
         with:
           api-level: ${{ matrix.api }}
@@ -502,6 +587,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: 代鱼启动证据-API${{ matrix.api }}-分片${{ matrix.shard }}${{ inputs.smoke_classes != '' && '-filtered' || '' }}
+          name: ${{ inputs.mode == 'candidate' && '代鱼定向候选证据' || '代鱼启动证据' }}-API${{ matrix.api }}-分片${{ matrix.shard }}${{ inputs.smoke_classes != '' && '-filtered' || '' }}
           path: smoke/
           if-no-files-found: ignore

@@ -57,7 +57,7 @@ class SourceTests(unittest.TestCase):
         self.assertIn('SMOKE_MODE: ${{ inputs.mode }}', workflow)
         self.assertIn('SMOKE_TEST_CLASSES: ${{ inputs.smoke_classes }}', workflow)
         guard = 'test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke'
-        for job in ('checks', 'build', 'synthetic', 'smoke'):
+        for job in ('checks', 'build', 'release', 'synthetic'):
             body = workflow.split('  ' + job + ':\n', 1)[1].split('    steps:\n', 1)[1]
             first = body.split('      - uses:', 1)[0]
             self.assertIn('shell: bash', first)
@@ -70,13 +70,13 @@ class SourceTests(unittest.TestCase):
                                             env=dict(os.environ, SMOKE_MODE=mode, SMOKE_TEST_CLASSES=value))
                     self.assertEqual(result.returncode == 0, not value or mode == 'smoke')
         suffix = "${{ inputs.smoke_classes != '' && '-filtered' || '' }}"
-        for name in ('    name: 启动验证 API ${{ matrix.api }} 分片${{ matrix.shard }}',
-                     '          name: 代鱼启动证据-API${{ matrix.api }}-分片${{ matrix.shard }}',
+        for name in ("    name: ${{ inputs.mode == 'candidate' && '定向候选验证' || '启动验证' }} API ${{ matrix.api }} 分片${{ matrix.shard }}",
+                     "          name: ${{ inputs.mode == 'candidate' && '代鱼定向候选证据' || '代鱼启动证据' }}-API${{ matrix.api }}-分片${{ matrix.shard }}",
                      '          name: 代鱼工具证据-smoke-API${{ matrix.api }}-分片${{ matrix.shard }}'):
             self.assertIn(name + suffix, workflow)
         smoke = workflow.split('  smoke:\n', 1)[1]
-        self.assertIn('SMOKE_SHARD_COUNT: 4', smoke)
-        matrix = re.search(r"\|\| '(\[.*\])'\) }}", smoke).group(1)
+        self.assertIn("SMOKE_SHARD_COUNT: ${{ inputs.mode == 'candidate' && 1 || 4 }}", smoke)
+        matrix = re.search(r"\|\| '(\[[^']*\])'\) }}", smoke).group(1)
         self.assertEqual({(v['api'], v['shard']) for v in json.loads(matrix)},
                          {(api, index) for api in ('26', '37.2') for index in range(4)})
 
@@ -98,7 +98,7 @@ class SourceTests(unittest.TestCase):
         for conclusion in ('failure', 'cancelled', 'skipped', None):
             with self.subTest(build_conclusion=conclusion), self.assertRaises(ValueError):
                 source.verify(env, record, dict(run, conclusion='failure'), [dict(jobs[0], conclusion=conclusion)], [])
-        for changed in (['app/build.gradle.kts'], ['core-domain/src/main/Foo.kt'],
+        for changed in (['app/src/androidTest/java/app/daiyu/android/ChangedTest.java'], ['app/build.gradle.kts'], ['core-domain/src/main/Foo.kt'],
                         ['scripts/prepare_signing.py'], ['scripts/verify_signing.py'],
                         ['scripts/prepare-speech-runtime.py'], ['scripts/new-build-input.py'],
                         ['scripts/cooperation/checks_only.init.gradle'], ['.github/workflows/build.yml'],
@@ -417,6 +417,44 @@ exit 0
             observed.update(names)
         self.assertEqual(observed, set(all_names))
         self.assertEqual(manifest["total_tests"], 9)
+
+    def test_candidate_runs_new_selected_class_on_both_apis(self):
+        selected = 'app.daiyu.android.other.SecondTest'
+        for api in (26, 37):
+            result = self.smoke(api=api, mode='candidate',
+                extra_sources={'Second.java': JAVA_SECOND_SOURCE}, test_classes=selected,
+                expected_classes=selected, reported_count=4)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            selection = self.selection()
+            self.assertEqual(selection['mode'], 'candidate')
+            self.assertIs(selection['formal_acceptance'], False)
+            self.assertEqual(selection['selected_classes'], [selected])
+            self.assertEqual(selection['expected_tests'], 4)
+            self.assertEqual(selection['status'], 'completed')
+            inventory = json.loads((self.root / 'smoke/instrumentation-shards.json').read_text())
+            self.assertEqual(inventory['shard_count'], 1)
+            self.assertEqual(inventory['total_tests'], 5)
+
+    def test_candidate_rejects_empty_invalid_filter_before_adb(self):
+        for value in (None, '', ' ', 'app.daiyu.android.MissingTest',
+                      'app.daiyu.android.FirstTest#testOne', '$(touch bad)'):
+            result = self.smoke(mode='candidate', test_classes=value)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((self.root / 'smoke/adb-calls.txt').exists())
+
+    def test_candidate_rejects_multiple_shards_before_adb(self):
+        for count, index in ((4, 0), (4, 1), (1, 1)):
+            result = self.smoke(mode='candidate', test_classes='app.daiyu.android.FirstTest',
+                                shard_count=count, shard_index=index)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertFalse((self.root / 'smoke/adb-calls.txt').exists())
+
+    def test_candidate_failure_is_not_completed(self):
+        for case in ('count', 'instrument-timeout', 'instrument-fail'):
+            result = self.smoke(mode='candidate', test_classes='app.daiyu.android.FirstTest', case=case)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(self.selection()['status'], 'planned')
+            self.assertFalse((self.root / 'smoke/launch-args.txt').exists())
 
     def selection(self):
         return json.loads((self.root / 'smoke/selection.json').read_text())

@@ -23,8 +23,11 @@ target_spec=$(python3 - <<'PYCOUNT'
 from pathlib import Path
 import re, os, json, hashlib
 raw_filter = os.environ.get("SMOKE_TEST_CLASSES", "")
-if raw_filter and os.environ.get("SMOKE_MODE") != "smoke":
-    raise ValueError("Class filtering is only allowed in smoke mode")
+mode = os.environ.get("SMOKE_MODE", "")
+if mode == "candidate" and not raw_filter:
+    raise ValueError("Candidate mode requires explicit test classes")
+if raw_filter and mode not in ("smoke", "candidate"):
+    raise ValueError("Class filtering is only allowed in smoke or candidate mode")
 requested = set(raw_filter.split(",")) if raw_filter else None
 if requested is not None and any(not re.fullmatch(
         r"app\.daiyu\.android\.(?:[A-Za-z_][A-Za-z_0-9]*\.)*[A-Za-z_][A-Za-z_0-9]*", name)
@@ -57,6 +60,8 @@ if requested is not None and not requested <= classes.keys():
     raise ValueError("Unknown instrumentation test class")
 shards = int(os.environ.get("SMOKE_SHARD_COUNT", "1"))
 shard = int(os.environ.get("SMOKE_SHARD_INDEX", "0"))
+if mode == "candidate" and (shards != 1 or shard != 0):
+    raise ValueError("Candidate mode requires exactly one shard per API")
 if not 1 <= shards <= 16 or not 0 <= shard < shards or len(classes) < shards:
     raise ValueError("Invalid instrumentation shard")
 # Balance by discovered method count, preserving each complete class.
@@ -79,6 +84,8 @@ selection = dict(schema_version=1, scope="targeted" if requested is not None els
                  expected_tests=sum(selected.values()), shard_index=shard, shard_count=shards,
                  status="planned" if selected else "filtered-empty-shard",
                  inventory=dict(path=inventory.name, sha256=hashlib.sha256(inventory.read_bytes()).hexdigest()))
+if mode == "candidate":
+    selection.update(mode="candidate", formal_acceptance=False)
 Path("smoke/selection.json").write_text(json.dumps(selection, sort_keys=True) + "\n")
 print(sum(selected.values()))
 print(",".join(sorted(selected)))

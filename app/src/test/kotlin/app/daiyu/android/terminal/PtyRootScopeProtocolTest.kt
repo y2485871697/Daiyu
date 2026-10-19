@@ -178,6 +178,8 @@ class PtyRootScopeProtocolTest {
                 assertTrue(state.getBoolean("reader_finished"))
                 assertFalse(state.getBoolean("hello_seen"))
                 assertEquals(expected == "pty_exec_failed", state.getBoolean("scope_seen"))
+                if (expected == "pty_exec_failed") assertEquals(scope, state.getString("root_scope"))
+                else assertTrue(state.isNull("root_scope"))
                 assertEquals(expected == "pty_protocol_unknown", state.getBoolean("protocol_broken"))
                 assertEquals(expected == "pty_root_scope_unavailable", state.getBoolean("root_drained"))
                 if (expected == "pty_exec_failed") assertEquals(13, state.getInt("exec_errno"))

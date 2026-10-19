@@ -131,6 +131,17 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
         }
     }
 
+    /** Exact call association; not constrained by the recent-twenty history window. */
+    internal fun forCall(conversationId: String, runId: String, messageId: String, toolName: String, callId: String): List<ChildTaskRecord> {
+        val group = childTaskCallGroup(conversationId, runId, messageId, toolName, callId)
+        return database.readableDatabase.query(TABLE, COLUMNS,
+            "conversation_id=? AND parent_run_id=? AND parent_message_id=? AND task_group_id=?",
+            arrayOf(conversationId, runId, messageId, group), null, null, "task_index ASC", "9").use { cursor ->
+            val records = buildList { while (cursor.moveToNext()) add(row(cursor)) }
+            records.takeIf { it.size <= 8 && it.map { row -> row.index }.distinct().size == it.size } ?: emptyList()
+        }
+    }
+
     private fun values(task: ChildTaskRecord) = ContentValues().apply {
         put("task_id", task.owner.childRunId); put("conversation_id", task.owner.conversationId)
         put("parent_run_id", task.owner.parentRunId); put("parent_message_id", task.parentMessageId)

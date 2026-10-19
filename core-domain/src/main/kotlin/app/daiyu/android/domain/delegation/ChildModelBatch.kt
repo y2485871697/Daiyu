@@ -99,7 +99,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
             busy = true; current = ++generation
             pauseControl = pause
         }
-        val group = queued?.first()?.owner?.taskGroupId ?: UUID.randomUUID().toString()
+        val group = queued?.first()?.owner?.taskGroupId ?: childTaskCallGroup(parent.conversationId.value,
+            parent.runId.value, parent.assistantMessageId.value, context.invocation.name, context.invocation.id.value)
         val recordGeneration = queued?.first()?.owner?.generation ?: current
         val started = AtomicBoolean(false)
         val completions = LinkedBlockingQueue<Completion>()

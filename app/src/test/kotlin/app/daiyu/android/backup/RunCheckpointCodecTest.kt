@@ -38,6 +38,21 @@ class RunCheckpointCodecTest {
         val unknown=checkpoint().copy(tools=listOf(ToolRecord(call,ToolDisposition.UNKNOWN)),outputs=emptyList())
         assertEquals(unknown,RunCheckpointCodec.decode(RunCheckpointCodec.encode(unknown)))
     }
+    @Test fun recoverySourceIsStrictReadOnlyStorageMetadata() {
+        val recovered = ProcessRecovery.interrupt(checkpoint()).copy(owner = "recovery-test", revision = 5, messageReconciled = true)
+        val text = RunCheckpointCodec.encode(recovered)
+        assertFalse(JSONObject(text).has("recovery_source_owner"))
+        val valid = JSONObject(text).put("recovery_source_owner", "owner")
+        assertEquals(recovered, RunCheckpointCodec.decode(valid.toString()))
+        listOf<Any>(1, true, JSONObject.NULL, "", "x".repeat(201), "recovery-test").forEach { source ->
+            reject { RunCheckpointCodec.decode(JSONObject(text).put("recovery_source_owner", source).toString()) }
+        }
+        reject { RunCheckpointCodec.decode(JSONObject(valid.toString()).put("extra_recovery", true).toString()) }
+        reject { RunCheckpointCodec.decode(JSONObject(RunCheckpointCodec.encode(checkpoint())).put("recovery_source_owner", "owner").toString()) }
+        reject { RunCheckpointCodec.decode(JSONObject(valid.toString()).put("message_reconciled", "true").toString()) }
+        assertFalse(JSONObject(RunCheckpointCodec.encode(RunCheckpointCodec.decode(valid.toString()))).has("recovery_source_owner"))
+    }
+
     @Test fun runningCapacityReservesRecoveryGrowth() {
         val limit=RunCheckpointCodec.MAX_BYTES
         RunCheckpointCodec.checkEncodedSize(limit-RunCheckpointCodec.RECOVERY_RESERVE,true)

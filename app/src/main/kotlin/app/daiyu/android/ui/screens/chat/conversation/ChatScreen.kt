@@ -63,6 +63,7 @@ internal fun DaiyuChatScreen(
     imageLoader: MessageImageLoader? = null,
     assistant: app.daiyu.android.ui.components.AssistantDisplay? = null,
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
+    toolContent: @Composable (WorkStepUi) -> Unit = {},
 ) {
     Column(
         modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
@@ -80,9 +81,13 @@ internal fun DaiyuChatScreen(
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 style = MiuixTheme.textStyles.footnote1)
         }
-        androidx.compose.runtime.key(state.conversationKey) {
-            ChatMessageList(state.turns, state.canJumpToPreviousUser, actions, Modifier.weight(1f), state.scrollRequest, turnExtras, imageLoader, dedicatedTool)
-        }
-        ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState)
+        ChatConversationLayers(Modifier.weight(1f), messages = { bottomInset ->
+            androidx.compose.runtime.key(state.conversationKey) {
+                ChatMessageList(state.turns, state.canJumpToPreviousUser, actions, Modifier.fillMaxSize(),
+                    state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset)
+            }
+        }, composer = { backdrop ->
+            ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop)
+        })
     }
 }

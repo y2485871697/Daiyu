@@ -13,10 +13,13 @@ object ChatTurnMapper {
         confirmedToolError: (Message, MessageBlock.Tool) -> Boolean? = { _, _ -> null },
         toolState: (Message, MessageBlock.Tool) -> WorkStepState? = { _, _ -> null },
         dedicatedTool: (Message, MessageBlock.Tool) -> String? = { _, _ -> null },
+        toolReceipt: (Message, MessageBlock.Tool) -> ToolReceiptUi? = { _, _ -> null },
         timestamp: (Message) -> String = { "" },
     ): List<ChatTurnUi> {
         // The host can pass either persisted owners or already-expanded history. Expansion
         // retains the segment's message id (especially supplemental user image ownership).
+        val states: (Message, MessageBlock.Tool) -> WorkStepState? = { message, block -> toolReceipt(message, block)?.state ?: toolState(message, block) }
+        val activity: (Message, MessageBlock.Tool) -> ToolActivityUi? = { message, block -> toolReceipt(message, block)?.activity }
         val history = if (messages.any { it.historySegments.isNotEmpty() }) MessageHistory.expand(messages) else messages
         val databaseOwners = messages.flatMap { owner -> owner.historySegments.map { segment ->
             TurnOwner(owner.conversationId.value, owner.runId.value, segment.messageId.value) to owner.id.value
@@ -33,12 +36,12 @@ object ChatTurnMapper {
                     id = message.id.value,
                     text = message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n\n") { it.text },
                     timestamp = timestamp(message),
-                    content = mixedContent(message, confirmedToolError, toolState, dedicatedTool),
+                    content = mixedContent(message, confirmedToolError, states, dedicatedTool, activity),
                     listKey = listKey,
                     ownerMessageId = databaseOwners[owner] ?: message.id.value,
                     segmentIndex = segment,
                 )
-                Message.ASSISTANT_ROLE -> mapAssistant(message, timestamp(message), confirmedToolError, toolState, dedicatedTool).copy(
+                Message.ASSISTANT_ROLE -> mapAssistant(message, timestamp(message), confirmedToolError, states, dedicatedTool, activity).copy(
                     listKey = listKey,
                     ownerMessageId = databaseOwners[owner] ?: message.id.value,
                     segmentIndex = segment,
@@ -65,7 +68,8 @@ object ChatTurnMapper {
     private fun mixedContent(message: Message,
         confirmedToolError: (Message, MessageBlock.Tool) -> Boolean?,
         toolState: (Message, MessageBlock.Tool) -> WorkStepState?,
-        dedicatedTool: (Message, MessageBlock.Tool) -> String?): List<MessageContentUi> {
+        dedicatedTool: (Message, MessageBlock.Tool) -> String?,
+        activity: (Message, MessageBlock.Tool) -> ToolActivityUi?): List<MessageContentUi> {
         if (message.blocks.none { it is MessageBlock.Image ||
                 it is MessageBlock.Tool && dedicatedTool(message, it) != null }) return emptyList()
         val owner = MessageImageOwner(message.conversationId.value, message.id.value)
@@ -73,12 +77,12 @@ object ChatTurnMapper {
             is MessageBlock.Text -> MessageContentUi.Text(block.itemId, block.text)
             is MessageBlock.Image -> MessageContentUi.Image(MessageImageUi(owner, block.reference))
             is MessageBlock.Tool -> MessageContentUi.Tool(
-                workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block)),
+                workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block), activity(message, block)),
             )
         } }
     }
 
-    private fun workStep(message: Message, block: MessageBlock.Tool, confirmedError: Boolean?, receipt: WorkStepState?, dedicatedKey: String?): WorkStepUi {
+    private fun workStep(message: Message, block: MessageBlock.Tool, confirmedError: Boolean?, receipt: WorkStepState?, dedicatedKey: String?, activity: ToolActivityUi?): WorkStepUi {
         val display = ToolCardPresentations.present(block.invocation.name, block.invocation.arguments, block.result)
         return WorkStepUi(
             id = block.invocation.id.value, name = display.title, detail = display.summary,
@@ -90,13 +94,19 @@ object ChatTurnMapper {
             owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value),
             toolName = block.invocation.name, category = display.category, sections = display.sections,
             dedicatedKey = dedicatedKey, categoryDetails = display.details,
+            activity = activity ?: ToolActivityUi.from(receipt ?: when (confirmedError) {
+                true -> WorkStepState.FAILED
+                false -> WorkStepState.OK
+                null -> if (message.status == RunStatus.RUNNING && block.result == null) WorkStepState.PENDING else WorkStepState.UNKNOWN
+            }),
         )
     }
 
     private fun mapAssistant(message: Message, timestamp: String,
         confirmedToolError: (Message, MessageBlock.Tool) -> Boolean?,
         toolState: (Message, MessageBlock.Tool) -> WorkStepState?,
-        dedicatedTool: (Message, MessageBlock.Tool) -> String?): ChatTurnUi.Assistant {
+        dedicatedTool: (Message, MessageBlock.Tool) -> String?,
+        activity: (Message, MessageBlock.Tool) -> ToolActivityUi?): ChatTurnUi.Assistant {
         val hasTools = message.blocks.any { it is MessageBlock.Tool }
         val lastText = message.blocks.indexOfLast { it is MessageBlock.Text }
         val finalText = if (hasTools) {
@@ -113,7 +123,7 @@ object ChatTurnMapper {
                         segments += WorkSegmentUi(narration = block.text)
                     }
                     is MessageBlock.Tool -> {
-                        val step = workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block))
+                        val step = workStep(message, block, confirmedToolError(message, block), toolState(message, block), dedicatedTool(message, block), activity(message, block))
                         // Keep even trailing tools while reserving the last text for the final answer.
                         if (segments.isEmpty()) segments += WorkSegmentUi()
                         val previous = segments.last()
@@ -142,7 +152,7 @@ object ChatTurnMapper {
             status = message.status,
             error = message.error,
             reportedReasoning = message.reportedReasoning,
-            content = mixedContent(message, confirmedToolError, toolState, dedicatedTool),
+            content = mixedContent(message, confirmedToolError, toolState, dedicatedTool, activity),
         )
     }
 

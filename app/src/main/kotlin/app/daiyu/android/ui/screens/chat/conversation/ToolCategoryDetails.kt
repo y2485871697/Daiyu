@@ -10,6 +10,7 @@ data class ToolCategoryDetailsUi(
     val fields: List<ToolFieldUi> = emptyList(),
     val items: List<ToolItemUi> = emptyList(),
     val notice: String,
+    val rich: ToolRichDetailsUi = ToolRichDetailsUi(),
 )
 
 internal object ToolCategoryDetails {
@@ -35,9 +36,11 @@ internal object ToolCategoryDetails {
         "ownerTransportReady" to "宿主通道就绪", "displayInitialized" to "显示已初始化", "hasFrame" to "已有画面",
         "sourceEmpty" to "画面源为空")
 
-    fun project(category: String, arguments: String, result: String?): ToolCategoryDetailsUi {
+    fun project(category: String, arguments: String, result: String?, toolName: String = ""): ToolCategoryDetailsUi {
         val args = parse(arguments)
-        val output = parse(result)
+        val envelope = parse(result)
+        val output = if (category in setOf("apps", "files", "personal_search", "device_read", "system_action"))
+            envelope?.optJSONObject("data") ?: envelope else envelope
         val fields = mutableListOf<ToolFieldUi>()
         fun numeric(source: JSONObject?, vararg keys: String) { keys.forEach { key ->
             val number = source?.opt(key) as? Number ?: return@forEach
@@ -57,7 +60,7 @@ internal object ToolCategoryDetails {
         val (heading, notice) = when (category) {
             "memory" -> {
                 numeric(args, "limit", "offset"); numeric(output, "count", "total", "revision"); count(output, "matches", "命中数")
-                "记忆条目" to "仅展示命中与修订元数据；记忆正文不在工具卡默认展开。"
+                "记忆条目" to "命中、修订与脱敏正文分别展示；查看不修改记忆。"
             }
             "skills" -> {
                 numeric(args, "max_bytes", "offset", "limit"); numeric(output, "count", "bytes"); count(output, "skills", "技能数")
@@ -78,31 +81,31 @@ internal object ToolCategoryDetails {
                 numeric(output, "exit_code", "wait_status", "offset", "next_offset", "total_bytes")
                 boolean(output, "pty", "persistent_shell", "opened", "has_more", "log_truncated", "output_complete", "log_available", "leader_exited", "scope_drain_confirmed")
                 state(output)
-                "运行与输出" to "命令、环境变量与原始日志可能含凭据；卡片只展示已确认运行元数据。"
+                "运行与输出" to "命令、环境变量与原始日志可能含凭据；仅按需展示脱敏命令与输出，不把退出或读取成功推断成业务完成。"
             }
             "files", "workspace" -> {
                 numeric(args, "max_bytes", "offset", "limit"); numeric(output, "bytes", "size", "count", "total", "offset")
                 count(output, "entries", "目录条目数"); count(output, "files", "文件数")
-                "文件与范围" to "仅投影读取范围与文件元数据；展开、复制不会写入文件或合并工作区。"
+                "文件与范围" to "读取范围、条目与脱敏内容分别展示；展开、复制不会写入文件或合并工作区。"
             }
             "browser" -> {
                 numeric(args, "tab_id", "max_chars", "offset"); count(output, "tabs", "标签页数"); count(output, "elements", "元素数")
                 numeric(output, "width", "height", "bytes"); boolean(output, "truncated", "has_more")
-                "网页观察" to "页面正文、URL 查询参数与 Cookie 不在卡片默认展示；历史页面信息不授予操作权。"
+                "网页观察" to "页面正文按需展开，认证与 URL 查询参数已脱敏，Cookie 值不展示；历史页面信息不授予操作权。"
             }
             "gui" -> {
                 count(output, "nodes", "节点数"); numeric(output, "width", "height", "expires_after_ms", "frameCount", "bytes")
                 boolean(output, "verified_ui_result", "truncated", "ownerTransportReady", "displayInitialized", "hasFrame", "sourceEmpty")
                 "屏幕与动作回执" to "派发动作不等于业务目标完成；过期观察与其他 owner 的记录不能重新执行。"
             }
-            "apps" -> { count(output, "apps", "应用数"); numeric(output, "count", "total"); "应用结果" to "只展示应用查询数量，不自动打开应用或链接。" }
+            "apps" -> { count(output, "apps", "应用数"); numeric(output, "count", "total"); "应用结果" to "应用匹配来自本次快照，不自动打开应用或链接。" }
             "device_read" -> {
                 numeric(output, "level", "percent", "capacity", "used", "available", "count"); boolean(output, "enabled")
                 "设备快照" to "这是本次调用返回的快照，不是持续监控或实时设备状态。"
             }
             "personal_search" -> {
                 numeric(args, "limit", "max_age_hours"); numeric(output, "count", "total"); count(output, "items", "条目数"); count(output, "results", "命中数")
-                "检索范围与命中" to "通知、短信、联系人与媒体正文保持隐藏；没有结果不等于没有个人活动。"
+                "检索范围与命中" to "个人条目按需展开，号码与验证码保持隐藏；没有结果不等于没有个人活动。"
             }
             "system_action" -> {
                 numeric(args, "hour", "minute", "duration_seconds", "percent"); boolean(args, "enabled"); boolean(output, "accepted", "enabled")
@@ -122,7 +125,7 @@ internal object ToolCategoryDetails {
             else -> "工具记录" to "未识别的工具使用只读安全回退；不根据返回文本猜测执行成功。"
         }
         if (result == null) fields += ToolFieldUi("返回内容", "尚未收到")
-        return ToolCategoryDetailsUi(heading, fields.distinct(), items, notice)
+        return ToolCategoryDetailsUi(heading, fields.distinct(), items, notice, ToolRichDetails.project(category, toolName, arguments, result))
     }
     private fun parse(value: String?): JSONObject? = if (value == null || value.length > 32_768 || !value.trimStart().startsWith('{')) null
         else runCatching { JSONObject(value) }.getOrNull()

@@ -41,8 +41,10 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             if (!mixed) ui.onNodeWithText("工作过程").performClick()
             ui.onAllNodesWithTag("tool-step:card-call").assertCountEquals(1)
             ui.onNodeWithText("读取终端输出").performClick()
-            ui.onNodeWithText("原始等待状态：0").assertIsDisplayed()
-            ui.onNodeWithText("secret-output", substring = true).assertDoesNotExist()
+            ui.onNodeWithText("原始等待状态").assertIsDisplayed()
+            ui.onNodeWithText("secret-output", substring = true).assertIsDisplayed()
+            ui.onNodeWithText("技术详情").performClick()
+            ui.onNodeWithText("收起技术详情").performClick()
             ui.onNodeWithContentDescription("复制安全摘要").performClick()
             assertEquals(if (mixed) 2 else 1, copies)
             ui.onNodeWithContentDescription("重试 读取终端输出").assertDoesNotExist()
@@ -77,6 +79,36 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithTag("tool-category:$category").assertIsDisplayed()
             ui.onNodeWithText(details.heading).assertIsDisplayed()
             ui.onNodeWithContentDescription("重试 typed-$category").assertDoesNotExist()
+        }
+    }
+
+    fun testLongOutputDisclosureAndHostSlotNeverReplayTools() {
+        var executions = 0
+        val body = "long output " + "x".repeat(600)
+        for (mixed in listOf(false, true)) {
+            val message = source(mixed).copy(blocks = source(mixed).blocks.map { block ->
+                if (block is MessageBlock.Tool) block.copy(result = org.json.JSONObject().put("stdout", body).toString()) else block
+            })
+            val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    Column(Modifier.verticalScroll(rememberScrollState())) {
+                        AssistantTurn(turn, ChatScreenActions(onRetryStep = { executions++ }), toolContent = {
+                            top.yukonga.miuix.kmp.basic.Text("trusted-host-slot")
+                        })
+                    }
+                }
+            } }
+            ui.waitForIdle()
+            if (!mixed) ui.onNodeWithText("工作过程").performClick()
+            ui.onNodeWithText("读取终端输出").performClick()
+            ui.onAllNodesWithText("trusted-host-slot").assertCountEquals(1)
+            ui.onNodeWithText(body).assertDoesNotExist()
+            ui.onNodeWithTag("tool-document:标准输出").performClick()
+            ui.onNodeWithText(body).assertExists()
+            ui.onNodeWithTag("tool-document:标准输出").performClick()
+            ui.onNodeWithText(body).assertDoesNotExist()
+            assertEquals(0, executions)
         }
     }
 

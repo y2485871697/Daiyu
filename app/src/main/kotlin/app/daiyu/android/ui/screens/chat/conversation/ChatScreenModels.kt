@@ -96,6 +96,7 @@ data class WorkStepUi(
     /** Host-validated dedicated projection; never grants execution permission. */
     val dedicatedKey: String? = null,
     val categoryDetails: ToolCategoryDetailsUi? = null,
+    val activity: ToolActivityUi = ToolActivityUi.from(state),
 ) {
     val toolCallId: String get() = id
 }

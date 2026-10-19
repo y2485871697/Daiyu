@@ -91,6 +91,20 @@ internal class ProviderRepository(
                 }
             } catch (_: StaleProviderRegistryException) { CatalogCommitResult.STALE }
         }
+    fun freezeCatalog(target: ProviderCatalogRunTarget): ProviderRunConfiguration = registry.access { state ->
+        if (!matches(state, target.editor)) throw StaleProviderRegistryException()
+        check(requireProvider(state, target.editor.slotId).enabled) { "提供商未启用" }
+        val store = resolveStore(target.editor.slotId)
+        store.modelCatalog.readConfiguration { revision ->
+            check(revision == target.catalogRevision) { "模型目录已变化" }
+            check(store.localModelCatalogProtocol() == target.protocol) { "模型协议已变化" }
+            val catalog = checkNotNull(store.localModelCatalogSnapshot()) { "模型目录不可用" }
+            check(catalog.providerIdentity == target.catalogIdentity) { "提供商连接已变化" }
+            val record = checkNotNull(catalog.models.singleOrNull { it.id == target.apiModel }) { "摘要模型已删除" }
+            check(record.settings.localIdentity == target.localIdentity) { "摘要模型记录已变化" }
+            ProviderRunConfiguration(target.editor, store.loadForRun(target.apiModel).also { it.validate() }, revision)
+        }
+    }
     fun freezeActive(): ProviderRunConfiguration = registry.access { state ->
         val id = checkNotNull(state.activeSlotId) { "未选择活动提供商" }
         check(requireProvider(state, id).enabled) { "提供商未启用" }

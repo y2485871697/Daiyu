@@ -19,7 +19,8 @@ internal object ProductionContextPreparation {
             models = object : SummaryModelResolver {
                 private val provider = ProviderSummaryModelResolver { binding ->
                     requireWorker()
-                    SummaryProfileStore(app).configuration(binding)
+                    if (CatalogSummaryBindings.decode(binding) == null) SummaryProfileStore(app).configuration(binding)
+                    else catalogSummaryConfiguration(app, binding)
                 }
                 override fun resolve(binding: SummaryModelBinding): BoundSummaryModel? = resolve(binding, null)
                 override fun resolve(binding: SummaryModelBinding, usage: BoundSummaryUsagePort?): BoundSummaryModel? {

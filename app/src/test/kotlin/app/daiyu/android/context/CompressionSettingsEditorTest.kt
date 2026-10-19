@@ -90,6 +90,79 @@ class CompressionSettingsEditorTest {
         }
     }
 
+    @Test fun directorySelectionAndNormalSaveReadBackWithoutOpeningLegacyProfile() {
+        val target = app.daiyu.android.storage.ProviderCatalogRunTarget(
+            app.daiyu.android.storage.ProviderEditorSlot("primary", 0), UUID.randomUUID().toString(), 1,
+            UUID.randomUUID().toString(), "summary-api", ProviderProtocol.RESPONSES)
+        val selected = CatalogSummaryBindings.encode(target)
+        var validations = 0
+        val owner = CompressionSettingsEditor({ ProductionCompressionSettingsStore(compressionPrefs) },
+            { error("directory must not read legacy profile") }, { assertEquals(selected, it); validations++ })
+        val settings = ProductionCompressionSettings(summaryModel = selected)
+        assertTrue(owner.prepareSelection(settings) {}!!.runWorker().outcome is CompressionSettingsEditor.Outcome.Saved)
+        assertTrue(owner.prepareLoad()!!.runWorker().outcome is CompressionSettingsEditor.Outcome.Loaded)
+        assertTrue(owner.prepareSave(CompressionSettingsEditor.SaveRequest(settings.copy(keepTurns = 5)))!!
+            .runWorker().outcome is CompressionSettingsEditor.Outcome.Saved)
+        assertEquals(3, validations)
+        assertEquals(0, modelReads + modelWrites + profileOpens)
+    }
+
+    @Test fun unknownDirectoryCapacityMaySaveSelectionButCannotPretendReady() {
+        val target = app.daiyu.android.storage.ProviderCatalogRunTarget(
+            app.daiyu.android.storage.ProviderEditorSlot("primary", 0), UUID.randomUUID().toString(), 1,
+            UUID.randomUUID().toString(), "summary-api", ProviderProtocol.RESPONSES)
+        val selected = CatalogSummaryBindings.encode(target)
+        val owner = CompressionSettingsEditor({ ProductionCompressionSettingsStore(compressionPrefs) },
+            { error("no legacy fallback") }, {
+                throw SummaryProfileUnavailableException(SummaryProfileUnavailableReason.INVALID_CONFIGURATION)
+            })
+        val settings = ProductionCompressionSettings(summaryModel = selected)
+        val result = owner.prepareSelection(settings) {}!!.runWorker().outcome as CompressionSettingsEditor.Outcome.Saved
+        assertEquals(SummaryProfileUnavailableReason.INVALID_CONFIGURATION, result.snapshot.profileUnavailableReason)
+        assertEquals(settings, ProductionCompressionSettingsStore(compressionPrefs).snapshot())
+        val work = owner.prepareLoad()!!
+        owner.revoke()
+        assertSame(CompressionSettingsEditor.Outcome.Revoked, work.runWorker().outcome)
+        assertEquals(0, modelReads + modelWrites + profileOpens)
+    }
+
+    @Test fun staleOrMalformedDirectoryKeepsSavedSettingsEditable() {
+        val target = app.daiyu.android.storage.ProviderCatalogRunTarget(
+            app.daiyu.android.storage.ProviderEditorSlot("primary", 0), UUID.randomUUID().toString(), 1,
+            UUID.randomUUID().toString(), "summary-api", ProviderProtocol.RESPONSES)
+        for (selected in listOf(CatalogSummaryBindings.encode(target),
+            SummaryModelBinding("catalog-summary:v1:bad-json", target.localIdentity))) {
+            val settings = ProductionCompressionSettings(automatic = false, keepTurns = 5, summaryModel = selected)
+            ProductionCompressionSettingsStore(compressionPrefs).save(settings)
+            val owner = CompressionSettingsEditor({ ProductionCompressionSettingsStore(compressionPrefs) },
+                { error("no legacy fallback") }, { error("stale directory") })
+            val loaded = owner.prepareLoad()!!.runWorker().outcome as CompressionSettingsEditor.Outcome.Loaded
+            assertEquals(settings, loaded.snapshot.settings)
+            assertNull(loaded.snapshot.profile)
+            assertEquals(SummaryProfileUnavailableReason.INVALID_CONFIGURATION, loaded.snapshot.profileUnavailableReason)
+            assertEquals(settings, ProductionCompressionSettingsStore(compressionPrefs).snapshot())
+        }
+    }
+
+    @Test fun unavailableDirectoryDoesNotMisreportConfirmedOrdinarySave() {
+        val target = app.daiyu.android.storage.ProviderCatalogRunTarget(
+            app.daiyu.android.storage.ProviderEditorSlot("primary", 0), UUID.randomUUID().toString(), 1,
+            UUID.randomUUID().toString(), "summary-api", ProviderProtocol.RESPONSES)
+        val settings = ProductionCompressionSettings(summaryModel = CatalogSummaryBindings.encode(target))
+        val owner = CompressionSettingsEditor({ ProductionCompressionSettingsStore(compressionPrefs) },
+            { error("no legacy fallback") }, {
+                throw SummaryProfileUnavailableException(SummaryProfileUnavailableReason.INVALID_CONFIGURATION)
+            })
+        assertTrue(owner.prepareSelection(settings) {}!!.runWorker().outcome is CompressionSettingsEditor.Outcome.Saved)
+        val changed = settings.copy(automatic = !settings.automatic, keepTurns = 5)
+        val saved = owner.prepareSave(CompressionSettingsEditor.SaveRequest(changed))!!.runWorker().outcome as
+            CompressionSettingsEditor.Outcome.Saved
+        assertEquals(changed, saved.snapshot.settings)
+        assertNull(saved.snapshot.profile)
+        assertEquals(SummaryProfileUnavailableReason.INVALID_CONFIGURATION, saved.snapshot.profileUnavailableReason)
+        assertEquals(changed, ProductionCompressionSettingsStore(compressionPrefs).snapshot())
+    }
+
     @Test fun queuedLoadAndSaveAreRevokedBeforeAnyStoreAccess() {
         for (save in listOf(false, true)) {
             val editor = editor()

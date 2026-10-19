@@ -121,7 +121,10 @@ internal fun CompressionSettingsScreen(
         onSelect = { choice ->
             if (!busy && page.active && currentOwner()) {
                 choosingModel = false
-                val selectedBinding = SummaryModelBinding(UUID.randomUUID().toString(), UUID.randomUUID().toString())
+                val selectedBinding = app.daiyu.android.context.CatalogSummaryBindings.encode(
+                    app.daiyu.android.storage.ProviderCatalogRunTarget(choice.provider,
+                        choice.selection.providerIdentity, choice.selection.expectedRevision,
+                        choice.selection.record.settings.localIdentity, choice.selection.record.id, choice.protocol))
                 val settings = draft.copy(binding = selectedBinding, configureSummary = true).compression()
                 editor.prepareSelection(settings) {
                     source.withModel(choice) { /* Validate the explicitly selected provider on the admitted worker. */ }

@@ -64,6 +64,31 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         assertEquals(8192, frozen.settings.contextWindowOverride)
     }
 
+    fun testExplicitCatalogFreezeDoesNotSelectMainModelAndRejectsStaleTicket() {
+        store.save(initial)
+        val extra = importedModel("summary-only").let { it.copy(settings = it.settings.copy(
+            contextWindowOverride = 32768, reasoningOverride = false, visionOverride = null)) }
+        append(extra)
+        val repository = ProviderRepository(context, primary = store)
+        val catalog = store.localModelCatalogSnapshot()!!
+        val target = ProviderCatalogRunTarget(repository.editor(ProviderRegistry.PRIMARY), catalog.providerIdentity,
+            catalog.revision, extra.settings.localIdentity, extra.id, initial.protocol)
+        val preferences = raw.all
+        val frozen = repository.freezeCatalog(target)
+        assertEquals(extra.id, frozen.settings.model)
+        assertEquals(extra.settings.requestOptions, frozen.settings.requestOptions)
+        assertEquals(32768, frozen.settings.contextWindowOverride)
+        assertEquals(false, frozen.settings.reasoningOverride)
+        assertNull(frozen.settings.visionOverride)
+        assertEquals(initial.model, store.load().model)
+        assertEquals(preferences, raw.all)
+        assertEquals(catalog, store.localModelCatalogSnapshot())
+        assertEquals(CatalogLocalEditResult.APPLIED, store.modelCatalog.replaceSelection(catalog.selectionFor(extra.id)!!,
+            extra.copy(displayName = "Changed summary")) { false })
+        rejectsSelection { repository.freezeCatalog(target) }
+        assertEquals(extra.id, frozen.settings.model)
+    }
+
     fun testInterruptedAccountSaveBlocksExecutionAndDirectoryUntilExplicitRecovery() {
         store.save(initial)
         append(importedModel("old-account-model"))

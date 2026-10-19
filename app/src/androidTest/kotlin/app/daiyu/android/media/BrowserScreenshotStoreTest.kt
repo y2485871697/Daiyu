@@ -11,6 +11,29 @@ class BrowserScreenshotStoreTest : AndroidTestCase() {
     fun testEveryOwnerAndInvocationFieldAndReceiptAreRequired() = verifyIsolation()
     fun testForeignPathSymlinkAndInvalidJpegAreRejected() = verifyInvalid()
 
+    fun testDirectorySyncFailureNeverPublishesSuccessfulReceipt() = verifyDirectorySyncFailure()
+
+    private fun verifyDirectorySyncFailure() = fixture { files, source, binding, store ->
+        val receipt = store.freeze(binding, source.path)
+        for (failAt in 1..4) {
+            var syncs = 0
+            val failing = BrowserScreenshotStore(files, source.parentFile!!.parentFile!!) {
+                syncs++; if (syncs == failAt) throw java.io.IOException("injected directory sync failure")
+            }
+            assertTrue(runCatching { failing.freeze(binding, source.path) }.isFailure)
+            assertEquals(failAt, syncs)
+        }
+        val synced = mutableListOf<File>()
+        val retry = BrowserScreenshotStore(files, source.parentFile!!.parentFile!!) { synced.add(it) }
+        val retried = retry.freeze(binding, source.path)
+        assertEquals(4, synced.size)
+        assertEquals(files, synced[0])
+        assertEquals(File(files, "browser-call-screenshots"), synced[1])
+        assertEquals(synced[2], synced[3].parentFile)
+        assertTrue(source.readBytes().contentEquals(store.read(binding, retried)))
+        assertTrue(source.readBytes().contentEquals(store.read(binding, receipt)))
+    }
+
     private fun fixture(body: (File, File, BrowserScreenshotStore.Binding, BrowserScreenshotStore) -> Unit) {
         val root = File(context.cacheDir, "browser-sidecar-test-${UUID.randomUUID()}")
         val files = File(root, "files").apply { mkdirs() }

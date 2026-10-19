@@ -2,6 +2,7 @@
 import copy
 import importlib.util
 import json
+import os
 import contextlib
 import io
 from pathlib import Path
@@ -161,6 +162,8 @@ class SummaryTests(unittest.TestCase):
         report = memory(); report['samples'][2]['sample_start_ns'] = 1
         with self.assertRaises(summary.InvalidEvidence): summary.memory(report, 'fixture', 'off')
 
+    @unittest.skipUnless(hasattr(os, "O_NOFOLLOW") and os.open in os.supports_dir_fd,
+                         "safe POSIX file operations unavailable")
     def test_bounded_strict_raw_reader(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'raw.jsonl'
@@ -194,6 +197,8 @@ class SummaryTests(unittest.TestCase):
             row.update(start_ns=start, end_ns=end)
             with self.subTest(start=start), self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
 
+    @unittest.skipUnless(hasattr(os, "O_NOFOLLOW") and os.open in os.supports_dir_fd,
+                         "safe POSIX file operations unavailable")
     def test_cli_success_optional_and_valid_memory(self):
         with tempfile.TemporaryDirectory() as root:
             raw = Path(root) / 'raw.jsonl'; mem = Path(root) / 'memory.json'
@@ -241,6 +246,8 @@ class SummaryTests(unittest.TestCase):
         rows = capture(); rows[0]['environment']['scroll_window_includes_driver_idle_time'] = False
         with self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
 
+    @unittest.skipUnless(hasattr(os, "O_NOFOLLOW") and os.open in os.supports_dir_fd,
+                         "safe POSIX file operations unavailable")
     def test_small_smoke_has_explicit_unsupported_mode(self):
         rows = capture(); rows[0]['environment']['fixture_mode'] = 'small_smoke'
         with tempfile.TemporaryDirectory() as root:

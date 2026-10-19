@@ -91,13 +91,13 @@ internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, mod
         .border(1.dp, if (primary) Color(0xff786c83) else colors.line, shape)
         .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 7.dp), contentAlignment = Alignment.Center) {
-        Text(text, fontSize = 9.sp, lineHeight = 12.6.sp, color = (if (primary) Color.White else colors.accent).copy(alpha = if (enabled) 1f else .4f))
+        Text(text, fontSize = 10.sp, lineHeight = 14.sp, color = (if (primary) Color.White else colors.accent).copy(alpha = if (enabled) 1f else .4f))
     }
 }
 
 @Composable internal fun ConversationAgentTypography(content: @Composable () -> Unit) {
     val colors = conversationAgentColors()
-    fun style(size: Int, weight: FontWeight = FontWeight.Normal) = TextStyle(fontSize = (size * .9f).sp, lineHeight = (size * 1.44f).sp, fontWeight = weight)
+    fun style(size: Int, weight: FontWeight = FontWeight.Normal) = TextStyle(fontSize = size.sp, lineHeight = (size * 1.6f).sp, fontWeight = weight)
     MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(onSurface = colors.text, onSurfaceVariant = colors.muted,
         primary = colors.accent, outline = colors.line, outlineVariant = colors.line), typography = MaterialTheme.typography.copy(
         titleLarge = style(16, FontWeight.SemiBold), titleMedium = style(11, FontWeight.Medium), titleSmall = style(11, FontWeight.Medium),

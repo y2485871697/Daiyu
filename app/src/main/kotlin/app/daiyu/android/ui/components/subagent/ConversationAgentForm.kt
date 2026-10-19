@@ -19,9 +19,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import top.yukonga.miuix.kmp.window.WindowDialog
 
-@Composable internal fun SubAgentConfigurationWindow(title: String, onDismiss: () -> Unit, content: @Composable () -> Unit) {
+@Composable internal fun SubAgentConfigurationWindow(title: String, onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Unit) {
     if (!LocalConversationAgentStyle.current) {
-        WindowDialog(show = true, title = title, onDismissRequest = onDismiss) { content() }
+        WindowDialog(show = true, title = title, onDismissRequest = onDismiss) { Column { content() } }
         return
     }
     val maximumHeight = (LocalConfiguration.current.screenHeightDp - 32).coerceAtLeast(180).dp
@@ -33,7 +33,7 @@ import top.yukonga.miuix.kmp.window.WindowDialog
                     ConversationAgentIconButton(onClick = onDismiss, modifier = Modifier.size(27.dp,29.dp)) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(16.dp))
                     }
-                    Text(title, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    Text(title, style = MaterialTheme.typography.titleLarge.copy(fontSize = 16.sp, lineHeight = 22.4.sp), modifier = Modifier.weight(1f))
                     ConversationAgentIconButton(onClick = onDismiss, modifier = Modifier.size(27.dp,29.dp)) {
                         Icon(Icons.Rounded.Close, "关闭", Modifier.size(16.dp))
                     }
@@ -48,9 +48,9 @@ import top.yukonga.miuix.kmp.window.WindowDialog
     enabled: Boolean, keyboardOptions: KeyboardOptions = KeyboardOptions.Default) {
     val colors = conversationAgentColors()
     Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-        Text(label, fontSize = 9.sp, color = colors.text, modifier = Modifier.padding(bottom = 5.dp))
+        Text(label, fontSize = 10.sp, lineHeight = 16.sp, color = colors.text, modifier = Modifier.padding(bottom = 5.dp))
         BasicTextField(value, onValueChange, enabled = enabled, singleLine = true, keyboardOptions = keyboardOptions,
-            textStyle = TextStyle(fontSize = 9.9.sp, lineHeight = 14.85.sp, color = colors.text),
+            textStyle = TextStyle(fontSize = 11.sp, lineHeight = 16.5.sp, color = colors.text),
             modifier = Modifier.fillMaxWidth().background(androidx.compose.ui.graphics.Color(if (colors.dark) 0x06ffffff else 0x60ffffff), RoundedCornerShape(10.dp))
                 .border(1.dp, colors.line, RoundedCornerShape(10.dp)).padding(horizontal = 10.dp, vertical = 9.dp))
     }

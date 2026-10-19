@@ -61,9 +61,9 @@ internal fun ChatUsageDialog(controller: ChatController, conversationId: String?
             } else {
                 UsageAction(text = if (all) "统计对象：全部会话" else "统计对象：本会话",
                     onClick = { scopePicker = true })
-                if (loading) Text("正在读取已记录用量…", fontSize = 9.sp, color = usagePalette().muted)
+                if (loading) Text("正在读取已记录用量…", fontSize = 10.sp, color = usagePalette().muted)
                 else projection?.let { usage ->
-                    if (usage.combined.requestSnapshotCount == 0L) Text("暂无已报告用量", style = androidx.compose.ui.text.TextStyle(fontSize = 9.sp, color = usagePalette().text))
+                    if (usage.combined.requestSnapshotCount == 0L) Text("暂无已报告用量", style = androidx.compose.ui.text.TextStyle(fontSize = 10.sp, color = usagePalette().text))
                     else {
                         UsageLine("输入 Token", usage.combined.input.reportedTokens?.let(::formatTokenCount) ?: "—")
                         UsageLine("输出 Token", usage.combined.output.reportedTokens?.let(::formatTokenCount) ?: "—")
@@ -75,12 +75,12 @@ internal fun ChatUsageDialog(controller: ChatController, conversationId: String?
                             UsageLine("主请求输出", formatReportedUsage(usage.main.output))
                             UsageLine("子任务输入", formatReportedUsage(usage.child.input))
                             UsageLine("子任务输出", formatReportedUsage(usage.child.output))
-                            Text("缓存写入、独立推理、费用：—（未记录）", style = androidx.compose.ui.text.TextStyle(fontSize = 7.2.sp, lineHeight = 11.7.sp, color = usagePalette().muted))
-                            Text(usage.coverageDescription, style = androidx.compose.ui.text.TextStyle(fontSize = 7.2.sp, lineHeight = 11.7.sp, color = usagePalette().muted))
+                            Text("缓存写入、独立推理、费用：—（未记录）", style = androidx.compose.ui.text.TextStyle(fontSize = 8.sp, lineHeight = 13.sp, color = usagePalette().muted))
+                            Text(usage.coverageDescription, style = androidx.compose.ui.text.TextStyle(fontSize = 8.sp, lineHeight = 13.sp, color = usagePalette().muted))
                         }
                     }
-                } ?: Text("用量读取失败", color = MiuixTheme.colorScheme.error, style = androidx.compose.ui.text.TextStyle(fontSize = 9.sp, color = usagePalette().text))
-                Text("已报告小计；缺报显示 —", style = androidx.compose.ui.text.TextStyle(fontSize = 7.2.sp, lineHeight = 11.7.sp, color = usagePalette().muted))
+                } ?: Text("用量读取失败", color = MiuixTheme.colorScheme.error, style = androidx.compose.ui.text.TextStyle(fontSize = 10.sp, color = usagePalette().text))
+                Text("已报告小计；缺报显示 —", style = androidx.compose.ui.text.TextStyle(fontSize = 8.sp, lineHeight = 13.sp, color = usagePalette().muted))
                 UsageAction(text = "刷新", onClick = { refresh++ }, enabled = !loading)
             }
             UsageAction(text = "关闭", onClick = onDismiss, modifier = Modifier.fillMaxWidth())

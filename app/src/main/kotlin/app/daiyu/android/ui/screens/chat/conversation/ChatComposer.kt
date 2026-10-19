@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.semantics
 import app.daiyu.android.ui.components.AssistantDisplay
 import app.daiyu.android.ui.components.AssistantAvatar
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -91,7 +92,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                 onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) })
             Row(Modifier.widthIn(max = 144.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
                 .border(1.dp, chrome.line, RoundedCornerShape(12.dp))
-                .combinedClickable(enabled = state.enabled, role = Role.Button, onClickLabel = "上下文统计", onClick = actions.onContextClick,
+                .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = state.enabled, role = Role.Button, onClickLabel = "上下文统计", onClick = actions.onContextClick,
                     onLongClick = { actions.onMenuAction(ChatMenuAction.CONTEXT_SCOPE) })
                 .padding(start = 6.dp, end = 6.dp, top = 3.dp, bottom = 3.dp),
                 horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -145,7 +146,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             ChatIconButton(ChatPreviewIcons.Thought, "推理强度，当前为 ${state.reasoningLabel}", actions.onOpenReasoning,
                                 Modifier.size(width = 25.dp, height = 28.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = chrome.accent, iconSize = 18.dp)
                             Box(Modifier.size(28.dp).testTag("chat-assistant").clip(CircleShape)
-                                .combinedClickable(enabled = state.enabled, role = Role.Button,
+                                .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = state.enabled, role = Role.Button,
                                     onClickLabel = "选择助手", onClick = actions.onOpenAssistant)
                                 .semantics { contentDescription = "选择助手，当前为 ${state.assistantLabel}" },
                                 contentAlignment = Alignment.Center) {
@@ -156,7 +157,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             Row(verticalAlignment = Alignment.CenterVertically) {
                             app.daiyu.android.balance.ui.ProviderBalanceIndicator(
                                 state = balanceState, modifier = Modifier.testTag("chat-provider-balance")
-                                    .widthIn(max = 60.dp).padding(horizontal = 2.dp), animateChanges = true)
+                                    .widthIn(max = 60.dp).padding(horizontal = 2.dp), animateChanges = true,
+                                textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 28.sp))
                             ChatIconButton(primaryIcon, primaryLabel, {
                                 if (!textAction) actions.onPrimaryTap()
                                 else if (state.phase == ComposerPhase.IDLE) actions.onSend(state.text)
@@ -165,7 +167,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 .controlGesture(actions, primaryEnabled),
                                 containerColor = if (!primaryEnabled) colors.disabledPrimaryButton
                                     else if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer,
-                                enabled = primaryEnabled, containerSize = 28.dp,
+                                enabled = primaryEnabled, containerSize = 20.dp,
                                 tint = if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
                                 iconSize = if (state.phase == ComposerPhase.RUNNING || state.phase == ComposerPhase.PAUSED && !hasText) 10.dp else 12.dp,
                                 onLongClick = if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
@@ -209,7 +211,7 @@ internal fun ComposerChip(icon: ImageVector, label: String, enabled: Boolean, on
     val colors = MiuixTheme.colorScheme
     val contentColor = if (enabled) colors.onSurfaceVariantSummary else colors.disabledOnSurface
     Row(modifier.clip(RoundedCornerShape(12.dp))
-        .combinedClickable(enabled = enabled, role = Role.Button, onClickLabel = "选择模型",
+        .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = enabled, role = Role.Button, onClickLabel = "选择模型",
             onClick = onClick, onLongClick = onLongClick).padding(horizontal = 0.dp, vertical = 3.dp),
         horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(11.dp), tint = contentColor)

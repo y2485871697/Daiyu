@@ -99,7 +99,7 @@ internal fun DaiyuConfirmDialog(
         ChatSelectionSheet(title, onDismiss, footer = {
             AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f))
             AssistantPreviewButton(confirmText, onConfirm, Modifier.weight(1f), primary = !destructive, danger = destructive)
-        }) { Text(message, fontSize = 10.8.sp, lineHeight = 17.28.sp, modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) }
+        }) { Text(message, fontSize = 12.sp, lineHeight = 19.2.sp, modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(bottom = 12.dp)) }
         return
     }
     WindowDialog(show = true, title = title, summary = message, onDismissRequest = onDismiss) {

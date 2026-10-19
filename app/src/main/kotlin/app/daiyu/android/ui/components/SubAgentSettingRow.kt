@@ -32,22 +32,30 @@ internal fun SubAgentSettingRow(label: String, value: String, icon: ImageVector,
     if (app.daiyu.android.ui.components.subagent.LocalConversationAgentStyle.current) {
         val colors = app.daiyu.android.ui.components.subagent.conversationAgentColors()
         val model = label == "模型"
-        val plain = model || label == "GPT 速度"
+        val speed = label == "GPT 速度"
+        val thinking = label == "思考深度"
+        val plain = model || speed
         Column(modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-            Text(label, fontSize = 10.sp, color = colors.text, modifier = Modifier.padding(bottom = 5.dp))
+            if (!speed) Text(label, fontSize = 10.sp, lineHeight = 16.sp, color = colors.text, modifier = Modifier.padding(bottom = 5.dp))
             Row(Modifier.fillMaxWidth().semantics { contentDescription = description }
+                .heightIn(min = if (thinking) 31.dp else 0.dp)
                 .then(if (plain) Modifier else Modifier.background(colors.soft, RoundedCornerShape(10.dp)).border(1.dp, colors.line, RoundedCornerShape(10.dp)))
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                     enabled = enabled, role = Role.Button, hapticFeedbackEnabled = false, onClick = onClick, onLongClick = onLongClick)
-                .padding(horizontal = if (plain) 0.dp else 10.dp, vertical = if (model) 7.dp else 9.dp),
+                .padding(horizontal = if (plain) 0.dp else 10.dp, vertical = if (model || thinking) 7.dp else if (speed) 10.dp else 9.dp),
                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                 if (model || label == "思考深度") Icon(icon, null, Modifier.size(if (model) 12.dp else 13.dp), tint = colors.accent)
-                Text(value, Modifier.weight(1f), fontSize = 11.sp, color = colors.text.copy(alpha = if (enabled) 1f else .4f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (speed) Text(label, Modifier.weight(1f), fontSize = 11.sp, lineHeight = 17.6.sp, color = colors.text)
+                Text(value, if (speed) Modifier else Modifier.weight(1f),
+                    fontSize = if (model || thinking || speed) 10.sp else 11.sp,
+                    lineHeight = if (thinking) 14.sp else if (speed) 16.sp else 16.5.sp,
+                    color = colors.text.copy(alpha = if (enabled) 1f else .4f),
+                    maxLines = if (model || thinking || speed) 1 else 2, overflow = TextOverflow.Ellipsis)
                 trailing?.invoke()
                 Icon(Icons.Rounded.ExpandMore, null, Modifier.size(12.dp), tint = colors.muted)
             }
             if (plain) HorizontalDivider(color = colors.line)
-            if (!badge.isNullOrBlank()) Text(badge, fontSize = 9.sp, color = colors.muted, modifier = Modifier.padding(top = 4.dp))
+            if (!badge.isNullOrBlank()) Text(badge, fontSize = 9.sp, lineHeight = 14.4.sp, color = colors.muted, modifier = Modifier.padding(top = 4.dp))
         }
         return
     }

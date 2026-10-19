@@ -27,7 +27,7 @@ import app.daiyu.android.ui.haptics.TouchHaptics
     val view = LocalView.current
     var expanded by remember { mutableStateOf(state.providerGroups.filter { state.selectedModel == null || it.providerId == state.selectedModel.providerId }.map { it.providerId }.toSet()) }
     SubAgentConfigurationWindow(title, onDismiss) {
-        Column(Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState()).selectableGroup()) {
+        Column(Modifier.weight(1f, fill = false).fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState()).selectableGroup()) {
             if (onClearSelection != null) ConversationModelOption("无", state.selectedModel == null, symbol = false) { TouchHaptics.click(view); onClearSelection() }
             if (state.providerGroups.isEmpty()) Text("没有可用模型", fontSize = 10.sp, color = colors.muted, modifier = Modifier.padding(vertical = 20.dp))
             state.providerGroups.forEach { group ->

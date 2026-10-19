@@ -35,7 +35,7 @@ import top.yukonga.miuix.kmp.window.WindowDialog
             Column(Modifier.background(Brush.linearGradient(if (colors.dark) listOf(androidx.compose.ui.graphics.Color(0xed302a3d), androidx.compose.ui.graphics.Color(0xef201c2b))
                 else listOf(androidx.compose.ui.graphics.Color(0xe8ffffff), androidx.compose.ui.graphics.Color(0xeaf7f3fb))))) {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 15.dp).heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(title, Modifier.weight(1f), fontSize = 10.8.sp, color = colors.accent)
+                    Text(title, Modifier.weight(1f), fontSize = 12.sp, lineHeight = 18.sp, color = colors.accent)
                     ConversationAgentIconButton(onClick = onDismiss, modifier = Modifier.size(29.dp)) { Icon(Icons.Rounded.Close, "关闭", Modifier.size(16.dp), tint = colors.muted) }
                 }
                 HorizontalDivider(Modifier.padding(horizontal = 12.dp), color = colors.line)
@@ -50,7 +50,7 @@ import top.yukonga.miuix.kmp.window.WindowDialog
     Row(Modifier.fillMaxWidth().heightIn(min = 46.dp).background(if (selected) colors.soft else androidx.compose.ui.graphics.Color.Transparent, RoundedCornerShape(13.dp))
         .clickable(role = Role.RadioButton, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick).padding(horizontal = 12.dp, vertical = 11.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f), fontSize = 10.8.sp, lineHeight = 16.2.sp, color = colors.text)
+        Text(label, Modifier.weight(1f), fontSize = 12.sp, lineHeight = 18.sp, color = colors.text)
         Box(Modifier.size(15.dp).border(1.4.dp, if (selected) colors.accent else colors.muted.copy(alpha = .65f), CircleShape), contentAlignment = Alignment.Center) {
             if (selected) Box(Modifier.size(7.dp).background(colors.accent, CircleShape))
         }

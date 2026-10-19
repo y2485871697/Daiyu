@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.components
 
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -57,7 +59,7 @@ internal fun UsageGlassDialog(
                 .heightIn(max = minOf(if (compact) 620.dp else 550.dp, available))
                 .clip(RoundedCornerShape(if (compact) 16.dp else 25.dp))
                 .previewGlassBlur(RoundedCornerShape(if (compact) 16.dp else 25.dp))
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                .pointerInput(Unit) { detectTapGestures(onTap = {}) }
                 .background(Brush.linearGradient(colors.sheet))
                 .border(1.dp, colors.edge, RoundedCornerShape(if (compact) 16.dp else 25.dp))
                 .padding(horizontal = if (compact) 14.dp else 15.dp)

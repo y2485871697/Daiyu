@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -44,7 +46,7 @@ internal fun ChatSelectionSheet(
                 else Modifier.height(minOf(height, available)))
             .clip(shape).previewGlassBlur(shape, 28f, 1.3f)
             .background(Brush.linearGradient(colors.sheet)).border(1.dp, colors.edge, shape)
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+            .pointerInput(Unit) { detectTapGestures(onTap = {}) }
             .padding(start = 15.dp, end = 15.dp, top = 11.dp, bottom = 15.dp)) {
             Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 17.dp)
                 .size(29.dp, 3.dp).background(colors.toolbar.copy(alpha = .24f), CircleShape))

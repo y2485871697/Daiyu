@@ -307,7 +307,8 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         val heading = ui.onNodeWithText("Heading", useUnmergedTree = true)
         val layouts = mutableListOf<TextLayoutResult>()
         heading.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
-        assertEquals(24.sp, layouts.single().layoutInput.style.fontSize)
+        assertEquals(17.sp, layouts.single().layoutInput.style.fontSize)
+        assertEquals(25.sp, layouts.single().layoutInput.style.lineHeight)
         assertEquals(FontWeight.Bold, layouts.single().layoutInput.style.fontWeight)
         val quote = annotation(ui.onNodeWithText("quote bold", useUnmergedTree = true))
         assertEquals(6, quote.spanStyles.single { it.item.fontWeight == FontWeight.Bold }.start)

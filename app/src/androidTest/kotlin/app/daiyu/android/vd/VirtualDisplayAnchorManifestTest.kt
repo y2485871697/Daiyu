@@ -18,6 +18,13 @@ class VirtualDisplayAnchorManifestTest : InstrumentationTestCase() {
         assertEquals(ActivityInfo.LAUNCH_MULTIPLE, info.launchMode)
         assertEquals(VirtualDisplayAnchorActivity.TASK_AFFINITY, info.taskAffinity)
         assertTrue(info.taskAffinity != context.packageName)
-        assertEquals(android.R.style.Theme_Material_NoActionBar, info.theme)
+        assertEquals(app.daiyu.android.R.style.Theme_Daiyu_Anchor, info.theme)
+        val theme = context.resources.newTheme().apply { applyStyle(info.themeResource, true) }
+        val attributes = theme.obtainStyledAttributes(intArrayOf(
+            android.R.attr.windowIsTranslucent, android.R.attr.windowIsFloating))
+        try {
+            assertFalse(attributes.getBoolean(0, false))
+            assertFalse(attributes.getBoolean(1, false))
+        } finally { attributes.recycle() }
     }
 }

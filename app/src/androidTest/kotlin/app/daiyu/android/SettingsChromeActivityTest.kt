@@ -127,6 +127,12 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { assertTrue(events.isEmpty()) }
     }
 
+    private fun chooseSheetOption(index: Int) {
+        ui.onNode(hasScrollToIndexAction() and hasAnyDescendant(hasTestTag("prompt-choice:0")),
+            useUnmergedTree = true).performScrollToIndex(index)
+        ui.onNodeWithTag("prompt-choice:$index", useUnmergedTree = true).assertIsDisplayed().performClick()
+    }
+
     fun testAppearanceSelectionAndWholeRowSwitchUpdateControlledState() {
         var state by mutableStateOf(AppearanceSettings())
         mainThread {
@@ -143,22 +149,24 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
             assertTrue(state.pureBlackEnabled)
         }
         reveal("settings-row:强调色", "外观与主题").performClick()
-        ui.onNodeWithText("绿色").performClick()
+        chooseSheetOption(8)
         ui.runOnIdle { assertEquals(AppearanceAccentColor.GREEN, state.accentColor); assertTrue(state.monetEnabled) }
         reveal("settings-row:强调色", "外观与主题").performClick()
-        ui.onNodeWithText("墨绿").performClick()
+        chooseSheetOption(0)
         ui.runOnIdle { assertFalse(state.monetEnabled); assertEquals(AppearanceAccentColor.GREEN, state.accentColor) }
         reveal("settings-row:色彩风格", "外观与主题").performClick()
-        ui.onNodeWithText("内容", useUnmergedTree = true).performScrollTo().performClick()
+        chooseSheetOption(9)
         ui.runOnIdle { assertTrue(state.monetEnabled); assertEquals(AppearancePaletteStyle.CONTENT, state.paletteStyle) }
         reveal("settings-row:色彩风格", "外观与主题").performClick()
-        ui.onNodeWithText("代鱼默认配色").performClick()
+        chooseSheetOption(0)
         ui.runOnIdle { assertFalse(state.monetEnabled); assertEquals(AppearancePaletteStyle.CONTENT, state.paletteStyle) }
         reveal("settings-switch:消息时间戳", "外观与主题").performClick().assertIsOn()
         reveal("settings-switch:圆形加载指示器", "外观与主题").performClick()
         reveal("settings-switch:仅消息生成前", "外观与主题").performClick().assertIsOn()
         ui.runOnIdle { assertTrue(state.morphLoadingIndicator); assertTrue(state.morphLoadingBeforeResponseOnly) }
-        reveal("settings-switch:圆形加载指示器", "外观与主题").onChild().performClick()
+        reveal("settings-switch:圆形加载指示器", "外观与主题")
+        ui.onNode(isToggleable() and hasAnyAncestor(hasTestTag("settings-switch:圆形加载指示器")),
+            useUnmergedTree = true).performClick()
         ui.runOnIdle { assertFalse(state.morphLoadingIndicator); assertTrue(state.morphLoadingBeforeResponseOnly) }
         node("settings-switch:仅消息生成前").assertDoesNotExist()
         reveal("settings-switch:圆形加载指示器", "外观与主题").performClick()

@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.semantics
+
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.runtime.*
@@ -20,6 +23,8 @@ import app.daiyu.android.ui.icons.DaiyuIcons
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONObject
 import top.yukonga.miuix.kmp.basic.TextButton
+
+internal val RetainedProviderFieldAdd = SemanticsPropertyKey<() -> Unit>("RetainedProviderFieldAdd")
 
 internal data class ProviderFieldRow(val id: Long, val name: String, val value: String) {
     override fun toString() = "ProviderFieldRow(<redacted>)"
@@ -107,10 +112,12 @@ internal fun ProviderInlineFields(draft: ModelSettingsDraftUi, enabled: Boolean,
         } }
         notice?.let { SettingsNote(it, error = true) }
         if (parsed.isFailure) TextButton("清除无效配置", enabled = enabled, onClick = { update(emptyList()) })
+        val add: () -> Unit = {
+            if (current() && rows.size < 32) update(rows + ProviderFieldRow(nextId, "", ""))
+        }
         TextButton(if (headers) "添加请求头" else "添加请求体字段", enabled = enabled && rows.size < 32,
-            modifier = Modifier.testTag("$prefix-add"), onClick = {
-                if (current() && rows.size < 32) update(rows + ProviderFieldRow(nextId, "", ""))
-            })
+            modifier = Modifier.testTag("$prefix-add").semantics { this[RetainedProviderFieldAdd] = add },
+            onClick = add)
     }
 }
 

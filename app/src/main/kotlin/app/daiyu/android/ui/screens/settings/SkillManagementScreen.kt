@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.ui.platform.LocalContext
@@ -63,6 +65,8 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
+
+internal val RetainedSkillRemovalCancel = SemanticsPropertyKey<() -> Unit>("RetainedSkillRemovalCancel")
 
 @Composable
 internal fun SkillManagementScreen(
@@ -272,7 +276,8 @@ internal fun SkillManagementScreen(
             text = { Text("删除 ${removal.entry.skill.name}？当前运行保留已冻结的正文，新运行不再加载该技能。") },
             confirmButton = { TextButton(onClick = { controller.remove(removal) }, enabled = !controller.busy,
                 modifier = Modifier.testTag("skills-confirm-remove")) { Text("删除") } },
-            dismissButton = { TextButton(onClick = cancel, enabled = !controller.busy) { Text("取消") } })
+            dismissButton = { TextButton(onClick = cancel, enabled = !controller.busy,
+                modifier = Modifier.semantics { this[RetainedSkillRemovalCancel] = cancel }) { Text("取消") } })
     }
 
 }

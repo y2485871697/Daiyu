@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.components.subagent
 
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -54,7 +56,7 @@ internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, mod
             .shadow(18.dp, RoundedCornerShape(radius.dp), ambientColor = Color(0x24352044), spotColor = Color(0x24352044))
             .clip(RoundedCornerShape(radius.dp))
             .previewGlassBlur(RoundedCornerShape(radius.dp))
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+            .pointerInput(Unit) { detectTapGestures(onTap = {}) }
             .background(Brush.linearGradient(colors.gradient))
             .border(1.dp, colors.edge, RoundedCornerShape(radius.dp))) {
             CompositionLocalProvider(LocalContentColor provides colors.text, content = { content() })

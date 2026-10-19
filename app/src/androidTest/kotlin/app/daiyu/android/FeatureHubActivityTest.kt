@@ -40,7 +40,8 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         val hidden = setOf("balance", "generation", "platform_tools", "browser", "overlay", "enhancements", "accessibility")
         for (engineering in listOf(false, true)) assertTrue(SettingsCatalog.visibleGroups(engineering)
             .flatMap { it.entries }.none { it.id in hidden })
-        entries.forEach { item -> entry(item.id).assertIsEnabled().assertTextContains(item.title) }
+        entries.forEach { item -> entry(item.id).assertIsEnabled().assert(
+            hasText(item.title) or hasAnyDescendant(hasText(item.title))) }
         ui.onAllNodes(SemanticsMatcher("forbidden state marker") { semantics ->
             val texts = semantics.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Text).orEmpty()
             texts.any { text -> listOf("尚未接入", "未实现", "占位", "开发中").any { it in text.text } }

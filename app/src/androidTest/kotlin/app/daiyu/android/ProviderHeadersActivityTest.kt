@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import app.daiyu.android.ui.screens.settings.RetainedProviderFieldAdd
+
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -69,7 +71,7 @@ class ProviderHeadersActivityTest : WiredActivityTestCase() {
     }
     fun testPausedAddCallbackCannotChangeDraftAfterResume() {
         showComponent(); openEditor()
-        val action = checkNotNull(control("model-header-add").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val action = control("model-header-add").fetchSemanticsNode().config[RetainedProviderFieldAdd]
         val before = draft
         realPauseResume(activity, atPause = { action(); assertEquals(before, draft) })
         mainThread { action() }
@@ -77,7 +79,7 @@ class ProviderHeadersActivityTest : WiredActivityTestCase() {
     }
     fun testChangedProtocolRevokesOldAddCallback() {
         showComponent(); openEditor()
-        val action = checkNotNull(control("model-header-add").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        val action = control("model-header-add").fetchSemanticsNode().config[RetainedProviderFieldAdd]
         mainThread { draft = draft.selectProtocol(ProviderProtocol.MESSAGES) }
         ui.waitForIdle(); val expected = draft
         mainThread { action() }

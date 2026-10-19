@@ -76,6 +76,7 @@ internal class ActivityRemoteVoiceHost(
     fun startDuplex(admission: () -> Boolean) {
         try {
             val config = runtime.snapshot()
+            check(VoiceSettingsPreferences(context).enabled("realtime"))
             check(config.duplexKey.isNotBlank() && admission())
             if (!permission()) return
             invalidate()

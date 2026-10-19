@@ -353,6 +353,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun startUniversalVoice(profile: VoiceControlProfile, limits: VoiceControlLimits) {
+        if (!VoiceSettingsPreferences(applicationContext).enabled("conversation")) { toast("请先在语音设置中启用语音会话"); return }
         if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible) return
         stopCascadeVoice(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
         speechHost.stop(speechHost.owner)
@@ -1627,6 +1628,7 @@ class MainActivity : ComponentActivity() {
                         onBack = { if (activityUsable() && retainedPage == "skills") retainedPage = "settings" },
                     )
                     "voice-settings" -> VoiceSettingsPanel(voiceRuntime, remoteVoice, controller.voiceAccounts,
+                        modelSource = remember { app.daiyu.android.ui.screens.settings.SettingsModelSource(applicationContext, controller.providers) },
                         installPreviewRevoke = { revoke ->
                             accountPreviewRevoke = revoke
                             val unregister: () -> Unit = { if (accountPreviewRevoke === revoke) accountPreviewRevoke = null }
@@ -2141,6 +2143,7 @@ class MainActivity : ComponentActivity() {
                 })
         }
         fun requestDictation() {
+            if (!VoiceSettingsPreferences(applicationContext).enabled("input")) { toast("请先在语音设置中启用语音输入"); return }
             if (editorMatches() && terminalEditor == null && virtualDisplayEditor == null && virtualDisplayPlanVisit == null && !videoSending &&
                 draftRevision == renderedDraftRevision && voiceForeground &&
                 retainedPage == "chat" && !sidebarVisible &&
@@ -5883,7 +5886,7 @@ internal interface VoiceHostPlayer : AutoCloseable {
     fun closeStrict()
 }
 
-private class AndroidVoiceHostPlayer(private val player: AndroidSpeechPlayer) : VoiceHostPlayer {
+internal class AndroidVoiceHostPlayer(private val player: AndroidSpeechPlayer) : VoiceHostPlayer {
     override val state get() = player.state
     override fun bindOwner(owner: String) = player.bindOwner(owner)
     override fun play(owner: String, requestId: String, text: String) = player.play(owner, requestId, text)

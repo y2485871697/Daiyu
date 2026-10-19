@@ -2,6 +2,10 @@ package app.daiyu.android
 
 import android.net.Uri
 import android.os.Looper
+import androidx.activity.compose.BackHandler
+import app.daiyu.android.ui.components.MiuixScaffoldPage
+import app.daiyu.android.ui.components.DaiyuConfirmDialog
+import app.daiyu.android.ui.screens.settings.*
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
@@ -81,6 +85,8 @@ internal fun VoiceAccountPanel(
     onBack: () -> Unit,
     // Synchronous main-thread host proof; false/throw must include any prior strict-stop failure.
     stopPreviewStrictly: () -> Boolean = { false },
+    previewConsent: @Composable () -> Unit = {},
+    onAccountKeyChange: (suspend (String) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
@@ -119,8 +125,8 @@ internal fun VoiceAccountPanel(
         confirmation = null; busy = true
         operation = scope.launch {
             try {
-                previewGuard.execute(::current, { latestStrictStop() }, block)
-                if (current()) notice = "操作完成；未自动选择、查询、上传或开始训练下一次请求。"
+                previewGuard.execute(::current, { latestStrictStop() }, block = block)
+                if (current()) notice = "操作完成"
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) {
                 if (current()) notice = if (previewGuard.stopUnconfirmed)
@@ -161,101 +167,215 @@ internal fun VoiceAccountPanel(
         pickerPending = samplePicker.pending
         if (uri != null) { sampleUri = uri; confirmation = null }
     }
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp).testTag("voice-account"),
-        verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        TextButton(text = "返回", onClick = { confirmation = null; operation?.cancel(); preview.stop(); onBack() })
-        Text("豆包账户音色管理")
-        Text("仅使用已保存语音配置的实际认证账户。导入已有音色、读取购买槽位、项目查询和状态查询均需确认后联网；不会自动查询或上传。")
-        Text(if (account == null) "请先保存有效豆包语音配置" else "当前语音账户：${account.fingerprint.take(12)}…")
-        if (!latestCurrent(frozenConfiguration)) Text("配置已变化，请退出后重新打开。")
-        if (notice.isNotBlank()) Text(notice)
-        previewState.error?.let { Text(it) }
-        confirmation?.let { pending ->
-            Text("确认本次请求：${pending.first}")
-            TextButton(text = "确认本次操作", enabled = enabled, onClick = { execute(pending.second) })
-            TextButton(text = "取消", onClick = { confirmation = null })
+    var page by remember { mutableStateOf("LIST") }
+    var parentPage by remember { mutableStateOf("LIST") }
+    var step by remember { mutableIntStateOf(0) }
+    var menu by remember { mutableStateOf(false) }
+    var addMenu by remember { mutableStateOf(false) }
+    var manualId by remember { mutableStateOf(false) }
+    var agreed by remember { mutableStateOf(false) }
+    var projectPicker by remember { mutableStateOf(false) }
+    var detail by remember { mutableStateOf<String?>(null) }
+    var voiceMenu by remember { mutableStateOf<PersonalVoices.Voice?>(null) }
+    var accountKey by remember(frozenConfiguration.revision) { mutableStateOf(frozenConfiguration.key) }
+    fun navigate(target: String) {
+        if (!current() || busy) return
+        confirmation = null; preview.stop(); menu = false; addMenu = false
+        if (target == "SYNC" || target == "ACCOUNT") parentPage = page
+        page = target
+    }
+    fun back() {
+        if (busy) { operation?.cancel(); notice = "正在停止等待。若已提交制作，请查询原音色，不要重复提交。"; return }
+        samplePicker.invalidate()
+        confirmation = null; preview.stop(); menu = false; addMenu = false; voiceMenu = null
+        when {
+            page == "SYNC" || page == "ACCOUNT" -> page = parentPage
+            page == "CREATE" && step > 0 -> { step--; agreed = false }
+            page != "LIST" -> page = "LIST"
+            else -> { operation?.cancel(); onBack() }
         }
-        AccountField("控制面 AK（不是语音 API Key）", ak, busy, true) { ak = it; confirmation = null }
-        AccountField("控制面 SK", sk, busy, true) { sk = it; confirmation = null }
-        AccountField("项目名称", project, busy) { project = it; confirmation = null }
-        Text("AK/SK/项目仅加密保存于当前语音账户下，不发送给合成接口。项目权限标记仅作提示，不能证明有复刻服务权限。")
-        TextButton(text = "仅本机加密保存控制面凭据", enabled = account != null && !busy && current(), onClick = {
-            val savedAk = ak; val savedSk = sk; val savedProject = project
-            execute { withContext(Dispatchers.IO) { resources.preferences.save(account!!.fingerprint, savedAk, savedSk, savedProject) } }
-        })
-        TextButton(text = "清除本机控制面凭据", enabled = account != null && !busy && current(), onClick = {
-            execute { withContext(Dispatchers.IO) { resources.preferences.clear(account!!.fingerprint) }; ak = ""; sk = ""; projects = emptyList() }
-        })
-        TextButton(text = "查询项目列表…", enabled = enabled, onClick = {
-            val a = ak; val s = sk
-            ask("向火山 IAM 发送 AK 签名请求，仅查询项目，不发送语音 Key") {
-                projects = resources.projects.list(a, s)
-            }
-        })
-        projects.forEach { item ->
-            TextButton(text = "项目 ${item.displayName} (${item.name}) · ${if (item.allowed) "有项目权限" else "权限未确认"}", enabled = enabled,
-                onClick = { project = item.name; confirmation = null })
+    }
+    BackHandler { back() }
+    val title = when (page) {
+        "SYNC" -> "同步音色名额"; "ACCOUNT" -> "声音复刻账户"
+        "IMPORT" -> "导入声音"; "CREATE" -> "制作声音"; else -> "我的声音"
+    }
+    MiuixScaffoldPage(title, ::back, modifier = Modifier.testTag("voice-account"), actions = {
+        if (page == "LIST") {
+            TextButton("+", enabled = !busy, modifier = Modifier.testTag("voice-account-add"), onClick = { if (current()) addMenu = true })
+            TextButton("更多", enabled = !busy, modifier = Modifier.testTag("voice-account-menu"), onClick = { if (current()) menu = true })
         }
-        TextButton(text = "导入购买的槽位…", enabled = enabled, onClick = {
-            val a = ak; val s = sk; val p = project
-            ask("查询项目 $p 的槽位；已训练槽位将用当前语音 Key 校验，不训练、不合成") {
-                resources.voices.importPurchased(speech!!, a, s, p)
+    }) {
+        if (page == "LIST") {
+            item { previewConsent() }
+            if (voices.isEmpty()) item { SettingsNote("还没有声音。点击 + 制作或导入声音。") }
+            items(voices.size, key = { voices[it].id }) { index ->
+                val voice = voices[index]
+                SettingsCard {
+                    SettingsRow(voice.name, summary = when {
+                        voice.uncertain -> "提交结果未知，请查询状态，不要重新制作"
+                        voice.unused -> "未使用名额"
+                        voice.error.isNotBlank() -> "处理失败"
+                        voice.tts -> "可用于朗读"
+                        else -> voiceStatus(voice)
+                    }, trailing = {
+                        TextButton(if (previewState.matches(voice.account, voice.id)) "停止" else "试听",
+                            enabled = enabled && voice.tts && voice.accepted && voice.demo.isNotBlank(), onClick = {
+                                if (previewState.matches(voice.account, voice.id)) preview.stop()
+                                else ask(ACCOUNT_PREVIEW_CONFIRMATION) { check(current()); preview.toggle(speech!!, voice) }
+                            })
+                        TextButton("更多", enabled = !busy, onClick = { if (current()) voiceMenu = voice })
+                    })
+                    if (voice.tts && !voice.accepted) SettingsRow("确认音色，允许正式合成", summary = "可能产生音色费用",
+                        onClick = if (!enabled) null else ({ ask("我有权使用此声音，并同意正式合成可能产生音色费用") {
+                            withContext(Dispatchers.IO) { resources.voices.accept(voice) }
+                        } }))
+                }
             }
-        })
-        AccountField("音色名称", name, busy) { name = it; confirmation = null }
-        AccountField("已有音色 ID（S_ 或 etaClone）", existingId, busy) { existingId = it; confirmation = null }
-        TextButton(text = "导入已有音色…", enabled = enabled, onClick = {
-            val id = existingId; val n = name
-            ask("用当前语音账户查询已有音色 $id；不上传、不训练") { resources.voices.importExisting(speech!!, id, n) }
-        })
-        Text("训练样本应为本人或已获授权的声音。一次上传可能消耗额度/费用；结果未知时仅查询原音色，不自动重训。")
-        AccountField("已有训练槽位 S_ ID", slotId, busy) { slotId = it; confirmation = null }
-        TextButton(text = if (postpaid) "后付费自定义 ID：已明确选择（点此改用已有槽位）" else "使用已有槽位（点此明确选择后付费自定义 ID）", enabled = enabled,
-            onClick = { postpaid = !postpaid; confirmation = null })
-        TextButton(text = if (sampleUri == null) "选择本机训练样本（不会上传）" else "已选样本；重新选择", enabled = enabled && !pickerPending,
-            onClick = {
-                if (samplePicker.begin(frozenConfiguration.revision)) { pickerPending = true; picker.launch("audio/*") }
-            })
-        TextButton(text = "提交一次训练…", enabled = enabled && sampleUri != null && name.isNotBlank(), onClick = {
-            val uri = sampleUri!!; val n = name; val slot = if (postpaid) null else slotId
-            ask("我拥有此录音的使用权，同意上传并进行一次${if (slot == null) "后付费自定义" else "槽位 $slot"}训练，可能消耗额度和费用") {
-                val sample = PersonalVoices.readSample(context, uri)
-                try {
-                    check(current())
-                    resources.voices.create(speech!!, sample, n, slot, confirmed = true)
-                } finally { sample.clear(); sampleUri = null }
-            }
-        })
-        Text("槽位 / 我的音色（空闲槽位可选训练，但不代表能朗读）")
-        voices.forEach { voice ->
-            Text("${voice.name} · ${voice.id}\n状态 ${voice.status} / ${voice.catalogState} · 模型 ${voice.models.sorted()} · 剩余 ${if (voice.remaining < 0) "未知" else voice.remaining.toString()} · ${if (voice.uncertain) "提交未知，只能查询" else if (voice.unused) "空闲槽位" else "音色"}")
-            if (voice.error.isNotBlank()) Text(voice.error)
-            TextButton(text = "查询状态…", enabled = enabled, onClick = {
-                ask("查询原音色 ${voice.id}；绝不重复训练") { resources.voices.refresh(voice, speech!!) }
-            })
-            TextButton(text = "选为训练槽位（不上传）", enabled = enabled && voice.canTrain && voice.id.startsWith("S_"),
-                onClick = { slotId = voice.id; postpaid = false; confirmation = null })
-            if (voice.tts && !voice.accepted) TextButton(text = "首次使用确认：我有权使用此声音", enabled = enabled, onClick = {
-                execute { withContext(Dispatchers.IO) { resources.voices.accept(voice) } }
-            })
-            TextButton(text = "选择此音色（不联网）", enabled = enabled && voice.tts && voice.accepted,
-                onClick = { if (current()) { preview.stop(); onSelect(frozenConfiguration, resources.voices.selected(voice.id, speech!!)!!) } })
-            TextButton(text = if (previewState.matches(voice.account, voice.id)) "停止试听" else "试听…", enabled = enabled && voice.tts && voice.accepted && voice.demo.isNotBlank(),
-                onClick = {
-                    if (previewState.matches(voice.account, voice.id)) preview.stop()
-                    else ask(ACCOUNT_PREVIEW_CONFIRMATION) { check(current()); preview.toggle(speech!!, voice) }
-                })
-            TextButton(text = "仅移除本机记录（不删除云端、不退款、不释放槽位；未知须先查询）", enabled = enabled && !voice.uncertain, onClick = {
-                execute { preview.stop(); withContext(Dispatchers.IO) { resources.voices.removeLocal(voice) } }
-            })
         }
+        if (page == "ACCOUNT") item {
+            SettingsCard {
+                SettingsTextField("声音复刻 API Key", accountKey, { if (!busy) { accountKey = it; confirmation = null } }, password = true, enabled = !busy)
+                SettingsRow("保存账户", onClick = if (busy || onAccountKeyChange == null) null else ({
+                    val key = accountKey
+                    execute { onAccountKeyChange?.invoke(key) }
+                }))
+            }
+            SettingsNote("使用当前已保存豆包语音配置的认证账户。更换后需重新打开声音列表。")
+        }
+        if (page == "SYNC") item {
+            SettingsNote("AK / SK 与语音 API Key 不同。此处只读取名额，不购买、不训练。")
+            SettingsCard {
+                AccountField("AK", ak, busy, true) { ak = it; confirmation = null }
+                AccountField("SK", sk, busy, true) { sk = it; confirmation = null }
+                SettingsRow("当前项目", summary = project, onClick = if (busy || projects.isEmpty()) null else ({ projectPicker = true }))
+                SettingsRow(if (projects.isEmpty()) "获取项目列表" else "刷新项目列表", onClick = if (!enabled) null else ({
+                    val a = ak; val s = sk
+                    ask("向火山 IAM 发送 AK 签名请求，仅查询项目，不发送语音 Key") { projects = resources.projects.list(a, s) }
+                }))
+                SettingsRow("手动填写项目（备用）", onClick = if (busy) null else ({ manualId = !manualId }))
+                if (manualId) AccountField("项目名称", project, busy) { project = it; confirmation = null }
+                SettingsRow("读取我的名额", onClick = if (!enabled) null else ({
+                    val a = ak; val s = sk; val p = project
+                    ask("查询项目 $p 的槽位；已制作槽位将用当前语音 Key 校验，不制作、不合成") {
+                        resources.voices.importPurchased(speech!!, a, s, p)
+                    }
+                }))
+                SettingsRow("保存账户信息", onClick = if (account == null || busy || !current()) null else ({
+                    val a = ak; val s = sk; val p = project
+                    execute { withContext(Dispatchers.IO) { resources.preferences.save(account!!.fingerprint, a, s, p) } }
+                }))
+                SettingsRow("清除已记住的信息", onClick = if (account == null || busy || !current()) null else ({
+                    ask("清除本机保存的 AK / SK 与项目，不改动云端账户") {
+                        withContext(Dispatchers.IO) { resources.preferences.clear(account!!.fingerprint) }
+                        ak = ""; sk = ""; projects = emptyList()
+                    }
+                }))
+            }
+        }
+        if (page == "IMPORT" || (page == "CREATE" && step == 0)) item {
+            if (page == "CREATE") SettingsSectionTitle("1. 选择名额")
+            SettingsCard {
+                AccountField(if (page == "IMPORT") "备注名称（可空）" else "声音名称", name, busy) { name = it; confirmation = null }
+                if (page == "CREATE") SettingsSwitchRow("新建后付费音色", postpaid, enabled = enabled) { postpaid = it; confirmation = null }
+                voices.filter { if (page == "CREATE") it.canTrain && it.id.startsWith("S_") else !it.unused }.forEach { voice ->
+                    val selected = if (page == "CREATE") slotId == voice.id else existingId == voice.id
+                    SettingsRadioRow(voice.name, selected, enabled = enabled, summary = voiceStatus(voice)) {
+                        if (current()) { if (page == "CREATE") { slotId = voice.id; postpaid = false } else existingId = voice.id; confirmation = null }
+                    }
+                }
+                SettingsRow("查找我的音色名额", onClick = if (!enabled) null else ({ navigate("SYNC") }))
+                SettingsRow("备用方式：从控制台复制 ID", onClick = if (busy) null else ({ manualId = !manualId }))
+                if (manualId) {
+                    if (page == "CREATE") AccountField("名额 ID", slotId, busy) { slotId = it; confirmation = null }
+                    else AccountField("已有音色 ID", existingId, busy) { existingId = it; confirmation = null }
+                }
+                if (page == "CREATE") SettingsRow("下一步：选择录音", onClick = if (!enabled || name.isBlank() || (!postpaid && slotId.isBlank())) null else ({ step = 1; agreed = false }))
+                else SettingsRow("导入声音", onClick = if (!enabled || existingId.isBlank()) null else ({
+                    val id = existingId; val n = name
+                    ask("用当前语音账户查询已有音色 $id；不上传、不制作") { resources.voices.importExisting(speech!!, id, n) }
+                }))
+            }
+        }
+        if (page == "CREATE" && step == 1) item {
+            SettingsSectionTitle("2. 选择录音")
+            SettingsCard {
+                SettingsRow(if (sampleUri == null) "选择录音" else "重新选择录音", tag = "voice-training-sample",
+                    summary = if (sampleUri == null) "选择文件不会上传" else "录音已选择", onClick = if (!enabled || pickerPending) null else ({
+                        if (samplePicker.begin(frozenConfiguration.revision)) {
+                            pickerPending = true
+                            try { picker.launch("audio/*") }
+                            catch (_: Exception) { samplePicker.deliver(null); pickerPending = samplePicker.pending; pickerResult++; notice = "未能打开录音选择器" }
+                        }
+                    }))
+                SettingsRow("下一步：确认制作", onClick = if (!enabled || sampleUri == null) null else ({ step = 2; agreed = false }))
+            }
+            SettingsNote("请选择清晰的单人录音，并确认你拥有此声音及录音的使用权。")
+        }
+        if (page == "CREATE" && step == 2) item {
+            SettingsSectionTitle("3. 确认制作")
+            SettingsCard {
+                SettingsRow("名称", summary = name)
+                SettingsRow(if (postpaid) "新建后付费音色" else "已有名额", summary = if (postpaid) null else slotId)
+                SettingsSwitchRow("我有权使用此录音并同意本次上传制作", agreed, enabled = enabled) { agreed = it }
+                SettingsRow("确认上传并制作", tag = "voice-training-submit", onClick = if (!enabled || !agreed || sampleUri == null) null else ({
+                    val uri = sampleUri!!; val n = name; val slot = if (postpaid) null else slotId
+                    ask("上传所选录音并进行一次${if (slot == null) "后付费自定义" else "名额 $slot"}制作，可能消耗次数及费用。结果未知时只查询原音色，不重复提交。") {
+                        val sample = PersonalVoices.readSample(context, uri)
+                        try { check(current()); resources.voices.create(speech!!, sample, n, slot, confirmed = true) }
+                        finally { sample.clear(); sampleUri = null; agreed = false }
+                    }
+                }))
+            }
+            SettingsNote("本次会上传录音并消耗训练次数，可能覆盖已有音色或产生费用。")
+        }
+        if (!latestCurrent(frozenConfiguration)) item { SettingsNote("配置已变化，请退出后重新打开。", error = true) }
+        if (notice.isNotBlank()) item { SettingsNote(notice) }
+        previewState.error?.let { value -> item { SettingsNote(value, error = true) } }
+    }
+    if (menu) VoiceChoiceDialog("声音设置", listOf("ACCOUNT" to "声音复刻账户", "SYNC" to "同步音色名额"), "",
+        onSelect = { navigate(it) }, onDismiss = { menu = false })
+    if (addMenu) VoiceChoiceDialog("添加声音", listOf("CREATE" to "用录音制作声音", "IMPORT" to "导入已有声音"), "",
+        onSelect = { step = 0; agreed = false; navigate(it) }, onDismiss = { addMenu = false })
+    if (projectPicker) VoiceChoiceDialog("选择项目", projects.filter { it.allowed }.map { it.name to it.displayName }, project,
+        onSelect = { if (current()) { project = it; projectPicker = false; confirmation = null } }, onDismiss = { projectPicker = false })
+    voiceMenu?.let { voice ->
+        VoiceChoiceDialog(voice.name, buildList {
+            add("QUERY" to "查询状态")
+            if (voice.error.isNotBlank()) add("ERROR" to "错误详情")
+            if (voice.tts && voice.accepted) add("SELECT" to "用于朗读")
+            if (!voice.uncertain) add("REMOVE" to "移除本机记录")
+        }, "", onSelect = { action ->
+            voiceMenu = null
+            if (enabled) when (action) {
+                "QUERY" -> ask("查询原音色 ${voice.id}，不重复制作") { resources.voices.refresh(voice, speech!!) }
+                "ERROR" -> detail = voice.error
+                "SELECT" -> { preview.stop(); resources.voices.selected(voice.id, speech!!)?.let { onSelect(frozenConfiguration, it) } }
+                "REMOVE" -> ask("仅移除本机记录，不删除云端音色或任务，不退款、不释放名额") {
+                    preview.stop(); withContext(Dispatchers.IO) { resources.voices.removeLocal(voice) }
+                }
+            }
+        }, onDismiss = { voiceMenu = null })
+    }
+    detail?.let { message ->
+        DaiyuConfirmDialog("错误详情", message, "关闭", false, onConfirm = { detail = null }, onDismiss = { detail = null })
+    }
+    confirmation?.let { pending ->
+        DaiyuConfirmDialog("确认本次操作", pending.first, "确认", false,
+            onConfirm = { if (confirmation === pending && enabled) execute(pending.second) }, onDismiss = { confirmation = null })
     }
 }
 
 @Composable
 private fun AccountField(label: String, value: String, readOnly: Boolean, secret: Boolean = false, onChange: (String) -> Unit) {
-    Text(label)
-    BasicTextField(value = value, onValueChange = onChange, readOnly = readOnly, singleLine = true,
-        visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
-        modifier = Modifier.fillMaxWidth().padding(8.dp))
+    SettingsTextField(label, value, onChange, password = secret, enabled = !readOnly)
+}
+
+private fun voiceStatus(voice: PersonalVoices.Voice): String = when {
+    voice.uncertain -> "结果未知，需查询"
+    voice.unused -> "未使用名额"
+    voice.ready -> "已就绪"
+    voice.status == 1 -> "制作中"
+    voice.error.isNotBlank() -> "制作失败"
+    else -> "待查询"
 }

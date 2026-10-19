@@ -33,13 +33,14 @@ internal fun ShizukuApprovalHost(
     var timeout by remember(controller) { mutableStateOf("30000") }
     var error by remember { mutableStateOf<String?>(null) }
     var revision by remember(controller) { mutableIntStateOf(0) }
+    val ownedPreparation = remember(controller) { mutableStateOf<ControllerShizukuPreparation?>(null) }
     val accepted by rememberUpdatedState(onAccepted)
     DisposableEffect(controller) {
         val observer: () -> Unit = { revision++ }
         controller.observe(observer)
         onDispose {
             controller.unobserve(observer)
-            controller.shizukuPreparation()?.takeUnless { it.isSubmitted() }?.let(controller::rejectShizuku)
+            ownedPreparation.value?.takeUnless { it.isSubmitted() }?.let(controller::rejectShizuku)
         }
     }
     // A changed owner/editor never inherits a previous approval. Submitted runs keep their IDs.
@@ -64,7 +65,9 @@ internal fun ShizukuApprovalHost(
             OutlinedTextField(timeout, { timeout = it }, label = { Text("超时毫秒（1–120000）") },
                 enabled = preview == null, singleLine = true)
             Button(enabled = preview == null && text.isNotBlank(), onClick = {
-                error = if (controller.prepareShizukuSend(conversation, text, command, uid, timeout) == null)
+                val prepared = controller.prepareShizukuSend(conversation, text, command, uid, timeout)
+                if (prepared != null) ownedPreparation.value = prepared
+                error = if (prepared == null)
                     "无法准备：请检查 UID、命令、超时，或等待当前运行结束。未发起请求。" else null
             }) { Text("预览命令及本次运行") }
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }

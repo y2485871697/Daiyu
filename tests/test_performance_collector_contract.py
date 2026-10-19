@@ -125,7 +125,7 @@ class ControlledWorkloadContract(unittest.TestCase):
         self.assertIn('if (fullScale) ControlledPerformanceModel() else null', source)
         self.assertIn('controlledModel?.port ?: error("external_model_request_forbidden")', source)
         call = source.index('collectControlledWorkloads(launched, activeFixture.controller')
-        self.assertIn('if (fullScale)', source[call - 120:call])
+        self.assertIn('if (fullScale)', source[:call].rsplit('stage = "semantics_input"', 1)[1])
         model = (PERFORMANCE / 'ControlledPerformanceModel.kt').read_text()
         self.assertIn('checkNotNull(queued.pollFirst())', model)
         self.assertIn('ModelEvent.TextDelta("body"', model)
@@ -178,7 +178,7 @@ class SystemImeContract(unittest.TestCase):
         self.assertIn('require(!systemImeEnabled || fullScale)', source)
         self.assertIn('daiyuExpectedIme', source)
         call = source.index('collectSystemImeWindow(launched, checkNotNull(expectedIme), captured, inputs)')
-        self.assertIn('if (systemImeEnabled)', source[call - 120:call])
+        self.assertIn('if (systemImeEnabled)', source[:call].rsplit('if (fullScale)', 1)[1])
         self.assertLess(call, source.index('captured.close()', call))
 
     def test_real_selected_ime_has_no_injection_or_write_fallback(self):

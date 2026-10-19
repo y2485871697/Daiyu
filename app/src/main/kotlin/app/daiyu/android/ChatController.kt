@@ -1621,6 +1621,9 @@ class ChatController internal constructor(private val application:Application,
     }
     @Volatile private var runner:ChatRunner?=null
     @Volatile private var runTools:RunCatalogTools?=null
+    private class DataOperation(var lastProgressAt: Long = -1L)
+    private var dataOperation: DataOperation? = null
+    @Volatile var dataStatus: String? = null; private set
     @Volatile var dataBusy=false;private set
     var dataRevision=0L;private set
     var dataNotice:String?=null;private set
@@ -2411,17 +2414,19 @@ class ChatController internal constructor(private val application:Application,
 
     private fun committedScreenshotOnWorker(owner: app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi,
         callId: String): app.daiyu.android.domain.runtime.ToolRecord? {
-        val snapshot = SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, owner.messageId)
-            ?: return null
-        val message = database.storedMessage(database.readableDatabase, ConversationId(owner.conversationId), owner.messageId)
-        check(message.role == Message.ASSISTANT_ROLE && message.id == snapshot.message.id &&
-            message.conversationId.value == owner.conversationId && message.runId.value == owner.runId &&
-            snapshot.message.conversationId == message.conversationId && snapshot.message.runId == message.runId)
-        val record = snapshot.tools.singleOrNull { it.invocation.id.value == callId && it.invocation.name in setOf("screen", "browser_read", "browser_write") }
-            ?: return null
-        val blocks = message.blocks + message.historySegments.flatMap { it.blocks }
-        check(blocks.filterIsInstance<MessageBlock.Tool>().any { it.invocation == record.invocation && it.result == record.result })
-        return record
+        return DatabaseTransactions { database.readableDatabase }.run { db ->
+            val snapshot = SQLiteRuntimeStore.readCheckpointSnapshot(db, owner.messageId)
+                ?: return@run null
+            val message = database.storedMessage(db, ConversationId(owner.conversationId), owner.messageId)
+            check(message.role == Message.ASSISTANT_ROLE && message.id == snapshot.message.id &&
+                message.conversationId.value == owner.conversationId && message.runId.value == owner.runId &&
+                snapshot.message.conversationId == message.conversationId && snapshot.message.runId == message.runId)
+            val record = snapshot.tools.singleOrNull { it.invocation.id.value == callId && it.invocation.name in setOf("screen", "browser_read", "browser_write") }
+                ?: return@run null
+            val blocks = message.blocks + message.historySegments.flatMap { it.blocks }
+            check(blocks.filterIsInstance<MessageBlock.Tool>().any { it.invocation == record.invocation && it.result == record.result })
+            record
+        }
     }
 
     internal fun loadToolScreenshot(owner: app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi,
@@ -4150,8 +4155,9 @@ class ChatController internal constructor(private val application:Application,
         })
     }
     internal fun importUserBackup(uri:Uri,complete:Boolean,resolver:android.content.ContentResolver=application.contentResolver) {
-        dataTask(importing=true,work={
-            importUserBackupContent(complete, { resolver.openInputStream(uri) ?: throw java.io.IOException("无法打开备份") }).first
+        dataTaskWithProgress(importing=true, initialStatus="正在读取备份", work={ report ->
+            importUserBackupContent(complete, { resolver.openInputStream(uri) ?: throw java.io.IOException("无法打开备份") },
+                onStage = { report(it, true) }).first
         })
     }
     internal data class BackupImportOutcome(val kind: app.daiyu.android.backup.BackupImportSource.Kind,
@@ -4160,18 +4166,25 @@ class ChatController internal constructor(private val application:Application,
         resolver: android.content.ContentResolver = application.contentResolver,
         completed: (BackupImportOutcome?) -> Unit = {}) {
         var outcome: BackupImportOutcome? = null
-        dataTask(importing = true, completed = { success -> completed(outcome.takeIf { success }) }, work = {
-            val source = app.daiyu.android.backup.BackupImportSource.prepare(application.cacheDir) {
+        dataTaskWithProgress(importing = true, initialStatus = "正在读取备份",
+            completed = { success -> completed(outcome.takeIf { success }) }, work = { report ->
+            var bytesRead = 0L
+            val source = app.daiyu.android.backup.BackupImportSource.prepare(application.cacheDir, open = {
                 resolver.openInputStream(uri) ?: throw java.io.IOException("无法打开备份")
-            }
+            }, onBytesRead = { total ->
+                bytesRead = total
+                if (total > 0L) report("正在读取备份：已读取 ${total} 字节", false)
+            })
             var notice: String? = null
             var primaryFailure: Throwable? = null
             try {
+                report("读取结束：已读取 ${bytesRead} 字节", true)
                 if (source.kind == app.daiyu.android.backup.BackupImportSource.Kind.LEGACY) {
                     outcome = BackupImportOutcome(source.kind)
                     notice = "已识别旧版备份；请在资料库预览并确认导入"
                 } else {
-                    val result = importUserBackupContent(source.kind == app.daiyu.android.backup.BackupImportSource.Kind.COMPLETE, source::open)
+                    val result = importUserBackupContent(source.kind == app.daiyu.android.backup.BackupImportSource.Kind.COMPLETE,
+                        source::open, onStage = { report(it, true) })
                     notice = result.first
                     outcome = BackupImportOutcome(source.kind, result.second)
                 }
@@ -4187,15 +4200,18 @@ class ChatController internal constructor(private val application:Application,
             checkNotNull(notice)
         })
     }
-    private fun importUserBackupContent(complete: Boolean, open: () -> java.io.InputStream): Pair<String, Boolean> {
+    private fun importUserBackupContent(complete: Boolean, open: () -> java.io.InputStream,
+        onStage: (String) -> Unit = {}): Pair<String, Boolean> {
         if (complete) {
-            val result = neutralBackup.importPackageFrom(open)
+            val result = neutralBackup.importPackageFrom(open, onStage)
             val inventory = result.inventory
             val summary = if (result.alreadyImported) "此完整备份已导入过，未重复添加"
             else "已导入${inventory.conversations}个会话、${inventory.messages}条消息、${inventory.attachments}个附件"
             return (result.cleanupProblem?.let { "$summary；$it" } ?: summary) to (inventory.configEntries > 0)
         }
+        onStage("正在解析纯文本备份")
         val text = open().use { readBackupText(it, 16L * 1024 * 1024) }
+        onStage("正在校验并导入纯文本备份")
         val counts = database.importBackup(text)
         return "已导入${counts.first}个会话、${counts.second}条消息" to false
     }
@@ -4272,8 +4288,30 @@ class ChatController internal constructor(private val application:Application,
 
     @Synchronized internal fun dataTask(importing:Boolean=false,failureNotice:String?=null,
         completed:(Boolean)->Unit = {},work:()->String) {
+        dataTaskWithProgress(importing, failureNotice, completed, initialStatus = null) { _ -> work() }
+    }
+
+    @Synchronized private fun dataTaskWithProgress(importing:Boolean=false,failureNotice:String?=null,
+        completed:(Boolean)->Unit = {}, initialStatus:String?, work:((String,Boolean)->Unit)->String) {
         check(idleAvailable() && !hasLiveChildTasks()) { "请等待后台子任务实际结束" }
-        dataBusy=true;notifyChanged()
+        val operation = DataOperation()
+        dataOperation=operation;dataStatus=initialStatus;dataNotice=null;dataBusy=true;notifyChanged()
+        val report: (String,Boolean)->Unit = { text, force ->
+            synchronized(this) {
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (!closed && dataBusy && dataOperation === operation &&
+                    (force || operation.lastProgressAt < 0L || now - operation.lastProgressAt >= 150L)) {
+                    operation.lastProgressAt=now
+                    handler.post {
+                        val current = synchronized(this) {
+                            if (closed || !dataBusy || dataOperation !== operation) false
+                            else { dataStatus=text;true }
+                        }
+                        if (current) dispatchChanged()
+                    }
+                }
+            }
+        }
         try {executor.execute {
             var value=failureNotice ?: if(importing) "导入失败；原会话保留，格式、校验或身份冲突" else "导出失败；目标文件可能不完整，原会话保留"
             var success=false
@@ -4281,7 +4319,7 @@ class ChatController internal constructor(private val application:Application,
             try {
                 // Both backup importers append new identities or roll back on conflict; even
                 // an attempted/duplicate import must leave old owners and their gates untouched.
-                value=work();success=true
+                value=work(report);success=true
             } catch(failure:Exception) {
                 value=failureNotice ?: when(failure) {
                     is SecurityException -> "备份文件访问权限不足或已失效；请重新选择文件。原会话保留，导出目标可能不完整"
@@ -4297,9 +4335,9 @@ class ChatController internal constructor(private val application:Application,
                 val notice=value;val changed=success && importing
                 handler.post {
                     val committed=synchronized(this) {
-                        if(closed) false else {
+                        if(closed || dataOperation !== operation) false else {
                             if(changed) dataRevision++
-                            dataNotice=notice;dataBusy=false;true
+                            dataOperation=null;dataStatus=null;dataNotice=notice;dataBusy=false;true
                         }
                     }
                     if(committed) {
@@ -4308,7 +4346,10 @@ class ChatController internal constructor(private val application:Application,
                     }
                 }
             }
-        }} catch(failure:java.util.concurrent.RejectedExecutionException) {dataBusy=false;notifyChanged();throw failure}
+        }} catch(failure:java.util.concurrent.RejectedExecutionException) {
+            if (dataOperation === operation) { dataOperation=null;dataStatus=null;dataBusy=false;notifyChanged() }
+            throw failure
+        }
     }
     private fun ownedRunner(owner:Message):ChatRunner? {
         val current=active ?: return null
@@ -4395,7 +4436,7 @@ class ChatController internal constructor(private val application:Application,
         }
         val lifetime=synchronized(this) {
             if(!closed) {
-                closed=true;ready=false;dataBusy=false;active=null
+                closed=true;ready=false;dataOperation=null;dataStatus=null;dataBusy=false;active=null
                 preparation?.revoked=true
                 imageProvider=null; imageProviderConfiguration=null
                 configurationRestorePreview=null;dataNotice=null;listeners.clear();reasoningListeners.clear();childBindings.clear()

@@ -35,12 +35,14 @@ class BackupActivityTest:ComposeActivityTestCase() {
     private class Documents(private val directory:File):ContentProvider() {
         val opens=AtomicInteger()
         var deny=false
+        @Volatile var pipe: ImportPipe? = null
         fun file(uri:Uri)=File(directory,uri.lastPathSegment ?: error("missing document"))
         override fun onCreate()=true
         override fun getType(uri:Uri)="application/json"
         override fun openFile(uri:Uri,mode:String):ParcelFileDescriptor {
             opens.incrementAndGet()
             if(deny) throw SecurityException("test revoked grant")
+            pipe?.let { return it.open() }
             return ParcelFileDescriptor.open(file(uri),ParcelFileDescriptor.parseMode(mode))
         }
         override fun query(uri:Uri,projection:Array<out String>?,selection:String?,selectionArgs:Array<out String>?,sortOrder:String?):Cursor?=null
@@ -48,6 +50,32 @@ class BackupActivityTest:ComposeActivityTestCase() {
         override fun delete(uri:Uri,selection:String?,selectionArgs:Array<out String>?)=error("unused")
         override fun update(uri:Uri,values:ContentValues?,selection:String?,selectionArgs:Array<out String>?)=error("unused")
     }
+    private class ImportPipe(private val body: ByteArray) {
+        val release = CountDownLatch(1)
+        val finished = CountDownLatch(1)
+        val failure = AtomicReference<Throwable?>()
+        private val opens = AtomicInteger()
+        val started get() = opens.get() != 0
+        fun open(): ParcelFileDescriptor {
+            check(opens.incrementAndGet() == 1)
+            val descriptors = ParcelFileDescriptor.createReliablePipe()
+            Thread({
+                try {
+                    ParcelFileDescriptor.AutoCloseOutputStream(descriptors[1]).use { output ->
+                        output.write(ByteArray(8192) { 0x20.toByte() }); output.flush()
+                        check(release.await(30, TimeUnit.SECONDS)) { "backup pipe was not released" }
+                        output.write(body)
+                    }
+                } catch (caught: Throwable) {
+                    failure.set(caught)
+                    runCatching { descriptors[1].closeWithError("backup test pipe failed") }
+                } finally { finished.countDown() }
+            }, "backup-test-pipe").apply { isDaemon = true; start() }
+            return descriptors[0]
+        }
+    }
+    private var importPipe: ImportPipe? = null
+
     private class FixtureApplication(base:Context,private val resolver:MockContentResolver):Application() {
         init {attachBaseContext(base)}
         override fun getContentResolver()=resolver
@@ -124,7 +152,12 @@ class BackupActivityTest:ComposeActivityTestCase() {
         main {original=application.controller;application.controller=controller}
     }
     override fun tearDown() {
+        var pipeFinished = true
         try {
+            importPipe?.let { pipe ->
+                pipe.release.countDown()
+                if (pipe.started) pipeFinished = pipe.finished.await(10, TimeUnit.SECONDS)
+            }
             main {activity?.finish()}
             instrumentation.waitForIdleSync()
             main {original?.let {application.controller=it}}
@@ -135,6 +168,7 @@ class BackupActivityTest:ComposeActivityTestCase() {
             }
             fixtureApp.getSharedPreferences("model-settings",0).edit().clear().commit()
             directory.deleteRecursively()
+            check(pipeFinished) { "backup pipe writer did not finish" }
         } finally {super.tearDown()}
     }
     private fun start(intent:Intent=Intent(instrumentation.targetContext,MainActivity::class.java)):MainActivity {
@@ -255,6 +289,44 @@ class BackupActivityTest:ComposeActivityTestCase() {
             main {setField("dataRevision",0L)}
         }
     }
+    private fun verifyRealReadProgress(success: Boolean) {
+        start(); click("数据备份")
+        val before = controller.database.exportBackup()
+        val source = provider.file(completeUri).readBytes()
+        val pipe = ImportPipe(if (success) source else byteArrayOf(0xc3.toByte(), 0x28))
+        importPipe = pipe; provider.pipe = pipe
+        try {
+            picker(107, uri = completeUri); press(DialogInterface.BUTTON_POSITIVE)
+            val progress = hasText("正在读取备份：已读取 ", substring = true) and hasText("字节", substring = true)
+            ui.waitUntil(10_000) { ui.onAllNodes(progress, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+            ui.onNode(progress, useUnmergedTree = true).assertIsDisplayed()
+            main {
+                assertTrue(controller.dataBusy); assertEquals(0L, controller.dataRevision)
+                val bytes = checkNotNull(controller.dataStatus).substringAfter("已读取 ").substringBefore(" 字节").toLong()
+                assertTrue(bytes in 1L..8192L)
+            }
+            assertEquals(1L, pipe.release.count)
+            assertEquals(before, controller.database.exportBackup())
+            pipe.release.countDown()
+            awaitState { !controller.dataBusy }
+            assertTrue(pipe.finished.await(5, TimeUnit.SECONDS)); assertNull(pipe.failure.get())
+            ui.onAllNodes(hasText("字节", substring = true), useUnmergedTree = true).assertCountEquals(0)
+            main { assertNull(controller.dataStatus) }
+            if (success) {
+                assertEquals(1L, controller.dataRevision)
+                assertEquals(1, controller.database.conversations().size)
+            } else {
+                unchanged(before)
+                ui.onAllNodes(hasText("已导入", substring = true), useUnmergedTree = true).assertCountEquals(0)
+            }
+            assertEquals(1, provider.opens.get())
+            assertTrue(source.contentEquals(provider.file(completeUri).readBytes()))
+            assertEquals(0, modelCalls.get())
+        } finally { pipe.release.countDown() }
+    }
+    fun testRealImportShowsReadBytesBeforeEofAndClearsProgressOnSuccess() = verifyRealReadProgress(true)
+    fun testRealImportReadProgressIsClearedOnFailureWithoutSuccessOrMutation() = verifyRealReadProgress(false)
+
     fun testImportConfirmationExpiresAfterRealPauseResume() {
         val current = start(opened(textUri))
         val before = controller.database.exportBackup()

@@ -101,15 +101,16 @@ class ControllerBackupTest:InstrumentationTestCase() {
             .putString("key-alias","SECRET_missing_alias").putString("cookie","SECRET_cookie").commit())
     }
     private fun task(f:Fixture,work:()->Unit):String {
-        val done=CountDownLatch(1);val notice=AtomicReference<String?>();val wrongThread=AtomicInteger()
+        val done=CountDownLatch(1);val notice=AtomicReference<String?>();val wrongThread=AtomicInteger();val prematureNotice=AtomicInteger()
         val listener:()->Unit={
             if(Looper.myLooper()!=Looper.getMainLooper()) wrongThread.incrementAndGet()
+            if(f.controller.dataBusy && f.controller.dataNotice != null) prematureNotice.incrementAndGet()
             if(!f.controller.dataBusy) f.controller.dataNotice?.let {notice.set(it);done.countDown()}
         }
         main {f.controller.consumeDataNotice();f.controller.observe(listener)}
         try {
             main {work()};assertTrue("backup completion timeout",done.await(10,TimeUnit.SECONDS));instrumentation.waitForIdleSync()
-            assertEquals(0,wrongThread.get());assertFalse(f.controller.dataBusy);return notice.get() ?: error("no notice")
+            assertEquals(0,wrongThread.get());assertEquals(0,prematureNotice.get());assertFalse(f.controller.dataBusy);return notice.get() ?: error("no notice")
         } finally {main {f.controller.unobserve(listener)}}
     }
     private fun export(f:Fixture,name:String="complete.json"):File {

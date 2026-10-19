@@ -2,6 +2,8 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -30,7 +32,7 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, onOpenRecords: (() -> Unit)? = null) {
+internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, onAction: (ToolCardActionRequest) -> Unit) {
     val owner = step.owner ?: return
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var records by remember(owner, step.toolCallId) { mutableStateOf(emptyList<ChildTaskRecord>()) }
@@ -65,7 +67,7 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
         when {
             loading -> Text("正在读取已登记子任务…", style = MiuixTheme.textStyles.footnote1)
             failed -> Text("子任务记录读取失败", color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1)
-            rows.isEmpty() -> Text("未记录该调用的精确子任务关联；旧记录可在任务记录中查看。", style = MiuixTheme.textStyles.footnote1)
+            rows.isEmpty() -> Text("暂无子任务记录", style = MiuixTheme.textStyles.footnote1)
             else -> rows.forEach { row -> key(row.owner) {
                 Column(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -77,11 +79,18 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
                     records.firstOrNull { it.owner == row.owner }?.text?.takeIf { it.isNotBlank() }?.let {
                         ToolDocument(ToolDisclosureUi("子任务输出", ToolRichDetails.scrub(it)))
                     }
+                    val actions = when (row.status) {
+                        "已暂停" -> listOf(ToolCardAction.RESUME_TASK, ToolCardAction.STOP_TASK)
+                        "执行中", "排队中" -> listOf(ToolCardAction.PAUSE_TASK, ToolCardAction.STOP_TASK)
+                        "暂停中", "停止中" -> emptyList()
+                        else -> listOf(ToolCardAction.READ_TASK_RESULT)
+                    }
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        actions.forEach { action -> TextButton(text = action.label, modifier = Modifier.heightIn(min = 44.dp),
+                            onClick = { onAction(step.actionRequest(action, subAgentStatusItemKey(row.owner))) }) }
+                    }
                 }
             } }
         }
-        Text("父调用回执与子任务状态分别记录；查看不会恢复或重新派发。", style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-        onOpenRecords?.let { TextButton(text = "查看任务记录", onClick = it) }
     }
 }

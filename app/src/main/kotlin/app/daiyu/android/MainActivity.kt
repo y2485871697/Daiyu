@@ -1953,7 +1953,7 @@ class MainActivity : ComponentActivity() {
         fun gestureOwner() = currentControlOwner()?.takeIf {
             renderedOwner != null && it.id == renderedOwner.id && it.runId == renderedOwner.runId && it.conversationId == renderedOwner.conversationId
         }
-        fun pendingFeature() { Toast.makeText(this, "该功能界面已保留，后端尚未接入", Toast.LENGTH_SHORT).show() }
+        fun actionUnavailable() { toast("操作未完成，请稍后再试") }
         val actionSnapshot = messageActionSnapshot?.takeIf {
             it.conversationId.value == renderedConversation && it.matchesRendered(shown.map { row -> row.second })
         }
@@ -2169,7 +2169,7 @@ class MainActivity : ComponentActivity() {
             ChatMenuAction.CONVERSATION_ID -> selected?.let {
                 (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("会话 ID", it.id.value))
             }
-            else -> pendingFeature()
+            else -> actionUnavailable()
         } } },
         )
     }
@@ -3007,10 +3007,10 @@ class MainActivity : ComponentActivity() {
         generationOutputs?.let { outputs ->
             val originalStaticVisit = staticGenerationVisit
             androidx.compose.material3.AlertDialog(onDismissRequest = ::cancelGenerationOutputs,
-                title = { androidx.compose.material3.Text("已登记生成资产") },
+                title = { androidx.compose.material3.Text("生成产物") },
                 text = {
                     Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
-                        if (outputs.isEmpty()) androidx.compose.material3.Text("暂无已登记资产；不会解析模型结果 URL，也不会重试生成。")
+                        if (outputs.isEmpty()) androidx.compose.material3.Text("暂无产物")
                         outputs.forEach { output ->
                             val meta = output.metadata
                             androidx.compose.material3.Text("${meta.kind} · ${meta.mimeType} · ${meta.bytes} bytes · ${meta.width}×${meta.height}")
@@ -3019,11 +3019,9 @@ class MainActivity : ComponentActivity() {
                                     bitmap = bitmap.asImageBitmap(),
                                     contentDescription = "已校验的生成图片", modifier = Modifier.fillMaxWidth())
                             }
-                            if (meta.kind == app.daiyu.android.model.generation.GenerationKind.VIDEO)
-                                androidx.compose.material3.Text("原视频已通过私有读取校验；当前入口不提供视频播放或导出。")
                         }
-                        androidx.compose.material3.Text("分支静态生成原件（只读，最多展示32项；完整备份包含全部记录）")
-                        if (staticGenerationOutputs == null) androidx.compose.material3.Text("静态原件正在读取或不可用；不会重试分支。")
+                        androidx.compose.material3.Text("分支产物")
+                        if (staticGenerationOutputs == null) androidx.compose.material3.Text("正在加载…")
                         staticGenerationOutputs?.forEach { display ->
                             val source = display.output.source
                             androidx.compose.material3.Text("静态 ${source.kind} · ${source.mimeType} · ${source.bytes} bytes · ${source.width}×${source.height}")
@@ -3033,10 +3031,10 @@ class MainActivity : ComponentActivity() {
                                 androidx.compose.material3.Text("保存静态原件")
                             }
                         }
-                        androidx.compose.material3.Text("备份导入的历史原件（独立只读存储，最多展示32项；完整备份仍包含全部记录）")
+                        androidx.compose.material3.Text("历史产物")
                         val historical = historicalGenerationOutputs
-                        if (historical == null) androidx.compose.material3.Text("历史原件正在读取或不可用；不会重发请求。")
-                        else if (historical.isEmpty()) androidx.compose.material3.Text("暂无导入的历史生成原件。")
+                        if (historical == null) androidx.compose.material3.Text("正在加载…")
+                        else if (historical.isEmpty()) androidx.compose.material3.Text("暂无历史产物")
                         historical?.forEach { display ->
                             val history = display.history
                             androidx.compose.material3.Text("历史 ${history.kind} · ${history.mimeType} · ${history.bytes} bytes · ${history.width}×${history.height}")
@@ -3044,8 +3042,6 @@ class MainActivity : ComponentActivity() {
                                 androidx.compose.foundation.Image(bitmap = bitmap.asImageBitmap(),
                                     contentDescription = "备份中的历史生成图片", modifier = Modifier.fillMaxWidth())
                             }
-                            if (history.kind == app.daiyu.android.model.generation.GenerationKind.VIDEO)
-                                androidx.compose.material3.Text("历史原视频已校验；可保存原文件，不恢复生成授权。")
                             androidx.compose.material3.TextButton(onClick = {
                                 backupGuard { pickHistoricalGenerationOriginal(history) }
                             }) { androidx.compose.material3.Text("保存历史原件") }
@@ -3089,8 +3085,7 @@ class MainActivity : ComponentActivity() {
                 title = { androidx.compose.material3.Text("浏览器已完成下载原件") },
                 text = {
                     Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState())) {
-                        androidx.compose.material3.Text("仅列本次宿主已登记的可信完成产物；不会解析模型路径、重新下载或自动共享。重启后不从历史回执恢复保存授权。")
-                        if (listing.references.isEmpty()) androidx.compose.material3.Text("暂无可信完成产物。")
+                        if (listing.references.isEmpty()) androidx.compose.material3.Text("暂无下载")
                         listing.references.forEach { reference ->
                             androidx.compose.material3.Text("${reference.lease.owner.kind} · ${reference.size} bytes · SHA-256 ${reference.sha256}")
                             androidx.compose.material3.TextButton(
@@ -4157,35 +4152,45 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun handleToolCardAction(request: ToolCardActionRequest) {
+        if (!activityUsable() || !selectionReady || !voiceForeground || retainedPage != "chat" || sidebarVisible) return
+        val step = resolveToolCardAction(chatState.turns, request)
+        if (step == null || step.owner?.conversationId != selected?.id?.value) {
+            toast("记录已变化，请重新打开")
+            return
+        }
+        val owner = step.owner ?: return
+        when (request.action) {
+            ToolCardAction.OPEN_BROWSER -> {
+                if (controller.hasBrowserVisual(owner)) openBrowserVisualPage(owner)
+                else toast("页面已关闭")
+            }
+            ToolCardAction.VIEW_DOWNLOADS -> openBrowserDownloadOutputs()
+            ToolCardAction.OPEN_WORKSPACE -> retainedPage = "chat-workspace"
+            ToolCardAction.OPEN_TERMINAL -> guard { openTerminal() }
+            ToolCardAction.VIEW_TASKS, ToolCardAction.READ_TASK_RESULT -> guard { openChildTaskRecords(owner.conversationId) }
+            ToolCardAction.VIEW_ASSETS -> openGenerationOutputs()
+            ToolCardAction.VIEW_DIFF -> {
+                val documents = step.categoryDetails?.rich?.documents.orEmpty()
+                val diff = documents.filter { it.title.contains("差异") || it.title.contains("审查") }
+                if (diff.isEmpty()) toast("没有差异记录")
+                else prompt = ConfirmPrompt("差异", diff.joinToString("\n\n") { it.text }, "关闭", false, {})
+            }
+            else -> toast("操作未完成，请稍后再试")
+        }
+    }
+
     @Composable private fun ToolTrustedContent(step: WorkStepUi) {
-        val owner = step.owner
-        if (owner != null && step.category == "browser" && controller.hasBrowserVisual(owner)) {
-            top.yukonga.miuix.kmp.basic.TextButton(text = "查看原运行浏览器", onClick = { openBrowserVisualPage(owner) })
-        }
-        if (owner != null && step.category == "workspace") {
-            top.yukonga.miuix.kmp.basic.TextButton(text = "打开工作区与文件", onClick = {
-                if (activityUsable() && retainedPage == "chat" && owner.conversationId == selected?.id?.value)
-                    retainedPage = "chat-workspace"
-            })
-        }
+        ToolCardControls(step, ::handleToolCardAction)
         if (step.toolName == "screen" && step.state == WorkStepState.OK && activityUsable() && voiceForeground &&
-            retainedPage == "chat" && owner?.conversationId == selected?.id?.value) {
+            retainedPage == "chat" && step.owner?.conversationId == selected?.id?.value) {
             app.daiyu.android.ui.screens.chat.conversation.ToolScreenshotContent(controller, step)
         }
         if (step.category == "generation") {
-            app.daiyu.android.ui.screens.chat.conversation.GenerationToolContent(controller, step) {
-                if (activityUsable() && retainedPage == "chat" && step.owner?.conversationId == selected?.id?.value) {
-                    openGenerationOutputs()
-                }
-            }
+            app.daiyu.android.ui.screens.chat.conversation.GenerationToolContent(controller, step, ::handleToolCardAction)
         }
         if (step.toolName in setOf("run_child_models", "start_child_tasks", "direct_child_task")) {
-            app.daiyu.android.ui.screens.chat.conversation.ChildTaskToolContent(controller, step) {
-                val owner = step.owner
-                if (owner != null && activityUsable() && retainedPage == "chat" && owner.conversationId == selected?.id?.value) {
-                    guard { openChildTaskRecords(owner.conversationId) }
-                }
-            }
+            app.daiyu.android.ui.screens.chat.conversation.ChildTaskToolContent(controller, step, ::handleToolCardAction)
         }
     }
 

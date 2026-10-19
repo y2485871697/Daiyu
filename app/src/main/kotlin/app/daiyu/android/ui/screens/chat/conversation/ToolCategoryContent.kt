@@ -96,10 +96,6 @@ internal fun ToolCategoryContent(category: String, details: ToolCategoryDetailsU
                 rich.documents.forEach { CategoryDocument(it) }
             }
         }
-        Text(rich.source, style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-        Text(details.notice, style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
     }
 }
 

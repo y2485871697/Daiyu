@@ -172,7 +172,6 @@ internal object ToolRichDetails {
             "gui" -> {
                 if (encodedScreenshot) {
                     outputDocument = true
-                    docs += ToolDisclosureUi("画面回执", "截图由宿主校验已保存回执后展示；编码原文不进入文本详情。")
                 }
                 field(args, "operation", "动作"); field(args, "observation_id", "观察"); field(args, "index", "目标节点"); field(args, "node_id", "目标节点")
                 fields(args, "button" to "按键", "direction" to "浏览方向", "coordinate_space" to "坐标系", "x" to "X", "y" to "Y", "duration_ms" to "持续毫秒", "timeout_ms" to "等待上限毫秒")

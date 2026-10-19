@@ -102,7 +102,7 @@ internal object ToolCardPresentations {
         }.firstOrNull { it.owner == requested.owner && it.toolCallId == requested.toolCallId && it.toolName == requested.toolName }
             ?: return null
         val category = current.categoryDetails
-        val typed = category?.let { detail -> listOf(detail.heading, detail.notice) +
+        val typed = category?.let { detail -> listOf(detail.heading) +
             detail.fields.map { "${it.label}：${it.value}" } + detail.items.flatMap { item ->
                 listOf(item.title) + item.fields.map { "${it.label}：${it.value}" }
             } }.orEmpty()

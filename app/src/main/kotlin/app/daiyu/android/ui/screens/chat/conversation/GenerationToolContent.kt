@@ -2,7 +2,6 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,7 +17,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ChatController
 import app.daiyu.android.ControllerGenerationOutputMetadata
@@ -30,11 +28,11 @@ import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.window.WindowDialog
 
-internal data class TrustedToolMediaUi(val key: String, val source: String,
+internal data class TrustedToolMediaUi(val key: String,
     val metadata: ControllerGenerationOutputMetadata, val thumbnail: Bitmap?)
 
 @Composable
-internal fun GenerationToolContent(controller: ChatController, step: WorkStepUi, onOpenAssets: (() -> Unit)? = null) {
+internal fun GenerationToolContent(controller: ChatController, step: WorkStepUi, onAction: (ToolCardActionRequest) -> Unit) {
     val owner = step.owner ?: return
     val binding = remember(owner, step.toolCallId, step.toolName) {
         GenerationAttemptBinding(owner.conversationId, owner.messageId, owner.runId, step.toolCallId, step.toolName)
@@ -58,17 +56,17 @@ internal fun GenerationToolContent(controller: ChatController, step: WorkStepUi,
             complete(outputs?.filter { output -> output.binding?.let {
                 it.conversationId == owner.conversationId && it.assistantMessageId == owner.messageId &&
                     it.runId == owner.runId && it.toolCallId == step.toolCallId && it.toolName == step.toolName
-            } == true }?.map { TrustedToolMediaUi("live:${it.itemId}:${it.metadata.outputIndex}", "本次已登记产物", it.metadata, it.thumbnail) })
+            } == true }?.map { TrustedToolMediaUi("live:${it.itemId}:${it.metadata.outputIndex}", it.metadata, it.thumbnail) })
         }) complete(null)
         if (!controller.loadHistoricalGenerationOutputs(conversation, binding) { outputs ->
             complete(outputs?.map { display -> with(display.history) {
-                TrustedToolMediaUi("history:${identity.itemId}:$outputIndex", "导入历史原件 · 只读",
+                TrustedToolMediaUi("history:${identity.itemId}:$outputIndex",
                     ControllerGenerationOutputMetadata(outputIndex, kind, mimeType, bytes, width, height, durationMs), display.thumbnail)
             } })
         }) complete(null)
         if (!controller.loadStaticGenerationOutputs(conversation, binding) { outputs ->
             complete(outputs?.map { display -> with(display.output.source) {
-                TrustedToolMediaUi("static:$itemId:$outputIndex", "分支静态原件 · 只读",
+                TrustedToolMediaUi("static:$itemId:$outputIndex",
                     ControllerGenerationOutputMetadata(outputIndex, kind, mimeType, bytes, width, height, durationMs), display.thumbnail)
             } })
         }) complete(null)
@@ -76,33 +74,30 @@ internal fun GenerationToolContent(controller: ChatController, step: WorkStepUi,
     }
     Column(Modifier.fillMaxWidth().testTag("tool-media:${step.toolCallId}"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         when {
-            pending > 0 -> Text("正在校验该调用的已登记产物…", style = MiuixTheme.textStyles.footnote1)
-            items.isEmpty() && failed -> Text("产物记录读取失败；不会重发生成请求。", color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1)
-            items.isEmpty() -> Text("该调用暂无可读取的已登记产物。", style = MiuixTheme.textStyles.footnote1)
+            pending > 0 -> Text("正在加载…", style = MiuixTheme.textStyles.footnote1)
+            items.isEmpty() && failed -> Text("读取失败", color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1)
+            items.isEmpty() -> Text("暂无产物", style = MiuixTheme.textStyles.footnote1)
         }
-        if (pending == 0) TextButton(text = "重新读取登记产物", onClick = { readRevision++ })
-        items.forEach { item -> key(item.key) { TrustedMediaItem(item) } }
-        if (items.isNotEmpty()) Text("仅加载本调用的本地登记原件；展开和放大不重试生成。", style = MiuixTheme.textStyles.footnote1,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-        onOpenAssets?.let { TextButton(text = "查看会话资产", onClick = it) }
+        if (pending == 0) TextButton(text = "刷新产物", onClick = { readRevision++ })
+        if (items.isEmpty()) ToolMediaSurface(step, null, step.toolName == "generate_videos", null, null, onAction = onAction)
+        items.forEach { item -> key(item.key) { TrustedMediaItem(item, step, onAction) } }
+        TextButton(text = "查看全部产物", onClick = { onAction(step.actionRequest(ToolCardAction.VIEW_ASSETS)) })
     }
 }
 
 @Composable
-private fun TrustedMediaItem(item: TrustedToolMediaUi) {
+private fun TrustedMediaItem(item: TrustedToolMediaUi, step: WorkStepUi, onAction: (ToolCardActionRequest) -> Unit) {
     var expanded by remember(item.key) { mutableStateOf(false) }
     val meta = item.metadata
-    Text("${item.source} · ${meta.mimeType} · ${meta.width}×${meta.height} · ${meta.bytes}字节", style = MiuixTheme.textStyles.footnote1)
-    val bitmap = item.thumbnail
-    if (bitmap != null) {
-        Image(bitmap.asImageBitmap(), "已校验的生成图片", Modifier.fillMaxWidth().heightIn(max = 220.dp)
-            .clickable(role = Role.Button, onClickLabel = "放大已登记图片") { expanded = true }, contentScale = ContentScale.Fit)
-        if (expanded) WindowDialog(show = true, title = "已登记图片", onDismissRequest = { expanded = false }) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Image(bitmap.asImageBitmap(), "放大已登记图片", Modifier.fillMaxWidth().heightIn(max = 520.dp), contentScale = ContentScale.Fit)
-                TextButton(text = "关闭", onClick = { expanded = false })
-            }
+    val video = meta.kind == GenerationKind.VIDEO
+    Text("${meta.mimeType} · ${meta.width}×${meta.height} · ${meta.bytes} B", style = MiuixTheme.textStyles.footnote1)
+    ToolMediaSurface(step, item.thumbnail, video, meta.durationMs, item.key, onAction = onAction,
+        onPreview = if (!video && item.thumbnail != null) ({ expanded = true }) else null)
+    if (expanded) WindowDialog(show = true, title = "图片", onDismissRequest = { expanded = false }) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            item.thumbnail?.let { Image(it.asImageBitmap(), "图片", Modifier.fillMaxWidth().heightIn(max = 520.dp), contentScale = ContentScale.Fit) }
+            TextButton(text = "保存原件", onClick = { onAction(step.actionRequest(ToolCardAction.SAVE_MEDIA, item.key)) })
+            TextButton(text = "关闭", onClick = { expanded = false })
         }
-    } else if (meta.kind == GenerationKind.IMAGE) Text("图片预览不可用", style = MiuixTheme.textStyles.footnote1)
-    else Text("视频原件 · ${meta.durationMs}毫秒；当前宿主未提供内联播放。", style = MiuixTheme.textStyles.footnote1)
+    }
 }

@@ -47,6 +47,7 @@ class CompressionSettingsFormTest : WiredActivityTestCase() {
 
     fun testUnavailableStoredProtocolRequiresAndCarriesExplicitRebind() {
         show(draft()) // An unavailable profile does not disclose the old stored protocol.
+        reveal("compression-summary-config", "上下文压缩").performClick()
         assertNull(submitted)
         reveal("settings-switch:重输摘要密钥并绑定新协议", "上下文压缩").performClick()
         assertNull(submitted)
@@ -63,6 +64,7 @@ class CompressionSettingsFormTest : WiredActivityTestCase() {
         val initial = draft().copy(savedProtocol = ProviderProtocol.RESPONSES,
             provider = draft().provider.copy(requestOptions = ProviderRequestOptions(speedMode = GptSpeedMode.FAST)))
         show(initial)
+        reveal("compression-summary-config", "上下文压缩").performClick()
         reveal("settings-radio:Anthropic Messages", "上下文压缩").performClick()
         mainThread { assertEquals(GptSpeedMode.FAST, observed!!.provider.requestOptions.speedMode) }
         reveal("settings-field:摘要 API Key", "上下文压缩").performTextReplacement("replacement-synthetic-key")

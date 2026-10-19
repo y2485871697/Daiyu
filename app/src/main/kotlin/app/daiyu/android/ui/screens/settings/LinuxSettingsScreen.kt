@@ -1,15 +1,31 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.material3.Text as MaterialText
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -45,6 +61,10 @@ internal fun LinuxSettingsScreen(
     val installState = controller.installation?.state?.collectAsState()?.value
     val chrootInstallState = controller.chrootInstallation?.state?.collectAsState()?.value
     var draft by remember(page) { mutableStateOf(LinuxSettingsDraft()) }
+    var manualExpanded by remember(page) { mutableStateOf(false) }
+    var installMode by remember(page) {
+        mutableStateOf(if (controller.installation == null) LinuxExecutionMode.CHROOT else LinuxExecutionMode.PROOT)
+    }
     var removing by remember(page) { mutableStateOf<LinuxInstallation?>(null) }
     var removalError by remember(page) { mutableStateOf<String?>(null) }
     val remove: (LinuxGenerationRef) -> Boolean = { reference ->
@@ -63,34 +83,66 @@ internal fun LinuxSettingsScreen(
     }
 
     MiuixScaffoldPage(title = "Linux 工具环境", onBack = leave, modifier = modifier) {
-        installState?.let { installation ->
-            item(key = "linux_install") {
-                SettingsCard {
-                    LinuxInstallPanel(installation, page, enabled && !hasPending && state.preview == null,
-                        otherBlocked = controller.chrootInstallation?.blocksManual == true)
+        item(key = "linux_status") {
+            SettingsSectionTitle("环境状态")
+            SettingsCard {
+                SettingsNote(when {
+                    state.busy -> "正在读取或验证环境…"
+                    !state.listConfirmed -> "环境列表尚未确认，请重新读取。"
+                    state.entries.isEmpty() -> "尚无已批准的环境。可先预览安装，或登记已有本地文件。"
+                    else -> "已批准 ${state.entries.size} 个配置；本进程可新启动 ${state.entries.count {
+                        controller.availableThisProcess(LinuxGenerationRef(it.environmentId, it.generation))
+                    }} 个。实际启动仍需文件与会话权限检查。"
+                })
+                LinuxAction(enabled = enabled, modifier = Modifier.testTag("linux-refresh"), onClick = { page.refresh() }) {
+                    Text("刷新环境状态")
                 }
             }
-        }
-        chrootInstallState?.let { installation ->
-            item(key = "linux_chroot_install") {
-                SettingsCard {
-                    LinuxInstallPanel(installation, page, enabled && !hasPending && state.preview == null,
-                        LinuxExecutionMode.CHROOT, otherBlocked = controller.installation?.blocksManual == true)
+            state.notice?.let { notice ->
+                if (state.error) {
+                    Column(Modifier.heightIn(max = 144.dp).verticalScroll(rememberScrollState())) {
+                        SettingsNote(notice, error = true)
+                    }
+                } else {
+                    LinuxDiagnostics(identity = notice, title = "最近操作反馈") { LinuxDetailText(notice) }
                 }
             }
-        }
-        item(key = "linux_scope") {
-            SettingsNote("下方手工配置仅登记已有本地文件。上方安装只使用固定目录条目及随 APK 安装的 helper，不接受任意 URL。下载安装并不等于批准注册。手工批准表示接受路径、期望摘要和共享映射，不表示来源认证；请从独立可信渠道取得期望摘要。")
-            SettingsNote("新增批准仅在下次应用进程启动生效。撤销立即阻止该配置的新启动，但不终止已有会话、不释放其资源租约、不清理 UNKNOWN、不删除安装文件。")
-            if (state.busy) SettingsNote("正在工作线程读取、冻结或验证配置…")
-            state.notice?.let { SettingsNote(it, error = state.error) }
             removalError?.let { SettingsNote(it, error = true) }
         }
+        if (installState != null || chrootInstallState != null) {
+            item(key = "linux_install_mode") {
+                SettingsSectionTitle("安装环境")
+                SettingsCard {
+                    Row(Modifier.fillMaxWidth()) {
+                        if (installState != null) LinuxAction(modifier = Modifier.weight(1f), onClick = { installMode = LinuxExecutionMode.PROOT }) {
+                            Text("PRoot${if (installMode == LinuxExecutionMode.PROOT) " · 已选" else ""}${installAttentionLabel(installState)}")
+                        }
+                        if (chrootInstallState != null) LinuxAction(modifier = Modifier.weight(1f), onClick = { installMode = LinuxExecutionMode.CHROOT }) {
+                            Text("chroot${if (installMode == LinuxExecutionMode.CHROOT) " · 已选" else "（需 Root）"}${installAttentionLabel(chrootInstallState)}")
+                        }
+                    }
+                    val shownMode = if (installState == null) LinuxExecutionMode.CHROOT else installMode
+                    val installation = if (shownMode == LinuxExecutionMode.PROOT) installState else chrootInstallState
+                    installation?.let {
+                        LinuxInstallPanel(it, page, enabled && !hasPending && state.preview == null, shownMode,
+                            otherBlocked = if (shownMode == LinuxExecutionMode.PROOT)
+                                controller.chrootInstallation?.blocksManual == true else controller.installation?.blocksManual == true)
+                    }
+                }
+            }
+        }
         item(key = "linux_form") {
-            SettingsSectionTitle("完整本地配置（共享目录默认空）")
+            SettingsSectionTitle("已有本地文件")
             SettingsCard {
+                LinuxAction(modifier = Modifier.testTag("linux-manual-toggle").semantics {
+                    stateDescription = if (manualExpanded) "已展开" else "已折叠"
+                }, onClick = { manualExpanded = !manualExpanded }) {
+                    Text(if (manualExpanded) "收起手工登记" else "手工登记环境（高级）")
+                }
+                if (manualExpanded) {
+                SettingsNote("仅登记已有文件，不下载。批准表示接受完整路径、期望摘要和共享映射，不是来源认证；期望摘要请从独立可信渠道取得。新增批准在下次应用进程启动生效。")
                 Column(Modifier.padding(horizontal = 16.dp)) {
-                    TextButton(enabled = editEnabled, modifier = Modifier.testTag("linux-mode"), onClick = {
+                    LinuxAction(enabled = editEnabled, modifier = Modifier.testTag("linux-mode"), onClick = {
                         edit(draft.copy(executionMode = if (draft.executionMode == LinuxExecutionMode.PROOT)
                             LinuxExecutionMode.CHROOT else LinuxExecutionMode.PROOT, proot = "", prootSha256 = "",
                             loader = "", loaderSha256 = "", guestWorkingDirectory = "/", sharedMounts = emptyList()))
@@ -123,17 +175,18 @@ internal fun LinuxSettingsScreen(
                         LinuxSettingsField("共享 ${index + 1}：guest 绝对路径", mount.guest, "linux-mount-guest-$index", editEnabled) { value ->
                             edit(draft.copy(sharedMounts = draft.sharedMounts.mapIndexed { i, old -> if (i == index) old.copy(guest = value) else old }))
                         }
-                        TextButton(enabled = editEnabled, onClick = { edit(draft.copy(sharedMounts = draft.sharedMounts.filterIndexed { i, _ -> i != index })) }) {
+                        LinuxAction(enabled = editEnabled, onClick = { edit(draft.copy(sharedMounts = draft.sharedMounts.filterIndexed { i, _ -> i != index })) }) {
                             Text("移除此共享映射")
                         }
                     }
-                    TextButton(enabled = editEnabled && draft.executionMode == LinuxExecutionMode.PROOT && draft.sharedMounts.size < 32, modifier = Modifier.testTag("linux-add-mount"),
+                    LinuxAction(enabled = editEnabled && draft.executionMode == LinuxExecutionMode.PROOT && draft.sharedMounts.size < 32, modifier = Modifier.testTag("linux-add-mount"),
                         onClick = { edit(draft.copy(sharedMounts = draft.sharedMounts + LinuxSettingsMount())) }) { Text("显式添加共享映射") }
-                    TextButton(enabled = editEnabled, modifier = Modifier.testTag("linux-preview"), onClick = { page.preview(draft) }) {
+                    LinuxAction(enabled = editEnabled, modifier = Modifier.testTag("linux-preview"), onClick = { page.preview(draft) }) {
                         Text("冻结完整配置并预览（尚不批准）")
                     }
                 }
-        }
+                }
+            }
         }
         state.preview?.let { approval ->
             item(key = "linux_frozen_preview") {
@@ -142,7 +195,7 @@ internal fun LinuxSettingsScreen(
                     "上次批准尚未获持久化确认。这里重新展示原对象的全部内容；请再次明确确认同一代次。确认前不能编辑或新建代次，刷新和离页不代表保存成功。"
                     else "以下才是实际提交内容。编辑任何字段将废弃此预览；批准不选择或启动环境。rootfs 没有全树摘要，以下仅为两个 helper 的期望摘要。")
                 LinuxSettingsConfiguration(approval.installation)
-                TextButton(enabled = enabled && state.pendingRemoval == null, modifier = Modifier.testTag("linux-approve"), onClick = { page.approve(approval) }) {
+                LinuxAction(enabled = enabled && state.pendingRemoval == null, modifier = Modifier.testTag("linux-approve"), onClick = { page.approve(approval) }) {
                     Text("我明确批准以上全部配置并验证保存")
                 }
             }
@@ -150,43 +203,53 @@ internal fun LinuxSettingsScreen(
         state.pendingRemoval?.let { reference ->
             item(key = "linux_pending_removal") {
                 SettingsSectionTitle("待确认持久化的撤销")
-                SettingsNote("环境 ID：${reference.environmentId}；代次：${reference.generation}。即使活动列表中已无此项，也未确认撤销已持久化；本进程拒绝新启动不会回退。", error = true)
-                TextButton(enabled = enabled, modifier = Modifier.testTag("linux-retry-revoke"),
+                SettingsNote("撤销尚未确认保存；即使列表中已无此项，本进程仍拒绝新启动。请重试原配置。", error = true)
+                LinuxDiagnostics(identity = reference) {
+                    LinuxDetailText("环境 ID：${reference.environmentId}\n代次：${reference.generation}")
+                }
+                LinuxAction(enabled = enabled, modifier = Modifier.testTag("linux-retry-revoke"),
                     onClick = { remove(reference) }) { Text("重试确认同一代次的撤销") }
             }
         }
         item(key = "linux_catalog_header") {
-            SettingsSectionTitle("用户批准的本地配置（非来源认证）")
-            SettingsNote(if (state.listConfirmed) "已读取并验证当前活动记录。目录条目本身不是可变的直接运行权限；文件仍须在启动时再次验证。"
-                else "列表尚未确认或上次读取失败；不能把这当作空目录或启动授权。")
-            TextButton(enabled = enabled, modifier = Modifier.testTag("linux-refresh"), onClick = { page.refresh() }) { Text("重新读取 / 验证目录") }
-            if (state.entries.isEmpty() && state.listConfirmed) SettingsNote("没有已批准的活动配置。")
+            SettingsSectionTitle("已批准的环境")
+            SettingsNote(if (state.listConfirmed) "新增批准在下次应用启动生效；批准不代表来源认证。"
+                else "列表未确认，不能据此判断为空或允许启动。")
         }
         state.entries.forEach { entry ->
             item(key = "linux-entry:${entry.environmentId}:${entry.generation}") {
                 LinuxSettingsConfiguration(entry)
                 val reference = LinuxGenerationRef(entry.environmentId, entry.generation)
-                SettingsNote(if (controller.availableThisProcess(reference)) "当前进程启动快照包含此代次；实际运行仍由终端 owner 和文件租约检查决定。"
-                    else "当前进程不可新启动此代次：新增批准需下次启动，或本进程已撤销。")
-                TextButton(enabled = enabled && !hasPending, modifier = Modifier.testTag("linux-revoke:${entry.environmentId}:${entry.generation}"),
+                SettingsNote(if (controller.availableThisProcess(reference)) "本进程可新启动；实际运行仍需会话与文件租约检查。"
+                    else "本进程不可新启动：需重启应用，或已在本进程撤销。")
+                LinuxAction(enabled = enabled && !hasPending, modifier = Modifier.testTag("linux-revoke:${entry.environmentId}:${entry.generation}"),
                     onClick = { removing = entry }) { Text("撤销此代次") }
             }
         }
     }
 
     removing?.let { entry ->
-        AlertDialog(onDismissRequest = { removing = null }, title = { Text("撤销本地配置？") }, text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
+        AlertDialog(onDismissRequest = { removing = null },
+            containerColor = MiuixTheme.colorScheme.surface,
+            title = { Text("撤销本地配置？") }, text = {
+            Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
                 Text("会立即阻止新启动，并保存撤销记录。不会杀死现有进程、释放 UNKNOWN 租约、删除文件或切换其他发行版。")
                 LinuxSettingsConfiguration(entry)
-                removalError?.let { Text(it) }
+                removalError?.let { Text(it, color = MiuixTheme.colorScheme.error) }
             }
         }, confirmButton = {
-            TextButton(enabled = enabled && !hasPending, onClick = {
+            LinuxAction(enabled = enabled && !hasPending, fullWidth = false, onClick = {
                 if (remove(LinuxGenerationRef(entry.environmentId, entry.generation))) removing = null
             }) { Text("确认撤销此代次") }
-        }, dismissButton = { TextButton(onClick = { removing = null }) { Text("取消") } })
+        }, dismissButton = { LinuxAction(fullWidth = false, onClick = { removing = null }) { Text("取消") } })
     }
+}
+
+private fun installAttentionLabel(state: app.daiyu.android.terminal.install.LinuxInstallState): String = when {
+    state.busy -> " · 处理中"
+    state.unknown || state.recoveryBlocked || state.cleanupPending || state.registrationPending -> " · 待处理"
+    state.prepared != null && !state.registered -> " · 有请求"
+    else -> ""
 }
 
 @Composable
@@ -197,54 +260,97 @@ private fun LinuxInstallPanel(
     mode: LinuxExecutionMode = LinuxExecutionMode.PROOT,
     otherBlocked: Boolean = false,
 ) {
-    SettingsSectionTitle("固定发行版 ${mode.wire} 安装（不自动注册）")
-    if (mode == LinuxExecutionMode.CHROOT) SettingsNote("chroot 需要 Android Root 授权及可用 cgroup2 清退能力。仅安装到应用私有目录，不使用 PRoot helper、不挂载共享目录，不自动切换既有环境。确认安装会启动一次真实 Root 的隔离 PTY 探针；仅在整棵子进程树已清退后发布。chroot 不是安全沙箱，rootfs 及其内容必须可信。")
-    else
-        SettingsNote("本批预编译 PRoot 仅支持 Android API 34+ 的 arm64 / x86_64 实际 64 位进程。API 26–33 明确不可用；不是已验证的运行支持。无运行时 helper 下载、不跟随 HTTP 重定向、不隐式挂载共享目录。下载后的 rootfs 会执行一次隔离 PTY 的 id -u 探测。")
-    state.notice?.let { SettingsNote(it, error = state.unknown || state.registrationPending || state.recoveryBlocked || state.cleanupPending) }
-    state.unavailableReason?.let { SettingsNote("安装不可用 (Unavailable)：$it", error = true) }
+    var distribution by remember(page, mode) { mutableStateOf("alpine") }
+    var mirror by remember(page, mode) { mutableStateOf("primary") }
+    SettingsNote(if (mode == LinuxExecutionMode.CHROOT)
+        "需要 Android Root 和可用 cgroup2。仅用应用私有目录；不是安全沙箱，只运行可信 rootfs。"
+        else "PRoot 仅适用于 Android 14+（API 34+）的 arm64 / x86_64 实际 64 位进程，不代表已验证兼容。")
+    val needsAttention = state.unknown || state.registrationPending || state.recoveryBlocked || state.cleanupPending
+    SettingsNote(when {
+        state.busy -> "正在处理安装请求…"
+        state.unavailableReason != null -> "当前设备无法安装此执行方式。"
+        state.unknown -> "上次运行状态未知，已阻止新的安装。"
+        state.recoveryBlocked -> "原安装请求恢复受阻，请先核验。"
+        state.cleanupPending -> "安装事务仍待清理。"
+        state.registrationPending -> "注册保存尚未确认，请重试原配置。"
+        state.registered -> "此安装已注册；新增批准在下次应用启动生效。"
+        state.receipt?.directorySyncConfirmed == false -> "安装已发布，持久化尚未确认。"
+        state.receipt?.directorySyncConfirmed == true -> "安装已发布并确认持久化，注册需单独批准。"
+        state.prepared != null -> "已保留安装条目；下载与探测需要明确确认。"
+        else -> "选择发行版和镜像后可预览，不会立即下载。"
+    }, error = needsAttention || state.unavailableReason != null)
+    if (needsAttention || state.unavailableReason != null) {
+        Column(Modifier.heightIn(max = 144.dp).verticalScroll(rememberScrollState())) {
+            state.notice?.let { SettingsNote(it, error = needsAttention) }
+            state.unavailableReason?.let { SettingsNote("不可用原因：$it", error = true) }
+        }
+    } else {
+        state.notice?.let {
+            Text(it, maxLines = 2, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                modifier = Modifier.padding(horizontal = 28.dp, vertical = 4.dp))
+        }
+    }
     val idle = enabled && !state.busy && !state.unknown && !state.recoveryBlocked && !state.cleanupPending && state.unavailableReason == null
     if (state.recoveryBlocked || state.unknown) {
         SettingsNote("原请求恢复未通过验证，禁止生成新 UUID 绕过。不会自动下载、重放探针、清理 UNKNOWN 锁或更换原 helper。", error = true)
-        TextButton(enabled = enabled && !state.busy && state.unavailableReason == null,
+        LinuxAction(enabled = enabled && !state.busy && state.unavailableReason == null,
             onClick = { page.recoverInstall(mode) }) { Text("仅重新读取并验证原安装请求（无授权）") }
     }
     if (otherBlocked) SettingsNote("另一种执行方式有未完成安装请求；请先处理原请求。已有请求仍可恢复、放弃或完成注册。")
     if (!state.recoveryBlocked && (state.prepared == null || state.registered)) {
         Column(Modifier.padding(horizontal = 16.dp)) {
-            listOf("alpine" to "primary", "alpine" to "aliyun", "debian" to "primary", "debian" to "gh-proxy").forEach { (distribution, mirror) ->
-                TextButton(enabled = idle && !otherBlocked,
-                    modifier = Modifier.testTag("linux-install-${mode.wire}-prepare-$distribution-$mirror"), onClick = { page.prepareInstall(distribution, mirror, mode) }) {
-                    Text("预览 $distribution / $mirror（不下载）")
+            Row(Modifier.fillMaxWidth()) {
+                listOf("alpine", "debian").forEach { choice ->
+                    LinuxAction(enabled = idle && !otherBlocked, modifier = Modifier.weight(1f), onClick = {
+                        if (distribution != choice) { distribution = choice; mirror = "primary" }
+                    }) { Text("${if (distribution == choice) "✓ " else ""}$choice") }
                 }
             }
-            Text("GitHub 等来源若返回重定向将失败关闭；可显式选择其他固定镜像，不自动切换。")
+            Row(Modifier.fillMaxWidth()) {
+                listOf("primary", if (distribution == "alpine") "aliyun" else "gh-proxy").forEach { choice ->
+                    LinuxAction(enabled = idle && !otherBlocked, modifier = Modifier.weight(1f),
+                        onClick = { mirror = choice }) {
+                        Text("${if (mirror == choice) "✓ " else ""}${when (choice) {
+                            "primary" -> "默认源"
+                            "aliyun" -> "阿里云镜像"
+                            else -> "GitHub 代理"
+                        }}")
+                    }
+                }
+            }
+            LinuxAction(enabled = idle && !otherBlocked,
+                modifier = Modifier.testTag("linux-install-${mode.wire}-prepare-$distribution-$mirror"),
+                onClick = { page.prepareInstall(distribution, mirror, mode) }) { Text("预览安装（不下载）") }
         }
     }
     state.prepared?.let { prepared ->
         if (state.cleanupPending) {
-            TextButton(enabled = enabled && !state.busy && !state.unknown && state.unavailableReason == null,
+            LinuxAction(enabled = enabled && !state.busy && !state.unknown && state.unavailableReason == null,
                 modifier = Modifier.testTag("linux-install-${mode.wire}-cleanup"),
                 onClick = { page.retryInstallCleanup(prepared) }) { Text("显式重试原事务清理（不下载、不执行探针）") }
         }
-        SettingsNote("条目：${prepared.artifact.id}\n版本：${prepared.artifact.version}\nABI：${prepared.artifact.abi}\n归档：${prepared.artifact.archive}\n大小：${prepared.artifact.compressedBytes} bytes\n归档 SHA-256：${prepared.artifact.sha256}\n镜像：${prepared.mirror.id}\nURL：${prepared.mirror.uri}")
-        LinuxSettingsConfiguration(prepared.installation)
+        SettingsNote("${prepared.artifact.version} · ${prepared.mirror.id}")
+        LinuxSettingsConfiguration(prepared.installation, extraDetails =
+            "条目：${prepared.artifact.id}\n版本：${prepared.artifact.version}\nABI：${prepared.artifact.abi}\n归档：${prepared.artifact.archive}\n大小：${prepared.artifact.compressedBytes} bytes\n归档 SHA-256：${prepared.artifact.sha256}\n镜像：${prepared.mirror.id}\nURL：${prepared.mirror.uri}")
         if (state.receipt == null && !state.registered) {
-            TextButton(enabled = idle, modifier = Modifier.testTag(if (mode == LinuxExecutionMode.PROOT) "linux-install-confirm" else "linux-install-chroot-confirm"),
+            SettingsNote(if (mode == LinuxExecutionMode.CHROOT)
+                "确认后会申请 Root 并下载、安装、运行隔离探测；不会自动注册或切换环境。"
+                else "确认后会下载、安装并运行隔离探测；不会自动注册或切换环境。")
+            LinuxAction(enabled = idle, modifier = Modifier.testTag(if (mode == LinuxExecutionMode.PROOT) "linux-install-confirm" else "linux-install-chroot-confirm"),
                 onClick = { page.install(prepared) }) { Text("确认以上条目：下载、安装并探测（不批准注册）") }
-            TextButton(enabled = idle, onClick = { page.discardInstall(mode) }) { Text("放弃此下载预览") }
+            LinuxAction(enabled = idle, onClick = { page.discardInstall(mode) }) { Text("放弃此下载预览") }
         }
         if (state.receipt?.directorySyncConfirmed == false) {
-            TextButton(enabled = idle, modifier = Modifier.testTag(if (mode == LinuxExecutionMode.PROOT) "linux-install-durability" else "linux-install-chroot-durability"),
+            LinuxAction(enabled = idle, modifier = Modifier.testTag(if (mode == LinuxExecutionMode.PROOT) "linux-install-durability" else "linux-install-chroot-durability"),
                 onClick = { page.confirmPublishedDurability(prepared) }) { Text("显式重试：确认同一发布的持久化") }
         }
     }
     if (state.busy) {
-        TextButton(enabled = true, modifier = Modifier.testTag(if (mode == LinuxExecutionMode.PROOT) "linux-install-cancel" else "linux-install-chroot-cancel"),
+        LinuxAction(enabled = true, modifier = Modifier.testTag(if (mode == LinuxExecutionMode.PROOT) "linux-install-cancel" else "linux-install-chroot-cancel"),
             onClick = { page.cancelInstall() }) { Text("取消请求（阻止排队注册；已开始写入仍等待回执）") }
     }
     if (state.receipt?.directorySyncConfirmed == true && state.registration == null && !state.registered) {
-        TextButton(enabled = idle, modifier = Modifier.testTag("linux-install-${mode.wire}-registration-preview"),
+        LinuxAction(enabled = idle, modifier = Modifier.testTag("linux-install-${mode.wire}-registration-preview"),
             onClick = { page.prepareInstalledRegistration(mode) }) {
             Text("重试准备注册冻结预览（不批准）")
         }
@@ -253,37 +359,118 @@ private fun LinuxInstallPanel(
         SettingsSectionTitle("独立的完整注册批准")
         SettingsNote("下载安装授权不包含注册授权。以下为固定的注册对象，可能使用独立的目录代次；重试时绝不重新生成。批准只供下次进程启动，不热换当前终端。")
         LinuxSettingsConfiguration(approval.installation)
-        TextButton(enabled = idle, modifier = Modifier.testTag(if (mode == LinuxExecutionMode.PROOT) "linux-install-register" else "linux-install-chroot-register"),
+        LinuxAction(enabled = idle, modifier = Modifier.testTag(if (mode == LinuxExecutionMode.PROOT) "linux-install-register" else "linux-install-chroot-register"),
             onClick = { page.approveInstalled(approval) }) {
             Text(if (state.registrationPending) "重试批准原冻结配置并确认持久化" else "另行明确批准以上完整配置并注册")
         }
+    }
+    LinuxDiagnostics(identity = mode, title = "安装说明与诊断") {
+        LinuxDetailText("仅使用固定下载条目，不接受任意 URL，不跟随 HTTP 重定向，不自动换源。共享目录不隐式添加。")
+        LinuxDetailText(if (mode == LinuxExecutionMode.CHROOT)
+            "chroot 仅安装到应用私有目录，不使用 PRoot helper、不挂载共享目录。确认安装会启动真实 Root 的隔离 PTY 探针，仅在整棵子进程树清退后发布。"
+            else "PRoot helper 随 APK 提供，不在运行时下载。API 26–33 不可用。下载后的 rootfs 会执行隔离 PTY 的 id -u 探测，平台条件不等于已验证运行支持。")
+        state.notice?.let { LinuxDetailText("最近反馈：$it") }
+        state.unavailableReason?.let { LinuxDetailText("不可用原因：$it") }
     }
 }
 
 @Composable
 private fun LinuxSettingsField(label: String, value: String, tag: String, enabled: Boolean, onChange: (String) -> Unit) {
-    OutlinedTextField(value = value, onValueChange = onChange, label = { Text(label) }, singleLine = true,
+    val colors = MiuixTheme.colorScheme
+    OutlinedTextField(value = value, onValueChange = onChange, label = { Text(label, color = colors.onSurfaceVariantSummary) }, singleLine = true,
+        textStyle = MiuixTheme.textStyles.body2,
+        colors = OutlinedTextFieldDefaults.colors(
+            focusedTextColor = colors.onSurface, unfocusedTextColor = colors.onSurface,
+            disabledTextColor = colors.onSurfaceVariantSummary,
+            cursorColor = colors.primary, focusedBorderColor = colors.primary,
+            unfocusedBorderColor = colors.onSurfaceVariantSummary,
+        ),
         enabled = enabled, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag(tag))
 }
 
-/** Uses only the frozen/record object, never the editable draft or a shortened path. */
+/** Summary and expandable full details both use the frozen/record object, never the draft. */
 @Composable
-private fun LinuxSettingsConfiguration(value: LinuxInstallation) {
-    Column(Modifier.fillMaxWidth().padding(16.dp)) {
-        Text("标签：${value.distribution}")
-        Text("环境 ID：${value.environmentId}")
-        Text("代次：${value.generation}")
-        Text("rootfs：${value.rootfs.path}")
-        Text("执行方式：${value.executionMode.wire}")
-        if (value.executionMode == LinuxExecutionMode.PROOT) {
-        Text("proot：${value.proot?.path}")
-        Text("proot 期望 SHA-256：${value.prootSha256}")
-        Text("loader：${value.loader?.path}")
-        Text("loader 期望 SHA-256：${value.loaderSha256}")
+private fun LinuxSettingsConfiguration(value: LinuxInstallation, extraDetails: String? = null) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Text("${value.distribution} · ${value.executionMode.wire}",
+            style = MiuixTheme.textStyles.body1, color = MiuixTheme.colorScheme.onSurface)
+        LinuxDetailText(if (value.sharedMounts.isEmpty()) "未共享宿主目录" else "共享目录：${value.sharedMounts.size} 项")
+        LinuxDiagnostics(identity = value) {
+            extraDetails?.let { LinuxDetailText(it) }
+            LinuxDetailText("标签：${value.distribution}\n环境 ID：${value.environmentId}\n代次：${value.generation}\n执行方式：${value.executionMode.wire}")
+            LinuxDetailText("rootfs：${value.rootfs.path}")
+            if (value.executionMode == LinuxExecutionMode.PROOT) {
+                LinuxDetailText("proot：${value.proot?.path}\nproot 期望 SHA-256：${value.prootSha256}")
+                LinuxDetailText("loader：${value.loader?.path}\nloader 期望 SHA-256：${value.loaderSha256}")
+            }
+            LinuxDetailText("guest cwd：${value.guestWorkingDirectory}")
+            LinuxDetailText("共享映射（host → guest）：")
+            if (value.sharedMounts.isEmpty()) LinuxDetailText("无（不隐式添加共享目录）")
+            value.sharedMounts.forEach { (host, guest) -> LinuxDetailText("$host → $guest") }
         }
-        Text("guest cwd：${value.guestWorkingDirectory}")
-        Text("共享映射（host → guest）：")
-        if (value.sharedMounts.isEmpty()) Text("无（不隐式添加共享目录）")
-        value.sharedMounts.forEach { (host, guest) -> Text("$host → $guest") }
+    }
+}
+
+/** Local presentation only: expanding details never calls a controller or grants approval. */
+@Composable
+private fun LinuxDiagnostics(identity: Any, title: String = "诊断详情", content: @Composable () -> Unit) {
+    var expanded by remember(identity) { mutableStateOf(false) }
+    Column(Modifier.fillMaxWidth()) {
+        LinuxAction(modifier = Modifier.semantics { stateDescription = if (expanded) "已展开" else "已折叠" },
+            onClick = { expanded = !expanded }) { Text("$title · ${if (expanded) "收起" else "展开"}") }
+        if (expanded) {
+            SelectionContainer {
+                Column(Modifier.fillMaxWidth().heightIn(max = 280.dp)
+                    .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    content()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LinuxDetailText(text: String) {
+    Text(text, style = MiuixTheme.textStyles.body2,
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        softWrap = true, modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp))
+}
+
+private val LocalLinuxActionColor = staticCompositionLocalOf<Color?> { null }
+
+/** Use the existing native settings palette, including inside Material dialogs and fields. */
+@Composable
+private fun Text(
+    text: String,
+    modifier: Modifier = Modifier,
+    style: TextStyle = MiuixTheme.textStyles.body2,
+    color: Color = LocalLinuxActionColor.current ?: MiuixTheme.colorScheme.onSurface,
+    softWrap: Boolean = true,
+    maxLines: Int = Int.MAX_VALUE,
+) {
+    MaterialText(text = text, modifier = modifier, style = style, color = color, softWrap = softWrap,
+        maxLines = maxLines, overflow = TextOverflow.Ellipsis)
+}
+
+/** Explicit no-indication action, including dialogs composed outside the scaffold. */
+@Composable
+private fun LinuxAction(
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier,
+    fullWidth: Boolean = true,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val colors = MiuixTheme.colorScheme
+    CompositionLocalProvider(
+        LocalLinuxActionColor provides
+            if (enabled) colors.primary else colors.onSurfaceVariantSummary,
+    ) {
+        Box(modifier.then(if (fullWidth) Modifier.fillMaxWidth() else Modifier).heightIn(min = 48.dp).clickable(
+            enabled = enabled, role = Role.Button,
+            interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick,
+        ).padding(horizontal = 16.dp, vertical = 12.dp), contentAlignment = Alignment.CenterStart) {
+            content()
+        }
     }
 }

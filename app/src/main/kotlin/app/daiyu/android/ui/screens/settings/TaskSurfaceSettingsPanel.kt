@@ -53,7 +53,7 @@ internal fun TaskSurfaceSettingsPanel(
     val back = { if (visit.active) onBack() }
     BackHandler { back() }
     MiuixScaffoldPage(title = "Agent任务偏好", onBack = back, modifier = modifier) {
-        item { SettingsNote("基础执行位置只影响后续运行；每个运行冻结一次决定。位置选择不等于无障碍授权、具体动作确认或后台整计划审批。") }
+        item { SettingsNote("仅影响之后开始的任务，当前任务不变。选择执行位置不等于授权；具体操作仍需相应权限和确认。") }
         item {
             SettingsCard {
                 TaskSurfacePreference.entries.forEach { value ->
@@ -69,7 +69,7 @@ internal fun TaskSurfaceSettingsPanel(
                 }
             }
         }
-        item { SettingsNote("操作本应用时仅当前有效路由使用前台，不改基础偏好、不弹位置询问、不创建副屏，也不解除已取消的询问。后台不受支持时明确不执行，不会回退到前台。请不要清理应用。") }
+        item { SettingsNote("后台不可用时不会执行，也不会自动切到前台。操作代鱼自身时使用前台，但不改变这里的设置。") }
         if (editor == null) item { SettingsNote("正在读取任务位置设置…") }
         if (editor?.saved === TaskSurfaceSettings.Unavailable) item {
             SettingsNote("无法确认已保存的位置；执行入口将拒绝执行，不会默认为前台。可重新选择并保存。", error = true)

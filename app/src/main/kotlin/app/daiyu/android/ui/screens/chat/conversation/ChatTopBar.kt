@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Row
@@ -29,7 +30,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.icons.DaiyuIcons
-import app.daiyu.android.ui.icons.daiyuIconColor
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -38,20 +38,24 @@ internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.B
     interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true,
     automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false) {
     var expanded by remember { mutableStateOf(false) }
-    Row(modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-        ChatIconButton(DaiyuIcons.Menu, "打开侧边栏", actions.onOpenSidebar)
-        Column(Modifier.weight(1f).padding(horizontal = 6.dp)) {
+    val chrome = chatChromeColors()
+    Row(modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 3.dp, bottom = 14.dp),
+        horizontalArrangement = Arrangement.spacedBy(11.dp), verticalAlignment = Alignment.CenterVertically) {
+        ChatIconButton(DaiyuIcons.Menu, "打开侧边栏", actions.onOpenSidebar,
+            Modifier.size(width = 17.dp, height = 28.dp), tint = chrome.text, iconSize = 17.dp)
+        Column(Modifier.weight(1f)) {
             Text(title.ifBlank { "新会话" }, Modifier.testTag("chat-title"),
-                color = MiuixTheme.colorScheme.onSurface,
-                style = MiuixTheme.textStyles.title3.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+                color = chrome.text,
+                style = MiuixTheme.textStyles.title3.copy(fontSize = 12.sp, lineHeight = 17.3.sp, fontWeight = FontWeight(550)),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(assistantLabel, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp),
+            Text(assistantLabel, modifier = Modifier.padding(top = 4.dp), color = chrome.muted,
+                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 11.5.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        ChatIconButton(DaiyuIcons.SubAgent, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, tint = daiyuIconColor(DaiyuIcons.SubAgent))
+        ChatIconButton(DaiyuIcons.SubAgent, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, modifier = Modifier.size(28.dp), tint = chrome.toolbar, iconSize = 18.dp)
         Box {
-            ChatIconButton(DaiyuIcons.More, "更多", { actions.onMore(); expanded = true })
+            ChatIconButton(DaiyuIcons.More, "更多", { actions.onMore(); expanded = true },
+                Modifier.size(28.dp), tint = chrome.text, iconSize = 17.dp)
             ChatOverflowMenu(expanded, { expanded = false }, actions.onMenuAction,
                 interactiveModeEnabled, interactiveModeChangeEnabled, automaticCompression, automaticCompressionPending)
         }
@@ -70,12 +74,13 @@ internal fun ChatIconButton(
     onLongClick: (() -> Unit)? = null,
     containerColor: Color? = null,
     iconSize: androidx.compose.ui.unit.Dp? = null,
+    containerSize: androidx.compose.ui.unit.Dp = 20.dp,
 ) {
     Box(modifier.size(48.dp).clip(CircleShape).combinedClickable(
         enabled = enabled, role = Role.Button, onClickLabel = label,
         onLongClick = onLongClick, onClick = onClick,
     ), contentAlignment = Alignment.Center) {
-        Box(if (containerColor == null) Modifier else Modifier.size(20.dp).background(containerColor, CircleShape),
+        Box(if (containerColor == null) Modifier else Modifier.size(containerSize).background(containerColor, CircleShape),
             contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = label, modifier = Modifier.size(iconSize ?: if (containerColor == null) 20.dp else 12.dp),
                 tint = if (enabled) tint else tint.copy(alpha = 0.38f))

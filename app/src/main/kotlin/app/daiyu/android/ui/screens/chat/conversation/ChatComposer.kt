@@ -62,6 +62,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     backdrop: top.yukonga.miuix.kmp.blur.LayerBackdrop? = null) {
     val colors = MiuixTheme.colorScheme
     val appearance = chatActionColors()
+    val chrome = chatChromeColors()
     val currentEditorGeneration by rememberUpdatedState(state.editorGeneration)
     var attachments by remember { mutableStateOf(false) }
     var voiceModes by remember { mutableStateOf(false) }
@@ -144,21 +145,21 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         cursorBrush = SolidColor(colors.primary),
                         decorationBox = { inner ->
                             Box {
-                                if (state.text.isEmpty()) Text("给代鱼发消息", color = colors.onSurfaceVariantSummary,
+                                if (state.text.isEmpty()) Text("给代鱼发消息", color = chrome.muted,
                                     style = MiuixTheme.textStyles.body1.copy(fontSize = 12.sp, lineHeight = 18.sp))
                                 inner()
                             }
                         },
                     )
                 }
-                Box(Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 10.dp).height(30.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxWidth().padding(start = 13.dp, end = 13.dp, bottom = 10.dp).height(30.dp), contentAlignment = Alignment.Center) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             ChatIconButton(DaiyuIcons.Attach, "附件", { actions.onAttach(); attachments = true },
-                                Modifier.size(28.dp), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Attach), iconSize = 16.dp)
+                                Modifier.size(width = 25.dp, height = 28.dp), enabled = state.enabled, tint = chrome.toolbar, iconSize = 16.dp)
                             ChatIconButton(DaiyuIcons.Reasoning, "推理强度，当前为 ${state.reasoningLabel}", actions.onOpenReasoning,
-                                Modifier.size(28.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = daiyuIconColor(DaiyuIcons.Reasoning))
+                                Modifier.size(width = 25.dp, height = 28.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = chrome.accent, iconSize = 18.dp)
                             Box(Modifier.size(28.dp).testTag("chat-assistant").clip(CircleShape)
                                 .combinedClickable(enabled = state.enabled, role = Role.Button,
                                     onClickLabel = "选择助手", onClick = actions.onOpenAssistant)
@@ -180,7 +181,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 .controlGesture(actions, primaryEnabled),
                                 containerColor = if (!primaryEnabled) colors.disabledPrimaryButton
                                     else if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer,
-                                enabled = primaryEnabled,
+                                enabled = primaryEnabled, containerSize = 28.dp,
                                 tint = if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
                                 iconSize = if (state.phase == ComposerPhase.RUNNING || state.phase == ComposerPhase.PAUSED && !hasText) 10.dp else 12.dp,
                                 onLongClick = if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
@@ -227,9 +228,9 @@ internal fun ComposerChip(icon: ImageVector, label: String, enabled: Boolean, on
         .combinedClickable(enabled = enabled, role = Role.Button, onClickLabel = "选择模型",
             onClick = onClick, onLongClick = onLongClick).padding(horizontal = 0.dp, vertical = 3.dp),
         horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(14.dp), tint = contentColor)
+        Icon(icon, null, Modifier.size(11.dp), tint = contentColor)
         Text(label, Modifier.weight(1f, fill = false), style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp),
             color = contentColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Icon(DaiyuIcons.ChevronDown, null, Modifier.size(12.dp), tint = contentColor)
+        Icon(DaiyuIcons.ChevronDown, null, Modifier.size(10.dp), tint = contentColor)
     }
 }

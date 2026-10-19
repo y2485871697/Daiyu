@@ -50,8 +50,8 @@ internal fun ChatSelectionSheet(
                 .size(29.dp, 3.dp).background(colors.toolbar.copy(alpha = .24f), CircleShape))
             Row(Modifier.fillMaxWidth().padding(bottom = 13.dp), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
-                    Text(title, color = colors.text, fontSize = 15.3.sp, lineHeight = 21.42.sp, fontWeight = FontWeight.SemiBold)
-                    subtitle?.let { Text(it, color = colors.muted, fontSize = 9.sp, lineHeight = 14.4.sp,
+                    Text(title, color = colors.text, fontSize = 17.sp, lineHeight = 23.8.sp, fontWeight = FontWeight.SemiBold)
+                    subtitle?.let { Text(it, color = colors.muted, fontSize = 10.sp, lineHeight = 16.sp,
                         modifier = Modifier.padding(top = 4.dp)) }
                 }
                 Box(Modifier.size(28.dp).clip(RoundedCornerShape(9.dp))

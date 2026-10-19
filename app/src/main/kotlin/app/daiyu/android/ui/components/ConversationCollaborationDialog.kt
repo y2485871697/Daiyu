@@ -145,7 +145,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                             }
                             if (choosing && directory != null && editor != null && chooserPopup != null) {
                                 val (popup, ticket) = chooserPopup
-                                Text("选择子代理组", fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = conversationAgentColors().accent, modifier = Modifier.padding(horizontal = 2.dp, vertical = 8.dp))
+                                Text("选择子代理组", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = conversationAgentColors().accent, modifier = Modifier.padding(horizontal = 2.dp, vertical = 8.dp))
                                 Text("应用时复制到本会话；本会话修改不会反写预设。切换会替换当前会话配置。", style = MaterialTheme.typography.bodySmall, color = conversationAgentColors().muted, modifier = Modifier.padding(start = 2.dp, end = 2.dp, bottom = 14.dp))
                                 SubAgentPresetDirectoryStatus(directory)
                                 directory.entries.forEach { preset ->

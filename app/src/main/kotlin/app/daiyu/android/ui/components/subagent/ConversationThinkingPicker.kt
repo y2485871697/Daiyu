@@ -46,14 +46,16 @@ import kotlin.math.roundToInt
     val maxHeight = (LocalConfiguration.current.screenHeightDp - 50).coerceAtLeast(160).dp
     if (subagent) {
         SubAgentConfigurationWindow("思考深度", onDismiss) {
+            Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {
             Column(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 25.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                 ConversationThinkingMark(Modifier.size(34.dp))
-                Text(options[selected].displayName, fontSize = 19.8.sp, fontWeight = FontWeight.Medium, color = colors.text, modifier = Modifier.padding(top = 14.dp))
+                Text(options[selected].displayName, fontSize = 22.sp, fontWeight = FontWeight.Medium, color = colors.text, modifier = Modifier.padding(top = 14.dp))
             }
             if (options.size > 1) ConversationDepthSlider(selected, options.lastIndex, { selected = it }, { index ->
                 if (options[index] != effort) onEffortChange(options[index])
             })
-            if (description != null) Text(description, fontSize = 8.1.sp, lineHeight = 13.5.sp, color = colors.muted, modifier = Modifier.padding(top = 15.dp))
+            if (description != null) Text(description, fontSize = 9.sp, lineHeight = 15.sp, color = colors.muted, modifier = Modifier.padding(top = 15.dp))
+            }
             androidx.compose.material3.HorizontalDivider(Modifier.padding(top = 10.dp), color = colors.line)
             ConversationAgentButton("关闭", modifier = Modifier.fillMaxWidth().padding(top = 10.dp), onClick = onDismiss)
         }
@@ -63,16 +65,16 @@ import kotlin.math.roundToInt
         ConversationAgentSheet(onDismiss, radius = if (subagent) 25 else 28, modifier = Modifier.heightIn(max = maxHeight)) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(top = 22.dp, bottom = 24.dp).verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("调整思考深度", fontSize = 14.4.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 19.dp), color = colors.text)
+                Text("调整思考深度", fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 19.dp), color = colors.text)
                 ConversationThinkingMark(Modifier.size(if (subagent) 34.dp else 30.dp))
-                Text(options[selected].displayName, fontSize = if (subagent) 19.8.sp else 18.sp,
-                    lineHeight = 25.2.sp, fontWeight = FontWeight.Normal, color = colors.text,
+                Text(options[selected].displayName, fontSize = if (subagent) 22.sp else 20.sp,
+                    lineHeight = 28.sp, fontWeight = FontWeight.Normal, color = colors.text,
                     modifier = Modifier.padding(top = if (subagent) 14.dp else 8.dp, bottom = if (subagent) 25.dp else 18.dp))
                 if (options.size > 1) ConversationDepthSlider(selected, options.lastIndex, { selected = it }, { index ->
                     if (options[index] != effort) onEffortChange(options[index])
                 })
                 // Real capability/permission explanation is retained; no preview endpoint claims.
-                if (description != null) Text(description, fontSize = 8.1.sp, lineHeight = 13.5.sp, color = colors.muted,
+                if (description != null) Text(description, fontSize = 9.sp, lineHeight = 15.sp, color = colors.muted,
                     modifier = Modifier.padding(top = 12.dp))
             }
         }

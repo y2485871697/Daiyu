@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -233,10 +234,10 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
                     onClick = {}, onLongClick = { showMenu = true })
                 .padding(horizontal = 12.dp, vertical = 9.dp)) {
                 if (turn.content.isNotEmpty()) {
-                    MessageContent(turn.content, actions, imageLoader, markdown = false)
+                    MessageContent(turn.content, actions, imageLoader, markdown = false,
+                        textBody = { text, modifier -> UserMessageText(text, modifier) })
                 } else {
-                    Text(turn.text, color = conversationColors().text,
-                        style = MiuixTheme.textStyles.body1.copy(fontSize = 11.sp, lineHeight = 19.8.sp))
+                    UserMessageText(turn.text)
                 }
             }
             UserTurnMenu(showMenu, { showMenu = false }, turn.id, actions)
@@ -316,5 +317,13 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreen
     } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {
         Text("正在思考…", color = conversationColors().muted,
             style = MiuixTheme.textStyles.body2.copy(fontSize = 10.sp, lineHeight = 18.sp))
+    }
+}
+
+@Composable
+internal fun UserMessageText(text: String, modifier: Modifier = Modifier) {
+    SelectionContainer {
+        Text(text, modifier, color = conversationColors().text,
+            style = MiuixTheme.textStyles.body1.copy(fontSize = 11.sp, lineHeight = 18.7.sp))
     }
 }

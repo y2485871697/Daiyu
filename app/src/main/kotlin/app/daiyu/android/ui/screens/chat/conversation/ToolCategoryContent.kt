@@ -201,17 +201,17 @@ private fun Document(document: ToolDisclosureUi) {
             .conversationClickable {}.padding(16.dp).testTag("tool-output-dialog"),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(document.title, Modifier.weight(1f), fontSize = 13.5.sp, lineHeight = 19.sp,
+                Text(document.title, Modifier.weight(1f), fontSize = 15.sp, lineHeight = 21.sp,
                     fontWeight = FontWeight.SemiBold, color = palette.text)
                 Box(Modifier.size(40.dp).testTag("tool-output-close").conversationClickable { opened = false }, contentAlignment = Alignment.Center) {
                     Icon(DaiyuIcons.Close, "关闭", Modifier.size(16.dp), tint = palette.muted)
                 }
             }
-            Text("${document.text.count { it == '\n' } + 1} 行", fontSize = 9.9.sp, lineHeight = 15.sp, color = palette.muted)
+            Text("${document.text.count { it == '\n' } + 1} 行", fontSize = 11.sp, lineHeight = 16.5.sp, color = palette.muted)
             SelectionContainer(Modifier.weight(1f, fill = false)) {
                 Text(document.text, Modifier.fillMaxWidth().heightIn(max = viewportHeight * .58f)
                     .verticalScroll(rememberScrollState()).testTag("tool-output-text"),
-                    style = style.copy(fontSize = 10.8.sp, lineHeight = 17.28.sp), color = palette.text)
+                    style = style.copy(fontSize = 12.sp, lineHeight = 19.2.sp), color = palette.text)
             }
             Box(Modifier.align(Alignment.End).heightIn(min = 40.dp).clip(RoundedCornerShape(10.dp))
                 .border(1.dp, palette.line, RoundedCornerShape(10.dp)).testTag("tool-output-copy")
@@ -220,7 +220,7 @@ private fun Document(document: ToolDisclosureUi) {
                         .onSuccess { copied = true }
                         .onFailure { android.widget.Toast.makeText(context, "复制失败，可长按选择文本", android.widget.Toast.LENGTH_SHORT).show() }
                 }.padding(horizontal = 12.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
-                Text(if (copied) "已复制" else "复制全文", fontSize = 10.8.sp, lineHeight = 16.sp, color = palette.accent)
+                Text(if (copied) "已复制" else "复制全文", fontSize = 12.sp, lineHeight = 18.sp, color = palette.accent)
             }
         }
     }

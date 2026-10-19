@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.runtime.CompositionLocalProvider
@@ -14,8 +15,10 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
+import app.daiyu.android.ui.screens.chat.conversation.ChatMenuLayer
 import app.daiyu.android.ui.screens.chat.conversation.ChatComposer
 import app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
 import app.daiyu.android.ui.screens.chat.conversation.ChatTopBar
@@ -38,9 +41,11 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 val density = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(density.density, 1f)) {
                     AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                        Column(Modifier.requiredWidth(320.dp).testTag("chrome-host")) {
-                            ChatTopBar("测试会话", null, actions, assistantLabel = composer.assistantLabel)
-                            ChatComposer(composer, actions)
+                        ChatMenuLayer(Modifier.fillMaxSize()) {
+                            Column(Modifier.requiredWidth(320.dp).testTag("chrome-host")) {
+                                ChatTopBar("测试会话", null, actions, assistantLabel = composer.assistantLabel)
+                                ChatComposer(composer, actions)
+                            }
                         }
                     }
                 }
@@ -71,7 +76,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         node("chat-control").assertIsEnabled().assertContentDescriptionEquals("暂停")
         val bounds = controls.mapIndexed { index, target ->
             target.assertIsDisplayed().assertHasClickAction()
-                .assertWidthIsEqualTo(if (index >= 3) 48.dp else 40.dp)
+                .assertWidthIsEqualTo(if (index < 2) 25.dp else 28.dp)
             target.fetchSemanticsNode().boundsInRoot.also {
                 assertTrue(it.width > 0 && it.height > 0)
                 assertTrue(it.left >= host.left - 1 && it.right <= host.right + 1)
@@ -113,7 +118,8 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         show(state, actions)
         touch(node("chat-reasoning")); touch(node("chat-assistant"))
         touch(button("更多"))
-        node("chat-menu:NEW_CHAT").assertDoesNotExist()
+        node("chat-menu:NEW_CHAT").assertIsDisplayed().assertTextContains("新建会话")
+        node("chat-menu:SEARCH").assertIsDisplayed().assertTextContains("搜索记录")
         touch(node("chat-menu:OPEN_TERMINAL").performScrollTo())
         node("chat-overflow-menu").assertDoesNotExist()
         touch(button("更多"))
@@ -168,13 +174,35 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             "加载更早消息", "定位用户消息", "回到底部", "设置", "启动 Kimi Web", "停止 Kimi Web")) {
             ui.onNodeWithText(text, substring = false, useUnmergedTree = true).assertDoesNotExist()
         }
-        val expected = listOf("INTERACTIVE_MODE", "OPEN_TERMINAL", "OPEN_BROWSER",
+        val expected = listOf("NEW_CHAT", "SEARCH", "INTERACTIVE_MODE", "OPEN_TERMINAL", "OPEN_BROWSER",
             "OPEN_WORKSPACE", "SUB_AGENT", "CONTEXT_STATS", "COMPRESS_CONTEXT", "AUTO_COMPRESS")
         val actual = ui.onAllNodes(SemanticsMatcher("overflow menu item") {
             it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("chat-menu:") == true
         }).fetchSemanticsNodes().map { it.config[SemanticsProperties.TestTag].removePrefix("chat-menu:") }
         assertEquals(expected, actual)
-        for (action in expected) node("chat-menu:$action").performScrollTo().assertIsDisplayed().assertHeightIsEqualTo(44.dp)
+        for (action in expected) node("chat-menu:$action").performScrollTo().assertIsDisplayed().assertHeightIsEqualTo(38.dp)
+    }
+
+    fun testNewChatAndSearchMenuDispatchOnceAndClose() {
+        val events = mutableListOf<String>()
+        show(composer(), ChatScreenActions(onMenuAction = { events.add(it.name) }))
+        for (action in listOf("NEW_CHAT", "SEARCH")) {
+            touch(button("更多"))
+            touch(node("chat-menu:$action"))
+            node("chat-overflow-menu").assertDoesNotExist()
+        }
+        ui.runOnIdle { assertEquals(listOf("NEW_CHAT", "SEARCH"), events) }
+    }
+
+    fun testMenuTogglesStayOpenAndUseCssTextSize() {
+        val events = mutableListOf<String>()
+        show(composer(), ChatScreenActions(onMenuAction = { events.add(it.name) }))
+        touch(button("更多"))
+        touch(node("chat-menu:INTERACTIVE_MODE"))
+        node("chat-overflow-menu").assertIsDisplayed()
+        assertEquals(12.sp, layout("交互模式").layoutInput.style.fontSize)
+        assertEquals(18.sp, layout("交互模式").layoutInput.style.lineHeight)
+        ui.runOnIdle { assertEquals(listOf("INTERACTIVE_MODE"), events) }
     }
 
     fun testDisabledComposerDoesNotAcquireControlGestureOrDispatchActions() {

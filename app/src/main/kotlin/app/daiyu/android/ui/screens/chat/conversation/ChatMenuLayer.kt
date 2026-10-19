@@ -79,7 +79,7 @@ internal fun ChatMenuLayer(modifier: Modifier = Modifier, content: @Composable (
             Box(Modifier.matchParentSize().windowInsetsPadding(WindowInsets.safeDrawing.union(WindowInsets.ime))) {
                 var host by remember { mutableStateOf(Rect.Zero) }
                 Box(Modifier.fillMaxSize().onGloballyPositioned { host = it.boundsInRoot() }) {
-                    Box(Modifier.matchParentSize().clickable(onClick = menu.onDismiss))
+                    Box(Modifier.matchParentSize().conversationClickable(onClick = menu.onDismiss))
                     var menuSize by remember(menu) { mutableStateOf(IntSize.Zero) }
                     val density = LocalDensity.current
                     val margin = with(density) { 9.dp.roundToPx() }

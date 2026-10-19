@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
@@ -72,7 +73,8 @@ private fun Context.animatorsEnabled(): Boolean =
 private data class BalanceBurst(val delta: BigDecimal, val level: BalanceEffectLevel)
 
 @Composable
-internal fun AnimatedProviderBalanceIndicator(state: BalanceState, amount: String, modifier: Modifier) {
+internal fun AnimatedProviderBalanceIndicator(state: BalanceState, amount: String, modifier: Modifier,
+    textStyle: TextStyle = MiuixTheme.textStyles.footnote1) {
     val context = LocalContext.current
     val density = LocalDensity.current
     val neutralColor = MiuixTheme.colorScheme.onSurfaceVariantSummary
@@ -176,7 +178,7 @@ internal fun AnimatedProviderBalanceIndicator(state: BalanceState, amount: Strin
             Icon(DaiyuIcons.Balance, contentDescription = null,
                 modifier = Modifier.padding(end = 4.dp).size(12.dp).graphicsLayer { rotationZ = iconRotation.value },
                 tint = amountColor)
-            Text(text = displayText, style = MiuixTheme.textStyles.footnote1, color = amountColor,
+            Text(text = displayText, style = textStyle, color = amountColor,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.graphicsLayer {
                     val shift = amountShift.value
@@ -187,7 +189,7 @@ internal fun AnimatedProviderBalanceIndicator(state: BalanceState, amount: Strin
         val current = burst
         if (current != null) {
             val strong = current.level == BalanceEffectLevel.Strong
-            val baseStyle = MiuixTheme.textStyles.footnote1
+            val baseStyle = textStyle
             Text(text = formatBalanceDelta(current.delta),
                 style = if (strong) baseStyle.copy(fontWeight = FontWeight.Bold) else baseStyle,
                 color = if (current.level == BalanceEffectLevel.Increase) BalanceIncreaseColor else decreaseColor,

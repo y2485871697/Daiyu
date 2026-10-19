@@ -29,9 +29,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.icons.DaiyuIcons
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -39,14 +39,14 @@ internal fun ToolMediaSurface(step: WorkStepUi, thumbnail: Bitmap?, video: Boole
     assetKey: String?, onPreview: (() -> Unit)? = null, onAction: (ToolCardActionRequest) -> Unit) {
     val action = if (video) ToolCardAction.PLAY_VIDEO else ToolCardAction.OPEN_IMAGE
     Column(Modifier.fillMaxWidth().testTag("tool-media-surface:${step.toolCallId}"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(Modifier.fillMaxWidth().heightIn(min = 140.dp, max = 240.dp).clip(RoundedCornerShape(10.dp))
+        Box(Modifier.fillMaxWidth().heightIn(max = 140.dp).clip(RoundedCornerShape(10.dp))
             .background(MiuixTheme.colorScheme.surfaceVariant)
-            .clickable(role = Role.Button, onClickLabel = if (onPreview != null) "预览图片" else action.label) {
+            .conversationClickable(role = Role.Button, onClickLabel = if (onPreview != null) "预览图片" else action.label) {
                 if (onPreview != null) onPreview() else onAction(step.actionRequest(action, assetKey))
             },
             contentAlignment = Alignment.Center) {
             if (thumbnail != null) Image(thumbnail.asImageBitmap(), if (video) "视频封面" else "图片",
-                Modifier.fillMaxWidth().heightIn(max = 240.dp), contentScale = ContentScale.Fit)
+                Modifier.fillMaxWidth().heightIn(max = 140.dp), contentScale = ContentScale.Crop)
             if (video || thumbnail == null) Icon(if (video) DaiyuIcons.Resume else DaiyuIcons.Image,
                 action.label, Modifier.size(36.dp), tint = MiuixTheme.colorScheme.primary)
             if (video && durationMs != null) Text(mediaTime(durationMs), Modifier.align(Alignment.BottomEnd)
@@ -55,7 +55,7 @@ internal fun ToolMediaSurface(step: WorkStepUi, thumbnail: Bitmap?, video: Boole
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(action, ToolCardAction.SAVE_MEDIA).forEach { item ->
-                TextButton(text = item.label, modifier = Modifier.heightIn(min = 44.dp).testTag("tool-action:${item.name}"),
+                ToolMiniAction(text = item.label, modifier = Modifier.testTag("tool-action:${item.name}"),
                     onClick = { onAction(step.actionRequest(item, assetKey)) })
             }
         }
@@ -70,7 +70,7 @@ internal fun ToolAudioControls(step: WorkStepUi, position: Float = 0f, durationM
         .padding(10.dp).testTag("tool-audio:${step.toolCallId}"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(if (playing) DaiyuIcons.Pause else DaiyuIcons.Resume, if (playing) "暂停" else "播放",
-                Modifier.size(44.dp).clickable(role = Role.Button) { onAction(step.actionRequest(if (playing) ToolCardAction.PAUSE_AUDIO else ToolCardAction.PLAY_AUDIO)) }
+                Modifier.size(44.dp).conversationClickable(role = Role.Button) { onAction(step.actionRequest(if (playing) ToolCardAction.PAUSE_AUDIO else ToolCardAction.PLAY_AUDIO)) }
                     .padding(10.dp), tint = MiuixTheme.colorScheme.primary)
             Text(if (durationMs == null) "--:-- / --:--" else "${mediaTime((durationMs * position).toLong())} / ${mediaTime(durationMs)}",
                 style = MiuixTheme.textStyles.footnote1)
@@ -79,7 +79,16 @@ internal fun ToolAudioControls(step: WorkStepUi, position: Float = 0f, durationM
             seeking?.let { onAction(step.actionRequest(ToolCardAction.SEEK_AUDIO, position = it)) }
             seeking = null
         }, modifier = Modifier.fillMaxWidth().testTag("tool-audio-position"))
-        TextButton(text = ToolCardAction.SAVE_MEDIA.label, modifier = Modifier.heightIn(min = 44.dp),
+        ToolMiniAction(text = ToolCardAction.SAVE_MEDIA.label,
             onClick = { onAction(step.actionRequest(ToolCardAction.SAVE_MEDIA)) })
+    }
+}
+
+@Composable
+internal fun ToolMiniAction(text: String, modifier: Modifier = Modifier, enabled: Boolean = true, onClick: () -> Unit) {
+    Box(modifier.heightIn(min = 27.dp).conversationClickable(enabled = enabled, onClick = onClick)
+        .padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
+        Text(text, style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 13.6.sp),
+            color = conversationColors().accent.copy(alpha = if (enabled) 1f else .4f))
     }
 }

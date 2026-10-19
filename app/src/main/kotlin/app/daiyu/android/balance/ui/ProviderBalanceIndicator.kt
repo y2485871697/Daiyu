@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.balance.BalanceState
@@ -29,23 +30,25 @@ fun ProviderBalanceIndicator(
     state: BalanceState?,
     modifier: Modifier = Modifier,
     animateChanges: Boolean = false,
+    textStyle: TextStyle = MiuixTheme.textStyles.footnote1,
 ) {
     val money = state?.successful?.money ?: return
     val amount = "${money.currency} ${formatBalanceDisplay(money.amount.toPlainString())}"
     // Reset animation ownership on account/configuration changes, not just on numeric seq.
     key(state.revision) {
-        if (animateChanges) AnimatedProviderBalanceIndicator(state, amount, modifier)
-        else ProviderBalanceAmount(amount, modifier)
+        if (animateChanges) AnimatedProviderBalanceIndicator(state, amount, modifier, textStyle)
+        else ProviderBalanceAmount(amount, modifier, textStyle)
     }
 }
 
 @Composable
-internal fun ProviderBalanceAmount(amount: String, modifier: Modifier = Modifier) {
+internal fun ProviderBalanceAmount(amount: String, modifier: Modifier = Modifier,
+    textStyle: TextStyle = MiuixTheme.textStyles.footnote1) {
     val neutral = MiuixTheme.colorScheme.onSurfaceVariantSummary
     Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
         Icon(DaiyuIcons.Balance, contentDescription = null,
             modifier = Modifier.padding(end = 4.dp).size(12.dp), tint = neutral)
-        Text(amount, style = MiuixTheme.textStyles.footnote1, color = neutral,
+        Text(amount, style = textStyle, color = neutral,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

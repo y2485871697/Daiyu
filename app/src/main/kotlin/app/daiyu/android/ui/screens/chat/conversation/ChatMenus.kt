@@ -62,6 +62,10 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
     interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true,
     automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false) {
     val groups = listOf(
+        listOf(
+            MenuEntry("新建会话", DaiyuIcons.NewChat, ChatMenuAction.NEW_CHAT),
+            MenuEntry("搜索记录", DaiyuIcons.Search, ChatMenuAction.SEARCH),
+        ),
         listOf(MenuEntry("交互模式", DaiyuIcons.Interactive, ChatMenuAction.INTERACTIVE_MODE)),
         listOf(
             MenuEntry("打开终端", DaiyuIcons.Terminal, ChatMenuAction.OPEN_TERMINAL),
@@ -105,13 +109,16 @@ private fun ChatMenuItem(entry: MenuEntry, onDismiss: () -> Unit, onAction: (Cha
     val colors = MiuixTheme.colorScheme
     Row(modifier.testTag("chat-menu:${entry.action.name}").fillMaxWidth().heightIn(min = 38.dp)
         .clip(RoundedCornerShape(11.dp))
-        .clickable(enabled = enabled) { onDismiss(); onAction(entry.action) }
+        .conversationClickable(enabled = enabled) {
+            if (entry.action != ChatMenuAction.INTERACTIVE_MODE && entry.action != ChatMenuAction.AUTO_COMPRESS) onDismiss()
+            onAction(entry.action)
+        }
         .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
         Icon(entry.icon, null, Modifier.size(17.dp), tint = daiyuIconColor(entry.icon)
             .copy(alpha = if (enabled) .9f else .38f))
         Text(entry.title, Modifier.weight(1f), maxLines = 1,
-            style = MiuixTheme.textStyles.body1.copy(fontSize = 12.sp),
+            style = MiuixTheme.textStyles.body1.copy(fontSize = 12.sp, lineHeight = 18.sp),
             color = colors.onSurface.copy(alpha = if (enabled) 1f else .38f))
         if (checked != null) {
             if (entry.action == ChatMenuAction.INTERACTIVE_MODE || entry.action == ChatMenuAction.AUTO_COMPRESS) {
@@ -155,7 +162,7 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
                     .padding(horizontal = 8.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(entry.icon, null, Modifier.size(18.dp), tint = tint)
-                    Text(entry.title, Modifier.weight(1f), fontSize = 10.8.sp, color = colors.text)
+                    Text(entry.title, Modifier.weight(1f), fontSize = 12.sp, color = colors.text)
                     Icon(DaiyuIcons.ChevronRight, null, Modifier.size(11.dp).alpha(.4f), tint = colors.muted)
                 }
             }
@@ -164,7 +171,7 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                     role = Role.Button) { showPath = !showPath }.padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                Text("输入文件路径", Modifier.weight(1f), fontSize = 9.9.sp, color = colors.muted)
+                Text("输入文件路径", Modifier.weight(1f), fontSize = 11.sp, color = colors.muted)
                 Icon(ChatPreviewIcons.Chevron, if (showPath) "收起" else "展开", Modifier.size(11.dp), tint = colors.muted)
             }
         }
@@ -186,7 +193,7 @@ internal fun UserTurnMenu(expanded: Boolean, onDismiss: () -> Unit, id: String, 
                     .clickable { onDismiss(); callback(id) }.padding(horizontal = 10.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
                     Icon(icon, null, Modifier.size(17.dp), tint = color)
-                    Text(label, style = MiuixTheme.textStyles.body1.copy(fontSize = 12.sp), color = color)
+                    Text(label, style = MiuixTheme.textStyles.body1.copy(fontSize = 12.sp, lineHeight = 18.sp), color = color)
                 }
             }
         }

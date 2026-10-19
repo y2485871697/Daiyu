@@ -37,7 +37,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
@@ -92,7 +91,7 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
                         else -> if (records.any { it.owner == row.owner && it.text.isNotBlank() }) emptyList() else listOf(ToolCardAction.READ_TASK_RESULT)
                     }
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        actions.forEach { action -> TextButton(text = action.label, modifier = Modifier.heightIn(min = 44.dp),
+                        actions.forEach { action -> ToolMiniAction(text = action.label,
                             onClick = { onAction(step.actionRequest(action, subAgentStatusItemKey(row.owner))) }) }
                     }
                 })

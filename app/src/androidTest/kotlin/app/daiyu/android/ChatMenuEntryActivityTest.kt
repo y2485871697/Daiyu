@@ -35,6 +35,53 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         assertDraft("menu draft stays unsent")
     }
 
+    fun testNewChatMenuRestoresUnattachedDraftAndPreservesConversationDraft() {
+        selectDraft()
+        val conversation = fixture.database.conversations().single()
+        mainThread { fixture.database.draft("未附着草稿") }
+        menu(ChatMenuAction.NEW_CHAT)
+        awaitUniqueTag("chat-draft")
+        assertDraft("未附着草稿")
+        assertEquals("menu draft stays unsent", fixture.database.conversations().single().draft)
+        assertEquals(1, fixture.database.conversations().size)
+        assertEquals(0, fixture.opens.get())
+        mainThread { activity.select(conversation) }
+        assertDraft("menu draft stays unsent")
+    }
+
+    fun testSearchMenuOpensMessageHistoryAndReturnsWithoutConsumingDraft() {
+        selectDraft()
+        val before = fixture.database.exportBackup()
+        menu(ChatMenuAction.SEARCH)
+        awaitUniqueTag("page:${activity.getString(R.string.search_messages_title)}")
+        node("search:query").assertIsDisplayed()
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+        backToChat(activity)
+        assertDraft("menu draft stays unsent")
+    }
+
+    fun testNewAndSearchRetainedCallbacksCannotLeaveSettingsOrReplaceAnotherEditor() {
+        selectDraft()
+        val oldMenu = retainedControls(activity).onMenuAction
+        val before = fixture.database.exportBackup()
+        openSettings()
+        mainThread {
+            oldMenu(ChatMenuAction.NEW_CHAT)
+            oldMenu(ChatMenuAction.SEARCH)
+        }
+        node("page:设置").assertExists()
+        backToChat(activity)
+        mainThread { activity.select(fixture.database.conversations().single()) }
+        mainThread {
+            oldMenu(ChatMenuAction.NEW_CHAT)
+            oldMenu(ChatMenuAction.SEARCH)
+        }
+        assertDraft("menu draft stays unsent")
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testBrowserMenuOpensVisiblePageWithoutCreatingRunOrConsumingDraft() {
         selectDraft()
         val before = fixture.database.exportBackup()
@@ -79,6 +126,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
             }
             node("chat-menu:AUTO_COMPRESS").performScrollTo().performClick()
             awaitControl("automatic compression saved") { !store.snapshot().automatic }
+            node("chat-overflow-menu").assertIsDisplayed()
             node("page:上下文压缩").assertDoesNotExist()
             node("context-management").assertDoesNotExist()
             assertEquals(before, fixture.database.exportBackup())
@@ -108,7 +156,8 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         try {
             menu(ChatMenuAction.INTERACTIVE_MODE)
             assertEquals(!previous, store.enabled)
-            node("interactive-mode-toggle").assert(hasStateDescription(if (previous) "已关闭" else "已开启"))
+            node("chat-overflow-menu").assertIsDisplayed()
+            node("chat-menu:INTERACTIVE_MODE").assertExists()
             assertDraft("menu draft stays unsent")
             assertEquals(0, fixture.opens.get())
         } finally { mainThread { store.setEnabled(previous) } }

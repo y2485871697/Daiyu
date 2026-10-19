@@ -2271,7 +2271,7 @@ class MainActivity : ComponentActivity() {
                 else toast("语音入口未保存；保持原选择")
             }
             ChatMenuAction.VOICE_DOUBAO -> if (currentChat()) toast("豆包实时通话尚未接入；可使用已配置的语音对话")
-            ChatMenuAction.NEW_CHAT -> select(null)
+            ChatMenuAction.NEW_CHAT -> if (currentChat()) select(null)
             ChatMenuAction.RENAME -> selected?.let { conversation ->
                 editConversation(conversation.id.value, false)
             }
@@ -2280,7 +2280,7 @@ class MainActivity : ComponentActivity() {
             ChatMenuAction.LOAD_EARLIER -> loadEarlier()
             ChatMenuAction.LOCATE_USER -> chooseUserMessage()
             ChatMenuAction.BOTTOM -> jumpToBottom()
-            ChatMenuAction.SEARCH -> openSearch("message-search")
+            ChatMenuAction.SEARCH -> if (currentChat()) openSearch("message-search")
             ChatMenuAction.SETTINGS -> retainedPage = "settings"
             ChatMenuAction.OPEN_TERMINAL -> openTerminal()
             ChatMenuAction.OPEN_BROWSER -> if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch) openBrowserVisualPage()

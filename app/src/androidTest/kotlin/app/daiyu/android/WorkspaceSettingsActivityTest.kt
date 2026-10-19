@@ -22,6 +22,19 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicBoolean
 
 class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
+    private fun workspaceControl(tag: String): SemanticsNodeInteraction {
+        ui.waitUntil(5_000) {
+            try {
+                node("page:工作区与文件").performScrollToNode(hasTestTag(tag))
+                node(tag).assertIsDisplayed()
+                true
+            } catch (_: AssertionError) { false }
+        }
+        return node(tag).assertIsDisplayed()
+    }
+    private fun workspaceClick(tag: String) {
+        workspaceControl(tag).performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+    }
     private fun openWorkspace() {
         openSettings()
         node("settings-search").performTextReplacement("工作区与文件")
@@ -54,9 +67,9 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
         }
         instrumentation.addMonitor(monitor)
         try {
-            openWorkspace(); node("workspace-pick-directory").performClick()
+            openWorkspace(); workspaceClick("workspace-pick-directory")
             ui.waitUntil(5_000) { launches.get() == 1 }; ui.waitForIdle()
-            node("workspace-pick-file").performClick()
+            workspaceClick("workspace-pick-file")
             ui.waitUntil(5_000) { ui.onAllNodesWithText("未取得有效的持久只读授权，请重新选择").fetchSemanticsNodes().isNotEmpty() }
             assertEquals(2, launches.get()); assertEquals(before, registry.grants())
             assertEquals(0, fixture.opens.get())
@@ -105,13 +118,13 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
                 WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access)
             } } }
-            ui.waitUntil(5_000) { ui.onAllNodesWithTag("workspace-browse:0").fetchSemanticsNodes().size == 1 }
-            node("workspace-browse:0").performClick(); assertTrue(entered.await(5, TimeUnit.SECONDS))
+            workspaceControl("workspace-browse:0")
+            workspaceClick("workspace-browse:0"); assertTrue(entered.await(5, TimeUnit.SECONDS))
             try { realPauseResume(activity) } finally { release.countDown() }
             assertTrue(returned.await(5, TimeUnit.SECONDS)); ui.waitForIdle()
             node("workspace-file:0").assertDoesNotExist()
-            ui.waitUntil(5_000) { ui.onAllNodesWithTag("workspace-browse:0").fetchSemanticsNodes().size == 1 }
-            node("workspace-browse:0").performClick()
+            workspaceControl("workspace-browse:0")
+            workspaceClick("workspace-browse:0")
             ui.waitUntil(5_000) {
                 try {
                     reveal("workspace-file:0", "工作区与文件")
@@ -136,11 +149,11 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
                 WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access)
             } } }
-            ui.waitUntil(5_000) { ui.onAllNodesWithTag("workspace-revoke:0").fetchSemanticsNodes().size == 1 }
-            node("workspace-revoke:0").performClick()
+            workspaceControl("workspace-revoke:0")
+            workspaceClick("workspace-revoke:0")
             val confirm = checkNotNull(node("dialog-confirm").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
             val cancel = checkNotNull(node("dialog-cancel").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-            node("dialog-cancel").performClick(); node("workspace-revoke:0").performClick()
+            node("dialog-cancel").performClick(); workspaceClick("workspace-revoke:0")
             mainThread { confirm(); cancel() }; ui.waitForIdle()
             assertEquals(0, releases.get()); node("dialog-confirm").assertExists()
             node("dialog-confirm").performClick()
@@ -164,13 +177,13 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
                 WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access)
             } } }
-            ui.waitUntil(5_000) { ui.onAllNodesWithTag("workspace-browse:0").fetchSemanticsNodes().size == 1 }
+            workspaceControl("workspace-browse:0")
             val browse = checkNotNull(node("workspace-browse:0").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-            hold.set(true); node("workspace-refresh").performClick(); assertTrue(entered.await(5, TimeUnit.SECONDS))
+            hold.set(true); workspaceClick("workspace-refresh"); assertTrue(entered.await(5, TimeUnit.SECONDS))
             node("workspace-browse:0").assertDoesNotExist()
             mainThread { browse() }; assertEquals(0, queries.get())
             hold.set(false); release.countDown()
-            ui.waitUntil(5_000) { ui.onAllNodesWithTag("workspace-browse:0").fetchSemanticsNodes().size == 1 }
+            workspaceControl("workspace-browse:0")
             ui.onNodeWithText("正在读取共享状态").assertDoesNotExist()
         } finally { hold.set(false); release.countDown(); context.deleteSharedPreferences(name) }
     }
@@ -193,8 +206,8 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
                 WorkspaceSettingsScreen(onBack = {}, suppliedAccess = access)
             } } }
-            ui.waitUntil(5_000) { ui.onAllNodesWithTag("workspace-revoke:0").fetchSemanticsNodes().size == 1 }
-            node("workspace-revoke:0").performClick(); node("dialog-confirm").performClick()
+            workspaceControl("workspace-revoke:0")
+            workspaceClick("workspace-revoke:0"); node("dialog-confirm").performClick()
             assertTrue(entered.await(5, TimeUnit.SECONDS))
             realPauseResume(activity, atPause = { reads.clear() })
             release.countDown()

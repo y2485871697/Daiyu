@@ -47,17 +47,56 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testTokenMenuEntersContextWithoutSending() = context(ChatMenuAction.CONTEXT_STATS)
+    fun testTokenMenuShowsUsageWithoutSending() {
+        selectDraft()
+        val before = fixture.database.exportBackup()
+        menu(ChatMenuAction.CONTEXT_STATS)
+        node("chat-usage-dialog").assertExists()
+        ui.onNodeWithText("关闭").performClick()
+        node("chat-usage-dialog").assertDoesNotExist()
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+        assertDraft("menu draft stays unsent")
+    }
     fun testCompressMenuEntersExistingContextWithoutSending() = context(ChatMenuAction.COMPRESS_CONTEXT)
 
-    fun testAutomaticCompressionMenuEntersExistingSettingsWithoutSending() {
-        selectDraft()
-        menu(ChatMenuAction.AUTO_COMPRESS)
-        node("page:上下文压缩").assertExists()
-        assertEquals(0, fixture.opens.get())
-        backToPage(activity, "page:设置")
-        backToChat(activity)
-        assertDraft("menu draft stays unsent")
+    fun testAutomaticCompressionMenuTogglesSavedConfigurationWithoutSending() {
+        val preferences = instrumentation.targetContext.getSharedPreferences("context-compression", 0)
+        val previous = preferences.all.toMap()
+        val store = app.daiyu.android.context.ProductionCompressionSettingsStore(preferences)
+        try {
+            store.save(app.daiyu.android.context.ProductionCompressionSettings(
+                automatic = true, contextWindowTokens = 10000,
+                summaryModel = app.daiyu.android.context.SummaryModelBinding("menu-fixture", "menu-model")))
+            activity = recreateActivity(activity)
+            selectDraft()
+            val before = fixture.database.exportBackup()
+            ui.onNodeWithContentDescription("更多").performClick()
+            ui.waitUntil(5_000) {
+                ui.onAllNodes(hasTestTag("chat-menu:AUTO_COMPRESS") and isEnabled()).fetchSemanticsNodes().size == 1
+            }
+            node("chat-menu:AUTO_COMPRESS").performScrollTo().performClick()
+            awaitControl("automatic compression saved") { !store.snapshot().automatic }
+            node("page:上下文压缩").assertDoesNotExist()
+            node("context-management").assertDoesNotExist()
+            assertEquals(before, fixture.database.exportBackup())
+            assertEquals(0, fixture.opens.get())
+            assertDraft("menu draft stays unsent")
+        } finally {
+            val editor = preferences.edit().clear()
+            previous.forEach { (key, value) ->
+                when (value) {
+                    is String -> editor.putString(key, value)
+                    is Boolean -> editor.putBoolean(key, value)
+                    is Int -> editor.putInt(key, value)
+                    is Long -> editor.putLong(key, value)
+                    is Float -> editor.putFloat(key, value)
+                    is Set<*> -> editor.putStringSet(key, value.filterIsInstance<String>().toSet())
+                    else -> error("unsupported preference type")
+                }
+            }
+            check(editor.commit())
+        }
     }
 
     fun testInteractiveMenuTogglesExistingStoreAndPreservesDraft() {
@@ -75,8 +114,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
 
     fun testVoiceMenuOpensRealControlsWithoutMicrophoneOrProviderRequest() {
         selectDraft()
-        ui.onNodeWithContentDescription("语音输入").performTouchInput { longClick() }
-        node("chat-menu:VOICE_CHAT").performClick()
+        openVoiceConversationPanel()
         node("voice-universal-control").assertExists()
         assertEquals(0, fixture.opens.get())
         // A selection change permanently loses this open request, not just its composition.
@@ -87,7 +125,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
 
     fun testVoiceMenuRequestFollowsOnlyItsOwnEditorMigrations() {
         selectDraft()
-        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.VOICE_CHAT) }
+        openVoiceConversationPanel()
         node("voice-universal-control").assertExists()
         val ownerField = MainActivity::class.java.getDeclaredField("voiceConversationDialogOwner\$delegate")
             .apply { isAccessible = true }

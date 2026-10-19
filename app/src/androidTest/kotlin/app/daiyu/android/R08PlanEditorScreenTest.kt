@@ -1,7 +1,5 @@
 package app.daiyu.android
 
-import android.content.Intent
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
@@ -9,18 +7,15 @@ import androidx.compose.ui.test.*
 import app.daiyu.android.integration.tools.R08VirtualDisplayAction
 import app.daiyu.android.vdapproval.*
 
-/** Independent non-Main editor, never launches a runtime, accepts text or requests root. */
+/** Isolated controller host for the editor; never launches a runtime, accepts text or requests root. */
 @Suppress("DEPRECATION")
-class R08PlanEditorScreenTest : ComposeActivityTestCase() {
-    private lateinit var activity: ComponentActivity
+class R08PlanEditorScreenTest : WiredActivityTestCase() {
     private val visible = mutableStateOf<R08PlanEditorHost?>(null)
     private val frozen = mutableListOf<Pair<R08PlanEditorHost, R08FrozenPlan>>()
     private val cancelled = mutableListOf<R08PlanEditorHost>()
 
     override fun setUp() {
         super.setUp()
-        activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext,
-            ComponentActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
         mainThread {
             activity.setContent {
                 MaterialTheme {
@@ -31,9 +26,7 @@ class R08PlanEditorScreenTest : ComposeActivityTestCase() {
             }
         }
     }
-    override fun tearDown() {
-        try { mainThread { activity.finish() } } finally { super.tearDown() }
-    }
+
     private fun reveal(tag: String) {
         node("r08-plan-rows").performScrollToNode(hasTestTag(tag))
     }

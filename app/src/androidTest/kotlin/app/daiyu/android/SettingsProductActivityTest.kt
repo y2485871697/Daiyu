@@ -44,16 +44,19 @@ class SettingsProductActivityTest : WiredActivityTestCase() {
         assertDraft("product backup unsent")
     }
 
-    fun testProductModelFormShowsDeviceAndTierControlsAndBodyRemainsEditable() {
+    fun testProductModelFormShowsDeviceAndSearchControlsAndBodyRemainsEditable() {
         setDraft("product models unsent")
+        val savedSettings = fixture.settings.load()
         val before = fixture.database.exportBackup()
         openModels()
-        for (title in listOf("电量查询", "设备状态查询", "Codex 档位"))
+        for (title in listOf("电量查询", "设备状态查询"))
             reveal("settings-switch:$title").assertExists().assertIsEnabled()
-        reveal("model-custom-body").assertExists().performClick()
         modelField("自定义请求体").assertExists().assertIsEnabled()
-        reveal("settings-radio:快速").assertExists().assertIsEnabled()
-        reveal("settings-switch:Codex 档位").assertExists().assertIsEnabled()
+        val body = """{"metadata":{"settings_product":true}}"""
+        editModel("自定义请求体", body)
+        modelField("自定义请求体").assertEditableText(body)
+        reveal("settings-switch:原生网页搜索").assertExists().assertIsEnabled()
+        assertEquals(savedSettings, fixture.settings.load())
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
         backToChat(activity); assertDraft("product models unsent")

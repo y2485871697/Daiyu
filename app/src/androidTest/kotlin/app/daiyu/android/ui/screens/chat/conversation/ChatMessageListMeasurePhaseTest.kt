@@ -1,7 +1,5 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import android.content.Intent
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -14,28 +12,14 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
-import app.daiyu.android.ComposeActivityTestCase
+import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
 import top.yukonga.miuix.kmp.basic.Text
 
 @Suppress("DEPRECATION")
-class ChatMessageListMeasurePhaseTest : ComposeActivityTestCase() {
-    private lateinit var activity: ComponentActivity
+class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
 
-    override fun setUp() {
-        super.setUp()
-        activity = instrumentation.startActivitySync(
-            Intent(instrumentation.targetContext, ComponentActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        ) as ComponentActivity
-    }
-
-    override fun tearDown() {
-        try {
-            if (::activity.isInitialized) mainThread { activity.finish() }
-        } finally { super.tearDown() }
-    }
 
     private fun mount(content: @Composable () -> Unit) {
         mainThread {

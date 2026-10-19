@@ -65,6 +65,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         }
         entry("relay").performClick(); node("page:设置").assertExists(); assertUnchanged()
         for (title in listOf("ST API", "摸鱼")) {
+            reveal("settings-search", "设置").performTextReplacement(title)
             reveal("settings-row:$title", "设置").assertExists(); node("page:设置").assertExists()
             assertUnchanged()
         }

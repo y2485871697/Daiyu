@@ -1,29 +1,18 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import android.content.Intent
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.*
-import app.daiyu.android.ComposeActivityTestCase
+import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.domain.ReportedReasoning
 import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.ui.app.AgentAppTheme
 
 /** Production AssistantTurn rendering, offline component host only. */
-class ReportedReasoningCardTest : ComposeActivityTestCase() {
-    private lateinit var activity: ComponentActivity
-    override fun setUp() {
-        super.setUp()
-        activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, ComponentActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
-    }
-    override fun tearDown() {
-        try { mainThread { activity.finish() } } finally { super.tearDown() }
-    }
+class ReportedReasoningCardTest : WiredActivityTestCase() {
 
     fun testReasoningDisclosureDoesNotConsumeAnswerOrToolAndKeepsExpandedStateOnUpdate() {
         var turn by mutableStateOf(ChatTurnUi.Assistant("assistant", finalText = "answer remains", status = RunStatus.COMPLETED,

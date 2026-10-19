@@ -1,6 +1,5 @@
 package app.daiyu.android
 
-import android.view.KeyEvent
 import androidx.compose.ui.test.*
 import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 
@@ -47,11 +46,10 @@ class TerminalActivityTest : WiredActivityTestCase() {
                 .apply { isAccessible = true }
             oldOpen = { open.invoke(activity, page); Unit }
         }
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        backToChat(activity)
         ui.waitForIdle()
         node("terminal-screen").assertDoesNotExist()
-        reveal("settings-row:终端", "设置").performClick()
-        awaitTerminal()
+        enterFromSettings()
         val caller = owner.caller.value
         mainThread { oldOpen() }
         assertSame(caller, owner.caller.value)

@@ -1,7 +1,5 @@
 package app.daiyu.android.ui.screens.chat.attachments
 
-import android.content.Intent
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.requiredWidth
@@ -14,7 +12,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
-import app.daiyu.android.ComposeActivityTestCase
+import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.media.ImageAttachment
 import app.daiyu.android.media.ImageAttachmentFailure
@@ -23,22 +21,14 @@ import app.daiyu.android.ui.app.AgentAppTheme
 import java.util.concurrent.atomic.AtomicBoolean
 
 /** Component-only instrumentation. No SAF launcher, model request or production controller is used. */
-class ImageAttachmentsUiTest : ComposeActivityTestCase() {
-    private lateinit var activity: ComponentActivity
+class ImageAttachmentsUiTest : WiredActivityTestCase() {
     private val owner = ImageAttachmentOwner("component-conversation", "component-draft")
     private val draft = ImageAttachmentDraft(owner, 1)
     private var selection: ImageAttachmentSelection? = null
 
     override fun setUp() {
         super.setUp()
-        // ComponentActivity is supplied by the existing debug ui-test-manifest dependency.
-        activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, ComponentActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
         selection = null
-    }
-
-    override fun tearDown() {
-        try { mainThread { activity.finish() } } finally { super.tearDown() }
     }
 
     private fun image(id: String) = ImageAttachment(owner, id, "image/png", 128, "digest-$id", 32, 24)
@@ -147,17 +137,7 @@ class ImageAttachmentsUiTest : ComposeActivityTestCase() {
         val picker = requireNotNull(before.requestSelection())
         val saved = before.state.value.ready.map { it.attachment }
         show(before)
-        val previous = activity
-        val monitor = instrumentation.addMonitor(ComponentActivity::class.java.name, null, false)
-        try {
-            mainThread { previous.recreate() }
-            val replacement = instrumentation.waitForMonitorWithTimeout(monitor, 5_000) as? ComponentActivity
-            assertNotNull("framework must recreate the component host", replacement)
-            activity = requireNotNull(replacement)
-            assertTrue(previous.isDestroyed)
-        } finally {
-            instrumentation.removeMonitor(monitor)
-        }
+        activity = recreateActivity(activity)
         val restored = ImageAttachmentsState(draft, saved)
         show(restored)
         mainThread {

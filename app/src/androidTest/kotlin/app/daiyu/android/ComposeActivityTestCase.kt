@@ -18,6 +18,7 @@ import org.junit.runners.model.Statement
 abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     protected val ui = createEmptyComposeRule()
     private var currentHost: MainActivity? = null
+    private var voicePreferenceSnapshot: Pair<Boolean, String?>? = null
     protected open val engineeringUi: Boolean = false
     private fun runLegacy() = super.runBare()
     override fun runBare() {
@@ -28,6 +29,11 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             ui.apply(object : Statement() { override fun evaluate() { runLegacy() } },
                 Description.createTestDescription(javaClass, name)).evaluate()
         } finally {
+            voicePreferenceSnapshot?.let { (hadValue, value) ->
+                val editor = instrumentation.targetContext.getSharedPreferences("chat-voice-entry", 0).edit()
+                if (hadValue) editor.putString("mode", value) else editor.remove("mode")
+                check(editor.commit())
+            }
             instrumentation.runOnMainSync {
                 (instrumentation.targetContext.applicationContext as ChatApplication).engineeringUiForTests = false
             }
@@ -64,26 +70,49 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         node(tag).assertExists()
     }
 
+    protected fun awaitHostWindowFocus(host: MainActivity) {
+        awaitControl("host resumed before focused-window check") {
+            !host.isDestroyed && !host.isFinishing &&
+                host.lifecycle.currentState == androidx.lifecycle.Lifecycle.State.RESUMED
+        }
+        check(currentHost === host)
+        focusedWindowRoot()
+    }
+
     protected fun focusedWindowRoot(): android.view.View {
-        checkNotNull(currentHost)
-        var root: android.view.View? = null
-        androidx.test.espresso.Espresso.onView(androidx.test.espresso.matcher.ViewMatchers.isRoot())
-            .inRoot(object : org.hamcrest.TypeSafeMatcher<androidx.test.espresso.Root>() {
-                override fun describeTo(description: org.hamcrest.Description) {
-                    description.appendText("attached window with current focus")
-                }
-                override fun matchesSafely(candidate: androidx.test.espresso.Root) =
-                    candidate.decorView.isAttachedToWindow && candidate.decorView.hasWindowFocus()
-            })
-            .perform(object : androidx.test.espresso.ViewAction {
-                override fun getConstraints(): org.hamcrest.Matcher<android.view.View> =
-                    androidx.test.espresso.matcher.ViewMatchers.isRoot()
-                override fun getDescription() = "capture focused window root"
-                override fun perform(controller: androidx.test.espresso.UiController, view: android.view.View) {
-                    root = view
-                }
-            })
-        return checkNotNull(root)
+        val host = checkNotNull(currentHost)
+        val deadline = android.os.SystemClock.uptimeMillis() + 5_000
+        var lastNoRoot: androidx.test.espresso.NoMatchingRootException? = null
+        while (true) {
+            mainThread { check(!host.isFinishing && !host.isDestroyed) }
+            var root: android.view.View? = null
+            try {
+                androidx.test.espresso.Espresso.onView(androidx.test.espresso.matcher.ViewMatchers.isRoot())
+                    .inRoot(object : org.hamcrest.TypeSafeMatcher<androidx.test.espresso.Root>() {
+                        override fun describeTo(description: org.hamcrest.Description) {
+                            description.appendText("attached window with current focus")
+                        }
+                        override fun matchesSafely(candidate: androidx.test.espresso.Root) =
+                            candidate.decorView.isAttachedToWindow && candidate.decorView.hasWindowFocus() &&
+                                candidate.decorView.applicationWindowToken == host.window.decorView.applicationWindowToken
+                    })
+                    .perform(object : androidx.test.espresso.ViewAction {
+                        override fun getConstraints(): org.hamcrest.Matcher<android.view.View> =
+                            androidx.test.espresso.matcher.ViewMatchers.isRoot()
+                        override fun getDescription() = "capture focused window root"
+                        override fun perform(controller: androidx.test.espresso.UiController, view: android.view.View) {
+                            if (view.isAttachedToWindow && view.hasWindowFocus()) root = view
+                        }
+                    })
+            } catch (failure: androidx.test.espresso.NoMatchingRootException) {
+                lastNoRoot = failure
+            }
+            root?.let { return it }
+            if (android.os.SystemClock.uptimeMillis() >= deadline) {
+                throw AssertionError("No attached focused test-process window within focus wait", lastNoRoot)
+            }
+            android.os.SystemClock.sleep(20)
+        }
     }
     protected fun dismissIme() {
         ui.waitForIdle()
@@ -185,6 +214,17 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         ui.waitUntil(timeoutMillis = 5_000) { settings.isDisplayed() }
         settings.assertIsEnabled().performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodesWithTag("page:设置").fetchSemanticsNodes().size == 1 }
+    }
+    protected fun openVoiceConversationPanel() {
+        if (voicePreferenceSnapshot == null) {
+            val preferences = instrumentation.targetContext.getSharedPreferences("chat-voice-entry", 0)
+            voicePreferenceSnapshot = preferences.contains("mode") to preferences.getString("mode", null)
+        }
+        ui.onNodeWithContentDescription("语音输入").assertIsEnabled().performTouchInput { longClick() }
+        node("chat-menu:VOICE_CHAT").assertIsEnabled().performClick()
+        node("voice-universal-control").assertDoesNotExist()
+        ui.onNodeWithContentDescription("语音输入").assertIsEnabled().performClick()
+        awaitUniqueTag("voice-universal-control")
     }
     protected fun menu(label: String) {
         ui.onNodeWithContentDescription("更多").performSemanticsAction(SemanticsActions.OnClick) { it() }
@@ -362,6 +402,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                 mainThread { original.lifecycle.removeObserver(before); app.unregisterActivityLifecycleCallbacks(callbacks) }
             }
         }
+        awaitHostWindowFocus(original)
         ui.waitForIdle()
     }
 
@@ -372,6 +413,9 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         var coverReady = false
         var coverDestroyed = false
         var coverTask = -1
+        var coverPid = -1
+        var coverUid = -1
+        var cleanupRequested = false
         var paused = false
         var resumed = false
         var stopped = false
@@ -396,7 +440,13 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             @Suppress("DEPRECATION")
             override fun onReceiveResult(code: Int, data: Bundle?) {
                 when (code) {
-                    0 -> { finishCover = data?.getParcelable("finish"); coverTask = data?.getInt("task", -1) ?: -1 }
+                    0 -> {
+                        finishCover = data?.getParcelable("finish")
+                        coverTask = data?.getInt("task", -1) ?: -1
+                        coverPid = data?.getInt("pid", -1) ?: -1
+                        coverUid = data?.getInt("uid", -1) ?: -1
+                        if (cleanupRequested) finishCover?.send(0, null)
+                    }
                     1 -> coverReady = true
                     2 -> coverDestroyed = true
                 }
@@ -416,14 +466,23 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                     .putExtra("reply", reply))
                 launched = true
             }
-            awaitControl("original paused under test APK cover") { paused && !stopped && coverReady && finishCover != null }
-            mainThread { assertEquals(original.taskId, coverTask) }
+            awaitControl("original paused under test APK cover") {
+                paused && !stopped && !resumed && coverReady && !coverDestroyed && finishCover != null &&
+                    original.lifecycle.currentState == androidx.lifecycle.Lifecycle.State.STARTED
+            }
+            mainThread {
+                assertEquals(original.taskId, coverTask)
+                assertTrue("cover must use another process", coverPid > 0 && coverPid != android.os.Process.myPid())
+                assertEquals(instrumentation.context.applicationInfo.uid, coverUid)
+                assertTrue("cover must use the test APK UID", coverUid != android.os.Process.myUid())
+            }
             failure.get()?.let { throw it }
         } catch (problem: Throwable) {
             primary = problem
             throw problem
         } finally {
             try {
+                mainThread { cleanupRequested = true }
                 if (launched) {
                     awaitControl("test APK cover finish channel") { finishCover != null || coverDestroyed }
                     mainThread { finishCover?.send(0, null) }
@@ -439,6 +498,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                 mainThread { original.lifecycle.removeObserver(before); original.application.unregisterActivityLifecycleCallbacks(callbacks) }
             }
         }
+        awaitHostWindowFocus(original)
         ui.waitForIdle()
     }
 
@@ -453,6 +513,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                 ui.waitForIdle()
                 assertTrue(activity.isDestroyed)
                 currentHost = created
+                awaitHostWindowFocus(created)
                 return created
             } catch (failure: Throwable) {
                 try {
@@ -464,17 +525,39 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         } finally { instrumentation.removeMonitor(monitor) }
     }
     protected fun startMain(intent: Intent = Intent(instrumentation.targetContext, MainActivity::class.java)): MainActivity {
-        val activity = instrumentation.startActivitySync(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        val app = instrumentation.targetContext.applicationContext as ChatApplication
+        val created = mutableListOf<MainActivity>()
+        var cleanupRequested = false
+        val callbacks = object : android.app.Application.ActivityLifecycleCallbacks {
+            override fun onActivityCreated(activity: android.app.Activity, state: Bundle?) {
+                if (activity is MainActivity) {
+                    created.add(activity)
+                    if (cleanupRequested) activity.finish()
+                }
+            }
+            override fun onActivityStarted(activity: android.app.Activity) = Unit
+            override fun onActivityResumed(activity: android.app.Activity) = Unit
+            override fun onActivityPaused(activity: android.app.Activity) = Unit
+            override fun onActivityStopped(activity: android.app.Activity) = Unit
+            override fun onActivitySaveInstanceState(activity: android.app.Activity, state: Bundle) = Unit
+            override fun onActivityDestroyed(activity: android.app.Activity) = Unit
+        }
+        mainThread { app.registerActivityLifecycleCallbacks(callbacks) }
         try {
-            ui.waitForIdle()
+            instrumentation.runOnMainSync { app.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+            awaitControl("MainActivity created by explicit launch") { created.isNotEmpty() }
+            val activity = created.single()
             currentHost = activity
+            awaitHostWindowFocus(activity)
             return activity
         } catch (failure: Throwable) {
             try {
-                mainThread { activity.finish() }
-                awaitControl("failed-start Activity destroyed") { activity.isDestroyed }
+                mainThread { cleanupRequested = true; created.forEach { if (!it.isDestroyed) it.finish() } }
+                awaitControl("failed-start Activities destroyed") { created.all { it.isDestroyed } }
             } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
             throw failure
+        } finally {
+            mainThread { app.unregisterActivityLifecycleCallbacks(callbacks) }
         }
     }
 }

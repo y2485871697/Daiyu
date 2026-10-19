@@ -8,6 +8,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toPixelMap
@@ -70,11 +72,13 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
             node("page:设置").performScrollToIndex(0)
             capture(if (dark) "settings-dark" else "settings-light")
         }
-        reveal("settings-row:模型提供商", "设置").performClick()
-        reveal("settings-row:外观与主题", "设置").performClick()
-        reveal("settings-row:助手", "设置").performClick()
-        reveal("settings-row:子代理", "设置").performClick()
-        ui.runOnIdle { assertEquals(listOf("MODEL_SETTINGS", "appearance", "assistants", "subagents"), events) }
+        val expected = mutableListOf<String>()
+        for ((title, event) in listOf("模型提供商" to "MODEL_SETTINGS", "外观与主题" to "appearance",
+                "助手" to "assistants", "子代理" to "subagents")) {
+            reveal("settings-row:$title", "设置").performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+            expected += event
+            ui.runOnIdle { assertEquals(expected, events) }
+        }
     }
 
     fun testSettingsCardsHaveNoOutlineOrRowDividersInBothThemes() {
@@ -163,7 +167,10 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
                 }
             }
         }
-        reveal("appearance-scale", "外观与主题").performTouchInput { swipeLeft() }
+        node("page:外观与主题").performScrollToIndex(1)
+        reveal("appearance-scale", "外观与主题").performTouchInput {
+            swipe(Offset(width * (2f / 3f), centerY), Offset(width * 0.25f, centerY), durationMillis = 300)
+        }
         ui.runOnIdle {
             assertEquals(1, requests.size)
             assertTrue(requests.single().interfaceScale < state.interfaceScale)

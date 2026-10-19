@@ -86,7 +86,7 @@ class SubAgentCatalogActivityTest : WiredActivityTestCase() {
         repo.createConversation(owner)
         conversationOwners.add(repo to owner)
         val before = fixture.database.exportBackup()
-        menu("子代理状态")
+        ui.onNodeWithContentDescription("本会话协作").assertIsDisplayed().assertIsEnabled().performClick()
         node("subagent-collaboration-card").assertExists()
         awaitDirectory("conversation directory published") { source().models.any { it.modelId == "run-control" } }
         ui.onNodeWithText("使用当前配置").assertIsEnabled().performClick()

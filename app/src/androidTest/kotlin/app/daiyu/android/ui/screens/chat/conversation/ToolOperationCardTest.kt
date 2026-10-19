@@ -1,26 +1,18 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import android.content.Intent
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.*
-import app.daiyu.android.ComposeActivityTestCase
+import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.domain.*
 import app.daiyu.android.ui.app.AgentAppTheme
 
-class ToolOperationCardTest : ComposeActivityTestCase() {
-    private lateinit var activity: ComponentActivity
-    override fun setUp() {
-        super.setUp()
-        activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, ComponentActivity::class.java)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as ComponentActivity
-    }
-    override fun tearDown() { try { mainThread { activity.finish() } } finally { super.tearDown() } }
+class ToolOperationCardTest : WiredActivityTestCase() {
+
     private fun show(turn: ChatTurnUi.Assistant, actions: ChatScreenActions) {
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {

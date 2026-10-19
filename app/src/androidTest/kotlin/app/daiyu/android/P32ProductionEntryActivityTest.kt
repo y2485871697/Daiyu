@@ -26,7 +26,7 @@ class P32ProductionEntryActivityTest : WiredActivityTestCase() {
     }
 
     fun testRealUniversalPanelOpenAndSelectionNeverStartsAudioOrSends() {
-        mainThread { retainedControls(activity).onMenuAction(app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction.VOICE_CHAT) }
+        openVoiceConversationPanel()
         node("voice-universal-control").assertExists()
         assertEquals(0, fixture.opens.get())
         assertNull(fixture.controller.textSendState())

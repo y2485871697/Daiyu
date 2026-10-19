@@ -4152,6 +4152,60 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun controlChildTaskFromCard(step: WorkStepUi, request: ToolCardActionRequest) {
+        if (!controller.ready || controller.dataBusy) return
+        val owner = step.owner ?: return
+        val editor = editorGeneration
+        val visit = contextManagementEntryEpoch
+        fun current() = activityUsable() && voiceForeground && selectionReady && retainedPage == "chat" &&
+            !sidebarVisible && editorGeneration == editor && contextManagementEntryEpoch == visit &&
+            selected?.id?.value == owner.conversationId && controller.ready && !controller.dataBusy &&
+            resolveToolCardAction(chatState.turns, request) != null
+        lifecycleScope.launch {
+            val records = try {
+                withContext(Dispatchers.IO) {
+                    app.daiyu.android.storage.SQLiteChildTaskStore(controller.database).forCall(
+                        owner.conversationId, owner.runId, owner.messageId, step.toolName, step.toolCallId)
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (current()) toast("无法读取任务记录，未执行操作")
+                return@launch
+            }
+            if (!current()) return@launch
+            val target = resolveChildTaskControlTarget(step, request, records)
+            val live = try { controller.liveChildTasks(app.daiyu.android.domain.ConversationId(owner.conversationId)) }
+                catch (_: Exception) { emptyList() }
+            val task = target?.let { app.daiyu.android.ui.screens.conversation.controllableChildTask(it, live) }
+            if (target == null || task == null) {
+                toast("任务已结束或已变化，未执行操作")
+                return@launch
+            }
+            try {
+                when (request.action) {
+                    ToolCardAction.PAUSE_TASK -> {
+                        val receipt = controller.pauseChildTask(target)
+                        toast(getString(app.daiyu.android.ui.screens.conversation.childTaskControlMessage(receipt)))
+                    }
+                    ToolCardAction.RESUME_TASK -> {
+                        val receipt = controller.resumeChildTask(target)
+                        toast(getString(app.daiyu.android.ui.screens.conversation.childTaskControlMessage(receipt,
+                            task.pauseState == app.daiyu.android.domain.delegation.ChildTaskPauseState.PENDING)))
+                    }
+                    ToolCardAction.STOP_TASK -> {
+                        val receipt = controller.stopChildTask(target)
+                        toast(if (receipt == app.daiyu.android.domain.delegation.ChildTaskStop.REQUESTED)
+                            "已请求停止，等待退出回执" else "任务已结束或已变化")
+                    }
+                    else -> Unit
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (current()) toast("操作回执未确认，请查看任务状态；未自动重试")
+            }
+        }
+    }
+
     private fun handleToolCardAction(request: ToolCardActionRequest) {
         if (!activityUsable() || !selectionReady || !voiceForeground || retainedPage != "chat" || sidebarVisible) return
         val step = resolveToolCardAction(chatState.turns, request)
@@ -4169,6 +4223,8 @@ class MainActivity : ComponentActivity() {
             ToolCardAction.OPEN_WORKSPACE -> retainedPage = "chat-workspace"
             ToolCardAction.OPEN_TERMINAL -> guard { openTerminal() }
             ToolCardAction.VIEW_TASKS, ToolCardAction.READ_TASK_RESULT -> guard { openChildTaskRecords(owner.conversationId) }
+            ToolCardAction.PAUSE_TASK, ToolCardAction.RESUME_TASK, ToolCardAction.STOP_TASK ->
+                controlChildTaskFromCard(step, request)
             ToolCardAction.VIEW_ASSETS -> openGenerationOutputs()
             ToolCardAction.VIEW_DIFF -> {
                 val documents = step.categoryDetails?.rich?.documents.orEmpty()
@@ -4181,16 +4237,23 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable private fun ToolTrustedContent(step: WorkStepUi) {
-        ToolCardControls(step, ::handleToolCardAction)
+        val editor = editorGeneration
+        val visit = contextManagementEntryEpoch
+        val action: (ToolCardActionRequest) -> Unit = remember(editor, visit) {
+            { request ->
+                if (editorGeneration == editor && contextManagementEntryEpoch == visit) handleToolCardAction(request)
+            }
+        }
+        ToolCardControls(step, action)
         if (step.toolName == "screen" && step.state == WorkStepState.OK && activityUsable() && voiceForeground &&
             retainedPage == "chat" && step.owner?.conversationId == selected?.id?.value) {
             app.daiyu.android.ui.screens.chat.conversation.ToolScreenshotContent(controller, step)
         }
         if (step.category == "generation") {
-            app.daiyu.android.ui.screens.chat.conversation.GenerationToolContent(controller, step, ::handleToolCardAction)
+            app.daiyu.android.ui.screens.chat.conversation.GenerationToolContent(controller, step, action)
         }
         if (step.toolName in setOf("run_child_models", "start_child_tasks", "direct_child_task")) {
-            app.daiyu.android.ui.screens.chat.conversation.ChildTaskToolContent(controller, step, ::handleToolCardAction)
+            app.daiyu.android.ui.screens.chat.conversation.ChildTaskToolContent(controller, step, action)
         }
     }
 

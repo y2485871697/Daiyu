@@ -73,7 +73,7 @@ def ime_capture():
         'text_changes': 20, 'poll_interval_ms': 50, 'polling_overhead_included': True,
         'target_window_only': True, 'hardware_input_latency': False, 'ime_commit_latency': False,
         'first_visible_feedback_measured': False, 'present_latency': False, 'system_ime_change_observed': False,
-        'observations': [{'observed_ns': 90_000_000_000 + i, 'text_utf16_length': i + 1,
+        'observations': [{'observed_ns': 90_000_000_000 + i * 50_000_000, 'text_utf16_length': i + 1,
                           'selection': 'TextRange(1, 1)', 'text_changed': True} for i in range(20)]})
     return rows
 
@@ -114,6 +114,20 @@ class SummaryTests(unittest.TestCase):
         with self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
         rows = ime_capture(); rows.append(copy.deepcopy(rows[-1]))
         with self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
+
+    def test_system_ime_poll_spacing_and_inferable_text_changes(self):
+        for mutate in (
+            lambda observations: observations[1].update(observed_ns=observations[0]['observed_ns']),
+            lambda observations: observations[1].update(observed_ns=observations[0]['observed_ns'] + 49_999_999),
+            lambda observations: observations[0].update(text_utf16_length=0),
+            lambda observations: observations[1].update(text_changed=False),
+        ):
+            rows = ime_capture(); mutate(rows[-1]['observations'])
+            with self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
+        rows = ime_capture()
+        # Same-length replacement can change text; never require length growth as proof.
+        for observation in rows[-1]['observations']: observation['text_utf16_length'] = 1
+        self.assertEqual(summary.frames(rows)[-1]['text_changes'], 20)
 
     def test_loading_isolated_from_cooperation_module_names_and_preserves_cache(self):
         import types

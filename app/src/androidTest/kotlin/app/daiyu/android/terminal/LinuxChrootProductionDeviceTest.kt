@@ -150,12 +150,12 @@ class LinuxChrootProductionDeviceTest : InstrumentationTestCase() {
                 "for p in $parent $child; do printf 'PID:%s\\n' \"\$p\"; " +
                 "cat /proc/\$p/status /proc/\$p/stat /proc/\$p/cgroup; readlink /proc/\$p/root; done; " +
                 "cat /sys/fs/cgroup/uid_0/$originalScope/cgroup.events")
-            val mounts = rootObservation("set -eu; cat /proc/$parent/mountinfo")
+            val mounts = rootObservation("set -eu; awk '\$5 == \"/proc\"' /proc/$parent/mountinfo")
             val procMount = mounts.lineSequence().single { line ->
                 line.split(" ").getOrNull(4) == "/proc" && line.contains(" - proc ")
             }
             assertTrue(procMount.split(" ")[5].split(",").containsAll(listOf("nosuid", "nodev", "noexec")))
-            val hostMounts = rootObservation("cat /proc/self/mountinfo")
+            val hostMounts = rootObservation("awk '\$5 == \"${rootfs.canonicalPath}/proc\"' /proc/self/mountinfo")
             assertFalse(hostMounts.contains(" ${rootfs.canonicalPath}/proc "))
             val rebuilt = LinuxEnvironmentStore(selected, policy)
             leased(rebuilt)
@@ -216,7 +216,7 @@ class LinuxChrootProductionDeviceTest : InstrumentationTestCase() {
                 "test ! -e /proc/$parent; test ! -e /proc/$child; " +
                 "test ! -e /sys/fs/cgroup/uid_0/$originalScope; printf 'original_scope_and_pids_gone\\n'")
             assertEquals("original_scope_and_pids_gone", after.trim())
-            val afterMounts = rootObservation("cat /proc/self/mountinfo")
+            val afterMounts = rootObservation("awk '\$5 == \"${rootfs.canonicalPath}/proc\"' /proc/self/mountinfo")
             assertFalse(afterMounts.contains(" ${rootfs.canonicalPath}/proc "))
             report.put("after", after).put("host_mountinfo_after", afterMounts).put("passed", true)
         } catch (failure: LinuxPtyStartupFailure) {

@@ -465,11 +465,8 @@ private class GuardedClient(
 
     // Request callbacks are not UI callbacks. Never take navigation's monitor on that thread:
     // UI owns registry -> navigation ordering, and a request must not invert it.
-    private fun requestBlocked(url: String?): Boolean {
-        if (live() && OpenMinisNavigationPolicy.permits(url)) return false
-        postRequestFailure("BROWSER_OPENMINIS_PAGE_URL_BLOCKED")
-        return true
-    }
+    private fun requestBlocked(url: String?): Boolean =
+        pageRequestBlocked(live(), url, ::postRequestFailure)
     private fun postRequestFailure(reason: String) {
         try { ui.post { navigation.failed(reason) } } catch (_: Exception) { reject(reason) }
     }

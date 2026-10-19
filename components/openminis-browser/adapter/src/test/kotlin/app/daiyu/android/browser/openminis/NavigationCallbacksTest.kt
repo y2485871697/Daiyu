@@ -30,6 +30,24 @@ class NavigationCallbacksTest {
             gate.onFinished(url, "title", visible) { upstreamFinishes += url }
     }
 
+    @Test fun `request during handoff is denied without poisoning resumed navigation`() {
+        val h = Harness()
+        h.live = false
+        assertTrue(pageRequestBlocked(h.live, a) { h.gate.failed(it) })
+        assertEquals(NavigationCallbacks.Phase.IDLE, h.gate.phase)
+        assertTrue(h.rejections.isEmpty())
+        h.live = true
+        assertFalse(pageRequestBlocked(h.live, a) { h.gate.failed(it) })
+        h.load(a)
+        assertTrue(h.finish(a))
+        assertTrue(h.gate.returned(true))
+        assertTrue(pageRequestBlocked(h.live, "file:///private") { h.gate.failed(it) })
+        assertEquals(NavigationCallbacks.Phase.QUARANTINED, h.gate.phase)
+        assertEquals(listOf("BROWSER_OPENMINIS_PAGE_URL_BLOCKED"), h.rejections)
+        h.live = false
+        assertTrue(pageRequestBlocked(h.live, b) { fail("retired request must stay denied") })
+    }
+
     @Test fun `fresh distinct navigations and reads can continue on same resource`() {
         val h = Harness()
         for (url in listOf(a, b, c)) {

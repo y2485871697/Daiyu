@@ -573,6 +573,9 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
         val tool = MessageBlock.Tool(call, result)
         val assistant = Message(messageId, conversation.id, run, Message.ASSISTANT_ROLE, listOf(tool), RunStatus.COMPLETED,
             createdAt = 1_700_000_000_123L)
+        fixture.database.send(Message(MessageId(UUID.randomUUID().toString()), conversation.id, run,
+            Message.USER_ROLE, listOf(MessageBlock.Text("prompt", "offline browser screenshot fixture")),
+            RunStatus.COMPLETED, createdAt = assistant.createdAt), assistant.copy(status = RunStatus.RUNNING))
         fixture.database.save(assistant)
         val snapshot = app.daiyu.android.domain.runtime.RunCheckpoint(assistant, emptyList(),
             app.daiyu.android.domain.runtime.ExecutionPhase.TERMINAL,
@@ -602,7 +605,16 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
             assertTrue(dataOperation { controller.saveGenerationMediaOriginal(binding, key, uri, AtomicBoolean(false), resolver) }
                 .startsWith("原件保存未确认"))
             assertEquals(1, documents.opens.get())
-            fixture.database.save(assistant.copy(blocks = listOf(tool.copy(invocation = call.copy(arguments = "{\"action\":\"get_text\"}")))))
+            // Fixture-only corruption: a checkpoint-owned terminal receipt cannot be rewritten via save().
+            val storedBlocks = fixture.database.readableDatabase.rawQuery(
+                "SELECT blocks FROM messages WHERE id=? AND conversation_id=? AND run_id=?",
+                arrayOf(messageId.value, conversation.id.value, run.value)).use {
+                    check(it.moveToFirst()); org.json.JSONArray(it.getString(0))
+                }
+            storedBlocks.getJSONObject(0).put("arguments", "{\"action\":\"get_text\"}")
+            assertEquals(1, fixture.database.writableDatabase.update("messages", android.content.ContentValues().apply {
+                put("blocks", storedBlocks.toString())
+            }, "id=? AND conversation_id=? AND run_id=?", arrayOf(messageId.value, conversation.id.value, run.value)))
             assertNull(loadCardOriginal(controller, binding, key, AtomicBoolean(true)))
             assertTrue(dataOperation { controller.saveGenerationMediaOriginal(binding, key, uri, AtomicBoolean(true), resolver) }
                 .startsWith("原件保存未确认"))

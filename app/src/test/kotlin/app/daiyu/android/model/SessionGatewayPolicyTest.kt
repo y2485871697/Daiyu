@@ -37,6 +37,14 @@ class SessionGatewayPolicyTest {
         assertFalse(rule.copy(pathPattern = "[").matches("gpt-5", "https://gateway.invalid/v1/responses?route=yes"))
     }
 
+    @Test fun multilineRulesMatchAnyNonemptyValidLineWithoutChangingSingleRuleSemantics() {
+        val rule = SessionGatewayRule(modelPattern = "[\n^gpt-.*$\n^relay-.*$", pathPattern = "/v1/responses\n/relay/responses")
+        assertTrue(rule.matches("relay-one", "https://gateway.invalid/relay/responses"))
+        assertTrue(rule.matches("gpt-one", "https://gateway.invalid/v1/responses"))
+        assertFalse(rule.matches("other", "https://gateway.invalid/v1/responses"))
+        assertFalse(rule.copy(pathPattern = "\n").matches("gpt-one", "https://gateway.invalid/v1/responses"))
+    }
+
     @Test fun keysAreLiteralAndRuntimeFieldsAreRejectedWithoutRepairingIntoProtocolOverrides() {
         for (key in listOf("model", "input", "messages", "tools", "stream", "store", "instructions", "system",
             "max_tokens", "max_output_tokens", "previous_response_id", "conversation", "tool_choice", "include", "metadata")) {

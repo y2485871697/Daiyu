@@ -6,9 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
-import app.daiyu.android.ui.screens.settings.ModelSettingsDraftUi
-import app.daiyu.android.ui.screens.settings.ModelSettingsScreen
-import app.daiyu.android.ui.screens.settings.selectProtocol
+import app.daiyu.android.ui.screens.settings.*
 import app.daiyu.android.model.ProviderProtocol
 import org.json.JSONObject
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -21,95 +19,68 @@ class ProviderHeadersActivityTest : WiredActivityTestCase() {
             draft = ModelSettingsDraftUi(customHeaders = headers)
             activity.setContent {
                 MiuixTheme {
-                    ModelSettingsScreen(draft, onDraftChange = { draft = it },
-                        onSave = { saved = it }, onFetchCatalog = { error("no fetch") },
-                        onBack = {}, showCatalog = false)
+                    ModelSettingsScreen(draft, { draft = it }, { saved = it }, { error("no fetch") }, {}, showCatalog = false)
                 }
             }
         }
         awaitModelEditor()
     }
-    private fun control(tag: String): SemanticsNodeInteraction {
-        dismissIme()
-        node("model-headers-list").performScrollToNode(hasTestTag(tag))
-        return node(tag).assertIsDisplayed()
-    }
-    private fun openEditor() {
-        reveal("model-custom-headers").performClick()
-        awaitUniqueTag("model-headers-list")
-    }
-    private fun add(name: String, value: String, index: Int = 1) {
+    private fun control(tag: String) = reveal(tag).performScrollTo()
+    private fun openEditor() { control("model-custom-headers").performClick() }
+    private fun add(name: String, value: String, index: Int = 0) {
         control("model-header-add").performClick()
-        control("settings-field:请求头名称 $index").performTextReplacement(name)
-        control("settings-field:请求头值 $index").performTextReplacement(value)
+        control("model-header-name:$index").performTextReplacement(name)
+        control("model-header-value:$index").performTextReplacement(value)
     }
-    fun testFieldsOnlyChangeDraftUntilExistingSaveAndCanBeDeleted() {
+    fun testInlineFieldsOnlyChangeDraftUntilSaveAndCanBeDeleted() {
         val before = fixture.settings.load()
-        showComponent()
-        openEditor(); add("X-Project", "header-canary")
-        control("model-custom-headers-apply").performClick()
+        showComponent(); openEditor(); add("X-Project", "header-canary")
         assertEquals("header-canary", JSONObject(draft.customHeaders).getString("x-project"))
-        assertNull(saved)
-        assertEquals(before, fixture.settings.load())
-        openEditor()
+        assertNull(saved); assertEquals(before, fixture.settings.load())
         control("model-header-delete:0").performClick()
-        control("model-custom-headers-apply").performClick()
         assertEquals(0, JSONObject(draft.customHeaders).length())
         reveal("model-save").performClick()
-        assertEquals(draft, saved)
-        assertEquals(before, fixture.settings.load())
-        assertEquals(0, fixture.opens.get())
+        assertEquals(draft, saved); assertEquals(before, fixture.settings.load()); assertEquals(0, fixture.opens.get())
     }
-    fun testCaseInsensitiveDuplicatesAndRuntimeOwnedHeadersDoNotApply() {
+    fun testDuplicatesAndOwnedHeadersBlockSaveWithoutReplacingLastValidJson() {
         showComponent("""{"X-Project":"original"}""")
-        val before = draft
-        openEditor(); add("x-project", "duplicate", 2)
-        control("model-custom-headers-apply").performClick()
-        assertEquals(before, draft)
-        control("settings-field:请求头名称 2").performTextReplacement("Authorization")
-        control("model-custom-headers-apply").performClick()
-        assertEquals(before, draft)
-        assertNull(saved)
-        assertEquals(0, fixture.opens.get())
+        openEditor(); add("x-project", "duplicate", 1)
+        assertFalse(draft.headerFieldsValid)
+        assertEquals("original", JSONObject(draft.customHeaders).getString("X-Project"))
+        reveal("model-save").assertIsNotEnabled()
+        openEditorIfCollapsed()
+        control("model-header-name:1").performTextReplacement("Authorization")
+        assertFalse(draft.headerFieldsValid)
+        reveal("model-save").assertIsNotEnabled()
+        assertNull(saved); assertEquals(0, fixture.opens.get())
     }
-    fun testCancelledEditLeavesExistingHeaderAndPersistentSettingsUnchanged() {
+    private fun openEditorIfCollapsed() {
+        reveal("model-custom-headers")
+        if (ui.onAllNodesWithTag("model-header-add").fetchSemanticsNodes().isEmpty()) openEditor()
+    }
+    fun testCollapseRetainsDraftAndPersistentSettingsRemainUnchanged() {
         showComponent("""{"X-Project":"original"}""")
-        val before = draft
         val settings = fixture.settings.load()
-        openEditor()
-        control("settings-field:请求头值 1").performTextReplacement("unsaved")
-        dismissIme()
-        ui.onNodeWithText("取消").performClick()
-        assertEquals(before, draft)
-        assertEquals(settings, fixture.settings.load())
-        assertNull(saved)
+        openEditor(); control("model-header-value:0").performTextReplacement("unsaved")
+        control("model-custom-headers").performClick()
+        control("model-custom-headers").performClick()
+        assertEquals("unsaved", JSONObject(draft.customHeaders).getString("x-project"))
+        assertEquals(settings, fixture.settings.load()); assertNull(saved)
     }
-    fun testPausedApplyCannotChangeDraftAfterResume() {
-        showComponent()
+    fun testPausedAddCallbackCannotChangeDraftAfterResume() {
+        showComponent(); openEditor()
+        val action = checkNotNull(control("model-header-add").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
         val before = draft
-        openEditor(); add("X-Project", "late")
-        val apply = checkNotNull(control("model-custom-headers-apply")
-            .fetchSemanticsNode().config[SemanticsActions.OnClick].action)
-        realPauseResume(activity, atPause = { apply(); assertEquals(before, draft) })
-        mainThread { apply() }
-        assertEquals(before, draft)
-        node("model-headers-list").assertDoesNotExist()
-        assertNull(saved)
-        assertEquals(0, fixture.opens.get())
+        realPauseResume(activity, atPause = { action(); assertEquals(before, draft) })
+        mainThread { action() }
+        assertEquals(before, draft); assertNull(saved); assertEquals(0, fixture.opens.get())
     }
-    fun testReplacedProtocolRevokesOldHeaderApply() {
-        showComponent()
-        openEditor(); add("X-Project", "late")
-        val apply = checkNotNull(control("model-custom-headers-apply")
-            .fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+    fun testChangedProtocolRevokesOldAddCallback() {
+        showComponent(); openEditor()
+        val action = checkNotNull(control("model-header-add").fetchSemanticsNode().config[SemanticsActions.OnClick].action)
         mainThread { draft = draft.selectProtocol(ProviderProtocol.MESSAGES) }
-        ui.waitForIdle()
-        val expected = draft
-        mainThread { apply() }
-        assertEquals(expected, draft)
-        assertEquals("", draft.customHeaders)
-        node("model-headers-list").assertDoesNotExist()
-        assertNull(saved)
-        assertEquals(0, fixture.opens.get())
+        ui.waitForIdle(); val expected = draft
+        mainThread { action() }
+        assertEquals(expected, draft); assertEquals("", draft.customHeaders); assertNull(saved)
     }
 }

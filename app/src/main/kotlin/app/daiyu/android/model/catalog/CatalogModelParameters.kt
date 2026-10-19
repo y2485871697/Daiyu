@@ -12,6 +12,9 @@ internal data class CatalogModelParameters(
     val batteryEnabled: Boolean = false,
     val deviceStatusEnabled: Boolean = false,
     val requestOptions: ProviderRequestOptions = ProviderRequestOptions(),
+    val contextWindowOverride: Int? = null,
+    val reasoningOverride: Boolean? = null,
+    val visionOverride: Boolean? = null,
 ) {
     /** Retain only the CURRENT connection/credential; model-local policy comes from this record. */
     fun applyTo(current: ModelSettings, model: String): ModelSettings = current.copy(
@@ -50,16 +53,28 @@ internal object CatalogModelParametersCodec : CatalogRecordCodec<CatalogModelPar
         .put("local_identity", record.localIdentity)
         .put("battery", record.batteryEnabled)
         .put("device_status", record.deviceStatusEnabled)
-        .put("request_options", record.requestOptions.encode()).toString()
+        .put("request_options", record.requestOptions.encode())
+        .put("context_window_override", record.contextWindowOverride ?: JSONObject.NULL)
+        .put("reasoning_override", record.reasoningOverride ?: JSONObject.NULL)
+        .put("vision_override", record.visionOverride ?: JSONObject.NULL).toString()
 
     override fun decode(encoded: String): CatalogModelParameters {
         val value = JSONObject(encoded)
-        require(value.keys().asSequence().toSet() == setOf("local_identity", "battery", "device_status", "request_options"))
+        val required = setOf("local_identity", "battery", "device_status", "request_options")
+        val optional = setOf("context_window_override", "reasoning_override", "vision_override")
+        val keys = value.keys().asSequence().toSet()
+        require(keys.containsAll(required) && keys.all { it in required || it in optional })
+        fun optionalBoolean(key: String): Boolean? = if (!value.has(key) || value.isNull(key)) null
+            else value.get(key) as? Boolean ?: error("Invalid capability override")
+        val context = if (!value.has("context_window_override") || value.isNull("context_window_override")) null
+            else (value.get("context_window_override") as? Int)?.also { require(it > 0) }
+                ?: error("Invalid context window override")
         val identity = value.get("local_identity") as? String ?: error("Invalid local identity")
         require(UUID.fromString(identity).toString() == identity)
         return CatalogModelParameters(identity,
             value.get("battery") as? Boolean ?: error("Invalid battery flag"),
             value.get("device_status") as? Boolean ?: error("Invalid device flag"),
-            ProviderRequestOptions.decode(value.get("request_options") as? String ?: error("Invalid model options")))
+            ProviderRequestOptions.decode(value.get("request_options") as? String ?: error("Invalid model options")),
+            context, optionalBoolean("reasoning_override"), optionalBoolean("vision_override"))
     }
 }

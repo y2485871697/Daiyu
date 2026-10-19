@@ -156,6 +156,8 @@ internal fun SettingsTextField(
     password: Boolean = false,
     multiline: Boolean = false,
     enabled: Boolean = true,
+    tag: String = "settings-field:$label",
+    secretLabel: String = "密钥",
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var secretVisible by remember(password) { mutableStateOf(false) }
@@ -170,7 +172,7 @@ internal fun SettingsTextField(
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(label, style = MiuixTheme.textStyles.body2,
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.weight(1f))
-            if (password) TextButton(text = if (secretVisible) "隐藏密钥" else "显示密钥",
+            if (password) TextButton(text = if (secretVisible) "隐藏$secretLabel" else "显示$secretLabel",
                 enabled = enabled, modifier = Modifier.testTag("settings-secret-visibility:$label"), onClick = {
                     if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) secretVisible = !secretVisible
                 })
@@ -186,7 +188,7 @@ internal fun SettingsTextField(
             cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
             visualTransformation = if (password && !secretVisible) PasswordVisualTransformation() else VisualTransformation.None,
             keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else KeyboardType.Text),
-            modifier = Modifier.testTag("settings-field:$label").fillMaxWidth().clip(RoundedCornerShape(12.dp))
+            modifier = Modifier.testTag(tag).fillMaxWidth().clip(RoundedCornerShape(12.dp))
                 .background(MiuixTheme.colorScheme.surfaceVariant).padding(14.dp)
                 .semantics { contentDescription = label },
             decorationBox = { editor ->

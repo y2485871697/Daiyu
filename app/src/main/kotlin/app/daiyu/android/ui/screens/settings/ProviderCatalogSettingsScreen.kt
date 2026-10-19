@@ -114,8 +114,11 @@ internal fun <T> ProviderCatalogSettingsScreen(
             onBack = onBack, pageTitle = pageTitle, headerContent = {
                 tabs()
                 item {
-                    TextButton(text = if (state.loading) "获取中" else "获取模型", enabled = enabled && !state.loading && !state.saving,
-                        modifier = Modifier.testTag("model-catalog-fetch"), onClick = { fetch(draft) })
+                    SettingsSectionTitle("模型管理")
+                    SettingsCard {
+                        SettingsRow(if (state.loading) "正在拉取模型" else "从远端自动拉取", summary = "读取当前供应商的模型列表",
+                            tag = "model-catalog-fetch", onClick = if (enabled && !state.loading && !state.saving) ({ fetch(draft) }) else null)
+                    }
                     state.status?.let { SettingsNote(it) }
                     errorText?.let { SettingsNote(it, error = true) }
                 }

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -45,6 +46,13 @@ internal data class ModelSettingsDraftUi(
     val customHeaders: String = "",
     val headersReplacementAuthorized: Boolean = false,
     val openAiWebSearchEnabled: Boolean = false,
+    val sessionGateway: app.daiyu.android.model.sessiongateway.SessionGatewayRule = app.daiyu.android.model.sessiongateway.SessionGatewayRule(),
+    val headerFieldsValid: Boolean = true,
+    val bodyFieldsValid: Boolean = true,
+    val headerFieldRows: List<ProviderFieldRow>? = null,
+    val bodyFieldRows: List<ProviderFieldRow>? = null,
+    val headerFieldsError: String? = null,
+    val bodyFieldsError: String? = null,
 ) {
     override fun toString(): String = "ModelSettingsDraftUi(protocol=$protocol, model=$model, apiKey=<redacted>, customBody=<redacted>)"
 }
@@ -64,6 +72,9 @@ internal fun ModelSettingsDraftUi.selectProtocol(selected: ProviderProtocol): Mo
         headersReplacementAuthorized = false,
         anthropicVersion = if (selected == ProviderProtocol.MESSAGES) anthropicVersion else "",
         openAiWebSearchEnabled = false,
+        headerFieldsValid = true,
+        bodyFieldsValid = true,
+        headerFieldRows = null, bodyFieldRows = null, headerFieldsError = null, bodyFieldsError = null,
     )
 
 /**
@@ -96,9 +107,11 @@ internal fun ModelSettingsScreen(
     headerContent: LazyListScope.() -> Unit = {},
     showCatalog: Boolean = true,
 ) {
+    val latestDraft by rememberUpdatedState(draft)
+    val latestEnabled by rememberUpdatedState(enabled)
     val connection = rememberSettingsConnectionTest(draft, enabled, testConnection)
-    val submit: () -> Unit = { connection.cancel(); onSave(draft) }
-    val changeDraft: (ModelSettingsDraftUi) -> Unit = { connection.cancel(); onDraftChange(it) }
+    val submit: () -> Unit = { if (latestEnabled && latestDraft === draft && draft.headerFieldsValid && draft.bodyFieldsValid) { connection.cancel(); onSave(draft) } }
+    val changeDraft: (ModelSettingsDraftUi) -> Unit = { if (latestEnabled && latestDraft === draft) { connection.cancel(); onDraftChange(it) } }
     var responsesPathPicker by remember { mutableStateOf(false) }
     val catalogIsCurrent = catalogForDraft?.let {
         it.endpoint == draft.endpoint && it.responsesPath == draft.responsesPath &&
@@ -162,18 +175,13 @@ internal fun ModelSettingsScreen(
                 }
                 SettingsTextField("模型名", draft.model, { changeDraft(draft.copy(model = it)) }, enabled = enabled)
                 SettingsTextField("API Key", draft.apiKey, { changeDraft(draft.copy(apiKey = it)) }, password = true, enabled = enabled)
-                RequestBodyFieldsEditor(draft, enabled, engineeringUi, changeDraft)
-                if (engineeringUi) SettingsTextField(
-                    "自定义请求体", draft.customBody, { changeDraft(draft.copy(customBody = it)) },
-                    hint = "JSON 对象；留空使用服务默认请求体", multiline = true, enabled = enabled,
-                )
+
                 if (requestOptionsUnavailable) {
                     SettingsNote("原请求策略不可用；替换需要明确确认", error = true)
                     SettingsSwitchRow("授权替换策略", draft.requestOptionsReplacementAuthorized, enabled = enabled) {
                         changeDraft(draft.copy(requestOptionsReplacementAuthorized = it))
                     }
                 }
-                ProviderHeadersEditor(draft, enabled, changeDraft)
                 if (headersUnavailable) {
                     SettingsNote("原请求头不可用；请重新输入或明确清除", error = true)
                     SettingsSwitchRow("授权替换或清除请求头", draft.headersReplacementAuthorized, enabled = enabled) {
@@ -184,11 +192,11 @@ internal fun ModelSettingsScreen(
         }
         item(key = "model_advanced") {
             SettingsCard {
-                SettingsSwitchRow("原生网页搜索", draft.openAiWebSearchEnabled,
+                SettingsSwitchRow("Provider 托管网页搜索", draft.openAiWebSearchEnabled,
+                    summary = "允许模型调用 Provider 提供的网页搜索",
                     enabled = enabled && draft.protocol == ProviderProtocol.RESPONSES) {
                     changeDraft(draft.copy(openAiWebSearchEnabled = it))
                 }
-                if (draft.openAiWebSearchEnabled) SettingsNote("仅用于 OpenAI 官方 Responses；由模型决定搜索，可能产生搜索费用。")
             }
         }
         if (testConnection != null) item(key = "model_connection_test") {
@@ -198,6 +206,20 @@ internal fun ModelSettingsScreen(
                     modifier = Modifier.testTag("model-connection-test").fillMaxWidth().padding(12.dp))
                 connection.status?.let { SettingsNote(it) }
             }
+        }
+        item(key = "provider_gateway") {
+            SettingsSectionTitle("会话 ID")
+            SettingsCard {
+                ProviderGatewayEditor(draft.sessionGateway, enabled) { changeDraft(draft.copy(sessionGateway = it)) }
+            }
+        }
+        item(key = "provider_headers") {
+            SettingsSectionTitle("自定义请求头")
+            SettingsCard { ProviderHeadersEditor(draft, enabled, changeDraft) }
+        }
+        item(key = "provider_body") {
+            SettingsSectionTitle("自定义请求体")
+            SettingsCard { RequestBodyFieldsEditor(draft, enabled, engineeringUi, changeDraft) }
         }
         if (showCatalog && onManageLocalModels != null) item(key = "local_models") {
             SettingsCard { SettingsRow("本地模型", onClick = { if (enabled) { connection.cancel(); onManageLocalModels() } },
@@ -240,7 +262,7 @@ internal fun ModelSettingsScreen(
             TextButton(
                 text = "保存",
                 onClick = submit,
-                enabled = enabled,
+                enabled = enabled && draft.headerFieldsValid && draft.bodyFieldsValid,
                 modifier = Modifier.testTag("model-save").semantics { this[RetainedModelSaveAction] = submit }.fillMaxWidth().padding(horizontal = 12.dp, vertical = 24.dp),
             )
         }

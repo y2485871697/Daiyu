@@ -37,6 +37,10 @@ internal class RequestBodyFieldEditorOwner(val draft: ModelSettingsDraftUi) {
 internal fun RequestBodyFieldsEditor(draft: ModelSettingsDraftUi, enabled: Boolean, engineeringUi: Boolean = false,
     onDraftChange: (ModelSettingsDraftUi) -> Unit,
 ) {
+    if (!engineeringUi) {
+        ProviderInlineFields(draft, enabled, headers = false, onDraftChange = onDraftChange)
+        return
+    }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var owner by remember { mutableStateOf<RequestBodyFieldEditorOwner?>(null) }
     var selection by remember { mutableStateOf<RequestBodyField?>(null) }

@@ -77,7 +77,10 @@ internal fun BrowserVisualScreen(
                     }
                     Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
                         verticalAlignment = Alignment.CenterVertically) {
-                        PlainToolButton(DaiyuIcons.Add, "新建标签", "browser-visual-new-tab", enabled = false) {}
+                        PlainToolButton(DaiyuIcons.Add, "新建标签", "browser-visual-new-tab",
+                            enabled = state.live && !state.waiting && !state.unknown && state.tabs.size < 3) {
+                            if (currentCheck()) { visit?.newTab(); refresh(); addressEdited = false }
+                        }
                         Text("${state.tabs.size}/3",
                             Modifier.weight(1f).clickable(interactionSource = remember { MutableInteractionSource() },
                                 indication = null, onClick = { panel = "tabs" }).padding(8.dp).testTag("browser-visual-tabs"),
@@ -145,7 +148,7 @@ internal fun BrowserVisualScreen(
                                     onClick = if (tab == state.lease && state.live && !state.unknown && !state.waiting) ({
                                         if (currentCheck()) { visit?.takeover(tab); refresh(); panel = null }
                                     }) else null) }
-                                SettingsRow("关闭当前标签", tag = "browser-visual-close-tab", onClick = if (state.takenOver && !state.unknown) ({ panel = null; confirmClose = true }) else null)
+                                SettingsRow("关闭当前标签", tag = "browser-visual-close-tab", onClick = if (state.takenOver && !state.unknown && !state.waiting) ({ panel = null; confirmClose = true }) else null)
                             }
                         }
                         else -> {
@@ -154,7 +157,7 @@ internal fun BrowserVisualScreen(
                             SettingsRow("查看网页", onClick = if (state.live && !state.takenOver && !state.waiting && !state.unknown && state.lease != null) ({
                                 if (currentCheck()) { state.lease?.let { visit?.takeover(it) }; refresh(); panel = null }
                             }) else null)
-                            SettingsRow("归还浏览器并继续任务", tag = "browser-visual-restore", onClick = if (state.live && state.takenOver && !state.unknown) ({
+                            SettingsRow("归还浏览器并继续任务", tag = "browser-visual-restore", onClick = if (state.live && state.takenOver && !state.unknown && !state.waiting) ({
                                 if (currentCheck()) { visit?.restore(); refresh(); panel = null }
                             }) else null)
                             SettingsRow("停止任务", tag = "browser-visual-stop-owner", onClick = if (state.live) ({

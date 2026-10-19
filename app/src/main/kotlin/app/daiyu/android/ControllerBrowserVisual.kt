@@ -3,6 +3,7 @@ package app.daiyu.android
 import android.os.Handler
 import android.os.Looper
 import android.view.ViewGroup
+import app.daiyu.android.browser.bridge.BrowserOutcome
 import app.daiyu.android.browser.host.BrowserToolTakeoverToken
 import app.daiyu.android.browser.session.BrowserTabLease
 import app.daiyu.android.domain.Message
@@ -19,6 +20,8 @@ internal class ControllerBrowserVisual(
     private val originalPaused: () -> Boolean,
     private val resumeOriginal: () -> Boolean,
     private val stopOriginal: () -> Boolean,
+    private val attachVisible: (BrowserToolTakeoverToken, ViewGroup) -> CatalogBrowserBinding.VisibleAttachment =
+        binding::attachVisible,
 ) {
     internal data class State(
         val live: Boolean = false, val lease: BrowserTabLease? = null,
@@ -35,6 +38,7 @@ internal class ControllerBrowserVisual(
         fun mount(parent: ViewGroup) = controller.mount(this, parent)
         fun unmount(parent: ViewGroup) = controller.unmount(this, parent)
         fun navigate(url: String) = controller.navigate(this, url)
+        fun newTab() = controller.newTab(this)
         fun restore() = controller.restore(this)
         fun closeTab() = controller.closeTab(this)
         fun stop() = controller.stop(this)
@@ -44,7 +48,9 @@ internal class ControllerBrowserVisual(
         var attachment: CatalogBrowserBinding.VisibleAttachment? = null
         var closeStarted = false
     }
-    private class Pending(val visit: Visit, val lease: BrowserTabLease)
+    private class Pending(val visit: Visit, val lease: BrowserTabLease?, val create: Boolean = false) {
+        var admitted = false
+    }
     private val pending = AtomicReference<Pending?>()
     private val main = Handler(Looper.getMainLooper())
     private val revoked = AtomicBoolean()
@@ -93,23 +99,84 @@ internal class ControllerBrowserVisual(
         notice = "等待原任务到达暂停边界；尚未接管，原工具批次允许正常收尾。"
         advanceTakeover(visit)
     }
+    private fun newTab(visit: Visit) {
+        requireMain()
+        if (!current(visit) || unknown || pending.get() != null) return
+        if (binding.session.visibleTabs.size >= 3) { notice = "最多打开三个标签；未新建。"; return }
+        val request = Pending(visit, binding.session.currentTab, create = true)
+        pending.set(request)
+        val accepted = try { originalPaused() || pauseOriginal() } catch (_: Exception) { false }
+        if (!accepted) {
+            pending.compareAndSet(request, null)
+            notice = "原任务暂停未受理；未新建标签。"
+            return
+        }
+        notice = "等待原任务暂停后新建空白标签；不会自动继续任务。"
+        advanceTakeover(visit)
+    }
+
+    private fun createTakenOverTab(visit: Visit) {
+        if (binding.session.visibleTabs.size >= 3) { notice = "最多打开三个标签；未新建。"; return }
+        val old = token
+        if (old != null) {
+            mounted.get()?.let(::detach)
+            if (!current(visit) || unknown) return
+            val released = binding.session.releaseTakeover(old)
+            if (token === old) token = null
+            check(binding.session.currentTab == released) { "BROWSER_STALE_TAB" }
+        }
+        if (!current(visit) || unknown) return
+        val before = binding.session.visibleTabs.toSet()
+        when (val outcome = binding.session.execute(mapOf("action" to "new_tab"))) {
+            is BrowserOutcome.NotExecuted -> notice = "新建标签未执行；原任务保持暂停。"
+            BrowserOutcome.Unknown -> markUnknown("新建标签结果 UNKNOWN；不重试或恢复自动化。")
+            is BrowserOutcome.Confirmed -> {
+                if (!current(visit)) return
+                val created = checkNotNull(binding.session.currentTab)
+                check(created !in before && created.owner == binding.session.grant.owner)
+                check(org.json.JSONObject(outcome.result.text).getInt("tabId") == created.tabId)
+                val acquired = binding.session.takeover(created)
+                token = acquired
+                if (acquired.cleanupFailure != null) markUnknown("新标签接管 UNKNOWN；保留原会话清理链，不重试。")
+                else notice = "已在本会话新建空白标签；旧标签保留，任务未自动继续。"
+            }
+        }
+    }
+
     private fun advanceTakeover(visit: Visit) {
         val request = pending.get()?.takeIf { it.visit === visit } ?: return
-        if (!current(visit)) { pending.compareAndSet(request, null); return }
-        if (!originalPaused()) return
+        if (!current(visit) || unknown) { pending.compareAndSet(request, null); return }
+        if (request.admitted || !originalPaused()) return
         if (pending.get() !== request) return
         if (binding.session.currentTab != request.lease) {
             pending.compareAndSet(request, null)
             notice = "暂停期间原标签已变化；未接管。请明确重新选择。"
             return
         }
+        if (request.create && token != null) {
+            try {
+                if (mounted.get()?.attachment?.isLoading == true) {
+                    notice = "原标签仍在加载；加载结束后才新建。"
+                    return
+                }
+            } catch (_: Exception) {
+                pending.compareAndSet(request, null)
+                markUnknown("原标签状态未确认；未新建标签。")
+                return
+            }
+        }
+        request.admitted = true
         try {
-            val acquired = binding.session.takeover(request.lease)
+            if (request.create) {
+                createTakenOverTab(visit)
+                return
+            }
+            val acquired = binding.session.takeover(requireNotNull(request.lease))
             token = acquired
             if (acquired.cleanupFailure != null) markUnknown("接管失效处理 UNKNOWN；保留原资源，请停止原任务核实。")
             else notice = "已接管原标签。返回或后台只卸载页面，不自动恢复任务。"
         } catch (failure: Exception) {
-            if (failure is IllegalStateException && failure.message in setOf(
+            if (!request.create && failure is IllegalStateException && failure.message in setOf(
                     "BROWSER_TAB_ACTIVE", "BROWSER_OPENMINIS_NATIVE_ACTIVE", "BROWSER_STALE_TAB",
                     "BROWSER_TAB_MISSING", "BROWSER_TAKEOVER_UNSUPPORTED")) {
                 notice = "原标签未满足接管条件；未接管，原任务保持暂停。"
@@ -127,7 +194,7 @@ internal class ControllerBrowserVisual(
         val attempt = Mount(visit, held, parent)
         mounted.set(attempt)
         try {
-            attempt.attachment = binding.attachVisible(held, parent)
+            attempt.attachment = attachVisible(held, parent)
             if (!current(visit) || mounted.get() !== attempt) detach(attempt)
         } catch (_: Exception) { markUnknown("原标签挂载 UNKNOWN；不重试或创建替代 WebView。") }
     }
@@ -148,7 +215,7 @@ internal class ControllerBrowserVisual(
     }
     private fun navigate(visit: Visit, input: String) {
         requireMain()
-        if (!current(visit) || unknown) return
+        if (!current(visit) || unknown || pending.get() != null) return
         val original = mounted.get()?.takeIf { it.visit === visit && it.token === token && !it.closeStarted } ?: return
         val url = input.trim()
         if (url.isEmpty() || url.length > 4096 || url.any { it.code < 32 || it.code == 127 } ||
@@ -160,7 +227,7 @@ internal class ControllerBrowserVisual(
     }
     private fun restore(visit: Visit) {
         requireMain()
-        if (!current(visit) || unknown) return
+        if (!current(visit) || unknown || pending.get() != null) return
         val held = token ?: return
         try {
             if (mounted.get()?.attachment?.isLoading == true) {
@@ -178,7 +245,7 @@ internal class ControllerBrowserVisual(
     }
     private fun closeTab(visit: Visit) {
         requireMain()
-        if (!current(visit) || unknown) return
+        if (!current(visit) || unknown || pending.get() != null) return
         val held = token ?: return
         try {
             // Explicit close accepts a loading attachment; it never makes the tab model-ready.

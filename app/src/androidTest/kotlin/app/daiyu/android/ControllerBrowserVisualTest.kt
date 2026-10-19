@@ -19,19 +19,42 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
         instrumentation.runOnMainSync(task)
         return task.get(10, TimeUnit.SECONDS)
     }
-    private class Fixture : AutoCloseable {
+    private class Fixture(initialTab: Boolean = true) : AutoCloseable {
         val identity = BrowserRunIdentity(ConversationId("visual-conversation"), RunId("visual-run"), "profile", MessageId("visual-message"))
         val grant = BrowserGrant(BrowserOwner(identity.runId.value, BrowserOwnerKind.MAIN), BrowserAccess.FULL)
         val registry = BrowserSessionRegistry()
         var allocations = 0
         var calls = 0
+        var closes = 0
+        var failCreate = false
+        var failRebind = false
+        var failBeforeRelease = false
+        var releaseChecks = 0
+        var loading = false
+        var mounts = 0
+        var detaches = 0
+        var failDetach = false
+        var onCreate: () -> Unit = {}
+        var onBeforeRelease: () -> Unit = {}
         var paused = false
         var pauses = 0
         var resumes = 0
         var live = true
         val session = BrowserToolSession(grant, registry, object : BrowserTabLifecycle {
-            override fun create(lease: BrowserTabLease) { allocations++ }
-            override fun close(lease: BrowserTabLease) { }
+            override fun create(lease: BrowserTabLease) {
+                allocations++
+                onCreate()
+                check(!failCreate) { "native creation uncertain" }
+            }
+            override fun close(lease: BrowserTabLease) { closes++ }
+            override fun beforeReleaseTakeover(allocation: BrowserTabLease, lease: BrowserTabLease) {
+                releaseChecks++
+                onBeforeRelease()
+                check(!failBeforeRelease) { "release state uncertain" }
+            }
+            override fun rebind(allocation: BrowserTabLease, lease: BrowserTabLease) {
+                check(!failRebind) { "native rebind uncertain" }
+            }
         }, object : BrowserExecutionPort {
             override fun execute(command: BrowserCommand, lease: BrowserTabLease): BrowserExecutionResult {
                 calls++
@@ -51,9 +74,200 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
         val owner = Message(identity.assistantMessageId, identity.conversationId, identity.runId,
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
         val controller = ControllerBrowserVisual(owner, binding, { live }, { pauses++; true },
-            { paused }, { resumes++; true }, { live = false; true })
-        init { check(session.execute(mapOf("action" to "new_tab")) is BrowserOutcome.Confirmed) }
+            { paused }, { resumes++; true }, { live = false; true }, attachVisible = { _, parent ->
+                mounts++
+                val child = android.view.View(parent.context)
+                parent.addView(child)
+                CatalogBrowserBinding.VisibleAttachment({ error("navigation not part of this fixture") },
+                    { loading }, {
+                        detaches++
+                        check(!failDetach) { "detach uncertain" }
+                        parent.removeView(child)
+                    })
+            })
+        init { if (initialTab) check(session.execute(mapOf("action" to "new_tab")) is BrowserOutcome.Confirmed) }
         override fun close() { controller.revoke(); binding.close() }
+    }
+
+    fun testNewTabWaitsForPauseAndRetainsOriginalSessionAndAllocation() = main {
+        val f = Fixture()
+        try {
+            val original = requireNotNull(f.session.currentTab)
+            val visit = requireNotNull(f.controller.openVisit())
+            visit.newTab()
+            assertEquals(1, f.pauses)
+            repeat(3) { assertTrue(visit.snapshot().waiting) }
+            assertEquals(1, f.pauses)
+            assertEquals(1, f.allocations)
+            f.onCreate = {
+                assertTrue(f.controller.automationHeld)
+                assertTrue(visit.snapshot().waiting)
+                visit.restore(); visit.closeTab(); visit.newTab()
+                assertEquals(0, f.resumes)
+                assertEquals(0, f.closes)
+            }
+            f.paused = true
+            val state = visit.snapshot()
+            assertTrue(state.takenOver)
+            assertFalse(state.waiting)
+            assertEquals(2, f.allocations)
+            assertEquals(2, state.tabs.size)
+            assertTrue(state.tabs.contains(original))
+            assertEquals(original.owner, state.lease!!.owner)
+            assertEquals(0, f.closes)
+            assertEquals(0, f.calls)
+            assertEquals(0, f.resumes)
+            repeat(3) { visit.snapshot() }
+            assertEquals(2, f.allocations)
+            visit.restore()
+            assertEquals(1, f.resumes)
+        } finally { f.close() }
+    }
+
+    fun testNewTabFromEmptySessionAndLimitPreserveExistingTabs() = main {
+        val f = Fixture(initialTab = false)
+        try {
+            val visit = requireNotNull(f.controller.openVisit())
+            f.paused = true
+            f.onCreate = { assertTrue(f.controller.automationHeld) }
+            repeat(3) { visit.newTab(); assertTrue(visit.snapshot().takenOver) }
+            val before = visit.snapshot().tabs
+            visit.newTab()
+            assertEquals(before, visit.snapshot().tabs)
+            assertEquals(3, f.allocations)
+            assertEquals(0, f.closes)
+            assertEquals(0, f.calls)
+            assertEquals(0, f.resumes)
+            visit.restore()
+            assertEquals(1, f.resumes)
+        } finally { f.close() }
+    }
+
+    fun testLeavingPendingNewTabAndChangedCurrentNeverAllocate() = main {
+        val f = Fixture()
+        try {
+            val visit = requireNotNull(f.controller.openVisit())
+            visit.newTab()
+            visit.close()
+            f.paused = true
+            visit.newTab()
+            assertFalse(visit.snapshot().live)
+            assertEquals(1, f.allocations)
+            assertEquals(0, f.resumes)
+            val current = requireNotNull(f.controller.openVisit())
+            f.paused = false
+            current.newTab()
+            assertTrue(f.session.execute(mapOf("action" to "new_tab")) is BrowserOutcome.Confirmed)
+            f.paused = true
+            assertFalse(current.snapshot().waiting)
+            assertFalse(current.snapshot().takenOver)
+            assertEquals(2, f.allocations)
+        } finally { f.close() }
+    }
+
+    fun testUnknownCreationAndOldTabReleaseNeverRetryOrResume() = main {
+        for (releaseFailure in listOf(false, true)) {
+            val f = Fixture()
+            try {
+                f.paused = true
+                val visit = requireNotNull(f.controller.openVisit())
+                visit.takeover(requireNotNull(f.session.currentTab))
+                f.failRebind = releaseFailure
+                f.failCreate = !releaseFailure
+                visit.newTab()
+                assertTrue(visit.snapshot().unknown)
+                val attempts = f.allocations
+                repeat(3) { visit.newTab(); visit.restore(); visit.snapshot() }
+                assertEquals(attempts, f.allocations)
+                assertEquals(if (releaseFailure) 1 else 2, attempts)
+                assertEquals(0, f.resumes)
+                assertTrue(f.controller.automationHeld)
+            } finally { f.close() }
+        }
+    }
+
+    fun testUnknownBeforeReleaseDoesNotRetryStillValidToken() = main {
+        val f = Fixture()
+        try {
+            f.paused = true
+            val visit = requireNotNull(f.controller.openVisit())
+            visit.takeover(requireNotNull(f.session.currentTab))
+            val held = f.session.currentTab
+            f.failBeforeRelease = true
+            visit.newTab()
+            assertTrue(visit.snapshot().unknown)
+            repeat(3) { visit.newTab(); visit.restore(); visit.snapshot() }
+            assertEquals(1, f.releaseChecks)
+            assertEquals(held, f.session.currentTab)
+            assertEquals(1, f.allocations)
+            assertEquals(0, f.closes)
+            assertEquals(0, f.resumes)
+        } finally { f.close() }
+    }
+
+    fun testMountedLoadingPageWaitsThenDetachesBeforeCreatingNewTab() = main {
+        val f = Fixture()
+        val parent = android.widget.FrameLayout(instrumentation.targetContext)
+        try {
+            f.paused = true
+            val original = requireNotNull(f.session.currentTab)
+            val visit = requireNotNull(f.controller.openVisit())
+            visit.takeover(original)
+            visit.mount(parent)
+            f.loading = true
+            visit.newTab()
+            repeat(3) { assertTrue(visit.snapshot().waiting) }
+            assertEquals(1, f.allocations)
+            assertEquals(1, parent.childCount)
+            assertEquals(0, f.detaches)
+            assertEquals(0, f.releaseChecks)
+            f.onBeforeRelease = {
+                assertEquals(0, parent.childCount)
+                assertEquals(f.releaseChecks, f.detaches)
+            }
+            f.onCreate = {
+                assertEquals(0, parent.childCount)
+                assertEquals(1, f.detaches)
+                assertEquals(1, f.releaseChecks)
+                assertTrue(f.controller.automationHeld)
+            }
+            f.loading = false
+            val state = visit.snapshot()
+            assertTrue(state.takenOver)
+            assertFalse(state.waiting)
+            assertEquals(2, f.allocations)
+            assertEquals(2, state.tabs.size)
+            assertTrue(state.tabs.any { it.tabId == original.tabId })
+            assertEquals(0, f.closes)
+            assertEquals(0, f.resumes)
+            visit.mount(parent)
+            assertEquals(2, f.mounts)
+            assertEquals(1, parent.childCount)
+            visit.restore()
+            assertEquals(0, parent.childCount)
+            assertEquals(2, f.detaches)
+            assertEquals(1, f.resumes)
+        } finally { f.close(); parent.removeAllViews() }
+    }
+
+    fun testMountedDetachFailurePreventsReleaseCreateAndRetry() = main {
+        val f = Fixture()
+        val parent = android.widget.FrameLayout(instrumentation.targetContext)
+        try {
+            f.paused = true
+            val visit = requireNotNull(f.controller.openVisit())
+            visit.takeover(requireNotNull(f.session.currentTab))
+            visit.mount(parent)
+            f.failDetach = true
+            visit.newTab()
+            assertTrue(visit.snapshot().unknown)
+            repeat(3) { visit.newTab(); visit.restore(); visit.mount(parent); visit.snapshot() }
+            assertEquals(1, f.mounts)
+            assertEquals(1, f.detaches)
+            assertEquals(0, f.releaseChecks)
+            assertEquals(1, f.allocations)
+            assertEquals(0, f.resumes)
+        } finally { f.close(); parent.removeAllViews() }
     }
 
     fun testTabSnapshotListsOnlyOriginalSessionWithoutOpeningOrExecuting() = main {

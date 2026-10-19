@@ -52,10 +52,16 @@ internal object RunCheckpointCodec {
         require(version in 1L..7L)
         val keys = arrayOf("version", "message", "history", "phase", "tools", "outputs", "supplements", "round",
             "request_unconfirmed", "message_reconciled", "owner", "revision")
-        fields(value, *(when (version) { 1L -> keys; 2L -> keys + "pending"; 3L -> keys + arrayOf("pending", "request");
+        val recoveryOwner = if (value.has("recovery_source_owner")) string(value, "recovery_source_owner") else null
+        if (recoveryOwner != null) require(recoveryOwner.isNotBlank() && recoveryOwner.length <= 200 &&
+            string(value, "phase") == "TERMINAL" && boolean(value, "message_reconciled") &&
+            integer(value, "revision") >= 2 && value.isNull("pending") &&
+            string(value, "owner").startsWith("recovery-") && string(value, "owner") != recoveryOwner)
+        fields(value, *((when (version) { 1L -> keys; 2L -> keys + "pending"; 3L -> keys + arrayOf("pending", "request");
             4L, 5L -> keys + arrayOf("pending", "request", "usage")
             6L -> keys + arrayOf("pending", "request", "usage", "usage_requests")
-            else -> keys + arrayOf("pending", "request", "usage", "usage_requests", "transport") }))
+            else -> keys + arrayOf("pending", "request", "usage", "usage_requests", "transport") }) +
+            if (recoveryOwner == null) emptyArray() else arrayOf("recovery_source_owner")))
         val transport = if (version < 7L || value.isNull("transport")) null else {
             val row = value.getJSONObject("transport")
             fields(row, "response_id", "sequence", "decoder_state")
@@ -86,6 +92,8 @@ internal object RunCheckpointCodec {
         fun messages(key: String) = ArchiveCodec.decode(value.getJSONArray(key).toString().toByteArray(Charsets.UTF_8))
         val message = messages("message").single()
         val tools = value.getJSONArray("tools")
+        if (recoveryOwner != null) require((0 until tools.length()).none {
+            tools.getJSONObject(it).optString("disposition") == ToolDisposition.IN_FLIGHT.name })
         val outputs = value.getJSONArray("outputs")
         require(tools.length() <= 10_000 && outputs.length() <= 10_000)
         val round = integer(value, "round"); require(round in 0..100)

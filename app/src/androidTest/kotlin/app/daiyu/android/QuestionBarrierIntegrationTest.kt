@@ -183,8 +183,34 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             assertNotNull(activity);ui.waitForIdle();instrumentation.waitForIdleSync()
         } finally {instrumentation.removeMonitor(monitor)}
     }
+    @Suppress("UNCHECKED_CAST")
+    private fun assertExactQuestionOwner(f: Fixture, shown: Message, call: ToolInvocation, expected: QuestionIdentity) {
+        val records = ChatController::class.java.getDeclaredField("questionHistory").apply { isAccessible = true }
+            .get(f.c) as MutableMap<String, Pair<QuestionIdentity, QuestionRecord>>
+        val original = checkNotNull(records[expected.storageKey])
+        val unrelated = QuestionIdentity(expected.conversationId, expected.runId, "unrelated-owner", expected.callId)
+        records[unrelated.storageKey] = unrelated to original.second.copy(callId = unrelated.storageKey)
+        try {
+            assertEquals(expected, f.c.questionProjection(shown, call)!!.identity)
+            records.remove(expected.storageKey)
+            assertNull(f.c.questionProjection(shown, call))
+        } finally {
+            records[expected.storageKey] = original
+            records.remove(unrelated.storageKey)
+        }
+    }
+
     fun testPublicQuestionReleasesWorkerAndDurableAnswerContinuesExactlyOnce() {
         val f=fresh(interactiveEnabled=true);launch(f);val owner=send(f);val id=waiting(f,owner)
+        main {
+            val shown = f.db.messages(owner.conversationId).last().second
+            val call = shown.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation
+            assertNotNull(f.c.questionProjection(shown, call))
+            assertExactQuestionOwner(f, shown, call, id)
+            assertNull(f.c.questionProjection(shown.copy(id = MessageId("different-owner")), call))
+            assertNull(f.c.questionProjection(shown, call.copy(arguments = ARGS.replace("Route choice", "Changed question"))))
+            assertNull(f.c.questionProjection(shown.copy(runId = RunId("different-run")), call))
+        }
         node("question-option:0").performClick().assertIsSelected()
         val originalCardId=node("question-card").fetchSemanticsNode().id
         main {MainActivity::class.java.getDeclaredMethod("refresh").apply {isAccessible=true}.invoke(checkNotNull(activity))}
@@ -294,6 +320,13 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         val saved=checkpoint(f,old.message);assertEquals(RunStatus.INTERRUPTED,saved.message.status);assertEquals(ExecutionPhase.TERMINAL,saved.phase);assertNull(saved.pending)
         assertTrue(saved.owner!=old.owner);assertEquals(ToolDisposition.UNKNOWN,saved.tools.single().disposition)
         assertEquals(answer,row(f,id).answer);if(answer==null) assertTrue(row(f,id).interrupted)
+        main {
+            val shown = f.db.messages(old.message.conversationId).last().second
+            val projection = f.c.questionProjection(shown, shown.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation)
+            assertNotNull(projection); assertFalse(projection!!.canAnswer); assertNull(projection.binding)
+            assertEquals(old.owner, projection.identity.ownerId)
+            assertExactQuestionOwner(f, shown, shown.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation, id)
+        }
         recreate();waitForCard(readOnly=true)
         drainWorker(f);assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())
     }

@@ -36,6 +36,8 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.material3.Icon
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.domain.question.QuestionAnswer
@@ -125,13 +127,32 @@ private fun QuestionCardContent(
 
     val colors = MiuixTheme.colorScheme
     val shape = RoundedCornerShape(16.dp)
+    var expanded by remember(owner) { mutableStateOf(true) }
     Column(
         modifier.testTag("question-card").fillMaxWidth().clip(shape).background(colors.surface)
             .border(1.dp, colors.outline, shape).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(value.question.title, color = colors.onSurface,
-            style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp))
+        Row(Modifier.fillMaxWidth().testTag("question-toggle").heightIn(min = 44.dp)
+            .clickable(role = Role.Button) { expanded = !expanded }
+            .semantics { stateDescription = if (expanded) "已展开" else "已折叠" },
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Icon(DaiyuIcons.Interactive, null, Modifier.size(16.dp), tint = colors.primary)
+            Text(value.question.title, Modifier.weight(1f), color = colors.onSurface,
+                style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp))
+            Icon(if (expanded) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight, null, Modifier.size(16.dp), tint = colors.onSurfaceVariantSummary)
+        }
+        if (!expanded) {
+            val summary = when (val answer = confirmedAnswer) {
+                is QuestionAnswer.Selected -> value.question.options.firstOrNull { it.id == answer.optionId }?.label ?: "已保存选项"
+                is QuestionAnswer.Other -> answer.text
+                is QuestionAnswer.Delegate -> "本题交给代鱼决定；不扩大权限"
+                null -> if (value.interrupted || !canAnswer) "提问已失效，当前不可作答" else "需要你回答"
+            }
+            Text(summary, color = colors.onSurfaceVariantSummary, style = MiuixTheme.textStyles.footnote1)
+            confirmedAnswer?.note?.takeIf { it.isNotBlank() }?.let { Text(it, style = MiuixTheme.textStyles.footnote1) }
+        }
+        if (expanded) {
         Text(value.question.question, color = colors.onSurfaceVariantSummary,
             style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp))
         Column(Modifier.fillMaxWidth().selectableGroup(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -153,7 +174,7 @@ private fun QuestionCardContent(
                 index++
             }
             if (value.question.allowDelegation) {
-                QuestionOptionRow("由你决定", "", false, selection is QuestionAnswer.Delegate, editable,
+                QuestionOptionRow("由你决定", "仅授权当前问题，不扩大设备权限", false, selection is QuestionAnswer.Delegate, editable,
                     { session.select(QuestionAnswer.Delegate()) }, Modifier.testTag("question-option:$index"))
             }
         }
@@ -162,6 +183,7 @@ private fun QuestionCardContent(
         }
         if (value.question.allowNote && (!completed || noteText.isNotEmpty())) {
             QuestionInput(noteText, "补充说明（可选）", editable, { session.editNote(it) }, Modifier.testTag("question-note"))
+        }
         }
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {

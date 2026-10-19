@@ -42,6 +42,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.ui.icons.DaiyuIcons
@@ -61,6 +63,8 @@ internal fun ChatMessageList(
     turnExtras: @Composable (ChatTurnUi.Assistant) -> Unit = {},
     imageLoader: MessageImageLoader? = null,
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
+    toolContent: @Composable (WorkStepUi) -> Unit = {},
+    composerBottomInset: Dp = 0.dp,
 ) {
     val listState = rememberLazyListState()
     val dragging by listState.interactionSource.collectIsDraggedAsState()
@@ -68,6 +72,8 @@ internal fun ChatMessageList(
     var wasDragged by remember { mutableStateOf(false) }
     var touchEpoch by remember { mutableStateOf(0L) }
     var consumedScrollSerial by rememberSaveable { mutableStateOf<Long?>(null) }
+    val occlusionPx = with(LocalDensity.current) { composerBottomInset.roundToPx() }
+    val currentOcclusionPx by rememberUpdatedState(occlusionPx)
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
     val readyTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
@@ -135,9 +141,10 @@ internal fun ChatMessageList(
     LaunchedEffect(listState) {
         snapshotFlow {
             val layout = listState.layoutInfo
+            val visibleBottom = layout.viewportEndOffset - currentOcclusionPx
             val visibleKeys = layout.visibleItemsInfo.filter {
-                it.size > 0 && it.offset < layout.viewportEndOffset &&
-                    it.offset + it.size in (layout.viewportStartOffset + 1)..layout.viewportEndOffset
+                it.size > 0 && it.offset < visibleBottom &&
+                    it.offset + it.size in (layout.viewportStartOffset + 1)..visibleBottom
             }.map { it.key }.toSet()
             currentReadAction to currentTurns.filterIsInstance<ChatTurnUi.Assistant>()
                 .filter { it.status == RunStatus.COMPLETED && it.listKey in visibleKeys && readyTurns[it.listKey] == it }
@@ -147,9 +154,10 @@ internal fun ChatMessageList(
                 withFrameNanos { }
                 withFrameNanos { }
                 val layout = listState.layoutInfo
+                val visibleBottom = layout.viewportEndOffset - currentOcclusionPx
                 val stillVisible = layout.visibleItemsInfo.filter {
-                    it.size > 0 && it.offset < layout.viewportEndOffset &&
-                    it.offset + it.size in (layout.viewportStartOffset + 1)..layout.viewportEndOffset
+                    it.size > 0 && it.offset < visibleBottom &&
+                    it.offset + it.size in (layout.viewportStartOffset + 1)..visibleBottom
                 }.map { it.key }.toSet()
                 val current = currentTurns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey }
                 readAction(completed.filter {
@@ -169,14 +177,14 @@ internal fun ChatMessageList(
                 do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
             }
         },
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 64.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = composerBottomInset + 64.dp),
             verticalArrangement = Arrangement.spacedBy(24.dp)) {
             items(turns, key = { it.listKey }, contentType = { if (it is ChatTurnUi.User) "user" else "assistant" }) { turn ->
                 Column(Modifier.testTag("chat-turn:${turn.id}")) {
                     when (turn) {
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
                         is ChatTurnUi.Assistant -> Column {
-                            AssistantTurn(turn, actions, imageLoader, dedicatedTool = dedicatedTool) { ready ->
+                            AssistantTurn(turn, actions, imageLoader, dedicatedTool = dedicatedTool, toolContent = toolContent) { ready ->
                                 if (ready) readyTurns[turn.listKey] = turn else readyTurns.remove(turn.listKey)
                             }
                             turnExtras(turn)
@@ -192,7 +200,7 @@ internal fun ChatMessageList(
                 val index = turns.indices.lastOrNull { it < anchor && turns[it] is ChatTurnUi.User }
                 if (index != null) scope.launch { listState.animateScrollToItem(index) }
                 actions.onJumpPreviousUser()
-            }, Modifier.align(Alignment.BottomEnd).padding(12.dp).background(MiuixTheme.colorScheme.surfaceContainerHigh, CircleShape))
+            }, Modifier.align(Alignment.BottomEnd).padding(bottom = composerBottomInset).padding(12.dp).background(MiuixTheme.colorScheme.surfaceContainerHigh, CircleShape))
         }
     }
 }
@@ -235,6 +243,7 @@ internal fun AssistantTurn(
     actions: ChatScreenActions,
     imageLoader: MessageImageLoader? = null,
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
+    toolContent: @Composable (WorkStepUi) -> Unit = {},
     onContentReady: (Boolean) -> Unit = {},
 ) {
     val sources = remember(turn.content, turn.finalText) {
@@ -248,11 +257,11 @@ internal fun AssistantTurn(
         ReportedReasoningCard(turn.listKey, turn.reportedReasoning)
         if (turn.content.isNotEmpty()) {
             // Splitting these blocks into a work card and a final answer would reorder images.
-            MessageContent(turn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool) { text, modifier ->
+            MessageContent(turn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool, toolContent = toolContent) { text, modifier ->
                 ParsedMessageMarkdown(text, projection?.blocks?.get(text), modifier)
             }
         } else {
-            AssistantTextContent(turn, actions, projection)
+            AssistantTextContent(turn, actions, projection, toolContent)
         }
         if (!turn.error.isNullOrBlank()) {
             Text(turn.error, color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.body2,
@@ -271,8 +280,8 @@ internal fun AssistantTurn(
 }
 
 @Composable
-private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?) {
-    turn.workProcess?.let { WorkProcessCard(it, turn.listKey, actions.onCopyToolSummary) }
+private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreenActions, projection: MarkdownProjection?, toolContent: @Composable (WorkStepUi) -> Unit) {
+    turn.workProcess?.let { WorkProcessCard(it, turn.listKey, actions.onCopyToolSummary, toolContent = toolContent) }
     if (turn.finalText.isNotBlank()) {
         ParsedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText))
     } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {

@@ -161,7 +161,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             // to make room: that would turn a replay into a second provider request.
             if (binding.requests.size + binding.commandRequests.size >= maxRequestsPerBinding) return ChildTaskAdmission.Rejected("child_request_budget_exhausted")
             if (tasks.size + inputSnapshot.size > maxRetainedTasks) return ChildTaskAdmission.Rejected("child_retention_limit")
-            val group = UUID.randomUUID().toString()
+            val group = childTaskCallGroup(binding.owner.conversationId.value, binding.owner.runId.value,
+                binding.owner.assistantMessageId.value, context.invocation.name, context.invocation.id.value)
             val epoch = Math.incrementExact(generation).also { generation = it }
             val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
             request = ChildTaskRequest(fingerprint, inputSnapshot.size)
@@ -276,7 +277,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                 val parent = binding.owner
                 val epoch = Math.incrementExact(generation).also { generation = it }
                 val record = ChildTaskRecord(ChildRunOwner(parent.conversationId.value, parent.runId.value,
-                    UUID.randomUUID().toString(), epoch, UUID.randomUUID().toString(), UUID.randomUUID().toString()),
+                    childTaskCallGroup(parent.conversationId.value, parent.runId.value, parent.assistantMessageId.value,
+                        invocation.name, invocation.id.value), epoch, UUID.randomUUID().toString(), UUID.randomUUID().toString()),
                     parent.assistantMessageId.value, parent.ownerId, 0, command.profileId, command.instruction,
                     sourceTaskId = source.owner.childRunId, commandKind = command.kind,
                     display = binding.resources?.models?.get(command.profileId)?.display)

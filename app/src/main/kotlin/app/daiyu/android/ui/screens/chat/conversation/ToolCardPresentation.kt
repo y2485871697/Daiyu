@@ -92,7 +92,7 @@ internal object ToolCardPresentations {
         val title = if (kind.first == "generic" && toolName.matches(Regex("[A-Za-z][A-Za-z0-9_.-]{0,63}"))) {
             "执行其他工具 · $toolName"
         } else kind.second
-        return Presentation(kind.first, title, summary, sections, ToolCategoryDetails.project(kind.first, arguments, result))
+        return Presentation(kind.first, title, summary, sections, ToolCategoryDetails.project(kind.first, arguments, result, toolName))
     }
     fun copySummary(turns: List<ChatTurnUi>, requested: WorkStepUi): String? {
         if (requested.owner == null) return null

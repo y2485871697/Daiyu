@@ -766,12 +766,13 @@ class MainActivity : ComponentActivity() {
         activityUsable() && voiceForeground && generationResumed() && retainedPage == "browser" &&
             !sidebarVisible && browserVisualVisit === original && selected?.id == original.owner.conversationId
 
-    private fun openBrowserVisualPage() {
+    private fun openBrowserVisualPage(expectedOwner: WorkStepOwnerUi? = null) {
         if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
             !selectionReady || !controller.ready || controller.dataBusy || pendingTextSend != null ||
             controller.textSendState() != null) return
         closeBrowserVisualVisit()
-        val original = selected?.id?.let(controller::openBrowserVisual)
+        val original = selected?.id?.let { controller.openBrowserVisual(it, expectedOwner) }
+        if (expectedOwner != null && original == null) return
         retainedPage = "browser"
         browserVisualVisit = original
     }
@@ -1781,7 +1782,8 @@ class MainActivity : ComponentActivity() {
                                             QuestionCleanup(turn.id)
                                             VoiceExtras(turn.id)
                                         }
-                                    }, dedicatedTool = { step -> DedicatedQuestion(step) }, imageLoader = imageHost.historyLoader,
+                                    }, dedicatedTool = { step -> DedicatedQuestion(step) },
+                                        toolContent = { step -> ToolTrustedContent(step) }, imageLoader = imageHost.historyLoader,
                                         assistant = projectedAssistants.firstOrNull { it.id == (selected?.assistantId ?: activeAssistant) })
                                     Column(Modifier.fillMaxWidth().heightIn(max = extrasMaxHeight)
                                         .verticalScroll(rememberScrollState()).testTag("chat-extra-actions")) {
@@ -4155,6 +4157,38 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    @Composable private fun ToolTrustedContent(step: WorkStepUi) {
+        val owner = step.owner
+        if (owner != null && step.category == "browser" && controller.hasBrowserVisual(owner)) {
+            top.yukonga.miuix.kmp.basic.TextButton(text = "查看原运行浏览器", onClick = { openBrowserVisualPage(owner) })
+        }
+        if (owner != null && step.category == "workspace") {
+            top.yukonga.miuix.kmp.basic.TextButton(text = "打开工作区与文件", onClick = {
+                if (activityUsable() && retainedPage == "chat" && owner.conversationId == selected?.id?.value)
+                    retainedPage = "chat-workspace"
+            })
+        }
+        if (step.toolName == "screen" && step.state == WorkStepState.OK && activityUsable() && voiceForeground &&
+            retainedPage == "chat" && owner?.conversationId == selected?.id?.value) {
+            app.daiyu.android.ui.screens.chat.conversation.ToolScreenshotContent(controller, step)
+        }
+        if (step.category == "generation") {
+            app.daiyu.android.ui.screens.chat.conversation.GenerationToolContent(controller, step) {
+                if (activityUsable() && retainedPage == "chat" && step.owner?.conversationId == selected?.id?.value) {
+                    openGenerationOutputs()
+                }
+            }
+        }
+        if (step.toolName in setOf("run_child_models", "start_child_tasks", "direct_child_task")) {
+            app.daiyu.android.ui.screens.chat.conversation.ChildTaskToolContent(controller, step) {
+                val owner = step.owner
+                if (owner != null && activityUsable() && retainedPage == "chat" && owner.conversationId == selected?.id?.value) {
+                    guard { openChildTaskRecords(owner.conversationId) }
+                }
+            }
+        }
+    }
+
     @Composable private fun DedicatedQuestion(step: WorkStepUi): Boolean {
         if (step.toolName != "ask_user") return false
         val owner = step.owner ?: return false
@@ -5049,7 +5083,7 @@ class MainActivity : ComponentActivity() {
                 questionCards[owner to block.invocation.id.value]?.identity?.storageKey
             }, timestamp = { message ->
                 MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
-            }, toolState = app.daiyu.android.ui.RetainedToolOutcomes.stateReader(controller.database, shown.map { it.second })), canJumpToPreviousUser = if (rowsChanged) shown.any { it.second.role == "user" } else chatState.canJumpToPreviousUser,
+            }, toolReceipt = app.daiyu.android.ui.RetainedToolOutcomes.projectionReader(controller.database, shown.map { it.second }, controller::runState, controller::runStopping)), canJumpToPreviousUser = if (rowsChanged) shown.any { it.second.role == "user" } else chatState.canJumpToPreviousUser,
             statusText = controller.problem ?: when { controller.dataBusy -> "处理备份中"; !controller.ready -> "恢复会话中";
                 pendingTextSend != null -> "正在准备上下文并核实发送结果"; imageHost.sending -> "正在核实图片发送结果"; else -> null },
             composer = ComposerUi(text = draft, selectionStart = selectionStart, selectionEnd = selectionEnd,

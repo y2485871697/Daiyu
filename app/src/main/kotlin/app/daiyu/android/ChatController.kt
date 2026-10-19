@@ -803,12 +803,12 @@ class ChatController internal constructor(private val application:Application,
     }
 
     internal data class GenerationAssetDisplay(val metadata: ControllerGenerationOutputMetadata,
-        val thumbnail: android.graphics.Bitmap?)
+        val thumbnail: android.graphics.Bitmap?, val binding: GenerationAttemptBinding? = null, val itemId: String = "")
     private val generationOutputReaders = linkedMapOf<String, ControllerGenerationOutputReader>()
     private val generationOutputConversations = mutableMapOf<String, String>()
 
     /** Same account and owner reuse one read fence. Only the controller worker touches this map. */
-    internal fun loadGenerationOutputs(conversation: ConversationId,
+    internal fun loadGenerationOutputs(conversation: ConversationId, forBinding: GenerationAttemptBinding? = null,
         complete: (List<GenerationAssetDisplay>?) -> Unit): Boolean {
         synchronized(this) {
             if (closed || !ready || dataBusy) return false
@@ -825,10 +825,14 @@ class ChatController internal constructor(private val application:Application,
                 val displays = mutableListOf<GenerationAssetDisplay>()
                 // Materialize scalars and CLOSE the SQL cursor before any owner/file gate read.
                 // Side table is authoritative, including registered outputs beside central UNKNOWN.
+                check(forBinding == null || forBinding.conversationId == conversation.value)
+                val selection = if (forBinding == null) "" else " AND assistant_id=? AND run_id=? AND tool_call_id=? AND tool_name=?"
+                val selectionArgs = if (forBinding == null) arrayOf(scope, conversation.value) else arrayOf(scope,
+                    conversation.value, forBinding.assistantMessageId, forBinding.runId, forBinding.toolCallId, forBinding.toolName)
                 val selected = retained.database().rawQuery("SELECT operation_id,item_id,output_index,fingerprint,protocol," +
                     "assistant_id,run_id,tool_call_id,tool_name FROM generation_outputs " +
-                    "WHERE account_scope=? AND conversation_id=? ORDER BY rowid DESC LIMIT 32",
-                    arrayOf(scope, conversation.value)).use { rows ->
+                    "WHERE account_scope=? AND conversation_id=?" + selection + " ORDER BY rowid DESC LIMIT 32",
+                    selectionArgs).use { rows ->
                     val result = mutableListOf<Triple<GenerationAttemptBinding, GenerationAttempt, Int>>()
                     while (rows.moveToNext()) {
                         val binding = GenerationAttemptBinding(conversation.value, rows.getString(5),
@@ -856,7 +860,7 @@ class ChatController internal constructor(private val application:Application,
                         reader.openOriginal(attempt, index)?.use { it.read() }
                         null
                     }
-                    displays.add(GenerationAssetDisplay(metadata, thumbnail))
+                    displays.add(GenerationAssetDisplay(metadata, thumbnail, binding, attempt.identity.itemId))
                 }
                 displays.toList()
             }.getOrNull()
@@ -909,7 +913,7 @@ class ChatController internal constructor(private val application:Application,
     /** Imported originals have a separate read-only path. No settings/vault, retained live
      * Resources, output registration, reservation, download or restoration of authority.
      */
-    internal fun loadHistoricalGenerationOutputs(conversation: ConversationId,
+    internal fun loadHistoricalGenerationOutputs(conversation: ConversationId, forBinding: GenerationAttemptBinding? = null,
         complete: (List<HistoricalGenerationAssetDisplay>?) -> Unit): Boolean {
         synchronized(this) {
             if (closed || !ready || dataBusy) return false
@@ -919,7 +923,12 @@ class ChatController internal constructor(private val application:Application,
             val result = runCatching {
                 synchronized(this) { check(conversation.value !in generationConversationPublicationSeals) }
                 // Display is explicitly capped like live history; complete export is not capped.
-                neutralBackup.historicalGenerationOutputs(conversation).take(32).map { history ->
+                check(forBinding == null || forBinding.conversationId == conversation.value)
+                neutralBackup.historicalGenerationOutputs(conversation).filter { history ->
+                    forBinding == null || (history.conversationId == forBinding.conversationId &&
+                        history.assistantMessageId == forBinding.assistantMessageId && history.runId == forBinding.runId &&
+                        history.toolCallId == forBinding.toolCallId && history.source.toolName == forBinding.toolName)
+                }.take(32).map { history ->
                     val bytes = neutralBackup.historicalGenerationOriginal(history)
                     val thumbnail = if (history.kind == GenerationKind.IMAGE) {
                         android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
@@ -947,7 +956,7 @@ class ChatController internal constructor(private val application:Application,
     internal data class StaticGenerationAssetDisplay(val output: app.daiyu.android.storage.StaticGenerationOutput,
         val thumbnail: android.graphics.Bitmap?)
 
-    internal fun loadStaticGenerationOutputs(conversation: ConversationId,
+    internal fun loadStaticGenerationOutputs(conversation: ConversationId, forBinding: GenerationAttemptBinding? = null,
         complete: (List<StaticGenerationAssetDisplay>?) -> Unit): Boolean {
         synchronized(this) {
             if (closed || !ready || dataBusy) return false
@@ -956,7 +965,13 @@ class ChatController internal constructor(private val application:Application,
         try { executor.execute {
             val result = runCatching {
                 synchronized(this) { check(conversation.value !in generationConversationPublicationSeals) }
-                neutralBackup.staticGenerationOutputs(conversation).take(32).map { output ->
+                check(forBinding == null || forBinding.conversationId == conversation.value)
+                neutralBackup.staticGenerationOutputs(conversation).filter { output ->
+                    val target = output.destination
+                    forBinding == null || (target.conversationId == forBinding.conversationId &&
+                        target.assistantMessageId == forBinding.assistantMessageId && target.runId == forBinding.runId &&
+                        target.toolCallId == forBinding.toolCallId && target.toolName == forBinding.toolName)
+                }.take(32).map { output ->
                     val source = output.source
                     val bytes = neutralBackup.staticGenerationOriginal(output)
                     val thumbnail = if (source.kind == GenerationKind.IMAGE) android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size,
@@ -1212,17 +1227,24 @@ class ChatController internal constructor(private val application:Application,
     }
     @Synchronized internal fun questionProjection(message:Message,call:ToolInvocation):QuestionProjection? {
         if(call.name!=ASK_USER_TOOL_NAME || message.role!=Message.ASSISTANT_ROLE) return null
-        val (identity,record)=questionHistory.values.singleOrNull {
-            it.first.conversationId==message.conversationId.value && it.first.runId==message.runId.value &&
-                it.first.callId==call.id.value
+        val (snapshot, recoveryOwner) = runCatching {
+            SQLiteRuntimeStore.readQuestionCheckpoint(database.readableDatabase, message.id.value)
+        }.getOrNull() ?: return null
+        if (snapshot.message.id != message.id || snapshot.message.conversationId != message.conversationId ||
+            snapshot.message.runId != message.runId || snapshot.tools.none { it.invocation == call }) return null
+        val expectedOwner = recoveryOwner ?: snapshot.owner
+        val (identity, record) = questionHistory.values.singleOrNull {
+            it.first.conversationId == message.conversationId.value && it.first.runId == message.runId.value &&
+                it.first.callId == call.id.value && it.first.ownerId == expectedOwner
         } ?: return null
+        if (runCatching { app.daiyu.android.domain.question.AskUserContract.parse(call.arguments) }.getOrNull() != record.question) return null
         val current=resources?.takeIf {it.initial.id==message.id && it.initial.runId==message.runId &&
             it.initial.conversationId==message.conversationId}
         val session=current?.question
-        val writable=!closed && current!=null && !current.fenced && current.waiting &&
+        val writable=recoveryOwner == null && !closed && current!=null && !current.fenced && current.waiting &&
             current.offer?.context?.owner?.ownerId==identity.ownerId &&
             current.offer?.pending?.callId==call.id && record.answer==null && !record.interrupted
-        return QuestionProjection(identity,record,session?.binding,writable)
+        return QuestionProjection(identity,record,if (recoveryOwner == null) session?.binding else null,writable)
     }
     private val toolLedger = ToolLedger(SQLiteToolLedgerStore(database))
     private val childPreferences by lazy { ConversationSubAgentPreferences(application.getSharedPreferences("subagent_configuration", 0)) }
@@ -2248,11 +2270,51 @@ class ChatController internal constructor(private val application:Application,
             })
     }
 
-    internal fun openBrowserVisual(conversation: ConversationId): ControllerBrowserVisual.Visit? {
+    internal fun loadToolScreenshot(owner: app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi,
+        callId: String, complete: (android.graphics.Bitmap?) -> Unit): Boolean {
+        val revision = synchronized(this) {
+            if (closed || !ready || dataBusy) return false
+            generationReaders++; dataRevision
+        }
+        try { executor.execute {
+            val image = runCatching {
+                val snapshot = SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, owner.messageId)
+                    ?: return@runCatching null
+                val message = database.storedMessage(database.readableDatabase, ConversationId(owner.conversationId), owner.messageId)
+                check(message.role == Message.ASSISTANT_ROLE && message.id == snapshot.message.id &&
+                    message.conversationId.value == owner.conversationId && message.runId.value == owner.runId &&
+                    snapshot.message.conversationId == message.conversationId && snapshot.message.runId == message.runId)
+                val record = snapshot.tools.singleOrNull { it.invocation.id.value == callId && it.invocation.name == "screen" }
+                    ?: return@runCatching null
+                val blocks = message.blocks + message.historySegments.flatMap { it.blocks }
+                check(blocks.filterIsInstance<MessageBlock.Tool>().any { it.invocation == record.invocation && it.result == record.result })
+                app.daiyu.android.ui.ToolScreenshotReceipt.decode(record)
+            }.getOrNull()
+            handler.post {
+                val valid = synchronized(this) {
+                    generationReaders--; if (closed) closeStorageWhenIdle(); !closed && !dataBusy && dataRevision == revision
+                }
+                complete(if (valid) image else null)
+            }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            synchronized(this) { generationReaders-- }; return false
+        }
+        return true
+    }
+
+    @Synchronized internal fun hasBrowserVisual(owner: app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi): Boolean =
+        resources?.let { !closed && ready && !dataBusy && !it.fenced && it.browserVisual != null &&
+            it.initial.conversationId.value == owner.conversationId && it.initial.id.value == owner.messageId &&
+            it.initial.runId.value == owner.runId } == true
+
+    internal fun openBrowserVisual(conversation: ConversationId,
+        expectedOwner: app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi? = null): ControllerBrowserVisual.Visit? {
         check(Looper.myLooper() == Looper.getMainLooper())
         val original = synchronized(this) {
             resources?.takeIf { !closed && ready && !dataBusy && !it.fenced &&
-                it.initial.conversationId == conversation }?.browserVisual
+                it.initial.conversationId == conversation && (expectedOwner == null ||
+                    (it.initial.id.value == expectedOwner.messageId && it.initial.runId.value == expectedOwner.runId &&
+                        it.initial.conversationId.value == expectedOwner.conversationId)) }?.browserVisual
         } ?: return null
         return original.openVisit()
     }
@@ -4083,6 +4145,11 @@ class ChatController internal constructor(private val application:Application,
             owner.role==Message.ASSISTANT_ROLE) runner else null
     }
     @Synchronized internal fun runState(owner:Message):ExecutionState? = ownedRunner(owner)?.state()
+    @Synchronized internal fun runStopping(owner: Message): Boolean = resources?.let {
+        it.fenced && it.initial.id == owner.id && it.initial.runId == owner.runId &&
+            it.initial.conversationId == owner.conversationId && owner.role == Message.ASSISTANT_ROLE
+    } == true
+
     /** Backend-only paused text admission. The Boolean is queueing, never a durable receipt.
      * Callers retain the messageId and draft until Accepted for the matching editor owner. */
     internal fun admitSupplement(owner:Message, messageId:MessageId, text:String,

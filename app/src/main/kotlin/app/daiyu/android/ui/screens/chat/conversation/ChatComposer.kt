@@ -57,7 +57,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifier: Modifier = Modifier, assistant: AssistantDisplay? = null,
-    balanceState: app.daiyu.android.balance.BalanceState? = null) {
+    balanceState: app.daiyu.android.balance.BalanceState? = null,
+    backdrop: top.yukonga.miuix.kmp.blur.LayerBackdrop? = null) {
     val colors = MiuixTheme.colorScheme
     val currentEditorGeneration by rememberUpdatedState(state.editorGeneration)
     var attachments by remember { mutableStateOf(false) }
@@ -82,7 +83,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         else -> "发送"
     }
     Column(modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) {
-        ChatComposerSurface {
+        ChatComposerSurface(backdrop) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             ComposerChip(DaiyuIcons.Model, state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,

@@ -84,6 +84,7 @@ class SQLiteRuntimeStoreDatabaseTest:InstrumentationTestCase() {
         assertEquals(RunStatus.INTERRUPTED,result.message.status);assertEquals(active.message.blocks,result.message.blocks)
         assertEquals(ToolDisposition.UNKNOWN,result.tools.single().disposition);assertTrue(result.requestUnconfirmed)
         assertEquals(3L,result.revision);assertTrue(result.owner!=active.owner)
+        assertEquals(active.owner, SQLiteRuntimeStore.readQuestionCheckpoint(db.readableDatabase, first.message.id.value)!!.second)
         assertEquals(active.request,result.request);assertEquals(active.owner,result.request!!.owner)
         assertEquals(active.usage,result.usage)
         assertEquals(result,next.reconcileCheckpoint(first))

@@ -168,7 +168,7 @@ internal class SQLiteRuntimeStore private constructor(
             reconcile(db, prior)
         }
     }
-    private data class Stored(val value: RunCheckpoint, val processOwner: String)
+    private data class Stored(val value: RunCheckpoint, val processOwner: String, val recoverySourceOwner: String? = null)
     private fun recoverable(db: SQLiteDatabase): List<Stored> {
         val ids = db.rawQuery(
             "SELECT message_id FROM runtime_checkpoints WHERE phase!='TERMINAL' ORDER BY message_id", null
@@ -200,7 +200,9 @@ internal class SQLiteRuntimeStore private constructor(
             tools = saved.tools.map {
                 if (it.disposition == ToolDisposition.IN_FLIGHT) it.copy(disposition = ToolDisposition.UNKNOWN) else it
             })
-        val encoded = RunCheckpointCodec.encode(result)
+        val encoded = org.json.JSONObject(RunCheckpointCodec.encode(result))
+            .put("recovery_source_owner", saved.owner).toString()
+        RunCheckpointCodec.checkEncodedSize(encoded.toByteArray(Charsets.UTF_8).size, false)
         if (actual.status == RunStatus.RUNNING) database.writeRuntimeMessage(db, result.message)
         check(db.update("runtime_checkpoints", values(result, encoded), "message_id=? AND owner=? AND revision=? AND process_owner=?",
             arrayOf(saved.message.id.value, saved.owner, saved.revision.toString(), prior.processOwner)) == 1)
@@ -225,6 +227,9 @@ internal class SQLiteRuntimeStore private constructor(
         internal fun readCheckpointSnapshot(db: SQLiteDatabase, messageId: String): RunCheckpoint? =
             read(db, messageId)?.value
 
+        internal fun readQuestionCheckpoint(db: SQLiteDatabase, messageId: String): Pair<RunCheckpoint, String?>? =
+            read(db, messageId)?.let { it.value to it.recoverySourceOwner }
+
         private fun read(db: SQLiteDatabase, messageId: String): Stored? {
             val metadata = db.rawQuery("SELECT conversation_id,run_id,owner,revision,phase,process_owner,length(payload) FROM runtime_checkpoints WHERE message_id=?",
                 arrayOf(messageId)).use { c -> if (!c.moveToFirst()) null else {
@@ -232,11 +237,14 @@ internal class SQLiteRuntimeStore private constructor(
                 val size = c.getLong(6); require(size in 1..(64L * 1024 * 1024))
                 listOf(c.getString(0), c.getString(1), c.getString(2), c.getLong(3).toString(), c.getString(4), c.getString(5), size.toString())
             } } ?: return null
-            val value = RunCheckpointCodec.decode(requireNotNull(SQLiteText.read(db, "runtime_checkpoints", "payload", "message_id", messageId)))
+            val payload = requireNotNull(SQLiteText.read(db, "runtime_checkpoints", "payload", "message_id", messageId))
+            val value = RunCheckpointCodec.decode(payload)
+            val json = org.json.JSONObject(payload)
+            val recoveryOwner = if (json.has("recovery_source_owner")) json.getString("recovery_source_owner") else null
             check(value.message.id.value == messageId && value.message.conversationId.value == metadata[0] &&
                 value.message.runId.value == metadata[1] && value.owner == metadata[2] &&
                 value.revision.toString() == metadata[3] && value.phase.name == metadata[4]) { "检查点元数据不匹配" }
-            return Stored(value, metadata[5])
+            return Stored(value, metadata[5], recoveryOwner)
         }
         private val leases = mutableSetOf<String>()
         fun acquire(database: ConversationDatabase): SQLiteRuntimeStore {

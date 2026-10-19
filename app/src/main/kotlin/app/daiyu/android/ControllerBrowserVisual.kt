@@ -24,6 +24,8 @@ internal class ControllerBrowserVisual(
         val live: Boolean = false, val lease: BrowserTabLease? = null,
         val takenOver: Boolean = false, val waiting: Boolean = false, val mounted: Boolean = false,
         val unknown: Boolean = false, val notice: String = "",
+        val tabs: List<BrowserTabLease> = emptyList(),
+        val page: app.daiyu.android.browser.openminis.BrowserVisiblePage? = null,
     )
     internal class Visit internal constructor(private val controller: ControllerBrowserVisual) : AutoCloseable {
         internal val active = AtomicBoolean(true)
@@ -69,9 +71,12 @@ internal class ControllerBrowserVisual(
         advanceTakeover(visit)
         val held = token
         val mount = mounted.get()
+        val page = if (!unknown && mount?.visit === visit && !mount.closeStarted) try {
+            mount.attachment?.page()
+        } catch (_: Exception) { markUnknown("页面状态读取未确认，请停止原任务后检查。"); null } else null
         return State(true, held?.lease ?: binding.session.currentTab, held != null, pending.get()?.visit === visit,
             mount?.visit === visit && mount.token === held && mount.attachment != null && !mount.closeStarted,
-            unknown, notice)
+            unknown, notice, binding.session.visibleTabs, page)
     }
     private fun takeover(visit: Visit, lease: BrowserTabLease) {
         requireMain()

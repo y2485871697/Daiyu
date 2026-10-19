@@ -64,8 +64,8 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
     val groups = listOf(
         listOf(MenuEntry("交互模式", DaiyuIcons.Interactive, ChatMenuAction.INTERACTIVE_MODE)),
         listOf(
-            MenuEntry("终端记录", DaiyuIcons.Terminal, ChatMenuAction.OPEN_TERMINAL),
-            MenuEntry("网页记录", DaiyuIcons.Browser, ChatMenuAction.OPEN_BROWSER),
+            MenuEntry("打开终端", DaiyuIcons.Terminal, ChatMenuAction.OPEN_TERMINAL),
+            MenuEntry("打开浏览器", DaiyuIcons.Browser, ChatMenuAction.OPEN_BROWSER),
             MenuEntry("浏览工作区文件", DaiyuIcons.Folder, ChatMenuAction.OPEN_WORKSPACE),
             MenuEntry("子代理状态", DaiyuIcons.SubAgent, ChatMenuAction.SUB_AGENT),
         ),

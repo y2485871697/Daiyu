@@ -16,18 +16,18 @@ class TerminalActivityTest : WiredActivityTestCase() {
         }
     }
 
-    private fun enterFromSettings() {
-        openSettings()
-        reveal("settings-row:终端", "设置").performClick()
+    private fun enterFromMenu() {
+        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.OPEN_TERMINAL) }
         awaitTerminal()
     }
 
-    fun testSettingsEntryAndRecreationKeepSameIdleOwnerWithoutOpeningPty() {
-        enterFromSettings()
+    fun testMenuEntryAndRecreationKeepSameIdleOwnerWithoutOpeningPty() {
+        enterFromMenu()
         val retained = owner
         val caller = retained.caller.value
         assertFalse(retained.host.state.value.ownsResources)
-        node("terminal-identity").assertTextContains(android.os.Process.myUid().toString(), substring = true)
+        node("terminal-identity").assertDoesNotExist()
+        node("terminal-input").assertIsDisplayed()
         activity = recreateActivity(activity)
         awaitTerminal()
         assertSame(retained, owner)
@@ -49,7 +49,7 @@ class TerminalActivityTest : WiredActivityTestCase() {
         backToChat(activity)
         ui.waitForIdle()
         node("terminal-screen").assertDoesNotExist()
-        enterFromSettings()
+        enterFromMenu()
         val caller = owner.caller.value
         mainThread { oldOpen() }
         assertSame(caller, owner.caller.value)

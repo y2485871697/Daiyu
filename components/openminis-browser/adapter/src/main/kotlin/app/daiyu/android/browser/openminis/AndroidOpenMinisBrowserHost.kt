@@ -32,12 +32,15 @@ import java.io.ByteArrayInputStream
 import java.util.concurrent.CompletableFuture
 import kotlin.coroutines.resume
 
+data class BrowserVisiblePage(val url: String, val title: String, val history: List<Pair<String, String>>)
+
 /** One exact UI attachment, never a tab-number or model capability. */
 class BrowserVisibleAttachment internal constructor(
     private val ui: UiDispatcher,
     private val navigateAction: (String) -> Unit,
     private val loadingAction: () -> Boolean,
     private val detachAction: () -> Unit,
+    private val pageAction: () -> BrowserVisiblePage = { BrowserVisiblePage("", "", emptyList()) },
 ) : AutoCloseable {
     private var closed = false
     fun navigate(url: String) {
@@ -49,6 +52,11 @@ class BrowserVisibleAttachment internal constructor(
         check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
         check(!closed) { "BROWSER_VISIBLE_CLOSED" }
         return loadingAction()
+    }
+    fun page(): BrowserVisiblePage {
+        check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
+        check(!closed) { "BROWSER_VISIBLE_CLOSED" }
+        return pageAction()
     }
     override fun close() {
         check(ui.isUiThread()) { "BROWSER_DISPATCH_NOT_UI" }
@@ -125,6 +133,12 @@ class AndroidOpenMinisBrowserHost(
                 },
                 // Cleanup remains legal after token/owner revocation, for this instance only.
                 detachAction = { resource.detach(identity) },
+                pageAction = {
+                    withVisibleResource(token, requireIdle = false) { current, _ ->
+                        check(current === resource) { "BROWSER_STALE_TAB" }
+                        resource.visiblePage(identity)
+                    }
+                },
             )
         }
 
@@ -242,6 +256,16 @@ private class AndroidBlankResource(
         check(navigation.phase == NavigationCallbacks.Phase.IDLE) { "BROWSER_OPENMINIS_NATIVE_ACTIVE" }
         ensureManager()
         view.loadUrl(url)
+    }
+
+    fun visiblePage(identity: Any): BrowserVisiblePage {
+        check(visibleIdentity === identity && resourceLive()) { "BROWSER_VISIBLE_EXPIRED" }
+        val history = view.copyBackForwardList()
+        return BrowserVisiblePage(view.url.orEmpty(), view.title.orEmpty(),
+            (maxOf(0, history.size - 100) until history.size).map { index ->
+                val item = history.getItemAtIndex(index)
+                item.url.orEmpty() to item.title.orEmpty()
+            })
     }
 
     fun visibleLoading(identity: Any): Boolean {

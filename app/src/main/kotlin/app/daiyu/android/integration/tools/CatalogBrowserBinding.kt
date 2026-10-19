@@ -53,6 +53,7 @@ internal class CatalogBrowserBinding private constructor(
         private val navigateOriginal: (String) -> Unit,
         private val loadingOriginal: () -> Boolean,
         private val closeOriginal: () -> Unit,
+        private val pageOriginal: () -> app.daiyu.android.browser.openminis.BrowserVisiblePage = { app.daiyu.android.browser.openminis.BrowserVisiblePage("", "", emptyList()) },
     ) : AutoCloseable {
         private var closed = false
         fun navigate(url: String) {
@@ -62,6 +63,10 @@ internal class CatalogBrowserBinding private constructor(
         val isLoading: Boolean get() {
             check(!closed) { "browser_visible_attachment_closed" }
             return loadingOriginal()
+        }
+        fun page(): app.daiyu.android.browser.openminis.BrowserVisiblePage {
+            check(!closed) { "browser_visible_attachment_closed" }
+            return pageOriginal()
         }
         override fun close() {
             if (closed) return
@@ -76,7 +81,7 @@ internal class CatalogBrowserBinding private constructor(
             checkNotNull(host.webHost) { "browser_visible_unsupported" }
         }
         val original = originalWebHost.attach(token, parent)
-        return VisibleAttachment({ original.navigate(it) }, { original.isLoading }, { original.close() })
+        return VisibleAttachment({ original.navigate(it) }, { original.isLoading }, { original.close() }, { original.page() })
     }
     val requiredWrites: Set<WriteEffect> = java.util.Collections.unmodifiableSet(
         confirmed.preview.writes.map { it.effect }.toSet())

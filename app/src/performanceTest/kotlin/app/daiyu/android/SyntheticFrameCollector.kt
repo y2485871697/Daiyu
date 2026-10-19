@@ -51,6 +51,11 @@ internal class SyntheticFrameCollector(instrumentation: Instrumentation, private
         try { syntheticMain(instrumentation) { window.addOnFrameMetricsAvailableListener(listener, Handler(thread.looper)) } }
         catch (failure: Throwable) { thread.quitSafely(); thread.join(5_000); throw failure }
     }
+    fun framesBetween(startNs: Long, endNs: Long): Int {
+        check(closed)
+        val index = metrics.keys.indexOf("intended_vsync_timestamp_ns")
+        return synchronized(lock) { frames.count { it.values[index] >= startNs && it.values[index] < endNs } }
+    }
     fun scenario(value: String) { check(!closed); label.set(value) }
     override fun close() {
         if (closed) return
@@ -81,8 +86,8 @@ internal class SyntheticFrameCollector(instrumentation: Instrumentation, private
                 .put("collector_overflow_count", overflow).put("metric_unavailable_value", -1)
                 .put("scenario_label_kind", "hint_at_callback_delivery").put("environment", environment)
                 .put("metric_names", JSONArray(metrics.keys.toList()))
-                .put("measurement_scope", "frame_and_semantics_input_only")
-                .put("not_measured_by_this_report", JSONArray(listOf("cold_start", "migration_ui_progress", "backend_migration", "stop_feedback", "streaming", "ime", "anr_count", "memory_growth"))))
+                .put("measurement_scope", "raw_frames_and_instrumented_synthetic_workloads")
+                .put("not_measured_by_this_report", JSONArray(listOf("cold_start", "migration_ui_progress", "backend_migration", "stop_first_visible_feedback", "real_provider_streaming", "system_ime_round_trip", "anr_count", "memory_growth"))))
             copy.forEachIndexed { index, raw ->
                 line(JSONObject().put("type", "frame").put("index", index).put("callback_ns", raw.callbackNs)
                     .put("scenario_hint", raw.label).put("framework_drop_count", raw.dropped)

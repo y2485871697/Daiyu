@@ -35,6 +35,6 @@ internal data class ChatChromeColors(
 @Composable
 internal fun chatChromeColors(): ChatChromeColors {
     val dark = MiuixTheme.colorScheme.background.luminance() < .3f
-    return if (dark) ChatChromeColors(Color(0xFFE0DCE8), Color(0xFF7A7786), Color(0xFFB2A9C7), Color(0xFFA491F1), Color(0xFF2B283A))
+    return if (dark) ChatChromeColors(Color(0xFFE0DCE8), Color(0xFF7A7786), Color(0xFFB2A9C7), Color(0xFFB4A3F7), Color(0xFF2B283A))
     else ChatChromeColors(Color(0xFF36333F), Color(0xFFA19AA9), Color(0xFF716A82), Color(0xFF7663BD), Color(0xFFECE7F5))
 }

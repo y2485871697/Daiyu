@@ -145,9 +145,11 @@ class CatalogBrowserBindingAndroidTest : InstrumentationTestCase() {
                         historyApproval = app.daiyu.android.browser.openminis.OpenMinisHistoryApproval { _, url, _ ->
                             url == "https://browser-fixture.invalid/receipt"
                         }, requestOverride = { request ->
-                            check(request.url.toString() == "https://browser-fixture.invalid/receipt")
-                            android.webkit.WebResourceResponse("text/html", "UTF-8", java.io.ByteArrayInputStream(
-                                "<html><body>Receipt screenshot fixture</body></html>".toByteArray()))
+                            check(request.url.host == "browser-fixture.invalid")
+                            if (request.url.path == "/receipt") android.webkit.WebResourceResponse("text/html", "UTF-8",
+                                java.io.ByteArrayInputStream("<html><body>Receipt screenshot fixture<img src='/missing.png'></body></html>".toByteArray()))
+                            else android.webkit.WebResourceResponse("text/plain", "UTF-8", 404, "Not Found", emptyMap(),
+                                java.io.ByteArrayInputStream(byteArrayOf()))
                         }) } catch (failure: app.daiyu.android.browser.openminis.BrowserRunConstructionException) {
                             constructionCleanup = { failure.closeWithResult() }
                             throw failure
@@ -163,9 +165,9 @@ class CatalogBrowserBindingAndroidTest : InstrumentationTestCase() {
             binding = opened
             assertTrue(opened.session.execute(mapOf("action" to "new_tab")) is
                 app.daiyu.android.browser.bridge.BrowserOutcome.Confirmed)
-            assertTrue("fixture document must finish before screenshot",
-                opened.session.execute(mapOf("action" to "navigate", "url" to "https://browser-fixture.invalid/receipt")) is
-                    app.daiyu.android.browser.bridge.BrowserOutcome.Confirmed)
+            val navigation = opened.session.execute(mapOf("action" to "navigate", "url" to "https://browser-fixture.invalid/receipt"))
+            assertTrue("fixture navigation must confirm before screenshot: $navigation",
+                navigation is app.daiyu.android.browser.bridge.BrowserOutcome.Confirmed)
             val executionOwner = owner(identity)
             val catalog = opened.bindOwner(executionOwner)
             val ledger = app.daiyu.android.domain.tools.InMemoryToolLedgerStore()

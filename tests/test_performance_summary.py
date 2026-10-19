@@ -11,10 +11,22 @@ import unittest
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1] / 'scripts' / 'acceptance'
-with patch.object(sys, 'path', [str(ROOT)] + sys.path):
-    spec = importlib.util.spec_from_file_location('performance_summary', ROOT / 'performance_summary.py')
-    summary = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(summary)
+def load(name, filename):
+    spec = importlib.util.spec_from_file_location(name, ROOT / filename)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_summary():
+    evidence = load('summary_evidence_api', 'evidence.py')
+    with patch.dict(sys.modules, {'evidence': evidence}):
+        performance = load('summary_performance_api', 'performance.py')
+        with patch.dict(sys.modules, {'performance': performance}):
+            return load('summary_api', 'performance_summary.py')
+
+
+summary = load_summary()
 
 
 def capture():
@@ -57,6 +69,18 @@ def memory(slope=0):
 
 
 class SummaryTests(unittest.TestCase):
+    def test_loading_isolated_from_cooperation_module_names_and_preserves_cache(self):
+        import types
+        foreign_evidence = types.ModuleType('evidence')
+        foreign_performance = types.ModuleType('performance')
+        before_path = list(sys.path)
+        with patch.dict(sys.modules, {'evidence': foreign_evidence, 'performance': foreign_performance}):
+            isolated = load_summary()
+            self.assertFalse(isolated.summarize(capture())['business_acceptance'])
+            self.assertIs(sys.modules['evidence'], foreign_evidence)
+            self.assertIs(sys.modules['performance'], foreign_performance)
+        self.assertEqual(sys.path, before_path)
+
     def test_frame_exact_thresholds_and_intended_vsync_not_callback(self):
         frames = summary.frames(capture())
         self.assertEqual(frames[0]['over_16_7_ms_ratio'], .5)

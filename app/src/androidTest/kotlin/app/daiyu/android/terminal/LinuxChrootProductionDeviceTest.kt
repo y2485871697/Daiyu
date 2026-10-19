@@ -1,5 +1,6 @@
 package app.daiyu.android.terminal
 
+import android.os.SystemClock
 import android.test.InstrumentationTestCase
 import androidx.test.platform.app.InstrumentationRegistry
 import app.daiyu.android.domain.ConversationId
@@ -57,8 +58,16 @@ class LinuxChrootProductionDeviceTest : InstrumentationTestCase() {
     }
 
     fun testExplicitRootChrootSelectionAndDetachedDescendantDrain() {
+        verifyExplicitRootChrootSelectionAndDetachedDescendantDrain()
+    }
+
+    private fun verifyExplicitRootChrootSelectionAndDetachedDescendantDrain() {
         val args = InstrumentationRegistry.getArguments()
         if (args.getString("daiyuChrootOptIn") != "true") return
+        val holdSeconds = args.getString("daiyuChrootHoldSeconds")?.let { raw ->
+            requireNotNull(raw.toIntOrNull()) { "invalid_chroot_hold_seconds" }
+                .also { require(it in 60..600) { "invalid_chroot_hold_seconds" } }
+        } ?: 0
         val context = instrumentation.targetContext
         check(context.packageName == "app.daiyu.android.synthetic") { "isolated_synthetic_required" }
         val source = File(requireNotNull(args.getString("daiyuChrootBusyboxSource")))
@@ -110,7 +119,7 @@ class LinuxChrootProductionDeviceTest : InstrumentationTestCase() {
                 /bin/busybox stty -echo
                 printf '\nPARENT_$token UID=%s PID=%s\n' "${'$'}(/bin/busybox id -u)" "${'$'}${'$'}"
                 printf '\nTOKEN:%s\n' "${'$'}(/bin/busybox cat /probe-token)"
-                /bin/busybox setsid /bin/sh -c 'printf "\nCHILD_$token UID=%s PID=%s\n" "${'$'}(/bin/busybox id -u)" "${'$'}${'$'}"; exec /bin/busybox sleep 300' </empty &
+                /bin/busybox setsid /bin/sh -c 'printf "\nCHILD_$token UID=%s PID=%s\n" "${'$'}(/bin/busybox id -u)" "${'$'}${'$'}"; exec /bin/busybox sleep ${holdSeconds + 300}' </empty &
 
             """.trimIndent() + "\n"
             val delivery = active.write(auth, "probe", 1, command.toByteArray())
@@ -147,6 +156,46 @@ class LinuxChrootProductionDeviceTest : InstrumentationTestCase() {
             val fields = childStat.substringAfterLast(") ").split(" ")
             assertEquals(child.toString(), fields[3])
             assertTrue(before.lineSequence().any { it == "populated 1" })
+            // An opt-in dwell proves continued ownership, not merely a sleep command being spawned.
+            val holdStart = SystemClock.elapsedRealtime()
+            val holdSamples = org.json.JSONArray()
+            report.put("hold_requested_seconds", holdSeconds).put("hold_samples", holdSamples)
+            val parentStat = before.lineSequence().single { it.startsWith("$parent (") }
+            fun startTime(stat: String) = stat.substringAfterLast(") ").split(" ")[19]
+            val parentStartTime = startTime(parentStat)
+            val childStartTime = startTime(childStat)
+            var lastVerifiedAt = holdStart
+            var maxGapMs = 0L
+            report.put("hold_max_allowed_gap_ms", 5000L)
+            try {
+                while (SystemClock.elapsedRealtime() - holdStart < holdSeconds * 1000L) {
+                    Thread.sleep(minOf(1000L, holdSeconds * 1000L - (SystemClock.elapsedRealtime() - holdStart)).coerceAtLeast(1L))
+                    val sample = JSONObject().put("started_ms", SystemClock.elapsedRealtime() - holdStart)
+                        .put("verified", false)
+                    holdSamples.put(sample)
+                    val observed = rootObservation("set -eu; for p in $parent $child; do " +
+                        "cat /proc/\$p/stat /proc/\$p/cgroup; readlink /proc/\$p/root; done; " +
+                        "cat /sys/fs/cgroup/uid_0/$originalScope/cgroup.events")
+                    val observedAt = SystemClock.elapsedRealtime()
+                    val gapMs = observedAt - lastVerifiedAt
+                    maxGapMs = maxOf(maxGapMs, gapMs)
+                    sample.put("elapsed_ms", observedAt - holdStart).put("gap_ms", gapMs)
+                    check(gapMs <= 5000L) { "chroot_hold_observation_gap" }
+                    assertEquals(parentStartTime, startTime(observed.lineSequence().single { it.startsWith("$parent (") }))
+                    assertEquals(childStartTime, startTime(observed.lineSequence().single { it.startsWith("$child (") }))
+                    assertEquals(2, observed.lineSequence().count { it == "0::/uid_0/$originalScope" })
+                    assertEquals(2, observed.lineSequence().count { it == rootfs.canonicalPath })
+                    assertTrue(observed.lineSequence().any { it == "populated 1" })
+                    leased(persisted)
+                    sample.put("parent_start_ticks", parentStartTime).put("child_start_ticks", childStartTime)
+                        .put("scope", originalScope).put("roots_verified", true).put("verified", true)
+                    lastVerifiedAt = observedAt
+                }
+                if (holdSeconds > 0) assertTrue(holdSamples.length() > 0)
+            } finally {
+                report.put("hold_elapsed_ms", SystemClock.elapsedRealtime() - holdStart)
+                    .put("hold_max_gap_ms", maxGapMs)
+            }
             active.close(); leased(persisted)
             joined = active.awaitTermination(30_000)
             assertTrue("must observe D receipt, reader exit and launcher exit", joined)

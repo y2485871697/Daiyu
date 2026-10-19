@@ -159,12 +159,18 @@ class SyntheticPackageTests(unittest.TestCase):
         self.assertTrue(manifest.is_file())
         sources = sorted((root / 'kotlin').rglob('*.kt'))
         names = {path.name for path in sources}
-        self.assertTrue({'ReleaseSyntheticPerformanceTest.kt', 'SyntheticFrameCollector.kt', 'FullPerformanceDataset.kt'} <= names)
+        self.assertTrue({'ReleaseSyntheticPerformanceTest.kt', 'PersistentColdStartPerformanceTest.kt',
+                         'SyntheticFrameCollector.kt', 'FullPerformanceDataset.kt'} <= names)
         entry = next(path for path in sources if path.name == 'ReleaseSyntheticPerformanceTest.kt').read_text()
         self.assertRegex(entry, r'class\s+ReleaseSyntheticPerformanceTest\s*:\s*InstrumentationTestCase\(\)')
         entries = [(path.name, name) for path in sources for name in
                    re.findall(r'^\s*fun\s+(test\w+)\s*\(\s*\)', path.read_text(), re.MULTILINE)]
-        self.assertEqual([('ReleaseSyntheticPerformanceTest.kt',
+        self.assertEqual([('PersistentColdStartPerformanceTest.kt',
+                           'testPreparePersistentColdStartDataset'),
+                          ('PersistentColdStartPerformanceTest.kt',
+                           'testVerifyPersistentColdStartDataset'),
+                          ('PersistentColdStartPerformanceTest.kt', 'testCollectOneColdStart'),
+                          ('ReleaseSyntheticPerformanceTest.kt',
                            'testCollectRawFramesAndSyntheticInputUpperBounds'),
                           ('ReleaseSyntheticPerformanceTest.kt',
                            'testCollectFullScaleScrollInputAndBackendMigration')], entries)

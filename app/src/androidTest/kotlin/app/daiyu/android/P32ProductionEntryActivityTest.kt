@@ -69,7 +69,7 @@ class P32ProductionEntryActivityTest : WiredActivityTestCase() {
         node("voice-duplex-start").assertDoesNotExist()
         node("voice-stop").assertDoesNotExist()
         node("voice-section-select").performClick()
-        ui.onNodeWithText("个人声音").performClick()
+        ui.onNodeWithTag("settings-radio:个人声音").performScrollTo().performClick()
         node("page:语音设置").performScrollToNode(hasTestTag("voice-account-open"))
         node("voice-account-open").performClick()
         node("voice-account").assertExists()

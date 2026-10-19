@@ -3,6 +3,10 @@ package app.daiyu.android
 import android.os.Handler
 import android.os.Looper
 import androidx.activity.compose.BackHandler
+import app.daiyu.android.ui.screens.settings.SettingsCard
+import app.daiyu.android.ui.screens.settings.SettingsRow
+import app.daiyu.android.ui.screens.settings.SettingsNote
+import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
@@ -35,6 +39,7 @@ internal fun ProductionVoiceAccountPage(
     val latestCurrent by rememberUpdatedState(isCurrent)
     val active = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
     var notice by remember { mutableStateOf("") }
+    var previewConsent by remember { mutableStateOf(false) }
     val preview = remember(frozen.revision, profile) {
         ActivityVoiceAccountPreviewHost.forContext(context, scope, frozen.speech()) { request ->
             active.get() && runtime.current(frozen, profile) && runCatching {
@@ -63,17 +68,21 @@ internal fun ProductionVoiceAccountPage(
             active.set(false); uninstall(); unobserve(); lifecycle.removeObserver(observer); preview.close()
         }
     }
-    // Each visit/resume needs another positive action. This authorizes preview only, never training.
     Column {
-        Text("试听使用已保存的 ${profile.name} 账户，向豆包合成固定文本“你好，这是当前账户音色的试听。”；不是下载云端示范。每次点击可能消耗额度或费用，取消不保证免计费，失败不自动重试。")
-        TextButton(text = "我同意本页显式试听使用上述固定文本并可能收费",
-            modifier = Modifier.testTag("voice-account-preview-consent"), onClick = {
-            if (latestCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && runtime.current(frozen, profile))
-                active.set(true)
-        })
-        if (notice.isNotBlank()) Text(notice)
+        if (notice.isNotBlank()) SettingsNote(notice, error = true)
         VoiceAccountPanel(
             frozenConfiguration = frozen, resources = resources, previewPort = preview,
+            previewConsent = {
+                SettingsCard {
+                    SettingsRow("试听授权", summary = "每次试听会在线合成固定文字，可能消耗额度或费用。",
+                        tag = "voice-account-preview-consent", onClick = { previewConsent = true })
+                }
+            },
+            onAccountKeyChange = { key ->
+                check(latestCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && runtime.current(frozen, profile))
+                runtime.save(frozen.copy(key = key), profile)
+                if (latestCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) leave()
+            },
             stopPreviewStrictly = {
                 if (!preview.stopPreviewStrictly()) false
                 else {
@@ -93,7 +102,8 @@ internal fun ProductionVoiceAccountPage(
                             try {
                                 runtime.save(original.copy(voice = personal.id, model = "seed-tts-2.0"), profile)
                                 onBack()
-                            } catch (_: Exception) { notice = "音色未保存，请退出后重新打开；不会自动合成" }
+                            } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                            catch (_: Exception) { notice = "音色未保存，请退出后重新打开；不会自动合成" }
                         }
                     } catch (_: Exception) { notice = "旧音频释放未确认，未更改音色；请退出本页" }
                 }
@@ -101,6 +111,11 @@ internal fun ProductionVoiceAccountPage(
             onBack = { leave() },
         )
     }
+    if (previewConsent) DaiyuConfirmDialog("试听授权", ACCOUNT_PREVIEW_CONFIRMATION, "允许", false,
+        onConfirm = {
+            previewConsent = false
+            if (latestCurrent() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && runtime.current(frozen, profile)) active.set(true)
+        }, onDismiss = { previewConsent = false })
 }
 
 internal fun accountPreviewVoiceMatches(

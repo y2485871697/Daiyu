@@ -207,9 +207,15 @@ static int root_finish(pid_t child,int master,int result) {
         if(populated<0) { error=errno; break; }
         if(!populated && no_children) {
             struct stat current;
-            if(fstatat(root_scope.parent,root_scope.name,&current,AT_SYMLINK_NOFOLLOW)<0) { error=errno; break; }
+            int checked;
+            do { checked=fstatat(root_scope.parent,root_scope.name,&current,AT_SYMLINK_NOFOLLOW); }
+            while(checked<0 && errno==EINTR && millis()<deadline);
+            if(checked<0) { error=errno; break; }
             if(current.st_dev!=root_scope.identity.st_dev || current.st_ino!=root_scope.identity.st_ino) { error=ESTALE; break; }
-            if(unlinkat(root_scope.parent,root_scope.name,AT_REMOVEDIR)<0) { error=errno; break; }
+            int removed;
+            do { removed=unlinkat(root_scope.parent,root_scope.name,AT_REMOVEDIR); }
+            while(removed<0 && errno==EINTR && millis()<deadline);
+            if(removed<0) { error=errno; break; }
             drained=1; break;
         }
         if(millis()>=deadline) { error=ETIMEDOUT; break; }

@@ -137,7 +137,7 @@ class BalanceProductionOwnershipTest {
         } finally { owner.close(); parent.cancel() }
     }
 
-    @Test fun realHostRouteStateAndAnimatedTopBarSourceContract() {
+    @Test fun realHostRouteStateAndAnimatedComposerBalanceSourceContract() {
         fun source(path: String) = generateSequence(File(System.getProperty("user.dir"))) { it.parentFile }
             .map { File(it, "app/src/main/kotlin/app/daiyu/android/$path") }.first { it.isFile }.readText()
         val main = source("MainActivity.kt")
@@ -154,9 +154,13 @@ class BalanceProductionOwnershipTest {
         val chat = source("ui/screens/chat/conversation/ChatScreen.kt")
         assertTrue(chat.contains("ChatTopBar(state.title, state.balanceState"))
         assertTrue(chat.contains("state.statusText?.let"))
-        val top = source("ui/screens/chat/conversation/ChatTopBar.kt")
-        assertTrue(top.contains("ProviderBalanceIndicator("))
-        assertTrue(top.contains("animateChanges = true"))
+        assertTrue(chat.contains(
+            "ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState)"
+        ))
+        val composer = source("ui/screens/chat/conversation/ChatComposer.kt")
+        assertTrue(composer.contains("ProviderBalanceIndicator("))
+        assertTrue(composer.contains("state = balanceState, modifier = Modifier.testTag(\"chat-provider-balance\")"))
+        assertTrue(composer.contains("animateChanges = true"))
         val screen = source("balance/ui/BalanceSettingsScreen.kt")
         assertTrue(screen.contains("BalanceLifecycleBinding(lifecycle, scope, runtime, poll = false)"))
         assertTrue(screen.contains("manualOwner?.requestRefresh()"))

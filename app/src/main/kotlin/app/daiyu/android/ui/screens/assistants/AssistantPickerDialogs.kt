@@ -1,6 +1,27 @@
 package app.daiyu.android.ui.screens.assistants
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Search
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import top.yukonga.miuix.kmp.basic.Icon
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -62,7 +83,8 @@ fun AssistantPickerDialog(
     var searchQuery by remember { mutableStateOf("") }
     var actionProfile by remember { mutableStateOf<AssistantProfile?>(null) }
     var deleteProfile by remember { mutableStateOf<AssistantProfile?>(null) }
-    val dialogBodyHeight = (LocalConfiguration.current.screenHeightDp * 0.5f).dp.coerceAtLeast(280.dp)
+    val colors = assistantPreviewPalette()
+    val s = assistantPreviewScale()
     LaunchedEffect(show) {
         if (!show) { searchQuery = ""; actionProfile = null; deleteProfile = null }
     }
@@ -70,32 +92,46 @@ fun AssistantPickerDialog(
         val query = searchQuery.trim()
         assistants.filter { query.isBlank() || it.name.contains(query, ignoreCase = true) }
     }
-    WindowDialog(show = show, title = stringResource(R.string.assistant_list_title),
-        onDismissRequest = { if (actionProfile == null && deleteProfile == null) onDismiss() }) {
-        Column(modifier = Modifier.fillMaxWidth().height(dialogBodyHeight)) {
-            TextField(value = searchQuery, onValueChange = { searchQuery = it }, label = stringResource(R.string.assistant_search),
-                useLabelAsPlaceholder = true, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Column(modifier = Modifier.fillMaxWidth().weight(1f).padding(top = 12.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                filtered.forEach { profile ->
-                    AssistantProfileCard(profile, profile.id == selectedId,
-                        onClick = { onSelect(profile.id); onDismiss() }, onLongClick = { actionProfile = profile }, assets = assets)
-                }
-                if (filtered.isEmpty()) {
-                    Text(text = stringResource(R.string.assistant_empty), style = MiuixTheme.textStyles.body2,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 8.dp, vertical = 12.dp))
-                }
+    // Management is a view within the same glass sheet, not a stack of stock dialogs.
+    AssistantPreviewDialog(show = show && actionProfile == null && deleteProfile == null,
+        title = stringResource(R.string.assistant_list_title), onDismiss = onDismiss,
+        footer = { AssistantPreviewButton("完成", onDismiss, Modifier.weight(1f), primary = true) }) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp * s)
+            .clip(RoundedCornerShape(13.dp * s)).background(colors.soft)
+            .border(1.dp, colors.line, RoundedCornerShape(13.dp * s)).padding(horizontal = 11.dp * s),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
+            Icon(Icons.Rounded.Search, null, Modifier.size(17.dp * s), tint = colors.muted)
+            Box(Modifier.weight(1f).padding(vertical = 9.dp * s)) {
+                if (searchQuery.isEmpty()) Text(stringResource(R.string.assistant_search), color = colors.muted, fontSize = (11f * s).sp)
+                BasicTextField(searchQuery, { searchQuery = it }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth(), cursorBrush = SolidColor(colors.accent),
+                    textStyle = TextStyle(color = colors.text, fontSize = (11f * s).sp))
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp * s, bottom = 7.dp * s), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("${filtered.size} 位助手", color = colors.muted, fontSize = (8f * s).sp)
+            Text("点击切换 · 长按管理", color = colors.muted, fontSize = (8f * s).sp)
+        }
+        LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(2.dp * s),
+            verticalArrangement = Arrangement.spacedBy(5.dp * s)) {
+            items(filtered, key = { it.id }) { profile ->
+                AssistantProfileCard(profile, profile.id == selectedId,
+                    onClick = { onSelect(profile.id); onDismiss() }, onLongClick = { actionProfile = profile }, assets = assets)
+            }
+            if (filtered.isEmpty()) item {
+                Text(stringResource(R.string.assistant_empty), color = colors.muted, fontSize = (11f * s).sp,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 22.dp))
             }
         }
     }
     actionProfile?.let { profile ->
-        AssistantActionsDialog(profile, canDelete = assistants.size > 1,
+        AssistantActionsDialog(profile, assets = assets, canDelete = assistants.size > 1,
             onCopy = { actionProfile = null; onCopy(profile.id) },
             onEdit = { actionProfile = null; onEdit(profile.id); onDismiss() },
             onDelete = { actionProfile = null; deleteProfile = profile }, onDismiss = { actionProfile = null })
     }
     deleteProfile?.let { profile ->
-        AssistantDeleteDialog(profile, canDelete = assistants.size > 1, onDismiss = { deleteProfile = null },
+        AssistantDeleteDialog(profile, assets = assets, canDelete = assistants.size > 1, onDismiss = { deleteProfile = null },
             onConfirm = { deleteProfile = null; onDelete(profile.id) })
     }
 }
@@ -152,41 +188,79 @@ internal fun AssistantProfileCard(
 ) {
     val view = LocalView.current
     val bitmap = remember(profile.avatarFileName) { assets.avatarBitmap(profile.avatarFileName) }
-    Column(modifier = modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-        .background(if (selected) MiuixTheme.colorScheme.primary.copy(alpha = .08f) else MiuixTheme.colorScheme.surfaceContainer)) {
-        Row(modifier = Modifier.fillMaxWidth().combinedClickable(hapticFeedbackEnabled = false,
+    val colors = assistantPreviewPalette()
+    val s = assistantPreviewScale()
+    val shape = RoundedCornerShape(15.dp * s)
+    Row(modifier.fillMaxWidth().heightIn(min = 64.dp * s).clip(shape)
+        .background(if (selected) colors.soft else androidx.compose.ui.graphics.Color.Transparent)
+        .border(1.dp, if (selected) colors.line else androidx.compose.ui.graphics.Color.Transparent, shape)
+        .combinedClickable(hapticFeedbackEnabled = false, interactionSource = remember { MutableInteractionSource() }, indication = null,
             onClick = { TouchHaptics.click(view); onClick() },
-            onLongClick = { TouchHaptics.longPress(view); onLongClick() }).padding(horizontal = 16.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            AssistantAvatar(bitmap = bitmap, size = 32.dp)
-            Text(text = profile.name, style = MiuixTheme.textStyles.body2, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f).padding(start = 12.dp, end = 8.dp))
-            if (selected) Text(text = stringResource(R.string.assistant_current), style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.primary, maxLines = 1)
+            onLongClick = { TouchHaptics.longPress(view); onLongClick() }).padding(10.dp * s),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp * s)) {
+        AssistantAvatar(bitmap = bitmap, size = 34.dp * s)
+        Column(Modifier.weight(1f)) {
+            Text(profile.name, color = colors.text, fontSize = (11f * s).sp,
+                fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            // There is no description field in the production profile; do not create a shadow model.
+            Text(profile.prompt.lineSequence().firstOrNull { it.isNotBlank() } ?: "自定义助手",
+                color = colors.muted, fontSize = (9f * s).sp,
+                maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp * s))
+        }
+        if (selected) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp * s)) {
+            Icon(Icons.Rounded.Check, null, Modifier.size(11.dp * s), tint = colors.accent)
+            Text(stringResource(R.string.assistant_current), color = colors.accent, fontSize = (8f * s).sp, maxLines = 1)
         }
     }
 }
 
 @Composable
-internal fun AssistantActionsDialog(profile: AssistantProfile, canDelete: Boolean, onCopy: () -> Unit,
+internal fun AssistantActionsDialog(profile: AssistantProfile, assets: AssistantAssets, canDelete: Boolean, onCopy: () -> Unit,
     onEdit: () -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit) {
-    WindowDialog(show = true, title = profile.name, onDismissRequest = onDismiss) {
-        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(text = stringResource(R.string.ui_copy_4edd1d), onClick = onCopy, modifier = Modifier.fillMaxWidth())
-            TextButton(text = stringResource(R.string.ui_edit_a7f814), onClick = onEdit, modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.textButtonColorsPrimary())
-            TextButton(text = stringResource(R.string.action_delete), onClick = onDelete, enabled = canDelete,
-                modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.textButtonColorsPrimary(
-                    color = MiuixTheme.colorScheme.error, textColor = MiuixTheme.colorScheme.onError))
+    val colors = assistantPreviewPalette()
+    val s = assistantPreviewScale()
+    AssistantPreviewDialog(show = true, title = "助手操作", onDismiss = onDismiss, onBack = onDismiss,
+        footer = { AssistantPreviewButton("返回助手列表", onDismiss, Modifier.weight(1f)) }) {
+        AssistantDialogIdentity(profile, assets)
+        Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            AssistantPreviewButton(stringResource(R.string.ui_copy_4edd1d), onCopy, Modifier.fillMaxWidth(),
+                icon = Icons.Rounded.ContentCopy, actionRow = true)
+            AssistantPreviewButton(stringResource(R.string.ui_edit_a7f814), onEdit, Modifier.fillMaxWidth(),
+                icon = Icons.Rounded.Edit, actionRow = true)
+            AssistantPreviewButton(stringResource(R.string.action_delete), onDelete, Modifier.fillMaxWidth(),
+                danger = true, enabled = canDelete, icon = Icons.Rounded.Delete, actionRow = true)
         }
     }
 }
 
 @Composable
-internal fun AssistantDeleteDialog(profile: AssistantProfile, canDelete: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    WindowDialog(show = true, title = stringResource(R.string.assistant_delete_title),
-        summary = stringResource(R.string.assistant_delete_body, profile.name), onDismissRequest = onDismiss) {
-        MiuixDialogActions(confirmText = stringResource(R.string.action_delete), destructive = true, confirmEnabled = canDelete,
-            onCancel = onDismiss, onConfirm = onConfirm)
+internal fun AssistantDeleteDialog(profile: AssistantProfile, assets: AssistantAssets, canDelete: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit) {
+    val s = assistantPreviewScale()
+    AssistantPreviewDialog(show = true, title = stringResource(R.string.assistant_delete_title),
+        onDismiss = onDismiss, onBack = onDismiss, footer = {
+            AssistantPreviewButton(stringResource(R.string.action_cancel), onDismiss, Modifier.weight(1f))
+            AssistantPreviewButton(stringResource(R.string.action_delete), onConfirm, Modifier.weight(1f), danger = true, enabled = canDelete)
+        }) {
+        AssistantDialogIdentity(profile, assets)
+        Text(stringResource(R.string.assistant_delete_body, profile.name), color = assistantPreviewPalette().text,
+            fontSize = (11f * s).sp, lineHeight = (19.8f * s).sp, modifier = Modifier.verticalScroll(rememberScrollState()))
+    }
+}
+
+@Composable
+private fun AssistantDialogIdentity(profile: AssistantProfile, assets: AssistantAssets) {
+    val s = assistantPreviewScale()
+    val colors = assistantPreviewPalette()
+    val bitmap = remember(assets, profile.avatarFileName) { assets.avatarBitmap(profile.avatarFileName) }
+    Row(Modifier.fillMaxWidth().padding(start = 2.dp * s, end = 2.dp * s, top = 7.dp * s, bottom = 16.dp * s),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp * s)) {
+        AssistantAvatar(bitmap = bitmap, size = 44.dp * s)
+        Column(Modifier.weight(1f)) {
+            Text(profile.name, color = colors.text, fontSize = (12f * s).sp, lineHeight = (19.2f * s).sp,
+                fontWeight = FontWeight.Medium)
+            Text(profile.prompt.lineSequence().firstOrNull { it.isNotBlank() } ?: "自定义助手",
+                color = colors.muted, fontSize = (9f * s).sp, lineHeight = (15.3f * s).sp,
+                maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp * s))
+        }
     }
 }

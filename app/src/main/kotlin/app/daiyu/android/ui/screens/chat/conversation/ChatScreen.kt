@@ -65,8 +65,9 @@ internal fun DaiyuChatScreen(
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
     toolContent: @Composable (WorkStepUi) -> Unit = {},
 ) {
+    ChatMenuLayer(modifier.fillMaxSize()) {
     Column(
-        modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
+        Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
             .statusBarsPadding().navigationBarsPadding().imePadding(),
     ) {
         ChatTopBar(state.title, state.balanceState, actions, assistantLabel = state.composer.assistantLabel,
@@ -90,4 +91,5 @@ internal fun DaiyuChatScreen(
             ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop)
         })
     }
+}
 }

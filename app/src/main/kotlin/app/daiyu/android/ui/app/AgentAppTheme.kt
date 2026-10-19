@@ -14,6 +14,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
+import app.daiyu.android.ui.components.PreviewBackdropHost
 import app.daiyu.android.ui.components.WithoutPressRipple
 import app.daiyu.android.data.model.AppearanceAccentColor
 import app.daiyu.android.data.model.AppearancePaletteStyle
@@ -170,7 +171,7 @@ fun AgentAppTheme(
                     extraLarge = RoundedCornerShape(20.dp),
                 ),
             ) {
-                WithoutPressRipple(content)
+                WithoutPressRipple { PreviewBackdropHost(content) }
             }
         }
     }

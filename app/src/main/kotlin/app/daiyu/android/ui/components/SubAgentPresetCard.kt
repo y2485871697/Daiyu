@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.daiyu.android.delegation.ConversationSubAgentPreferences
 import app.daiyu.android.delegation.SubAgentPreset
 import app.daiyu.android.ui.haptics.TouchHaptics
@@ -76,6 +77,24 @@ internal fun SubAgentPresetDirectoryStatus(directory: SubAgentPresetDirectory) {
 internal fun SubAgentPresetCard(preset: SubAgentPreset, enabled: Boolean, actionLabel: String,
     onClick: () -> Unit, selected: Boolean = false, trailing: @Composable (() -> Unit)? = null) {
     val view = LocalView.current
+    if (app.daiyu.android.ui.components.subagent.LocalConversationAgentStyle.current) {
+        val colors = app.daiyu.android.ui.components.subagent.conversationAgentColors()
+        Surface(shape = RoundedCornerShape(13.dp), color = if (selected) colors.soft else androidx.compose.ui.graphics.Color.Transparent,
+            border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) androidx.compose.ui.graphics.Color(0x5281738e) else colors.line), modifier = Modifier.fillMaxWidth()) {
+            Row(Modifier.fillMaxWidth().semantics { contentDescription = actionLabel }
+                .clickable(enabled = enabled, role = Role.Button, interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                    TouchHaptics.click(view); onClick()
+                }.padding(10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
+                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                    Text(preset.name, fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium, color = colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${preset.config.profiles.size} 个子代理 · 自动委派已${if (preset.config.enabled) "开启" else "关闭"}${if (selected) " · 当前使用" else ""}", fontSize = 9.sp, color = colors.muted)
+                }
+                Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null, Modifier.size(17.dp), tint = colors.accent)
+                trailing?.invoke()
+            }
+        }
+        return
+    }
     Surface(shape = RoundedCornerShape(16.dp),
         color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
         contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth()) {

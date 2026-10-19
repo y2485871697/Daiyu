@@ -28,10 +28,9 @@ import java.time.Month
 import java.time.YearMonth
 import java.time.format.TextStyle
 import java.util.Locale
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
+import app.daiyu.android.ui.components.UsageAction as TextButton
+import app.daiyu.android.ui.components.UsageGlassDialog
+import app.daiyu.android.ui.components.usagePalette
 
 @Composable
 internal fun UsageDateTimePickerDialog(
@@ -46,13 +45,9 @@ internal fun UsageDateTimePickerDialog(
     if (!show) return
     val initial = remember(current, endOfBound) { current.date ?: LocalDate.now() }
     var picked by remember(initial) { mutableStateOf(initial) }
-    val textColor = MiuixTheme.colorScheme.onSurface.toArgb()
+    val textColor = usagePalette().text.toArgb()
     val view = LocalView.current
-    WindowDialog(
-        show = true,
-        title = title,
-        onDismissRequest = onDismiss,
-    ) {
+    UsageGlassDialog(title = title, onDismiss = onDismiss) {
         Column(modifier = Modifier.fillMaxWidth()) {
             AndroidView(
                 modifier = Modifier.fillMaxWidth(),
@@ -92,7 +87,7 @@ internal fun UsageDateTimePickerDialog(
                         onConfirm(UsageTimeBound.from(picked))
                     },
                     modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                    primary = true,
                 )
             }
         }

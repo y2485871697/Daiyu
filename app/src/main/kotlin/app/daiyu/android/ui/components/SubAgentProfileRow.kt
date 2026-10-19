@@ -17,6 +17,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import app.daiyu.android.delegation.*
 import app.daiyu.android.ui.components.subagent.*
 import app.daiyu.android.ui.haptics.TouchHaptics
@@ -24,7 +25,8 @@ import app.daiyu.android.ui.haptics.TouchHaptics
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAgentProvider>, enabled: Boolean = true,
-    settings: Boolean = false, draftAllowed: Boolean = enabled, draftRetry: (() -> Unit)? = null) {
+    settings: Boolean = false, draftAllowed: Boolean = enabled, draftRetry: (() -> Unit)? = null,
+    authorization: (@Composable () -> Unit)? = null) {
     val editor = LocalConversationSubAgentEditor.current
     val usable = enabled && editor?.enabled == true
     val view = LocalView.current
@@ -105,6 +107,37 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
             SubAgentSettingRow("思考深度", thinkingLabel, Icons.Rounded.AutoAwesome, "调整${profile.name}思考深度", enabled = usable && canThink,
                 onClick = { if (currentUsable && canThink) { TouchHaptics.click(view); thinkingPicker = true } })
             SubAgentParallelLimitRow(profile, config, usable)
+        } else if (LocalConversationAgentStyle.current) {
+            val colors = conversationAgentColors()
+            Surface(shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                color = androidx.compose.ui.graphics.Color(if (colors.dark) 0x03ffffff else 0x1cffffff),
+                border = androidx.compose.foundation.BorderStroke(1.dp, colors.line), modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(10.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(bottom = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(profile.name, Modifier.weight(1f), fontSize = 11.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, color = colors.text)
+                        authorization?.invoke()
+                        IconButton(modifier = Modifier.size(27.dp, 29.dp), enabled = usable, onClick = {
+                            if (currentUsable && editor != null) SubAgentProfileDraftSession.open(editor, profile)?.let { TouchHaptics.click(view); profileDraft = it }
+                        }) { Icon(Icons.Rounded.MoreHoriz, "配置${profile.name}", Modifier.size(16.dp), tint = colors.accent) }
+                    }
+                    Row(Modifier.fillMaxWidth().semantics { contentDescription = "${profile.name}模型" }
+                        .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                            role = Role.Button, enabled = usable, hapticFeedbackEnabled = false,
+                            onClickLabel = "选择${profile.name}模型", onLongClickLabel = "调整${profile.name}思考深度",
+                            onClick = { if (currentUsable) { TouchHaptics.click(view); modelPicker = true } },
+                            onLongClick = { if (currentUsable && canThink) { TouchHaptics.longPress(view); thinkingPicker = true } })
+                        .padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                        Icon(Icons.Rounded.ViewInAr, null, Modifier.size(12.dp), tint = colors.accent)
+                        Text(config?.let { it.modelDisplayName.ifBlank { it.model } } ?: if (profile.modelId.isBlank()) "无" else "模型不可用",
+                            Modifier.weight(1f), fontSize = 10.sp, color = if (config == null) colors.muted else colors.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Icon(Icons.Rounded.ExpandMore, null, Modifier.size(12.dp), tint = colors.accent)
+                    }
+                    HorizontalDivider(color = colors.line)
+                    SubAgentGptSpeedButton(profile, providers, usable, Modifier.padding(top = 7.dp))
+                }
+            }
         } else {
             Row(Modifier.fillMaxWidth().heightIn(min = 88.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f).heightIn(min = 64.dp).semantics { contentDescription = "${profile.name}模型" }

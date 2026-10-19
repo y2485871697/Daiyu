@@ -52,6 +52,10 @@ internal object SubAgentModelPickerProjector {
 internal fun SubAgentModelPickerDialog(state: SubAgentModelPickerUiState, show: Boolean, onDismiss: () -> Unit,
     onModelSelected: (String, String) -> Unit, title: String, onClearSelection: (() -> Unit)? = null, highlightSelection: Boolean = false) {
     if (!show) return
+    if (LocalConversationAgentStyle.current) {
+        ConversationSubAgentModels(state, onDismiss, onModelSelected, title, onClearSelection)
+        return
+    }
     val view = LocalView.current
     var expanded by remember { mutableStateOf(state.selectedModel?.providerId ?: state.providerGroups.singleOrNull()?.providerId) }
     CompositionLocalProvider(LocalRippleConfiguration provides null) {

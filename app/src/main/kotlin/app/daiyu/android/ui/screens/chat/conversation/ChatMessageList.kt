@@ -9,6 +9,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.collectIsDraggedAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -43,6 +46,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.material3.Icon
+import app.daiyu.android.ui.haptics.TouchHaptics
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.domain.RunStatus
@@ -177,8 +183,8 @@ internal fun ChatMessageList(
                 do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
             }
         },
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = composerBottomInset + 64.dp),
-            verticalArrangement = Arrangement.spacedBy(24.dp)) {
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 11.dp, bottom = composerBottomInset + 64.dp),
+            verticalArrangement = Arrangement.spacedBy(26.dp)) {
             items(turns, key = { it.listKey }, contentType = { if (it is ChatTurnUi.User) "user" else "assistant" }) { turn ->
                 Column(Modifier.testTag("chat-turn:${turn.id}")) {
                     when (turn) {
@@ -194,13 +200,20 @@ internal fun ChatMessageList(
             }
         }
         if (canJumpToPreviousUser) {
-            ChatIconButton(DaiyuIcons.JumpUp, "上一条用户消息", {
-                followBottom = false
-                val anchor = listState.firstVisibleItemIndex
-                val index = turns.indices.lastOrNull { it < anchor && turns[it] is ChatTurnUi.User }
-                if (index != null) scope.launch { listState.animateScrollToItem(index) }
-                actions.onJumpPreviousUser()
-            }, Modifier.align(Alignment.BottomEnd).padding(bottom = composerBottomInset).padding(12.dp).background(MiuixTheme.colorScheme.surfaceContainerHigh, CircleShape))
+            val view = LocalView.current
+            Box(Modifier.align(Alignment.BottomEnd).padding(bottom = composerBottomInset).padding(12.dp)
+                .background(conversationColors().surface, CircleShape)) {
+                ConversationIconButton(onClick = {
+                    TouchHaptics.click(view)
+                    followBottom = false
+                    val anchor = listState.firstVisibleItemIndex
+                    val index = turns.indices.lastOrNull { it < anchor && turns[it] is ChatTurnUi.User }
+                    if (index != null) scope.launch { listState.animateScrollToItem(index) }
+                    actions.onJumpPreviousUser()
+                }, minWidth = 32.dp, minHeight = 32.dp) {
+                    Icon(DaiyuIcons.JumpUp, "上一条用户消息", Modifier.size(15.dp), tint = conversationColors().muted)
+                }
+            }
         }
     }
 }
@@ -210,20 +223,24 @@ internal fun ChatMessageList(
 internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLoader: MessageImageLoader? = null) {
     var showMenu by remember { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
-        Box {
-            Column(Modifier.widthIn(max = 320.dp)
-                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 6.dp, bottomStart = 16.dp))
-                .background(MiuixTheme.colorScheme.primaryContainer)
-                .combinedClickable(onClick = {}, onLongClick = { showMenu = true })
-                .padding(horizontal = 16.dp, vertical = 12.dp)) {
+        BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
+            val bubbleWidth = maxWidth * 0.9f
+            Box {
+            Column(Modifier.widthIn(max = bubbleWidth)
+                .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 5.dp, bottomStart = 16.dp))
+                .background(conversationColors().bubble)
+                .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                    onClick = {}, onLongClick = { showMenu = true })
+                .padding(horizontal = 12.dp, vertical = 9.dp)) {
                 if (turn.content.isNotEmpty()) {
                     MessageContent(turn.content, actions, imageLoader, markdown = false)
                 } else {
-                    Text(turn.text, color = MiuixTheme.colorScheme.onSurface,
-                        style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 25.sp))
+                    Text(turn.text, color = conversationColors().text,
+                        style = MiuixTheme.textStyles.body1.copy(fontSize = 11.sp, lineHeight = 19.8.sp))
                 }
             }
             UserTurnMenu(showMenu, { showMenu = false }, turn.id, actions)
+            }
         }
         MessageActionBar(
             id = turn.id,
@@ -232,7 +249,7 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
             showEditAction = true,
             allowSpeech = false,
             showRegenerateAction = false,
-            modifier = Modifier.widthIn(max = 320.dp),
+            endAligned = true,
         )
     }
 }
@@ -254,6 +271,17 @@ internal fun AssistantTurn(
     SideEffect { onContentReady(projection != null) }
     DisposableEffect(turn.listKey) { onDispose { onContentReady(false) } }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        // The turn carries a role, not a profile name or avatar. Never invent an identity.
+        Row(Modifier.padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+            Box(Modifier.size(23.dp).background(conversationColors().surface, CircleShape),
+                contentAlignment = Alignment.Center) {
+                Text("助", color = conversationColors().accent,
+                    style = MiuixTheme.textStyles.body2.copy(fontSize = 11.sp, lineHeight = 16.sp))
+            }
+            Text("助手", color = conversationColors().text,
+                style = MiuixTheme.textStyles.body2.copy(fontSize = 10.sp, lineHeight = 15.sp))
+        }
         ReportedReasoningCard(turn.listKey, turn.reportedReasoning)
         if (turn.content.isNotEmpty()) {
             // Splitting these blocks into a work card and a final answer would reorder images.
@@ -264,7 +292,8 @@ internal fun AssistantTurn(
             AssistantTextContent(turn, actions, projection, toolContent)
         }
         if (!turn.error.isNullOrBlank()) {
-            Text(turn.error, color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.body2,
+            Text(turn.error, color = conversationColors().error,
+                style = MiuixTheme.textStyles.body2.copy(fontSize = 11.sp, lineHeight = 19.8.sp),
                 maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
         if (turn.status != RunStatus.RUNNING) {
@@ -285,6 +314,7 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreen
     if (turn.finalText.isNotBlank()) {
         ParsedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText))
     } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {
-        Text("正在思考…", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, style = MiuixTheme.textStyles.body2)
+        Text("正在思考…", color = conversationColors().muted,
+            style = MiuixTheme.textStyles.body2.copy(fontSize = 10.sp, lineHeight = 18.sp))
     }
 }

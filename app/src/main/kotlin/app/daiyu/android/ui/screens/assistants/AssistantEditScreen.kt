@@ -5,7 +5,18 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -145,80 +156,75 @@ fun AssistantEditScreen(
             else android.widget.Toast.makeText(context, result.exceptionOrNull()?.message ?: "保存失败，草稿已保留", android.widget.Toast.LENGTH_LONG).show()
         }
     }
-    MiuixScaffoldPage(title = stringResource(R.string.assistant_edit_title), onBack = { session.close(); onBack() },
-        actions = {
-            Text(text = stringResource(R.string.action_save),
-                color = if (dirty && !saving && !memoryOverLimit) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                modifier = Modifier.padding(end = 12.dp).clickable(enabled = dirty && !saving && !memoryOverLimit, onClick = ::save))
-        }) {
-        item(key = "preview_title") { SmallTitle(stringResource(R.string.assistant_preview)) }
-        item(key = "preview") {
-            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
-                Row(modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                    AssistantAvatar(bitmap = avatarBitmap, size = 56.dp, modifier = Modifier.clickable(enabled = !saving) {
+    val colors = assistantPreviewPalette()
+    val s = assistantPreviewScale()
+    val close = { session.close(); onBack() }
+    BackHandler(onBack = close)
+    // Editing is the preview's ap-editor inside a bottom glass sheet, not a settings scaffold.
+    // The only production-only row is the existing avatar picker; its owner checks remain intact.
+    AssistantPreviewDialog(show = true, title = stringResource(R.string.assistant_edit_title), onDismiss = close, onBack = close,
+            footer = {
+                AssistantPreviewButton(stringResource(R.string.action_cancel), close, Modifier.weight(1f))
+                AssistantPreviewButton(stringResource(R.string.action_save), ::save, Modifier.weight(1f), primary = true,
+                    enabled = dirty && !saving && !memoryOverLimit && memoryRevision.isNotBlank())
+            }) {
+            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 2.dp * s)) {
+                Row(Modifier.fillMaxWidth().padding(top = 7.dp * s, bottom = 16.dp * s),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp * s)) {
+                    AssistantAvatar(bitmap = avatarBitmap, size = 44.dp * s, modifier = Modifier.clickable(enabled = !saving) {
                         if (session.isActive && pickerOwner == null) {
                             pickerOwner = session
                             picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
                         }
                     })
-                    Text(text = name.trim().ifBlank { stringResource(R.string.assistant_unnamed) }, style = MiuixTheme.textStyles.title3)
+                    Column(Modifier.weight(1f)) {
+                        Text(name.trim().ifBlank { stringResource(R.string.assistant_unnamed) }, color = colors.text,
+                            fontSize = (12f * s).sp, fontWeight = FontWeight.Medium)
+                        Text(stringResource(R.string.assistant_preview), color = colors.muted, fontSize = (8f * s).sp,
+                            modifier = Modifier.padding(top = 3.dp * s))
+                    }
                 }
-            }
-        }
-        item(key = "identity_title") { SmallTitle(stringResource(R.string.assistant_identity)) }
-        item(key = "identity") {
-            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    TextField(value = name, onValueChange = { if (session.isActive && !saving) name = it }, label = stringResource(R.string.assistant_name), enabled = !saving,
-                        modifier = Modifier.fillMaxWidth(), singleLine = true)
-                }
-            }
-        }
-        item(key = "prompt_title") { SmallTitle(stringResource(R.string.assistant_prompt_title)) }
-        item(key = "prompt") {
-            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
-                TextField(value = prompt, onValueChange = { if (session.isActive && !saving) prompt = it }, label = "", enabled = !saving,
-                    modifier = Modifier.fillMaxWidth().padding(16.dp).height(240.dp), singleLine = false)
-            }
-        }
-        item(key = "memory_title") { SmallTitle(stringResource(R.string.ui_memory_b55ff5)) }
-        item(key = "memory") {
-            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
-                SwitchPreference(title = stringResource(R.string.ui_enable_memory_4b69b7),
-                    summary = stringResource(R.string.assistant_memory_summary), checked = memoryEnabled,
-                    onCheckedChange = { if (session.isActive && !saving) { memoryEnabled = it; persistAssistantToggles(nextMemory = it) } })
-                Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    TextField(value = memoryDraft, onValueChange = {
-                        if (session.isActive && !saving) { memoryEditor.edit(it); memoryDraft = it }
-                    }, label = "MEMORY.md", enabled = !saving,
-                        useLabelAsPlaceholder = true, singleLine = false, minLines = 6, maxLines = 12,
-                        textStyle = MiuixTheme.textStyles.body2.copy(fontFamily = FontFamily.Monospace), modifier = Modifier.fillMaxWidth())
-                    if (memoryOverLimit) Text(text = stringResource(R.string.memory_over_limit), color = MiuixTheme.colorScheme.error,
-                        style = MiuixTheme.textStyles.footnote1, modifier = Modifier.padding(top = 8.dp))
-                }
-            }
-        }
-        item(key = "skills_title") { SmallTitle(stringResource(R.string.route_skills)) }
-        item(key = "skills") {
-            Card(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
-                Text(text = stringResource(R.string.assistant_skills_summary), style = MiuixTheme.textStyles.body2,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
-                if (installedSkills.isEmpty()) {
-                    Text(text = stringResource(R.string.ui_no_skills_installed_yet_4e960f), style = MiuixTheme.textStyles.body2,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary, modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp))
-                } else installedSkills.forEach { skill ->
-                    AssistantSkillSwitchRow(skill, enabledSkillIds.contains(skill.id), !saving) { enabled ->
-                        if (session.isActive && !saving) {
-                            val next = if (enabled) enabledSkillIds + skill.id else enabledSkillIds - skill.id
-                            enabledSkillIds = next
-                            persistAssistantToggles(nextSkills = next)
+                AssistantPreviewField(name, { if (session.isActive && !saving) name = it },
+                    stringResource(R.string.assistant_name), enabled = !saving)
+                AssistantPreviewField(prompt, { if (session.isActive && !saving) prompt = it },
+                    stringResource(R.string.assistant_prompt_title), enabled = !saving, singleLine = false, minLines = 5, maxLines = 10)
+                AssistantPreviewSection(stringResource(R.string.route_skills)) {
+                    Text(stringResource(R.string.assistant_skills_summary), color = colors.muted, fontSize = (8f * s).sp, lineHeight = (12.8f * s).sp)
+                    if (installedSkills.isEmpty()) {
+                        Text(stringResource(R.string.ui_no_skills_installed_yet_4e960f), color = colors.muted,
+                            fontSize = (10f * s).sp, modifier = Modifier.padding(vertical = 14.dp * s))
+                    } else installedSkills.forEachIndexed { index, skill ->
+                        if (index > 0) Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
+                        AssistantSkillSwitchRow(skill, enabledSkillIds.contains(skill.id), !saving) { enabled ->
+                            if (session.isActive && !saving) {
+                                val next = if (enabled) enabledSkillIds + skill.id else enabledSkillIds - skill.id
+                                enabledSkillIds = next
+                                persistAssistantToggles(nextSkills = next)
+                            }
                         }
                     }
                 }
+                AssistantPreviewSection(stringResource(R.string.ui_memory_b55ff5)) {
+                    Row(Modifier.fillMaxWidth().padding(bottom = 12.dp * s), verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(7.dp * s)) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.ui_enable_memory_4b69b7), color = colors.text, fontSize = (10f * s).sp,
+                                fontWeight = FontWeight.Medium)
+                            Text(stringResource(R.string.assistant_memory_summary), color = colors.muted, fontSize = (8f * s).sp,
+                                lineHeight = (12.8f * s).sp, modifier = Modifier.padding(top = 4.dp * s))
+                        }
+                        AssistantPreviewSwitch(memoryEnabled, !saving, "") {
+                            if (session.isActive && !saving) { memoryEnabled = it; persistAssistantToggles(nextMemory = it) }
+                        }
+                    }
+                    AssistantPreviewField(memoryDraft, {
+                        if (session.isActive && !saving) { memoryEditor.edit(it); memoryDraft = it }
+                    }, "MEMORY.md", enabled = !saving, singleLine = false, minLines = 4, maxLines = 8, monospace = true)
+                    if (memoryOverLimit) Text(stringResource(R.string.memory_over_limit), color = colors.danger,
+                        fontSize = (8f * s).sp, modifier = Modifier.padding(top = 8.dp * s))
+                }
             }
         }
-    }
     cropBitmap?.let { bitmap ->
         AvatarCropDialog(bitmap = bitmap, onCancel = { cropBitmap = null }, onConfirm = { cropped ->
             cropBitmap = null
@@ -244,24 +250,18 @@ fun AssistantEditScreen(
     }
 }
 
-/** The no-menu branch of the original SkillSwitchRow, with the original icons and metrics. */
+/** .ap-skill-row: text and an independent switch, without the settings preference chrome. */
 @Composable
 private fun AssistantSkillSwitchRow(skill: AssistantSkill, checked: Boolean, enabled: Boolean, onToggle: (Boolean) -> Unit) {
-    val description = skill.description.ifBlank { stringResource(R.string.skills_no_description) }
-    BasicComponent(startAction = {
-        Icon(imageVector = when (skill.id) {
-            "self-improving-agent" -> Icons.Rounded.Refresh
-            "skill-creator" -> Icons.Rounded.DesignServices
-            else -> Icons.Rounded.Extension
-        }, contentDescription = null, modifier = Modifier.padding(end = 6.dp).size(24.dp),
-            tint = if (enabled) MiuixTheme.colorScheme.onBackground else MiuixTheme.colorScheme.disabledOnSurface)
-    }, endActions = {
-        Switch(checked = checked, onCheckedChange = onToggle, enabled = enabled, modifier = Modifier.align(Alignment.CenterVertically))
-    }) {
-        Text(text = skill.name, style = MiuixTheme.textStyles.headline1, fontWeight = FontWeight.Medium,
-            color = if (enabled) MiuixTheme.colorScheme.onBackground else MiuixTheme.colorScheme.disabledOnSurface)
-        Text(text = description, style = MiuixTheme.textStyles.body2,
-            color = if (enabled) MiuixTheme.colorScheme.onSurfaceVariantSummary else MiuixTheme.colorScheme.disabledOnSurface,
-            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+    val colors = assistantPreviewPalette()
+    val s = assistantPreviewScale()
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp * s), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp * s)) {
+        Column(Modifier.weight(1f)) {
+            Text(skill.name, color = colors.text, fontSize = (10f * s).sp)
+            Text(skill.description.ifBlank { stringResource(R.string.skills_no_description) }, color = colors.muted,
+                fontSize = (8f * s).sp, lineHeight = (12.8f * s).sp, modifier = Modifier.padding(top = 3.dp * s))
+        }
+        AssistantPreviewSwitch(checked, enabled, "启用", onToggle)
     }
 }

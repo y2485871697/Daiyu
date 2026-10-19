@@ -2021,6 +2021,7 @@ class MainActivity : ComponentActivity() {
                 // The preparation worker freezes it once; edits never mutate an active request.
                 val thinkingOwner = chatState.conversationKey
                 SubAgentThinkingEffortPickerDialog(show = thinkingPicker, effort = reasoningPreference.get(thinkingOwner),
+                    chatStyle = true,
                     options = ReasoningEffort.entries,
                     description = "下一次主请求生效。默认保留供应商配置；Responses 使用 reasoning。Messages 手动 thinking 预算：最小1024、低2048、中4096、高8192；未设 max_tokens 时为预算+4096，已有上限不足会拒绝。不支持的配置不会自动降档；远端模型仍可能拒绝。仅展示模型已报告的摘要或思考文本，不代表获得隐藏内部推理。",
                     onDismiss = { thinkingPicker = false }, onEffortChange = { effort ->

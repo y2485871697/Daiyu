@@ -35,12 +35,12 @@ internal fun SpeechMorphButton(
 ) {
     val view = LocalView.current
     val diameter by animateDpAsState(
-        if (listening) 40.dp else 24.dp,
+        if (listening) 28.dp else 24.dp,
         spring(dampingRatio = 0.65f),
         label = "speechDiameter",
     )
     Box(
-        modifier = modifier.size(48.dp).clip(CircleShape)
+        modifier = modifier.size(28.dp).clip(CircleShape)
             .semantics {
                 contentDescription = if (listening) "停止语音输入" else "语音输入"
                 if (listening) stateDescription = "正在聆听"

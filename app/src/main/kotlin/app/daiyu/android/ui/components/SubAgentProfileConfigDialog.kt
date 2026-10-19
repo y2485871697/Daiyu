@@ -150,12 +150,14 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
     val userDismiss = { if (!session.submitting) dismiss() }
     CompositionLocalProvider(LocalRippleConfiguration provides null) {
         WithoutPressRipple {
-            WindowDialog(show = true, title = if (session.expectedProfile == null) "添加子代理" else "子代理配置", onDismissRequest = userDismiss) {
+            SubAgentConfigurationWindow(title = if (session.expectedProfile == null) "添加子代理" else "子代理配置", onDismiss = userDismiss) {
                 Column(Modifier.fillMaxWidth().profileDialogScrollableBody().verticalScroll(rememberScrollState())) {
-                    EtaFormTextField(session.name, { if (usable) session.name = it.take(80) }, hint = "名称", singleLine = true, enabled = usable, modifier = Modifier.fillMaxWidth())
+                    if (LocalConversationAgentStyle.current) ConversationAgentField("名称", session.name, { if (usable) session.name = it.take(80) }, usable)
+                    else EtaFormTextField(session.name, { if (usable) session.name = it.take(80) }, hint = "名称", singleLine = true, enabled = usable, modifier = Modifier.fillMaxWidth())
                     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text("启用", Modifier.weight(1f))
-                        Switch(draft.enabled, enabled = usable, onCheckedChange = { active -> interact { session.edit { it.copy(enabled = active) } } })
+                        if (LocalConversationAgentStyle.current) ConversationAgentSwitch(draft.enabled, usable) { active -> interact { session.edit { it.copy(enabled = active) } } }
+                        else Switch(draft.enabled, enabled = usable, onCheckedChange = { active -> interact { session.edit { it.copy(enabled = active) } } })
                     }
                     SubAgentSettingRow("模型", boundConfig?.let { it.modelDisplayName.ifBlank { it.model } } ?: if (draft.modelId.isBlank()) "选择模型" else "模型不可用",
                         Icons.Rounded.ViewInAr, "草稿模型", usable, badge = boundConfig?.providerName,
@@ -169,7 +171,9 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                     SubAgentSettingRow("职责", draft.roleLabel, Icons.Rounded.Assignment, "草稿职责", usable, onClick = { interact { choices = "role" } })
                     if (draft.supportsTaskTier) SubAgentSettingRow("任务分工", draft.tier?.label ?: "未设置分工", Icons.Rounded.AccountTree, "草稿任务分工", usable, onClick = { interact { choices = "tier" } })
                     SubAgentSettingRow("思考深度", thinkingLabel, Icons.Rounded.AutoAwesome, "草稿思考深度", usable && canThink, onClick = { interact { thinkingPicker = true } })
-                    EtaFormTextField(session.parallelValue, { if (usable) session.editParallel(it) }, hint = "并行上限（0 为不限）", singleLine = true,
+                    if (LocalConversationAgentStyle.current) ConversationAgentField("并行上限（0 为不限）", session.parallelValue,
+                        { if (usable) session.editParallel(it) }, usable && boundConfig != null, KeyboardOptions(keyboardType = KeyboardType.Number))
+                    else EtaFormTextField(session.parallelValue, { if (usable) session.editParallel(it) }, hint = "并行上限（0 为不限）", singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), enabled = usable && boundConfig != null, modifier = Modifier.fillMaxWidth())
                     if (!session.parallelIsValid()) Text("请输入 0 或正整数", color = MaterialTheme.colorScheme.error)
                     Text("本配置内相同提供商/API 模型共用此上限；仅确认时保存，调低不会取消正在执行的任务。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 8.dp))
@@ -222,16 +226,22 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                     "tier" -> listOf(null to "未设置分工") + SubAgentTaskTier.entries.map { it.wireValue to it.label }
                     else -> listOf(null to "跟随接口") + ImageResolutionTier.values.filter { !verifiedGrok || it in setOf("low", "high") }.map { it to ImageResolutionTier.label(it) }
                 }
-                WindowDialog(show = true, title = when (field) { "role" -> "职责"; "tier" -> "任务分工"; else -> "默认分辨率" }, onDismissRequest = { choices = null }) {
+                SubAgentChoiceWindow(title = when (field) { "role" -> "职责"; "tier" -> "任务分工"; else -> "默认分辨率" }, onDismiss = { choices = null }) {
                     Column(Modifier.fillMaxWidth().profileDialogScrollableBody().verticalScroll(rememberScrollState())) {
                         options.forEach { (value, label) ->
-                            TextButton(onClick = { interact {
+                            val select = { interact {
                                 session.edit { profile -> when (field) {
                                     "role" -> profile.withRole(requireNotNull(value))
                                     "tier" -> if (profile.supportsTaskTier) profile.copy(tier = SubAgentTaskTier.fromWireValue(value.orEmpty())) else profile
                                     else -> if (profile.role == "image_generation") profile.copy(imageResolution = value) else profile
                                 } }; choices = null
-                            } }, modifier = Modifier.fillMaxWidth()) { Text(label) }
+                            } }
+                            if (LocalConversationAgentStyle.current) ConversationAgentChoice(label, when (field) {
+                                "role" -> draft.role == value
+                                "tier" -> draft.tier?.wireValue == value
+                                else -> draft.imageResolution == value
+                            }, select)
+                            else TextButton(onClick = select, modifier = Modifier.fillMaxWidth()) { Text(label) }
                         }
                     }
                 }
@@ -242,6 +252,14 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
 @Composable
 private fun SubAgentDraftDialogActions(confirmEnabled: Boolean, cancelEnabled: Boolean, onCancel: () -> Unit, onConfirm: () -> Unit) {
     val view = LocalView.current
+    if (LocalConversationAgentStyle.current) {
+        HorizontalDivider(Modifier.padding(top = 10.dp), color = conversationAgentColors().line)
+        Row(Modifier.fillMaxWidth().padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ConversationAgentButton("取消", cancelEnabled, modifier = Modifier.weight(1f)) { TouchHaptics.click(view); onCancel() }
+            ConversationAgentButton("确认", confirmEnabled, primary = true, modifier = Modifier.weight(1f), onClick = onConfirm)
+        }
+        return
+    }
     Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         MiuixTextButton(text = "取消", modifier = Modifier.weight(1f), enabled = cancelEnabled, onClick = { TouchHaptics.click(view); onCancel() })
         MiuixTextButton(text = "确认", modifier = Modifier.weight(1f), enabled = confirmEnabled, colors = MiuixButtonDefaults.textButtonColorsPrimary(), onClick = onConfirm)

@@ -67,13 +67,23 @@ import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
-import java.time.format.TextStyle
+import java.time.format.TextStyle as JavaTextStyle
 import java.time.temporal.TemporalAdjusters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.basic.Card
+import app.daiyu.android.ui.components.UsageSurface as Card
+import app.daiyu.android.ui.components.UsageGlassDialog
+import app.daiyu.android.ui.components.UsageAction
+import app.daiyu.android.ui.components.UsageMetric
+import app.daiyu.android.ui.components.UsageDivider
+import app.daiyu.android.ui.components.usagePalette
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
-import top.yukonga.miuix.kmp.basic.Text
+import app.daiyu.android.ui.components.UsageBody as Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 private enum class UsageStatsTab { Overview, Models }
@@ -98,17 +108,17 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
         stats = loaded.getOrDefault(UsageStatsSnapshot())
     }
 
-    MiuixScaffoldPage(
+    UsageStatsSheet(
         title = stringResource(R.string.stats_page_title),
         onBack = onBack,
     ) {
         if (loadFailed) item(key = "load_error") {
             Column(Modifier.padding(16.dp)) {
                 Text("暂时无法读取用量", modifier = Modifier.testTag("usage-error"))
-                top.yukonga.miuix.kmp.basic.TextButton(text = "重试", modifier = Modifier.testTag("usage-retry"), onClick = { loadAttempt++ })
+                UsageAction(text = "重试", modifier = Modifier.testTag("usage-retry"), onClick = { loadAttempt++ })
             }
         }
-        if (loadFailed) return@MiuixScaffoldPage
+        if (loadFailed) return@UsageStatsSheet
         item(key = "tabs") {
             UsageStatsTabs(
                 selected = selectedTab,
@@ -146,7 +156,7 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
                     ) {
                         Text(
                             text = stringResource(R.string.stats_page_heatmap_title),
-                            style = MiuixTheme.textStyles.headline1,
+                            style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
                         )
                         ChatHeatmap(conversationsPerDay = stats.conversationsPerDay, available = stats.heatmapAvailable)
                         Row(
@@ -157,7 +167,7 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
                             Text(
                                 text = stringResource(R.string.stats_page_heatmap_less),
                                 fontSize = 11.sp,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = usagePalette().muted,
                             )
                             listOf(0f, 0.25f, 0.5f, 0.75f, 1f).forEach { alpha ->
                                 HeatmapCell(alpha = alpha, sizeDp = 10)
@@ -165,7 +175,7 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
                             Text(
                                 text = stringResource(R.string.stats_page_heatmap_more),
                                 fontSize = 11.sp,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = usagePalette().muted,
                             )
                         }
                     }
@@ -178,6 +188,16 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun UsageStatsSheet(title: String, onBack: () -> Unit, content: LazyListScope.() -> Unit) {
+    UsageGlassDialog(title, onBack) {
+        LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 430.dp).testTag("page:$title"),
+            verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
+        UsageDivider(Modifier.padding(top = 9.dp))
+        UsageAction("关闭", onBack, Modifier.fillMaxWidth().padding(top = 10.dp))
     }
 }
 
@@ -212,13 +232,13 @@ private fun RowScope.UsageTabButton(
     onClick: () -> Unit,
 ) {
     val view = LocalView.current
-    val colors = MiuixTheme.colorScheme
+    val colors = usagePalette()
     Box(
         modifier = Modifier
             .weight(1f)
             .height(44.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) colors.primary else colors.surfaceVariant)
+            .background(if (selected) colors.accent else colors.bubble)
             .clickableNoRipple {
                 TouchHaptics.click(view)
                 onClick()
@@ -227,8 +247,8 @@ private fun RowScope.UsageTabButton(
     ) {
         Text(
             text = label,
-            style = MiuixTheme.textStyles.body1,
-            color = if (selected) colors.onPrimary else colors.onSurfaceVariantSummary,
+            style = TextStyle(fontSize = 11.sp),
+            color = if (selected) androidx.compose.ui.graphics.Color(if (colors.dark) 0xff211735 else 0xffffffff) else colors.muted,
         )
     }
 }
@@ -275,7 +295,7 @@ private fun ModelUsagePane(
             ) {
                 Text(
                     text = stringResource(R.string.stats_model_total_title),
-                    style = MiuixTheme.textStyles.headline1,
+                    style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_page_token_total),
@@ -314,8 +334,8 @@ private fun ModelUsagePane(
                         R.string.stats_model_empty
                     },
                 ),
-                style = MiuixTheme.textStyles.body2,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp),
+                color = usagePalette().muted,
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
             )
         } else {
@@ -330,7 +350,7 @@ private fun ModelUsagePane(
                         ) {
                             Text(
                                 text = provider.name,
-                                style = MiuixTheme.textStyles.title3,
+                                style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
                                 modifier = Modifier.weight(1f),
                             )
                         }
@@ -389,12 +409,12 @@ private fun ModelUsageFilterCard(
             ) {
                 Text(
                     text = stringResource(R.string.stats_model_filter_title),
-                    style = MiuixTheme.textStyles.headline1,
+                    style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
                 )
                 Text(
                     text = summary,
-                    style = MiuixTheme.textStyles.body2,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp),
+                    color = usagePalette().muted,
                     maxLines = 1,
                     textAlign = TextAlign.End,
                     modifier = Modifier
@@ -405,7 +425,7 @@ private fun ModelUsageFilterCard(
                     imageVector = if (expanded) Icons.Rounded.ExpandMore else Icons.Rounded.ChevronRight,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
-                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    tint = usagePalette().muted,
                 )
             }
             AnimatedVisibility(visible = expanded) {
@@ -442,8 +462,8 @@ private fun ModelUsageFilterCard(
                     if (start.isSet || end.isSet) {
                         Text(
                             text = stringResource(R.string.stats_model_filter_clear),
-                            style = MiuixTheme.textStyles.body2,
-                            color = MiuixTheme.colorScheme.primary,
+                            style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp),
+                            color = usagePalette().accent,
                             modifier = Modifier
                                 .clickableNoRipple {
                                     TouchHaptics.click(view)
@@ -485,8 +505,8 @@ private fun UsageBoundRow(
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             text = label,
-            style = MiuixTheme.textStyles.body2,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp),
+            color = usagePalette().muted,
         )
         UsageBoundChip(
             text = formatUsageDate(bound)
@@ -534,19 +554,19 @@ private fun UsageBoundChip(
     contentAlignment: Alignment = Alignment.Center,
     onClick: () -> Unit,
 ) {
-    val colors = MiuixTheme.colorScheme
+    val colors = usagePalette()
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) colors.primary else colors.surfaceVariant)
+            .background(if (selected) colors.accent else colors.bubble)
             .clickableNoRipple(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = contentAlignment,
     ) {
         Text(
             text = text,
-            style = MiuixTheme.textStyles.body2,
-            color = if (selected) colors.onPrimary else colors.onSurfaceVariantSummary,
+            style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp),
+            color = if (selected) androidx.compose.ui.graphics.Color(if (colors.dark) 0xff211735 else 0xffffffff) else colors.muted,
             maxLines = 1,
         )
     }
@@ -602,7 +622,7 @@ private fun ModelUsageRow(
         ) {
             Text(
                 text = model.displayName,
-                style = MiuixTheme.textStyles.body1,
+                style = TextStyle(fontSize = 11.sp),
                 modifier = Modifier.weight(1f),
             )
             androidx.compose.material3.Icon(
@@ -611,7 +631,7 @@ private fun ModelUsageRow(
                 modifier = Modifier
                     .padding(start = 6.dp)
                     .size(18.dp),
-                tint = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                tint = usagePalette().muted,
             )
         }
         AnimatedVisibility(visible = expanded) {
@@ -673,12 +693,12 @@ private fun ModelMetricRow(label: String, value: String) {
     ) {
         Text(
             text = label,
-            style = MiuixTheme.textStyles.body2,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp),
+            color = usagePalette().muted,
         )
         Text(
             text = value,
-            style = MiuixTheme.textStyles.body1,
+            style = TextStyle(fontSize = 11.sp),
         )
     }
 }
@@ -704,7 +724,7 @@ private fun ChatHeatmap(conversationsPerDay: Map<LocalDate, Int>, available: Boo
         "",
     )
     val scrollState = rememberScrollState(initial = Int.MAX_VALUE)
-    val colors = MiuixTheme.colorScheme
+    val colors = usagePalette()
 
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         Column(
@@ -721,7 +741,7 @@ private fun ChatHeatmap(conversationsPerDay: Map<LocalDate, Int>, available: Boo
                         Text(
                             text = label,
                             fontSize = 8.sp,
-                            color = colors.onSurfaceVariantSummary,
+                            color = colors.muted,
                         )
                     }
                 }
@@ -748,11 +768,11 @@ private fun ChatHeatmap(conversationsPerDay: Map<LocalDate, Int>, available: Boo
                                 text = if (labelDate.monthValue == 1) {
                                     labelDate.year.toString()
                                 } else {
-                                    labelDate.month.getDisplayName(TextStyle.SHORT, LocalConfiguration.current.locales[0])
+                                    labelDate.month.getDisplayName(JavaTextStyle.SHORT, LocalConfiguration.current.locales[0])
                                 },
                                 modifier = Modifier.wrapContentWidth(unbounded = true),
                                 fontSize = 9.sp,
-                                color = colors.onSurfaceVariantSummary,
+                                color = colors.muted,
                                 maxLines = 1,
                             )
                         }
@@ -781,12 +801,12 @@ private fun ChatHeatmap(conversationsPerDay: Map<LocalDate, Int>, available: Boo
 
 @Composable
 private fun HeatmapCell(alpha: Float, sizeDp: Int, unknown: Boolean = false) {
-    val colors = MiuixTheme.colorScheme
+    val colors = usagePalette()
     val color = when {
         unknown -> androidx.compose.ui.graphics.Color.Transparent
-        alpha < 0f -> colors.surfaceVariant.copy(alpha = 0.3f)
-        alpha == 0f -> colors.surfaceVariant
-        else -> colors.primary.copy(alpha = alpha)
+        alpha < 0f -> colors.bubble.copy(alpha = 0.3f)
+        alpha == 0f -> colors.bubble
+        else -> colors.accent.copy(alpha = alpha)
     }
     Box(
         modifier = Modifier
@@ -796,20 +816,16 @@ private fun HeatmapCell(alpha: Float, sizeDp: Int, unknown: Boolean = false) {
         contentAlignment = Alignment.Center,
     ) {
         if (unknown) Text("—", fontSize = (sizeDp - 2).coerceAtLeast(6).sp,
-            color = colors.onSurfaceVariantSummary)
+            color = colors.muted)
     }
 }
 
 @Composable
 private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatCard(modifier = Modifier.weight(1f), icon = Icons.Rounded.Forum,
-                label = "当前保留会话",
-                value = if (stats.currentDataAvailable) formatStatCount(stats.currentConversations.toLong()) else "—")
-            StatCard(modifier = Modifier.weight(1f), icon = Icons.Rounded.ChatBubbleOutline,
-                label = "当前保留消息",
-                value = if (stats.currentDataAvailable) formatStatCount(stats.currentMessages.toLong()) else "—")
+        Card {
+            UsageMetric("当前保留会话", if (stats.currentDataAvailable) formatStatCount(stats.currentConversations.toLong()) else "—")
+            UsageMetric("当前保留消息", if (stats.currentDataAvailable) formatStatCount(stats.currentMessages.toLong()) else "—")
         }
         RecordedUsagePane(stats.recordedProjection, modelView = false,
             modifier = Modifier.padding(bottom = 12.dp))
@@ -822,29 +838,34 @@ internal fun RecordedUsagePane(
     modelView: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    var details by remember(modelView) { mutableStateOf(false) }
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Card {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (modelView) "未归属模型的用量" else "用量统计",
-                    style = MiuixTheme.textStyles.headline1)
+                    style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium))
                 Text(when {
                     projection == null -> "暂时无法读取用量"
                     projection.combined.requestSnapshotCount == 0L -> "暂无已报告用量"
                     else -> "仅统计已记录用量，未报告的数据以 — 显示。"
-                }, style = MiuixTheme.textStyles.body2)
+                }, style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp))
                 if (projection != null && !projection.attributed.scanComplete)
-                    Text("部分记录尚未读取，仅显示已读取的用量。", style = MiuixTheme.textStyles.body2)
+                    Text("部分记录尚未读取，仅显示已读取的用量。", style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp))
                 if (modelView && projection != null && projection.combined.requestSnapshotCount > 0L)
-                    Text("历史记录未包含模型信息", style = MiuixTheme.textStyles.body2)
+                    Text("历史记录未包含模型信息", style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp))
             }
         }
         if (projection != null && projection.combined.requestSnapshotCount > 0L) {
             // Unknown historical model is one explicitly unattributed bucket, not today's model.
             if (modelView) RecordedSummaryCard("未归属历史模型 · 主请求 + 子任务", projection.combined)
             else {
-                RecordedSummaryCard("主请求", projection.main)
-                RecordedSummaryCard("子任务（归父）", projection.child)
                 RecordedSummaryCard("合计（不重复计缓存）", projection.combined)
+                UsageAction(if (details) "▾ 详细用量" else "▸ 详细用量", { details = !details },
+                    plain = true, modifier = Modifier.fillMaxWidth().testTag("stats-usage-details"))
+                if (details) {
+                    RecordedSummaryCard("主请求", projection.main)
+                    RecordedSummaryCard("子任务（归父）", projection.child)
+                }
             }
         }
     }
@@ -852,16 +873,20 @@ internal fun RecordedUsagePane(
 
 @Composable
 private fun RecordedSummaryCard(title: String, summary: RecordedUsageSummary) {
+    var cacheExpanded by remember(title) { mutableStateOf(false) }
     Card {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(title, style = MiuixTheme.textStyles.headline1)
-            ModelMetricRow("已记录请求", formatStatCount(summary.requestSnapshotCount))
-            // Values include per-field report coverage; independent partial fields cannot safely
-            // produce a fresh-input, cache-hit-rate, total, average or cache-creation value.
-            Text("输入（含缓存）：${formatReportedUsage(summary.input)}", style = MiuixTheme.textStyles.body2)
-            Text("输出：${formatReportedUsage(summary.output)}", style = MiuixTheme.textStyles.body2)
-            Text("缓存读取：${formatReportedUsage(summary.cached)}", style = MiuixTheme.textStyles.body2)
-            Text("缓存写入 / 独立推理 / 费用：—（未记录）", style = MiuixTheme.textStyles.body2)
+        Text(title, style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium))
+        UsageMetric("已记录请求", formatStatCount(summary.requestSnapshotCount), total = true)
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Coverage is retained per field; never manufacture a total from partial reports.
+            UsageMetric("输入（含缓存）", formatReportedUsage(summary.input))
+            UsageMetric("输出", formatReportedUsage(summary.output))
+        }
+        UsageAction(if (cacheExpanded) "▾ 缓存明细" else "▸ 缓存明细", { cacheExpanded = !cacheExpanded },
+            plain = true, modifier = Modifier.fillMaxWidth())
+        if (cacheExpanded) {
+            UsageMetric("缓存读取", formatReportedUsage(summary.cached))
+            Text("缓存写入 / 独立推理 / 费用：—（未记录）", color = usagePalette().muted, fontSize = 8.sp)
         }
     }
 }
@@ -972,12 +997,12 @@ private fun StatCard(
             )
             Text(
                 text = value,
-                style = MiuixTheme.textStyles.headline1,
+                style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
             )
             Text(
                 text = label,
-                style = MiuixTheme.textStyles.body2,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp),
+                color = usagePalette().muted,
             )
         }
     }

@@ -20,6 +20,6 @@ internal fun chatActionColors(): ChatActionColors {
         sendContainer = if (dark) Color(0xFF7862ED) else Color(0xFFE9E3FB),
         sendContent = if (dark) Color(0xFFF1ECFF) else Color(0xFF8D7AC9),
         appendContainer = if (dark) Color(0xFFB4A3F7) else Color(0xFF7663BD),
-        appendContent = Color.White,
+        appendContent = if (dark) Color(0xFF211735) else Color.White,
     )
 }

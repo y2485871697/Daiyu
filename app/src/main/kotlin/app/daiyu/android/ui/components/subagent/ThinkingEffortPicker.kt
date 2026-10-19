@@ -31,8 +31,13 @@ internal fun SubAgentThinkingEffortPickerDialog(
     onDismiss: () -> Unit,
     onEffortChange: (ReasoningEffort) -> Unit,
     description: String? = null,
+    chatStyle: Boolean = LocalConversationAgentStyle.current,
 ) {
     if (options.isEmpty()) return
+    if (chatStyle) {
+        ConversationThinkingPicker(show, effort, options, onDismiss, onEffortChange, description)
+        return
+    }
     val view = LocalView.current
     val selectedIndex = options.indexOf(effort).coerceAtLeast(0)
     var sliderValue by remember { mutableFloatStateOf(selectedIndex.toFloat()) }

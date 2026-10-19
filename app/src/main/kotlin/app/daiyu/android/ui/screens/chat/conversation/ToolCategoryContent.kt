@@ -5,6 +5,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -102,17 +106,20 @@ internal fun ToolCategoryContent(category: String, details: ToolCategoryDetailsU
 
 @Composable
 private fun SectionTitle(text: String) {
-    Text(text, style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+    Text(text, style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 13.sp),
+        color = conversationColors().muted)
 }
 
 @Composable
 private fun Fields(fields: List<ToolFieldUi>) {
     fields.distinct().forEach { field ->
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.Top) {
-            Text(field.label, Modifier.width(80.dp), style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-            Text(field.value, Modifier.weight(1f), style = MiuixTheme.textStyles.footnote1,
-                color = MiuixTheme.colorScheme.onSurface)
+            Text(field.label, Modifier.width(42.dp),
+                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 13.2.sp),
+                color = conversationColors().muted)
+            Text(field.value, Modifier.weight(1f),
+                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 13.2.sp),
+                color = conversationColors().text)
         }
     }
 }
@@ -128,7 +135,7 @@ private fun EntryList(entries: List<ToolRichEntryUi>, title: String) {
                     SectionTitle(entry.title)
                     Fields(entry.fields)
                     entry.documents.forEach { CategoryDocument(it) }
-                    if (index != grouped.lastIndex) HorizontalDivider(color = MiuixTheme.colorScheme.outline.copy(alpha = .4f))
+                    if (index != grouped.lastIndex) HorizontalDivider(thickness = 1.dp, color = conversationColors().line)
                 }
             }
         }
@@ -151,21 +158,32 @@ private fun Document(document: ToolDisclosureUi) {
     val log = document.title in setOf("标准输出", "标准错误", "已收到输出", "任务日志", "守护日志", "运行回执")
     val preview = toolOutputPreview(document.text, tail = log)
     val tappable = log || preview.truncated
-    val style = if (document.code) MiuixTheme.textStyles.footnote1.copy(fontFamily = FontFamily.Monospace)
-        else MiuixTheme.textStyles.footnote1
+    val colors = conversationColors()
+    val style = MiuixTheme.textStyles.footnote1.copy(fontSize = if (document.code) 8.5.sp else 8.sp,
+        lineHeight = if (document.code) 14.sp else 13.6.sp,
+        fontFamily = if (document.code) FontFamily.Monospace else FontFamily.Default)
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         SectionTitle(document.title)
         val shape = RoundedCornerShape(8.dp)
-        val surface = Modifier.fillMaxWidth().clip(shape)
-            .background(MiuixTheme.colorScheme.surfaceVariant)
-            .border(1.dp, MiuixTheme.colorScheme.outline, shape)
-        if (tappable) Column(surface.testTag("tool-document:${document.title}")
-            .clickable(role = Role.Button, onClickLabel = "查看${document.title}") { opened = true }.padding(8.dp)) {
-            Text(preview.text, modifier = Modifier.testTag("tool-output-preview:${document.title}"), style = style, maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                color = MiuixTheme.colorScheme.onSurface)
-            Text("点按查看完整输出", style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        // A prose return is a paragraph, not another nested card.
+        val surface = if (document.code || log) Modifier.fillMaxWidth().clip(shape)
+            .background(colors.soft).border(1.dp, colors.line, shape)
+        else Modifier.fillMaxWidth()
+        if (tappable) Box(surface.testTag("tool-document:${document.title}")
+            .conversationClickable(onClickLabel = "查看${document.title}") { opened = true }) {
+            Text(preview.text, modifier = Modifier.fillMaxWidth()
+                .padding(start = 9.dp, end = 9.dp, top = 8.dp, bottom = 26.dp)
+                .testTag("tool-output-preview:${document.title}"), style = style, maxLines = 3,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, color = colors.text)
+            val hintBackground = if (colors.dark) Color(0xFF191B23) else Color(0xFFFAF9FC)
+            Text("点按查看完整输出", Modifier.align(Alignment.BottomEnd).fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(Color.Transparent, hintBackground)))
+                .padding(start = 9.dp, end = 9.dp, top = 7.dp, bottom = 5.dp),
+                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 13.sp,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.End), color = colors.muted)
         } else SelectionContainer {
-            Text(document.text, surface.padding(8.dp), style = style, color = MiuixTheme.colorScheme.onSurface)
+            Text(document.text, if (document.code) surface.padding(horizontal = 9.dp, vertical = 8.dp)
+                else surface.padding(vertical = 2.dp), style = style, color = colors.text)
         }
     }
     if (opened) top.yukonga.miuix.kmp.window.WindowDialog(show = true, title = document.title,
@@ -176,17 +194,17 @@ private fun Document(document: ToolDisclosureUi) {
                 Text(document.text, Modifier.fillMaxWidth().heightIn(max = minOf(480.dp,
                     (androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp * .55f).dp))
                     .verticalScroll(rememberScrollState()).testTag("tool-output-text"),
-                    style = style, color = MiuixTheme.colorScheme.onSurface)
+                    style = style.copy(fontSize = 12.sp, lineHeight = 19.2.sp), color = colors.text)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                top.yukonga.miuix.kmp.basic.TextButton(text = if (copied) "已复制" else "复制全文",
-                    modifier = Modifier.testTag("tool-output-copy"), onClick = {
+                ConversationTextButton(text = if (copied) "已复制" else "复制全文",
+                    modifier = Modifier.heightIn(min = 40.dp).testTag("tool-output-copy"), onClick = {
                         runCatching { clipboard.setText(androidx.compose.ui.text.AnnotatedString(document.text)) }
                             .onSuccess { copied = true }
                             .onFailure { android.widget.Toast.makeText(context, "复制失败，可长按选择文本", android.widget.Toast.LENGTH_SHORT).show() }
                     })
-                top.yukonga.miuix.kmp.basic.TextButton(text = "关闭", onClick = { opened = false },
-                    modifier = Modifier.testTag("tool-output-close"))
+                ConversationTextButton(text = "关闭", onClick = { opened = false },
+                    modifier = Modifier.heightIn(min = 40.dp).testTag("tool-output-close"))
             }
         }
     }
@@ -196,10 +214,12 @@ private fun Document(document: ToolDisclosureUi) {
 private fun Disclosure(title: String, tag: String, body: @Composable () -> Unit) {
     var open by remember(title) { mutableStateOf(false) }
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        Row(Modifier.fillMaxWidth().testTag(tag).heightIn(min = 44.dp).clickable(role = Role.Button) { open = !open }.padding(vertical = 5.dp),
+        Row(Modifier.fillMaxWidth().testTag(tag).heightIn(min = 22.dp)
+            .conversationClickable { open = !open }.padding(vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            Icon(if (open) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight, null, Modifier.size(13.dp), tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-            Text(title, style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.primary)
+            Icon(if (open) DaiyuIcons.ChevronDown else DaiyuIcons.ChevronRight, null, Modifier.size(10.dp), tint = conversationColors().muted)
+            Text(title, style = MiuixTheme.textStyles.footnote1.copy(fontSize = 7.5.sp, lineHeight = 12.sp),
+                color = conversationColors().muted)
         }
         if (open) body()
     }

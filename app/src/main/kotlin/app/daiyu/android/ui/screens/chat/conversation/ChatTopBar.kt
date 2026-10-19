@@ -38,19 +38,17 @@ internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.B
     interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true,
     automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false) {
     var expanded by remember { mutableStateOf(false) }
-    Row(modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().padding(horizontal = 9.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
         ChatIconButton(DaiyuIcons.Menu, "打开侧边栏", actions.onOpenSidebar)
         Column(Modifier.weight(1f).padding(horizontal = 6.dp)) {
             Text(title.ifBlank { "新会话" }, Modifier.testTag("chat-title"),
                 color = MiuixTheme.colorScheme.onSurface,
-                style = MiuixTheme.textStyles.title3.copy(fontSize = 18.sp, fontWeight = FontWeight.SemiBold),
+                style = MiuixTheme.textStyles.title3.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(assistantLabel, color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp),
+                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        InteractiveModeToggle(enabled = interactiveModeChangeEnabled, checked = interactiveModeEnabled,
-            onCheckedChange = actions.onInteractiveModeChange)
         ChatIconButton(DaiyuIcons.SubAgent, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, tint = daiyuIconColor(DaiyuIcons.SubAgent))
         Box {
             ChatIconButton(DaiyuIcons.More, "更多", { actions.onMore(); expanded = true })
@@ -77,9 +75,9 @@ internal fun ChatIconButton(
         enabled = enabled, role = Role.Button, onClickLabel = label,
         onLongClick = onLongClick, onClick = onClick,
     ), contentAlignment = Alignment.Center) {
-        Box(if (containerColor == null) Modifier else Modifier.size(24.dp).background(containerColor, CircleShape),
+        Box(if (containerColor == null) Modifier else Modifier.size(20.dp).background(containerColor, CircleShape),
             contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = label, modifier = Modifier.size(iconSize ?: if (containerColor == null) 20.dp else 14.dp),
+            Icon(icon, contentDescription = label, modifier = Modifier.size(iconSize ?: if (containerColor == null) 20.dp else 12.dp),
                 tint = if (enabled) tint else tint.copy(alpha = 0.38f))
         }
     }

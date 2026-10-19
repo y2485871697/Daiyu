@@ -25,6 +25,11 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.daiyu.android.delegation.*
 import app.daiyu.android.ui.haptics.TouchHaptics
+import app.daiyu.android.ui.components.subagent.*
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.VerifiedUser
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.font.FontWeight
 
 internal class OwnerBoundPopup<Owner>(val owner: Owner) {
     private var active: Any? = null
@@ -37,7 +42,7 @@ internal class OwnerBoundPopup<Owner>(val owner: Owner) {
     }
 }
 
-/** Entry wiring only; the original collaboration panel below is unchanged. */
+/** Conversation-bound editor wiring; preview styling is scoped to this chat entry only. */
 @Composable
 internal fun ConversationCollaborationDialog(
     show: Boolean,
@@ -66,7 +71,8 @@ internal fun ConversationCollaborationDialog(
     } }
     DisposableEffect(editor) { onDispose { editor?.dispose() } }
     key(editor) {
-        CompositionLocalProvider(LocalConversationSubAgentEditor provides editor) {
+        CompositionLocalProvider(LocalConversationSubAgentEditor provides editor,
+            app.daiyu.android.ui.components.subagent.LocalConversationAgentStyle provides true) {
             BoundConversationCollaborationDialog(show, enabled, onEnabledChange, onDismiss, taskRunning, ownerMatches, modelSource, onAuthorizeSavedModel)
         }
     }
@@ -115,13 +121,16 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
     val panelEnabled = canChange && panelEditor?.enabled == true && panelConfig != null
     CompositionLocalProvider(LocalRippleConfiguration provides null) {
         WithoutPressRipple {
-            Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-                Surface(Modifier.widthIn(max = 480.dp).fillMaxWidth().padding(horizontal = 12.dp, vertical = 12.dp)
-                    .heightIn(max = maximumHeight).testTag("subagent-collaboration-card"), shape = RoundedCornerShape(28.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 0.dp,
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) {
-                    Column(Modifier.padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)) {
-                        Text("本会话协作", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(bottom = 16.dp))
+            ConversationAgentTypography {
+                ConversationAgentSheet(onDismiss, modifier = Modifier.heightIn(max = maximumHeight).testTag("subagent-collaboration-card")) {
+                    Column(Modifier.heightIn(min = 360.dp).padding(start = 15.dp, end = 15.dp, top = 10.dp, bottom = 16.dp)) {
+                        ConversationAgentHandle()
+                        Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text("本会话协作", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                            IconButton(onClick = onDismiss, modifier = Modifier.size(27.dp, 29.dp)) {
+                                Icon(Icons.Rounded.Close, "关闭子代理设置", Modifier.size(16.dp))
+                            }
+                        }
                         Column(Modifier.fillMaxWidth().weight(1f, fill = false).testTag("subagent-collaboration-body")
                             .verticalScroll(key(editor, choosing, current?.presetApplicationToken) { rememberScrollState() })
                             .padding(bottom = 8.dp).alpha(if (canChange) 1f else 0.38f)) {
@@ -136,8 +145,8 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                             }
                             if (choosing && directory != null && editor != null && chooserPopup != null) {
                                 val (popup, ticket) = chooserPopup
-                                Text("选择子代理组", style = MaterialTheme.typography.titleMedium)
-                                Text("应用时复制到本会话；本会话修改不会反写预设。切换会替换当前会话配置。", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 12.dp))
+                                Text("选择子代理组", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = conversationAgentColors().accent, modifier = Modifier.padding(horizontal = 2.dp, vertical = 8.dp))
+                                Text("应用时复制到本会话；本会话修改不会反写预设。切换会替换当前会话配置。", style = MaterialTheme.typography.bodySmall, color = conversationAgentColors().muted, modifier = Modifier.padding(start = 2.dp, end = 2.dp, bottom = 14.dp))
                                 SubAgentPresetDirectoryStatus(directory)
                                 directory.entries.forEach { preset ->
                                     key(editor, preset.id) {
@@ -150,7 +159,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                                     else applicationError = "子代理组未应用，当前会话配置已保留；请重试。"
                                                 }
                                             })
-                                        Spacer(Modifier.height(12.dp))
+                                        Spacer(Modifier.height(8.dp))
                                     }
                                 }
                                 applicationError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -169,7 +178,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                             else -> Unit
                                         }
                                         (panelConfig ?: current).appliedPresetName?.let { Text("已应用：$it", style = MaterialTheme.typography.bodySmall) }
-                                        Row(Modifier.fillMaxWidth().heightIn(min = 64.dp)
+                                        Row(Modifier.fillMaxWidth().padding(vertical = 10.dp)
                                             .toggleable(value = panelConfig?.enabled ?: current.enabled, enabled = panelEnabled, role = Role.Switch,
                                                 onValueChange = { if (panelEnabled && panelEditor.enabled) { TouchHaptics.click(view); panelEditor.setEnabled(it) } }),
                                             verticalAlignment = Alignment.CenterVertically) {
@@ -177,30 +186,32 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                                 Text("自动委派", style = MaterialTheme.typography.bodyLarge)
                                                 Text("按职责自动分配任务", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
                                             }
-                                            Switch(checked = panelConfig?.enabled ?: current.enabled, enabled = panelEnabled, onCheckedChange = null)
+                                            ConversationAgentSwitch(checked = panelConfig?.enabled ?: current.enabled, enabled = panelEnabled)
                                         }
-                                        HorizontalDivider(Modifier.padding(top = 12.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
+                                        HorizontalDivider(Modifier.padding(bottom = 8.dp), color = conversationAgentColors().line)
                                         (panelConfig ?: current).profiles.forEach { profile ->
                                             key(panelEditor, profile.id) {
-                                                SubAgentProfileRow(profile, providers, enabled = panelEnabled,
-                                                    draftAllowed = latestOwnerMatches() && !latestTaskRunning && !latestChoosing, draftRetry = { editor.retry(); panelEditor.retry() })
                                                 val selectedProvider = providers.singleOrNull { it.id == profile.providerId && it.isEnabled }
                                                 val selectedModel = selectedProvider?.models?.singleOrNull { it.id == profile.modelId && it.isEnabled }
-                                                TextButton(modifier = Modifier.testTag("subagent-authorize-${profile.id}"),
-                                                    enabled = panelEnabled && profile.enabled && selectedProvider != null && selectedModel != null,
-                                                    onClick = {
-                                                        if (panelEnabled && panelEditor.enabled && latestOwnerMatches() && !latestTaskRunning &&
-                                                            !latestChoosing && selectedProvider != null && selectedModel != null)
-                                                            onAuthorizeSavedModel(profile, selectedProvider, selectedModel)
-                                                    }) { Text("授权此已保存模型") }
-                                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+                                                SubAgentProfileRow(profile, providers, enabled = panelEnabled,
+                                                    draftAllowed = latestOwnerMatches() && !latestTaskRunning && !latestChoosing, draftRetry = { editor.retry(); panelEditor.retry() },
+                                                    authorization = {
+                                                        IconButton(modifier = Modifier.size(27.dp, 29.dp).testTag("subagent-authorize-${profile.id}"),
+                                                            enabled = panelEnabled && profile.enabled && selectedProvider != null && selectedModel != null,
+                                                            onClick = {
+                                                                if (panelEnabled && panelEditor.enabled && latestOwnerMatches() && !latestTaskRunning &&
+                                                                    !latestChoosing && selectedProvider != null && selectedModel != null)
+                                                                    onAuthorizeSavedModel(profile, selectedProvider, selectedModel)
+                                                            }) { Icon(Icons.Rounded.VerifiedUser, "授权此已保存模型", Modifier.size(16.dp)) }
+                                                    })
+                                                Spacer(Modifier.height(8.dp))
                                             }
                                         }
-                                        Row(Modifier.fillMaxWidth().padding(top = 14.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                                             Text("点按模型切换 · 长按调整思考", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                                            IconButton(modifier = Modifier.size(48.dp), enabled = panelEnabled, onClick = {
+                                            IconButton(modifier = Modifier.size(27.dp, 29.dp), enabled = panelEnabled, onClick = {
                                                 if (panelEnabled && panelEditor.enabled) SubAgentProfileDraftSession.open(panelEditor)?.let { TouchHaptics.click(view); addedDraft = it }
-                                            }) { Icon(Icons.Rounded.Add, "添加子代理") }
+                                            }) { Icon(Icons.Rounded.Add, "添加子代理", Modifier.size(16.dp)) }
                                         }
                                         addedDraft?.let { session ->
                                             SubAgentProfileConfigDialog(session, panelEditor, providers, enabled = latestOwnerMatches() && !latestTaskRunning && !latestChoosing,
@@ -210,28 +221,22 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                 }
                             }
                         }
-                        Row(Modifier.fillMaxWidth().padding(top = 4.dp).heightIn(min = 48.dp).testTag("subagent-collaboration-footer"),
+                        HorizontalDivider(Modifier.padding(top = 10.dp), color = conversationAgentColors().line)
+                        Row(Modifier.fillMaxWidth().padding(top = 10.dp).testTag("subagent-collaboration-footer"),
                             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             if (choosing && current != null && editor != null && chooserPopup != null) {
                                 val (popup, ticket) = chooserPopup
-                                TextButton(enabled = canChange, modifier = Modifier.semantics { onClick {
+                                ConversationAgentButton("使用当前配置", enabled = canChange, modifier = Modifier.weight(1f)) {
                                     if (popup.isCurrent(ticket, popup) && latestOwnerMatches() && !latestTaskRunning && latestCanChange && latestChoosing && editor.enabled) { TouchHaptics.click(view); chooserOverride = false }
-                                    true
-                                } }, onClick = {
-                                    if (popup.isCurrent(ticket, popup) && latestOwnerMatches() && !latestTaskRunning && latestCanChange && latestChoosing && editor.enabled) { TouchHaptics.click(view); chooserOverride = false }
-                                }) { Text("使用当前配置") }
+                                }
                             } else if (!choosing && panelEditor != null) {
-                                TextButton(enabled = panelEnabled, modifier = Modifier.semantics { onClick {
+                                ConversationAgentButton("切换子代理组", enabled = panelEnabled, modifier = Modifier.weight(1f)) {
                                     if (panelEnabled && panelEditor.enabled && latestOwnerMatches() && !latestTaskRunning && !latestChoosing) { TouchHaptics.click(view); chooserOverride = true }
-                                    true
-                                } }, onClick = {
-                                    if (panelEnabled && panelEditor.enabled && latestOwnerMatches() && !latestTaskRunning && !latestChoosing) { TouchHaptics.click(view); chooserOverride = true }
-                                }) { Text("切换子代理组") }
+                                }
                             }
-                            Spacer(Modifier.weight(1f))
-                            TextButton(enabled = !taskRunning, onClick = {
+                            ConversationAgentButton("完成", enabled = !taskRunning, primary = true, modifier = Modifier.weight(1f)) {
                                 if (latestOwnerMatches() && !latestTaskRunning) { TouchHaptics.click(view); onDismiss() }
-                            }) { Text("完成") }
+                            }
                         }
                     }
                 }

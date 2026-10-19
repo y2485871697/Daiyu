@@ -102,15 +102,15 @@ fun AssistantPickerDialog(
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
             Icon(Icons.Rounded.Search, null, Modifier.size(17.dp * s), tint = colors.muted)
             Box(Modifier.weight(1f).padding(vertical = 9.dp * s)) {
-                if (searchQuery.isEmpty()) Text(stringResource(R.string.assistant_search), color = colors.muted, fontSize = (11f * s).sp)
+                if (searchQuery.isEmpty()) Text(stringResource(R.string.assistant_search), color = colors.muted, fontSize = (9.9f * s).sp)
                 BasicTextField(searchQuery, { searchQuery = it }, singleLine = true,
                     modifier = Modifier.fillMaxWidth(), cursorBrush = SolidColor(colors.accent),
-                    textStyle = TextStyle(color = colors.text, fontSize = (11f * s).sp))
+                    textStyle = TextStyle(color = colors.text, fontSize = (9.9f * s).sp))
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 10.dp * s, bottom = 7.dp * s), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("${filtered.size} 位助手", color = colors.muted, fontSize = (8f * s).sp)
-            Text("点击切换 · 长按管理", color = colors.muted, fontSize = (8f * s).sp)
+            Text("${filtered.size} 位助手", color = colors.muted, fontSize = (7.2f * s).sp)
+            Text("点击切换 · 长按管理", color = colors.muted, fontSize = (7.2f * s).sp)
         }
         LazyColumn(Modifier.fillMaxWidth().weight(1f).padding(2.dp * s),
             verticalArrangement = Arrangement.spacedBy(5.dp * s)) {
@@ -119,7 +119,7 @@ fun AssistantPickerDialog(
                     onClick = { onSelect(profile.id); onDismiss() }, onLongClick = { actionProfile = profile }, assets = assets)
             }
             if (filtered.isEmpty()) item {
-                Text(stringResource(R.string.assistant_empty), color = colors.muted, fontSize = (11f * s).sp,
+                Text(stringResource(R.string.assistant_empty), color = colors.muted, fontSize = (9.9f * s).sp,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 22.dp))
             }
         }
@@ -200,16 +200,16 @@ internal fun AssistantProfileCard(
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp * s)) {
         AssistantAvatar(bitmap = bitmap, size = 34.dp * s)
         Column(Modifier.weight(1f)) {
-            Text(profile.name, color = colors.text, fontSize = (11f * s).sp,
+            Text(profile.name, color = colors.text, fontSize = (9.9f * s).sp,
                 fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             // There is no description field in the production profile; do not create a shadow model.
             Text(profile.prompt.lineSequence().firstOrNull { it.isNotBlank() } ?: "自定义助手",
-                color = colors.muted, fontSize = (9f * s).sp,
+                color = colors.muted, fontSize = (8.1f * s).sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp * s))
         }
         if (selected) Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp * s)) {
             Icon(Icons.Rounded.Check, null, Modifier.size(11.dp * s), tint = colors.accent)
-            Text(stringResource(R.string.assistant_current), color = colors.accent, fontSize = (8f * s).sp, maxLines = 1)
+            Text(stringResource(R.string.assistant_current), color = colors.accent, fontSize = (7.2f * s).sp, maxLines = 1)
         }
     }
 }
@@ -243,7 +243,7 @@ internal fun AssistantDeleteDialog(profile: AssistantProfile, assets: AssistantA
         }) {
         AssistantDialogIdentity(profile, assets)
         Text(stringResource(R.string.assistant_delete_body, profile.name), color = assistantPreviewPalette().text,
-            fontSize = (11f * s).sp, lineHeight = (19.8f * s).sp, modifier = Modifier.verticalScroll(rememberScrollState()))
+            fontSize = (9.9f * s).sp, lineHeight = (17.82f * s).sp, modifier = Modifier.verticalScroll(rememberScrollState()))
     }
 }
 
@@ -256,10 +256,10 @@ private fun AssistantDialogIdentity(profile: AssistantProfile, assets: Assistant
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(11.dp * s)) {
         AssistantAvatar(bitmap = bitmap, size = 44.dp * s)
         Column(Modifier.weight(1f)) {
-            Text(profile.name, color = colors.text, fontSize = (12f * s).sp, lineHeight = (19.2f * s).sp,
+            Text(profile.name, color = colors.text, fontSize = (10.8f * s).sp, lineHeight = (17.28f * s).sp,
                 fontWeight = FontWeight.Medium)
             Text(profile.prompt.lineSequence().firstOrNull { it.isNotBlank() } ?: "自定义助手",
-                color = colors.muted, fontSize = (9f * s).sp, lineHeight = (15.3f * s).sp,
+                color = colors.muted, fontSize = (8.1f * s).sp, lineHeight = (13.77f * s).sp,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp * s))
         }
     }

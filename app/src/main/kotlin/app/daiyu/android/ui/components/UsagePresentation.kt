@@ -22,9 +22,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -52,34 +49,25 @@ internal fun UsageGlassDialog(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = usagePalette()
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        val view = LocalView.current
-        DisposableEffect(view) {
-            val window = (view.parent as? DialogWindowProvider)?.window
-            window?.setDimAmount(0f)
-            onDispose { }
-        }
-        Box(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxSize().background(Color(if (colors.dark) 0x55000000 else 0x2620172d))
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss))
-            Column(
-                Modifier.align(if (compact) Alignment.Center else Alignment.BottomCenter)
-                    .padding(10.dp).widthIn(max = if (compact) 218.dp else 550.dp).fillMaxWidth()
-                    .heightIn(max = if (compact) 620.dp else 550.dp)
-                    .clip(RoundedCornerShape(if (compact) 16.dp else 25.dp))
-                    .previewGlassBlur(RoundedCornerShape(if (compact) 16.dp else 25.dp))
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
-                    .background(Brush.linearGradient(colors.sheet))
-                    .border(1.dp, colors.edge, RoundedCornerShape(if (compact) 16.dp else 25.dp))
-                    .padding(horizontal = if (compact) 14.dp else 15.dp)
-                    .padding(top = if (compact) 8.dp else 14.dp, bottom = if (compact) 10.dp else 15.dp),
-            ) {
-                if (!compact) Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 17.dp)
-                    .size(29.dp, 3.dp).clip(RoundedCornerShape(4.dp)).background(colors.toolbar.copy(alpha = .24f)))
-                Text(title, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = colors.text,
-                    modifier = Modifier.padding(bottom = if (compact) 10.dp else 10.dp))
-                content()
-            }
+    PreviewDialog(onDismiss) {
+        val available = (maxHeight - 30.dp).coerceAtLeast(0.dp)
+        Column(
+            Modifier.align(if (compact) Alignment.Center else Alignment.BottomCenter)
+                .padding(10.dp).widthIn(max = if (compact) 218.dp else 550.dp).fillMaxWidth()
+                .heightIn(max = minOf(if (compact) 620.dp else 550.dp, available))
+                .clip(RoundedCornerShape(if (compact) 16.dp else 25.dp))
+                .previewGlassBlur(RoundedCornerShape(if (compact) 16.dp else 25.dp))
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                .background(Brush.linearGradient(colors.sheet))
+                .border(1.dp, colors.edge, RoundedCornerShape(if (compact) 16.dp else 25.dp))
+                .padding(horizontal = if (compact) 14.dp else 15.dp)
+                .padding(top = if (compact) 8.dp else 14.dp, bottom = if (compact) 10.dp else 15.dp),
+        ) {
+            if (!compact) Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 17.dp)
+                .size(29.dp, 3.dp).clip(RoundedCornerShape(4.dp)).background(colors.toolbar.copy(alpha = .24f)))
+            Text(title, fontSize = 15.3.sp, fontWeight = FontWeight.SemiBold, color = colors.text,
+                modifier = Modifier.padding(bottom = if (compact) 10.dp else 10.dp))
+            content()
         }
     }
 }
@@ -97,10 +85,10 @@ internal fun UsageMetric(label: String, value: String, modifier: Modifier = Modi
     val colors = usagePalette()
     Row(modifier.fillMaxWidth().padding(horizontal = 2.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f), fontSize = if (total) 11.sp else 10.sp,
-            color = if (total) colors.toolbar else colors.text, lineHeight = 16.sp)
-        Text(value, fontSize = if (total) 12.sp else 11.sp, fontWeight = FontWeight.Medium,
-            color = if (total) colors.text else colors.accent, lineHeight = 17.sp)
+        Text(label, Modifier.weight(1f), fontSize = if (total) 9.9.sp else 9.sp,
+            color = if (total) colors.toolbar else colors.text, lineHeight = 14.4.sp)
+        Text(value, fontSize = if (total) 10.8.sp else 9.9.sp, fontWeight = FontWeight.Medium,
+            color = if (total) colors.text else colors.accent, lineHeight = 15.3.sp)
     }
 }
 
@@ -122,7 +110,7 @@ internal fun UsageAction(
             indication = null, onClick = onClick)
         .heightIn(min = if (plain) 28.dp else 34.dp).padding(horizontal = if (plain) 0.dp else 10.dp, vertical = 8.dp),
         contentAlignment = if (plain) Alignment.CenterStart else Alignment.Center) {
-        Text(text, fontSize = if (plain) 12.sp else 10.sp, lineHeight = 16.sp,
+        Text(text, fontSize = if (plain) 10.8.sp else 9.sp, lineHeight = 14.4.sp,
             color = if (primary) Color(if (colors.dark) 0xff211735 else 0xffffffff) else if (plain) colors.muted else colors.accent)
     }
 }
@@ -133,7 +121,7 @@ internal fun UsageBody(
     modifier: Modifier = Modifier,
     style: androidx.compose.ui.text.TextStyle = androidx.compose.ui.text.TextStyle.Default,
     color: Color = Color.Unspecified,
-    fontSize: androidx.compose.ui.unit.TextUnit = 10.sp,
+    fontSize: androidx.compose.ui.unit.TextUnit = 9.sp,
     fontWeight: FontWeight? = null,
     textAlign: androidx.compose.ui.text.style.TextAlign? = null,
     maxLines: Int = Int.MAX_VALUE,

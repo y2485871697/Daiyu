@@ -155,7 +155,7 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
                     .padding(horizontal = 8.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Icon(entry.icon, null, Modifier.size(18.dp), tint = tint)
-                    Text(entry.title, Modifier.weight(1f), fontSize = 12.sp, color = colors.text)
+                    Text(entry.title, Modifier.weight(1f), fontSize = 10.8.sp, color = colors.text)
                     Icon(DaiyuIcons.ChevronRight, null, Modifier.size(11.dp).alpha(.4f), tint = colors.muted)
                 }
             }
@@ -164,7 +164,7 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                     role = Role.Button) { showPath = !showPath }.padding(vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                Text("输入文件路径", Modifier.weight(1f), fontSize = 11.sp, color = colors.muted)
+                Text("输入文件路径", Modifier.weight(1f), fontSize = 9.9.sp, color = colors.muted)
                 Icon(ChatPreviewIcons.Chevron, if (showPath) "收起" else "展开", Modifier.size(11.dp), tint = colors.muted)
             }
         }

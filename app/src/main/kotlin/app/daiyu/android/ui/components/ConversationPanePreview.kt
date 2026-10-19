@@ -3,12 +3,11 @@ package app.daiyu.android.ui.components
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.platform.LocalConfiguration
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** Scoped final preview tokens: .glass-drawer and .drawer-* (style-00.css 234–300).
  * CSS #RRGGBBAA is deliberately converted to Compose #AARRGGBB, not made opaque.
- * 368 is the final preview's effective content width; dp and sp share the same ratio.
+ * Fixed CSS geometry stays in dp; only percentage widths follow the container.
  */
 internal data class ConversationPanePreviewPalette(val dark: Boolean) {
     val text = if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
@@ -35,4 +34,4 @@ internal data class ConversationPanePreviewPalette(val dark: Boolean) {
     ConversationPanePreviewPalette(MiuixTheme.colorScheme.background.luminance() < .5f)
 
 @Composable internal fun conversationPanePreviewScale() =
-    (LocalConfiguration.current.screenWidthDp / 368f).coerceIn(.85f, 1.5f)
+    1f

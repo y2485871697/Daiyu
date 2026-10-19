@@ -1855,7 +1855,6 @@ class MainActivity : ComponentActivity() {
                         onConversationExport = { item -> backupGuard { openConversationExport(item.id) } },
                         onConversationTasks = { item -> guard { openChildTaskRecords(item.id) } },
                         onNewConversation = { guard { dismissSidebar(); select(null) } },
-                        onOpenManageChats = { guard { dismissSidebar(); updatePane(); retainedPage = "manage" } },
                         onSelectFolder = { id -> paneState = paneState.copy(selectedFolderId = id); updatePane() },
                         onCreateFolder = { name -> guard { retainedData.createFolder(name); updatePane() } },
                         onRenameFolder = { old, name -> guard {
@@ -4277,11 +4276,13 @@ class MainActivity : ComponentActivity() {
         fun valid() = activityUsable() && prompt === current
         when (current) {
             is InputPrompt -> DaiyuTextInputDialog(current.title, current.initial, current.hint, current.confirm,
+                preview = retainedPage == "chat",
                 onConfirm = { value -> confirmInputPrompt(current, value) },
                 onDismiss = { if (valid()) { if (current === mcpInput) cancelMcpEditor() else prompt = null } })
-            is ChoicePrompt -> DaiyuChoiceSheet(current.title, current.options,
+            is ChoicePrompt -> DaiyuChoiceSheet(current.title, current.options, preview = retainedPage == "chat",
                 onSelect = { index -> if (valid()) { prompt = null; current.action(index) } }, onDismiss = { if (valid()) prompt = null })
             is ConfirmPrompt -> DaiyuConfirmDialog(current.title, current.message, current.confirm, current.destructive,
+                preview = retainedPage == "chat",
                 onConfirm = { confirmPrompt(current) }, onDismiss = { if (valid()) dismissPrompt(current) })
         }
     }

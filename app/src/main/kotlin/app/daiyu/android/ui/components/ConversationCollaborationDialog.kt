@@ -127,7 +127,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                         ConversationAgentHandle()
                         Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("本会话协作", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                            IconButton(onClick = onDismiss, modifier = Modifier.size(27.dp, 29.dp)) {
+                            ConversationAgentIconButton(onClick = onDismiss, modifier = Modifier.size(27.dp, 29.dp)) {
                                 Icon(Icons.Rounded.Close, "关闭子代理设置", Modifier.size(16.dp))
                             }
                         }
@@ -137,7 +137,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                             when (state) {
                                 is SubAgentEditorState.Error -> {
                                     Text("子代理配置读取或保存失败：${state.reason}")
-                                    TextButton(onClick = { editor?.retry() }) { Text("重试恢复配置") }
+                                    ConversationAgentButton("重试恢复配置", onClick = { editor?.retry() })
                                 }
                                 SubAgentEditorState.Loading -> Text("正在读取本会话子代理配置…")
                                 else -> if (editor == null) Text("请先选择会话；未选择会话时不可编辑。")
@@ -145,7 +145,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                             }
                             if (choosing && directory != null && editor != null && chooserPopup != null) {
                                 val (popup, ticket) = chooserPopup
-                                Text("选择子代理组", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = conversationAgentColors().accent, modifier = Modifier.padding(horizontal = 2.dp, vertical = 8.dp))
+                                Text("选择子代理组", fontSize = 9.sp, fontWeight = FontWeight.SemiBold, color = conversationAgentColors().accent, modifier = Modifier.padding(horizontal = 2.dp, vertical = 8.dp))
                                 Text("应用时复制到本会话；本会话修改不会反写预设。切换会替换当前会话配置。", style = MaterialTheme.typography.bodySmall, color = conversationAgentColors().muted, modifier = Modifier.padding(start = 2.dp, end = 2.dp, bottom = 14.dp))
                                 SubAgentPresetDirectoryStatus(directory)
                                 directory.entries.forEach { preset ->
@@ -170,9 +170,9 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                         when (panelState) {
                                             is SubAgentEditorState.Error -> {
                                                 Text("本会话配置保存或读取失败：${panelState.reason}", color = MaterialTheme.colorScheme.error)
-                                                TextButton(enabled = latestOwnerMatches() && !latestTaskRunning, onClick = {
+                                                ConversationAgentButton("重试本会话配置", enabled = latestOwnerMatches() && !latestTaskRunning, onClick = {
                                                     if (latestOwnerMatches() && !latestTaskRunning && !latestChoosing) { TouchHaptics.click(view); editor.retry(); panelEditor.retry() }
-                                                }) { Text("重试本会话配置") }
+                                                })
                                             }
                                             SubAgentEditorState.Loading -> Text("正在读取本会话子代理配置…")
                                             else -> Unit
@@ -196,7 +196,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                                 SubAgentProfileRow(profile, providers, enabled = panelEnabled,
                                                     draftAllowed = latestOwnerMatches() && !latestTaskRunning && !latestChoosing, draftRetry = { editor.retry(); panelEditor.retry() },
                                                     authorization = {
-                                                        IconButton(modifier = Modifier.size(27.dp, 29.dp).testTag("subagent-authorize-${profile.id}"),
+                                                        ConversationAgentIconButton(modifier = Modifier.size(27.dp, 29.dp).testTag("subagent-authorize-${profile.id}"),
                                                             enabled = panelEnabled && profile.enabled && selectedProvider != null && selectedModel != null,
                                                             onClick = {
                                                                 if (panelEnabled && panelEditor.enabled && latestOwnerMatches() && !latestTaskRunning &&
@@ -209,7 +209,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                         }
                                         Row(Modifier.fillMaxWidth().padding(vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                                             Text("点按模型切换 · 长按调整思考", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.weight(1f))
-                                            IconButton(modifier = Modifier.size(27.dp, 29.dp), enabled = panelEnabled, onClick = {
+                                            ConversationAgentIconButton(modifier = Modifier.size(27.dp, 29.dp), enabled = panelEnabled, onClick = {
                                                 if (panelEnabled && panelEditor.enabled) SubAgentProfileDraftSession.open(panelEditor)?.let { TouchHaptics.click(view); addedDraft = it }
                                             }) { Icon(Icons.Rounded.Add, "添加子代理", Modifier.size(16.dp)) }
                                         }

@@ -108,9 +108,9 @@ internal fun ChatModelPicker(
                     Icon(DaiyuIcons.Model, null, Modifier.size(17.dp), tint = colors.accent)
                 }
                 Column(Modifier.weight(1f)) {
-                    Text("当前模型", color = colors.muted, fontSize = 9.sp, modifier = Modifier.padding(bottom = 3.dp))
+                    Text("当前模型", color = colors.muted, fontSize = 8.1.sp, modifier = Modifier.padding(bottom = 3.dp))
                     Text(currentModel?.displayName ?: state.current.ifBlank { if (state.loading) "读取中…" else "未选择模型" },
-                        color = colors.accent, fontSize = 12.sp, fontWeight = FontWeight(550),
+                        color = colors.accent, fontSize = 10.8.sp, fontWeight = FontWeight(550),
                         maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (state.current.isNotBlank()) Icon(DaiyuIcons.Check, "当前模型", Modifier.size(14.dp), tint = colors.accent)
@@ -121,8 +121,8 @@ internal fun ChatModelPicker(
             // make the existing search editing contract depend on semantics merging.
             BasicTextField(
                 value = query, onValueChange = { query = it }, singleLine = true,
-                textStyle = TextStyle(color = colors.text, fontSize = 11.sp,
-                    lineHeight = 18.15.sp),
+                textStyle = TextStyle(color = colors.text, fontSize = 9.9.sp,
+                    lineHeight = 16.335.sp),
                 cursorBrush = SolidColor(colors.accent),
                 modifier = Modifier.testTag("chat-model-search").fillMaxWidth()
                     .semantics { contentDescription = "搜索模型" }
@@ -137,7 +137,7 @@ internal fun ChatModelPicker(
                         Icon(DaiyuIcons.Search, null, Modifier.size(14.dp), tint = colors.muted)
                         Box(Modifier.weight(1f)) {
                             if (query.isEmpty()) Text("搜索模型", color = colors.muted,
-                                fontSize = 11.sp)
+                                fontSize = 9.9.sp)
                             input()
                         }
                     }
@@ -146,10 +146,10 @@ internal fun ChatModelPicker(
             Spacer(Modifier.height(13.dp))
             if (!state.loading && state.current.isNotBlank() && currentModel == null) {
                 Text("当前模型不在本地目录：${state.current}", color = colors.muted,
-                    fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                    fontSize = 9.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(bottom = 7.dp))
             }
-            if (status != null) Text(status, color = colors.muted, fontSize = 10.sp,
+            if (status != null) Text(status, color = colors.muted, fontSize = 9.sp,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 7.dp))
             LazyColumn(
                 Modifier.testTag("chat-model-list").fillMaxWidth().weight(1f),
@@ -161,8 +161,8 @@ internal fun ChatModelPicker(
                     Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 5.dp)
                         .semantics { heading() }, verticalAlignment = Alignment.CenterVertically) {
                         Text("当前供应商 · 本地目录", color = colors.muted,
-                            fontSize = 10.sp, modifier = Modifier.weight(1f))
-                        Text("${visible.size}", color = colors.muted, fontSize = 9.sp)
+                            fontSize = 9.sp, modifier = Modifier.weight(1f))
+                        Text("${visible.size}", color = colors.muted, fontSize = 8.1.sp)
                     }
                 }
                 items(visible, key = { "model:${it.id}" }) { model ->
@@ -186,11 +186,11 @@ internal fun ChatModelPicker(
                         Icon(DaiyuIcons.Model, null, Modifier.size(17.dp), tint = colors.accent)
                         Column(Modifier.weight(1f)) {
                             Text(model.displayName, color = if (selected) colors.accent else colors.text,
-                                fontSize = 11.sp,
+                                fontSize = 9.9.sp,
                                 fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
                                 maxLines = 2, overflow = TextOverflow.Ellipsis)
                             if (model.displayName in duplicateNames && model.displayName != model.id) {
-                                Text(model.id, color = colors.muted, fontSize = 9.sp,
+                                Text(model.id, color = colors.muted, fontSize = 8.1.sp,
                                     maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
@@ -206,13 +206,13 @@ internal fun ChatModelPicker(
                 }
                 if (visible.isEmpty() && !state.loading) item(key = "empty") {
                     Text(if (query.isBlank()) "暂无可选模型" else "没有匹配的模型",
-                        color = colors.muted, fontSize = 11.sp,
+                        color = colors.muted, fontSize = 9.9.sp,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
                 }
             }
             HorizontalDivider(Modifier.padding(top = 10.dp), color = colors.line)
             Text("仅显示当前供应商的本地目录 · 刷新不会联网", color = colors.muted,
-                fontSize = 9.sp, modifier = Modifier.fillMaxWidth().padding(top = 9.dp, bottom = 8.dp),
+                fontSize = 8.1.sp, modifier = Modifier.fillMaxWidth().padding(top = 9.dp, bottom = 8.dp),
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }

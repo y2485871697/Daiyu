@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.ui.draw.alpha
+import app.daiyu.android.ui.components.PreviewDialog
 import app.daiyu.android.ui.components.previewGlassBlur
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -25,9 +26,6 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
-import androidx.compose.ui.window.DialogWindowProvider
 
 /** Default-off: settings continue to use their original appearance. */
 internal val LocalConversationAgentStyle = staticCompositionLocalOf { false }
@@ -51,20 +49,15 @@ internal data class ConversationAgentColors(val dark: Boolean) {
 internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit) {
     val colors = conversationAgentColors()
-    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
-        val window = (LocalView.current.parent as? DialogWindowProvider)?.window
-        SideEffect { window?.setDimAmount(0f) }
-        Box(Modifier.fillMaxSize().background(Color(if (colors.dark) 0x55000000 else 0x2620172d))) {
-            Box(Modifier.matchParentSize().clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss))
-            Column(modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(10.dp).fillMaxWidth()
-                .shadow(18.dp, RoundedCornerShape(radius.dp), ambientColor = Color(0x24352044), spotColor = Color(0x24352044))
-                .clip(RoundedCornerShape(radius.dp))
-                .previewGlassBlur(RoundedCornerShape(radius.dp))
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
-                .background(Brush.linearGradient(colors.gradient))
-                .border(1.dp, colors.edge, RoundedCornerShape(radius.dp))) {
-                CompositionLocalProvider(LocalContentColor provides colors.text, content = { content() })
-            }
+    PreviewDialog(onDismiss) {
+        Column(modifier.align(Alignment.BottomCenter).heightIn(max = (maxHeight - 20.dp).coerceAtLeast(0.dp)).padding(10.dp).fillMaxWidth()
+            .shadow(18.dp, RoundedCornerShape(radius.dp), ambientColor = Color(0x24352044), spotColor = Color(0x24352044))
+            .clip(RoundedCornerShape(radius.dp))
+            .previewGlassBlur(RoundedCornerShape(radius.dp))
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+            .background(Brush.linearGradient(colors.gradient))
+            .border(1.dp, colors.edge, RoundedCornerShape(radius.dp))) {
+            CompositionLocalProvider(LocalContentColor provides colors.text, content = { content() })
         }
     }
 }
@@ -98,15 +91,22 @@ internal fun ConversationAgentSheet(onDismiss: () -> Unit, radius: Int = 25, mod
         .border(1.dp, if (primary) Color(0xff786c83) else colors.line, shape)
         .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null, role = Role.Button, onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 7.dp), contentAlignment = Alignment.Center) {
-        Text(text, fontSize = 10.sp, lineHeight = 14.sp, color = (if (primary) Color.White else colors.accent).copy(alpha = if (enabled) 1f else .4f))
+        Text(text, fontSize = 9.sp, lineHeight = 12.6.sp, color = (if (primary) Color.White else colors.accent).copy(alpha = if (enabled) 1f else .4f))
     }
 }
 
 @Composable internal fun ConversationAgentTypography(content: @Composable () -> Unit) {
     val colors = conversationAgentColors()
-    fun style(size: Int, weight: FontWeight = FontWeight.Normal) = TextStyle(fontSize = size.sp, lineHeight = (size * 1.6f).sp, fontWeight = weight)
+    fun style(size: Int, weight: FontWeight = FontWeight.Normal) = TextStyle(fontSize = (size * .9f).sp, lineHeight = (size * 1.44f).sp, fontWeight = weight)
     MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(onSurface = colors.text, onSurfaceVariant = colors.muted,
         primary = colors.accent, outline = colors.line, outlineVariant = colors.line), typography = MaterialTheme.typography.copy(
         titleLarge = style(16, FontWeight.SemiBold), titleMedium = style(11, FontWeight.Medium), titleSmall = style(11, FontWeight.Medium),
         bodyLarge = style(11), bodyMedium = style(11), bodySmall = style(9), labelSmall = style(9), labelMedium = style(10)), content = content)
+}
+
+@Composable internal fun ConversationAgentIconButton(onClick: () -> Unit, modifier: Modifier = Modifier,
+    enabled: Boolean = true, content: @Composable () -> Unit) {
+    Box(modifier.clip(RoundedCornerShape(9.dp)).alpha(if (enabled) 1f else .4f)
+        .clickable(enabled = enabled, role = Role.Button, interactionSource = remember { MutableInteractionSource() },
+            indication = null, onClick = onClick), contentAlignment = Alignment.Center) { content() }
 }

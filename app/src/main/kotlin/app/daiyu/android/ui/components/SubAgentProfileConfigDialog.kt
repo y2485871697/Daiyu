@@ -183,7 +183,8 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                     val editorState = session.editor.state
                     if (editorState is SubAgentEditorState.Error) {
                         Text("配置保存或读取失败：${editorState.reason}", color = MaterialTheme.colorScheme.error)
-                        TextButton(enabled = !session.submitting, onClick = onRetry) { Text("重试恢复配置（保留草稿）") }
+                        if (LocalConversationAgentStyle.current) ConversationAgentButton("重试恢复配置（保留草稿）", enabled = !session.submitting, onClick = onRetry)
+                        else TextButton(enabled = !session.submitting, onClick = onRetry) { Text("重试恢复配置（保留草稿）") }
                     }
                 }
                 SubAgentDraftDialogActions(ready, !session.submitting, userDismiss, onConfirm = {

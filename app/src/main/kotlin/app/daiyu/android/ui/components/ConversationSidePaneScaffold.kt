@@ -88,6 +88,11 @@ import androidx.compose.ui.draw.blur
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.BlurColors
 import top.yukonga.miuix.kmp.blur.textureBlur
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -176,7 +181,6 @@ internal fun ConversationSidePaneScaffold(
     onConversationExport: (ConversationSummaryUi) -> Unit = {},
     onConversationTasks: ((ConversationSummaryUi) -> Unit)? = null,
     onNewConversation: () -> Unit,
-    onOpenManageChats: () -> Unit = {},
     onSelectFolder: (String?) -> Unit = {},
     onCreateFolder: (String) -> Unit = {},
     onRenameFolder: (String, String) -> Unit = { _, _ -> },
@@ -212,6 +216,7 @@ internal fun ConversationSidePaneScaffold(
     val currentOnOpen by rememberUpdatedState(onOpen)
     val currentOnDismiss by rememberUpdatedState(onDismiss)
     var drawerBlocksIme by remember { mutableStateOf(visible) }
+    var managing by remember { mutableStateOf(false) }
 
     fun launchAfterDrawerClosed(action: () -> Unit) {
         drawerScope.launch {
@@ -312,7 +317,8 @@ internal fun ConversationSidePaneScaffold(
                     onConversationTogglePin = onConversationTogglePin,
                     onConversationExport = onConversationExport,
                     onConversationTasks = onConversationTasks,
-                    onOpenManageChats = { launchAfterDrawerClosed(onOpenManageChats) },
+                    managing = managing,
+                    onManagingChange = { managing = it },
                     onSelectFolder = onSelectFolder,
                     onCreateFolder = onCreateFolder,
                     onRenameFolder = onRenameFolder,
@@ -343,6 +349,8 @@ internal fun ConversationSidePaneScaffold(
 @Composable
 private fun ConversationPanePanel(
     state: ConversationPaneUiState,
+    managing: Boolean,
+    onManagingChange: (Boolean) -> Unit,
     width: androidx.compose.ui.unit.Dp,
     drawerShape: AbsoluteRoundedCornerShape,
     backdrop: LayerBackdrop?,
@@ -356,7 +364,6 @@ private fun ConversationPanePanel(
     onConversationExport: (ConversationSummaryUi) -> Unit = {},
     onConversationTasks: ((ConversationSummaryUi) -> Unit)? = null,
     onNewConversation: () -> Unit,
-    onOpenManageChats: () -> Unit = {},
     onSelectFolder: (String?) -> Unit = {},
     onCreateFolder: (String) -> Unit = {},
     onRenameFolder: (String, String) -> Unit = { _, _ -> },
@@ -373,6 +380,10 @@ private fun ConversationPanePanel(
     onOpenPermissions: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    var selectedIds by remember(managing) { mutableStateOf(emptySet<String>()) }
+    LaunchedEffect(state.historyConversations) {
+        selectedIds = selectedIds.intersect(state.historyConversations.map { it.id }.toSet())
+    }
     val query = state.searchQuery.trim()
     val visibleConversations = remember(state.conversations, query) {
         state.searchResults()
@@ -389,7 +400,7 @@ private fun ConversationPanePanel(
     val safeTop = with(density) { WindowInsets.safeDrawing.getTop(density).toDp() }
     Surface(
         modifier = modifier
-            .width(width)
+            .width(width).testTag("conversation-drawer")
             .fillMaxHeight()
             .graphicsLayer { clip = true; shape = drawerShape }
             .then(if (backdrop != null) Modifier.textureBlur(backdrop = backdrop, shape = drawerShape,
@@ -416,7 +427,7 @@ private fun ConversationPanePanel(
                 // 搜索框在顶部，键盘不必把底部 dock 和会话输入一起顶上来。
                 .windowInsetsPadding(WindowInsets.safeDrawing.exclude(WindowInsets.ime))
                 .consumeWindowInsets(WindowInsets.ime)
-                .padding(horizontal = DrawerMetrics.PaneHorizontalPadding),
+                .padding(start = DrawerMetrics.PaneHorizontalPadding, end = DrawerMetrics.PaneHorizontalPadding + 1.dp),
         ) {
             // The HTML drawer's 30px top padding includes the status area.
             Spacer(modifier = Modifier.height((30.dp * scale - safeTop).coerceAtLeast(0.dp)))
@@ -428,7 +439,8 @@ private fun ConversationPanePanel(
             Spacer(modifier = Modifier.height(DrawerMetrics.AfterSearch))
             PaneDrawerActions(
                 onNewConversation = onNewConversation,
-                onOpenManageChats = onOpenManageChats,
+                managing = managing,
+                onOpenManageChats = { onManagingChange(!managing) },
             )
             Spacer(modifier = Modifier.height(DrawerMetrics.AfterSearch))
             PaneFolderBar(
@@ -440,6 +452,9 @@ private fun ConversationPanePanel(
                 onDeleteFolder = onDeleteFolder,
             )
             Spacer(modifier = Modifier.height(DrawerMetrics.AfterChips))
+            if (managing) Text("已选择 ${selectedIds.size} 项", color = colors.accent,
+                fontSize = 8.1.sp, lineHeight = 12.sp,
+                modifier = Modifier.testTag("drawer-selection-count").padding(start = 8.dp, end = 8.dp, bottom = 8.dp))
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
@@ -454,9 +469,9 @@ private fun ConversationPanePanel(
                         EmptyConversations(isSearching = query.isNotBlank())
                     }
                 } else {
-                    groups.forEach { group ->
+                    groups.forEachIndexed { groupIndex, group ->
                         item(key = group.key, contentType = "drawer-section") {
-                            ConversationSectionHeader(group = group)
+                            ConversationSectionHeader(group = group, first = groupIndex == 0)
                         }
                         items(
                             items = group.items,
@@ -466,7 +481,13 @@ private fun ConversationPanePanel(
                             ConversationTextRow(
                                 conversation = conversation,
                                 selected = conversation.id == state.selectedConversationId,
-                                onClick = { onConversationSelected(conversation.id) },
+                                managing = managing,
+                                checked = conversation.id in selectedIds,
+                                onClick = {
+                                    if (managing) selectedIds = if (conversation.id in selectedIds)
+                                        selectedIds - conversation.id else selectedIds + conversation.id
+                                    else onConversationSelected(conversation.id)
+                                },
                                 onRename = { onConversationRename(conversation) },
                                 onDelete = { onConversationDelete(conversation) },
                                 onMoveToFolder = { onMoveConversationToFolder(conversation) },
@@ -517,7 +538,8 @@ private fun PaneSearchRow(
     val textStyle = MiuixTheme.textStyles.body2.merge(
         TextStyle(
             color = conversationPanePreviewPalette().text,
-            fontSize = (12f * s).sp,
+            fontSize = (10.8f * s).sp,
+            lineHeight = 16.sp,
         ),
     )
     val searchFocusRequester = remember { FocusRequester() }
@@ -588,6 +610,7 @@ private fun PaneSearchRow(
 
 @Composable
 private fun PaneDrawerActions(
+    managing: Boolean,
     onNewConversation: () -> Unit,
     onOpenManageChats: () -> Unit,
 ) {
@@ -601,7 +624,7 @@ private fun PaneDrawerActions(
             onClick = onNewConversation,
         )
         DrawerActionRow(
-            label = stringResource(R.string.drawer_manage_chats),
+            label = if (managing) "完成管理" else stringResource(R.string.drawer_manage_chats),
             icon = Icons.Rounded.History,
             onClick = onOpenManageChats,
         )
@@ -617,7 +640,7 @@ private fun DrawerActionRow(
     val view = LocalView.current
     val colors = conversationPanePreviewPalette()
     val s = conversationPanePreviewScale()
-    Row(Modifier.fillMaxWidth().heightIn(min = 38.dp * s)
+    Row(Modifier.fillMaxWidth().heightIn(min = 40.dp * s)
         .clip(RoundedCornerShape(13.dp * s)).background(colors.action)
         .border(1.dp, colors.actionBorder, RoundedCornerShape(13.dp * s))
         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
@@ -625,7 +648,7 @@ private fun DrawerActionRow(
         }.padding(horizontal = 12.dp * s, vertical = 10.dp * s),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp * s)) {
         Icon(icon, null, Modifier.size(18.dp * s), tint = colors.toolbar)
-        Text(label, color = colors.accent, fontSize = (11f * s).sp, fontWeight = FontWeight.Medium,
+        Text(label, color = colors.accent, fontSize = (9.9f * s).sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
@@ -744,54 +767,22 @@ private fun PaneFolderBar(
         )
     }
     folderToDelete?.let { folder ->
-        WindowDialog(
-            show = true,
-            title = stringResource(R.string.drawer_delete_folder_title),
-            summary = stringResource(R.string.drawer_delete_folder_message),
-            onDismissRequest = { folderToDelete = null },
-        ) {
-            MiuixDialogActions(
-                confirmText = stringResource(R.string.action_delete),
-                destructive = true,
-                onCancel = { folderToDelete = null },
-                onConfirm = {
-                    onDeleteFolder(folder.id)
-                    folderToDelete = null
-                },
-            )
-        }
+        DaiyuConfirmDialog(stringResource(R.string.drawer_delete_folder_title),
+            stringResource(R.string.drawer_delete_folder_message), stringResource(R.string.action_delete), true,
+            onConfirm = { onDeleteFolder(folder.id); folderToDelete = null },
+            onDismiss = { folderToDelete = null }, preview = true)
     }
 }
 
 @Composable
-private fun FolderNameDialog(
-    title: String,
-    initialName: String,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit,
-) {
+private fun FolderNameDialog(title: String, initialName: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var name by remember(initialName) { mutableStateOf(initialName) }
-    WindowDialog(
-        show = true,
-        title = title,
-        onDismissRequest = onDismiss,
-    ) {
-        Column {
-            TextField(
-                value = name,
-                onValueChange = { name = it },
-                label = stringResource(R.string.drawer_folder_name),
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            MiuixDialogActions(
-                confirmText = stringResource(R.string.action_save),
-                confirmEnabled = name.isNotBlank(),
-                onCancel = onDismiss,
-                onConfirm = { onConfirm(name) },
-                modifier = Modifier.padding(top = 16.dp),
-            )
-        }
+    app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet(title, onDismiss, footer = {
+        app.daiyu.android.ui.screens.assistants.AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f))
+        app.daiyu.android.ui.screens.assistants.AssistantPreviewButton(stringResource(R.string.action_save),
+            { onConfirm(name) }, Modifier.weight(1f), primary = true, enabled = name.isNotBlank())
+    }) {
+        app.daiyu.android.ui.screens.assistants.AssistantPreviewField(name, { name = it }, stringResource(R.string.drawer_folder_name))
     }
 }
 
@@ -850,7 +841,8 @@ private fun DrawerChip(
         Text(
             text = label,
             color = contentColor,
-            fontSize = (10f * s).sp,
+            fontSize = (9f * s).sp,
+            lineHeight = 13.sp,
             fontWeight = FontWeight.Normal,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -861,18 +853,20 @@ private fun DrawerChip(
 @Composable
 private fun ConversationSectionHeader(
     group: ConversationDrawerGroup,
+    first: Boolean,
 ) {
     Text(
         text = group.localizedLabel(),
         color = conversationPanePreviewPalette().muted,
-        fontSize = (10f * conversationPanePreviewScale()).sp,
+        fontSize = (9f * conversationPanePreviewScale()).sp,
+        lineHeight = 13.05.sp,
         letterSpacing = (.2f * conversationPanePreviewScale()).sp,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier
             .fillMaxWidth()
             .padding(
                 start = DrawerMetrics.RowHorizontalPadding,
-                top = DrawerMetrics.SectionTopPadding,
+                top = if (first) 5.dp else DrawerMetrics.SectionTopPadding,
                 bottom = DrawerMetrics.SectionBottomPadding,
             ),
     )
@@ -881,6 +875,8 @@ private fun ConversationSectionHeader(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ConversationTextRow(
+    managing: Boolean,
+    checked: Boolean,
     conversation: ConversationSummaryUi,
     selected: Boolean,
     onClick: () -> Unit,
@@ -891,7 +887,7 @@ private fun ConversationTextRow(
     onExport: () -> Unit,
     onTasks: (() -> Unit)?,
 ) {
-    var showActionMenu by remember { mutableStateOf(false) }
+    var showActionMenu by remember(managing) { mutableStateOf(false) }
     val view = LocalView.current
 
     Box(modifier = Modifier.fillMaxWidth()) {
@@ -909,6 +905,8 @@ private fun ConversationTextRow(
                 )
                 .border(1.dp, if (selected) conversationPanePreviewPalette().line else Color.Transparent,
                     RoundedCornerShape(DrawerMetrics.RowCornerRadius))
+                .testTag("drawer-conversation:${conversation.id}")
+                .semantics { if (managing) { role = Role.Checkbox; this.selected = checked } }
                 .combinedClickable(
                     interactionSource = remember { MutableInteractionSource() }, indication = null,
                     hapticFeedbackEnabled = false,
@@ -918,7 +916,7 @@ private fun ConversationTextRow(
                     },
                     onLongClick = {
                         TouchHaptics.longPress(view)
-                        showActionMenu = true
+                        if (!managing) showActionMenu = true
                     },
                 )
                 .padding(
@@ -927,11 +925,19 @@ private fun ConversationTextRow(
                 ),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (managing) {
+                Box(Modifier.padding(end = 8.dp).size(13.dp).clip(RoundedCornerShape(4.dp))
+                    .background(if (checked) conversationPanePreviewPalette().accent else Color.Transparent)
+                    .border(1.dp, conversationPanePreviewPalette().accent, RoundedCornerShape(4.dp)),
+                    contentAlignment = Alignment.Center) {
+                    if (checked) Box(Modifier.size(6.dp).background(conversationPanePreviewPalette().folderText, RoundedCornerShape(1.dp)))
+                }
+            }
             Text(
                 text = conversation.title.ifBlank { conversation.preview },
                 color = conversationPanePreviewPalette().text,
-                fontSize = (12f * conversationPanePreviewScale()).sp,
-                lineHeight = (17.4f * conversationPanePreviewScale()).sp,
+                fontSize = (10.8f * conversationPanePreviewScale()).sp,
+                lineHeight = (15.66f * conversationPanePreviewScale()).sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1075,7 +1081,7 @@ private fun EmptyConversations(isSearching: Boolean) {
             if (isSearching) R.string.conversation_no_results else R.string.conversation_empty,
         ),
         color = conversationPanePreviewPalette().muted,
-        fontSize = (11f * conversationPanePreviewScale()).sp,
+        fontSize = (9.9f * conversationPanePreviewScale()).sp,
         textAlign = TextAlign.Center,
         fontWeight = FontWeight.Normal,
         modifier = Modifier.padding(
@@ -1107,8 +1113,8 @@ private fun PaneAssistantBar(
         Text(
             text = name,
             color = conversationPanePreviewPalette().text,
-            fontSize = (12f * conversationPanePreviewScale()).sp,
-            lineHeight = (18f * conversationPanePreviewScale()).sp,
+            fontSize = (10.8f * conversationPanePreviewScale()).sp,
+            lineHeight = (16.2f * conversationPanePreviewScale()).sp,
             fontWeight = FontWeight.Normal,
             textAlign = TextAlign.End,
             maxLines = 1,
@@ -1129,44 +1135,54 @@ private fun PaneDock(
     onOpenUsageStats: () -> Unit,
     onOpenSkills: () -> Unit,
 ) {
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+    val buttonSize = maxWidth * .15625f
+    val gap = maxWidth * .0390625f
     Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         DrawerCircleButton(
+            size = buttonSize,
             icon = Icons.Rounded.HealthAndSafety,
             label = stringResource(R.string.ui_permission_health_3048bb),
             onClick = onOpenPermissions,
         )
-        Spacer(modifier = Modifier.width(8.dp * conversationPanePreviewScale()))
+        Spacer(modifier = Modifier.width(gap))
         DrawerCircleButton(
+            size = buttonSize,
             icon = Icons.Rounded.Memory,
             label = stringResource(R.string.conversation_dock_models),
             onClick = onOpenModelProviders,
         )
-        Spacer(modifier = Modifier.width(8.dp * conversationPanePreviewScale()))
+        Spacer(modifier = Modifier.width(gap))
         DrawerCircleButton(
+            size = buttonSize,
             icon = Icons.Rounded.Extension,
             label = stringResource(R.string.route_skills),
             onClick = onOpenSkills,
         )
-        Spacer(modifier = Modifier.width(8.dp * conversationPanePreviewScale()))
+        Spacer(modifier = Modifier.width(gap))
         DrawerCircleButton(
+            size = buttonSize,
             icon = Icons.Rounded.BarChart,
             label = stringResource(R.string.stats_page_title),
             onClick = onOpenUsageStats,
         )
         Spacer(modifier = Modifier.weight(1f))
         DrawerCircleButton(
+            size = buttonSize,
             icon = Icons.Rounded.Settings,
             label = stringResource(R.string.route_settings),
             onClick = onOpenSettings,
         )
     }
+    }
 }
 
 @Composable
 private fun DrawerCircleButton(
+    size: androidx.compose.ui.unit.Dp,
     icon: ImageVector,
     label: String,
     onClick: () -> Unit,
@@ -1174,6 +1190,7 @@ private fun DrawerCircleButton(
     val view = LocalView.current
     Box(
         modifier = Modifier
+            .size(size)
             .clip(CircleShape)
             .background(conversationPanePreviewPalette().bubble)
             .clickable(
@@ -1182,14 +1199,13 @@ private fun DrawerCircleButton(
             ) {
                 TouchHaptics.click(view)
                 onClick()
-            }
-            .padding(DrawerMetrics.CircleButtonPadding),
+            },
         contentAlignment = Alignment.Center,
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
-            modifier = Modifier.size(DrawerMetrics.ActionIconSize),
+            modifier = Modifier.size(size * .5f),
             tint = conversationPanePreviewPalette().toolbar,
         )
     }

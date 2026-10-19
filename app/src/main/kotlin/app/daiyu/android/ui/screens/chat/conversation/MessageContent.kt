@@ -31,6 +31,7 @@ internal fun MessageContent(
     actions: ChatScreenActions,
     imageLoader: MessageImageLoader?,
     markdown: Boolean,
+    dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
     textBody: @Composable (String, Modifier) -> Unit = { text, modifier -> MessageMarkdown(text, modifier, markdown) },
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -42,7 +43,9 @@ internal fun MessageContent(
                 }
                 is MessageContentUi.Image -> MessageImage(block.image, ++imageNumber, imageLoader)
                 is MessageContentUi.Tool -> {
-                    key(block.step.owner, block.step.toolCallId) { WorkStepRow(block.step, actions.onCopyToolSummary) }
+                    key(block.step.owner, block.step.toolCallId) {
+                        if (!dedicatedTool(block.step)) WorkStepRow(block.step, actions.onCopyToolSummary)
+                    }
                 }
             }
         }

@@ -58,8 +58,9 @@ internal fun ChatMessageList(
     actions: ChatScreenActions,
     modifier: Modifier = Modifier,
     scrollRequest: ChatScrollRequest? = null,
-    turnExtras: @Composable (String) -> Unit = {},
+    turnExtras: @Composable (ChatTurnUi.Assistant) -> Unit = {},
     imageLoader: MessageImageLoader? = null,
+    dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
 ) {
     val listState = rememberLazyListState()
     val dragging by listState.interactionSource.collectIsDraggedAsState()
@@ -175,10 +176,10 @@ internal fun ChatMessageList(
                     when (turn) {
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
                         is ChatTurnUi.Assistant -> Column {
-                            AssistantTurn(turn, actions, imageLoader) { ready ->
+                            AssistantTurn(turn, actions, imageLoader, dedicatedTool = dedicatedTool) { ready ->
                                 if (ready) readyTurns[turn.listKey] = turn else readyTurns.remove(turn.listKey)
                             }
-                            turnExtras(turn.id)
+                            turnExtras(turn)
                         }
                     }
                 }
@@ -233,6 +234,7 @@ internal fun AssistantTurn(
     turn: ChatTurnUi.Assistant,
     actions: ChatScreenActions,
     imageLoader: MessageImageLoader? = null,
+    dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
     onContentReady: (Boolean) -> Unit = {},
 ) {
     val sources = remember(turn.content, turn.finalText) {
@@ -246,7 +248,7 @@ internal fun AssistantTurn(
         ReportedReasoningCard(turn.listKey, turn.reportedReasoning)
         if (turn.content.isNotEmpty()) {
             // Splitting these blocks into a work card and a final answer would reorder images.
-            MessageContent(turn.content, actions, imageLoader, markdown = true) { text, modifier ->
+            MessageContent(turn.content, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool) { text, modifier ->
                 ParsedMessageMarkdown(text, projection?.blocks?.get(text), modifier)
             }
         } else {

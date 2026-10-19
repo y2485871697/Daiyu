@@ -40,7 +40,7 @@
 ## 跨类别的状态与内容组件
 
 - 建议设计状态：排队、准备、执行中、等待用户、暂停中、已暂停、停止中、已停止、成功、失败、已中断、未执行、结果未确认。是否可显示某状态取决于该后端的真实事件；不同任务不必都有全套状态。
-- 现有步骤枚举只有 `PENDING/OK/FAILED`；持久回执另有 `SUCCEEDED/FAILED/UNKNOWN` 等，运行状态也有停止/中断。不得仅改枚举名称就称完成接线；未知结果不画绿色成功，也不提供自动重试。
+- 现有步骤枚举为 `PENDING/OK/FAILED/UNKNOWN/NOT_EXECUTED`；持久回执另有 `SUCCEEDED/FAILED/UNKNOWN` 等，运行状态也有停止/中断。不得仅改枚举名称就称完成接线；未知结果不画绿色成功，也不提供自动重试。
 - 准备、执行中可有轻量动态效果；已结束历史行静止。展开/收起不得重发工具。
 - 共用内容组件：命令与输出/退出码、文本/代码、检索命中、图片/视频、网页预览、子任务列表/结果、差异摘要、交互问答、错误摘要。
 - 配套容器：工作过程总卡、模型实际公开的思考/摘要、等待用户卡、压缩/重连/中断提示。不展示未公开的模型内部推理。
@@ -51,7 +51,7 @@
 根目录 `/workspace/代鱼`，包路径前缀 `app/src/main/kotlin/app/daiyu/android/`：
 
 1. `ui/screens/chat/conversation/ChatScreenModels.kt`：WorkStepUi、WorkStepState、WorkProcessUi。
-2. `ui/screens/chat/conversation/ChatTurnMapper.kt`：MessageBlock.Tool → WorkStepUi；目前name直接取invocation.name，需要集中展示映射，不改真实工具标识。
+2. `ui/screens/chat/conversation/ChatTurnMapper.kt`：MessageBlock.Tool → WorkStepUi；经 ToolCardPresentations 映射标题与安全摘要，不改真实工具标识。真实专用投影通过 dedicatedKey 选择保序路径，缺投影保留通用回退。
 3. `ui/screens/chat/conversation/WorkProcessCard.kt`：工作过程容器和步骤外壳。
 4. `ui/screens/chat/conversation/MessageContentUi.kt`、`MessageContent.kt`：图文工具混排也要使用同一新卡片分发，不只改汇总路径。
 5. `ui/screens/chat/conversation/ChatMessageList.kt`：AssistantTurn实际挂载，保留历史片段、稳定key与消息顺序。
@@ -71,3 +71,10 @@
 - 交互回调沿用真实宿主。后端没有动作时省略按钮，不能留下看似可点击的空回调。Unknown、过期、其他owner卡禁重放；副作用/付费工具不能通用自动重试。
 - 验证分类映射、未知工具回退、真实结果状态、图文顺序、历史重建、展开不执行、过期按钮失效；运行相关ChatTurnMapper与RetainedToolOutcomes测试，UI测试按项目云端流程。
 - 代码与唯一清单/更新说明同次提交，给出实际diff、接入路径、运行过的命令与退出码、仍缺后端项。提交/Preview成功不等于交付验收。
+
+
+## 专用问答接入补充
+
+`MainActivity.publishChat` 从真实片段 Tool block 建立 owner/call → QuestionProjection 索引。只有该索引命中才让 mapper 附带专用 key 并走默认可见的保序内容路径；`DedicatedQuestion` 再核工具名、物理 owner/call 与原 identity.storageKey，复用 QuestionCard/binding。MessageContent 的宿主回调未命中则显示通用 WorkStepRow，不能按名称吞掉工具。原 QuestionExtras 整组挂载已移除，历史片段不再重复整个问答集合。逻辑执行 ownerId 与 messageId 不互相替代。
+
+本补充不是其余 20 类富详情或全部 Android UI 验收完成声明。最新验证范围见唯一重构清单 R13 修复记录。

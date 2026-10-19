@@ -91,6 +91,8 @@ data class WorkStepUi(
     val toolName: String = name,
     val category: String = "generic",
     val sections: List<ToolDetailSectionUi> = emptyList(),
+    /** Host-validated dedicated projection; never grants execution permission. */
+    val dedicatedKey: String? = null,
 ) {
     val toolCallId: String get() = id
 }

@@ -171,4 +171,48 @@ class ChatTurnMapperTest {
         assertNull(turn.workProcess!!.segments.single().narration)
         assertEquals("Answer", turn.finalText)
     }
+    private fun question(id: String) = MessageBlock.Tool(
+        ToolInvocation(ToolCallId(id), "ask_user", "{}"), null,
+    )
+
+    @Test fun dedicatedQuestionUsesSourceOrderWithoutImageAndMissingProjectionKeepsFallback() {
+        val original = message(text("before", "Before"), question("q"), tool("ordinary"), text("after", "After"))
+        val fallback = mapped(original)
+        assertTrue(fallback.content.isEmpty())
+        assertNull(fallback.workProcess!!.segments.flatMap { it.steps }.first().dedicatedKey)
+        val turn = ChatTurnMapper.map(listOf(original), dedicatedTool = { _, block ->
+            if (block.invocation.id.value == "q") "validated-question" else null
+        }).single() as ChatTurnUi.Assistant
+        assertEquals(listOf("Before", "q", "ordinary", "After"), turn.content.map { block -> when (block) {
+            is MessageContentUi.Text -> block.text
+            is MessageContentUi.Tool -> block.step.toolCallId
+            is MessageContentUi.Image -> "image"
+        } })
+        val steps = turn.content.filterIsInstance<MessageContentUi.Tool>().map { it.step }
+        assertEquals("validated-question", steps.first().dedicatedKey)
+        assertNull(steps.last().dedicatedKey)
+        assertEquals(WorkStepOwnerUi("conversation", "run", "assistant"), steps.first().owner)
+        assertEquals(original, message(text("before", "Before"), question("q"), tool("ordinary"), text("after", "After")))
+    }
+
+    @Test fun dedicatedProjectionOnlyMatchesExactOwnerAndCallAcrossHistorySegments() {
+        val original = message().copy(historySegments = listOf(
+            MessageHistorySegment(MessageId("assistant"), Message.ASSISTANT_ROLE, listOf(question("first"))),
+            MessageHistorySegment(MessageId("supplement"), Message.USER_ROLE, listOf(text("u", "Supplement"))),
+            MessageHistorySegment(MessageId("assistant"), Message.ASSISTANT_ROLE, listOf(question("second"))),
+        ))
+        val otherRun = message(question("first")).copy(runId = RunId("other-run"))
+        val turns = ChatTurnMapper.map(listOf(original, otherRun), dedicatedTool = { owner, block ->
+            if (owner.conversationId.value == "conversation" && owner.runId.value == "run" &&
+                owner.id.value == "assistant") "key-${block.invocation.id.value}" else null
+        }).filterIsInstance<ChatTurnUi.Assistant>()
+        assertEquals(listOf("first", "second"), turns.take(2).flatMap { it.content }
+            .filterIsInstance<MessageContentUi.Tool>().map { it.step.toolCallId })
+        assertEquals(listOf("key-first", "key-second"), turns.take(2).flatMap { it.content }
+            .filterIsInstance<MessageContentUi.Tool>().map { it.step.dedicatedKey })
+        assertEquals(listOf(0, 1), turns.take(2).map { it.segmentIndex })
+        assertTrue(turns.last().content.isEmpty())
+        assertNull(turns.last().workProcess!!.segments.single().steps.single().dedicatedKey)
+    }
+
 }

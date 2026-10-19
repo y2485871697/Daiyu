@@ -21,6 +21,7 @@ import app.daiyu.android.ui.components.MiuixScaffold
 import app.daiyu.android.ui.screens.settings.*
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
+import app.daiyu.android.voice.ActivityVoiceAudio
 import app.daiyu.android.voice.duplex.DoubaoDuplexProtocol
 import app.daiyu.android.voice.offline.OfflineSpeechPack
 import app.daiyu.android.voice.providers.DoubaoAsrProtocol

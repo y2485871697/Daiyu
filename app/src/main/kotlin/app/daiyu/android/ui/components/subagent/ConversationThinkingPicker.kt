@@ -33,19 +33,8 @@ import app.daiyu.android.ui.haptics.TouchHaptics
 import kotlin.math.roundToInt
 
 @Composable internal fun ConversationThinkingMark(modifier: Modifier = Modifier) {
-    val color = conversationAgentColors().strong
-    Canvas(modifier) {
-        scale(size.width / 24f, size.height / 24f, pivot = Offset.Zero) {
-            val path = Path().apply {
-                moveTo(5f,15f); cubicTo(2f,10f,5f,4f,10f,4f)
-                cubicTo(16f,4f,19f,9f,16f,13f); cubicTo(14f,16f,9f,15f,9f,12f)
-                cubicTo(9f,9f,13f,8f,14f,11f)
-                moveTo(8f,20f); cubicTo(14f,22f,20f,18f,20f,12f)
-            }
-            drawPath(path, color, style = Stroke(1.45f, cap = StrokeCap.Round))
-            drawCircle(color, 1.15f, Offset(5f,16.5f)); drawCircle(color, 1f, Offset(20f,7.5f))
-        }
-    }
+    androidx.compose.material3.Icon(app.daiyu.android.ui.icons.ChatPreviewIcons.Thought,
+        contentDescription = null, modifier = modifier, tint = conversationAgentColors().accent)
 }
 
 @Composable internal fun ConversationThinkingPicker(show: Boolean, effort: ReasoningEffort, options: List<ReasoningEffort>,
@@ -74,7 +63,7 @@ import kotlin.math.roundToInt
         ConversationAgentSheet(onDismiss, radius = if (subagent) 25 else 28, modifier = Modifier.heightIn(max = maxHeight)) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp).padding(top = 22.dp, bottom = 24.dp).verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("思考深度", fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 19.dp), color = colors.text)
+                Text("调整思考深度", fontSize = 16.sp, fontWeight = FontWeight.Medium, modifier = Modifier.padding(bottom = 19.dp), color = colors.text)
                 ConversationThinkingMark(Modifier.size(if (subagent) 34.dp else 30.dp))
                 Text(options[selected].displayName, fontSize = if (subagent) 22.sp else 20.sp,
                     lineHeight = 28.sp, fontWeight = FontWeight.Normal, color = colors.text,

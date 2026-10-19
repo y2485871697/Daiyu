@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.ui.icons.ChatPreviewIcons
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
@@ -41,7 +42,7 @@ internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.B
     val chrome = chatChromeColors()
     Row(modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 3.dp, bottom = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(11.dp), verticalAlignment = Alignment.CenterVertically) {
-        ChatIconButton(DaiyuIcons.Menu, "打开侧边栏", actions.onOpenSidebar,
+        ChatIconButton(ChatPreviewIcons.Menu, "打开侧边栏", actions.onOpenSidebar,
             Modifier.size(width = 17.dp, height = 28.dp), tint = chrome.text, iconSize = 17.dp)
         Column(Modifier.weight(1f)) {
             Text(title.ifBlank { "新会话" }, Modifier.testTag("chat-title"),
@@ -52,9 +53,9 @@ internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.B
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 11.5.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        ChatIconButton(DaiyuIcons.SubAgent, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, modifier = Modifier.size(28.dp), tint = chrome.toolbar, iconSize = 18.dp)
+        ChatIconButton(ChatPreviewIcons.SubAgents, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, modifier = Modifier.size(28.dp), tint = chrome.toolbar, iconSize = 18.dp)
         Box {
-            ChatIconButton(DaiyuIcons.More, "更多", { actions.onMore(); expanded = true },
+            ChatIconButton(ChatPreviewIcons.More, "更多", { actions.onMore(); expanded = true },
                 Modifier.size(28.dp), tint = chrome.text, iconSize = 17.dp)
             ChatOverflowMenu(expanded, { expanded = false }, actions.onMenuAction,
                 interactiveModeEnabled, interactiveModeChangeEnabled, automaticCompression, automaticCompressionPending)

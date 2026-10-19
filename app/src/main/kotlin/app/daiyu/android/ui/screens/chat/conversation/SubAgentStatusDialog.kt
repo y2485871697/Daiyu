@@ -34,7 +34,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
+import androidx.compose.material3.Icon
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontFamily
+import app.daiyu.android.ui.icons.DaiyuIcons
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -80,11 +84,20 @@ internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolea
     val maximumHeight = (LocalConfiguration.current.screenHeightDp - 48).coerceAtLeast(180).dp
     ConversationAgentSheet(onDismiss, radius = 26, modifier = Modifier.heightIn(max = maximumHeight)) {
         Column(Modifier.fillMaxWidth().heightIn(min = 180.dp).padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 12.dp).testTag("subagent-status")) {
-            Text("子代理状态", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = colors.text, modifier = Modifier.padding(bottom = 10.dp))
+            ConversationAgentHandle()
+            Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.Top) {
+                Text("子代理状态", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = colors.text,
+                    modifier = Modifier.weight(1f))
+                Box(Modifier.size(28.dp).clip(RoundedCornerShape(9.dp))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
+                    contentAlignment = Alignment.Center) {
+                    Icon(DaiyuIcons.Close, "关闭", Modifier.size(15.dp), tint = colors.taskMuted)
+                }
+            }
             Text("当前会话", fontSize = 10.sp, color = colors.taskMuted, modifier = Modifier.padding(bottom = 10.dp))
             when {
                 loading -> Text("正在读取任务状态…", color = colors.taskMuted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 32.dp))
-                failed -> Text("任务状态读取失败；未改变任何任务", color = Color(0xffa15468), fontSize = 13.sp, modifier = Modifier.padding(vertical = 32.dp))
+                failed -> Text("任务状态读取失败；未改变任何任务", color = Color(if (colors.dark) 0xffe5a8b7 else 0xffa15468), fontSize = 13.sp, modifier = Modifier.padding(vertical = 32.dp))
                 rows.isEmpty() -> Text("本会话暂无子代理任务", color = colors.taskMuted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 32.dp))
                 else -> LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).testTag("subagent-status-list")) {
                     items(rows, key = { subAgentStatusItemKey(it.owner) }) { row ->
@@ -110,7 +123,7 @@ internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolea
                         if (expanded) androidx.compose.foundation.text.selection.SelectionContainer {
                             Column(Modifier.padding(start = 1.dp, end = 1.dp, bottom = 10.dp)) {
                                 Text(ToolRichDetails.scrub(row.model, limit = 160), fontSize = 10.sp, lineHeight = 17.sp, color = colors.taskMuted)
-                                Text(row.owner.childRunId, fontSize = 10.sp, lineHeight = 17.sp, color = colors.taskMuted)
+                                Text(row.owner.childRunId, fontFamily = FontFamily.Monospace, fontSize = 10.sp, lineHeight = 17.sp, color = colors.taskMuted)
                             }
                         }
                         if (row != rows.lastOrNull()) HorizontalDivider(color = colors.taskLine)
@@ -119,7 +132,9 @@ internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolea
                 }
             }
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onDismiss, modifier = Modifier.testTag("subagent-status-close"), contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp)) {
+                Box(Modifier.testTag("subagent-status-close").heightIn(min = 36.dp).clip(RoundedCornerShape(12.dp))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss)
+                    .padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
                     Text("关闭", fontSize = 12.sp, color = colors.strong)
                 }
             }

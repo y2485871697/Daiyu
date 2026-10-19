@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.ui.icons.ChatPreviewIcons
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
@@ -24,10 +25,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.text.font.FontWeight
+import app.daiyu.android.ui.components.usagePalette
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -126,7 +129,6 @@ private fun ChatMenuItem(entry: MenuEntry, onDismiss: () -> Unit, onAction: (Cha
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit) {
     var showPath by remember { mutableStateOf(false) }
@@ -137,22 +139,34 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
         MenuEntry("目录引用", DaiyuIcons.Folder, ChatMenuAction.ATTACH_FOLDER),
         MenuEntry("路径引用", DaiyuIcons.Terminal, ChatMenuAction.ATTACH_PATH),
     )
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MiuixTheme.colorScheme.surfaceContainer,
-        contentColor = MiuixTheme.colorScheme.onSurface) {
-        Column(Modifier.fillMaxWidth().heightIn(max = (LocalConfiguration.current.screenHeightDp * .72f).dp)
-            .verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
-            Text("附件", Modifier.padding(horizontal = 24.dp, vertical = 8.dp), style = MiuixTheme.textStyles.body2)
+    val colors = usagePalette()
+    ChatSelectionSheet("附件", onDismiss, subtitle = "选择你要添加的内容") {
+        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
             entries.filter { it.action != ChatMenuAction.ATTACH_PATH || showPath }.forEach { entry ->
+                val tint = when (entry.action) {
+                    ChatMenuAction.ATTACH_IMAGE, ChatMenuAction.ATTACH_VIDEO -> Color(0xFFB97595)
+                    ChatMenuAction.ATTACH_FILE, ChatMenuAction.ATTACH_FOLDER -> Color(0xFFB08D59)
+                    else -> Color(0xFF568E90)
+                }
                 Row(Modifier.fillMaxWidth().testTag("chat-attachment:${entry.action.name}")
-                    .clickable { onDismiss(); onAction(entry.action) }
-                    .padding(horizontal = 24.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(entry.icon, null, Modifier.size(18.dp), tint = daiyuIconColor(entry.icon))
-                    Text(entry.title, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onSurface)
+                    .heightIn(min = 44.dp).clip(RoundedCornerShape(12.dp))
+                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                        role = Role.Button) { onDismiss(); onAction(entry.action) }
+                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(entry.icon, null, Modifier.size(18.dp), tint = tint)
+                    Text(entry.title, Modifier.weight(1f), fontSize = 12.sp, color = colors.text)
+                    Icon(DaiyuIcons.ChevronRight, null, Modifier.size(11.dp).alpha(.4f), tint = colors.muted)
                 }
             }
-            top.yukonga.miuix.kmp.basic.TextButton(text = if (showPath) "收起路径输入" else "输入文件路径",
-                onClick = { showPath = !showPath }, modifier = Modifier.padding(horizontal = 24.dp).testTag("chat-attachment-path-toggle"))
+            HorizontalDivider(Modifier.padding(top = 12.dp), color = colors.line)
+            Row(Modifier.fillMaxWidth().testTag("chat-attachment-path-toggle")
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                    role = Role.Button) { showPath = !showPath }.padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("输入文件路径", Modifier.weight(1f), fontSize = 11.sp, color = colors.muted)
+                Icon(ChatPreviewIcons.Chevron, if (showPath) "收起" else "展开", Modifier.size(11.dp), tint = colors.muted)
+            }
         }
     }
 }

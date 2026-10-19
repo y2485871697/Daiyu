@@ -1,9 +1,8 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import androidx.compose.foundation.Canvas
+import app.daiyu.android.ui.icons.ChatContextMark
+import app.daiyu.android.ui.icons.ChatPreviewIcons
 import androidx.compose.foundation.layout.height
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.PathMeasure
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import app.daiyu.android.ui.components.AssistantDisplay
@@ -44,7 +43,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
@@ -70,11 +68,11 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val textAction = hasText && state.phase != ComposerPhase.RUNNING
     val primaryEnabled = if (textAction) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
         val primaryIcon = when {
-        state.phase == ComposerPhase.PAUSED && !hasText -> DaiyuIcons.Resume
-        textAction && state.phase != ComposerPhase.IDLE -> DaiyuIcons.Steer
-        textAction -> DaiyuIcons.Send
-        state.phase == ComposerPhase.RUNNING -> DaiyuIcons.Pause
-        else -> DaiyuIcons.Send
+        state.phase == ComposerPhase.PAUSED && !hasText -> ChatPreviewIcons.Play
+        textAction && state.phase != ComposerPhase.IDLE -> ChatPreviewIcons.Append
+        textAction -> ChatPreviewIcons.Send
+        state.phase == ComposerPhase.RUNNING -> ChatPreviewIcons.Pause
+        else -> ChatPreviewIcons.Send
     }
     val primaryLabel = when {
         state.phase == ComposerPhase.PAUSED && !hasText -> "继续"
@@ -92,36 +90,22 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                 Modifier.weight(1f).testTag("chat-model"),
                 onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) })
             Row(Modifier.widthIn(max = 144.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
-                .border(1.dp, colors.outline, RoundedCornerShape(12.dp))
+                .border(1.dp, chrome.line, RoundedCornerShape(12.dp))
                 .combinedClickable(enabled = state.enabled, role = Role.Button, onClickLabel = "上下文统计", onClick = actions.onContextClick,
                     onLongClick = { actions.onMenuAction(ChatMenuAction.CONTEXT_SCOPE) })
                 .padding(start = 6.dp, end = 6.dp, top = 3.dp, bottom = 3.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                 val fraction = state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
-                Canvas(Modifier.size(16.dp)) {
-                    val path = Path().apply {
-                        moveTo(size.width * .5f, size.height * .48f)
-                        cubicTo(-size.width * .15f, -size.height * .25f, 0f, size.height * .9f, size.width * .5f, size.height * .55f)
-                        cubicTo(size.width * .02f, size.height * 1.35f, size.width * 1.1f, size.height * 1.18f, size.width * .5f, size.height * .48f)
-                        cubicTo(size.width * 1.15f, -size.height * .25f, size.width, size.height * .9f, size.width * .5f, size.height * .55f)
-                    }
-                    val stroke = Stroke(width = 1.5.dp.toPx())
-                    drawPath(path, colors.primary.copy(alpha = .24f), style = stroke)
-                    if (fraction != null) {
-                        val measure = PathMeasure().apply { setPath(path, false) }
-                        val progress = Path()
-                        measure.getSegment(0f, measure.length * fraction, progress)
-                        drawPath(progress, if (state.enabled) colors.primary else colors.disabledOnSurface, style = stroke)
-                    }
-                }
+                ChatContextMark(fraction, if (state.enabled) chrome.accent else colors.disabledOnSurface,
+                    Modifier.size(15.dp))
                 Text(if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}",
                     modifier = Modifier,
-                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 9.sp), color = colors.primary,
+                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 9.sp), color = chrome.accent,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
                 Box(Modifier.fillMaxWidth().padding(horizontal = 13.dp).height(1.dp)
-                    .background(colors.primary.copy(alpha = 0.12f)))
+                    .background(chrome.line))
                 key(state.editorGeneration) {
                     val mountedGeneration = state.editorGeneration
                     var editingValue by remember {
@@ -156,9 +140,9 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            ChatIconButton(DaiyuIcons.Attach, "附件", { actions.onAttach(); attachments = true },
+                            ChatIconButton(ChatPreviewIcons.Attach, "附件", { actions.onAttach(); attachments = true },
                                 Modifier.size(width = 25.dp, height = 28.dp), enabled = state.enabled, tint = chrome.toolbar, iconSize = 16.dp)
-                            ChatIconButton(DaiyuIcons.Reasoning, "推理强度，当前为 ${state.reasoningLabel}", actions.onOpenReasoning,
+                            ChatIconButton(ChatPreviewIcons.Thought, "推理强度，当前为 ${state.reasoningLabel}", actions.onOpenReasoning,
                                 Modifier.size(width = 25.dp, height = 28.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = chrome.accent, iconSize = 18.dp)
                             Box(Modifier.size(28.dp).testTag("chat-assistant").clip(CircleShape)
                                 .combinedClickable(enabled = state.enabled, role = Role.Button,
@@ -231,6 +215,6 @@ internal fun ComposerChip(icon: ImageVector, label: String, enabled: Boolean, on
         Icon(icon, null, Modifier.size(11.dp), tint = contentColor)
         Text(label, Modifier.weight(1f, fill = false), style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp),
             color = contentColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Icon(DaiyuIcons.ChevronDown, null, Modifier.size(10.dp), tint = contentColor)
+        Icon(ChatPreviewIcons.Chevron, null, Modifier.size(10.dp), tint = contentColor)
     }
 }

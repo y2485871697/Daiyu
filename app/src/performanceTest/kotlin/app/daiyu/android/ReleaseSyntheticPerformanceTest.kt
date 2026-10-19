@@ -211,6 +211,89 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
         }
     }
 
+    private fun collectSystemImeWindow(activity: MainActivity, expectedIme: String,
+        captured: SyntheticFrameCollector, records: MutableList<JSONObject>) {
+        val target = instrumentation.targetContext
+        fun currentIme() = android.provider.Settings.Secure.getString(target.contentResolver,
+            android.provider.Settings.Secure.DEFAULT_INPUT_METHOD)
+        check(currentIme() == expectedIme) { "system_ime_identity_mismatch" }
+        ui.onNodeWithTag("chat-draft").performTextReplacement("")
+        ui.onNodeWithTag("chat-draft").performClick()
+        ui.onNodeWithTag("chat-draft").assertIsFocused()
+        main {
+            androidx.core.view.WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                .show(androidx.core.view.WindowInsetsCompat.Type.ime())
+        }
+        val shownDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10)
+        while (!main { androidx.core.view.ViewCompat.getRootWindowInsets(activity.window.decorView)
+                ?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true }) {
+            check(System.nanoTime() < shownDeadline) { "system_ime_not_visible" }; Thread.sleep(50)
+        }
+        captured.scenario("system_ime_user_input")
+        val start = System.nanoTime()
+        var changes = 0; var previous = ""; var previousSelection: String? = null
+        val observations = org.json.JSONArray()
+        var completed = false
+        var identityChanged = false
+        var observedIme: String? = expectedIme
+        var primaryFailure: Throwable? = null
+        try {
+            // Input must come through the selected keyboard, never a semantics or direct-connection fallback.
+            android.util.Log.i("DaiyuPerformance", "IME workload manual-nihao-v1: repeat typing nihao and selecting 你好 for 35 seconds; do not send.")
+            while (System.nanoTime() - start < TimeUnit.SECONDS.toNanos(35)) {
+                observedIme = currentIme()
+                identityChanged = identityChanged || observedIme != expectedIme
+                check(!identityChanged) { "system_ime_changed_during_collection" }
+                check(main { androidx.core.view.ViewCompat.getRootWindowInsets(activity.window.decorView)
+                    ?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true }) { "system_ime_hidden" }
+                val node = ui.onNodeWithTag("chat-draft").fetchSemanticsNode()
+                val text = node.config.getOrNull(SemanticsProperties.EditableText)?.text.orEmpty()
+                val selection = node.config.getOrNull(SemanticsProperties.TextSelectionRange)?.toString()
+                check(text.length <= 4096) { "system_ime_text_limit" }
+                if (text != previous || selection != previousSelection) {
+                    if (text != previous) changes++
+                    observations.put(JSONObject().put("observed_ns", System.nanoTime())
+                        .put("text_utf16_length", text.length).put("selection", selection ?: JSONObject.NULL)
+                        .put("text_changed", text != previous))
+                    previous = text; previousSelection = selection
+                }
+                Thread.sleep(50)
+            }
+            check(changes >= 20 && previous.isNotBlank()) { "system_ime_manual_input_missing" }
+            observedIme = currentIme()
+            identityChanged = identityChanged || observedIme != expectedIme
+            check(!identityChanged) { "system_ime_changed_during_collection" }
+            completed = true
+        } catch (failure: Throwable) {
+            primaryFailure = failure; throw failure
+        } finally {
+            android.util.Log.i("DaiyuPerformance", "IME manual-nihao-v1 window ended; stop typing.")
+            records.add(JSONObject().put("type", "scenario_window").put("scenario", "system_ime_user_input")
+                .put("start_ns", start).put("end_ns", System.nanoTime()).put("completed", completed)
+                .put("method", "selected_system_ime_user_input_to_observed_editor_changes")
+                .put("input_source", "user_via_selected_system_ime").put("ime_id", expectedIme)
+                .put("last_observed_ime_id", observedIme ?: JSONObject.NULL).put("workload_id", "manual-nihao-v1")
+                .put("text_changes", changes).put("observations", observations)
+                .put("poll_interval_ms", 50).put("polling_overhead_included", true)
+                .put("target_window_only", true).put("hardware_input_latency", false)
+                .put("ime_commit_latency", false).put("first_visible_feedback_measured", false)
+                .put("present_latency", false).put("system_ime_change_observed", identityChanged))
+            val cleanup = runCatching {
+                main {
+                    androidx.core.view.WindowCompat.getInsetsController(activity.window, activity.window.decorView)
+                        .hide(androidx.core.view.WindowInsetsCompat.Type.ime())
+                }
+                ui.onNodeWithTag("chat-draft").performTextReplacement("")
+            }.exceptionOrNull()
+            if (cleanup != null) primaryFailure?.addSuppressed(cleanup) ?: throw cleanup
+        }
+        val hiddenDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+        while (main { androidx.core.view.ViewCompat.getRootWindowInsets(activity.window.decorView)
+                ?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true }) {
+            check(System.nanoTime() < hiddenDeadline) { "system_ime_cleanup_not_hidden" }; Thread.sleep(50)
+        }
+    }
+
     private fun collect(fullScale: Boolean) {
         val target = instrumentation.targetContext
         check(target.packageName == "app.daiyu.android.synthetic") { "non_synthetic_target_refused" }
@@ -218,6 +301,14 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
         check(Build.VERSION.SDK_INT >= 29)
         check(target.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE == 0)
         check(target.applicationInfo.isProfileableByShell)
+        val systemImeOption = InstrumentationRegistry.getArguments().getString("daiyuSystemIme") ?: "false"
+        require(systemImeOption in setOf("false", "true")) { "invalid_system_ime_opt_in" }
+        val systemImeEnabled = systemImeOption == "true"
+        require(!systemImeEnabled || fullScale) { "system_ime_requires_full_scale" }
+        val expectedIme = if (systemImeEnabled) {
+            checkNotNull(InstrumentationRegistry.getArguments().getString("daiyuExpectedIme"))
+                .also { require(it.isNotBlank() && it.length <= 256 && it.contains('/')) { "expected_system_ime_required" } }
+        } else null
         val diagnosticsMode = InstrumentationRegistry.getArguments().getString("daiyuDiagnostics") ?: "off"
         require(diagnosticsMode in setOf("off", "on")) { "invalid_diagnostics_mode" }
         val application = target.applicationContext as ChatApplication
@@ -328,6 +419,10 @@ class ReleaseSyntheticPerformanceTest : InstrumentationTestCase() {
                 stage = "streaming_input_connection_stop"
                 collectControlledWorkloads(launched, activeFixture.controller, activeFixture.database,
                     checkNotNull(controlledModel), captured, inputs)
+            }
+            if (systemImeEnabled) {
+                stage = "system_ime_user_input"
+                collectSystemImeWindow(launched, checkNotNull(expectedIme), captured, inputs)
             }
             captured.close()
             inputs.filter { it.optString("type") == "scenario_window" }.forEach { window ->

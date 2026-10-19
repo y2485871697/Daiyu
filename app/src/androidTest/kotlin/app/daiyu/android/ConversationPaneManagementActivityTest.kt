@@ -23,7 +23,7 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
         val owner = mainThreadValue { MainActivity::class.java.getDeclaredField("selected").apply { isAccessible = true }.get(activity) }
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
         awaitUniqueTag("drawer-conversation:${first.id.value}")
-        ui.onNodeWithText("管理聊天").performClick()
+        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.drawer_manage_chats)).assertIsDisplayed().assertIsEnabled().performClick()
         ui.onNodeWithText("完成管理").assertIsDisplayed()
         node("drawer-selection-count").assertTextEquals("已选择 0 项")
         node("drawer-conversation:${first.id.value}").performClick().assertIsSelected()
@@ -42,7 +42,7 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
         node("drawer-selection-count").assertTextEquals("已选择 1 项")
         ui.onNodeWithText("完成管理").performClick()
         node("drawer-selection-count").assertDoesNotExist()
-        ui.onNodeWithText("管理聊天").performClick()
+        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.drawer_manage_chats)).assertIsDisplayed().assertIsEnabled().performClick()
         node("drawer-selection-count").assertTextEquals("已选择 0 项")
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())

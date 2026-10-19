@@ -25,6 +25,9 @@ import org.json.JSONObject
 import top.yukonga.miuix.kmp.basic.TextButton
 
 internal val RetainedProviderFieldAdd = SemanticsPropertyKey<() -> Unit>("RetainedProviderFieldAdd")
+internal val RetainedProviderGatewayChange =
+    SemanticsPropertyKey<Pair<SessionGatewayRule, (SessionGatewayRule) -> Unit>>("RetainedProviderGatewayChange")
+
 
 internal data class ProviderFieldRow(val id: Long, val name: String, val value: String) {
     override fun toString() = "ProviderFieldRow(<redacted>)"
@@ -128,6 +131,7 @@ internal fun ProviderGatewayEditor(draft: SessionGatewayRule, enabled: Boolean,
     var expanded by remember { mutableStateOf(false) }
     SettingsRow("网关", summary = "${draft.modelPattern} · ${draft.keyField}", tag = "provider-session-gateway",
         onClick = if (enabled) ({ expanded = !expanded }) else null,
+        modifier = Modifier.semantics { this[RetainedProviderGatewayChange] = draft to onDraftChange },
         trailing = { DaiyuIcon(DaiyuIcons.ChevronDown, null, modifier = Modifier.rotate(if (expanded) 180f else 0f)) })
     if (expanded) SessionGatewayFields(draft, enabled, onDraftChange)
 }

@@ -2,9 +2,7 @@ package app.daiyu.android.ui.screens.settings
 
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.*
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
-import androidx.compose.ui.text.AnnotatedString
 import app.daiyu.android.WiredActivityTestCase
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -20,16 +18,16 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
     private fun control(tag: String) = reveal(tag).performScrollTo()
     fun testBodyUsesRawJsonInputAndBlocksInvalidSaveWithoutLosingRowsOnRemount() {
         render()
-        control("model-body-fields").performClick()
-        control("model-body-field-add").performClick()
-        control("model-body-field-name:0").performTextReplacement("temperature")
-        control("model-body-field-value:0").performTextReplacement("not-json")
+        addInlineBodyField("temperature", "not-json")
         assertFalse(draft.bodyFieldsValid)
         assertEquals("not-json", draft.bodyFieldRows!!.single().value)
+        attemptBlockedInlineBodySave(); assertNull(saved)
         render()
-        control("model-body-fields").performClick()
-        control("model-body-field-value:0").assertTextContains("not-json")
-        control("model-body-field-value:0").performTextReplacement("0.1234567890123456789")
+        openInlineBodyFields()
+        inlineBodyControl("model-body-field-value:0").assertEditableText("not-json")
+        assertFalse(draft.bodyFieldsValid)
+        attemptBlockedInlineBodySave(); assertNull(saved)
+        inlineBodyControl("model-body-field-value:0").performTextReplacement("0.1234567890123456789")
         assertTrue(draft.bodyFieldsValid)
         assertTrue(draft.customBody.contains("0.1234567890123456789"))
         control("model-save").performClick()
@@ -37,14 +35,17 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
     }
     fun testGatewayEditsAreInProviderDraftAndOldCallbackCannotRevertNewDraft() {
         render()
-        control("provider-session-gateway").performClick()
-        val oldSet = checkNotNull(control("settings-field:模型正则（每一行一个）").fetchSemanticsNode()
-            .config[SemanticsActions.SetText].action)
+        val gateway = control("provider-session-gateway")
+        val (oldRule, oldChange) = gateway.fetchSemanticsNode().config[RetainedProviderGatewayChange]
+        gateway.performClick()
         control("settings-field:字段").performTextReplacement("request_cache_key")
         val current = draft
-        mainThread { oldSet(AnnotatedString("stale-pattern")) }
-        assertEquals(current, draft)
+        assertEquals("request_cache_key", current.sessionGateway.keyField)
+        mainThread { oldChange(oldRule.copy(modelPattern = "stale-pattern")) }
+        assertEquals(current, draft); assertSame(current, draft)
         assertEquals("request_cache_key", draft.sessionGateway.keyField)
+        control("settings-field:模型正则（每一行一个）").performTextReplacement("current-pattern")
+        assertEquals(current.copy(sessionGateway = current.sessionGateway.copy(modelPattern = "current-pattern")), draft)
         assertNull(saved); assertEquals(0, fixture.opens.get())
     }
 }

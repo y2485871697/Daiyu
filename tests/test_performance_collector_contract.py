@@ -170,5 +170,42 @@ class ControlledWorkloadContract(unittest.TestCase):
         self.assertIn('window.put("frame_count_by_intended_vsync", count)', fixture)
 
 
+class SystemImeContract(unittest.TestCase):
+    def test_manual_system_ime_is_opt_in_and_preserves_test_inventory(self):
+        source = (PERFORMANCE / 'ReleaseSyntheticPerformanceTest.kt').read_text()
+        self.assertEqual(source.count('fun test'), 2)
+        self.assertIn('systemImeOption in setOf("false", "true")', source)
+        self.assertIn('require(!systemImeEnabled || fullScale)', source)
+        self.assertIn('daiyuExpectedIme', source)
+        call = source.index('collectSystemImeWindow(launched, checkNotNull(expectedIme), captured, inputs)')
+        self.assertIn('if (systemImeEnabled)', source[call - 120:call])
+        self.assertLess(call, source.index('captured.close()', call))
+
+    def test_real_selected_ime_has_no_injection_or_write_fallback(self):
+        source = (PERFORMANCE / 'ReleaseSyntheticPerformanceTest.kt').read_text()
+        helper = source.split('private fun collectSystemImeWindow(', 1)[1].split('private fun collect(fullScale:', 1)[0]
+        loop = helper.split('while (System.nanoTime() - start', 1)[1].split('} finally', 1)[0]
+        self.assertIn('DEFAULT_INPUT_METHOD', helper)
+        self.assertIn('WindowInsetsCompat.Type.ime()', helper)
+        self.assertIn('TimeUnit.SECONDS.toNanos(35)', loop)
+        self.assertIn('changes >= 20 && previous.isNotBlank()', loop)
+        for forbidden in ('performTextReplacement', 'commitText', 'onCreateInputConnection', 'controller.send',
+                          'putString', 'executeShellCommand', 'sendStatus', 'INJECT_EVENTS'):
+            self.assertNotIn(forbidden, loop)
+        self.assertIn('text.length <= 4096', loop)
+        self.assertIn('"text_utf16_length", text.length', loop)
+        self.assertNotIn('.put("text", text)', helper)
+        for field in ('polling_overhead_included', 'target_window_only'):
+            self.assertIn('.put("' + field + '", true)', helper)
+        for field in ('hardware_input_latency', 'ime_commit_latency', 'first_visible_feedback_measured', 'present_latency'):
+            self.assertIn('.put("' + field + '", false)', helper)
+        self.assertIn('.put("completed", completed)', helper)
+        self.assertIn('manual-nihao-v1', helper)
+        self.assertIn('.put("system_ime_change_observed", identityChanged)', helper)
+        self.assertIn('primaryFailure?.addSuppressed(cleanup) ?: throw cleanup', helper)
+        self.assertIn('system_ime_cleanup_not_hidden', helper)
+        self.assertIn('.hide(androidx.core.view.WindowInsetsCompat.Type.ime())', helper)
+
+
 if __name__ == '__main__':
     unittest.main()

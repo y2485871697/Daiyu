@@ -60,6 +60,24 @@ def capture():
     return rows
 
 
+def ime_capture():
+    rows = capture()
+    rows[0]['frame_count'] += 1
+    rows.insert(7, {'type': 'frame', 'index': 6, 'framework_drop_count': 0,
+                   'metrics': [16_000_000, 90_000_000_001]})
+    rows.append({'type': 'scenario_window', 'scenario': 'system_ime_user_input', 'completed': True,
+        'start_ns': 90_000_000_000, 'end_ns': 125_000_000_000, 'frame_count_by_intended_vsync': 1,
+        'method': 'selected_system_ime_user_input_to_observed_editor_changes',
+        'input_source': 'user_via_selected_system_ime', 'ime_id': 'test.keyboard/.Ime',
+        'last_observed_ime_id': 'test.keyboard/.Ime', 'workload_id': 'manual-nihao-v1',
+        'text_changes': 20, 'poll_interval_ms': 50, 'polling_overhead_included': True,
+        'target_window_only': True, 'hardware_input_latency': False, 'ime_commit_latency': False,
+        'first_visible_feedback_measured': False, 'present_latency': False, 'system_ime_change_observed': False,
+        'observations': [{'observed_ns': 90_000_000_000 + i, 'text_utf16_length': i + 1,
+                          'selection': 'TextRange(1, 1)', 'text_changed': True} for i in range(20)]})
+    return rows
+
+
 def memory(slope=0):
     phases = [('before_switches', 0)] + [('switch_completed', i) for i in range(1, 101)] + [('post_gc_observation', i) for i in range(1, 11)]
     return {'schema': 'daiyu.synthetic.memory.raw.v1', 'collection_id': 'fixture', 'diagnostics_mode': 'off',
@@ -70,6 +88,33 @@ def memory(slope=0):
 
 
 class SummaryTests(unittest.TestCase):
+    def test_optional_system_ime_window_is_distinct_and_honest(self):
+        result = summary.frames(ime_capture())
+        self.assertEqual(len(result), 4)
+        self.assertEqual(result[-1]['scenario'], 'system_ime_user_input')
+        self.assertEqual(result[-1]['frame_count'], 1)
+        self.assertFalse(result[-1]['ime_commit_latency'])
+        self.assertTrue(result[-1]['polling_overhead_included'])
+        self.assertEqual(len(summary.frames(capture())), 3)
+
+    def test_system_ime_rejects_scope_identity_timing_counts_and_text_payload(self):
+        invalid = [('completed', False), ('method', 'direct_connection'), ('input_source', 'semantics'),
+            ('workload_id', 'anything'), ('last_observed_ime_id', 'other/.Ime'), ('ime_id', True),
+            ('system_ime_change_observed', True), ('text_changes', True), ('text_changes', 19),
+            ('poll_interval_ms', True), ('end_ns', 124_999_999_999), ('frame_count_by_intended_vsync', 2),
+            ('present_latency', True), ('target_window_only', False), ('polling_overhead_included', False)]
+        for key, value in invalid:
+            rows = ime_capture(); rows[-1][key] = value
+            with self.subTest(key=key), self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
+        for update in ({'observed_ns': 1}, {'observed_ns': 126_000_000_000}, {'text_changed': 1},
+                       {'text_utf16_length': 4097}, {'text': 'private'}, {'selection': []}):
+            rows = ime_capture(); rows[-1]['observations'][3].update(update)
+            with self.subTest(update=update), self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
+        rows = ime_capture(); rows[-1]['observations'][-1]['text_utf16_length'] = 0
+        with self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
+        rows = ime_capture(); rows.append(copy.deepcopy(rows[-1]))
+        with self.assertRaises(summary.InvalidEvidence): summary.frames(rows)
+
     def test_loading_isolated_from_cooperation_module_names_and_preserves_cache(self):
         import types
         foreign_evidence = types.ModuleType('evidence')

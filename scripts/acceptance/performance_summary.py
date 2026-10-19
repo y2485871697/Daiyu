@@ -94,6 +94,50 @@ def latency(rows, kind):
             'formal_feedback_endpoint_verified': False}
 
 
+def system_ime_window(rows):
+    selected = [row for row in rows if row.get('type') == 'scenario_window'
+                and row.get('scenario') == 'system_ime_user_input']
+    require(len(selected) <= 1, 'duplicate_system_ime_window')
+    if not selected:
+        return None
+    row = selected[0]
+    require(row.get('completed') is True and row.get('method') ==
+            'selected_system_ime_user_input_to_observed_editor_changes'
+            and row.get('input_source') == 'user_via_selected_system_ime'
+            and row.get('workload_id') == 'manual-nihao-v1', 'invalid_system_ime_method')
+    ime = row.get('ime_id')
+    require(isinstance(ime, str) and 0 < len(ime) <= 256 and '/' in ime
+            and row.get('last_observed_ime_id') == ime, 'system_ime_identity_mismatch')
+    for field in ('polling_overhead_included', 'target_window_only'):
+        require(row.get(field) is True, 'unsupported_system_ime_scope')
+    for field in ('hardware_input_latency', 'ime_commit_latency', 'first_visible_feedback_measured',
+                  'present_latency', 'system_ime_change_observed'):
+        require(row.get(field) is False, 'unsupported_system_ime_scope')
+    require(type(row.get('poll_interval_ms')) is int and row['poll_interval_ms'] == 50,
+            'invalid_system_ime_poll_interval')
+    start, end = integer(row.get('start_ns')), integer(row.get('end_ns'))
+    require(end - start >= 35_000_000_000, 'system_ime_duration_insufficient')
+    observed = row.get('observations')
+    require(isinstance(observed, list) and 20 <= len(observed) <= 1000, 'invalid_system_ime_observations')
+    previous, changes = start, 0
+    for entry in observed:
+        require(isinstance(entry, dict) and set(entry) == {
+            'observed_ns', 'text_utf16_length', 'selection', 'text_changed'}, 'invalid_system_ime_observation')
+        timestamp = integer(entry.get('observed_ns'))
+        require(previous <= timestamp <= end, 'invalid_system_ime_observation_time')
+        previous = timestamp
+        require(integer(entry.get('text_utf16_length')) <= 4096, 'system_ime_text_limit')
+        require(type(entry.get('text_changed')) is bool, 'invalid_system_ime_change')
+        selection = entry.get('selection')
+        require(selection is None or isinstance(selection, str) and len(selection) <= 100,
+                'invalid_system_ime_selection')
+        changes += entry['text_changed']
+    require(type(row.get('text_changes')) is int and row['text_changes'] == changes and changes >= 20,
+            'system_ime_change_count_mismatch')
+    require(observed[-1]['text_utf16_length'] > 0, 'system_ime_final_text_missing')
+    return row
+
+
 def frames(rows):
     require(rows and rows[0].get('type') == 'metadata' and rows[0].get('schema') == SCHEMA, 'raw_schema_mismatch')
     meta = rows[0]
@@ -129,6 +173,10 @@ def frames(rows):
         require(len(selected) == 1 and selected[0].get('completed') is True, 'scenario_window_missing')
         row = selected[0]
         windows.append((scenario, row.get('start_ns'), row.get('end_ns'), row.get('frame_count_by_intended_vsync')))
+    system_ime = system_ime_window(rows)
+    if system_ime is not None:
+        windows.append(('system_ime_user_input', system_ime['start_ns'], system_ime['end_ns'],
+                        system_ime.get('frame_count_by_intended_vsync')))
     result = []
     previous_end = -1
     for scenario, start, end, count in windows:
@@ -141,6 +189,10 @@ def frames(rows):
         if scenario != 'scroll':
             require(type(count) is int and count == len(durations), 'scenario_frame_count_mismatch')
         scope = {'window_includes_driver_idle_time': True} if scenario == 'scroll' else {}
+        if scenario == 'system_ime_user_input':
+            scope = {key: system_ime[key] for key in ('input_source', 'ime_id', 'workload_id',
+                     'text_changes', 'polling_overhead_included', 'target_window_only', 'ime_commit_latency',
+                     'hardware_input_latency', 'present_latency', 'first_visible_feedback_measured')}
         result.append({**scope, 'scenario': scenario, 'start_ns': start, 'end_ns': end, 'frame_count': len(durations),
                        'over_16_7_ms_ratio': sum(n > 16_700_000 for n in durations) / len(durations),
                        'over_50_ms_ratio': sum(n > 50_000_000 for n in durations) / len(durations),

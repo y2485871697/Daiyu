@@ -251,8 +251,6 @@ jobs:
           python3 scripts/verify_boundaries.py
       - name: 准备固定离线语音 JNI（不打包）
         run: ./gradlew --no-daemon :app:prepareOfflineSpeechRuntime
-      - name: 单测与 Lint
-        run: ./gradlew --no-daemon :core-domain:test :app:testReleaseUnitTest :app:lintRelease
       - name: 准备固定签名
         env:
           DAIYU_RELEASE_KEYSTORE_BASE64: ${{ secrets.DAIYU_RELEASE_KEYSTORE_BASE64 }}
@@ -260,6 +258,14 @@ jobs:
           DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
           DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
         run: python3 scripts/prepare_signing.py
+      - name: 单测与 Lint
+        env:
+          DAIYU_REQUIRE_SIGNING: 'true'
+          DAIYU_RELEASE_STORE_FILE: ${{ runner.temp }}/daiyu-release.p12
+          DAIYU_RELEASE_KEY_ALIAS: ${{ secrets.DAIYU_RELEASE_KEY_ALIAS }}
+          DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}
+          DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}
+        run: ./gradlew --no-daemon -PdaiyuProductionRelease=true :core-domain:test :app:testReleaseUnitTest :app:lintRelease
       - name: 构建生产 Release 与同变体测试 APK
         env:
           DAIYU_REQUIRE_SIGNING: 'true'

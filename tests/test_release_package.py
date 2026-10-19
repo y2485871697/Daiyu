@@ -1,6 +1,7 @@
 """Synthetic manifest/tool fixtures; never a real Release build or device result."""
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -93,6 +94,35 @@ class ReleasePackageTests(unittest.TestCase):
             app.write_bytes(b'')
             with self.assertRaisesRegex(ValueError, 'release_apk_pair_missing'):
                 package.verify_delivery('apkanalyzer', 'apksigner', root, env, run)
+
+    def test_release_checks_use_the_same_signed_production_configuration_as_packaging(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        release = workflow.split('  release:\n', 1)[1].split('  synthetic:\n', 1)[0]
+        def step(name):
+            body = release.split(f'      - name: {name}\n', 1)[1]
+            return re.split(r'^      - (?:name:|uses:)', body, maxsplit=1, flags=re.MULTILINE)[0]
+        prepare = step('准备固定签名')
+        unit = step('单测与 Lint')
+        assemble = step('构建生产 Release 与同变体测试 APK')
+        self.assertIn('python3 scripts/prepare_signing.py', prepare)
+        self.assertLess(release.index('- name: 准备固定签名'), release.index('- name: 单测与 Lint'))
+        self.assertLess(release.index('- name: 单测与 Lint'), release.index('- name: 构建生产 Release 与同变体测试 APK'))
+        for body in (unit, assemble):
+            self.assertIn('-PdaiyuProductionRelease=true', body)
+            for declaration in (
+                "DAIYU_REQUIRE_SIGNING: 'true'",
+                'DAIYU_RELEASE_STORE_FILE: ${{ runner.temp }}/daiyu-release.p12',
+                'DAIYU_RELEASE_KEY_ALIAS: ${{ secrets.DAIYU_RELEASE_KEY_ALIAS }}',
+                'DAIYU_RELEASE_KEY_PASSWORD: ${{ secrets.DAIYU_RELEASE_KEY_PASSWORD }}',
+                'DAIYU_RELEASE_STORE_PASSWORD: ${{ secrets.DAIYU_RELEASE_STORE_PASSWORD }}',
+            ):
+                self.assertIn(declaration, body)
+        self.assertIn(':core-domain:test :app:testReleaseUnitTest :app:lintRelease', unit)
+        self.assertIn(':app:assembleRelease :app:assembleReleaseAndroidTest', assemble)
+        self.assertLess(release.index('- name: 构建生产 Release 与同变体测试 APK'), release.index('- name: 清理临时签名文件'))
+        cleanup = step('清理临时签名文件')
+        self.assertIn('if: always()', cleanup)
+        self.assertIn('rm -f -- "$RUNNER_TEMP/daiyu-release.p12"', cleanup)
 
     def test_release_workflow_is_separate_full_unfiltered_dual_api_path(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()

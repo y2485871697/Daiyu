@@ -123,7 +123,14 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             }
             root?.let { return it }
             if (android.os.SystemClock.uptimeMillis() >= deadline) {
-                throw AssertionError("No attached focused test-process window within focus wait", lastNoRoot)
+                var hostState = ""
+                mainThread {
+                    val decor = host.window.decorView
+                    hostState = "host=${System.identityHashCode(host)} task=${host.taskId} " +
+                        "attached=${decor.isAttachedToWindow} focused=${decor.hasWindowFocus()} " +
+                        "token=${decor.windowToken}"
+                }
+                throw AssertionError("No attached focused test-process window within focus wait: $hostState", lastNoRoot)
             }
             android.os.SystemClock.sleep(20)
         }
@@ -526,6 +533,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
 
     protected fun recreateActivity(activity: MainActivity, afterDestroyed: () -> Unit = {}): MainActivity {
+        dismissIme()
         val monitor = instrumentation.addMonitor(MainActivity::class.java.name, null, false)
         try {
             mainThread { activity.recreate() }

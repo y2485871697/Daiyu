@@ -198,6 +198,9 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
         assertEquals(0, modelCalls.get())
     }
     fun testFocusedRootBelongsToHostWhenImportDialogOwnsFocus() {
+        verifyFocusedImportDialogHost()
+    }
+    private fun verifyFocusedImportDialogHost() {
         val current = start(open = true)
         confirmation()
         val focused = focusedWindowRoot()
@@ -205,8 +208,13 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
             assertNotSame(current.window.decorView, focused)
             assertTrue(focused.isAttachedToWindow && focused.hasWindowFocus())
             val params = focused.layoutParams as android.view.WindowManager.LayoutParams
-            assertNotNull(current.window.attributes.token)
-            assertEquals(current.window.attributes.token, params.token)
+            val focusedHost = generateSequence(focused.context) {
+                (it as? android.content.ContextWrapper)?.baseContext
+            }.filterIsInstance<android.app.Activity>().firstOrNull()
+            assertSame(current, focusedHost)
+            val hostToken = current.window.attributes.token
+            assertNotNull(hostToken)
+            params.token?.let { assertEquals(hostToken, it) }
         }
         assertEquals(0, provider.opens.get())
         assertEquals(0, modelCalls.get())

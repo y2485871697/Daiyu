@@ -21,8 +21,7 @@ class ReconnectSettingsActivityTest : WiredActivityTestCase() {
 
     private fun enter() {
         openSettings()
-        reveal("settings-row:模型功能", "设置").performClick()
-        reveal("settings-row:错误重连", "模型功能").performClick()
+        reveal("settings-row:错误重连", "设置").performClick()
         node("page:错误重连").assertExists()
         ui.waitUntil(timeoutMillis = 5_000) {
             ui.onAllNodes(hasTestTag("reconnect-duration:none") and isEnabled())
@@ -65,8 +64,7 @@ class ReconnectSettingsActivityTest : WiredActivityTestCase() {
         backToPage(activity, "page:设置")
         node("page:设置").assertExists()
         assertFalse(old.isActive)
-        reveal("settings-row:模型功能", "设置").performClick()
-        reveal("settings-row:错误重连", "模型功能").performClick()
+        reveal("settings-row:错误重连", "设置").performClick()
         val replacement = owner()
         assertNotSame(old, replacement)
         assertTrue(replacement.isActive)

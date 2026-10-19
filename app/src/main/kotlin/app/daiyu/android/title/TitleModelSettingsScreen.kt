@@ -2,9 +2,7 @@ package app.daiyu.android.title
 
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
 import app.daiyu.android.ui.components.MiuixScaffoldPage
-import androidx.compose.ui.platform.testTag
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -43,8 +41,7 @@ fun TitleModelSettingsScreen(owner: TitleModelSettingsEditor, ownerCurrent: () -
     DisposableEffect(owner) {
         onDispose { owner.revoke(); draft = emptyDraft() }
     }
-    MiuixScaffoldPage(title = "标题模型", onBack = { if (ownerCurrent()) onBack() },
-        modifier = Modifier.testTag("page:标题模型")) {
+    MiuixScaffoldPage(title = "标题模型", onBack = { if (ownerCurrent()) onBack() }) {
         item(key = "title-model-editor") {
             TitleModelSettingsPanel(settings, draft, { if (ownerCurrent() && !busy) draft = it },
                 onSave = { if (ownerCurrent()) enqueue(owner.prepareSave(it), true) },

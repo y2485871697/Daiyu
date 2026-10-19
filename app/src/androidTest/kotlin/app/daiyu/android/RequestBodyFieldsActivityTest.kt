@@ -1,11 +1,36 @@
 package app.daiyu.android
 
+import androidx.activity.compose.setContent
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import app.daiyu.android.ui.screens.settings.ModelSettingsDraftUi
+import app.daiyu.android.ui.screens.settings.ModelSettingsScreen
+import app.daiyu.android.ui.screens.settings.RequestBodyFieldsEditor
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import app.daiyu.android.ui.screens.settings.RetainedRequestBodyFieldApply
 import androidx.compose.ui.test.*
 import org.json.JSONObject
 
 class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
     override val engineeringUi = true
+    private var draft by mutableStateOf(ModelSettingsDraftUi())
+    private var saved: ModelSettingsDraftUi? = null
+    private var saveCount = 0
+    private fun showComponent() {
+        mainThread {
+            draft = ModelSettingsDraftUi(protocol = fixture.settings.load().protocol)
+            activity.setContent {
+                MiuixTheme {
+                    ModelSettingsScreen(draft, onDraftChange = { draft = it },
+                        onSave = { saved = it; saveCount++ }, onFetchCatalog = { error("no fetch") },
+                        onBack = {}, engineeringUi = true, showCatalog = false,
+                        headerContent = { item { RequestBodyFieldsEditor(draft, true, true) { draft = it } } })
+                }
+            }
+        }
+        awaitModelEditor()
+    }
     private fun fieldControl(tag: String, list: String = "model-body-field-editor-list"): SemanticsNodeInteraction {
         dismissIme()
         node(list).performScrollToNode(hasTestTag(tag))
@@ -20,7 +45,7 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
         fieldControl("model-body-field-apply")
     }
     fun testDismissImeUsesTheOpenFieldDialogWindow() {
-        openModels()
+        showComponent()
         reveal("model-body-fields").performClick()
         fieldControl("model-body-field-add", "model-body-fields-list").performClick()
         val field = node("settings-field:字段名")
@@ -60,33 +85,47 @@ class RequestBodyFieldsActivityTest : WiredActivityTestCase() {
         fieldControl("model-body-field-apply").assertExists()
         assertEquals(0, fixture.opens.get())
     }
-    fun testTypedFieldEditsOnlyDraftThenPersistsThroughTheExistingSave() {
+    fun testJsonBodyEditsOnlyDraftThenPersistsThroughTheExistingSave() {
         val before = fixture.settings.load()
-        setDraft("field editor unsent draft"); openModels()
-        beginField("metadata", "对象", """{"marker":true,"numeric":"123"}""")
-        node("model-body-field-apply").performClick()
+        setDraft("JSON editor unsent draft"); openModels()
+        editModel("自定义请求体", """{"metadata":{"marker":true,"numeric":"123"}}""")
         assertEquals(before, fixture.settings.load())
         saveModel()
         val body = JSONObject(fixture.settings.load().requestOptions.customBody)
         assertTrue(body.getJSONObject("metadata").getBoolean("marker"))
         assertEquals("123", body.getJSONObject("metadata").get("numeric"))
         assertEquals(before.copy(requestOptions = before.requestOptions.copy(customBody = body.toString())), fixture.settings.load())
-        openModels(); reveal("model-body-fields").performClick()
-        fieldControl("model-body-field:0", "model-body-fields-list").assertExists()
-        fieldControl("model-body-field-delete:0", "model-body-fields-list").performClick()
+        openModels()
+        modelField("自定义请求体").assertEditableText(body.toString())
+        editModel("自定义请求体", "{}")
         assertTrue(JSONObject(fixture.settings.load().requestOptions.customBody).has("metadata"))
-        saveModel(); assertFalse(JSONObject(fixture.settings.load().requestOptions.customBody).has("metadata"))
+        saveModel()
+        assertFalse(JSONObject(fixture.settings.load().requestOptions.customBody).has("metadata"))
+        assertDraft("JSON editor unsent draft")
         assertEquals(0, fixture.opens.get())
     }
-    fun testPausedFieldApplyCapabilityCannotChangeTheReopenedDraftOrSave() {
+    fun testPausedFieldApplyCapabilityCannotChangeTheComponentDraftOrSave() {
         val before = fixture.settings.load()
-        openModels(); beginField("metadata", "对象", """{"marker":true}""")
+        showComponent()
+        val initial = draft
+        beginField("metadata", "对象", """{"marker":true}""")
         val apply = node("model-body-field-apply").fetchSemanticsNode().config[RetainedRequestBodyFieldApply]
-        realPauseResume(activity, atPause = { apply() })
+        realPauseResume(activity, atPause = { apply(); assertEquals(initial, draft) })
         mainThread { apply() }
-        assertEquals(before, fixture.settings.load())
-        modelField("自定义请求体").assertEditableText(before.requestOptions.customBody)
+        assertEquals(initial, draft)
+        assertNull(saved); assertEquals(0, saveCount)
+        modelField("自定义请求体").assertEditableText(initial.customBody)
         node("model-body-field-apply").assertDoesNotExist()
+        beginField("fresh", "对象", """{"marker":"fresh"}""")
+        mainThread { apply() }
+        assertEquals(initial, draft)
+        node("model-body-field-apply").assertExists().performClick()
+        assertEquals("fresh", JSONObject(draft.customBody).getJSONObject("fresh").getString("marker"))
+        assertFalse(JSONObject(draft.customBody).has("metadata"))
+        assertEquals(before, fixture.settings.load())
+        saveModel()
+        assertEquals(draft, saved); assertEquals(1, saveCount)
+        assertEquals(before, fixture.settings.load())
         assertEquals(0, fixture.opens.get())
     }
 }

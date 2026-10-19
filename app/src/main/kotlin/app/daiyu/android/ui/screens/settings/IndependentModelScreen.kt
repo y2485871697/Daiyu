@@ -117,7 +117,11 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
         label("协议（保存即明确确认该协议及凭据）")
         val supported = listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES)
         val protocol = choices(listOf("请选择支持的协议（此功能仅支持 Responses/Messages）", "Responses", "Messages"), supported.indexOf(settings.protocol) + 1)
-        val path = field("Responses 自定义路径（Messages 请留空）", settings.responsesPath)
+        label("Responses 路径")
+        val paths = listOf("/v1/responses", "/responses")
+        var pathValue = settings.responsesPath
+        val path = choices(paths, paths.indexOf(settings.responsesPath).coerceAtLeast(0))
+        path.visibility = if (settings.protocol == ProviderProtocol.RESPONSES) android.view.View.VISIBLE else android.view.View.GONE
         label("图片能力声明（未知拒绝图片，不按名称猜测）")
         val images = choices(listOf("未知", "已确认支持图片", "不支持图片"), when(record.imageInput) { true -> 1; false -> 2; null -> 0 })
         images.tag = "independent-model-image-capability"
@@ -130,11 +134,24 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
             }
             override fun afterTextChanged(s: android.text.Editable?) {}
         }
-        listOf(endpoint, model, key, path).forEach { it.addTextChangedListener(resetCapability) }
+        listOf(endpoint, model, key).forEach { it.addTextChangedListener(resetCapability) }
+        var previousPath = path.selectedItemPosition
+        path.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
+            override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                if (position != previousPath) { pathValue = paths[position]; images.setSelection(0) }
+                previousPath = position
+            }
+            override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
+        }
         var previousProtocol = protocol.selectedItemPosition
         protocol.onItemSelectedListener = object : android.widget.AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: android.widget.AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
-                if (position != previousProtocol) { images.setSelection(0); key.setText(""); if (supported.getOrNull(position - 1) != ProviderProtocol.RESPONSES) path.setText("") }
+                if (position != previousProtocol) {
+                    images.setSelection(0); key.setText("")
+                    pathValue = if (supported.getOrNull(position - 1) == ProviderProtocol.RESPONSES)
+                        paths[path.selectedItemPosition] else ""
+                }
+                path.visibility = if (supported.getOrNull(position - 1) == ProviderProtocol.RESPONSES) android.view.View.VISIBLE else android.view.View.GONE
                 previousProtocol = position
             }
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) { images.setSelection(0) }
@@ -156,7 +173,7 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
                 val selectedProtocol = supported.getOrNull(protocol.selectedItemPosition - 1)
                 if (selectedProtocol == null) { status.text = "此独立功能仅支持 Responses/Messages；请选择支持的协议并重新输入密钥"; return@setOnClickListener }
                 val replacement = ModelSettings(endpoint.text.toString().trim(), model.text.toString().trim(),
-                    key.text.toString(), false, path.text.toString().trim(), false, selectedProtocol)
+                    key.text.toString(), false, pathValue, false, selectedProtocol)
                 val allow = enabled.isChecked
                 val capability = when(images.selectedItemPosition) { 1 -> true; 2 -> false; else -> null }
                 saving = true; isEnabled = false

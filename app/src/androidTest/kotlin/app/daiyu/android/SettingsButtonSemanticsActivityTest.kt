@@ -51,10 +51,9 @@ class SettingsButtonSemanticsActivityTest : WiredActivityTestCase() {
             if (wasOn) toggle.assertIsOn() else toggle.assertIsOff()
         }
         if (android.os.Build.VERSION.SDK_INT < 33) {
-            for (title in listOf("模糊效果", "顶栏模糊样式")) {
-                node("settings-row:$title").assertDoesNotExist()
-                node("settings-switch:$title").assertDoesNotExist()
-            }
+            node("page:外观与主题").performScrollToNode(hasTestTag("settings-switch:模糊效果"))
+            node("settings-switch:模糊效果").assertIsDisplayed().assertIsNotEnabled().assertIsOff()
+            node("settings-row:顶栏模糊样式").assertDoesNotExist()
         }
         assertEquals(0, fixture.opens.get())
     }

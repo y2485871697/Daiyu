@@ -385,6 +385,10 @@ private fun SkillDetailsSheet(entry: SkillManagement.Entry, onDismiss: () -> Uni
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
+                    Text(entry.skill.name, style = MiuixTheme.textStyles.title3, color = colors.onSurface)
+                    Text(entry.skill.description.ifBlank { "暂无描述" },
+                        modifier = Modifier.testTag("skill-description:${entry.id}"),
+                        style = MiuixTheme.textStyles.body1, color = colors.onSurface)
                     listOf(
                         "ID" to entry.id,
                         "来源" to (entry.skill.source ?: "本地或内置"),

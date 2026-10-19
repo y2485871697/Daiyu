@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.ui.platform.testTag
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -86,11 +89,17 @@ internal fun <T> ProviderCatalogSettingsScreen(
     val tabs: LazyListScope.() -> Unit = {
         if (twoTabs) item(key = "provider-tabs") {
             SettingsCard {
-                SettingsRadioRow("配置", !modelTab, enabled = !state.saving) {
-                    if (ownerCurrent()) { session.invalidate(); modelTab = false }
-                }
-                SettingsRadioRow("模型", modelTab, enabled = !state.saving) {
-                    if (ownerCurrent()) { session.invalidate(); modelTab = true }
+                Row(Modifier.fillMaxWidth().selectableGroup()) {
+                    androidx.compose.foundation.layout.Box(Modifier.weight(1f)) {
+                        SettingsRadioRow("配置", !modelTab, enabled = !state.saving) {
+                            if (ownerCurrent()) { session.invalidate(); modelTab = false }
+                        }
+                    }
+                    androidx.compose.foundation.layout.Box(Modifier.weight(1f)) {
+                        SettingsRadioRow("模型", modelTab, enabled = !state.saving) {
+                            if (ownerCurrent()) { session.invalidate(); modelTab = true }
+                        }
+                    }
                 }
             }
         }

@@ -176,6 +176,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         }
     }
     protected fun openSettings() {
+        dismissIme()
         ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction())
             .assertIsDisplayed().assertIsEnabled()
             .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }

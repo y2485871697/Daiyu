@@ -781,6 +781,7 @@ class MainActivity : ComponentActivity() {
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
+            if (value != retainedPageState) revokeBackupExportPage()
             if (value != "browser") closeBrowserVisualVisit()
             if (value != "chat") revokeChildAuthorization()
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
@@ -817,7 +818,7 @@ class MainActivity : ComponentActivity() {
                 // Retain outstanding request tokens until their callback consumes them. Otherwise a
                 // late result could be confused with a second picker opened on a newer page visit.
             }
-            if (value != "backup") { backupImportPickerHopPending = false; backupImportVisit = null; pendingBackupImportResult = null; cancelRestorePreview() }
+            if (value != "backup") { if (prompt?.backup == true) prompt = null; backupImportPickerHopPending = false; backupImportVisit = null; pendingBackupImportResult = null; cancelRestorePreview() }
             if (value != "terminal") terminalPageOwner = null
             if (value != "linux-settings") {
                 linuxSettingsVisit = null
@@ -1117,6 +1118,17 @@ class MainActivity : ComponentActivity() {
     private class DeferredOpenedBackup(val uri: Uri, val waitingPrompt: Prompt)
     private var deferredOpenedBackup: DeferredOpenedBackup? = null
     private var pendingBackupRequest: Int? = null
+    private var backupExportPageOwner by mutableStateOf<Any>(Any())
+    private var pendingBackupExportOwner: Any? = null
+    private var backupExportPickerHopPending = false
+    private fun backupExportPageCurrent(owner: Any?) = owner != null && backupExportPageOwner === owner &&
+        activityUsable() && retainedPage == "backup"
+    private fun revokeBackupExportPage() {
+        backupExportPageOwner = Any()
+        pendingBackupExportOwner = null
+        backupExportPickerHopPending = false
+        // Keep the outstanding request slot until its result is consumed.
+    }
     private var exportPickerPending by mutableStateOf(false)
     private var conversationExport = ConversationExportSelection()
     private var exportConversationId by mutableStateOf<String?>(null)
@@ -1222,7 +1234,7 @@ class MainActivity : ComponentActivity() {
         activityCallbacksAllowed = true
         nextLegacyCode = state?.getInt("legacy-next-code", 12000)?.coerceIn(12000, 14000) ?: 12000
         pendingBackupRequest = state?.getInt("pending-backup-request", 0)?.takeIf {
-            it != 0 && it != 107 && it !in 12000..65534
+            it != 0 && it != 101 && it != 103 && it != 107 && it !in 12000..65534
         }
         conversationExport = ConversationExportSelection(
             state?.getString("pending-conversation-export").takeIf { pendingBackupRequest == 105 })
@@ -1651,12 +1663,14 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                     }
-                    "backup" -> BackupScreen(
+                    "backup" -> {
+                        val exportOwner = backupExportPageOwner
+                        BackupScreen(
                         engineeringUi = engineeringUi,
                         onImport = { backupGuard { pickBackupAuto() } },
                         onBack = { if (activityUsable() && retainedPage == "backup") retainedPage = "settings" },
-                        onExportCompact = { backupGuard { pickBackup(true, false) } },
-                        onExportComplete = { backupGuard { pickBackup(true, true) } },
+                        onExportCompact = { if (backupExportPageCurrent(exportOwner)) backupGuard { pickBackup(true, false) } },
+                        onExportComplete = { if (backupExportPageCurrent(exportOwner)) backupGuard { pickBackup(true, true) } },
                         onImportCompact = { backupGuard { pickBackup(false, false) } },
                         onImportComplete = { backupGuard { pickBackup(false, true) } },
                         onOpenLegacyLibrary = { backupGuard { openLegacyLibrary() } },
@@ -1666,6 +1680,7 @@ class MainActivity : ComponentActivity() {
                         canRestoreConfiguration = configurationRestorePreview?.plan?.isNoOp == false,
                         busy = backupBusy,
                     )
+                    }
                     "appearance" -> AppearanceSettingsScreen(
                         state = appearance,
                         onChange = { saveAppearance(it) },
@@ -4126,7 +4141,7 @@ class MainActivity : ComponentActivity() {
         state.putBoolean("terminal-page", retainedPage == "terminal")
         state.putBoolean("balance-page", retainedPage == "balance-settings") // Route only, no balance credentials.
         state.putInt("legacy-next-code", nextLegacyCode)
-        state.putInt("pending-backup-request", pendingBackupRequest ?: 0)
+        state.putInt("pending-backup-request", pendingBackupRequest?.takeUnless { it == 101 || it == 103 } ?: 0)
         state.putString("pending-conversation-export", conversationExport.pendingConversationId)
         if (retainedPage == "conversation-export") {
             state.putString("export-page-conversation", exportConversationId)
@@ -4137,6 +4152,7 @@ class MainActivity : ComponentActivity() {
     }
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent); setIntent(intent)
+        revokeBackupExportPage()
         cancelDeferredOpenedBackup() // Replacement, including invalid VIEW/other actions, revokes.
         if (intent.action == ChatApplication.OPEN_PET_SETTINGS) {
             dismissSidebar(); retainedPage = "pet-settings"
@@ -4249,6 +4265,10 @@ class MainActivity : ComponentActivity() {
         // A returned backup URI may show a one-shot confirmation. Unlike the external
         // DocumentsUI hop itself, that approval must not survive a background transition.
         // A fresh foreground visit must choose the file again.
+        val preserveExportPicker = pendingBackupRequest in setOf(101, 103) && backupExportPickerHopPending &&
+            backupExportPageCurrent(pendingBackupExportOwner)
+        backupExportPickerHopPending = false
+        if (!preserveExportPicker) revokeBackupExportPage()
         val preserveBackupPicker = pendingBackupRequest == 107 && backupImportPickerHopPending &&
             backupImportVisit != null && retainedPage == "backup"
         backupImportPickerHopPending = false
@@ -4280,6 +4300,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        revokeBackupExportPage()
         revokeChildAuthorization()
         closeBrowserVisualVisit()
         revokeChatReferencePick(); chatReferencePick = null
@@ -5337,14 +5358,22 @@ class MainActivity : ComponentActivity() {
     }
     @Suppress("DEPRECATION") private fun pickBackup(exporting: Boolean, complete: Boolean) {
         checkBackupAvailable(); check(pendingBackupRequest == null) { "文件选择尚未返回；请先完成或取消选择" }
+        val owner = if (exporting) backupExportPageOwner.also {
+            check(backupExportPageCurrent(it) && generationResumed()) { "备份页面已变化；请重新选择导出" }
+        } else null
         val code = if (complete) { if (exporting) 103 else 104 } else { if (exporting) 101 else 102 }
         pendingBackupRequest = code
+        pendingBackupExportOwner = owner
+        backupExportPickerHopPending = exporting
         try {
             startActivityForResult(Intent(if (exporting) Intent.ACTION_CREATE_DOCUMENT else Intent.ACTION_OPEN_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE); type = "application/json"
                 if (exporting) putExtra(Intent.EXTRA_TITLE, if (complete) "daiyu-complete.json" else "daiyu-text.json")
             }, code)
-        } catch (failure: Exception) { pendingBackupRequest = null; throw failure }
+        } catch (failure: Exception) {
+            pendingBackupRequest = null; pendingBackupExportOwner = null; backupExportPickerHopPending = false
+            throw failure
+        }
     }
     @Suppress("DEPRECATION") override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
@@ -5395,6 +5424,9 @@ class MainActivity : ComponentActivity() {
             return
         }
         if (requestCode !in setOf(101, 102, 103, 104, 105, 106, 107) || pendingBackupRequest != requestCode) return
+        val exportOwner = if (requestCode == 101 || requestCode == 103) pendingBackupExportOwner.also {
+            pendingBackupExportOwner = null; backupExportPickerHopPending = false
+        } else null
         pendingBackupRequest = null
         if (requestCode == 107) backupImportPickerHopPending = false
         if (requestCode == 106) {
@@ -5427,7 +5459,10 @@ class MainActivity : ComponentActivity() {
         val complete = requestCode == 103 || requestCode == 104
         backupGuard {
             require(uri.scheme == "content") { "文件选择未返回content URI；原数据保留，请重新选择" }
-            if (requestCode == 101 || requestCode == 103) controller.exportUserBackup(uri, complete)
+            if (requestCode == 101 || requestCode == 103) {
+                check(backupExportPageCurrent(exportOwner)) { "备份页面已变化；本次导出已失效，请重新选择" }
+                controller.exportUserBackup(uri, complete)
+            }
             else if (requestCode == 107) {
                 val visit = backupImportVisit
                 if (visit != null && retainedPage == "backup") confirmBackupImportAuto(uri, visit)

@@ -608,4 +608,33 @@ class BackupActivityTest:ComposeActivityTestCase() {
         assertFalse(resolves("content://activity-backup/text.json","text/plain"))
         assertFalse(resolves("content://activity-backup/text.json","application/octet-stream"))
     }
+
+    fun testExportResultAfterLeavingBackupDoesNotOpenTarget() {
+        start()
+        val before = controller.database.exportBackup()
+        val output = Uri.parse("content://activity-backup/left-backup.json")
+        picker(103, uri = output, beforeReturn = {
+            MainActivity::class.java.getDeclaredMethod("returnToChat").apply { isAccessible = true }.invoke(activity)
+        })
+        awaitState { !controller.dataBusy }
+        assertEquals(0, provider.opens.get())
+        assertFalse(provider.file(output).exists())
+        unchanged(before)
+        main { assertNull(pending()) }
+    }
+    fun testExportResultCannotBorrowReplacementBackupPage() {
+        start()
+        val before = controller.database.exportBackup()
+        val output = Uri.parse("content://activity-backup/replaced-backup.json")
+        picker(103, uri = output, beforeReturn = {
+            MainActivity::class.java.getDeclaredMethod("returnToChat").apply { isAccessible = true }.invoke(activity)
+            MainActivity::class.java.getDeclaredMethod("backupMenu").apply { isAccessible = true }.invoke(activity)
+        })
+        awaitState { !controller.dataBusy }
+        assertEquals(0, provider.opens.get())
+        assertFalse(provider.file(output).exists())
+        unchanged(before)
+        main { assertNull(pending()) }
+    }
+
 }

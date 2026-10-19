@@ -78,6 +78,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithText("typed-$category").performClick()
             ui.onNodeWithTag("tool-category:$category").assertIsDisplayed()
             ui.onNodeWithText(details.heading).assertIsDisplayed()
+            ui.onNodeWithText(details.notice).assertDoesNotExist()
+            ui.onNodeWithText(details.rich.source).assertDoesNotExist()
             ui.onNodeWithContentDescription("重试 typed-$category").assertDoesNotExist()
         }
     }
@@ -139,6 +141,31 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             show(turn, ChatScreenActions())
             ui.onAllNodesWithTag("tool-step:card-call").assertCountEquals(1)
         }
+    }
+
+    fun testFinalControlsStayEnabledAndDispatchOnlyBoundIntent() = finalControlsStayEnabledAndDispatchOnlyBoundIntent()
+
+    private fun finalControlsStayEnabledAndDispatchOnlyBoundIntent() {
+        val step = WorkStepUi("final-call", "工作区", "", WorkStepState.UNKNOWN,
+            WorkStepOwnerUi("chat", "old-run", "message"), "workspace-inspect", "workspace")
+        val requests = mutableListOf<ToolCardActionRequest>()
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    ToolCardControls(step) { requests += it }
+                    ToolAudioControls(step.copy(category = "speech")) { requests += it }
+                    ToolMediaSurface(step, null, true, 12000L, "asset") { requests += it }
+                }
+            }
+        } }
+        ui.waitForIdle()
+        ui.onNodeWithTag("tool-action:MERGE_WORKSPACE").assertIsEnabled().performClick()
+        assertEquals(step.actionRequest(ToolCardAction.MERGE_WORKSPACE), requests.single())
+        ui.onNodeWithTag("tool-action:PLAY_VIDEO").performScrollTo().assertIsEnabled().performClick()
+        assertEquals(step.actionRequest(ToolCardAction.PLAY_VIDEO, "asset"), requests.last())
+        assertEquals(2, requests.size)
+        ui.onNodeWithText("暂未接入", substring = true).assertDoesNotExist()
+        ui.onNodeWithText("宿主未提供", substring = true).assertDoesNotExist()
     }
 
 }

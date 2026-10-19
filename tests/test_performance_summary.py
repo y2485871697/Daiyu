@@ -88,6 +88,67 @@ def memory(slope=0):
 
 
 class SummaryTests(unittest.TestCase):
+    def migration_capture(self):
+        rows = capture()
+        rows[0]['environment'].update(dataset_sha256='a' * 64, migration_package_sha256='b' * 64,
+            migration_package_bytes=100_000_000, mb_definition='decimal_1000000_bytes')
+        sample = dict(type='backend_migration_sample', collection_id='fixture', clock='System.nanoTime',
+            start_ns=100, commit_returned_ns=2_000_100, duration_ns=2_000_000, bytes_read=100_000_000,
+            dataset_sha256='a' * 64, package_sha256='b' * 64, database_reopened=True,
+            integrity_verified=True, ui_progress_measured=False, saf_measured=False,
+            business_acceptance=False, collection_authenticated=False)
+        return rows, sample
+
+    def test_optional_backend_migration_preserves_existing_summary(self):
+        rows, sample = self.migration_capture()
+        before = summary.summarize(rows, memory())
+        after = summary.summarize(rows, memory(), sample)
+        migration = after.pop('backend_migration')
+        self.assertEqual(before, after)
+        self.assertEqual(migration['duration_ms'], 2.0)
+        self.assertEqual(migration['bytes_read'], 100_000_000)
+        self.assertFalse(migration['integrity_verification_in_duration'])
+        self.assertFalse(migration['ui_progress_measured'])
+        self.assertFalse(migration['saf_measured'])
+        self.assertFalse(migration['business_acceptance'])
+
+    def test_backend_migration_rejects_identity_timing_scope_and_types(self):
+        for field, value in [('collection_id', 'other'), ('collection_id', True), ('clock', 'wall'),
+            ('start_ns', True), ('commit_returned_ns', 99), ('duration_ns', 1), ('duration_ns', True),
+            ('bytes_read', True), ('bytes_read', 99_999_999), ('dataset_sha256', 'c' * 64),
+            ('package_sha256', 'B' * 64), ('database_reopened', False), ('integrity_verified', 1),
+            ('ui_progress_measured', True), ('saf_measured', 0), ('business_acceptance', True),
+            ('collection_authenticated', True)]:
+            rows, sample = self.migration_capture(); sample[field] = value
+            with self.subTest(field=field, value=value), self.assertRaises(summary.InvalidEvidence):
+                summary.summarize(rows, backend_migration_report=sample)
+        for field in ('dataset_sha256', 'migration_package_sha256', 'migration_package_bytes', 'mb_definition'):
+            rows, sample = self.migration_capture(); del rows[0]['environment'][field]
+            with self.subTest(missing=field), self.assertRaises(summary.InvalidEvidence):
+                summary.summarize(rows, backend_migration_report=sample)
+
+    @unittest.skipUnless(hasattr(os, 'O_NOFOLLOW') and os.open in os.supports_dir_fd, 'safe POSIX unavailable')
+    def test_cli_optional_backend_migration_and_fixed_failure(self):
+        with tempfile.TemporaryDirectory() as root:
+            rows, sample = self.migration_capture()
+            raw = Path(root) / 'raw.jsonl'; migration = Path(root) / 'migration.json'
+            raw.write_text('\n'.join(json.dumps(r) for r in rows)); migration.write_text(json.dumps(sample))
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                code = summary.main(['--raw', str(raw), '--backend-migration', str(migration)])
+            self.assertEqual(code, 0)
+            report = json.loads(output.getvalue())
+            self.assertEqual(report['backend_migration_sha256'], summary.hashlib.sha256(migration.read_bytes()).hexdigest())
+            self.assertEqual(report['backend_migration']['duration_ms'], 2.0)
+            for content in ('null', '{"type":1,"type":2}', json.dumps(dict(sample, collection_id='other'))):
+                migration.write_text(content); output = io.StringIO(); errors = io.StringIO()
+                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+                    code = summary.main(['--raw', str(raw), '--backend-migration', str(migration)])
+                self.assertEqual(code, 2); self.assertEqual(errors.getvalue(), '')
+                self.assertEqual(json.loads(output.getvalue()), {'valid': False,
+                    'error': 'invalid_performance_capture', 'business_acceptance': False})
+
+
     def test_optional_system_ime_window_is_distinct_and_honest(self):
         result = summary.frames(ime_capture())
         self.assertEqual(len(result), 4)

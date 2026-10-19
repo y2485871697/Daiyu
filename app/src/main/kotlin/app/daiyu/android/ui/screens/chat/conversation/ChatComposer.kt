@@ -17,6 +17,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -60,6 +61,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     balanceState: app.daiyu.android.balance.BalanceState? = null,
     backdrop: top.yukonga.miuix.kmp.blur.LayerBackdrop? = null) {
     val colors = MiuixTheme.colorScheme
+    val appearance = chatActionColors()
     val currentEditorGeneration by rememberUpdatedState(state.editorGeneration)
     var attachments by remember { mutableStateOf(false) }
     var voiceModes by remember { mutableStateOf(false) }
@@ -90,6 +92,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                 Modifier.weight(1f).testTag("chat-model"),
                 onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) })
             Row(Modifier.widthIn(min = 112.dp, max = 144.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
+                .border(1.dp, colors.outline, RoundedCornerShape(12.dp))
                 .combinedClickable(enabled = state.enabled, role = Role.Button, onClickLabel = "上下文统计", onClick = actions.onContextClick,
                     onLongClick = { actions.onMenuAction(ChatMenuAction.CONTEXT_SCOPE) })
                 .padding(start = 8.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
@@ -179,9 +182,9 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             }, Modifier.size(48.dp).testTag(if (textAction || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
                                 .controlGesture(actions, primaryEnabled),
                                 containerColor = if (!primaryEnabled) colors.disabledPrimaryButton
-                                    else if (state.phase == ComposerPhase.PAUSED || (!textAction && state.phase == ComposerPhase.RUNNING)) colors.onSurface else colors.primary,
+                                    else if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer,
                                 enabled = primaryEnabled,
-                                tint = if (state.phase == ComposerPhase.PAUSED || (!textAction && state.phase == ComposerPhase.RUNNING)) colors.surface else colors.onPrimary,
+                                tint = if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
                                 onLongClick = if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
                             }
                         }

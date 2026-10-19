@@ -39,7 +39,7 @@
         </intent>
     </queries>
     <application android:name=".ChatApplication" android:usesCleartextTraffic="false" android:dataExtractionRules="@xml/data_extraction_rules" android:allowBackup="false" android:fullBackupContent="false" android:label="@string/app_name"
-        android:icon="@drawable/task17_launcher_f6f7f9_2491ff" android:roundIcon="@drawable/task17_launcher_f6f7f9_2491ff" android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:icon="@drawable/task17_launcher_f6f7f9_2491ff" android:roundIcon="@drawable/task17_launcher_f6f7f9_2491ff" android:theme="@style/Theme.Daiyu"
         android:supportsRtl="true">
         <!-- Cross-app notification read special access only. Not posting, not a run/model grant.
              No separate process: uses the application-owned capture store and listener gate. -->
@@ -69,7 +69,7 @@
         <activity android:name=".vd.VirtualDisplayAnchorActivity"
             android:exported="true" android:excludeFromRecents="true"
             android:allowTaskReparenting="false" android:taskAffinity="app.daiyu.android.vd.anchor"
-            android:launchMode="standard" android:theme="@android:style/Theme.Material.NoActionBar" />
+            android:launchMode="standard" android:theme="@style/Theme.Daiyu.Anchor" />
         <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
             <!-- Only JSON documents with content grants; no file/http or wildcard MIME capture. -->
             <intent-filter>

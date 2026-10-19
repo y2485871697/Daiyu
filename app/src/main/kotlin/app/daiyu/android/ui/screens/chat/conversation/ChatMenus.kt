@@ -1,6 +1,11 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -67,11 +72,23 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
         ),
     )
     val colors = MiuixTheme.colorScheme
+    val dark = colors.background.luminance() < .3f
+    val shape = RoundedCornerShape(19.dp)
+    // A Popup has no shared message backdrop: use the preview's opaque fallback.
+    val menuSurface = if (dark) Color(0xFF211D2C) else Color(0xFFFAF7FF)
+    val highlight = if (dark) Color(0x14F5EBFF) else Color.White
     val maxHeight = minOf(336.dp, (LocalConfiguration.current.screenHeightDp * 0.55f).dp)
     DropdownMenu(expanded, onDismiss, modifier = Modifier.testTag("chat-overflow-menu")
-        .widthIn(min = 208.dp, max = 292.dp).heightIn(max = maxHeight),
-        shape = RoundedCornerShape(16.dp), containerColor = colors.surfaceContainer,
-        tonalElevation = 0.dp, shadowElevation = 5.dp, border = BorderStroke(1.dp, colors.outline.copy(alpha = 0.7f))) {
+        .widthIn(min = 208.dp, max = 292.dp).heightIn(max = maxHeight)
+        .background(menuSurface, shape)
+        .drawWithContent {
+            drawContent()
+            drawLine(highlight, Offset(19.dp.toPx(), .5.dp.toPx()),
+                Offset(size.width - 19.dp.toPx(), .5.dp.toPx()), 1.dp.toPx())
+        },
+        shape = shape, containerColor = Color.Transparent,
+        tonalElevation = 0.dp, shadowElevation = 5.dp,
+        border = BorderStroke(1.dp, if (dark) Color(0x26DCCDFF) else Color(0xF0FFFFFF))) {
         groups.forEachIndexed { index, entries ->
             if (index > 0) HorizontalDivider(Modifier.padding(vertical = 4.dp), color = colors.outline)
             entries.forEach { entry ->

@@ -15,7 +15,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 static char fake_parent[128];
-static int fail_open,fail_stat,fail_unlink,interrupt_unlink;
+static int fail_open,fail_stat,fail_unlink,interrupt_unlink,interrupt_stat;
 static int preflight,pre_case,pre_ioctl_seen;
 static int proc_test,mount_calls,mount_failure;
 static int fake_posix_openpt(int flags) {
@@ -41,6 +41,10 @@ static int fake_openat(int parent,const char *path,int flags,...) {
 static int fake_fstat(int fd,struct stat *value) {
     if(fail_stat) { fail_stat=0; errno=EIO; return -1; }
     return fstat(fd,value);
+}
+static int fake_fstatat(int parent,const char *path,struct stat *value,int flags) {
+    if(interrupt_stat) { interrupt_stat=0; errno=EINTR; return -1; }
+    return fstatat(parent,path,value,flags);
 }
 static int fake_fstatfs(int fd,struct statfs *value) {
     int result=fstatfs(fd,value);
@@ -87,6 +91,7 @@ static uid_t fake_uid(void) { return preflight && pre_case==0 ? 1000 : 0; }
 #define open fake_open
 #define openat fake_openat
 #define fstat fake_fstat
+#define fstatat fake_fstatat
 #define fstatfs fake_fstatfs
 #define mkdirat fake_mkdirat
 #define unlinkat fake_unlinkat
@@ -100,6 +105,7 @@ static uid_t fake_uid(void) { return preflight && pre_case==0 ? 1000 : 0; }
 #undef open
 #undef openat
 #undef fstat
+#undef fstatat
 #undef fstatfs
 #undef mkdirat
 #undef unlinkat
@@ -203,7 +209,15 @@ int main(void) {
     assert(size>0 && transcript[0]=='S'); next=5+be32(transcript+1);
     assert(next+9<(size_t)size && transcript[next]=='E' && be32(transcript+next+5)==EAGAIN);
     next+=9; assert(transcript[next]=='D' && next+5+be32(transcript+next+1)==(size_t)size);
+    for(int which=0;which<2;which++) {
+        assert(root_create()==0);
+        if(which==0) interrupt_stat=1; else interrupt_unlink=1;
+        assert(root_finish(-1,-1,0)==0 && !exists());
+        assert(!interrupt_stat && !interrupt_unlink);
+        size=read(output[0],transcript,sizeof(transcript));
+        assert(size>5 && transcript[0]=='D' && 5+be32(transcript+1)==(size_t)size);
+    }
     assert(dup2(saved_stdout,STDOUT_FILENO)>=0); close(saved_stdout); close(output[0]);
     assert(rmdir(fake_parent)==0);
-    puts("root_scope_faults: 18 passed"); return 0;
+    puts("root_scope_faults: 20 passed"); return 0;
 }

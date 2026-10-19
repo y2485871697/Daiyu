@@ -97,7 +97,7 @@ finally:
     if p.poll() is None:p.kill()
     p.wait(timeout=3)
 faults=subprocess.run([str(helper.with_name('root_scope_faults'))],check=True,capture_output=True,text=True,timeout=5)
-assert faults.stdout.strip()=='root_scope_faults: 18 passed',faults.stdout
+assert faults.stdout.strip()=='root_scope_faults: 20 passed',faults.stdout
 tests.extend(['proc mount creates missing directory through pinned fd with fixed flags',
     'existing real proc directory is accepted', 'proc mount refusal preserves errno',
     'proc symlink is rejected before mount', 'proc regular file is rejected before mount',
@@ -110,7 +110,8 @@ tests.extend(['proc mount creates missing directory through pinned fd with fixed
     'failed F flush preserves failure and cannot produce a cleanup receipt',
     'closed pipe reader cannot terminate pre-scope failure via SIGPIPE',
     'root scope open failure removes its empty group','root scope fstat failure removes its empty group',
-    'root scope removal retries EINTR','failed scope removal reports S/E without drain',
+    'pre-fork scope removal retries EINTR',
+    'final drain identity check retries EINTR','final drain removal retries EINTR','failed scope removal reports S/E without drain',
     'pre-hello launch failure sends S/E/D and removes scope'])
 record['tests']=tests
 (out/'check.json').write_text(json.dumps(record,indent=2));print(json.dumps({k:record[k] for k in ['CHECK_ID','tests','exit_code']},indent=2))

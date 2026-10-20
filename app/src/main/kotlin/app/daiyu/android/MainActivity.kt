@@ -2210,7 +2210,6 @@ class MainActivity : ComponentActivity() {
         onMore = { if (currentChat()) refreshAutomaticCompression() },
         onVoice = { if (voiceEntryMode == ChatMenuAction.VOICE_INPUT) requestDictation()
             else if (currentChat()) voiceConversationDialogOwner = ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) },
-        onContextClick = { if (currentChat()) usageVisit = UsageVisit(Any(), selected?.id?.value, false) },
         onRegenerate = messageCallbacks.onRegenerate, onSpeak = { id ->
             if (editorMatches() && controller.ready && !controller.dataBusy &&
                 speechHost.owner == renderedSpeechOwner && selected?.id?.value == renderedConversation) {
@@ -2298,7 +2297,6 @@ class MainActivity : ComponentActivity() {
             ChatMenuAction.INTERACTIVE_MODE -> if (currentChat())
                 controller.interactiveMode.setEnabled(!controller.interactiveMode.enabled)
             ChatMenuAction.CONTEXT_STATS -> if (currentChat()) usageVisit = UsageVisit(Any(), selected?.id?.value, false)
-            ChatMenuAction.CONTEXT_SCOPE -> if (currentChat()) usageVisit = UsageVisit(Any(), selected?.id?.value, true)
             ChatMenuAction.COMPRESS_CONTEXT -> openContextPage()
             ChatMenuAction.AUTO_COMPRESS -> if (currentChat()) toggleAutomaticCompression()
             ChatMenuAction.VOICE_INPUT, ChatMenuAction.VOICE_CHAT -> if (currentChat()) {

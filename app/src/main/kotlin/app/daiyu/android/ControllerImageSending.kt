@@ -46,8 +46,6 @@ internal data class ImageSendIdentity(val userId: MessageId, val assistantId: Me
 internal data class FrozenImageSend(val owner: ImageAttachmentOwner, val revision: Long,
     val text: String, val parts: List<ImageSendPart>, val identity: ImageSendIdentity)
 
-internal class ImageDraftChangedException : IllegalStateException("image_draft_changed")
-
 /** cancel wins only before the DB acceptance gate. It never undoes an accepted send. */
 internal class ImageSendHandle internal constructor(val owner: ImageAttachmentOwner, val revision: Long,
     private val onCancel: () -> Unit = {}) {

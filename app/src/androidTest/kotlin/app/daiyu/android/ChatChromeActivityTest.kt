@@ -170,6 +170,42 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         assertEquals(46.9f, bar.height / density, 1.5f)
     }
 
+    fun testComposerKeepsPreviewBoxModelWithoutDoubleScalingText() {
+        val state = composer().copy(text = "", modelLabel = "gpt-6.1-sol", phase = ComposerPhase.IDLE)
+        for (scale in listOf(1f, .8f)) {
+            show(state, fontScale = .9f, interfaceScale = scale)
+            val host = node("chrome-host").fetchSemanticsNode().boundsInRoot
+            val density = host.width / 320f
+            val surface = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+            val context = node("chat-context").fetchSemanticsNode().boundsInRoot
+            val divider = node("chat-composer-divider").fetchSemanticsNode().boundsInRoot
+            val bottom = node("chat-composer-bottom").fetchSemanticsNode().boundsInRoot
+            val send = node("chat-send").fetchSemanticsNode().boundsInRoot
+            assertEquals(9f, (surface.left - host.left) / density, .5f)
+            assertEquals(128f, surface.height / density, 1.5f)
+            assertEquals(23f, context.height / density, .75f)
+            assertEquals(12f, (context.top - surface.top) / density, .75f)
+            assertEquals(14f, (surface.right - context.right) / density, .75f)
+            assertEquals(13f, (divider.left - surface.left) / density, .75f)
+            assertEquals(4f, (divider.top - context.bottom) / density, .75f)
+            assertEquals(30f, bottom.height / density, .75f)
+            assertEquals(11f, (surface.bottom - bottom.bottom) / density, .75f)
+            assertEquals(28f, send.width / density, .75f)
+            assertEquals(13f, (surface.right - send.right) / density, .75f)
+            assertEquals(47f, node("chat-draft").fetchSemanticsNode().boundsInRoot.height / density, .75f)
+            node("chat-send").assertIsNotEnabled()
+            val modelText = layout(state.modelLabel)
+            assertEquals(10.sp, modelText.layoutInput.style.fontSize)
+            assertEquals(14.5.sp, modelText.layoutInput.style.lineHeight)
+            assertEquals(9.sp, layout("37% 上下文").layoutInput.style.fontSize)
+            assertEquals(13.sp, layout("37% 上下文").layoutInput.style.lineHeight)
+            val placeholder = layout("给代鱼发消息")
+            assertEquals(12.sp, placeholder.layoutInput.style.fontSize)
+            assertEquals(18.sp, placeholder.layoutInput.style.lineHeight)
+            assertEquals(.9f, placeholder.layoutInput.density.fontScale, .001f)
+        }
+    }
+
     fun testExpandedMoreStateAndFullMenuKeepBothCompressionRowsVisible() {
         show(composer())
         button("更多").assertIsNotSelected()

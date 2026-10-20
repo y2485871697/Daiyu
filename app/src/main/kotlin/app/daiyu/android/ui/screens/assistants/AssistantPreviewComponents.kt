@@ -53,6 +53,7 @@ internal data class AssistantPreviewPalette(val dark: Boolean) {
     val accent = if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)
     val line = if (dark) Color(0x29C5B1DB) else Color(0x299B89AA)
     val soft = if (dark) Color(0x17C4ACD7) else Color(0x14A18DB9)
+    val fieldBackground = if (dark) Color(0x22C4ACD7) else Color(0x1FA18DB9)
     val primary = if (dark) Color(0xFFB6A4C7) else Color(0xFF8E7C9E)
     val onPrimary = if (dark) Color(0xFF261F30) else Color.White
     val danger = if (dark) Color(0xFFDF9CA9) else Color(0xFFAE687A)
@@ -210,7 +211,7 @@ internal fun AssistantPreviewField(
             singleLine = singleLine, minLines = minLines, maxLines = maxLines,
             textStyle = textStyle, cursorBrush = SolidColor(colors.accent),
             modifier = fieldModifier.fillMaxWidth().heightIn(min = minHeight, max = maxHeight).onFocusChanged { focused = it.isFocused }
-                .clip(RoundedCornerShape(11.dp * s)).background(colors.soft)
+                .clip(RoundedCornerShape(11.dp * s)).background(colors.fieldBackground)
                 .border(1.dp, if (focused) colors.accent else colors.line, RoundedCornerShape(11.dp * s))
                 .padding(1.dp).padding(horizontal = 10.dp * s, vertical = 9.dp * s),
             decorationBox = { innerTextField ->

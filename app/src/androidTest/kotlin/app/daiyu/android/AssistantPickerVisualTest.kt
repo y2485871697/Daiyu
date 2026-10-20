@@ -47,6 +47,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             }
         }
         ui.waitForIdle()
+        dismissIme()
     }
 
     private fun text(id: Int, vararg args: Any) = instrumentation.targetContext.getString(id, *args)

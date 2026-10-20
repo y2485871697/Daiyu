@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.chat.conversation.ChatMenuLayer
@@ -37,12 +38,13 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
     )
 
     private fun show(composer: ComposerUi, actions: ChatScreenActions = ChatScreenActions(),
-        fontScale: Float = 1f, interfaceScale: Float = 1f) {
+        fontScale: Float = 1f, interfaceScale: Float = 1f, dark: Boolean = false) {
         mainThread {
             activity.setContent {
                 val density = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
-                    AgentAppTheme(AppearanceSettings(interfaceScale = interfaceScale), applyInterfaceScale = true) {
+                    AgentAppTheme(AppearanceSettings(interfaceScale = interfaceScale,
+                        themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = true) {
                         ChatMenuLayer(Modifier.fillMaxSize()) {
                             Column(Modifier.requiredWidth(320.dp).testTag("chrome-host")) {
                                 ChatTopBar("测试会话", null, actions, assistantLabel = composer.assistantLabel, modelLabel = composer.modelLabel)
@@ -76,9 +78,9 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             button("选择助手，当前为 代码助手"), button("语音输入"), node("chat-control"))
         node("chat-send").assertDoesNotExist()
         node("chat-control").assertIsEnabled().assertContentDescriptionEquals("暂停")
-        val bounds = controls.mapIndexed { index, target ->
+        val bounds = controls.map { target ->
             target.assertIsDisplayed().assertHasClickAction()
-                .assertWidthIsEqualTo(if (index < 2) 25.dp else 28.dp)
+                .assertWidthIsEqualTo(32.dp).assertHeightIsEqualTo(32.dp)
             target.fetchSemanticsNode().boundsInRoot.also {
                 assertTrue(it.width > 0 && it.height > 0)
                 assertTrue(it.left >= host.left - 1 && it.right <= host.right + 1)
@@ -173,10 +175,10 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         assertEquals(64f, bar.height / density, 1.5f)
     }
 
-    fun testComposerKeepsPreviewBoxModelWithoutDoubleScalingText() {
+    fun testEnlargedComposerFitsControlsWithoutDoubleScalingText() {
         val state = composer().copy(text = "", modelLabel = "gpt-6.1-sol", phase = ComposerPhase.IDLE)
-        for (scale in listOf(1f, .8f)) {
-            show(state, fontScale = .9f, interfaceScale = scale)
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            show(state, fontScale = .9f, interfaceScale = scale, dark = dark)
             val host = node("chrome-host").fetchSemanticsNode().boundsInRoot
             val density = host.width / 320f
             val surface = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
@@ -186,28 +188,62 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             val send = node("chat-send").fetchSemanticsNode().boundsInRoot
             assertEquals(9f, (surface.left - host.left) / density, .5f)
             assertEquals(16f, (host.bottom - surface.bottom) / density, .75f)
-            assertEquals(128f, surface.height / density, 1.5f)
-            assertEquals(23f, context.height / density, .75f)
+            assertEquals(144f, surface.height / density, 1.5f)
+            assertEquals(26f, context.height / density, .75f)
             assertEquals(12f, (context.top - surface.top) / density, .75f)
             assertEquals(14f, (surface.right - context.right) / density, .75f)
             assertEquals(13f, (divider.left - surface.left) / density, .75f)
             assertEquals(4f, (divider.top - context.bottom) / density, .75f)
-            assertEquals(30f, bottom.height / density, .75f)
-            assertEquals(11f, (surface.bottom - bottom.bottom) / density, .75f)
-            assertEquals(28f, send.width / density, .75f)
+            assertEquals(36f, bottom.height / density, .75f)
+            assertEquals(12f, (surface.bottom - bottom.bottom) / density, .75f)
+            assertEquals(32f, send.width / density, .75f)
             assertEquals(13f, (surface.right - send.right) / density, .75f)
-            assertEquals(27f, node("chat-draft").fetchSemanticsNode().boundsInRoot.height / density, .75f)
+            assertEquals(33f, node("chat-draft").fetchSemanticsNode().boundsInRoot.height / density, .75f)
             node("chat-send").assertIsNotEnabled()
             val modelText = layout(state.modelLabel)
-            assertEquals(10.sp, modelText.layoutInput.style.fontSize)
-            assertEquals(14.5.sp, modelText.layoutInput.style.lineHeight)
-            assertEquals(9.sp, layout("37% 上下文").layoutInput.style.fontSize)
-            assertEquals(13.sp, layout("37% 上下文").layoutInput.style.lineHeight)
+            assertEquals(12.sp, modelText.layoutInput.style.fontSize)
+            assertEquals(17.sp, modelText.layoutInput.style.lineHeight)
+            assertEquals(10.sp, layout("37% 上下文").layoutInput.style.fontSize)
+            assertEquals(15.sp, layout("37% 上下文").layoutInput.style.lineHeight)
             val placeholder = layout("给代鱼发消息")
-            assertEquals(12.sp, placeholder.layoutInput.style.fontSize)
-            assertEquals(18.sp, placeholder.layoutInput.style.lineHeight)
+            assertEquals(14.sp, placeholder.layoutInput.style.fontSize)
+            assertEquals(20.sp, placeholder.layoutInput.style.lineHeight)
             assertEquals(.9f, placeholder.layoutInput.density.fontScale, .001f)
         }
+    }
+
+    fun testEnlargedComposerGrowsForMultilineDraftAndKeepsLargeTextControlsSeparate() {
+        for (dark in listOf(false, true)) {
+            val state = composer().copy(text = "短消息", phase = ComposerPhase.IDLE)
+            show(state, fontScale = 1.3f, interfaceScale = .8f, dark = dark)
+            val shortHeight = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot.height
+            show(state.copy(text = List(6) { "第${it + 1}行消息" }.joinToString("\n")),
+                fontScale = 1.3f, interfaceScale = .8f, dark = dark)
+            val host = node("chrome-host").fetchSemanticsNode().boundsInRoot
+            val surface = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+            val draft = node("chat-draft").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val bottom = node("chat-composer-bottom").fetchSemanticsNode().boundsInRoot
+            assertTrue(surface.height > shortHeight)
+            assertTrue(draft.bottom <= bottom.top + 1f)
+            val controls = listOf(button("附件"), node("chat-reasoning"), node("chat-assistant"),
+                button("语音输入"), node("chat-send"))
+            val bounds = controls.map {
+                it.assertIsDisplayed().assertWidthIsEqualTo(32.dp).assertHeightIsEqualTo(32.dp)
+                it.fetchSemanticsNode().boundsInRoot.also { rect ->
+                    assertTrue(rect.left >= surface.left && rect.right <= surface.right)
+                    assertTrue(rect.top >= bottom.top - 1f && rect.bottom <= bottom.bottom + 1f)
+                }
+            }
+            for (i in bounds.indices) for (j in i + 1 until bounds.size) {
+                val a = bounds[i]; val b = bounds[j]
+                assertFalse("Enlarged controls overlap: $a / $b",
+                    a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom)
+            }
+            assertTrue(abs(bounds[3].center.x - host.center.x) <= 1f)
+            assertFalse(layout("37% 上下文").isLineEllipsized(0))
+            assertEquals(16f, (host.bottom - surface.bottom) / (host.width / 320f), .75f)
+        }
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testExpandedMoreStateAndFullMenuKeepBothCompressionRowsReachable() {

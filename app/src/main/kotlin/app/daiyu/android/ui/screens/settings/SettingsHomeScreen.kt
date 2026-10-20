@@ -54,7 +54,8 @@ internal fun SettingsIcon(icon: androidx.compose.ui.graphics.vector.ImageVector)
 }
 
 @Composable
-private fun SettingsSearch(query: String, onQueryChange: (String) -> Unit) {
+internal fun SettingsSearch(query: String, onQueryChange: (String) -> Unit,
+    placeholder: String = "搜索设置", tag: String = "settings-search") {
     val colors = MiuixTheme.colorScheme
     Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth()
         .background(colors.surfaceContainerHigh, RoundedCornerShape(12.dp))
@@ -64,16 +65,16 @@ private fun SettingsSearch(query: String, onQueryChange: (String) -> Unit) {
             textStyle = MiuixTheme.textStyles.body1.copy(color = colors.onSurface, fontSize = 15.sp),
             cursorBrush = SolidColor(colors.primary),
             modifier = Modifier.weight(1f).padding(horizontal = 10.dp, vertical = 14.dp)
-                .testTag("settings-search").semantics { contentDescription = "搜索设置" },
+                .testTag(tag).semantics { contentDescription = placeholder },
             decorationBox = { editor ->
                 Box {
-                    if (query.isEmpty()) Text("搜索设置", color = colors.onSurfaceVariantSummary,
+                    if (query.isEmpty()) Text(placeholder, color = colors.onSurfaceVariantSummary,
                         style = MiuixTheme.textStyles.body1.copy(fontSize = 15.sp))
                     editor()
                 }
             })
         if (query.isNotEmpty()) IconButton(onClick = { onQueryChange("") },
-            modifier = Modifier.size(48.dp).testTag("settings-search-clear")) {
+            modifier = Modifier.size(48.dp).testTag("$tag-clear")) {
             DaiyuIcon(DaiyuIcons.Close, "清除搜索", tint = colors.onSurfaceVariantSummary, size = 18.dp)
         }
     }
@@ -205,7 +206,7 @@ internal fun DaiyuSettingsScreen(
     MiuixScaffoldPage(title = "设置", onBack = onBack, modifier = modifier, listState = listState,
         listModifier = if (engineeringUi) Modifier.semantics { this[RetainedSettingsEntryAction] = open } else Modifier,
     ) {
-        item(key = "settings_search") { SettingsSearch(query) { query = it } }
+        item(key = "settings_search") { SettingsSearch(query, onQueryChange = { query = it }) }
         if (query.isNotBlank()) item(key = "search_heading") {
             SettingsSectionTitle("搜索结果 · ${groups.sumOf { it.entries.size }}")
         }

@@ -55,19 +55,17 @@ internal fun ProviderSettingsTabs(modelTab: Boolean, enabled: Boolean, onSelect:
 internal fun ProviderProtocolFields(draft: ModelSettingsDraftUi, enabled: Boolean,
     onChange: (ModelSettingsDraftUi) -> Unit) {
     val openAi = draft.protocol == ProviderProtocol.RESPONSES || draft.protocol == ProviderProtocol.CHAT_COMPLETIONS
-    val families = listOf("OpenAI 兼容", "Anthropic Messages", "Google Gemini")
+    val families = listOf("OpenAI 兼容", "Anthropic Messages")
     ProviderChoiceRow("服务协议", when (draft.protocol) {
         ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS -> families[0]
         ProviderProtocol.MESSAGES -> families[1]
-        ProviderProtocol.GEMINI -> families[2]
         else -> "请选择"
     }, "provider-protocol-select", enabled, families,
-        listOf("provider-family:openai", "settings-radio:Anthropic Messages", "settings-radio:Google Gemini"),
-        when { openAi -> 0; draft.protocol == ProviderProtocol.MESSAGES -> 1; draft.protocol == ProviderProtocol.GEMINI -> 2; else -> -1 }) { index ->
+        listOf("provider-family:openai", "settings-radio:Anthropic Messages"),
+        when { openAi -> 0; draft.protocol == ProviderProtocol.MESSAGES -> 1; else -> -1 }) { index ->
         onChange(draft.selectProtocol(when (index) {
             0 -> if (openAi) draft.protocol else ProviderProtocol.RESPONSES
-            1 -> ProviderProtocol.MESSAGES
-            else -> ProviderProtocol.GEMINI
+            else -> ProviderProtocol.MESSAGES
         }))
     }
     if (openAi) {

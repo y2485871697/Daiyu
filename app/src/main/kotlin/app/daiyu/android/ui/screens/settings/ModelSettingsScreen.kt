@@ -126,13 +126,11 @@ internal fun ModelSettingsScreen(
             SettingsCard {
                 if (providerName != null) SettingsRow("名称", summary = providerName, tag = "provider-name")
                 SettingsTextField("Base URL", draft.endpoint, { changeDraft(draft.copy(endpoint = it)) }, enabled = enabled, compact = true)
-                SettingsTextField("API Key", draft.apiKey, { changeDraft(draft.copy(apiKey = it)) }, password = true, enabled = enabled, compact = true)
+                SettingsTextField("API Key", draft.apiKey, { key ->
+                    changeDraft(draft.copy(apiKey = key,
+                        protocolChangeAuthorized = draft.protocol != draft.savedProtocol && key.isNotBlank()))
+                }, password = true, enabled = enabled, compact = true)
                 ProviderProtocolFields(draft, enabled, changeDraft)
-                if (draft.protocol != draft.savedProtocol) {
-                    SettingsSwitchRow("重输密钥并绑定", draft.protocolChangeAuthorized, enabled = enabled) {
-                        changeDraft(draft.copy(protocolChangeAuthorized = it))
-                    }
-                }
                 if (credentialUnavailable) SettingsNote("密钥失效，请重输", error = true)
                 if (draft.savedProtocol == ProviderProtocol.UNKNOWN) SettingsNote("协议无效，请重选", error = true)
                 if (draft.protocol == ProviderProtocol.RESPONSES) {

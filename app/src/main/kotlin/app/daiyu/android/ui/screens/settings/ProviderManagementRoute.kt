@@ -10,6 +10,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.ChatController
 import app.daiyu.android.ModelSettingsSaveOwner
 import app.daiyu.android.model.catalog.CatalogLocalEditResult
@@ -48,7 +49,7 @@ private class PausedProviderDraft(
     val editor: ProviderEditorSlot, val editing: EditingSettings, val configurationRevision: Long,
     val draft: ModelSettingsDraftUi,
 )
-private class ProviderPrompt(val registration: RegisteredProvider?)
+private class ProviderPrompt(val registration: RegisteredProvider?, val protocol: ProviderProtocol = ProviderProtocol.RESPONSES)
 private class ProviderConfirm(val title: String, val message: String, val destructive: Boolean, val action: () -> Unit)
 private fun ModelSettings.providerDraft() = ModelSettingsDraftUi(protocol = protocol, endpoint = endpoint,
     responsesPath = responsesPath, apiKey = apiKey, model = model, batteryEnabled = batteryEnabled,
@@ -78,6 +79,10 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     var permit by remember { mutableStateOf(ProviderPagePermit()) }
     var resumed by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var registry by remember { mutableStateOf<ProviderRegistrySnapshot?>(null) }
+    var summaries by remember { mutableStateOf<Map<String, ProviderCardSummary>>(emptyMap()) }
+    var query by remember { mutableStateOf("") }
+    var authentication by remember { mutableStateOf(false) }
+    var managing by remember { mutableStateOf<RegisteredProvider?>(null) }
     var detail by remember { mutableStateOf<ProviderDetail?>(null) }
     var pausedDraft by remember { mutableStateOf<PausedProviderDraft?>(null) }
     var pendingOpen by remember { mutableStateOf(true) }
@@ -91,7 +96,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     var version by remember { mutableStateOf(0L) }
     fun current(p: ProviderPagePermit) = visit.get() && p.live.get() && permit === p && resumed &&
         lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && ownerCheck()
-    fun clearPrompts() { prompt = null; confirmation = null }
+    fun clearPrompts() { prompt = null; confirmation = null; managing = null }
     fun closeDetail() { serial++; loading = false; detail?.revoke(); detail = null; clearPrompts() }
     fun refresh() {
         val p = permit
@@ -104,19 +109,35 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 val value = repo.snapshot()
                 val detailCurrent = previousDetail == null ||
                     (previousDetail.editor.registryRevision == value.revision && repo.editing(previousDetail.editor) == previousDetail.editing)
-                value to detailCurrent
+                val cards = value.providers.associate { registration ->
+                    val editor = ProviderEditorSlot(registration.slotId, value.revision)
+                    registration.slotId to repo.withEditor(editor) { store ->
+                        val fields = store.nonSecretConfiguration()
+                        val endpoint = runCatching {
+                            val uri = java.net.URI(fields["endpoint"] as? String ?: "")
+                            if (uri.host == null) "" else java.net.URI(uri.scheme, null, uri.host, uri.port,
+                                uri.path, null, null).toString()
+                        }.getOrDefault("")
+                        ProviderCardSummary(endpoint,
+                            ProviderProtocol.entries.firstOrNull { it.wireName == fields["protocol"] }
+                                ?: if (fields["protocol"] == null) ProviderProtocol.RESPONSES else ProviderProtocol.UNKNOWN,
+                            runCatching { store.localModelCatalogSnapshot()?.models?.size }.getOrNull())
+                    }
+                }
+                Triple(value, detailCurrent, cards)
             } }
             if (!current(p) || serial != request) return@launch
             checkingRegistry = false
-            result.fold(onSuccess = { (value, detailCurrent) ->
+            result.fold(onSuccess = { (value, detailCurrent, cards) ->
                 registry = value
+                summaries = cards
                 if (!detailCurrent && detail === previousDetail) {
                     closeDetail(); notice = "提供商配置已变化，请重新打开详情。"
                 }
             }, onFailure = { closeDetail(); notice = "提供商列表读取失败；未创建替代配置。" })
         }
     }
-    fun open(slot: String, restore: PausedProviderDraft? = null) {
+    fun open(slot: String, restore: PausedProviderDraft? = null, newProtocol: ProviderProtocol? = null) {
         val p = permit
         if (!current(p) || busy != null) return
         if (restore == null) pausedDraft = null
@@ -141,22 +162,29 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     restore.configurationRevision == loaded.configurationRevision) {
                     loaded.draft = restore.draft.copy(protocolChangeAuthorized = false, requestOptionsReplacementAuthorized = false, headersReplacementAuthorized = false)
                 }
+                if (newProtocol != null) loaded.draft = loaded.draft.selectProtocol(newProtocol)
+                authentication = false
                 pausedDraft = null
                 detail = loaded
             }, onFailure = { pausedDraft = null; notice = "详情读取失败或已变化，请刷新后重新打开。" })
         }
     }
     fun mutate(expected: ProviderRegistrySnapshot, p: ProviderPagePermit,
+        completed: ((ProviderRegistrySnapshot) -> Unit)? = null,
         action: (ProviderRepository, Long, () -> Unit) -> ProviderRegistrySnapshot,
     ) {
         if (!current(p) || registry !== expected || detail != null || loading || busy != null) return
         clearPrompts()
+        val navigation = serial
         val ticket = Any(); busy = ticket
         try {
             controller.mutateProviders(expected.revision, p.save, action) { result ->
                 if (busy === ticket) busy = null
                 if (current(p)) {
-                    if (result != null) { registry = result; notice = "提供商列表已更新" }
+                    if (result != null) {
+                        registry = result; notice = null
+                        if (completed != null && serial == navigation) completed(result) else refresh()
+                    }
                     else { notice = "操作未确认，请刷新核对；不会自动重试。"; refresh() }
                 }
             }
@@ -173,6 +201,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 detail?.let {
                     pausedDraft = PausedProviderDraft(it.editor, it.editing, it.configurationRevision, it.draft)
                 }
+                authentication = false
                 resumed = false; permit.revoke(); closeDetail(); checkingRegistry = false
             } else if (event == Lifecycle.Event.ON_RESUME) {
                 permit = ProviderPagePermit(); resumed = true
@@ -191,9 +220,11 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         }
     }
     fun back() {
+        if (authentication && !loading) { serial++; authentication = false; clearPrompts(); refresh(); return }
         detail?.revoke()
         pausedDraft = null; pendingOpen = false
         if (detail != null || loading) {
+            authentication = false
             // The primary provider is entered as the app's model-settings page, not as a
             // separate provider-list visit. Returning from its detail must leave the route;
             // otherwise the next Back press only reveals the provider list.
@@ -344,42 +375,42 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
             headersUnavailable = d.editing.headersUnavailable,
             testConnection = connection, localModelActions = actions)
+    } else if (authentication) {
+        ProviderAuthenticationPage(enabled, notice, onBack = { back() }, onApiKey = {
+            if (enabled) prompt = ProviderPrompt(null)
+        })
     } else {
-        MiuixScaffoldPage("提供商", onBack = { back() }, modifier = Modifier.testTag("provider-management")) {
-            item {
-                notice?.let { SettingsNote(it, error = true) }
-                if (loading) SettingsNote("正在读取提供商详情")
-                TextButton(text = "添加提供商", enabled = enabled && registry != null,
-                    modifier = Modifier.testTag("provider-add"), onClick = { if (enabled && registry != null) prompt = ProviderPrompt(null) })
-                TextButton(text = "刷新", enabled = !loading && busy == null,
-                    modifier = Modifier.testTag("provider-refresh"), onClick = { if (current(p)) refresh() })
-            }
-            val expected = registry
-            expected?.providers?.forEach { registration -> item(key = registration.slotId) {
-                SettingsSectionTitle(registration.name)
-                SettingsCard {
-                    SettingsRow("配置与模型", summary = if (expected.activeSlotId == registration.slotId) "当前提供商" else "",
-                        tag = "provider-open-${registration.slotId}", onClick = { if (enabled) open(registration.slotId) })
-                    SettingsSwitchRow("启用", registration.enabled, enabled = enabled) { value ->
-                        mutate(expected, p) { repo, revision, admit -> repo.setEnabled(revision, registration.slotId, value, admit) }
-                    }
-                    SettingsRow("设为当前提供商", tag = "provider-activate-${registration.slotId}",
-                        onClick = if (enabled && registration.enabled && expected.activeSlotId != registration.slotId) ({
-                            confirmation = ProviderConfirm("切换提供商", "后续新运行将使用此提供商的已保存配置。", false) {
-                                mutate(expected, p) { repo, revision, admit -> repo.activate(revision, registration.slotId, admit) }
-                            }
-                        }) else null)
-                    SettingsRow("重命名", tag = "provider-rename-${registration.slotId}",
-                        onClick = if (enabled) ({ prompt = ProviderPrompt(registration) }) else null)
-                    SettingsRow("删除提供商", tag = "provider-delete-${registration.slotId}",
-                        onClick = if (enabled) ({ confirmation = ProviderConfirm("删除提供商", "将移除注册并撤销旧编辑入口；若为当前提供商则清空选择，不自动切换。不会安全擦除原加密配置。", true) {
-                            mutate(expected, p) { repo, revision, admit -> repo.delete(revision, registration.slotId, admit) }
-                        } }) else null)
-                }
-            } }
-            if (expected?.providers?.isEmpty() == true) item { SettingsNote("尚无提供商，请添加并保存配置、启用后设为当前。") }
-        }
+        ProviderDirectoryPage(registry, summaries, query, { query = it }, enabled && registry != null,
+            notice, onBack = { back() },
+            onAddOpenAi = { if (enabled) authentication = true },
+            onAddAnthropic = { if (enabled) prompt = ProviderPrompt(null, ProviderProtocol.MESSAGES) },
+            onOpen = { if (enabled) open(it.slotId) },
+            onManage = { if (enabled) managing = it }, modifier = Modifier.testTag("provider-management"))
     }
+    val managed = managing
+    val managedRegistry = registry
+    if (managed != null && managedRegistry != null) DaiyuChoiceSheet(managed.name,
+        listOf("配置与模型", if (managed.enabled) "禁用" else "启用", "设为当前提供商", "重命名", "删除提供商"),
+        onSelect = { index ->
+            if (current(p) && enabled && managing === managed) {
+                managing = null
+                when (index) {
+                    0 -> open(managed.slotId)
+                    1 -> mutate(managedRegistry, p) { repo, revision, admit ->
+                        repo.setEnabled(revision, managed.slotId, !managed.enabled, admit)
+                    }
+                    2 -> if (managed.enabled && managedRegistry.activeSlotId != managed.slotId) {
+                        confirmation = ProviderConfirm("切换提供商", "后续新运行将使用此提供商的已保存配置。", false) {
+                            mutate(managedRegistry, p) { repo, revision, admit -> repo.activate(revision, managed.slotId, admit) }
+                        }
+                    }
+                    3 -> prompt = ProviderPrompt(managed)
+                    4 -> confirmation = ProviderConfirm("删除提供商", "将移除注册并撤销旧编辑入口；若为当前提供商则清空选择，不自动切换。不会安全擦除原加密配置。", true) {
+                        mutate(managedRegistry, p) { repo, revision, admit -> repo.delete(revision, managed.slotId, admit) }
+                    }
+                }
+            }
+        }, onDismiss = { managing = null })
     val input = prompt
     val expected = registry
     if (input != null && expected != null) DaiyuTextInputDialog(
@@ -388,7 +419,12 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             if (prompt === input && current(p) && enabled) {
                 val name = raw.trim()
                 if (runCatching { ProviderRegistry.requireValidName(name) }.isSuccess) {
-                    mutate(expected, p) { repo, revision, admit ->
+                    mutate(expected, p, completed = { result ->
+                        if (input.registration == null) {
+                            val added = result.providers.single { candidate -> expected.providers.none { it.slotId == candidate.slotId } }
+                            open(added.slotId, newProtocol = input.protocol)
+                        } else refresh()
+                    }) { repo, revision, admit ->
                         input.registration?.let { repo.rename(revision, it.slotId, name, admit) } ?: repo.register(revision, name, admit)
                     }
                 } else notice = "名称须为1至200字，且不能包含控制字符。"

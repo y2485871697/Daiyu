@@ -1,8 +1,16 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.test.*
 import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
+import app.daiyu.android.data.repository.ModelUsageEvent
+import app.daiyu.android.data.repository.ModelUsageModelUi
+import app.daiyu.android.data.repository.ModelUsageProviderUi
+import app.daiyu.android.data.repository.ModelUsageSnapshot
 import app.daiyu.android.data.repository.RecordedUsageStats
 import app.daiyu.android.data.repository.UsageStatsSnapshot
 import app.daiyu.android.domain.usage.aggregateAttributedUsage
@@ -12,6 +20,8 @@ import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.screens.stats.UsageStatsScreen
 import kotlinx.coroutines.CompletableDeferred
 import java.util.concurrent.atomic.AtomicInteger
+import java.time.LocalDate
+import java.time.ZoneId
 
 class UsagePresentationActivityTest : WiredActivityTestCase() {
     private fun usagePage() = node("page:${activity.getString(R.string.stats_page_title)}")
@@ -21,11 +31,36 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
             RecordedUsageStats(summary.main, if (incomplete) 1 else 0, 0, 0, 0, 0, if (incomplete) 1 else 0),
             ChildUsageCoverage(0, 0, 0, 0, 0, 0)))
     }
-    private fun show(load: suspend () -> UsageStatsSnapshot) {
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = true) {
-            UsageStatsScreen(onBack = {}, load = load)
-        } } }
+    private fun show(
+        dark: Boolean = false,
+        scale: Float = 1f,
+        fontScale: Float = .9f,
+        onBack: () -> Unit = {},
+        load: suspend () -> UsageStatsSnapshot,
+    ) {
+        mainThread { activity.setContent {
+            val platform = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(platform.density, fontScale)) {
+                AgentAppTheme(AppearanceSettings(interfaceScale = scale,
+                    themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                    applyInterfaceScale = true) {
+                    UsageStatsScreen(onBack = onBack, load = load)
+                }
+            }
+        } }
         ui.waitForIdle()
+    }
+    private fun tab(label: Int) = "usage-tab:${activity.getString(label)}"
+    private fun selectTab(label: Int) {
+        val tag = tab(label)
+        usagePage().performScrollToNode(hasTestTag(tag))
+        node(tag).performClick().assertIsSelected()
+    }
+    private fun assertMetric(label: Int, value: String) {
+        val tag = "usage-stat:${activity.getString(label)}"
+        usagePage().performScrollToNode(hasTestTag(tag))
+        ui.onNode(hasText(value) and hasAnyAncestor(hasTestTag(tag)), useUnmergedTree = true)
+            .assertIsDisplayed()
     }
     fun testLoadingErrorAndRetryAreDistinctAndDoNotDisplayExceptionContents() {
         val pending = CompletableDeferred<UsageStatsSnapshot>()
@@ -50,6 +85,106 @@ class UsagePresentationActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText("部分记录尚未读取，仅显示已读取的用量。").assertExists()
         ui.onNodeWithText("缺 checkpoint", substring = true).assertDoesNotExist()
         ui.onNodeWithText("预算延后", substring = true).assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testOriginalOverviewKeepsAllMetricsOnFullPageAcrossThemesAndScales() {
+        val stats = empty().copy(
+            heatmapAvailable = true, currentDataAvailable = true,
+            tokenAccountingAvailable = true, lifetimeAccountingAvailable = true,
+            currentConversations = 12, lifetimeConversations = 27,
+            currentMessages = 35, lifetimeMessages = 91,
+            currentInputTokens = 250, lifetimeInputTokens = 600,
+            currentOutputTokens = 70, lifetimeOutputTokens = 180,
+            currentCachedTokens = 60, lifetimeCachedTokens = 100,
+            currentCacheCreationTokens = 40, lifetimeCacheCreationTokens = 80,
+            launchCount = 8,
+        )
+        listOf(false, true).forEach { dark -> listOf(1f, .8f).forEach { scale ->
+            show(dark = dark, scale = scale) { stats }
+            val page = node("usage-stats-screen").fetchSemanticsNode().boundsInRoot
+            val root = ui.onRoot().fetchSemanticsNode().boundsInRoot
+            assertTrue("Usage statistics must occupy the page, not a capped dialog", page.height >= root.height * .95f)
+            node("usage-heatmap").assertIsDisplayed()
+            node(tab(R.string.stats_tab_overview)).assertIsSelected()
+            val tabNode = node(tab(R.string.stats_tab_models)).fetchSemanticsNode()
+            assertTrue(tabNode.boundsInRoot.height / tabNode.layoutInfo.density.density >= 43.5f)
+            ui.onNodeWithText("关闭").assertDoesNotExist()
+            assertMetric(R.string.stats_page_total_conversations, "12 / 27")
+            assertMetric(R.string.stats_page_total_messages, "35 / 91")
+            assertMetric(R.string.stats_page_fresh_input_tokens, "150 / 420")
+            assertMetric(R.string.stats_page_output_tokens, "70 / 180")
+            assertMetric(R.string.stats_page_cached_tokens, "60 / 100")
+            assertMetric(R.string.stats_page_cache_creation_tokens, "40 / 80")
+            assertMetric(R.string.stats_page_launch_count, "8")
+            usagePage().performScrollToNode(hasText("暂无已报告用量"))
+            selectTab(R.string.stats_tab_models)
+            node("usage-model-pane").assertExists()
+            selectTab(R.string.stats_tab_overview)
+            node("usage-heatmap").assertExists()
+            node("usage-overview-grid").assertExists()
+        } }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testMissingAccountingKeepsOriginalStructureWithoutInventedZeroValues() {
+        show { empty() }
+        node("usage-heatmap").assertExists()
+        listOf(R.string.stats_page_total_conversations, R.string.stats_page_total_messages,
+            R.string.stats_page_fresh_input_tokens, R.string.stats_page_output_tokens,
+            R.string.stats_page_cached_tokens, R.string.stats_page_cache_creation_tokens,
+            R.string.stats_page_launch_count).forEach { assertMetric(it, "—") }
+        selectTab(R.string.stats_tab_models)
+        node("usage-model-filter").assertExists()
+        ui.onAllNodesWithText("0%").assertCountEquals(0)
+        ui.onAllNodesWithText("0.0%").assertCountEquals(0)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testOriginalModelFilterAndExpansionRemainUsableWithLargerText() {
+        val today = LocalDate.now()
+        fun at(date: LocalDate) = date.atTime(12, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        val usage = ModelUsageSnapshot(listOf(ModelUsageProviderUi("visual-provider", "Visual provider", listOf(
+            ModelUsageModelUi("visual-model", "Visual model", 300, 100, 2, 2,
+                cachedTokens = 60, cacheCreationTokens = 30,
+                events = listOf(
+                    ModelUsageEvent(at(today), 100, 40, 20, 10, "recent"),
+                    ModelUsageEvent(at(today.minusDays(10)), 200, 60, 40, 20, "older"),
+                )),
+        ))))
+        show(dark = true, scale = .8f, fontScale = 1.3f) {
+            empty().copy(tokenAccountingAvailable = true, modelUsage = usage)
+        }
+        selectTab(R.string.stats_tab_models)
+        usagePage().performScrollToNode(hasText("Visual model"))
+        ui.onNode(hasText("Visual model") and hasClickAction()).performClick()
+        val activeDays = activity.getString(R.string.stats_model_active_days)
+        usagePage().performScrollToNode(hasText(activeDays))
+        ui.onNodeWithText(activeDays).assertIsDisplayed()
+        val filterTitle = activity.getString(R.string.stats_model_filter_title)
+        usagePage().performScrollToNode(hasText(filterTitle))
+        ui.onNode(hasText(filterTitle) and hasClickAction()).performClick()
+        val preset = activity.getString(R.string.stats_model_filter_preset_today)
+        usagePage().performScrollToNode(hasText(preset) and hasClickAction())
+        ui.onNode(hasText(preset) and hasClickAction()).performClick()
+        usagePage().performScrollToNode(hasText("140"))
+        ui.onAllNodesWithText("140").onFirst().assertIsDisplayed()
+        ui.onAllNodesWithText("400").assertCountEquals(0)
+        val clear = activity.getString(R.string.stats_model_filter_clear)
+        usagePage().performScrollToNode(hasText(clear))
+        ui.onNodeWithText(clear).performClick()
+        usagePage().performScrollToNode(hasText("400"))
+        ui.onAllNodesWithText("400").onFirst().assertIsDisplayed()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testTopBarAndSystemBackEachReturnOneLevel() {
+        val returned = AtomicInteger()
+        show(onBack = { returned.incrementAndGet() }) { empty() }
+        ui.onNodeWithContentDescription(activity.getString(R.string.action_back)).performClick()
+        assertEquals(1, returned.get())
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        assertEquals(2, returned.get())
         assertEquals(0, fixture.opens.get())
     }
 }

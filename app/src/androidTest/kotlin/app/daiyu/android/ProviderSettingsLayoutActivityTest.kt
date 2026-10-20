@@ -20,7 +20,7 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
         node("settings-secret-visibility:API Key").assertIsDisplayed().assertHasClickAction()
         reveal("provider-endpoint-select").assertTextContains("Responses API")
         selectProviderTab("模型")
-        reveal("local-model-refresh").assertExists()
+        reveal("model-catalog-fetch").assertIsNotEnabled()
         selectProviderTab("配置")
         modelField("Base URL").assertEditableText(before.endpoint)
         assertEquals(before, fixture.settings.load())

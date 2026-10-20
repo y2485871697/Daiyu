@@ -35,6 +35,9 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -58,6 +61,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 private class MenuOverlay(
     val anchor: () -> Rect,
     val onDismiss: () -> Unit,
+    val maxHeight: Dp?,
+    val offset: DpOffset,
+    val screenMargin: Dp,
     val content: @Composable () -> Unit,
 )
 
@@ -85,13 +91,17 @@ internal fun ChatMenuLayer(modifier: Modifier = Modifier, content: @Composable (
                     var menuSize by remember(menu) { mutableStateOf(IntSize.Zero) }
                     val density = LocalDensity.current
                     val margin = with(density) { 9.dp.roundToPx() }
+                    val widthMargin = with(density) { menu.screenMargin.roundToPx() }
+                    val offsetX = with(density) { menu.offset.x.roundToPx() }
+                    val offsetY = with(density) { menu.offset.y.roundToPx() }
                     val anchor = menu.anchor().translate(-host.left, -host.top)
-                    val maxWidth = with(density) { (host.width - margin * 2).coerceAtLeast(1f).toDp() }
-                    val maxHeight = minOf(336.dp, with(density) { (host.height - margin * 2).coerceAtLeast(1f).toDp() })
-                    val y = (if (anchor.bottom + menuSize.height + margin <= host.height) anchor.bottom.toInt()
-                        else anchor.top.toInt() - menuSize.height).coerceIn(margin,
+                    val maxWidth = with(density) { (host.width - widthMargin * 2).coerceAtLeast(1f).toDp() }
+                    val availableHeight = with(density) { (host.height - margin * 2).coerceAtLeast(1f).toDp() }
+                    val maxHeight = menu.maxHeight?.coerceAtMost(availableHeight) ?: availableHeight
+                    val y = (if (anchor.bottom + offsetY + menuSize.height + margin <= host.height) anchor.bottom.toInt() + offsetY
+                        else anchor.top.toInt() - offsetY - menuSize.height).coerceIn(margin,
                             (host.height.toInt() - menuSize.height - margin).coerceAtLeast(margin))
-                    val x = (anchor.right.toInt() - menuSize.width).coerceIn(margin,
+                    val x = (anchor.right.toInt() + offsetX - menuSize.width).coerceIn(margin,
                         (host.width.toInt() - menuSize.width - margin).coerceAtLeast(margin))
                     ChatGlassMenuSurface(backdrop, Modifier.align(AbsoluteAlignment.TopLeft).absoluteOffset { IntOffset(x, y) }
                         .widthIn(min = minOf(156.dp, maxWidth), max = maxWidth).heightIn(max = maxHeight)
@@ -108,6 +118,9 @@ internal fun ChatAnchoredMenu(
     expanded: Boolean,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
+    maxHeight: Dp? = 336.dp,
+    offset: DpOffset = DpOffset.Zero,
+    screenMargin: Dp = 9.dp,
     content: @Composable () -> Unit,
 ) {
     val layer = LocalMenuLayer.current
@@ -118,7 +131,7 @@ internal fun ChatAnchoredMenu(
         anchor = coordinates.parentLayoutCoordinates?.boundsInRoot() ?: coordinates.boundsInRoot()
     })
     if (expanded && layer != null) {
-        val menu = remember { MenuOverlay({ anchor }, { latestDismiss() }) { Box(modifier) { latestContent() } } }
+        val menu = remember(maxHeight, offset, screenMargin) { MenuOverlay({ anchor }, { latestDismiss() }, maxHeight, offset, screenMargin) { Box(modifier) { latestContent() } } }
         DisposableEffect(layer, menu) {
             layer.active = menu
             onDispose { if (layer.active === menu) layer.active = null }
@@ -141,7 +154,8 @@ private fun ChatGlassMenuSurface(backdrop: LayerBackdrop?, modifier: Modifier, c
     )
     val shades = if (dark) listOf(Color(0xE62C2739), Color(0xDB1B1924))
         else listOf(Color(0xE6FFFFFF), Color(0xD4FAF7FF))
-    Column(modifier.width(IntrinsicSize.Max).clip(shape).then(blur)
+    Column(modifier.width(IntrinsicSize.Max)
+        .shadow(12.dp, shape, clip = false, ambientColor = Color(0x164C3A6B), spotColor = Color(0x164C3A6B)).clip(shape).then(blur)
         .pointerInput(Unit) { detectTapGestures(onTap = {}) }
         .background(Brush.linearGradient(shades))
         .border(1.dp, if (dark) Color(0x26DCCDFF) else Color(0xF0FFFFFF), shape)

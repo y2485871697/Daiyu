@@ -2,6 +2,12 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import app.daiyu.android.ui.icons.ChatPreviewIcons
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
@@ -37,26 +43,33 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.BalanceState?, actions: ChatScreenActions, modifier: Modifier = Modifier, assistantLabel: String = "助手",
     interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true,
-    automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false) {
+    automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false, modelLabel: String = "") {
     var expanded by remember { mutableStateOf(false) }
     val chrome = chatChromeColors()
-    Row(modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 3.dp, bottom = 14.dp),
+    Row(modifier.testTag("chat-top-bar").fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 3.dp, bottom = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(11.dp), verticalAlignment = Alignment.CenterVertically) {
         ChatIconButton(ChatPreviewIcons.Menu, "打开侧边栏", actions.onOpenSidebar,
             Modifier.size(width = 17.dp, height = 28.dp), tint = chrome.text, iconSize = 17.dp)
         Column(Modifier.weight(1f)) {
             Text(title.ifBlank { "新会话" }, Modifier.testTag("chat-title"),
                 color = chrome.text,
-                style = MiuixTheme.textStyles.title3.copy(fontSize = 12.sp, lineHeight = 17.3.sp, fontWeight = FontWeight(550)),
+                style = MiuixTheme.textStyles.title3.copy(fontSize = 12.sp, lineHeight = 17.3.sp, fontWeight = FontWeight(650)),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(assistantLabel, modifier = Modifier.padding(top = 4.dp), color = chrome.muted,
+            Text(listOf(assistantLabel, modelLabel).filter { it.isNotBlank() }.joinToString(" · "),
+                modifier = Modifier.testTag("chat-subtitle").padding(top = 4.dp), color = chrome.muted,
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 11.5.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         ChatIconButton(ChatPreviewIcons.SubAgents, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, modifier = Modifier.size(28.dp), tint = chrome.toolbar, iconSize = 18.dp)
         Box {
+            val moreShape = RoundedCornerShape(10.dp)
+            val dark = MiuixTheme.colorScheme.background.luminance() < .3f
+            val activeBackground = if (dark) Color(0xFF26233D) else Color(0xFFF0ECFC)
             ChatIconButton(ChatPreviewIcons.More, "更多", { actions.onMore(); expanded = true },
-                Modifier.size(28.dp), tint = chrome.text, iconSize = 17.dp)
+                Modifier.size(28.dp).semantics { selected = expanded }
+                    .background(if (expanded) activeBackground else Color.Transparent, moreShape)
+                    .then(if (expanded) Modifier.border(1.dp, Color(0x0D9980BE), moreShape) else Modifier),
+                tint = if (expanded) chrome.accent else chrome.text, iconSize = 17.dp, shape = moreShape)
             ChatOverflowMenu(expanded, { expanded = false }, actions.onMenuAction,
                 interactiveModeEnabled, interactiveModeChangeEnabled, automaticCompression, automaticCompressionPending)
         }
@@ -76,8 +89,9 @@ internal fun ChatIconButton(
     containerColor: Color? = null,
     iconSize: androidx.compose.ui.unit.Dp? = null,
     containerSize: androidx.compose.ui.unit.Dp = 20.dp,
+    shape: Shape = CircleShape,
 ) {
-    Box(modifier.size(48.dp).clip(CircleShape).combinedClickable(
+    Box(modifier.size(48.dp).clip(shape).combinedClickable(
         enabled = enabled, role = Role.Button, onClickLabel = label,
         onLongClick = onLongClick, onClick = onClick,
     ), contentAlignment = Alignment.Center) {

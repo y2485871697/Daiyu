@@ -58,14 +58,27 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifier: Modifier = Modifier, assistant: AssistantDisplay? = null,
     balanceState: app.daiyu.android.balance.BalanceState? = null,
-    backdrop: top.yukonga.miuix.kmp.blur.LayerBackdrop? = null) {
+    backdrop: top.yukonga.miuix.kmp.blur.LayerBackdrop? = null,
+    attachmentContent: @Composable () -> Unit = {}) {
     val colors = MiuixTheme.colorScheme
     val appearance = chatActionColors()
     val chrome = chatChromeColors()
     val currentEditorGeneration by rememberUpdatedState(state.editorGeneration)
+    val currentDraft by rememberUpdatedState(state.text)
+    var composingSource by remember(state.editorGeneration) { mutableStateOf<Pair<String, TextRange>?>(null) }
+    val references = remember(state.text, composingSource) {
+        ComposerReferences(state.text, composingSource?.takeIf { it.first == state.text }?.second?.let { it.min until it.max })
+    }
+    fun editReferenceDraft(next: String, start: Int, end: Int): Boolean {
+        val edit = actions.onProjectedDraftEdit
+        if (edit != null) return edit(references.source, next, start, end)
+        actions.onTextChange(next)
+        actions.onSelectionChange(start, end)
+        return true
+    }
     var attachments by remember { mutableStateOf(false) }
     var voiceModes by remember { mutableStateOf(false) }
-    val hasText = state.text.isNotBlank() || (state.phase == ComposerPhase.IDLE && state.imageSendAvailable)
+    val hasText = state.text.isNotBlank() || (state.phase == ComposerPhase.IDLE && (state.imageSendAvailable || state.videoSendAvailable))
     val textAction = hasText && state.phase != ComposerPhase.RUNNING
     val primaryEnabled = if (textAction) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
         val primaryIcon = when {
@@ -107,20 +120,43 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         }
                 Box(Modifier.fillMaxWidth().padding(horizontal = 13.dp).height(1.dp)
                     .background(chrome.line))
+                ComposerReferenceChips(references.references, state.enabled) { reference ->
+                    if (state.editorGeneration == currentEditorGeneration && references.source == currentDraft) {
+                        val next = references.remove(reference)
+                        val projected = ComposerReferences(next)
+                        editReferenceDraft(next, projected.toSource(references.toVisible(state.selectionStart)),
+                            projected.toSource(references.toVisible(state.selectionEnd)))
+                    }
+                }
+                attachmentContent()
                 key(state.editorGeneration) {
                     val mountedGeneration = state.editorGeneration
                     var editingValue by remember {
-                        mutableStateOf(TextFieldValue(state.text).forComposer(state.text, state.selectionStart, state.selectionEnd))
+                        mutableStateOf(TextFieldValue(references.text).forComposer(references.text, references.toVisible(state.selectionStart), references.toVisible(state.selectionEnd)))
                     }
-                    val renderedValue = editingValue.forComposer(state.text, state.selectionStart, state.selectionEnd)
+                    val renderedValue = editingValue.forComposer(references.text, references.toVisible(state.selectionStart), references.toVisible(state.selectionEnd))
                     SideEffect { if (editingValue != renderedValue) editingValue = renderedValue }
                     BasicTextField(
                         value = renderedValue,
                         onValueChange = { value ->
                             if (mountedGeneration == currentEditorGeneration) {
-                                editingValue = value
-                                if (value.text != state.text) actions.onTextChange(value.text)
-                                actions.onSelectionChange(value.selection.start, value.selection.end)
+                                val bodyChanged = value.text != references.text
+                                val next = references.edit(value.text)
+                                fun rawOffset(offset: Int) = if (bodyChanged) offset.coerceIn(0, value.text.length) else references.toSource(offset)
+                                val rawComposition = value.composition?.let { TextRange(rawOffset(it.start), rawOffset(it.end)) }
+                                val projected = ComposerReferences(next, rawComposition?.let { it.min until it.max })
+                                val selection = TextRange(projected.toVisible(rawOffset(value.selection.start)),
+                                    projected.toVisible(rawOffset(value.selection.end)))
+                                val composition = rawComposition?.let { TextRange(projected.toVisible(it.start), projected.toVisible(it.end)) }
+                                val accepted = if (references.references.isEmpty() && projected.references.isEmpty()) {
+                                    if (next != state.text) actions.onTextChange(next)
+                                    actions.onSelectionChange(rawOffset(value.selection.start), rawOffset(value.selection.end))
+                                    true
+                                } else editReferenceDraft(next, projected.toSource(selection.start), projected.toSource(selection.end))
+                                if (accepted) {
+                                    composingSource = rawComposition?.let { next to it }
+                                    editingValue = TextFieldValue(projected.text, selection, composition)
+                                }
                             }
                         },
                         enabled = state.enabled,
@@ -130,7 +166,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         cursorBrush = SolidColor(colors.primary),
                         decorationBox = { inner ->
                             Box {
-                                if (state.text.isEmpty()) Text("给代鱼发消息", color = chrome.muted,
+                                if (references.text.isEmpty()) Text("给代鱼发消息", color = chrome.muted,
                                     style = MiuixTheme.textStyles.body1.copy(fontSize = 12.sp, lineHeight = 18.sp))
                                 inner()
                             }

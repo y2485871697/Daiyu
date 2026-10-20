@@ -25,6 +25,7 @@ data class ChatScreenActions(
     val onSupplement: (String) -> Unit = {},
     val onTextChange: (String) -> Unit = {},
     val onSelectionChange: (Int, Int) -> Unit = { _, _ -> },
+    val onProjectedDraftEdit: ((String, String, Int, Int) -> Boolean)? = null,
     val onControlPress: () -> Unit = {},
     val onControlRelease: () -> Unit = {},
     val onPrimaryTap: () -> Unit = {},
@@ -64,6 +65,7 @@ internal fun DaiyuChatScreen(
     assistant: app.daiyu.android.ui.components.AssistantDisplay? = null,
     dedicatedTool: @Composable (WorkStepUi) -> Boolean = { false },
     toolContent: @Composable (WorkStepUi) -> Unit = {},
+    composerAttachments: @Composable () -> Unit = {},
 ) {
     ChatMenuLayer(modifier.fillMaxSize()) {
     Column(
@@ -88,7 +90,7 @@ internal fun DaiyuChatScreen(
                     state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset)
             }
         }, composer = { backdrop ->
-            ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop)
+            ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop, attachmentContent = composerAttachments)
         })
     }
 }

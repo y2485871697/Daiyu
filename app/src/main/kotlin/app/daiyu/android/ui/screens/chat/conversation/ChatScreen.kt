@@ -70,7 +70,7 @@ internal fun DaiyuChatScreen(
         Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
             .statusBarsPadding().navigationBarsPadding().imePadding(),
     ) {
-        ChatTopBar(state.title, state.balanceState, actions, assistantLabel = state.composer.assistantLabel,
+        ChatTopBar(state.title, state.balanceState, actions, assistantLabel = state.composer.assistantLabel, modelLabel = state.composer.modelLabel,
             interactiveModeEnabled = state.interactiveModeEnabled,
             interactiveModeChangeEnabled = state.interactiveModeChangeEnabled,
             automaticCompression = state.automaticCompression, automaticCompressionPending = state.automaticCompressionPending)

@@ -19,6 +19,50 @@ import androidx.compose.ui.unit.dp
 
 // Exact preview-agent-cards SVG geometry shared by chat controls and their sheets.
 internal object ChatPreviewIcons {
+    val NewChat: ImageVector by lazy {
+        previewIcon("NewChat") { outline("M13 5H5a2 2 0 0 0-2 2v14l5-4h11a2 2 0 0 0 2-2v-4M19 2v6m-3-3h6", 1.65f) }
+    }
+
+    val Search: ImageVector by lazy {
+        previewIcon("Search") { outline("M17.5 10.5a7 7 0 1 0-14 0a7 7 0 1 0 14 0 M16 16l5 5", 1.65f) }
+    }
+
+    val Interactive: ImageVector by lazy {
+        previewIcon("Interactive") { outline("M9 11V6a2 2 0 0 1 4 0v7l2-2 5 3-2 7H9l-5-7 2-2 3 3M5 7a6 6 0 0 1 12 0", 1.65f) }
+    }
+
+    val Terminal: ImageVector by lazy {
+        previewIcon("Terminal") { outline("M6 4h12a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V7a3 3 0 0 1 3-3Z M7 9l3 3-3 3m6 0h4", 1.65f) }
+    }
+
+    val Globe: ImageVector by lazy {
+        previewIcon("Globe") { outline("M21 12a9 9 0 1 0-18 0a9 9 0 1 0 18 0 M16 12a4 9 0 1 0-8 0a4 9 0 1 0 8 0 M3 12h18M5 6.5h14M5 17.5h14", 1.65f) }
+    }
+
+    val Document: ImageVector by lazy {
+        previewIcon("Document") { outline("M5 3h9l5 5v13H5V3Zm9 0v6h5M8 13h8m-8 4h5", 1.65f) }
+    }
+
+    val Agents: ImageVector by lazy {
+        previewIcon("Agents") { outline("M14.5 4a2.5 2.5 0 1 0-5 0a2.5 2.5 0 1 0 5 0 M7.5 20a2.5 2.5 0 1 0-5 0a2.5 2.5 0 1 0 5 0 M21.5 20a2.5 2.5 0 1 0-5 0a2.5 2.5 0 1 0 5 0 M12 6.5V12m-7 5v-5h14v5", 1.65f) }
+    }
+
+    val Usage: ImageVector by lazy {
+        previewIcon("Usage") { outline("M12 3a9 9 0 1 0 9 9h-9V3Zm4 0v5h5a8 8 0 0 0-5-5Z", 1.65f) }
+    }
+
+    val Compress: ImageVector by lazy {
+        previewIcon("Compress") { outline("M5 3h9l5 5v13H5V3Zm9 0v6h5M9 11v7m-2-2 2 2 2-2m2-5v7m-2-5 2-2 2 2", 1.65f) }
+    }
+
+    val AutoCompress: ImageVector by lazy {
+        previewIcon("AutoCompress") { outline("M4 10h16M4 14h16M12 2v5m-3-3 3 3 3-3M12 22v-5m-3 3 3-3 3 3", 1.65f) }
+    }
+
+    val ChevronRight: ImageVector by lazy {
+        previewIcon("ChevronRight") { outline("M9 6l6 6-6 6", 1.65f) }
+    }
+
     val Attach: ImageVector by lazy {
         previewIcon("Attach") {
             outline("M12 3v18M3 12h18", 1.7f)

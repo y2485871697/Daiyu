@@ -13,6 +13,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -35,15 +36,16 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         contextFraction = 0.37f, controlOwnerKey = "chrome-owner",
     )
 
-    private fun show(composer: ComposerUi, actions: ChatScreenActions = ChatScreenActions()) {
+    private fun show(composer: ComposerUi, actions: ChatScreenActions = ChatScreenActions(),
+        fontScale: Float = 1f, interfaceScale: Float = 1f) {
         mainThread {
             activity.setContent {
                 val density = LocalDensity.current
-                CompositionLocalProvider(LocalDensity provides Density(density.density, 1f)) {
-                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                    AgentAppTheme(AppearanceSettings(interfaceScale = interfaceScale), applyInterfaceScale = true) {
                         ChatMenuLayer(Modifier.fillMaxSize()) {
                             Column(Modifier.requiredWidth(320.dp).testTag("chrome-host")) {
-                                ChatTopBar("测试会话", null, actions, assistantLabel = composer.assistantLabel)
+                                ChatTopBar("测试会话", null, actions, assistantLabel = composer.assistantLabel, modelLabel = composer.modelLabel)
                                 ChatComposer(composer, actions)
                             }
                         }
@@ -126,7 +128,8 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         node("chat-overflow-menu").assertDoesNotExist()
         touch(button("更多"))
         val menu = node("chat-overflow-menu").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        assertTrue(menu.height <= 336 * activity.resources.displayMetrics.density + 1)
+        assertTrue(menu.height > 336 * activity.resources.displayMetrics.density)
+        node("chat-menu:AUTO_COMPRESS").assertIsDisplayed()
         touch(ui.onNodeWithText("Token 用量").performScrollTo())
         ui.onNodeWithText("Token 用量").assertDoesNotExist()
         touch(node("chat-model")); touch(node("chat-context")); touch(button("语音输入"))
@@ -143,6 +146,42 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                 "model", "context", "voice", "supplement<${state.text}>", "continue", "stop"), events.toList())
             assertEquals(3, presses); assertEquals(3, releases)
         }
+    }
+
+    fun testHeaderKeepsPreviewGeometryAndSubtitleAtDeviceFontScale() {
+        val state = composer().copy(modelLabel = "gpt-6.1-sol")
+        show(state, fontScale = .9f, interfaceScale = .8f)
+        val bar = node("chat-top-bar").fetchSemanticsNode().boundsInRoot
+        val density = bar.width / 320f
+        val title = layout("测试会话")
+        assertEquals(12.sp, title.layoutInput.style.fontSize)
+        assertEquals(FontWeight(650), title.layoutInput.style.fontWeight)
+        assertEquals(.9f, title.layoutInput.density.fontScale, .001f)
+        assertEquals(8.sp, layout("代码助手 · gpt-6.1-sol").layoutInput.style.fontSize)
+        val drawer = button("打开侧边栏").fetchSemanticsNode().boundsInRoot
+        val more = button("更多").fetchSemanticsNode().boundsInRoot
+        val agents = button("本会话协作").fetchSemanticsNode().boundsInRoot
+        val titleBounds = node("chat-title").fetchSemanticsNode().boundsInRoot
+        assertEquals(14f, (drawer.left - bar.left) / density, 1f)
+        assertEquals(42f, (titleBounds.left - bar.left) / density, 1f)
+        assertEquals(14f, (bar.right - more.right) / density, 1f)
+        assertEquals(28f, more.width / density, .5f)
+        assertEquals(11f, (more.left - agents.right) / density, .5f)
+        assertEquals(46.9f, bar.height / density, 1.5f)
+    }
+
+    fun testExpandedMoreStateAndFullMenuKeepBothCompressionRowsVisible() {
+        show(composer())
+        button("更多").assertIsNotSelected()
+        touch(button("更多"))
+        button("更多").assertIsSelected()
+        node("chat-menu:COMPRESS_CONTEXT").assertIsDisplayed()
+        node("chat-menu:AUTO_COMPRESS").assertIsDisplayed().assertIsNotEnabled()
+        ui.onNodeWithTag("chat-menu-switch:AUTO_COMPRESS", useUnmergedTree = true)
+            .assertExists().assertWidthIsEqualTo(25.dp).assertHeightIsEqualTo(15.dp)
+        touch(node("chat-menu:NEW_CHAT"))
+        button("更多").assertIsNotSelected()
+        node("chat-overflow-menu").assertDoesNotExist()
     }
 
     fun testIdleTextDispatchesSendAndNeverSupplement() {

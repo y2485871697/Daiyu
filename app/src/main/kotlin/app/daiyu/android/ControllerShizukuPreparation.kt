@@ -73,8 +73,6 @@ internal class ControllerShizukuPreparation internal constructor(
     }
 }
 
-internal class ControllerShizukuDraftChangedException : IllegalStateException("shizuku_draft_changed")
-
 /** UNKNOWN is terminal for this controller lifetime, not an acknowledgement of drain. */
 internal class ControllerShizukuCleanup {
     var result: RunCatalogCloseResult? = null

@@ -1315,7 +1315,7 @@ class MainActivity : ComponentActivity() {
     private var collaborationOwner by mutableStateOf<String?>(null)
     private var collaborationVisible by mutableStateOf(false)
     private var childStatusVisit by mutableStateOf<Pair<Any, String?>?>(null)
-    private data class UsageVisit(val token: Any, val conversation: String?, val scopePicker: Boolean)
+    private data class UsageVisit(val token: Any, val conversation: ConversationId?)
     private var usageVisit by mutableStateOf<UsageVisit?>(null)
     private var automaticCompression by mutableStateOf<Boolean?>(null)
     private var automaticCompressionPending by mutableStateOf(false)
@@ -2012,8 +2012,8 @@ class MainActivity : ComponentActivity() {
                         onDismiss = { if(assistantSelectionOwner===owner) assistantPicker = false })
                 } }
                 usageVisit?.let { visit ->
-                    if (retainedPage == "chat" && !sidebarVisible && selected?.id?.value == visit.conversation) {
-                        key(visit.token) { ChatUsageDialog(controller, visit.conversation, visit.scopePicker,
+                    if (retainedPage == "chat" && !sidebarVisible && selected?.id == visit.conversation) {
+                        key(visit.token) { ChatUsageDialog(controller, visit.conversation,
                             onDismiss = { if (usageVisit === visit) usageVisit = null }) }
                     } else LaunchedEffect(visit) { if (usageVisit === visit) usageVisit = null }
                 }
@@ -2297,7 +2297,7 @@ class MainActivity : ComponentActivity() {
             ChatMenuAction.ATTACH_FOLDER -> if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch) pickChatReference(true)
             ChatMenuAction.INTERACTIVE_MODE -> if (currentChat())
                 controller.interactiveMode.setEnabled(!controller.interactiveMode.enabled)
-            ChatMenuAction.CONTEXT_STATS -> if (currentChat()) usageVisit = UsageVisit(Any(), selected?.id?.value, false)
+            ChatMenuAction.CONTEXT_STATS -> if (currentChat()) usageVisit = UsageVisit(Any(), selected?.id)
             ChatMenuAction.COMPRESS_CONTEXT -> openContextPage()
             ChatMenuAction.AUTO_COMPRESS -> if (currentChat()) toggleAutomaticCompression()
             ChatMenuAction.VOICE_INPUT, ChatMenuAction.VOICE_CHAT -> if (currentChat()) {

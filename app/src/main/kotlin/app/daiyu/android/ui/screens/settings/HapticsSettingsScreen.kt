@@ -25,7 +25,6 @@ import app.daiyu.android.domain.haptics.HapticDelivery
 import app.daiyu.android.domain.haptics.HapticIntensity
 import app.daiyu.android.domain.haptics.HapticSettings
 import app.daiyu.android.haptics.HapticsRuntime
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import kotlin.math.roundToInt
 
@@ -90,7 +89,7 @@ internal fun HapticsSettingsScreen(
         }
     }
     val labels = listOf("系统默认", "低", "中", "高")
-    MiuixScaffoldPage(title = "触感反馈", onBack = onBack, modifier = modifier) {
+    SettingsScaffoldPage(title = "触感反馈", onBack = onBack, modifier = modifier) {
         item(key = "haptics_switches") {
             SettingsSectionTitle("触感设置")
             SettingsCard {

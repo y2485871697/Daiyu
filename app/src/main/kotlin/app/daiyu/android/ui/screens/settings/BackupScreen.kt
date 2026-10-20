@@ -2,7 +2,6 @@ package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.icons.DaiyuIcons
 
 /** The host owns document pickers, import confirmation, restore authorization and operation state. */
@@ -25,7 +24,7 @@ internal fun BackupScreen(
     engineeringUi: Boolean = false,
     onImport: () -> Unit = onImportComplete,
 ) {
-    MiuixScaffoldPage(title = "备份与导入", onBack = onBack, modifier = modifier) {
+    SettingsScaffoldPage(title = "备份与导入", onBack = onBack, modifier = modifier) {
         item(key = "backup_intro") {
             SettingsNote("备份文件可能包含个人数据，请妥善保管。导入前请确认来源可信。")
             if (busy) SettingsNote("处理中")

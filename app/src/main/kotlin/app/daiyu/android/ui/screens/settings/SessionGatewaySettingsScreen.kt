@@ -7,7 +7,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.model.sessiongateway.SessionGatewayRule
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import top.yukonga.miuix.kmp.basic.TextButton
 
 /** Independent controlled editor. The host owns persistence/admission and keeps all five fields. */
@@ -25,7 +24,7 @@ internal fun SessionGatewaySettingsScreen(
     onReplacementAuthorization: (Boolean) -> Unit = {},
 ) {
     val validationError = runCatching { draft.validate() }.exceptionOrNull()?.message
-    MiuixScaffoldPage(title = "保留会话网关", onBack = onBack, modifier = modifier) {
+    SettingsScaffoldPage(title = "保留会话网关", onBack = onBack, modifier = modifier) {
         item(key = "session_gateway_rules") {
             SettingsSectionTitle("Responses 会话匹配")
             SettingsCard {

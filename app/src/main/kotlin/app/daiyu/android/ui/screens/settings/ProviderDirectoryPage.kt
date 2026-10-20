@@ -9,7 +9,6 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.storage.ProviderRegistrySnapshot
 import app.daiyu.android.storage.RegisteredProvider
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import top.yukonga.miuix.kmp.basic.Text
@@ -34,7 +33,7 @@ internal fun ProviderDirectoryPage(
     onOpen: (RegisteredProvider) -> Unit, onManage: (RegisteredProvider) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    MiuixScaffoldPage("模型提供商", onBack, modifier) {
+    SettingsScaffoldPage("模型提供商", onBack, modifier) {
         item("provider-search") {
             SettingsSearch(query, onQuery, "搜索提供商", "provider-search")
         }
@@ -74,7 +73,7 @@ internal fun ProviderDirectoryPage(
 
 @Composable
 internal fun ProviderAuthenticationPage(enabled: Boolean, notice: String?, onBack: () -> Unit, onApiKey: () -> Unit) {
-    MiuixScaffoldPage("认证方式", onBack) {
+    SettingsScaffoldPage("认证方式", onBack) {
         notice?.let { item("auth-notice") { SettingsNote(it, error = true) } }
         item {
             SettingsSectionTitle("选择身份验证方式")

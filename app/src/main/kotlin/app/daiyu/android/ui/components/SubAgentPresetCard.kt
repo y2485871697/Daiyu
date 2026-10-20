@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -11,6 +12,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -75,7 +78,7 @@ internal fun SubAgentPresetDirectoryStatus(directory: SubAgentPresetDirectory) {
 }
 @Composable
 internal fun SubAgentPresetCard(preset: SubAgentPreset, enabled: Boolean, actionLabel: String,
-    onClick: () -> Unit, selected: Boolean = false, trailing: @Composable (() -> Unit)? = null) {
+    onClick: () -> Unit, selected: Boolean = false, settingsStyle: Boolean = false, trailing: @Composable (() -> Unit)? = null) {
     val view = LocalView.current
     if (app.daiyu.android.ui.components.subagent.LocalConversationAgentStyle.current) {
         val colors = app.daiyu.android.ui.components.subagent.conversationAgentColors()
@@ -95,10 +98,15 @@ internal fun SubAgentPresetCard(preset: SubAgentPreset, enabled: Boolean, action
         }
         return
     }
-    Surface(shape = RoundedCornerShape(16.dp),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainer,
+    Surface(shape = RoundedCornerShape(if (settingsStyle) 22.dp else 16.dp),
+        color = when {
+            selected -> MaterialTheme.colorScheme.primaryContainer
+            settingsStyle -> Color.Transparent
+            else -> MaterialTheme.colorScheme.surfaceContainer
+        },
         contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.fillMaxWidth()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(modifier = if (settingsStyle && !selected) Modifier.background(Brush.linearGradient(usagePalette().sheet))
+            else Modifier, verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f).heightIn(min = 96.dp).semantics { contentDescription = actionLabel }
                 .clickable(enabled = enabled, role = Role.Button, interactionSource = remember { MutableInteractionSource() }, indication = null) {
                     TouchHaptics.click(view); onClick()

@@ -65,9 +65,10 @@ internal fun SettingsIcon(icon: androidx.compose.ui.graphics.vector.ImageVector)
 @Composable
 internal fun SettingsSearch(query: String, onQueryChange: (String) -> Unit,
     placeholder: String = "搜索设置", tag: String = "settings-search",
-    containerColor: Color = MiuixTheme.colorScheme.surfaceContainerHigh) {
+    containerColor: Color = if (LocalSettingsPageStyle.current) MiuixTheme.colorScheme.surfaceContainerHighest
+        else MiuixTheme.colorScheme.surfaceContainerHigh) {
     val colors = MiuixTheme.colorScheme
-    Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp).fillMaxWidth()
+    Row(Modifier.padding(horizontal = if (LocalSettingsPageStyle.current) 16.dp else 20.dp, vertical = 8.dp).fillMaxWidth()
         .background(containerColor, RoundedCornerShape(12.dp))
         .padding(start = 14.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         DaiyuIcon(DaiyuIcons.Search, null, tint = colors.onSurfaceVariantSummary, size = 20.dp)

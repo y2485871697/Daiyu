@@ -9,7 +9,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.domain.tools.WriteEffect
 import app.daiyu.android.gui.*
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 
 /** Independent settings/approval host. The default page grants nothing to any model.
  * An optional unbound session MUST come from a user-opened, reserved run owned by the parent.
@@ -59,7 +58,7 @@ internal fun GuiSettingsPanel(
             lifecycle.removeObserver(observer)
         }
     }
-    MiuixScaffoldPage(title = "无障碍与屏幕授权", onBack = leave, modifier = modifier) {
+    SettingsScaffoldPage(title = "无障碍与屏幕授权", onBack = leave, modifier = modifier) {
         item(key = "gui-system") {
             SettingsSectionTitle("系统服务（不是 Agent 授权）")
             SettingsCard {

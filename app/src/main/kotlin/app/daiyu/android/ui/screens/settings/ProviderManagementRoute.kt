@@ -19,7 +19,6 @@ import app.daiyu.android.model.catalog.SavedModelCatalogPersistence
 import app.daiyu.android.storage.*
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -410,7 +409,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             headersUnavailable = d.editing.headersUnavailable,
             testConnection = connection, localModelActions = actions)
     } else if (loading) {
-        MiuixScaffoldPage("模型提供商", { back() }) { item { SettingsNote("正在读取提供商详情") } }
+        SettingsScaffoldPage("模型提供商", { back() }) { item { SettingsNote("正在读取提供商详情") } }
     } else if (authentication) {
         ProviderAuthenticationPage(enabled, notice, onBack = { back() }, onApiKey = {
             if (enabled) creating = NewProviderDraft(ProviderProtocol.RESPONSES)

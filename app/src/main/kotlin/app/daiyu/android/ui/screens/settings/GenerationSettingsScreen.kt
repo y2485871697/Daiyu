@@ -13,7 +13,6 @@ import app.daiyu.android.model.generation.GenerationProtocol
 import app.daiyu.android.model.generation.GenerationSettingsEditingSnapshot
 import app.daiyu.android.model.generation.GenerationSettingsSnapshot
 import app.daiyu.android.model.generation.GenerationSettingsValues
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import top.yukonga.miuix.kmp.basic.TextButton
 
 /** Memory only. Never rememberSaveable, log, persist as plaintext, or include in a backup. */
@@ -92,7 +91,7 @@ fun GenerationSettingsScreen(
     fun update(index: Int, profile: GenerationProfileDraftUi) {
         onDraftChange(draft.copy(profiles = draft.profiles.mapIndexed { i, previous -> if (i == index) profile else previous }))
     }
-    MiuixScaffoldPage(title = "独立生成模型设置", onBack = onBack, modifier = modifier) {
+    SettingsScaffoldPage(title = "独立生成模型设置", onBack = onBack, modifier = modifier) {
         item(key = "generation_explanation") {
             SettingsNote("仅保存生成配置，不使用聊天模型，不联网、不探测能力，也不授权付费运行。每次运行仍需单独预览并确认。")
             SettingsNote("endpoint 必须是服务商完整 HTTPS 生成地址；不会补路径或自动选择协议。附加请求参数由运行编辑器保留并校验，本页不会丢弃或替换参数。")

@@ -17,7 +17,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
-import app.daiyu.android.ui.components.MiuixScaffold
+import app.daiyu.android.ui.screens.settings.SettingsScaffold
 import app.daiyu.android.ui.screens.settings.*
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
@@ -149,7 +149,7 @@ internal fun VoiceSettingsPanel(
         return
     }
     val pageTitle = when (child) { "ASR" -> "识别方式"; "MIMO" -> "MiMo 语音"; else -> "语音设置" }
-    MiuixScaffold(title = pageTitle, onBack = {
+    SettingsScaffold(title = pageTitle, onBack = {
         if (current() && !busy) {
             if (child != null) leaveChild() else if (stopAudio()) { picker.close(); onBack() }
         }

@@ -11,7 +11,6 @@ import app.daiyu.android.context.SummaryProfileSettings
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.ProviderRequestOptions
 import app.daiyu.android.storage.ModelSettings
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 
 /** In-memory draft only; the host supplies one stable binding for the page. */
 internal data class CompressionSettingsDraftUi(
@@ -71,7 +70,7 @@ internal fun CompressionSettingsForm(
     modelLabel: String? = null,
     onChooseModel: () -> Unit = {},
 ) {
-    MiuixScaffoldPage(title = "上下文压缩", onBack = onBack, modifier = modifier) {
+    SettingsScaffoldPage(title = "上下文压缩", onBack = onBack, modifier = modifier) {
         notice?.let { item("compression-notice") { SettingsNote(it, error = error) } }
         item("compression-automatic") {
             SettingsCard(Modifier.padding(top = 12.dp)) {

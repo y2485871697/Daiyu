@@ -16,7 +16,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.model.ProviderProtocol
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
@@ -122,7 +121,7 @@ internal fun ModelSettingsScreen(
             it.anthropicVersion == draft.anthropicVersion && it.customHeaders == draft.customHeaders &&
             it.openAiWebSearchEnabled == draft.openAiWebSearchEnabled
     } == true
-    MiuixScaffoldPage(title = pageTitle, onBack = { connection.cancel(); onBack() }, modifier = modifier) {
+    SettingsScaffoldPage(title = pageTitle, onBack = { connection.cancel(); onBack() }, modifier = modifier) {
         headerContent()
         item(key = "model_connection") {
             SettingsSectionTitle("连接配置")

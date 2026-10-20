@@ -11,7 +11,6 @@ import app.daiyu.android.domain.pet.PetModelSelection
 import app.daiyu.android.pet.PetApplicationHost
 import app.daiyu.android.storage.IndependentModelSettings
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.Dispatchers
@@ -126,7 +125,7 @@ internal fun IndependentModelScreen(store: IndependentModelSettings, slot: Indep
     source: SettingsModelSource, modifier: Modifier = Modifier) {
     IndependentModelSelection(store, slot, assistants, pets, source) { controls ->
         val title = if (slot == IndependentModelSettings.Slot.PET) "说话模型" else "辅助视觉模型"
-        MiuixScaffoldPage(title, onBack, modifier = modifier.testTag("independent-model-${slot.key}")) {
+        SettingsScaffoldPage(title, onBack, modifier = modifier.testTag("independent-model-${slot.key}")) {
             controls.problem?.let { item("independent-model-status") { SettingsNote(it, error = true) } }
             item("independent-model-selection") {
                 SettingsCard(Modifier.padding(top = 12.dp)) {

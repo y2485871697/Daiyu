@@ -9,7 +9,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import top.yukonga.miuix.kmp.window.WindowDialog
 import app.daiyu.android.mcp.*
@@ -98,7 +97,7 @@ import kotlinx.coroutines.withContext
         label = server?.label.orEmpty(); endpoint = server?.endpoint.orEmpty(); bearer = ""
         editing = true
     }
-    MiuixScaffoldPage(title = selected?.label ?: "MCP 服务器", onBack = { back() },
+    SettingsScaffoldPage(title = selected?.label ?: "MCP 服务器", onBack = { back() },
         modifier = Modifier.testTag("mcp-settings"), actions = {
             top.yukonga.miuix.kmp.basic.TextButton(
                 text = if (selected == null) "添加服务器" else "刷新",
@@ -142,6 +141,7 @@ import kotlinx.coroutines.withContext
                 }
             }
             item(key = "delete") {
+                SettingsSectionTitle("服务器管理")
                 SettingsCard {
                     SettingsRow("删除服务器", tag = "mcp-settings-delete",
                         onClick = if (busy) null else ({ deleting = true }))

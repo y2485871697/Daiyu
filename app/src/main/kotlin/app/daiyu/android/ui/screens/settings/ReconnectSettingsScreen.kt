@@ -16,7 +16,6 @@ import app.daiyu.android.model.reconnect.ReconnectDurationPreset
 import app.daiyu.android.model.reconnect.ReconnectSettings
 import app.daiyu.android.model.reconnect.ReconnectSettingsSaveOwner
 import app.daiyu.android.model.reconnect.ReconnectSettingsStore
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -86,7 +85,7 @@ internal fun ReconnectSettingsScreen(
             busy = false
         }
     }
-    MiuixScaffoldPage(title = "错误重连", onBack = leave, modifier = modifier) {
+    SettingsScaffoldPage(title = "错误重连", onBack = leave, modifier = modifier) {
         item(key = "reconnect-global") {
             SettingsCard {
                 ReconnectDurationPreset.entries.forEach { duration ->

@@ -32,7 +32,6 @@ import app.daiyu.android.model.catalog.SavedModelCatalogSnapshot
 import app.daiyu.android.model.catalog.selectionFor
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import app.daiyu.android.ui.components.DaiyuTextInputDialog
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -192,7 +191,7 @@ internal fun <T> LocalCatalogModelsScreen(
             onConfirm = { if (deleting === selection && current() && matches(selection)) submit(selection, null) },
             onDismiss = { if (deleting === selection) deleting = null })
     }
-    MiuixScaffoldPage(pageTitle, onBack = back) {
+    SettingsScaffoldPage(pageTitle, onBack = back) {
         headerContent()
         item("catalog-state") {
             val add = if (actions.add != null && enabled && request == null && loaded && snapshot != null)

@@ -222,6 +222,45 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
         capture("appearance-dark")
     }
 
+    fun testAppearanceGroupsRetainControlsAtLargeFontAndBothScales() {
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            var state by mutableStateOf(AppearanceSettings(
+                themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
+                interfaceScale = scale))
+            mainThread {
+                activity.setContent {
+                    val density = LocalDensity.current
+                    CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
+                        key(dark, scale) {
+                            AgentAppTheme(state, true) {
+                                Box(Modifier.requiredWidth(320.dp).fillMaxHeight().testTag("appearance-host")) {
+                                    AppearanceSettingsScreen(state, onChange = { state = it }, onBack = {})
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            ui.waitForIdle()
+            for (title in listOf("主题模式", "色彩与背景", "应用图标", "界面与效果", "导航与手势")) {
+                node("page:外观与主题").performScrollToNode(hasText(title))
+                ui.onNodeWithText(title).assertIsDisplayed()
+            }
+            val host = node("appearance-host").fetchSemanticsNode().boundsInRoot
+            for (tag in listOf("settings-row:图标", "settings-row:色彩风格", "settings-row:强调色",
+                "settings-switch:横移返回手势", "settings-switch:预测性返回手势")) {
+                val bounds = reveal(tag, "外观与主题").assertHasClickAction().fetchSemanticsNode().boundsInRoot
+                assertTrue(bounds.left >= host.left && bounds.right <= host.right)
+            }
+            val before = state
+            for (title in listOf("色彩风格", "强调色")) reveal("settings-row:$title", "外观与主题").performClick()
+            ui.runOnIdle { assertEquals(before, state) }
+            reveal("settings-switch:横移返回手势", "外观与主题").performClick()
+            ui.runOnIdle { assertEquals(!before.swipeDismissEnabled, state.swipeDismissEnabled) }
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testScaleGestureCommitsOnceAndRejectedSaveRestoresConfirmedValue() {
         val state = AppearanceSettings(interfaceScale = 1f)
         val requests = mutableListOf<AppearanceSettings>()
@@ -232,7 +271,6 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
                 }
             }
         }
-        node("page:外观与主题").performScrollToIndex(1)
         reveal("appearance-scale", "外观与主题").performTouchInput {
             swipe(Offset(width * (2f / 3f), centerY), Offset(width * 0.25f, centerY), durationMillis = 300)
         }

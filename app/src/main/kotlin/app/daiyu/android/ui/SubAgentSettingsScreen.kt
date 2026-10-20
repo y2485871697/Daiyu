@@ -1,6 +1,7 @@
 package app.daiyu.android.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -12,6 +13,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.platform.LocalContext
@@ -24,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.delegation.*
 import app.daiyu.android.ui.components.*
 import app.daiyu.android.ui.haptics.TouchHaptics
+import app.daiyu.android.ui.screens.settings.settingsPageBackground
 import app.daiyu.android.ui.layout.horizontalCutoutPadding
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -68,10 +72,10 @@ internal fun SubAgentSettingsScreen(
     val editable = !directory.loading && directory.error == null
     CompositionLocalProvider(LocalRippleConfiguration provides null) {
         WithoutPressRipple {
-            Scaffold(containerColor = MaterialTheme.colorScheme.surface,
+            Scaffold(containerColor = settingsPageBackground(),
                 topBar = { TopAppBar(title = { Text("子代理组") }, navigationIcon = {
                     IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回") }
-                }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)) },
+                }, colors = TopAppBarDefaults.topAppBarColors(containerColor = settingsPageBackground())) },
                 floatingActionButtonPosition = FabPosition.Center,
                 floatingActionButton = {
                     FilledTonalButton(enabled = editable, onClick = {
@@ -81,14 +85,14 @@ internal fun SubAgentSettingsScreen(
                     }
                 }) { padding ->
                 LazyColumn(Modifier.fillMaxSize().padding(padding).horizontalCutoutPadding(),
-                    contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 96.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     item {
                         Text("预设组可供不同会话复制使用；修改预设不会改变已应用的会话。", style = MaterialTheme.typography.bodyMedium)
                         SubAgentPresetDirectoryStatus(directory)
                     }
                     items(directory.entries, key = { it.id }) { preset ->
-                        SubAgentPresetCard(preset, editable, "编辑子代理组${preset.name}",
+                        SubAgentPresetCard(preset, editable, "编辑子代理组${preset.name}", settingsStyle = true,
                             onClick = { if (editable) directory.change {
                                 check(repository.presetExists(preset.id)) { "子代理组不存在，请重试" }
                                 selectedId = preset.id
@@ -147,10 +151,10 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
     LaunchedEffect(editor, editable) { if (!editable) { rename = null; delete = null } }
     CompositionLocalProvider(LocalRippleConfiguration provides null) {
     WithoutPressRipple {
-        Scaffold(containerColor = MaterialTheme.colorScheme.surface,
+        Scaffold(containerColor = settingsPageBackground(),
             topBar = { TopAppBar(title = { Text(groupName) }, navigationIcon = {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回") }
-            }, colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface)) },
+            }, colors = TopAppBarDefaults.topAppBarColors(containerColor = settingsPageBackground())) },
             floatingActionButtonPosition = FabPosition.Center,
             floatingActionButton = {
                 FilledTonalButton(onClick = {
@@ -165,7 +169,7 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
             }) { padding ->
             Box(Modifier.fillMaxSize().padding(padding).horizontalCutoutPadding(), contentAlignment = Alignment.TopCenter) {
                 LazyColumn(Modifier.widthIn(max = 640.dp).fillMaxSize(),
-                    contentPadding = PaddingValues(start = 24.dp, end = 24.dp, top = 12.dp, bottom = 96.dp)) {
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp)) {
                     item {
                         Text(when (state) {
                             is SubAgentEditorState.Error -> "子代理配置读取或保存失败：${state.reason}"
@@ -178,8 +182,10 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
                     }
                     if (config != null) {
                         items(profiles, key = { it.id }) { profile ->
-                            Column(Modifier.fillMaxWidth().padding(top = 16.dp, bottom = 4.dp).alpha(if (editable) 1f else 0.38f)) {
-                                Column(Modifier.padding(bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(top = 12.dp).alpha(if (editable) 1f else 0.38f)
+                                .clip(RoundedCornerShape(22.dp)).background(Brush.linearGradient(usagePalette().sheet))
+                                .padding(16.dp)) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                         Icon(when (profile.role) {
@@ -220,7 +226,6 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
                                     }
                                     SubAgentProfileRow(profile, providers, enabled = editable, settings = true, draftAllowed = true)
                                 }
-                                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                             }
                         }
                     }

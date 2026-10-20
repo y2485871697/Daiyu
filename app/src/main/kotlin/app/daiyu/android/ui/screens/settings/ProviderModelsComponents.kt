@@ -6,7 +6,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 
@@ -29,7 +28,7 @@ internal fun ProviderModelManagementCard(endpoint: String, loading: Boolean = fa
 internal fun ProviderEmptyModelsPage(title: String, onBack: () -> Unit,
     tabs: LazyListScope.() -> Unit, notice: String) {
     var query by remember { mutableStateOf("") }
-    MiuixScaffoldPage(title, onBack) {
+    SettingsScaffoldPage(title, onBack) {
         tabs()
         item("model-management") { ProviderModelManagementCard("") }
         item("model-search") { SettingsSearch(query, { query = it }, "搜索模型", "local-model-search") }

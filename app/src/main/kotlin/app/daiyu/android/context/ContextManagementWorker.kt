@@ -5,11 +5,16 @@ import android.os.Looper
 import app.daiyu.android.domain.ConversationId
 import app.daiyu.android.domain.Message
 import app.daiyu.android.domain.context.ContextRevision
+import app.daiyu.android.model.ProviderProtocol
+import app.daiyu.android.storage.ProviderRepository
 
 /** Exact host selection identity, not a title, parent branch, or the last visible message. */
 internal data class ContextManagementOwner(val conversationId: ConversationId, val generation: Long) {
     init { require(generation >= 0 && conversationId.value.isNotBlank() && conversationId.value.length <= 200) }
 }
+
+/** Null binding is explicit current-model intent for one manual operation, never an error fallback. */
+internal data class ContextManagementSelection(val binding: SummaryModelBinding?, val protocol: ProviderProtocol)
 
 internal data class ContextManagementSnapshot(
     val conversationId: ConversationId,
@@ -18,6 +23,7 @@ internal data class ContextManagementSnapshot(
     val effective: PreparedContext,
     val configuration: CompressionSettings?,
     val summaryTarget: SummaryProfileDescriptor?,
+    val savedConfiguration: CompressionSettings? = configuration,
 ) {
     val canCompress: Boolean get() = originals.isNotEmpty() && configuration?.let {
         it.contextWindowTokens != null && it.summaryModel != null && it.keepTurns != null &&
@@ -30,6 +36,8 @@ internal data class ContextManagementSnapshot(
  * No network until that retained candidate is consumed by the existing coordinator/service. */
 internal interface ContextManagementSummaryProfiles {
     fun describe(binding: SummaryModelBinding): SummaryProfileDescriptor?
+    fun describeSelection(selection: ContextManagementSelection): SummaryProfileDescriptor =
+        throw UnsupportedOperationException("当前摘要配置不支持一次性选择；请刷新")
     fun freeze(expected: SummaryProfileDescriptor, usagePort: BoundSummaryUsagePort): BoundSummaryModel?
 }
 
@@ -55,6 +63,9 @@ internal interface ContextManagementLease {
 
 internal interface ContextManagementBackend {
     fun snapshot(lease: ContextManagementLease): ContextManagementSnapshot
+    fun selectCompression(lease: ContextManagementLease, expected: ContextManagementSnapshot,
+        selection: ContextManagementSelection): ContextManagementSnapshot =
+        throw UnsupportedOperationException("当前上下文后端不支持一次性选择；请刷新")
     fun archive(lease: ContextManagementLease, snapshot: ContextManagementSnapshot,
         offset: Int): ContextManagementArchive
     fun compress(lease: ContextManagementLease,
@@ -88,6 +99,23 @@ internal class ContextManagementWorker(
         }
     }
 
+    override fun selectCompression(lease: ContextManagementLease, expected: ContextManagementSnapshot,
+        selection: ContextManagementSelection): ContextManagementSnapshot {
+        checkLease(lease)
+        service.readQuery { validateSnapshot(lease, expected) }
+        val saved = requireNotNull(expected.savedConfiguration) { "压缩配置不可用；请重新保存设置后刷新" }
+        require(settings() == saved) { "压缩设置已改变；请刷新后重新选择" }
+        val target = profiles.describeSelection(selection)
+        val selected = expected.copy(configuration = saved.copy(summaryModel = target.binding),
+            summaryTarget = target, savedConfiguration = saved)
+        require(selected.canCompress) { "需要完整历史、明确窗口、保留轮数和可用摘要目标" }
+        checkLease(lease)
+        require(settings() == saved) { "压缩设置已改变；请刷新后重新选择" }
+        service.readQuery { validateSnapshot(lease, expected) }
+        checkLease(lease)
+        return selected
+    }
+
     override fun archive(lease: ContextManagementLease, snapshot: ContextManagementSnapshot,
         offset: Int): ContextManagementArchive {
         checkLease(lease)
@@ -105,7 +133,9 @@ internal class ContextManagementWorker(
         checkLease(lease)
         service.readQuery { validateSnapshot(lease, expected) }
         require(expected.canCompress) { "需要明确窗口、保留轮数和独立摘要绑定" }
-        val saved = requireNotNull(expected.configuration)
+        val saved = requireNotNull(expected.savedConfiguration)
+        val selected = requireNotNull(expected.configuration)
+        require(selected.copy(summaryModel = saved.summaryModel) == saved) { "本次压缩配置不匹配；请刷新后重新确认" }
         require(settings() == saved) { "压缩设置已改变；请刷新后重新确认" }
         // Explicit manual consent enables this SINGLE frozen preparation, not the saved auto switch.
         // Existing coordinator still freezes/validates the exact independent candidate and cancellation.
@@ -114,7 +144,7 @@ internal class ContextManagementWorker(
         var success = false
         var failure: Throwable? = null
         try {
-            val coordinator = ContextPreparationCoordinator(service, { saved.copy(automatic = true) }, policies,
+            val coordinator = ContextPreparationCoordinator(service, { selected.copy(automatic = true) }, policies,
                 SummaryModelResolver { binding ->
                     require(binding == target.binding) { "摘要目标不匹配；请刷新并重新确认" }
                     // Atomic revision comparison + credential capture, not a check followed by resolving
@@ -124,6 +154,7 @@ internal class ContextManagementWorker(
             val frozen = coordinator.freeze(expected.conversationId, emptyList(), lease.cancellation)
             val summarizer = requireNotNull(frozen.summarizer) { "独立摘要模型不可用；未回退聊天模型" }
             checkLease(lease)
+            require(settings() == saved) { "压缩设置已改变；请刷新后重新确认" }
             check(frozen.consumed.compareAndSet(false, true)) { "准备只能使用一次" }
             // Manual intent bypasses only the automatic pressure threshold. Service owns the retained
             // cut, full authoritative-history CAS, budget, archive publication and cancellation checks.
@@ -181,15 +212,25 @@ internal class ContextManagementWorker(
                 ProductionCompressionSettingsStore(app).snapshot().coordinatorSettings()
             }, policies = ProductionCompressionPolicyResolver,
                 profiles = object : ContextManagementSummaryProfiles {
+                    override fun describeSelection(selection: ContextManagementSelection): SummaryProfileDescriptor {
+                        requireWorker()
+                        return ManualSummaryTargets.describe(ProviderRepository(app), selection)
+                    }
                     override fun describe(binding: SummaryModelBinding): SummaryProfileDescriptor {
                         requireWorker()
-                        return if (CatalogSummaryBindings.decode(binding) == null) SummaryProfileStore(app).descriptor(binding)
-                        else catalogSummaryDescriptor(app, binding)
+                        return when {
+                            ManualSummaryTargets.isManual(binding) -> ManualSummaryTargets.descriptor(ProviderRepository(app), binding)
+                            CatalogSummaryBindings.decode(binding) != null -> catalogSummaryDescriptor(app, binding)
+                            else -> SummaryProfileStore(app).descriptor(binding)
+                        }
                     }
                     override fun freeze(expected: SummaryProfileDescriptor, usagePort: BoundSummaryUsagePort): BoundSummaryModel? {
                         requireWorker()
-                        val configuration = if (CatalogSummaryBindings.decode(expected.binding) == null)
-                            SummaryProfileStore(app).configuration(expected) else catalogSummaryConfiguration(app, expected)
+                        val configuration = when {
+                            ManualSummaryTargets.isManual(expected.binding) -> ManualSummaryTargets.configuration(ProviderRepository(app), expected)
+                            CatalogSummaryBindings.decode(expected.binding) != null -> catalogSummaryConfiguration(app, expected)
+                            else -> SummaryProfileStore(app).configuration(expected)
+                        }
                         return ProviderSummaryModelResolver(lookup = { binding ->
                             require(binding == expected.binding)
                             configuration // Retain the exact descriptor revision; do not resolve again.

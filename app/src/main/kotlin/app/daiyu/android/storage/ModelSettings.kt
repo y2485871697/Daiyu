@@ -120,6 +120,14 @@ class ModelSettingsStore internal constructor(
         check(!editing.requestOptionsUnavailable) { "模型请求策略不可用" }
         editing.settings.copy(model = apiModel).requestEndpoint()
     }
+    /** Consent metadata only: never decrypt keys/headers or validate an empty credential. */
+    internal fun summaryRequestMetadata(apiModel: String? = null): ModelSettings = synchronized(lock) {
+        checkCatalogConfiguration()
+        val editing = editingWithoutCredential(includeHeadersState = false)
+        check(!editing.requestOptionsUnavailable) { "模型请求策略不可用" }
+        editing.settings.copy(model = apiModel ?: editing.settings.model)
+    }
+
     internal fun loadForRun(modelId: String? = null): ModelSettings = modelCatalog.readConfiguration {
         val current = load()
         val selected = modelCatalog.readRegisteredModel(modelId ?: current.model)

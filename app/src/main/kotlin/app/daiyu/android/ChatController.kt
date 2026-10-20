@@ -15,6 +15,7 @@ import app.daiyu.android.context.ContextManagementAdmission
 import app.daiyu.android.context.ContextManagementLease
 import app.daiyu.android.context.ContextManagementBackend
 import app.daiyu.android.context.ContextManagementSnapshot
+import app.daiyu.android.context.ContextManagementSelection
 import app.daiyu.android.context.ContextManagementWorker
 import app.daiyu.android.context.ContextPreparationCoordinator
 import app.daiyu.android.context.ContextPreparationCancellation
@@ -364,6 +365,11 @@ class ChatController internal constructor(private val application:Application,
                 override fun snapshot(lease: ContextManagementLease): ContextManagementSnapshot {
                     lease.checkCurrent()
                     return delegate.snapshot(lease)
+                }
+                override fun selectCompression(lease: ContextManagementLease, expected: ContextManagementSnapshot,
+                    selection: ContextManagementSelection): ContextManagementSnapshot {
+                    lease.checkCurrent()
+                    return delegate.selectCompression(lease, expected, selection)
                 }
                 override fun archive(lease: ContextManagementLease, snapshot: ContextManagementSnapshot, offset: Int) =
                     run { lease.checkCurrent(); delegate.archive(lease, snapshot, offset) }

@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-internal enum class ContextManagementOperation { REFRESH, ARCHIVE, COMPRESS }
+internal enum class ContextManagementOperation { REFRESH, ARCHIVE, SELECT, COMPRESS }
 internal data class ContextManagementState(
     val owner: ContextManagementOwner,
     val snapshot: ContextManagementSnapshot? = null,
@@ -25,6 +25,7 @@ internal interface ContextManagementControllerAdapter : AutoCloseable {
     fun openArchive()
     fun nextArchivePage()
     fun previousArchivePage()
+    fun selectCompression(selection: ContextManagementSelection): Boolean = false
     fun requestCompression()
     fun dismissCompression()
     fun confirmCompression()
@@ -58,13 +59,15 @@ internal class ControlledContextManagementAdapter(
     private class Active(val lease: ContextManagementLease, val operation: ContextManagementOperation)
     private var active: Active? = null
 
-    override fun refresh() = launch(ContextManagementOperation.REFRESH, { backend.snapshot(it) }) { snapshot ->
-        mutable.value = mutable.value.copy(snapshot = snapshot, archive = null, requiresRefresh = false,
-            notice = when {
-                snapshot.configuration == null -> "压缩配置不可用；本机会话仍可查看，请明确重新保存设置"
-                snapshot.summaryTarget == null -> "摘要目标或版本不可用；本机会话仍可查看，请重新保存独立摘要 profile 后刷新"
-                else -> null
-            })
+    override fun refresh() {
+        launch(ContextManagementOperation.REFRESH, { backend.snapshot(it) }) { snapshot ->
+            mutable.value = mutable.value.copy(snapshot = snapshot, archive = null, requiresRefresh = false,
+                notice = when {
+                    snapshot.configuration == null -> "压缩配置不可用；本机会话仍可查看，请明确重新保存设置"
+                    snapshot.summaryTarget == null -> "摘要目标或版本不可用；本机会话仍可查看，请重新保存独立摘要 profile 后刷新"
+                    else -> null
+                })
+        }
     }
 
     override fun openArchive() = loadArchive(0)
@@ -82,6 +85,19 @@ internal class ControlledContextManagementAdapter(
         if (state.requiresRefresh || snapshot.effective.archiveId == null) return
         launch(ContextManagementOperation.ARCHIVE, { backend.archive(it, snapshot, offset) }) { archive ->
             mutable.value = mutable.value.copy(archive = archive, notice = null)
+        }
+    }
+
+    override fun selectCompression(selection: ContextManagementSelection): Boolean {
+        val state = mutable.value
+        val expected = state.snapshot ?: return false
+        if (!available() || state.requiresRefresh) return false
+        return launch(ContextManagementOperation.SELECT, { lease ->
+            backend.selectCompression(lease, expected, selection).also { require(it.canCompress) }
+        }) { selected ->
+            confirmedSnapshot = selected
+            mutable.value = mutable.value.copy(snapshot = selected, archive = null, requiresRefresh = false,
+                confirmingCompression = true, notice = null)
         }
     }
 
@@ -132,20 +148,20 @@ internal class ControlledContextManagementAdapter(
     private fun available(): Boolean = !closed && active == null && admission.isCurrent(mutable.value.owner)
 
     private fun <T> launch(operation: ContextManagementOperation,
-        work: (ContextManagementLease) -> T, success: (T) -> Unit) {
-        if (!available()) return
+        work: (ContextManagementLease) -> T, success: (T) -> Unit): Boolean {
+        if (!available()) return false
         confirmedSnapshot = null // Refresh/archive/consume invalidates the previous consent.
         val lease = admission.tryReserve(mutable.value.owner)
         if (lease == null) {
             mutable.value = mutable.value.copy(confirmingCompression = false,
                 notice = "当前会话正在发送、准备或执行任务；未开始操作，请稍后刷新")
-            return
+            return false
         }
         if (lease.owner != mutable.value.owner) {
             lease.finish()
             mutable.value = mutable.value.copy(confirmingCompression = false, requiresRefresh = true,
                 notice = "准备归属不匹配；未开始操作，请重新打开页面")
-            return
+            return false
         }
         val pending = Active(lease, operation)
         active = pending
@@ -171,10 +187,17 @@ internal class ControlledContextManagementAdapter(
                         return@publish
                     }
                     mutable.value = mutable.value.copy(operation = null, cancellationRequested = false)
+                    if (operation == ContextManagementOperation.SELECT && lease.cancellation.isCancelled) {
+                        mutable.value = mutable.value.copy(confirmingCompression = false, requiresRefresh = true,
+                            notice = "本次目标选择已取消；未发起摘要或聊天请求。请刷新后重新选择。")
+                        return@publish
+                    }
                     result.fold(onSuccess = success, onFailure = { failure ->
                         val mutation = operation == ContextManagementOperation.COMPRESS
                         mutable.value = mutable.value.copy(requiresRefresh = true,
                             notice = when {
+                                operation == ContextManagementOperation.SELECT ->
+                                    "摘要目标不可用、已取消或上下文已变化；未发起摘要或聊天请求。请刷新后重新选择。"
                                 mutation && failure is SummaryProfileChangedException ->
                                     "摘要目标或 profile 版本已改变；未发起请求。请刷新目标并重新明确确认费用。"
                                 mutation && failure is CancellationException ->
@@ -193,6 +216,8 @@ internal class ControlledContextManagementAdapter(
             lease.finish()
             mutable.value = mutable.value.copy(operation = null, confirmingCompression = false,
                 notice = "准备工作线程不可用；未开始操作")
+            return false
         }
+        return true
     }
 }

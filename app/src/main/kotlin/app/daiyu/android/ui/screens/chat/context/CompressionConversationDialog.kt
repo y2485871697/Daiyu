@@ -52,6 +52,9 @@ internal fun CompressionConversationDialog(
     onChooseModel: () -> Unit,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    enabled: Boolean = true,
+    notice: String? = null,
+    onManage: (() -> Unit)? = null,
 ) {
     val colors = assistantPreviewPalette()
     var showHelp by remember { mutableStateOf(false) }
@@ -62,7 +65,7 @@ internal fun CompressionConversationDialog(
                 Row(Modifier.fillMaxWidth().heightIn(min = 44.dp),
                     horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                     Text("自定义压缩模型", fontSize = 14.sp)
-                    AssistantPreviewSwitch(draft.customModel, true, "",
+                    AssistantPreviewSwitch(draft.customModel, enabled, "",
                         Modifier.testTag("compression-dialog-custom").semantics { contentDescription = "自定义压缩模型" },
                         onToggle = { onChange(draft.copy(customModel = it)) })
                 }
@@ -70,7 +73,7 @@ internal fun CompressionConversationDialog(
             if (draft.customModel) item("model") {
                 Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("compression-dialog-model")
                     .clip(RoundedCornerShape(12.dp)).background(colors.fieldBackground)
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                    .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null,
                         onClick = onChooseModel).padding(horizontal = 14.dp, vertical = 12.dp),
                     verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(draft.modelLabel ?: "选择模型", Modifier.weight(1f), fontSize = 14.sp,
@@ -92,7 +95,7 @@ internal fun CompressionConversationDialog(
                         Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
                             .testTag("compression-dialog-api:${protocol.wireName}")
                             .background(if (selected) colors.fieldBackground else androidx.compose.ui.graphics.Color.Transparent)
-                            .selectable(selected, role = Role.RadioButton,
+                            .selectable(selected, enabled = enabled, role = Role.RadioButton,
                                 interactionSource = remember { MutableInteractionSource() }, indication = null,
                                 onClick = { onChange(draft.copy(protocol = protocol)) })
                             .padding(start = 14.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
@@ -103,6 +106,13 @@ internal fun CompressionConversationDialog(
                         }
                     }
                 }
+            }
+            if (notice != null) item("notice") {
+                Text(notice, Modifier.testTag("context-notice"), color = colors.muted, fontSize = 12.sp)
+            }
+            if (onManage != null) item("local-context") {
+                AssistantPreviewButton("查看本机上下文", onManage,
+                    Modifier.fillMaxWidth().testTag("context-view"))
             }
             item("help") {
                 Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).testTag("compression-dialog-help")
@@ -120,7 +130,7 @@ internal fun CompressionConversationDialog(
         }
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f).testTag("context-close"))
-            AssistantPreviewButton("确定", onConfirm, Modifier.weight(1f).testTag("context-compress"), primary = true)
+            AssistantPreviewButton("确定", { if (enabled) onConfirm() }, Modifier.weight(1f).testTag("context-compress"), primary = true)
         }
     }
 }

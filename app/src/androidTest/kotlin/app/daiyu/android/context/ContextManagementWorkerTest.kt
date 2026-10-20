@@ -47,6 +47,11 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         worker = ContextManagementWorker(service, { configuration }, ProductionCompressionPolicyResolver,
             object : ContextManagementSummaryProfiles {
                 override fun describe(binding: SummaryModelBinding) = target?.takeIf { it.binding == binding }
+                override fun describeSelection(selection: ContextManagementSelection): SummaryProfileDescriptor {
+                    val selected = selection.binding ?: SummaryModelBinding("explicit-chat", "selected-current")
+                    target = SummaryProfileDescriptor(selected, "selected-once", "https://selected.invalid/v1/responses", "selected-api")
+                    return checkNotNull(target)
+                }
                 override fun freeze(expected: SummaryProfileDescriptor, usagePort: BoundSummaryUsagePort): BoundSummaryModel? {
                     if (target != expected) throw SummaryProfileChangedException()
                     resolutions++
@@ -70,7 +75,7 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         }
         return Lease(ContextManagementOwner(id, 17))
     }
-    private fun bound() = BoundSummaryModel(binding, SummaryModelTransport { history, _ ->
+    private fun bound(selectedBinding: SummaryModelBinding = binding) = BoundSummaryModel(selectedBinding, SummaryModelTransport { history, _ ->
         requests++
         assertEquals(1, history.size)
         assertEquals("user", history.single().role)
@@ -92,6 +97,33 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
     private fun priorArchive(lease: Lease): PreparedContext {
         service.compress(lease.owner.conversationId, CompressionPolicy(keepTurns = 2), ContextSummarizer { "旧有效摘要" })
         return service.prepareSend(lease.owner.conversationId)
+    }
+
+    fun testOneShotSelectionUsesNewBindingWithoutSavingOrChangingAutomaticPolicy() {
+        val lease = seed()
+        val saved = configuration
+        val before = worker.snapshot(lease)
+        val selectedBinding = SummaryModelBinding("explicit-only", "chosen-summary")
+        val selected = worker.selectCompression(lease, before,
+            ContextManagementSelection(selectedBinding, app.daiyu.android.model.ProviderProtocol.RESPONSES))
+        assertSame(saved, selected.savedConfiguration)
+        assertEquals(selectedBinding, selected.configuration!!.summaryModel)
+        assertEquals(saved, configuration)
+        assertEquals(0, requests); assertEquals(0, resolutions)
+        resolve = { bound(selectedBinding) }
+        assertNotNull(worker.compress(lease, selected).archiveId)
+        assertEquals(1, requests); assertEquals(1, resolutions)
+        assertEquals(saved, configuration)
+        assertFalse(configuration.automatic)
+    }
+
+    fun testChangedSavedSettingsAfterOneShotSelectionRejectBeforeSummaryFreeze() {
+        val lease = seed()
+        val selected = worker.selectCompression(lease, worker.snapshot(lease),
+            ContextManagementSelection(null, app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS))
+        configuration = configuration.copy(keepTurns = 2)
+        failure { worker.compress(lease, selected) }
+        assertEquals(0, resolutions); assertEquals(0, requests)
     }
 
     fun testMainThreadMisuseRejectsBeforeReadingStorageOrResolvingModel() {

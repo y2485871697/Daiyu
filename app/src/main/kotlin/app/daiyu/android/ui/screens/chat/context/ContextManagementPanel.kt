@@ -24,6 +24,10 @@ import app.daiyu.android.context.ArchiveCodec
 import app.daiyu.android.context.ContextManagementControllerAdapter
 import app.daiyu.android.context.ContextManagementOperation
 import app.daiyu.android.context.ContextManagementState
+import app.daiyu.android.context.ContextManagementSelection
+import app.daiyu.android.context.CatalogSummaryBindings
+import app.daiyu.android.storage.ProviderCatalogRunTarget
+import app.daiyu.android.ui.screens.settings.SettingsModelChoice
 import app.daiyu.android.domain.Message
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.ui.screens.settings.SettingsModelPicker
@@ -39,8 +43,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.sp
 
-/** Visit-scoped adapter: construction/loading never starts a model request. Parent supplies the
- * real admission seam; this route is intentionally not attached to Main's pendingFeature. */
+/** Main's visit-scoped context page. Loading and choosing a target never start a paid request. */
 @Composable
 internal fun ContextManagementRoute(
     adapter: ContextManagementControllerAdapter,
@@ -52,38 +55,55 @@ internal fun ContextManagementRoute(
     DisposableEffect(adapter) { onDispose { adapter.close() } }
     val dismiss = { adapter.close(); onClose() }
     val initial = remember(adapter, state.snapshot?.configuration?.summaryModel, state.snapshot?.summaryTarget) {
-        CompressionDialogDraft(
-            customModel = state.snapshot?.configuration?.summaryModel != null,
+        val binding = state.snapshot?.configuration?.summaryModel
+        val protocol = runCatching { binding?.let(CatalogSummaryBindings::decode)?.protocol }.getOrNull()
+            ?: source.protocol("compression") ?: ProviderProtocol.CHAT_COMPLETIONS
+        CompressionDialogDraft(customModel = binding != null,
             modelLabel = state.snapshot?.summaryTarget?.apiModel ?: source.label("compression"),
-            modelKey = source.key("compression"),
-            protocol = if (source.protocol("compression") == ProviderProtocol.RESPONSES)
-                ProviderProtocol.RESPONSES else ProviderProtocol.CHAT_COMPLETIONS,
-        )
+            modelKey = source.key("compression"), protocol = if (protocol == ProviderProtocol.RESPONSES) protocol else ProviderProtocol.CHAT_COMPLETIONS)
     }
     var draft by remember(initial) { mutableStateOf(initial) }
-    var modelPicked by remember(initial) { mutableStateOf(false) }
+    var picked by remember(initial) { mutableStateOf<SettingsModelChoice?>(null) }
     var choosingModel by remember(adapter) { mutableStateOf(false) }
     var managing by remember(adapter) { mutableStateOf(false) }
+    var notice by remember(adapter) { mutableStateOf<String?>(null) }
     if (managing) {
-        ContextManagementPanel(state, adapter, onClose = dismiss)
+        ContextManagementPanel(state, adapter, onClose = dismiss, onChooseTarget = {
+            adapter.dismissCompression()
+            adapter.refresh()
+            picked = null
+            notice = null
+            managing = false
+        })
     } else if (choosingModel) {
         SettingsModelPicker("压缩模型", source, draft.modelKey,
+            protocols = setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS),
             onSelect = { choice ->
-                draft = draft.copy(modelLabel = choice.selection.record.displayName, modelKey = choice.key)
-                modelPicked = true
+                picked = choice
+                draft = draft.copy(modelLabel = choice.label, modelKey = choice.key)
                 choosingModel = false
             }, onDismiss = { choosingModel = false })
     } else {
-        CompressionConversationDialog(draft, onChange = { draft = it },
+        CompressionConversationDialog(draft, onChange = { draft = it; notice = null },
             onChooseModel = { choosingModel = true }, onDismiss = dismiss, onConfirm = {
-                // New model/API choices remain a local draft until their execution path is wired.
-                // Never send to the old saved target after the user selected a different target.
-                if (draft == initial && !modelPicked && state.snapshot?.canCompress == true &&
-                    state.operation == null && !state.requiresRefresh) {
-                    adapter.requestCompression()
-                    if (adapter.state.value.confirmingCompression) managing = true
+                if (state.operation == null && !state.requiresRefresh) {
+                    if (draft == initial && picked == null && state.snapshot?.canCompress == true) {
+                        adapter.requestCompression()
+                        if (adapter.state.value.confirmingCompression) managing = true
+                    } else {
+                        val choice = picked
+                        val binding = if (!draft.customModel) null else if (choice == null)
+                            state.snapshot?.configuration?.summaryModel else CatalogSummaryBindings.encode(
+                                ProviderCatalogRunTarget(choice.provider, choice.selection.providerIdentity,
+                                    choice.selection.expectedRevision, choice.selection.record.settings.localIdentity,
+                                    choice.selection.record.id, choice.protocol))
+                        if (draft.customModel && binding == null) notice = "请先选择压缩模型"
+                        else if (adapter.selectCompression(ContextManagementSelection(binding, draft.protocol))) managing = true
+                        else notice = "当前不可选择目标，请先查看本机上下文并刷新"
+                    }
                 }
-            })
+            }, enabled = state.operation == null, notice = notice ?: state.notice,
+            onManage = { managing = true })
     }
 }
 
@@ -95,6 +115,7 @@ internal fun ContextManagementPanel(
     actions: ContextManagementControllerAdapter,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    onChooseTarget: (() -> Unit)? = null,
 ) {
     var showAdvanced by remember(state.owner) { mutableStateOf(false) }
     var showOriginals by remember(state.owner) { mutableStateOf(false) }
@@ -113,10 +134,15 @@ internal fun ContextManagementPanel(
                     Text(when (state.operation) {
                         ContextManagementOperation.COMPRESS -> "正在手动压缩；占用与发送相同的准备槽"
                         ContextManagementOperation.ARCHIVE -> "正在读取本机档案"
+                        ContextManagementOperation.SELECT -> "正在核对本次摘要目标；尚未发起请求"
                         else -> "正在读取本机会话"
                     })
                     TextButton(text = "取消并等待退出", enabled = !state.cancellationRequested,
                         onClick = actions::cancel, modifier = Modifier.testTag("context-cancel"))
+                }
+                onChooseTarget?.let { choose ->
+                    TextButton(text = "选择压缩目标", enabled = !busy && !state.requiresRefresh,
+                        onClick = choose, modifier = Modifier.testTag("context-select-target"))
                 }
                 state.notice?.let { Text(it, modifier = Modifier.testTag("context-notice")) }
                 if (state.requiresRefresh) Text("以下是操作前快照，不代表最新状态；请先刷新核对。")

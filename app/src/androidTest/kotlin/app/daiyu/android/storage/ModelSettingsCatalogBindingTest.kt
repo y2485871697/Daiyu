@@ -474,4 +474,55 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         assertEquals(initial, store.load())
     }
 
+    fun testManualSummaryMetadataAndChangedConsentNeverReadMalformedCredentials() {
+        store.save(initial)
+        val repository = ProviderRepository(context, primary = store)
+        raw.edit().putString("key", "malformed-private-ciphertext").commit()
+        val before = raw.all
+        val descriptor = app.daiyu.android.context.ManualSummaryTargets.describe(repository,
+            app.daiyu.android.context.ContextManagementSelection(null, app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS))
+        assertEquals(initial.model, descriptor.apiModel)
+        assertTrue(descriptor.endpoint.endsWith("/chat/completions"))
+        assertEquals(before, raw.all)
+        try {
+            app.daiyu.android.context.ManualSummaryTargets.configuration(repository,
+                descriptor.copy(endpoint = "https://wrong.invalid/v1/chat/completions"))
+            fail("modified consent")
+        } catch (_: app.daiyu.android.context.SummaryProfileChangedException) { }
+        assertEquals(before, raw.all)
+    }
+
+    fun testManualSummarySelectedProviderAndProtocolDoNotMutateChatOrSavedSelection() {
+        store.save(initial)
+        val repository = ProviderRepository(context, primary = store)
+        val other = initial.copy(endpoint = "https://manual-other.invalid", apiKey = "manual-other-key")
+        val registered = repository.registerConfigured(repository.snapshot().revision, "Manual other", other,
+            false, enabled = true, admit = {})
+        val editor = repository.editor(registered.providers.single { it.name == "Manual other" }.slotId)
+        repository.withEditor(editor) { targetStore ->
+            val catalog = targetStore.modelCatalogSnapshot()
+            assertEquals(CatalogCommitResult.COMMITTED, targetStore.modelCatalog.compareAndAppend(
+                catalog.providerIdentity, catalog.revision,
+                listOf(CatalogModelEdit("one-shot-summary", "One shot", "32768", true, false).newRecord())) { false })
+        }
+        val catalog = repository.catalogSnapshot(editor)
+        val record = catalog.models.single { it.id == "one-shot-summary" }
+        val target = ProviderCatalogRunTarget(editor, catalog.providerIdentity, catalog.revision,
+            record.settings.localIdentity, record.id, other.protocol)
+        val selection = app.daiyu.android.context.ContextManagementSelection(
+            app.daiyu.android.context.CatalogSummaryBindings.encode(target), app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS)
+        val saved = repository.snapshot()
+        val descriptor = app.daiyu.android.context.ManualSummaryTargets.describe(repository, selection)
+        val frozen = app.daiyu.android.context.ManualSummaryTargets.configuration(repository, descriptor)
+        assertEquals("one-shot-summary", frozen.apiModel)
+        assertEquals(other.apiKey, frozen.provider.apiKey)
+        assertEquals(app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS, frozen.provider.protocol)
+        assertTrue(descriptor.endpoint.endsWith("/chat/completions"))
+        assertEquals(saved, repository.snapshot())
+        assertEquals(initial, store.load())
+        assertEquals(other, repository.editing(editor).settings)
+        repository.setEnabled(saved.revision, editor.slotId, false)
+        rejectsSelection { app.daiyu.android.context.ManualSummaryTargets.configuration(repository, descriptor) }
+    }
+
 }

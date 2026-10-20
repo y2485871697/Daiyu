@@ -18,6 +18,12 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** No prompting, binding, command execution or fallback until the host explicitly asks. */
 class ShizukuAuthorization(context: Context) : AutoCloseable {
@@ -62,6 +68,32 @@ class ShizukuAuthorization(context: Context) : AutoCloseable {
         check(status.availability in setOf(ShizukuAvailability.PERMISSION_REQUIRED, ShizukuAvailability.AUTHORIZED)) { "shizuku_service_unavailable" }
         if (status.availability != ShizukuAvailability.AUTHORIZED) Shizuku.requestPermission(PERMISSION_REQUEST)
     }
+    suspend fun requestPermissionAndAwait(): Boolean {
+        val requestCode = modeRequestCode.incrementAndGet()
+        val result = CompletableDeferred<Unit>()
+        val listener = Shizuku.OnRequestPermissionResultListener { code, _ ->
+            if (code == requestCode) result.complete(Unit)
+        }
+        Shizuku.addRequestPermissionResultListener(listener)
+        return try {
+            withTimeoutOrNull(60_000) {
+                val requested = withContext(Dispatchers.IO) {
+                    check(!closed.get())
+                    when (refresh().availability) {
+                        ShizukuAvailability.AUTHORIZED -> false
+                        ShizukuAvailability.PERMISSION_REQUIRED -> { Shizuku.requestPermission(requestCode); true }
+                        else -> error("shizuku_service_unavailable")
+                    }
+                }
+                if (requested) result.await()
+                // Re-read the live server; a callback or cached SDK grant is not authorization.
+                withContext(Dispatchers.IO) { refresh().availability == ShizukuAvailability.AUTHORIZED }
+            } ?: false
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { false }
+        finally { Shizuku.removeRequestPermissionResultListener(listener) }
+    }
+
     private fun invalidate() { gate.invalidate(); current?.close() }
     /** The host must explicitly choose shell (2000) or root (0); no default or fallback. */
     fun connect(expectedUid: Int): ShizukuConnection = synchronized(connectLock) {
@@ -132,7 +164,10 @@ class ShizukuAuthorization(context: Context) : AutoCloseable {
         Shizuku.removeRequestPermissionResultListener(permission)
         cleanup.shutdown()
     }
-    companion object { private const val PERMISSION_REQUEST = 0x5348 }
+    companion object {
+        private const val PERMISSION_REQUEST = 0x5348
+        private val modeRequestCode = AtomicInteger(0x6000)
+    }
 }
 
 /** A live connection is not a task permission. Only trusted host code may create an execution scope. */

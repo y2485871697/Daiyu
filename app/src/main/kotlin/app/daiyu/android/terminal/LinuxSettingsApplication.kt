@@ -2,6 +2,8 @@ package app.daiyu.android.terminal
 
 import android.content.Context
 import android.os.Looper
+import app.daiyu.android.runningmode.AndroidRunningModeStore
+import app.daiyu.android.runningmode.RunningMode
 import app.daiyu.android.integration.tools.TerminalPtyLaunch
 import app.daiyu.android.domain.ConversationId
 import java.io.File
@@ -17,6 +19,7 @@ class LinuxSettingsApplication private constructor(
     private val admission: LinuxSettingsAdmission,
     private val terminalSelection: TerminalTrustedLinuxSelection,
     private val executionModes: Map<LinuxGenerationRef, LinuxExecutionMode>,
+    private val allowChroot: () -> Boolean,
 ) : AutoCloseable {
     /**
      * All parent Linux open callbacks must use this entry, not terminalOwner.openLinux directly.
@@ -24,7 +27,9 @@ class LinuxSettingsApplication private constructor(
      * cannot return and then admit a previously checked open. Already admitted runs retain leases.
      */
     fun openLinux(reference: LinuxGenerationRef, conversationId: ConversationId? = null): Boolean =
-        executionModes[reference]?.let { LinuxRuntimePlatform.unavailableReason(it) == null } == true &&
+        executionModes[reference]?.let {
+            LinuxRuntimePlatform.unavailableReason(it) == null && (it != LinuxExecutionMode.CHROOT || allowChroot())
+        } == true &&
             admission.admit(reference) { terminalOwner.openLinux(reference, conversationId) }
 
     /**
@@ -40,7 +45,9 @@ class LinuxSettingsApplication private constructor(
     ): TerminalPtyLaunch.Linux {
         check(Looper.myLooper() != Looper.getMainLooper()) { "terminal_freeze_requires_worker" }
         return admission.freeze(reference) {
-            LinuxRuntimePlatform.requireSupported(checkNotNull(executionModes[reference]) { "linux_trusted_installation_unavailable" })
+            val mode = checkNotNull(executionModes[reference]) { "linux_trusted_installation_unavailable" }
+            check(mode != LinuxExecutionMode.CHROOT || allowChroot()) { "linux_root_mode_required" }
+            LinuxRuntimePlatform.requireSupported(mode)
             terminalSelection.withSelection(reference) { store ->
                 TerminalPtyLaunch.Linux.freeze(store, reference, tempDirectory, hostWorkingDirectory)
             }
@@ -59,6 +66,8 @@ class LinuxSettingsApplication private constructor(
             catalog: TrustedLinuxCatalog = TrustedLinuxCatalog(File(context.filesDir.canonicalFile, "trusted-linux-catalog"),
                 File(context.filesDir.canonicalFile, "linux-chroot-installations")),
         ): LinuxSettingsApplication {
+            val runningMode = AndroidRunningModeStore.get(context)
+            val allowChroot = { runningMode.mode.value == RunningMode.ROOT }
             val snapshot = catalog.load()
             val modes = snapshot.associate { LinuxGenerationRef(it.environmentId, it.generation) to it.executionMode }
             val admission = LinuxSettingsAdmission(snapshot.filter { LinuxRuntimePlatform.unavailableReason(it.executionMode) == null }
@@ -69,10 +78,10 @@ class LinuxSettingsApplication private constructor(
             val installation = app.daiyu.android.terminal.install.LinuxInstallCoordinator.android(context, access)
             val chrootInstallation = app.daiyu.android.terminal.install.LinuxInstallCoordinator.android(context, access, LinuxExecutionMode.CHROOT)
             val settings = LinuxSettingsController(access, admission, startupEntries = snapshot, installation = installation,
-                chrootInstallation = chrootInstallation)
+                chrootInstallation = chrootInstallation, allowChroot = allowChroot)
             val selection = TerminalTrustedLinuxSelection(File(context.filesDir, "user-terminal/linux-selection"), snapshot,
                 chrootRoot = File(context.filesDir.canonicalFile, "linux-chroot-installations"))
-            return LinuxSettingsApplication(owner, settings, admission, selection, modes)
+            return LinuxSettingsApplication(owner, settings, admission, selection, modes, allowChroot)
         }
     }
 }

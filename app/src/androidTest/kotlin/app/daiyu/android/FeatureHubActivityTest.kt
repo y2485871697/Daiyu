@@ -117,17 +117,29 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         assertEquals(before, fixture.database.exportBackup()); assertEquals(0, fixture.opens.get())
     }
 
+    fun testRunningModeEntryShowsOnlyThreeChoicesAndReturnsToSettings() {
+        setDraft("运行模式入口草稿")
+        openHub()
+        entry("running_mode").performClick()
+        node("page:运行模式").assertExists()
+        for (mode in listOf("normal", "root", "shizuku")) node("running-mode:$mode").assertHasClickAction()
+        backToPage(activity, "page:设置")
+        backToChat(activity)
+        assertDraft("运行模式入口草稿")
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testOriginalSettingsAppearOutsideExistingChatTreeWithoutStateLabels() {
         openHub()
         val expectedIds = listOf(
             "appearance", "assistants", "voice", "haptics",
             "providers", "compression", "vision", "subagents", "title_model", "reconnect",
             "pet", "skills", "mcp",
-            "workspace", "linux", "task_surface",
+            "running_mode", "workspace", "linux", "task_surface",
             "usage", "backup", "logging", "export_logs", "clear_logs",
             "updates", "telegram", "qq", "source", "relay", "relay_st", "relay_moyu", "donate",
         )
-        assertEquals(29, entries.size)
+        assertEquals(30, entries.size)
         for (engineering in listOf(false, true)) {
             assertEquals(expectedIds, SettingsCatalog.visibleGroups(engineering).flatMap { it.entries }.map { it.id })
         }

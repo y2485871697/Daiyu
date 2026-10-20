@@ -169,6 +169,8 @@ internal fun DaiyuSettingsScreen(
         BackHandler(onBack = localBack)
         if (openedPage == SettingsLocalPage.TASK_SURFACE) {
             TaskSurfaceSettingsPanel(onBack = localBack, modifier = modifier)
+        } else if (openedPage == SettingsLocalPage.RUNNING_MODE) {
+            RunningModeSettingsScreen(onBack = localBack, modifier = modifier)
         } else if (openedPage == SettingsLocalPage.WORKSPACE) {
             WorkspaceSettingsScreen(onBack = localBack, modifier = modifier)
         } else {

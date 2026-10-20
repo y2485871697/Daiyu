@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.activity.compose.setContent
+import app.daiyu.android.runningmode.*
 import androidx.compose.ui.test.*
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
@@ -12,6 +13,11 @@ import java.util.concurrent.atomic.AtomicInteger
 class LinuxSettingsScreenTest : WiredActivityTestCase() {
     private val writes = AtomicInteger()
     private var settings: LinuxSettingsController? = null
+    private val modes = RunningModeStore(object : RunningModePersistence {
+        private var value: String? = null
+        override fun read() = value
+        override fun write(value: String) { this.value = value }
+    })
     private fun show() {
         val catalog = object : LinuxSettingsCatalogAccess {
             override fun freeze(configuration: LinuxInstallation): FrozenLinuxApproval { writes.incrementAndGet(); error("no configuration writes") }
@@ -28,7 +34,7 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    LinuxSettingsScreen(controller, page, onBack = {})
+                    LinuxSettingsScreen(controller, page, onBack = {}, runningModeStore = modes)
                 }
             }
         }
@@ -56,12 +62,33 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         node("linux-distribution-choice").performClick()
         ui.onNodeWithText("软件兼容性更好的 glibc 环境").performClick()
         node("linux-distribution-choice").assertTextContains("Debian")
+        modes.save(RunningMode.ROOT)
+        ui.waitForIdle()
         revealLinux("linux-execution-choice").performClick()
         ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").performClick()
         revealLinux("linux-execution-choice").assertTextContains("Root 模式 · chroot")
         assertEquals(0, writes.get())
         assertEquals(0, fixture.opens.get())
     }
+    fun testChrootChoiceIsOnlyVisibleInRootModeAndOldPopupCannotSelectIt() {
+        show()
+        for (mode in listOf(RunningMode.NORMAL, RunningMode.SHIZUKU)) {
+            modes.save(mode); ui.waitForIdle()
+            revealLinux("linux-execution-choice").performClick()
+            ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertDoesNotExist()
+            ui.onNodeWithText("无需 Root，使用独立的私有 Linux 环境").performClick()
+        }
+        modes.save(RunningMode.ROOT); ui.waitForIdle()
+        revealLinux("linux-execution-choice").performClick()
+        ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertExists()
+        modes.save(RunningMode.NORMAL); ui.waitForIdle()
+        ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").assertDoesNotExist()
+        ui.onNodeWithText("无需 Root，使用独立的私有 Linux 环境").performClick()
+        revealLinux("linux-execution-choice").assertTextContains("普通模式 · PRoot")
+        assertEquals(0, writes.get())
+        assertEquals(0, fixture.opens.get())
+    }
+
     override fun tearDown() {
         try { settings?.close() } finally { super.tearDown() }
     }

@@ -9,6 +9,14 @@ import java.util.concurrent.TimeUnit
 
 /** Exercises the real MainActivity routes + SQLite adapter, not a replacement setContent host. */
 class SearchHostActivityTest : WiredActivityTestCase() {
+    private fun replaceSearchQuery(query: String) {
+        node("search:query")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString(query)))
+            }
+            .assertEditableText(query)
+        dismissIme(activity.window.decorView)
+    }
     private fun text(id: Int) = activity.getString(id)
     private fun page(id: Int) = node("page:${text(id)}")
     private fun awaitTag(tag: String) {
@@ -56,8 +64,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         openManage()
         ui.onNodeWithText(text(R.string.search_conversations_title)).performClick()
         awaitPage(R.string.search_conversations_title)
-        node("search:query").performTextReplacement("中文检索")
-        dismissIme(activity.window.decorView)
+        replaceSearchQuery("中文检索")
         awaitTag("search:conversation:${first.id.value}")
         node("search:conversation:${first.id.value}").assertTextContains("中文检索标题")
         assertEquals(before, fixture.database.exportBackup())
@@ -69,8 +76,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
 
         openManage()
         ui.onNodeWithText(text(R.string.search_conversations_title)).performClick()
-        node("search:query").performTextReplacement("中文检索")
-        dismissIme(activity.window.decorView)
+        replaceSearchQuery("中文检索")
         awaitTag("search:conversation:${first.id.value}")
         node("search:conversation:${first.id.value}").performClick()
         node("chat-title").assertTextEquals("中文检索标题")
@@ -84,7 +90,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         mainThread { activity.select(target) }
         setDraft("当前会话草稿")
         openMessages()
-        node("search:query").performTextReplacement("独特旧记录关键词")
+        replaceSearchQuery("独特旧记录关键词")
         awaitTag("search:message:${other.id.value}:${otherMessage.id.value}")
         ui.onNodeWithText(text(R.string.search_current)).assertIsEnabled().performClick()
         val tag = "search:message:${target.id.value}:${older.id.value}"
@@ -106,7 +112,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText(text(R.string.search_current)).assertIsNotEnabled()
         ui.onNodeWithText(text(R.string.search_current_unavailable)).assertExists()
         node("search:prompt").assertExists()
-        node("search:query").performTextReplacement("没有这种记录")
+        replaceSearchQuery("没有这种记录")
         awaitTag("search:empty")
         node("search:error").assertDoesNotExist()
         backToPage(activity, "page:${text(R.string.history_page_title)}")
@@ -121,7 +127,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
             arrayOf(first.id.value)).use { it.moveToFirst(); it.getString(0) }
         fixture.database.writableDatabase.execSQL("UPDATE messages SET blocks='not-json' WHERE id=?", arrayOf(first.id.value))
         openMessages()
-        node("search:query").performTextReplacement("修复后可检索")
+        replaceSearchQuery("修复后可检索")
         awaitTag("search:error")
         node("search:empty").assertDoesNotExist()
         fixture.database.writableDatabase.execSQL("UPDATE messages SET blocks=? WHERE id=?", arrayOf(originalBlocks, first.id.value))
@@ -130,10 +136,10 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText(activity.getString(R.string.search_message_count, 1)).assertExists()
         node("search:error").assertDoesNotExist()
         ui.onNodeWithText(activity.getString(R.string.search_limited_results, 200)).assertDoesNotExist()
-        node("search:query").performTextReplacement("不存在的正文")
+        replaceSearchQuery("不存在的正文")
         awaitTag("search:empty")
         node("search:error").assertDoesNotExist()
-        node("search:query").performTextReplacement("")
+        replaceSearchQuery("")
         node("search:prompt").assertExists()
         backToChat(activity)
         node("chat-draft").assertExists()
@@ -166,12 +172,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         }
         setDraft("分页跳转前草稿")
         openMessages()
-        node("search:query")
-            .performSemanticsAction(SemanticsActions.SetText) { setText ->
-                assertTrue(setText(AnnotatedString("分页UI命中")))
-            }
-            .assertEditableText("分页UI命中")
-        dismissIme(activity.window.decorView)
+        replaceSearchQuery("分页UI命中")
         ui.waitUntil(5_000) {
             ui.onAllNodesWithText(activity.getString(R.string.search_message_count, 200)).fetchSemanticsNodes().isNotEmpty()
         }
@@ -194,7 +195,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
     fun testDeletedHitCannotNavigateToAnotherConversation() {
         val (conversation, message) = seed("将被删除的命中", "deleted", "删除前关键词")
         openMessages()
-        node("search:query").performTextReplacement("删除前关键词")
+        replaceSearchQuery("删除前关键词")
         val tag = "search:message:${conversation.id.value}:${message.id.value}"
         awaitTag(tag)
         mainThread { fixture.database.delete(conversation.id) }
@@ -209,8 +210,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
     fun testRecreationDisposesSearchAndPreservesUnsentDraft() {
         setDraft("重建时保留的搜索草稿")
         openMessages()
-        node("search:query").performTextReplacement("不会发送的检索词")
-        dismissIme(activity.window.decorView)
+        replaceSearchQuery("不会发送的检索词")
         val old = activity
         activity = recreateActivity(old)
         page(R.string.search_messages_title).assertDoesNotExist()

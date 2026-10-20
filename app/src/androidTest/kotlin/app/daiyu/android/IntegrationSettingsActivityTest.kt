@@ -110,8 +110,14 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     private fun fetch() {
         fetchReady().performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
     }
+    private fun awaitCatalogEntered(entered: CountDownLatch) {
+        ui.waitUntil(timeoutMillis = 5_000) { entered.count == 0L }
+        assertEquals("catalog request entered", 0L, entered.count)
+    }
     private fun finished(connection: AtomicReference<CatalogConnection>) {
-        awaitControl("catalog finished") { connection.get()?.disconnected == true }; ui.waitForIdle()
+        ui.waitUntil(timeoutMillis = 5_000) { connection.get()?.disconnected == true }
+        assertTrue("catalog finished", connection.get()?.disconnected == true)
+        ui.waitForIdle()
     }
     // Explicit setup/migration only. Opening or refreshing the chat picker must never register
     // a provider or fetch a remote list. Match the active policy so only the model ID changes.
@@ -302,7 +308,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             } } catch (problem: Throwable) { failure.set(problem) }
         }.apply { start() }
         try {
-            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            awaitCatalogEntered(entered)
             mainThread {
                 val parent = activity.lifecycleScope.coroutineContext[Job]!!
                 val previousJobs = parent.children.toSet()
@@ -422,8 +428,9 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         openModels()
         reveal("settings-secret-visibility:API Key").performClick()
         modelField("API Key").assertEditableText(old)
-        fetch(); assertTrue(entered.await(5, TimeUnit.SECONDS))
+        fetch()
         try {
+            awaitCatalogEntered(entered)
             selectProviderTab("配置")
             reveal("settings-secret-visibility:API Key").performClick()
             editModel("API Key", "changed"); modelField("API Key").assertEditableText("changed")
@@ -431,7 +438,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         } finally { release.countDown() }
         finished(connection); fetchReady(); node("provider-model-selection").assertDoesNotExist()
         val (retryEntered, _, retryConnection) = catalogue()
-        fetch(); assertTrue(retryEntered.await(5, TimeUnit.SECONDS)); finished(retryConnection)
+        fetch(); awaitCatalogEntered(retryEntered); finished(retryConnection)
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-option:second").fetchSemanticsNodes().isNotEmpty() }
         node("provider-model-option:second").assertExists()
         node("dialog-cancel").assertIsEnabled().performClick(); backToChat(activity)
@@ -443,8 +450,9 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             val before = fixture.settings.load()
             val (entered, release, connection) = catalogue(held = true)
             openModels(); if (save) editModel("API Key", "")
-            fetch(); assertTrue(entered.await(5, TimeUnit.SECONDS))
+            fetch()
             try {
+                awaitCatalogEntered(entered)
                 if (save) {
                     selectProviderTab("配置")
                     reveal("model-save").performClick()

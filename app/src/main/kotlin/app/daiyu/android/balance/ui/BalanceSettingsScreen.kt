@@ -39,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -105,10 +106,10 @@ fun BalanceSettingsScreen(runtime: BalanceRuntime, onBack: () -> Unit, modifier:
         return
     }
     val enabled = !busy
-    Column(modifier.verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(modifier.testTag("page:独立余额设置").verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             TextButton(onClick = onBack) { Text("返回") }
-            Text("独立余额设置", style = MaterialTheme.typography.titleLarge)
+            Text("独立余额设置", modifier = Modifier.testTag("balance-settings-title"), style = MaterialTheme.typography.titleLarge)
         }
         Text("独立账户接口返回的真实金额；不是 token 估算。密钥与金额仅加密保存，不进入备份。",
             style = MaterialTheme.typography.bodySmall)
@@ -158,7 +159,7 @@ fun BalanceSettingsScreen(runtime: BalanceRuntime, onBack: () -> Unit, modifier:
                     finally { busy = false }
                 }
             }) { Text("保存配置") }
-            TextButton(enabled = enabled && !dirty && projection.canRefresh &&
+            TextButton(modifier = Modifier.testTag("balance-query-saved"), enabled = enabled && !dirty && projection.canRefresh &&
                 lifecycleState.isAtLeast(Lifecycle.State.STARTED), onClick = {
                 // ON_STOP cancels the child Job even if this composition remains mounted.
                 manualOwner?.requestRefresh()

@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.platform.testTag
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewField
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewSection
@@ -250,6 +253,31 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
         tagged("assistant-edit-description").performScrollTo().assertTextEquals("擅长整理资料")
         tagged("assistant-edit-save").assertIsNotEnabled()
         assertEquals(1, writes.get())
+    }
+
+    fun testInputBackgroundHasSubtlePurpleTintInBothThemes() {
+        for (dark in listOf(false, true)) {
+            val background = if (dark) Color(0xFF24202C) else Color.White
+            val fill = if (dark) Color(0x22C4ACD7) else Color(0x1FA18DB9)
+            mainThread {
+                activity.setContent {
+                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                        applyInterfaceScale = false) {
+                        Box(Modifier.fillMaxWidth().background(background).padding(24.dp)) {
+                            AssistantPreviewField("", {}, "", minHeight = 48.dp,
+                                fieldModifier = Modifier.testTag("tinted-input"))
+                        }
+                    }
+                }
+            }
+            val field = tagged("tinted-input").assertHeightIsEqualTo(48.dp)
+            val pixels = field.captureToImage().toPixelMap()
+            val actual = pixels[pixels.width / 2, pixels.height / 2]
+            val expected = fill.compositeOver(background)
+            assertEquals(expected.red, actual.red, .01f)
+            assertEquals(expected.green, actual.green, .01f)
+            assertEquals(expected.blue, actual.blue, .01f)
+        }
     }
 
     fun testSkillsLegendPaddingIsTransparentInBothThemes() {

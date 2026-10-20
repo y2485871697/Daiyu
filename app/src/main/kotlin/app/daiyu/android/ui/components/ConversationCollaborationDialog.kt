@@ -98,7 +98,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
     val latestChoosing by rememberUpdatedState(choosing)
     val latestCanChange by rememberUpdatedState(canChange)
     val directory = editor?.let { rememberSubAgentPresetDirectory(it.repository) }
-    val compactState = editor == null || (choosing && directory?.entries.isNullOrEmpty())
+    val emptyState = editor == null || (choosing && directory?.entries.isNullOrEmpty())
     val providers by modelSource.providers.collectAsState()
     val maximumHeight = (LocalConfiguration.current.screenHeightDp - 48).coerceAtLeast(160).dp
     val view = LocalView.current
@@ -123,7 +123,8 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
         WithoutPressRipple {
             ConversationAgentTypography {
                 ConversationAgentSheet(onDismiss, modifier = Modifier.heightIn(max = maximumHeight).testTag("subagent-collaboration-card")) {
-                    Column(Modifier.heightIn(min = if (compactState) 0.dp else 360.dp).padding(start = 15.dp, end = 15.dp, top = 10.dp, bottom = 16.dp)) {
+                    Column(Modifier.then(if (emptyState) Modifier.height(360.dp) else Modifier.heightIn(min = 360.dp))
+                        .padding(start = 15.dp, end = 15.dp, top = 10.dp, bottom = 16.dp)) {
                         ConversationAgentHandle()
                         Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("本会话协作", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
@@ -131,7 +132,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                 Icon(Icons.Rounded.Close, "关闭子代理设置", Modifier.size(16.dp))
                             }
                         }
-                        Column(Modifier.fillMaxWidth().weight(1f, fill = false).testTag("subagent-collaboration-body")
+                        Column(Modifier.fillMaxWidth().weight(1f, fill = emptyState).testTag("subagent-collaboration-body")
                             .verticalScroll(key(editor, choosing, current?.presetApplicationToken) { rememberScrollState() })
                             .padding(bottom = 8.dp)) {
                             when (state) {

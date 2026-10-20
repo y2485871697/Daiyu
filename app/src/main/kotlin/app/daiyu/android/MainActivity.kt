@@ -802,6 +802,8 @@ class MainActivity : ComponentActivity() {
     private var retainedPageState by mutableStateOf("chat")
     private var offlineSpeechReturnPage = "chat"
     private var usageReturnPage = "chat"
+    private var providersReturnPage = "chat"
+    private var skillsReturnPage = "chat"
     private var retainedPage: String
         get() = retainedPageState
         set(value) {
@@ -1434,9 +1436,11 @@ class MainActivity : ComponentActivity() {
                 }
                 BackHandler(enabled = retainedPage != "chat") {
                     when (retainedPage) {
-                        "backup", "skills", "subagents", "providers", "appearance", "haptics", "voice-settings", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
+                        "backup", "subagents", "appearance", "haptics", "voice-settings", "browser-settings", "mcp-settings", "gui-settings", "compression-settings", "reconnect-settings", "linux-settings", "pet-settings", "vision-settings", "session-gateway", "balance-settings", "title-model-settings", "platform-settings" -> retainedPage = "settings"
                         "terminal" -> closeTerminalPage()
                         "usage" -> closeUsagePage()
+                        "providers" -> closeProvidersPage()
+                        "skills" -> closeSkillsPage()
                         "offline-speech" -> retainedPage = offlineSpeechReturnPage
                         "pet-model-settings" -> retainedPage = "pet-settings"
                         "assistant-edit" -> closeAssistantEditor()
@@ -1642,7 +1646,7 @@ class MainActivity : ComponentActivity() {
                     "skills" -> SkillManagementScreen(
                         engineeringUi = engineeringUi,
                         managementFactory = { controller.skillManagement() },
-                        onBack = { if (activityUsable() && retainedPage == "skills") retainedPage = "settings" },
+                        onBack = { closeSkillsPage() },
                     )
                     "voice-settings" -> VoiceSettingsPanel(voiceRuntime, remoteVoice, controller.voiceAccounts,
                         modelSource = remember { app.daiyu.android.ui.screens.settings.SettingsModelSource(applicationContext, controller.providers) },
@@ -1740,7 +1744,7 @@ class MainActivity : ComponentActivity() {
                     }
                     "providers" -> ProviderManagementRoute(controller,
                         ownerCurrent = { activityUsable() && voiceForeground && retainedPage == "providers" && !sidebarVisible },
-                        onBack = { if (activityUsable() && retainedPage == "providers") retainedPage = "settings" },
+                        onBack = { closeProvidersPage() },
                         onDetailBack = { if (activityUsable() && retainedPage == "providers") returnToChat() },
                         engineeringUi = engineeringUi)
                     "models" -> modelDraft?.let { value ->
@@ -4738,7 +4742,12 @@ class MainActivity : ComponentActivity() {
         if (activityUsable()) refresh()
     }
     private fun openSkillManagement() {
+        skillsReturnPage = if (retainedPage == "settings") "settings" else "chat"
         retainedPage = "skills"
+    }
+    private fun closeSkillsPage() {
+        if (!activityUsable() || retainedPage != "skills") return
+        if (skillsReturnPage == "settings") retainedPage = "settings" else returnToChat()
     }
     private fun openGenerationSettings() {
         requireActivityUsable()
@@ -5608,7 +5617,12 @@ class MainActivity : ComponentActivity() {
 
     private fun modelSettings() {
         requireActivityUsable()
+        providersReturnPage = if (retainedPage == "settings") "settings" else "chat"
         retainedPage = "providers"
+    }
+    private fun closeProvidersPage() {
+        if (!activityUsable() || retainedPage != "providers") return
+        if (providersReturnPage == "settings") retainedPage = "settings" else returnToChat()
     }
     private fun changeModelDraft(value: ModelSettingsDraftUi) {
         if (activityUsable() && retainedPage == "models" && !controller.dataBusy) modelDraft = value

@@ -4003,13 +4003,14 @@ class ChatController internal constructor(private val application:Application,
     }
     internal fun saveProviderSettings(editor: ProviderEditorSlot, value: ModelSettings, expected: EditingSettings,
         protocolChangeAuthorized: Boolean, requestOptionsReplacementAuthorized: Boolean, owner: ModelSettingsSaveOwner,
-        headersReplacementAuthorized: Boolean = false, providerName: String? = null, completed: (Boolean) -> Unit,
+        headersReplacementAuthorized: Boolean = false, providerName: String? = null, providerEnabled: Boolean? = null, completed: (Boolean) -> Unit,
     ) {
         check(Looper.myLooper() == Looper.getMainLooper())
         invalidateVideoConfiguration()
         dataTask(failureNotice = "提供商保存未完整确认；请重新打开详情核对名称与配置", completed = completed, work = {
             providers.save(editor, value, expected, protocolChangeAuthorized, requestOptionsReplacementAuthorized,
-                headersReplacementAuthorized = headersReplacementAuthorized, providerName = providerName, admit = { owner.commit { Unit } })
+                headersReplacementAuthorized = headersReplacementAuthorized, providerName = providerName,
+                providerEnabled = providerEnabled, admit = { owner.commit { Unit } })
             try { providers.catalogSnapshot(providers.editor(editor.slotId)); "提供商设置已保存" }
             catch (_: Exception) { "提供商设置已保存；模型目录尚不可用，请重新打开详情" }
         })
@@ -4024,9 +4025,21 @@ class ChatController internal constructor(private val application:Application,
             providers.withEditor(editor) { store ->
                 store.modelCatalog.readConfiguration {
                     check(!cancelled()) { "模型选择页面已关闭" }
-                    store.selectCatalogModel(expected, ticket)
+                    store.selectCatalogModel(expected, ticket, cancelled)
                 }
             }
+            "模型已切换"
+        })
+    }
+    internal fun selectActiveProviderCatalogModel(expectedActive: ProviderEditorSlot?, expectedSettings: ModelSettings?,
+        target: ProviderEditorSlot, targetSettings: ModelSettings?,
+        ticket: app.daiyu.android.model.catalog.CatalogModelSelection<app.daiyu.android.model.catalog.CatalogModelParameters>,
+        cancelled: () -> Boolean, completed: (Boolean) -> Unit,
+    ) {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        invalidateVideoConfiguration()
+        dataTask(failureNotice = "模型或提供商切换未完整确认；请重新打开目录核对", completed = completed, work = {
+            providers.selectActiveCatalogModel(expectedActive, expectedSettings, target, targetSettings, ticket, cancelled)
             "模型已切换"
         })
     }

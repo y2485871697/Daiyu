@@ -142,7 +142,7 @@ class SettingsReleaseActivityTest : WiredActivityTestCase() {
             mainThread { assertTrue(oldClick()) }
             ui.waitUntil(5_000) { calls.get() == 1 }
             mainThread {
-                activity.setContent { AgentAppTheme(AppearanceSettings()) {
+                activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     top.yukonga.miuix.kmp.basic.Text("已离开设置")
                 } }
             }

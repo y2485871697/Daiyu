@@ -77,6 +77,69 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         assertEquals(initial, store.load())
     }
 
+    fun testProviderNameAndEnabledAreSavedInOneRegistryRevisionAndDoNotAutoActivate() {
+        store.save(initial)
+        val repository = ProviderRepository(context, primary = store)
+        val editor = repository.activeEditor()
+        val expected = repository.editing(editor)
+        repository.save(editor, initial, expected, false, false, providerName = "Disabled primary", providerEnabled = false)
+        val disabled = repository.snapshot()
+        assertEquals(editor.registryRevision + 1, disabled.revision)
+        assertEquals("Disabled primary", disabled.providers.single().name)
+        assertFalse(disabled.providers.single().enabled)
+        assertNull(disabled.activeSlotId)
+        assertEquals(disabled, ProviderRepository(context, primary = store).snapshot())
+        rejectsSelection { repository.save(editor, initial.copy(apiKey = "stale"), expected, false, false, providerEnabled = true) }
+        assertEquals(initial, store.load())
+        val current = repository.editor(ProviderRegistry.PRIMARY)
+        repository.save(current, initial, repository.editing(current), false, false, providerEnabled = true)
+        assertTrue(repository.snapshot().providers.single().enabled)
+        assertNull(repository.snapshot().activeSlotId)
+        val created = repository.registerConfigured(repository.snapshot().revision, "Enabled new", initial,
+            protocolChangeAuthorized = false, enabled = true, admit = {})
+        assertTrue(created.providers.single { it.name == "Enabled new" }.enabled)
+        assertNull(created.activeSlotId)
+    }
+
+    fun testChatCatalogSelectionActivatesExactProviderAndPreservesOtherAccount() {
+        store.save(initial)
+        val repository = ProviderRepository(context, primary = store)
+        val targetSettings = initial.copy(endpoint = "https://other.example.invalid", apiKey = "other-account-key")
+        val registered = repository.registerConfigured(repository.snapshot().revision, "Other", targetSettings,
+            protocolChangeAuthorized = false, enabled = true, admit = {})
+        val target = repository.editor(registered.providers.single { it.name == "Other" }.slotId)
+        val active = repository.activeEditor()
+        val ticket = repository.catalogSnapshot(target).selectionFor(initial.model)!!
+        val before = repository.snapshot()
+        rejectsSelection { repository.selectActiveCatalogModel(active, initial, target, targetSettings, ticket) { true } }
+        assertEquals(before, repository.snapshot())
+        repository.selectActiveCatalogModel(active, initial, target, targetSettings, ticket) { false }
+        assertEquals(target.slotId, repository.snapshot().activeSlotId)
+        assertEquals(initial, store.load())
+        assertEquals(targetSettings.apiKey, repository.freezeActive().settings.apiKey)
+        assertEquals(targetSettings.endpoint, repository.freezeActive().settings.endpoint)
+        rejectsSelection { repository.selectActiveCatalogModel(active, initial, target, targetSettings, ticket) { false } }
+        assertEquals(target.slotId, repository.snapshot().activeSlotId)
+    }
+
+    fun testChatCatalogSelectionRejectsStaleCatalogAndSupportsNoActiveProvider() {
+        store.save(initial)
+        val repository = ProviderRepository(context, primary = store)
+        val editor = repository.activeEditor()
+        val stale = repository.catalogSnapshot(editor).selectionFor(initial.model)!!
+        append(importedModel("new-local"))
+        rejectsSelection { repository.selectActiveCatalogModel(editor, initial, editor, initial, stale) { false } }
+        assertEquals(initial, store.load())
+        repository.setEnabled(editor.registryRevision, editor.slotId, false)
+        val enabled = repository.setEnabled(repository.snapshot().revision, editor.slotId, true)
+        assertNull(enabled.activeSlotId)
+        val target = repository.editor(editor.slotId)
+        val current = repository.catalogSnapshot(target).selectionFor("new-local")!!
+        repository.selectActiveCatalogModel(null, null, target, initial, current) { false }
+        assertEquals(editor.slotId, repository.snapshot().activeSlotId)
+        assertEquals("new-local", store.load().model)
+    }
+
     fun testRuntimeOverridesAreFrozenWithoutPreferenceWritesAndEditsInvalidateOldConfiguration() {
         store.save(initial)
         val ticket = store.modelCatalogSnapshot().selectionFor(initial.model)!!

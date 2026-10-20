@@ -358,7 +358,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
     protected fun retainedControls(activity: MainActivity) = invokeHost(activity, "chatActions") as
         app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
-    private fun invokeHost(activity: MainActivity, name: String, vararg arguments: Any): Any? {
+    protected fun invokeHost(activity: MainActivity, name: String, vararg arguments: Any): Any? {
         val method = MainActivity::class.java.declaredMethods.single { it.name == name && it.parameterCount == arguments.size }
         try { return method.apply { isAccessible = true }.invoke(activity, *arguments) }
         catch (failure: java.lang.reflect.InvocationTargetException) { throw failure.targetException }

@@ -13,21 +13,25 @@ import app.daiyu.android.ui.screens.settings.ModelCatalogEntryUi
  * it on reload replaces ALL tickets; never resolve an old click against a newly read snapshot.
  */
 internal class LocalCatalogChatModelPickerSession(
-    snapshot: SavedModelCatalogSnapshot<CatalogModelParameters>,
+    snapshot: SavedModelCatalogSnapshot<CatalogModelParameters>?,
     currentModel: String,
     providerId: String = "current",
     providers: List<ChatModelProviderUi> = emptyList(),
+    providerCatalogs: Map<String, SavedModelCatalogSnapshot<CatalogModelParameters>> = emptyMap(),
 ) {
-    private val snapshot = snapshot.copy(models = snapshot.models.toList())
+    private val snapshot = snapshot?.copy(models = snapshot.models.toList())
+    private val catalogs = providerCatalogs.mapValues { (_, value) -> value.copy(models = value.models.toList()) }
     val state = ChatModelPickerState(
         current = currentModel,
         providerId = providerId,
         providers = providers,
-        models = snapshot.models.map { ModelCatalogEntryUi(it.id, it.displayName) },
-        message = if (snapshot.models.isEmpty()) "本地目录为空，请到模型设置导入" else null,
+        models = snapshot?.models.orEmpty().map { ModelCatalogEntryUi(it.id, it.displayName) },
+        message = if (snapshot?.models.isNullOrEmpty()) "本地目录为空，请到模型设置导入" else null,
     )
 
-    fun selectionFor(id: String): CatalogModelSelection<CatalogModelParameters>? = snapshot.selectionFor(id)
+    fun selectionFor(id: String): CatalogModelSelection<CatalogModelParameters>? = snapshot?.selectionFor(id)
+    fun selectionFor(providerId: String, id: String): CatalogModelSelection<CatalogModelParameters>? =
+        if (providerId == state.providerId) selectionFor(id) else catalogs[providerId]?.selectionFor(id)
 }
 
 /** Reuses the production searchable radio picker with the current local snapshot. */
@@ -38,11 +42,15 @@ internal fun LocalCatalogChatModelPicker(
     loading: Boolean = false,
     message: String? = session.state.message,
     onSelect: (CatalogModelSelection<CatalogModelParameters>) -> Unit,
+    onSelectOtherProvider: (String, CatalogModelSelection<CatalogModelParameters>) -> Unit,
     onDismiss: () -> Unit,
 ) {
     ChatModelPicker(
         state = session.state.copy(enabled = enabled && !loading, loading = loading, message = message),
         onSelect = { id -> if (enabled && !loading) session.selectionFor(id)?.let(onSelect) },
         onDismiss = onDismiss,
+        onSelectOtherProvider = { providerId, id ->
+            if (enabled && !loading) session.selectionFor(providerId, id)?.let { onSelectOtherProvider(providerId, it) }
+        },
     )
 }

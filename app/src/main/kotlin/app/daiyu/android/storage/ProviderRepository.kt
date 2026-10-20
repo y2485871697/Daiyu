@@ -27,13 +27,13 @@ internal class ProviderRepository(
         old.copy(providers = old.providers + RegisteredProvider(id, name, false))
     }
     fun registerConfigured(expectedRevision: Long, name: String, value: ModelSettings,
-        protocolChangeAuthorized: Boolean, admit: () -> Unit,
+        protocolChangeAuthorized: Boolean, enabled: Boolean = false, admit: () -> Unit,
     ) = registry.change(expectedRevision) { old ->
         admit(); ProviderRegistry.requireValidName(name); value.validateConnection()
         val id = UUID.randomUUID().toString()
         check(old.providers.none { it.slotId == id })
         resolveStore(id).save(value, protocolChangeAuthorized, allowUnselectedModel = true)
-        old.copy(providers = old.providers + RegisteredProvider(id, name, false))
+        old.copy(providers = old.providers + RegisteredProvider(id, name, enabled))
     }
     fun rename(expectedRevision: Long, slotId: String, name: String, admit: () -> Unit = {}) = registry.change(expectedRevision) { old ->
         admit(); requireProvider(old, slotId); ProviderRegistry.requireValidName(name)
@@ -55,6 +55,27 @@ internal class ProviderRepository(
         resolveStore(slotId).load().validate()
         old.copy(activeSlotId = slotId)
     }
+    /** Selection and activation use the displayed registry revision and exact local catalog ticket. */
+    fun selectActiveCatalogModel(expectedActive: ProviderEditorSlot?, expectedSettings: ModelSettings?,
+        target: ProviderEditorSlot, targetSettings: ModelSettings?, ticket: CatalogModelSelection<CatalogModelParameters>,
+        cancelled: () -> Boolean,
+    ): Unit = registry.access { state ->
+        if (!matches(state, target) || (expectedActive != null && !matches(state, expectedActive)))
+            throw StaleProviderRegistryException()
+        check(state.activeSlotId == expectedActive?.slotId) { "活动提供商已变化，请重新打开选择器" }
+        if (expectedActive != null) check(resolveStore(expectedActive.slotId).load() == expectedSettings) {
+            "模型配置已变化，请重新打开选择器"
+        }
+        check(requireProvider(state, target.slotId).enabled) { "提供商未启用" }
+        val store = resolveStore(target.slotId)
+        store.modelCatalog.readConfiguration {
+            check(!cancelled()) { "模型选择页面已关闭" }
+            store.selectCatalogModel(targetSettings ?: store.load(), ticket, cancelled)
+            if (state.activeSlotId != target.slotId) registry.change(state.revision) {
+                it.copy(activeSlotId = target.slotId)
+            }
+        }
+    }
     fun editor(slotId: String): ProviderEditorSlot = registry.access { state ->
         requireProvider(state, slotId); ProviderEditorSlot(slotId, state.revision)
     }
@@ -69,7 +90,7 @@ internal class ProviderRepository(
     }
     fun editing(editor: ProviderEditorSlot): EditingSettings = withEditor(editor) { it.loadForEditing() }
     fun save(editor: ProviderEditorSlot, value: ModelSettings, expected: EditingSettings?,
-        protocolChangeAuthorized: Boolean, requestOptionsReplacementAuthorized: Boolean, headersReplacementAuthorized: Boolean = false, providerName: String? = null, admit: () -> Unit = {},
+        protocolChangeAuthorized: Boolean, requestOptionsReplacementAuthorized: Boolean, headersReplacementAuthorized: Boolean = false, providerName: String? = null, providerEnabled: Boolean? = null, admit: () -> Unit = {},
     ): Unit = registry.access { state ->
         if (!matches(state, editor)) throw StaleProviderRegistryException()
         providerName?.let { ProviderRegistry.requireValidName(it) }
@@ -79,8 +100,11 @@ internal class ProviderRepository(
             if (expected != null) check(store.loadForEditing() == expected) { "模型配置已变化，请重新打开设置" }
             store.save(value, protocolChangeAuthorized, requestOptionsReplacementAuthorized, headersReplacementAuthorized,
                 allowUnselectedModel = true)
-            if (providerName != null && requireProvider(state, editor.slotId).name != providerName) {
-                rename(state.revision, editor.slotId, providerName)
+            val provider = requireProvider(state, editor.slotId)
+            val updated = provider.copy(name = providerName ?: provider.name, enabled = providerEnabled ?: provider.enabled)
+            if (updated != provider) registry.change(state.revision) { old ->
+                old.copy(providers = old.providers.map { if (it.slotId == editor.slotId) updated else it },
+                    activeSlotId = old.activeSlotId.takeUnless { !updated.enabled && it == editor.slotId })
             }
         }
     }

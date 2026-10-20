@@ -135,10 +135,13 @@ class ModelSettingsStore internal constructor(
     }
 
     /** Worker-only strict path: UI must retain this ticket from the displayed local snapshot. */
-    internal fun selectCatalogModel(expected: ModelSettings, selection: CatalogModelSelection<CatalogModelParameters>): Unit =
+    internal fun selectCatalogModel(expected: ModelSettings, selection: CatalogModelSelection<CatalogModelParameters>,
+        cancelled: () -> Boolean = { false },
+    ): Unit =
         modelCatalog.consumeSelection(selection) { record -> synchronized(lock) {
             val current = load()
             check(current == expected) { "模型配置已变更，请重新打开选择器" }
+            check(!cancelled()) { "模型选择页面已关闭" }
             val selected = record.settings.applyTo(current, record.id)
             selected.validate()
             if (selected != current) save(selected)

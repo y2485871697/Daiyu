@@ -133,7 +133,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         setDraft("Gemini UI 草稿"); val before = fixture.database.exportBackup()
         val settings = fixture.settings.loadForEditing().settings
         openHub()
-        val implemented = setOf("assistants", "subagents", "appearance", "haptics", "voice", "source", "default_reasoning", "telegram", "qq", "relay_st", "relay_moyu", "relay", "platform_tools", "logging", "export_logs", "clear_logs")
+        val implemented = setOf("updates", "assistants", "subagents", "appearance", "haptics", "voice", "source", "default_reasoning", "telegram", "qq", "relay_st", "relay_moyu", "relay", "platform_tools", "logging", "export_logs", "clear_logs")
         val placeholder = entries.single { it.id == "donate" }
         val unwired = entries.filter { it.route == null && it.localPage == null && it.id !in implemented && it != placeholder }
         assertEquals(0, unwired.size)

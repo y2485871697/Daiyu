@@ -9,7 +9,7 @@ internal val RetainedSettingsEntryAction =
 
 internal enum class SettingControl { PAGE, TOGGLE, CHOICE, ACTION }
 /** Pages hosted by the retained settings home, not an Activity-level FeatureRoute. */
-internal enum class SettingsLocalPage { TASK_SURFACE, ENHANCEMENTS, SHIZUKU_ACCESS, OVERLAY, UPDATES, WORKSPACE }
+internal enum class SettingsLocalPage { TASK_SURFACE, ENHANCEMENTS, SHIZUKU_ACCESS, OVERLAY, WORKSPACE }
 internal data class SettingsEntry(
     val id: String, val title: String, val icon: ImageVector,
     val control: SettingControl = SettingControl.PAGE, val route: FeatureRoute? = null,
@@ -67,7 +67,7 @@ internal object SettingsCatalog {
             SettingsEntry("accessibility", "无障碍与 GUI 设置", DaiyuIcons.Accessibility, SettingControl.PAGE, FeatureRoute.GUI_SETTINGS),
         )),
         SettingsGroup("about", "关于", "版本、社区与项目入口", listOf(
-            SettingsEntry("updates", "检查更新", DaiyuIcons.Refresh, SettingControl.PAGE, localPage = SettingsLocalPage.UPDATES),
+            SettingsEntry("updates", "检查更新", DaiyuIcons.Refresh, SettingControl.ACTION),
             SettingsEntry("telegram", "Telegram 频道", DaiyuIcons.Browser, SettingControl.ACTION),
             SettingsEntry("qq", "QQ 群", DaiyuIcons.Browser, SettingControl.ACTION),
             SettingsEntry("source", "源代码", DaiyuIcons.Browser, SettingControl.ACTION),

@@ -17,7 +17,7 @@ class CompressionSettingsEditor internal constructor(
     constructor(context: Context) : this(
         compressionStore = { ProductionCompressionSettingsStore(context.applicationContext) },
         profileStore = { SummaryProfileStore(context.applicationContext) },
-        validateDirectory = { catalogSummaryConfiguration(context.applicationContext, it); Unit },
+        validateDirectory = { catalogSummaryDescriptor(context.applicationContext, it); Unit },
     )
 
     /** All fields are explicit immutable values; no main-model lookup or budget inference.

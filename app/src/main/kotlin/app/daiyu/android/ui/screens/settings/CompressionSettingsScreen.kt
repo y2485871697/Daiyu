@@ -114,7 +114,7 @@ internal fun CompressionSettingsScreen(
             if (!busy && page.active && currentOwner()) choosingModel = true
         })
     if (choosingModel) SettingsModelPicker("压缩模型", source, selectedKey,
-        protocols = setOf(app.daiyu.android.model.ProviderProtocol.RESPONSES, app.daiyu.android.model.ProviderProtocol.MESSAGES),
+        protocols = setOf(app.daiyu.android.model.ProviderProtocol.RESPONSES, app.daiyu.android.model.ProviderProtocol.MESSAGES, app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS),
         onSelect = { choice ->
             if (!busy && page.active && currentOwner()) {
                 choosingModel = false

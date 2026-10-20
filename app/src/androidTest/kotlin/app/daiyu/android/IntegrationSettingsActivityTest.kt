@@ -186,9 +186,9 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             .apply { isAccessible = true }.get(activity) as LocalCatalogChatModelPickerSession
         val ticket = checkNotNull(session.selectionFor("second"))
         val select = MainActivity::class.java.declaredMethods.single {
-            it.name == "selectChatModel" && it.parameterCount == 3
+            it.name == "selectChatModel" && it.parameterCount == 4
         }.apply { isAccessible = true }
-        return { select.invoke(activity, ticket, owner, session); Unit }
+        return { select.invoke(activity, ticket, owner, session, session.state.providerId); Unit }
     }
     fun testChatModelButtonOpensPickerAndSelectionPreservesConfigurationAndDraft() {
         seedChatPickerCatalog()
@@ -249,6 +249,24 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         assertDraft("旧选择不得借用新页面")
         assertChatPickerOffline(calls)
         assertEquals(0, fixture.opens.get())
+    }
+    fun testPausedChatModelPickerRevokesOldSelectionAndCannotBorrowResumedOwner() {
+        seedChatPickerCatalog()
+        val calls = guardChatPickerNetwork()
+        val before = fixture.settings.load()
+        node("chat-model").performClick(); awaitChatPickerReady()
+        lateinit var stale: () -> Unit
+        mainThread { stale = retainedChatPickerSelection() }
+        realPauseResume(activity)
+        mainThread { stale() }
+        assertEquals(before, fixture.settings.load())
+        assertFalse(fixture.controller.dataBusy)
+        node("chat-model-picker").assertDoesNotExist()
+        node("chat-model").performClick(); awaitChatPickerReady()
+        mainThread { stale() }
+        assertEquals(before, fixture.settings.load())
+        node("chat-model-picker").assertExists()
+        assertChatPickerOffline(calls)
     }
     fun testDismissedChatModelPickerCannotReviveFromPendingCatalog() {
         seedChatPickerCatalog()

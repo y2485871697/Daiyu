@@ -113,6 +113,13 @@ class ModelSettingsStore internal constructor(
         checkCatalogConfiguration()
         modelCatalog.current()
     }
+    /** Effective target for local consent; never decrypts credentials or connection headers. */
+    internal fun catalogRequestEndpoint(apiModel: String): String = synchronized(lock) {
+        checkCatalogConfiguration()
+        val editing = editingWithoutCredential(includeHeadersState = false)
+        check(!editing.requestOptionsUnavailable) { "模型请求策略不可用" }
+        editing.settings.copy(model = apiModel).requestEndpoint()
+    }
     internal fun loadForRun(modelId: String? = null): ModelSettings = modelCatalog.readConfiguration {
         val current = load()
         val selected = modelCatalog.readRegisteredModel(modelId ?: current.model)

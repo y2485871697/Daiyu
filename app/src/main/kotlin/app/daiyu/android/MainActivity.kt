@@ -1362,13 +1362,6 @@ class MainActivity : ComponentActivity() {
         refreshAutomaticCompression()
         refreshConfirmedModelLabel()
         nextBrowserSaveRequestCode = state?.getInt("browser-save-next", 14000) ?: 14000
-        lifecycleScope.launch {
-            // Application-retained deferred: first Keystore/disk read runs on IO, once per process.
-            val runtime = (application as ChatApplication).balanceHost.get()
-            balanceRuntime = runtime
-            balanceLifecycle = app.daiyu.android.balance.BalanceLifecycleBinding(
-                lifecycle, lifecycleScope, runtime, poll = true)
-        }
         if (state?.getBoolean("balance-page", false) == true) retainedPageState = "balance-settings"
         // An Activity mount never inherits an approval capability from an older mount.
         controller.virtualDisplayEntry()?.let(controller::cancelVirtualDisplay)
@@ -1461,7 +1454,7 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.fillMaxSize())
                         else Column(Modifier.fillMaxSize().padding(16.dp)) {
                             top.yukonga.miuix.kmp.basic.TextButton(text = "返回", onClick = { retainedPage = "settings" })
-                            top.yukonga.miuix.kmp.basic.Text("正在读取独立余额配置")
+                            top.yukonga.miuix.kmp.basic.Text("请先选择提供商，再配置其独立余额")
                         }
                     }
                     "pet-settings" -> app.daiyu.android.ui.screens.settings.PetSettingsScreen(
@@ -4571,6 +4564,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        dismissChatModels()
         if (retainedPage == "history-search") {
             searchPage = null
             retainedPage = "chat"
@@ -5450,13 +5444,20 @@ class MainActivity : ComponentActivity() {
     private fun refreshConfirmedModelLabel() {
         val request = Any()
         modelLabelRead = request
+        balanceLifecycle?.close(); balanceLifecycle = null; balanceRuntime = null
         lifecycleScope.launch {
             val saved = withContext(Dispatchers.IO) { runCatching {
                 val editor = controller.providers.activeEditor()
-                controller.providers.withEditor(editor) { it.load().model }
+                val runtime = controller.providerBalances.get(editor.slotId)
+                val model = controller.providers.withEditor(editor) { runCatching { it.load().model }.getOrDefault("") }
+                Triple(editor, model, runtime)
             }.getOrNull() }
             if (activityUsable() && modelLabelRead === request) {
-                confirmedModelLabel = saved?.ifBlank { "模型" } ?: "模型"
+                confirmedModelLabel = saved?.second?.ifBlank { "模型" } ?: "模型"
+                balanceRuntime = saved?.third
+                balanceLifecycle = saved?.third?.let { runtime ->
+                    app.daiyu.android.balance.BalanceLifecycleBinding(lifecycle, lifecycleScope, runtime, poll = true)
+                }
             }
         }
     }
@@ -5518,7 +5519,8 @@ class MainActivity : ComponentActivity() {
                 check(controller.providers.snapshot().revision == registry.revision) { "提供商列表已变化" }
                 val groups = registry.providers.filter { it.enabled }.map { provider ->
                     ChatModelProviderUi(provider.slotId, provider.name,
-                        choices[provider.slotId]?.catalog?.models.orEmpty().map { ModelCatalogEntryUi(it.id, it.displayName) })
+                        choices[provider.slotId]?.catalog?.models.orEmpty().map { ModelCatalogEntryUi(it.id, it.displayName) },
+                        balance = controller.providerBalances.get(provider.slotId).state.value.project().balanceText)
                 }
                 ChatModelCatalogLoad(registry.activeSlotId?.let { ProviderEditorSlot(it, registry.revision) }, choices, groups)
             } }

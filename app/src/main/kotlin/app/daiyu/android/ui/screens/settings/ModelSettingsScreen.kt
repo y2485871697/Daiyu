@@ -55,6 +55,7 @@ internal data class ModelSettingsDraftUi(
     val bodyFieldsError: String? = null,
     val providerEnabled: Boolean = false,
     val balanceOption: app.daiyu.android.balance.BalanceOption = app.daiyu.android.balance.BalanceOption(),
+    val balanceConfiguration: app.daiyu.android.balance.BalanceConfiguration? = null,
 ) {
     override fun toString(): String = "ModelSettingsDraftUi(protocol=$protocol, model=$model, apiKey=<redacted>, customBody=<redacted>)"
 }
@@ -109,19 +110,21 @@ internal fun ModelSettingsScreen(
     headerContent: LazyListScope.() -> Unit = {},
     showCatalog: Boolean = true,
     providerName: String? = null,
+    testBalance: ProviderBalanceTester? = null,
 ) {
     val latestDraft by rememberUpdatedState(draft)
     val latestEnabled by rememberUpdatedState(enabled)
     val connection = rememberSettingsConnectionTest(draft, enabled, testConnection)
-    val submit: () -> Unit = { if (latestEnabled && latestDraft === draft && draft.headerFieldsValid && draft.bodyFieldsValid) { connection.cancel(); onSave(draft) } }
-    val changeDraft: (ModelSettingsDraftUi) -> Unit = { if (latestEnabled && latestDraft === draft) { connection.cancel(); onDraftChange(it) } }
+    val balance = rememberProviderBalanceTest(draft, enabled, testBalance)
+    val submit: () -> Unit = { if (latestEnabled && latestDraft === draft && draft.headerFieldsValid && draft.bodyFieldsValid) { connection.cancel(); balance.cancel(); onSave(draft) } }
+    val changeDraft: (ModelSettingsDraftUi) -> Unit = { if (latestEnabled && latestDraft === draft) { connection.cancel(); balance.cancel(); onDraftChange(it) } }
     val catalogIsCurrent = catalogForDraft?.let {
         it.endpoint == draft.endpoint && it.responsesPath == draft.responsesPath &&
             it.protocol == draft.protocol && it.apiKey == draft.apiKey && it.model == draft.model &&
             it.anthropicVersion == draft.anthropicVersion && it.customHeaders == draft.customHeaders &&
             it.openAiWebSearchEnabled == draft.openAiWebSearchEnabled
     } == true
-    SettingsScaffoldPage(title = pageTitle, onBack = { connection.cancel(); onBack() }, modifier = modifier) {
+    SettingsScaffoldPage(title = pageTitle, onBack = { connection.cancel(); balance.cancel(); onBack() }, modifier = modifier) {
         headerContent()
         item(key = "model_connection") {
             SettingsSectionTitle("连接配置")
@@ -204,11 +207,11 @@ internal fun ModelSettingsScreen(
                 }
             }
             item(key = "provider_balance") {
-                ProviderBalanceFields(draft, enabled, changeDraft)
+                ProviderBalanceFields(draft, enabled, changeDraft, testBalance, balance)
             }
         }
         if (showCatalog && onManageLocalModels != null) item(key = "local_models") {
-            SettingsCard { SettingsRow("本地模型", onClick = { if (enabled) { connection.cancel(); onManageLocalModels() } },
+            SettingsCard { SettingsRow("本地模型", onClick = { if (enabled) { connection.cancel(); balance.cancel(); onManageLocalModels() } },
                 tag = "model-local-manage") }
         }
         if (showCatalog) {
@@ -217,7 +220,7 @@ internal fun ModelSettingsScreen(
             SettingsCard {
                 TextButton(
                     text = if (isFetchingCatalog) "获取中" else "获取模型",
-                    onClick = { connection.cancel(); onFetchCatalog(draft) },
+                    onClick = { connection.cancel(); balance.cancel(); onFetchCatalog(draft) },
                     enabled = enabled && catalogEnabled && !isFetchingCatalog,
                     modifier = Modifier.testTag("model-catalog-fetch").fillMaxWidth().padding(12.dp),
                 )

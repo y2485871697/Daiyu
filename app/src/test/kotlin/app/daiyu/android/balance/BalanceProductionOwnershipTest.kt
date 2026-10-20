@@ -141,7 +141,7 @@ class BalanceProductionOwnershipTest {
         fun source(path: String) = generateSequence(File(System.getProperty("user.dir"))) { it.parentFile }
             .map { File(it, "app/src/main/kotlin/app/daiyu/android/$path") }.first { it.isFile }.readText()
         val main = source("MainActivity.kt")
-        assertTrue(main.contains("balanceHost.get()"))
+        assertTrue(main.contains("controller.providerBalances.get(editor.slotId)"))
         assertTrue(main.contains("runtime, poll = true"))
         assertTrue(main.contains("FeatureRoute.BALANCE_SETTINGS -> retainedPage = \"balance-settings\""))
         assertTrue(main.contains("BalanceSettingsScreen("))

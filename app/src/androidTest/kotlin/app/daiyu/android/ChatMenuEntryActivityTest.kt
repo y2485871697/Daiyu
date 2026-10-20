@@ -110,7 +110,13 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         node("chat-usage-dialog").assertDoesNotExist()
         menu(ChatMenuAction.CONTEXT_STATS)
         node("chat-usage-dialog").assertExists()
-        ui.onNodeWithText("关闭").performClick()
+        awaitUniqueTag("chat-usage-empty")
+        ui.onNodeWithText("暂无用量").assertIsDisplayed()
+        for (label in listOf("关闭", "刷新", "统计对象：本会话", "统计对象：全部会话", "详细用量")) {
+            ui.onNodeWithText(label).assertDoesNotExist()
+        }
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        ui.waitForIdle()
         node("chat-usage-dialog").assertDoesNotExist()
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())

@@ -106,6 +106,38 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             listOf("first", "second").map { CatalogModelParameters.fromCurrent(saved.copy(model = it)) },
         ) { false })
     }
+    fun testChatPickerGroupsRealLocalProvidersWithoutChangingActiveProvider() {
+        seedChatPickerCatalog()
+        val providers = fixture.controller.providers
+        val saved = fixture.settings.load()
+        val registered = providers.registerConfigured(providers.snapshot().revision, "Other fixture", saved,
+            protocolChangeAuthorized = false, admit = {})
+        val other = registered.providers.single { it.name == "Other fixture" }
+        providers.withEditor(providers.editor(other.slotId)) { store ->
+            val snapshot = store.modelCatalogSnapshot()
+            assertEquals(CatalogCommitResult.COMMITTED, store.modelCatalog.compareAndAppend(
+                snapshot.providerIdentity, snapshot.revision,
+                listOf(CatalogModelParameters.fromCurrent(saved.copy(model = "second")))) { false })
+        }
+        providers.setEnabled(registered.revision, other.slotId, true)
+        val before = providers.snapshot()
+        val calls = guardChatPickerNetwork()
+        node("chat-model").performClick(); awaitChatPickerLoaded()
+        node("chat-model-list").performScrollToNode(hasTestTag("chat-model-provider:${other.slotId}"))
+        node("chat-model-provider:${other.slotId}").assertTextContains("Other fixture").performClick()
+        node("chat-model-option:${other.slotId}:second").assertIsNotSelected().performClick()
+        assertEquals(before, providers.snapshot())
+        assertEquals(saved, fixture.settings.load())
+        node("chat-model-picker").assertExists()
+        node("chat-model-search").performSemanticsAction(SemanticsActions.SetText) {
+            assertTrue(it(androidx.compose.ui.text.AnnotatedString("主模型服务商")))
+        }
+        node("chat-model-option:second").assertIsDisplayed()
+        node("chat-model-provider:${other.slotId}").assertDoesNotExist()
+        assertChatPickerOffline(calls)
+        assertEquals(0, fixture.opens.get())
+    }
+
     private class PickerNetworkCalls {
         val savedCredentials = AtomicInteger()
         val connections = AtomicInteger()

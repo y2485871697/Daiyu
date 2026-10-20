@@ -54,15 +54,16 @@ internal fun ProviderSettingsTabs(modelTab: Boolean, enabled: Boolean, onSelect:
 @Composable
 internal fun ProviderProtocolFields(draft: ModelSettingsDraftUi, enabled: Boolean,
     onChange: (ModelSettingsDraftUi) -> Unit) {
-    val protocols = listOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES)
-    val modes = listOf("Chat Completions API", "Responses API", "Anthropic Messages")
+    if (draft.savedProtocol == ProviderProtocol.MESSAGES) return
+    val protocols = listOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.RESPONSES)
+    val modes = listOf("Chat Completions API", "Responses API")
+    val tags = listOf("settings-radio:OpenAI Chat Completions", "settings-radio:OpenAI Responses")
     val index = protocols.indexOf(draft.protocol)
     ProviderChoiceRow("Endpoint 模式", modes.getOrNull(index) ?: "请选择", "provider-endpoint-select", enabled, modes,
-        listOf("settings-radio:OpenAI Chat Completions", "settings-radio:OpenAI Responses", "settings-radio:Anthropic Messages"), index,
+        tags, index,
         summary = when (draft.protocol) {
             ProviderProtocol.RESPONSES -> "使用 Responses API、typed items 与语义化流式事件"
             ProviderProtocol.CHAT_COMPLETIONS -> "使用 Chat Completions API"
-            ProviderProtocol.MESSAGES -> "使用 Anthropic Messages API"
             else -> "请选择请求接口"
         }) { choice -> onChange(draft.selectProtocol(protocols[choice])) }
 

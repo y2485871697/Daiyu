@@ -11,7 +11,7 @@ class ResponsesSearchSettingsActivityTest : WiredActivityTestCase() {
         assertTrue(fixture.settings.load().requestOptions.openAiWebSearchEnabled)
         assertDraft("search settings unsent")
         openModels(); reveal("settings-switch:Provider 托管网页搜索").assertIsOn()
-        chooseProviderProtocol("Anthropic Messages")
+        chooseProviderProtocol("OpenAI Chat Completions")
         reveal("settings-switch:Provider 托管网页搜索").assertIsOff().assertIsNotEnabled()
         chooseProviderProtocol("OpenAI Responses")
         reveal("settings-switch:Provider 托管网页搜索").assertIsOff().assertIsEnabled()

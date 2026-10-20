@@ -51,11 +51,17 @@ class ProviderAuthenticationChoiceActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("page:添加提供商")
         node("prompt-input").assertDoesNotExist()
         fillNew("Anthropic fixture")
-        reveal("provider-endpoint-select", "添加提供商").assertTextContains("Anthropic Messages")
+        node("provider-endpoint-select").assertDoesNotExist()
+        node("settings-radio:Anthropic Messages").assertDoesNotExist()
         reveal("model-save", "添加提供商").performClick()
         awaitUniqueTag("page:Anthropic fixture")
         val after = fixture.controller.providers.snapshot()
-        assertFalse(after.providers.single { it.name == "Anthropic fixture" }.enabled)
+        val added = after.providers.single { it.name == "Anthropic fixture" }
+        assertFalse(added.enabled)
+        assertEquals(app.daiyu.android.model.ProviderProtocol.MESSAGES,
+            fixture.controller.providers.editing(fixture.controller.providers.editor(added.slotId)).settings.protocol)
+        reveal("settings-field:Anthropic 版本", "Anthropic fixture").assertExists()
+        node("provider-endpoint-select").assertDoesNotExist()
         assertEquals(before.activeSlotId, after.activeSlotId)
         assertEquals(0, fixture.opens.get())
     }

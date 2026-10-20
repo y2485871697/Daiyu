@@ -36,6 +36,7 @@ class ProviderSettingsLayoutActivityTest : WiredActivityTestCase() {
         reveal("provider-endpoint-select").performClick()
         node("settings-radio:OpenAI Responses").assertIsSelected()
         node("settings-radio:Google Gemini").assertDoesNotExist()
+        node("settings-radio:Anthropic Messages").assertDoesNotExist()
         node("settings-radio:OpenAI Chat Completions").performClick()
         reveal("provider-endpoint-select").assertTextContains("Chat Completions API")
         modelField("API Key").assertEditableText("")

@@ -67,11 +67,11 @@ class DialogCloseAffordanceTest : WiredActivityTestCase() {
                 ModelCatalogEntryUi("first", "First model"), ModelCatalogEntryUi("second", "Second model"))),
                 { selected = it }, dismiss)
         }
-        ui.onNodeWithText("当前供应商 · 本地目录").assertIsDisplayed()
+        node("chat-model-provider:current").assertIsDisplayed()
         node("chat-model-search").performSemanticsAction(SemanticsActions.SetText) {
             assertTrue(it(AnnotatedString("missing")))
         }
-        ui.onNodeWithText("没有匹配的模型").assertIsDisplayed()
+        ui.onNodeWithText("没有找到匹配的模型").assertIsDisplayed()
         node("chat-model-search").performSemanticsAction(SemanticsActions.SetText) {
             assertTrue(it(AnnotatedString("second")))
         }

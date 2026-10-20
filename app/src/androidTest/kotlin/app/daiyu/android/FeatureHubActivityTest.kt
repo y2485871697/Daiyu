@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -34,6 +35,74 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         reveal("settings-search", "设置").performTextReplacement(item.title)
         return reveal("settings-row:${item.title}", "设置")
     }
+    private fun settingsScrollPosition(): Float = node("page:设置").fetchSemanticsNode()
+        .config[SemanticsProperties.VerticalScrollAxisRange].value()
+
+    fun testLowerSettingsRowsKeepScrollOffsetAfterToolbarAndSystemBack() {
+        setDraft("设置滚动保留草稿")
+        val before = fixture.database.exportBackup()
+        val settings = fixture.settings.loadForEditing().settings
+        openHub()
+        // Exercise a real swipe too, so a collapsed top bar is part of the restored viewport.
+        node("page:设置").performTouchInput { swipeUp() }
+        for ((title, page) in listOf("震动列表" to "page:触感反馈", "Agent任务偏好" to "page:Agent任务偏好")) {
+            val tag = "settings-row:$title"
+            node("page:设置").performScrollToNode(hasTestTag(tag))
+            node(tag).assertIsDisplayed()
+            ui.waitForIdle()
+            val position = settingsScrollPosition()
+            val bounds = node(tag).fetchSemanticsNode().boundsInRoot
+            assertTrue("Entry must be opened after scrolling away from the top", position > 0f)
+            for (systemBack in listOf(false, true)) {
+                node(tag).performClick()
+                awaitUniqueTag(page)
+                if (systemBack) backToPage(activity, "page:设置") else {
+                    ui.onNodeWithContentDescription(activity.getString(R.string.action_back)).performClick()
+                    awaitUniqueTag("page:设置")
+                }
+                ui.waitForIdle()
+                // Do not reveal/scroll the row here: restoration itself must make it visible.
+                node(tag).assertIsDisplayed()
+                assertEquals(position, settingsScrollPosition(), .00002f)
+                val restored = node(tag).fetchSemanticsNode().boundsInRoot
+                assertEquals(bounds.top, restored.top, 2f)
+                assertEquals(bounds.bottom, restored.bottom, 2f)
+            }
+        }
+        backToChat(activity)
+        assertDraft("设置滚动保留草稿")
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(settings, fixture.settings.loadForEditing().settings)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testSettingsSearchSurvivesChildPageAndOnlyEditsResetTheList() {
+        openHub()
+        entry("usage").performClick()
+        awaitUniqueTag("usage-stats-screen")
+        backToPage(activity, "page:设置")
+        node("settings-search").assertEditableText("用量统计")
+        node("settings-row:用量统计").assertIsDisplayed()
+        node("settings-row:模型提供商").assertDoesNotExist()
+        node("settings-search-clear").performClick()
+        ui.waitForIdle()
+        node("settings-search").assertEditableText("")
+        assertEquals(0f, settingsScrollPosition(), .00002f)
+        node("settings-row:模型提供商").assertIsDisplayed()
+        node("page:设置").performScrollToNode(hasTestTag("settings-row:震动列表"))
+        val before = settingsScrollPosition()
+        node("settings-row:震动列表").performClick()
+        awaitUniqueTag("page:触感反馈")
+        backToPage(activity, "page:设置")
+        assertEquals(before, settingsScrollPosition(), .00002f)
+        reveal("settings-search", "设置").performTextReplacement("没有这样的设置")
+        dismissIme()
+        ui.waitForIdle()
+        assertEquals(0f, settingsScrollPosition(), .00002f)
+        ui.onNodeWithText("没有匹配的设置").assertIsDisplayed()
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testOriginalSettingsAppearOutsideExistingChatTreeWithoutStateLabels() {
         openHub()
         val expectedIds = listOf(

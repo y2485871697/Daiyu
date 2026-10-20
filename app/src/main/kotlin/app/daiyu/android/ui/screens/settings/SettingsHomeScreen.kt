@@ -14,10 +14,10 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -40,6 +40,9 @@ import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.daiyuIconColor
 import app.daiyu.android.ui.icons.DaiyuIcons
+import kotlinx.coroutines.launch
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.ScrollBehavior
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -125,6 +128,7 @@ internal fun DaiyuSettingsScreen(
     onDefaultReasoningChange: ((ReasoningEffort) -> Unit)? = null,
     engineeringUi: Boolean = false,
     diagnostics: app.daiyu.android.diagnostics.DiagnosticLogStore? = null,
+    scrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
 ) {
     val context = LocalContext.current
     val focus = LocalFocusManager.current
@@ -154,7 +158,7 @@ internal fun DaiyuSettingsScreen(
     val catalogGroups = remember(engineeringUi) { SettingsCatalog.visibleGroups(engineeringUi) }
     val groups = remember(query, catalogGroups) { filterSettingsGroups(query, catalogGroups) }
     val listState = rememberLazyListState()
-    LaunchedEffect(query) { listState.scrollToItem(0) }
+    val scope = rememberCoroutineScope()
     val openedPage = localPage
     if (openedPage != null) {
         val localBack: () -> Unit = {
@@ -204,9 +208,17 @@ internal fun DaiyuSettingsScreen(
         }
     }
     MiuixScaffoldPage(title = "设置", onBack = onBack, modifier = modifier, listState = listState,
+        scrollBehavior = scrollBehavior,
         listModifier = if (engineeringUi) Modifier.semantics { this[RetainedSettingsEntryAction] = open } else Modifier,
     ) {
-        item(key = "settings_search") { SettingsSearch(query, onQueryChange = { query = it }) }
+        item(key = "settings_search") {
+            SettingsSearch(query, onQueryChange = {
+                if (query != it) {
+                    query = it
+                    scope.launch { listState.scrollToItem(0) }
+                }
+            })
+        }
         if (query.isNotBlank()) item(key = "search_heading") {
             SettingsSectionTitle("搜索结果 · ${groups.sumOf { it.entries.size }}")
         }

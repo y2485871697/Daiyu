@@ -114,10 +114,10 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                 horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                 val fraction = state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
                 ChatContextMark(fraction, if (state.enabled) chrome.accent else colors.disabledOnSurface,
-                    Modifier.size(15.dp))
+                    Modifier.size(18.dp))
                 Text(if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}",
                     modifier = Modifier,
-                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 9.sp, lineHeight = 13.sp), color = chrome.accent,
+                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 15.sp), color = chrome.accent,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -163,33 +163,33 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             }
                         },
                         enabled = state.enabled,
-                        modifier = Modifier.testTag("chat-draft").fillMaxWidth().heightIn(min = 47.dp, max = 160.dp)
+                        modifier = Modifier.testTag("chat-draft").fillMaxWidth().heightIn(min = 53.dp, max = 176.dp)
                             .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 7.dp),
-                        maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = chrome.text, fontSize = 12.sp, lineHeight = 18.sp),
+                        maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = chrome.text, fontSize = 14.sp, lineHeight = 20.sp),
                         cursorBrush = SolidColor(colors.primary),
                         decorationBox = { inner ->
                             Box {
                                 if (references.text.isEmpty()) Text("给代鱼发消息", color = chrome.muted,
-                                    style = MiuixTheme.textStyles.body1.copy(fontSize = 12.sp, lineHeight = 18.sp))
+                                    style = MiuixTheme.textStyles.body1.copy(fontSize = 14.sp, lineHeight = 20.sp))
                                 inner()
                             }
                         },
                     )
                 }
-                Box(Modifier.fillMaxWidth().padding(start = 13.dp, end = 13.dp, bottom = 11.dp).height(30.dp).testTag("chat-composer-bottom"), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxWidth().padding(start = 13.dp, end = 13.dp, bottom = 12.dp).heightIn(min = 36.dp).testTag("chat-composer-bottom"), contentAlignment = Alignment.Center) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                             ChatIconButton(ChatPreviewIcons.Attach, "附件", { actions.onAttach(); attachments = true },
-                                Modifier.size(width = 25.dp, height = 28.dp), enabled = state.enabled, tint = chrome.toolbar, iconSize = 16.dp)
+                                Modifier.size(32.dp), enabled = state.enabled, tint = chrome.toolbar, iconSize = 18.dp)
                             ChatIconButton(ChatPreviewIcons.Thought, "推理强度，当前为 ${state.reasoningLabel}", actions.onOpenReasoning,
-                                Modifier.size(width = 25.dp, height = 28.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = chrome.accent, iconSize = 18.dp)
-                            Box(Modifier.size(28.dp).testTag("chat-assistant").clip(CircleShape)
+                                Modifier.size(32.dp).testTag("chat-reasoning"), enabled = state.enabled, tint = chrome.accent, iconSize = 20.dp)
+                            Box(Modifier.size(32.dp).testTag("chat-assistant").clip(CircleShape)
                                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = state.enabled, role = Role.Button,
                                     onClickLabel = "选择助手", onClick = actions.onOpenAssistant)
                                 .semantics { contentDescription = "选择助手，当前为 ${state.assistantLabel}" },
                                 contentAlignment = Alignment.Center) {
-                                AssistantAvatar(assistant, 18.dp)
+                                AssistantAvatar(assistant, 22.dp)
                             }
                         }
                         key(state.controlOwnerKey) {
@@ -197,18 +197,18 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             app.daiyu.android.balance.ui.ProviderBalanceIndicator(
                                 state = balanceState, modifier = Modifier.testTag("chat-provider-balance")
                                     .widthIn(max = 60.dp), animateChanges = true,
-                                textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 28.sp))
+                                textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 11.sp, lineHeight = 30.sp))
                             ChatIconButton(primaryIcon, primaryLabel, {
                                 if (!textAction) actions.onPrimaryTap()
                                 else if (state.phase == ComposerPhase.IDLE) actions.onSend(state.text)
                                 else actions.onSupplement(state.text)
-                            }, Modifier.size(28.dp).testTag(if (textAction || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
+                            }, Modifier.size(32.dp).testTag(if (textAction || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
                                 .controlGesture(actions, primaryEnabled),
                                 containerColor = (if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
                                     .copy(alpha = if (primaryEnabled) 1f else .4f),
-                                enabled = primaryEnabled, containerSize = 20.dp,
+                                enabled = primaryEnabled, containerSize = 24.dp,
                                 tint = if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
-                                iconSize = if (state.phase == ComposerPhase.RUNNING || state.phase == ComposerPhase.PAUSED && !hasText) 10.dp else 12.dp,
+                                iconSize = if (state.phase == ComposerPhase.RUNNING || state.phase == ComposerPhase.PAUSED && !hasText) 12.dp else 14.dp,
                                 onLongClick = if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
                             }
                         }
@@ -251,13 +251,13 @@ internal fun ComposerChip(icon: ImageVector, label: String, enabled: Boolean, on
     val chrome = chatChromeColors()
     val contentColor = if (enabled) chrome.toolbar else colors.disabledOnSurface
     val modelColor = if (colors.background.luminance() < .3f) Color(0xFFA491F1) else Color(0xFF9384D2)
-    Row(modifier.clip(RoundedCornerShape(12.dp))
+    Row(modifier.heightIn(min = 26.dp).clip(RoundedCornerShape(12.dp))
         .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = enabled, role = Role.Button, onClickLabel = "选择模型",
             onClick = onClick, onLongClick = onLongClick),
         horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(11.dp), tint = if (enabled) modelColor else contentColor)
-        Text(label, Modifier.weight(1f, fill = false), style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 14.5.sp),
+        Icon(icon, null, Modifier.size(13.dp), tint = if (enabled) modelColor else contentColor)
+        Text(label, Modifier.weight(1f, fill = false), style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 17.sp),
             color = contentColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Icon(ChatPreviewIcons.Chevron, null, Modifier.size(10.dp), tint = if (enabled) chrome.muted else contentColor)
+        Icon(ChatPreviewIcons.Chevron, null, Modifier.size(12.dp), tint = if (enabled) chrome.muted else contentColor)
     }
 }

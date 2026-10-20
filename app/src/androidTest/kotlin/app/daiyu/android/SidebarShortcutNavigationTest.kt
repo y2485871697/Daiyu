@@ -13,7 +13,8 @@ class SidebarShortcutNavigationTest : WiredActivityTestCase() {
     private fun backOnce(system: Boolean) {
         dismissIme()
         if (system) mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-        else ui.onNodeWithContentDescription("返回").performClick()
+        else ui.onNode(hasContentDescription(activity.getString(R.string.action_back)) and
+            hasClickAction()).assertIsDisplayed().performClick()
         ui.waitForIdle()
     }
 

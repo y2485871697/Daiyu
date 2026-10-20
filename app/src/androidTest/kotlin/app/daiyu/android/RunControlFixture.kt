@@ -3,6 +3,7 @@ package app.daiyu.android
 import android.app.Application
 import android.content.Context
 import android.test.InstrumentationTestCase
+import app.daiyu.android.balance.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.*
 import app.daiyu.android.tasksurface.*
@@ -20,6 +21,7 @@ internal class RunControlFixture(base:Context,
     mcpTransport: (app.daiyu.android.mcp.McpServer) -> app.daiyu.android.mcp.McpHttpSession = { app.daiyu.android.mcp.McpHttpSession(it) },
     beforeOpen: (List<Message>) -> Unit = {},
     filesRoot: java.io.File? = null,
+    providerBalanceHost: ProviderBalanceRuntimeHost? = null,
     beforeModel: () -> Unit = {}) : AutoCloseable {
     private class FixtureApplication(base:Context):Application() {
         init {attachBaseContext(base)}
@@ -31,6 +33,14 @@ internal class RunControlFixture(base:Context,
         testContext(base,"run-control-$fixtureId-")) {
         override fun getFilesDir() = this@RunControlFixture.filesRoot
     })
+    private val ownedBalanceHost = if (providerBalanceHost == null) ProviderBalanceRuntimeHost(
+        draftQuery = BalanceQuery { error("Unexpected fixture balance request") },
+        factory = { BalanceRuntime(
+            ProviderBalanceStore(object : BalancePersistence {
+                private var bytes: ByteArray? = null
+                override fun read() = bytes?.clone()
+                override fun write(record: ByteArray?) { bytes = record?.clone() }
+            }), BalanceQuery { error("Unexpected fixture balance request") }) }) else null
     val database=ConversationDatabase(application)
     private val alias="app.daiyu.android.test.run-control.${UUID.randomUUID()}"
     val settings=ModelSettingsStore(application,alias)
@@ -58,7 +68,7 @@ internal class RunControlFixture(base:Context,
             virtualDisplayFactory = virtualDisplayFactory, mcpTransport = mcpTransport, taskSurfaceStore = taskSurfaces,
             sessionModel = if (onSession == null) null else { provider, assistant, session ->
                 onSession(provider, assistant, session); factory(provider.asModelSettings())
-            }, diagnostics = diagnostics)
+            }, diagnostics = diagnostics, providerBalanceHost = { checkNotNull(providerBalanceHost ?: ownedBalanceHost) })
     }
     class Session(val text:String,held:Boolean,private val holdSeconds:Long=10,
         private val releaseOnCancel:Boolean=true) : ModelSession {
@@ -82,6 +92,7 @@ internal class RunControlFixture(base:Context,
         synchronized(queued) {sessions.forEach {it.release.countDown()}}
         if (diagnosticsFile.exists()) diagnostics.setEnabled(false)
         controller.stop();controller.close()
+        ownedBalanceHost?.close()
         diagnosticsFile.parentFile?.deleteRecursively()
         application.getSharedPreferences("model-settings",0).edit().clear().commit()
         application.getSharedPreferences("conversation-ui",0).edit().clear().commit()

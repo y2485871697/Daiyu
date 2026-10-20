@@ -142,13 +142,15 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         node("chat-model").performClick(); awaitChatPickerLoaded()
         node("chat-model-list").performScrollToNode(hasTestTag("chat-model-provider:${other.slotId}"))
         node("chat-model-provider:${other.slotId}").assertTextContains("Other fixture").performClick()
+        node("chat-model-list").performScrollToNode(hasTestTag("chat-model-option:${other.slotId}:second"))
         node("chat-model-option:${other.slotId}:second").assertIsNotSelected().performClick()
         awaitControl("provider catalog selected") { providers.snapshot().activeSlotId == other.slotId && !fixture.controller.dataBusy }
         assertEquals(before.revision + 1, providers.snapshot().revision)
         assertEquals(saved, fixture.settings.load())
         assertEquals("second", providers.freezeActive().settings.model)
+        assertEquals(other.slotId, providers.freezeActive().editor.slotId)
         node("chat-model-picker").assertDoesNotExist()
-        node("chat-model").performClick(); awaitChatPickerLoaded()
+        node("chat-model").performClick(); awaitChatPickerReady()
         node("chat-model-option:second").assertIsSelected()
         assertChatPickerOffline(calls)
         assertEquals(0, fixture.opens.get())
@@ -308,6 +310,11 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
                     .apply { isAccessible = true }.invoke(activity)
                 val pending = parent.children.single { it !in previousJobs }
                 pending.invokeOnCompletion { completed.countDown() }
+            }
+            awaitUniqueTag("chat-model-picker")
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().singleOrNull()?.config
+                    ?.getOrNull(SemanticsProperties.StateDescription) == "正在读取模型目录"
             }
             ui.onNodeWithText("正在读取模型目录…").assertExists()
             closeChatPicker()

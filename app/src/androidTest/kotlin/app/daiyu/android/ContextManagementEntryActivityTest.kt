@@ -104,9 +104,12 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
     }
     private fun openAndAwait(): ContextManagementControllerAdapter {
         awaitLocalReaders()
+        dismissIme()
         ui.onNodeWithContentDescription("更多").performClick()
+        awaitUniqueTag("chat-overflow-menu")
+        awaitUniqueTag("chat-menu:COMPRESS_CONTEXT")
         node("chat-menu:COMPRESS_CONTEXT").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()
-        node("context-management").assertExists()
+        awaitUniqueTag("context-management")
         lateinit var result: ContextManagementControllerAdapter
         mainThread { result = adapter() }
         awaitControl("context route production read") {
@@ -322,7 +325,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             settingsClick()
             assertNoVisit()
         }
-        node("page:设置").assertExists()
+        awaitUniqueTag("page:设置")
         backToChat(activity)
         awaitLocalReaders()
         mainThread {

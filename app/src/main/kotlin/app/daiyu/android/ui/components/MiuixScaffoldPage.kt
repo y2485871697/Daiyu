@@ -59,7 +59,7 @@ fun MiuixScaffoldPage(
             TopBarBackdrop(backdrop) {
                 AdaptiveTopAppBar(
                     title = title,
-                    modifier = topBarModifier,
+                    modifier = topBarModifier.testTag("page-topbar:$title"),
                     color = topBarColor,
                     navigationIcon = { MiuixBackButton(onClick = onBack) },
                     actions = actions,

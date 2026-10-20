@@ -55,6 +55,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText(text(R.string.search_conversations_title)).performClick()
         awaitPage(R.string.search_conversations_title)
         node("search:query").performTextReplacement("中文检索")
+        dismissIme(activity.window.decorView)
         awaitTag("search:conversation:${first.id.value}")
         node("search:conversation:${first.id.value}").assertTextContains("中文检索标题")
         assertEquals(before, fixture.database.exportBackup())
@@ -67,6 +68,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         openManage()
         ui.onNodeWithText(text(R.string.search_conversations_title)).performClick()
         node("search:query").performTextReplacement("中文检索")
+        dismissIme(activity.window.decorView)
         awaitTag("search:conversation:${first.id.value}")
         node("search:conversation:${first.id.value}").performClick()
         node("chat-title").assertTextEquals("中文检索标题")
@@ -201,6 +203,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         setDraft("重建时保留的搜索草稿")
         openMessages()
         node("search:query").performTextReplacement("不会发送的检索词")
+        dismissIme(activity.window.decorView)
         val old = activity
         activity = recreateActivity(old)
         page(R.string.search_messages_title).assertDoesNotExist()

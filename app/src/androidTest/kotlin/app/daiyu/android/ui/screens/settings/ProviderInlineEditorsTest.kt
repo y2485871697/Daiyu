@@ -39,6 +39,7 @@ class ProviderInlineEditorsTest : WiredActivityTestCase() {
         val (oldRule, oldChange) = gateway.fetchSemanticsNode().config[RetainedProviderGatewayChange]
         gateway.performClick()
         control("settings-field:字段").performTextReplacement("request_cache_key")
+        ui.waitForIdle()
         val current = draft
         assertEquals("request_cache_key", current.sessionGateway.keyField)
         mainThread { oldChange(oldRule.copy(modelPattern = "stale-pattern")) }

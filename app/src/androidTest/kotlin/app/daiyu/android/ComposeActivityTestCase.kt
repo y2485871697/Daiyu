@@ -135,9 +135,11 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             android.os.SystemClock.sleep(20)
         }
     }
-    protected fun dismissIme() {
-        ui.waitForIdle()
-        val root = focusedWindowRoot()
+    protected fun dismissIme(knownRoot: android.view.View? = null) {
+        val root = knownRoot ?: run {
+            ui.waitForIdle()
+            focusedWindowRoot()
+        }
         fun requestHide() {
             check(root.isAttachedToWindow && root.hasWindowFocus()) { "ime_window_changed" }
             val controller = androidx.core.view.ViewCompat.getWindowInsetsController(root)

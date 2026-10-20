@@ -169,7 +169,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             "主模型服务商" else page
         awaitUniqueTag("page:$title")
         node("page:$title").performScrollToNode(hasTestTag(tag))
-        return node(tag).assertIsDisplayed()
+        return node(tag).performScrollTo().assertIsDisplayed()
     }
     protected fun retainedSettingsEntry(id: String, page: String = "设置"): () -> Unit {
         val entry = app.daiyu.android.ui.screens.settings.SettingsCatalog.entry(id)
@@ -258,7 +258,10 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         awaitModelEditor()
     }
     protected fun awaitModelEditor() {
-        awaitUniqueTag("page:主模型服务商")
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("page:主模型服务商").fetchSemanticsNodes().size == 1 ||
+                ui.onAllNodesWithTag("page:模型设置").fetchSemanticsNodes().size == 1
+        }
         reveal("settings-field:模型名")
         ui.waitUntil(5_000) {
             ui.onAllNodesWithTag("settings-field:模型名").fetchSemanticsNodes()

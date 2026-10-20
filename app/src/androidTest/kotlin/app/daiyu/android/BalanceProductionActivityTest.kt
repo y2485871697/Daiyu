@@ -96,7 +96,7 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
     }
 
     private fun querySaved() {
-        ui.onNodeWithText("测试已保存的余额查询").performScrollTo().assertIsEnabled().performClick()
+        reveal("balance-query-saved", "独立余额设置").assertIsEnabled().performClick()
     }
 
     private fun assertTopBarMoney() {
@@ -188,7 +188,7 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
         }
         ui.waitUntil(timeoutMillis = 5000) { activity.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) }
-        ui.onNodeWithText("独立余额设置").performScrollTo().assertIsDisplayed()
+        reveal("balance-settings-title", "独立余额设置").assertIsDisplayed()
         ui.waitUntil(timeoutMillis = 5000) { !runtime.state.value.refreshing }
         val before = calls.get()
         querySaved()

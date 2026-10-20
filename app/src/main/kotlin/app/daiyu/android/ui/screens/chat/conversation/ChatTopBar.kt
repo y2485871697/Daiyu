@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import app.daiyu.android.ui.icons.ChatPreviewIcons
+import app.daiyu.android.balance.ui.ProviderBalanceIndicator
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -58,10 +59,15 @@ internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.B
                 color = chrome.text,
                 style = MiuixTheme.textStyles.title3.copy(fontSize = 18.sp, lineHeight = 24.sp, fontWeight = FontWeight(650)),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(listOf(assistantLabel, modelLabel).filter { it.isNotBlank() }.joinToString(" · "),
-                modifier = Modifier.testTag("chat-subtitle").padding(top = 4.dp), color = chrome.muted,
-                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp),
-                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Text(listOf(assistantLabel, modelLabel).filter { it.isNotBlank() }.joinToString(" · "),
+                    modifier = Modifier.weight(1f, fill = false).testTag("chat-subtitle"), color = chrome.muted,
+                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp),
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                ProviderBalanceIndicator(balanceState, Modifier.testTag("chat-provider-balance"), animateChanges = true,
+                    textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp))
+            }
         }
         ChatIconButton(ChatPreviewIcons.SubAgents, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, modifier = Modifier.size(40.dp), tint = chrome.toolbar, iconSize = 22.dp)
         Box {

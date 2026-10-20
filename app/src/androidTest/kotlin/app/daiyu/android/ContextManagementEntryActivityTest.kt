@@ -105,7 +105,9 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
     private fun openAndAwait(): ContextManagementControllerAdapter {
         awaitLocalReaders()
         dismissIme()
-        ui.onNodeWithContentDescription("更多").performClick()
+        ui.mainClock.advanceTimeByFrame()
+        ui.waitForIdle()
+        ui.onNodeWithContentDescription("更多").assertIsDisplayed().performClick()
         awaitUniqueTag("chat-overflow-menu")
         awaitUniqueTag("chat-menu:COMPRESS_CONTEXT")
         node("chat-menu:COMPRESS_CONTEXT").performScrollTo().assertIsDisplayed().assertIsEnabled().performClick()

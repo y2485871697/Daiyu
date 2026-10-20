@@ -191,7 +191,16 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
         val before = fake.requests.size
         mainThread { stale.start() }; assertEquals(before, fake.requests.size)
         deliver(disposed); assertNull(latestUi.status)
-        deliver(startCoordinator(fake)); assertEquals("余额测试成功：CNY 12.34（仅本次测试，未保存）", latestUi.status)
+        val expected = "余额测试成功：CNY 12.34（仅本次测试，未保存）"
+        val fresh = startCoordinator(fake)
+        assertFalse(fresh.cancelled())
+        deliver(fresh)
+        ui.waitUntil(timeoutMillis = 5_000) {
+            var completed = false
+            mainThread { completed = !latestUi.running && latestUi.status == expected }
+            completed
+        }
+        mainThread { assertEquals(expected, latestUi.status) }
         assertEquals(0, fixture.opens.get())
     }
 }

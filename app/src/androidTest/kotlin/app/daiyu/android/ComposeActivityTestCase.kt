@@ -59,6 +59,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         return interaction
     }
     protected fun awaitUniqueTag(tag: String, hostState: () -> String = { "" }) {
+        ui.mainClock.advanceTimeByFrame()
         try {
             ui.waitUntil(5_000) {
                 ui.onAllNodesWithTag(tag).fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
@@ -189,13 +190,17 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             assertTrue("Duplicate target $tag in $pageTag", matches.size <= 1)
             val found = matches.singleOrNull()
             val bounds = container.boundsInRoot
-            val bar = ui.onNodeWithTag("page-topbar:$title").fetchSemanticsNode().boundsInRoot
-            val viewport = Rect(bounds.left, maxOf(bounds.top, bar.bottom), bounds.right, bounds.bottom)
+            val bar = ui.onAllNodesWithTag("page-topbar:$title").fetchSemanticsNodes().singleOrNull()?.boundsInRoot
+            val viewport = Rect(bounds.left, maxOf(bounds.top, bar?.bottom ?: bounds.top), bounds.right, bounds.bottom)
             assertTrue("Empty reachable viewport for $pageTag: $viewport", viewport.width > 0f && viewport.height > 0f)
             val axis = checkNotNull(container.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange))
             return Frame(viewport, found?.let(::rawBounds), found?.boundsInRoot, axis.value())
         }
-        if (frame().target == null) pageNode.performScrollToIndex(0)
+        if (frame().target == null && pageNode.fetchSemanticsNode().config.getOrNull(SemanticsActions.ScrollToIndex) != null) {
+            pageNode.performScrollToIndex(0)
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+        }
         ui.waitUntil(timeoutMillis = 5_000) {
             val before = frame()
             val raw = before.target
@@ -211,6 +216,9 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
                 pageNode.performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
                     assertTrue("ScrollBy rejected for $tag", scroll(0f, if (axis.reverseScrolling) -dy else dy))
                 }
+                // ScrollBy accepts a queued coroutine; Espresso idle does not start that task.
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
                 val after = frame()
                 assertTrue("Scroll made no progress for $tag: before=$before after=$after", after != before)
                 false
@@ -411,6 +419,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     protected fun backToChat(activity: MainActivity) {
         dismissIme()
         repeat(8) {
+            ui.mainClock.advanceTimeByFrame()
             ui.waitForIdle()
             var chatExposed = false
             mainThread {

@@ -12,6 +12,7 @@ data class AssistantProfile(
     val createdAt: Long = 0L,
     val memoryEnabled: Boolean = true,
     val enabledSkillIds: List<String> = AssistantDefaults.ENABLED_SKILL_IDS,
+    val description: String = "",
 )
 
 object AssistantPrompt {

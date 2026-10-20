@@ -98,6 +98,22 @@ class AssistantEditSessionTest {
         } finally { release.countDown() }
     }
 
+    @Test fun descriptionSavesWithProfileAndRejectsStaleEditor() = runBlocking {
+        val original = AssistantProfile("intro", "助手", "system", description = "before")
+        val store = MemoryTestStore(original)
+        val first = AssistantEditSession(store, original)
+        val stale = AssistantEditSession(store, original)
+        val receipt = first.save("助手", "system", false, setOf("skill"), "after") { null }
+        assertEquals("after", receipt.profile.description)
+        assertEquals("system", receipt.profile.prompt)
+        assertEquals(receipt.profile, store.read("intro"))
+        try {
+            stale.save("助手", "system", true, emptySet(), "late") { error("stale memory write") }
+            fail("stale description accepted")
+        } catch (_: StaleAssistantProfileException) { }
+        assertEquals("after", store.read("intro")!!.description)
+    }
+
     @Test fun deletedProfileIsNotRecreatedAndManualMemoryHasNoSecretKeywordFilter() = runBlocking {
         val original = AssistantProfile("a", "A", "")
         val store = MemoryTestStore(original)

@@ -13,7 +13,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 21), ConversationStore {
+class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 22), ConversationStore {
     constructor(context: Context) : this(context, {})
     private val assistantPreferences = context.getSharedPreferences("daiyu-assistants", Context.MODE_PRIVATE)
     private fun installAssistants(db: SQLiteDatabase) = app.daiyu.android.assistants.SqliteAssistantStore.install(
@@ -57,7 +57,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..20 && newVersion == 21) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..21 && newVersion == 22) { "不支持此数据库版本，保留原数据" }
         // Install before the >=13 early return; do not rewrite timestamps or video witnesses.
         app.daiyu.android.title.SqliteTitleCommitAdapter.installSchema(db)
         app.daiyu.android.platform.NotificationHistoryStore.installSchema(db)
@@ -85,6 +85,14 @@ class ConversationDatabase internal constructor(context: Context, private val af
             SQLiteChildTaskStore.installSchema(db)
             app.daiyu.android.model.usage.SQLiteChildUsageStore.installSchema(db)
             createUiFolders(db)
+        }
+        if (oldVersion >= 10) {
+            val hasDescription = db.rawQuery("PRAGMA table_info(assistants)", null).use { c ->
+                var found = false
+                while (c.moveToNext()) if (c.getString(1) == "description") found = true
+                found
+            }
+            if (!hasDescription) db.execSQL("ALTER TABLE assistants ADD COLUMN description TEXT NOT NULL DEFAULT ''")
         }
         // Install AFTER legacy child tables exist and BEFORE the >=13 early return.
         app.daiyu.android.context.RuntimePreparationSchema.install(db)

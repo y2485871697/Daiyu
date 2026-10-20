@@ -19,7 +19,7 @@ internal object LegacyAssistantCodec {
         fun text(p: JSONObject, key: String) = p.get(key) as? String ?: error("助手字段须为文本: $key")
         val profiles = (0 until array.length()).map { i ->
             val p = array.getJSONObject(i)
-            require(p.keys().asSequence().all { it in setOf("id", "name", "prompt", "avatarFileName", "createdAt", "memoryEnabled", "enabledSkillIds") }) { "未知助手字段；原数据保留" }
+            require(p.keys().asSequence().all { it in setOf("id", "name", "prompt", "avatarFileName", "createdAt", "memoryEnabled", "enabledSkillIds", "description") }) { "未知助手字段；原数据保留" }
             val skills = if (p.has("enabledSkillIds")) {
                 val ids = p.getJSONArray("enabledSkillIds")
                 (0 until ids.length()).map { ids.get(it) as? String ?: error("技能 ID 须为文本") }
@@ -29,7 +29,8 @@ internal object LegacyAssistantCodec {
                 if (p.has("prompt")) text(p, "prompt") else "",
                 if (!p.has("avatarFileName") || p.isNull("avatarFileName")) null else text(p, "avatarFileName"),
                 created.toLong(), if (p.has("memoryEnabled")) p.get("memoryEnabled") as? Boolean
-                    ?: error("记忆开关须为布尔值") else true, skills.toList())
+                    ?: error("记忆开关须为布尔值") else true, skills.toList(),
+                if (p.has("description")) text(p, "description") else "")
         }
         require(profiles.map { it.id }.distinct().size == profiles.size) { "助手 ID 重复；原数据保留" }
         val selected = text(root, "activeId")
@@ -40,6 +41,6 @@ internal object LegacyAssistantCodec {
     fun encode(snapshot: Snapshot): String = JSONObject().put("profiles", JSONArray().apply {
         snapshot.profiles.forEach { p -> put(JSONObject().put("id", p.id).put("name", p.name).put("prompt", p.prompt)
             .put("avatarFileName", p.avatarFileName ?: JSONObject.NULL).put("createdAt", p.createdAt)
-            .put("memoryEnabled", p.memoryEnabled).put("enabledSkillIds", JSONArray(p.enabledSkillIds))) }
+            .put("description", p.description).put("memoryEnabled", p.memoryEnabled).put("enabledSkillIds", JSONArray(p.enabledSkillIds))) }
     }).put("activeId", snapshot.selectedId).toString()
 }

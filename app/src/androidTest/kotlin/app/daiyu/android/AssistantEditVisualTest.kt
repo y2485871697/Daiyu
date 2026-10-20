@@ -1,9 +1,20 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewSection
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
@@ -26,13 +37,14 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
     private val writes = AtomicInteger()
     private val memory = AtomicReference(AssistantMemorySnapshot("Original memory", "base"))
     private lateinit var store: AssistantStore
+    private lateinit var editorAssets: AssistantAssets
 
-    private fun show(scale: Float = 1f, dark: Boolean = false) {
+    private fun show(scale: Float = 1f, dark: Boolean = false, prompt: String = "Original prompt") {
         saved.set(0)
         closed.set(0)
         writes.set(0)
         memory.set(AssistantMemorySnapshot("Original memory", "base"))
-        val profile = AssistantProfile("editor-visual", "Visual editor", "Original prompt",
+        val profile = AssistantProfile("editor-visual", "Visual editor", prompt,
             memoryEnabled = false, enabledSkillIds = emptyList())
         store = object : AssistantStore {
             override val assistants = MutableStateFlow(listOf(profile))
@@ -48,7 +60,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             override fun delete(id: String) { error("Unexpected deletion") }
             override fun select(id: String) { error("Unexpected selection") }
         }
-        val assets = object : AssistantAssets by FileAssistantAssets(instrumentation.targetContext) {
+        editorAssets = object : AssistantAssets by FileAssistantAssets(instrumentation.targetContext) {
             override fun memory(id: String): AssistantMemorySnapshot = memory.get()
             override fun saveMemory(id: String, content: String, revision: String): AssistantMemorySnapshot {
                 check(memory.get().revision == revision)
@@ -63,7 +75,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
                         themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                         applyInterfaceScale = true) {
                         density.set(LocalDensity.current)
-                        AssistantEditScreen(profile.id, { closed.incrementAndGet() }, store, assets,
+                        AssistantEditScreen(profile.id, { closed.incrementAndGet() }, store, editorAssets,
                             installedSkills = listOf(AssistantSkill("visual-skill", "Visual skill", "Skill description")),
                             onSaved = { saved.incrementAndGet() })
                     }
@@ -101,7 +113,7 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
             assertType(text(R.string.assistant_editor_title), 18.sp, 26.sp)
             assertType(text(R.string.assistant_editor_name), 13.sp, 20.sp)
             assertType("Visual editor", 14.sp, 21.sp)
-            tagged("assistant-edit-description").assert(SemanticsMatcher.keyNotDefined(SemanticsActions.SetText))
+            tagged("assistant-edit-description").assert(SemanticsMatcher.keyIsDefined(SemanticsActions.SetText))
             tagged("assistant-edit-avatar").assertHasClickAction()
             tagged("assistant-edit-save").assertIsNotEnabled()
             val footer = tagged("assistant-sheet-footer").fetchSemanticsNode().boundsInRoot
@@ -129,37 +141,156 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
         }
     }
 
-    fun testEditorKeepsExistingToggleAndRevisionCheckedSaveCallbacks() {
+    fun testTogglesStayInDraftUntilRevisionCheckedSave() {
         show()
         tagged("assistant-skill-visual-skill").performScrollTo().performClick()
-        ui.waitUntil(5_000) { saved.get() == 1 }
-        assertEquals(listOf("visual-skill"), store.list().single().enabledSkillIds)
+        tagged("assistant-edit-save").assertIsEnabled()
+        assertEquals(0, writes.get())
+        assertTrue(store.list().single().enabledSkillIds.isEmpty())
         tagged("assistant-memory-switch").performScrollTo().performClick()
-        ui.waitUntil(5_000) { saved.get() == 2 }
-        assertTrue(store.list().single().memoryEnabled)
+        tagged("assistant-edit-save").assertIsEnabled()
+        assertEquals(0, saved.get())
+        assertFalse(store.list().single().memoryEnabled)
         tagged("assistant-memory-switch").assertIsOn()
         setField("assistant-edit-memory", "Updated memory")
         setField("assistant-edit-prompt", "Updated prompt")
         setField("assistant-edit-name", "Updated name")
+        setField("assistant-edit-description", "能帮忙整理资料")
         tagged("assistant-edit-save").assertIsEnabled().performClick()
         ui.waitUntil(5_000) { closed.get() == 1 }
-        assertEquals(3, writes.get())
-        assertEquals(3, saved.get())
+        assertEquals(1, writes.get())
+        assertEquals(1, saved.get())
+        assertTrue(store.list().single().memoryEnabled)
+        assertEquals(listOf("visual-skill"), store.list().single().enabledSkillIds)
         assertEquals("Updated name", store.list().single().name)
+        assertEquals("能帮忙整理资料", store.list().single().description)
         assertEquals("Updated prompt", store.list().single().prompt)
         assertEquals(AssistantMemorySnapshot("Updated memory", "saved"), memory.get())
         assertEquals("editor-visual", store.selectedId.value)
     }
 
+    fun testToggleOnlySaveAndRevertingToOriginalClearsDirtyState() {
+        for (tag in listOf("assistant-skill-visual-skill", "assistant-memory-switch")) {
+            show()
+            tagged(tag).performScrollTo().performClick()
+            tagged("assistant-edit-save").assertIsEnabled()
+            tagged(tag).performClick()
+            tagged("assistant-edit-save").assertIsNotEnabled()
+            assertEquals(0, writes.get())
+            tagged(tag).performClick()
+            tagged("assistant-edit-save").assertIsEnabled().performClick()
+            ui.waitUntil(5_000) { closed.get() == 1 }
+            assertEquals(1, writes.get())
+            assertEquals(1, saved.get())
+            val profile = store.list().single()
+            assertEquals(tag == "assistant-memory-switch", profile.memoryEnabled)
+            assertEquals(if (tag == "assistant-skill-visual-skill") listOf("visual-skill") else emptyList<String>(),
+                profile.enabledSkillIds)
+        }
+    }
+
+    fun testPromptAndMemoryDragsStayInsideFieldIncludingEdgesAndFling() {
+        show(prompt = (1..80).joinToString("\n") { "Prompt line $it" })
+        val longMemory = (1..80).joinToString("\n") { "Memory line $it" }
+        setField("assistant-edit-memory", longMemory)
+        for (tag in listOf("assistant-edit-prompt", "assistant-edit-memory")) {
+            val field = tagged(tag).performScrollTo()
+            val pageRange = tagged("assistant-editor").fetchSemanticsNode()
+                .config[SemanticsProperties.VerticalScrollAxisRange]
+            val beforePage = pageRange.value()
+            val before = field.captureToImage().toPixelMap()
+            field.performTouchInput { swipe(Offset(centerX, height * .75f), Offset(centerX, height * .25f), 350) }
+            ui.waitForIdle()
+            assertEquals(beforePage, pageRange.value(), 1f)
+            val after = field.captureToImage().toPixelMap()
+            var changed = 0
+            for (y in 0 until minOf(before.height, after.height)) for (x in 0 until minOf(before.width, after.width)) {
+                if (before[x, y] != after[x, y]) changed++
+            }
+            assertTrue("Text must scroll inside $tag", changed > before.width)
+            repeat(5) {
+                field.performTouchInput { swipeDown(durationMillis = 100) }
+                ui.waitForIdle()
+                assertEquals(beforePage, pageRange.value(), 1f)
+            }
+        }
+        // A new gesture outside a field must restore ordinary page scrolling.
+        tagged("assistant-skills").performScrollTo()
+        val range = tagged("assistant-editor").fetchSemanticsNode()
+            .config[SemanticsProperties.VerticalScrollAxisRange]
+        val before = range.value()
+        tagged("assistant-skills").performTouchInput { swipeDown(durationMillis = 350) }
+        ui.waitForIdle()
+        assertTrue(range.value() < before)
+        assertEquals(0, writes.get())
+        assertEquals(0, saved.get())
+    }
+
+    fun testDescriptionOnlyEditSavesAndReopensWithoutBecomingSystemPrompt() {
+        show()
+        setField("assistant-edit-description", "擅长整理资料")
+        tagged("assistant-edit-save").assertIsEnabled()
+        assertEquals("", store.list().single().description)
+        tagged("assistant-edit-save").performClick()
+        ui.waitUntil(5_000) { closed.get() == 1 }
+        val profile = store.list().single()
+        assertEquals("擅长整理资料", profile.description)
+        assertEquals("Original prompt", profile.prompt)
+        mainThread { activity.setContent { Box(Modifier) {} } }
+        ui.waitForIdle()
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    AssistantEditScreen(profile.id, {}, store, editorAssets)
+                }
+            }
+        }
+        tagged("assistant-edit-description").performScrollTo().assertTextEquals("擅长整理资料")
+        tagged("assistant-edit-save").assertIsNotEnabled()
+        assertEquals(1, writes.get())
+    }
+
+    fun testSkillsLegendPaddingIsTransparentInBothThemes() {
+        val background = Color(0xFF304050)
+        for (dark in listOf(false, true)) {
+            mainThread {
+                activity.setContent {
+                    AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
+                        applyInterfaceScale = false) {
+                        Box(Modifier.fillMaxWidth().background(background).padding(24.dp)) {
+                            AssistantPreviewSection("Skills") {
+                                Box(Modifier.fillMaxWidth().padding(24.dp))
+                            }
+                        }
+                    }
+                }
+            }
+            val pixels = tagged("assistant-section-legend:Skills").captureToImage().toPixelMap()
+            // The legend's horizontal padding must show its real parent, not a white mask.
+            for (x in listOf(1, pixels.width - 2)) {
+                val pixel = pixels[x, 1]
+                assertEquals(background.red, pixel.red, .01f)
+                assertEquals(background.green, pixel.green, .01f)
+                assertEquals(background.blue, pixel.blue, .01f)
+            }
+        }
+    }
+
     fun testCancelDiscardsUnsavedFields() {
         show()
+        tagged("assistant-skill-visual-skill").performScrollTo().performClick()
+        tagged("assistant-memory-switch").performScrollTo().performClick()
         setField("assistant-edit-name", "Unsaved name")
+        setField("assistant-edit-description", "Unsaved description")
         setField("assistant-edit-prompt", "Unsaved prompt")
         setField("assistant-edit-memory", "Unsaved memory")
         tagged("assistant-edit-cancel").performClick()
         assertEquals(1, closed.get())
         assertEquals(0, writes.get())
+        assertFalse(store.list().single().memoryEnabled)
+        assertTrue(store.list().single().enabledSkillIds.isEmpty())
         assertEquals("Visual editor", store.list().single().name)
+        assertEquals("", store.list().single().description)
         assertEquals("Original prompt", store.list().single().prompt)
         assertEquals(AssistantMemorySnapshot("Original memory", "base"), memory.get())
     }

@@ -43,6 +43,9 @@ import app.daiyu.android.assistants.AssistantEditSession
 import app.daiyu.android.assistants.AssistantSkill
 import app.daiyu.android.assistants.AssistantStore
 import app.daiyu.android.ui.components.AssistantAvatar
+import app.daiyu.android.ui.components.EditorScrollIsolation
+import app.daiyu.android.ui.components.editorPageGestures
+import app.daiyu.android.ui.components.isolateEditorScroll
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -70,12 +73,11 @@ fun AssistantEditScreen(
     val memoryEditor = remember(session) { AssistantMemoryDraft() }
     val initialReadTicket = remember(session) { memoryEditor.beginRead() }
     var name by remember(session) { mutableStateOf(original.name) }
+    var description by remember(session) { mutableStateOf(original.description) }
     var prompt by remember(session) { mutableStateOf(original.prompt) }
     var avatarFileName by remember(session) { mutableStateOf(original.avatarFileName) }
     var memoryEnabled by remember(session) { mutableStateOf(original.memoryEnabled) }
-    var persistedMemoryEnabled by remember(session) { mutableStateOf(original.memoryEnabled) }
     var enabledSkillIds by remember(session) { mutableStateOf(original.enabledSkillIds.toSet()) }
-    var persistedSkillIds by remember(session) { mutableStateOf(original.enabledSkillIds.toSet()) }
     var memoryDraft by remember(session) { mutableStateOf("") }
     var memoryRevision by remember(session) { mutableStateOf("") }
     var memorySaved by remember(session) { mutableStateOf("") }
@@ -84,8 +86,8 @@ fun AssistantEditScreen(
     val avatarBitmap = remember(assistantId, avatarFileName) { assets.avatarBitmap(avatarFileName) }
     val memoryBytes = remember(memoryDraft) { memoryDraft.toByteArray(Charsets.UTF_8).size }
     val memoryOverLimit = memoryBytes > AssistantAssets.MAX_MEMORY_BYTES
-    val dirty = name.trim() != original.name || prompt != original.prompt || avatarFileName != original.avatarFileName ||
-        memoryEnabled != persistedMemoryEnabled || enabledSkillIds != persistedSkillIds || memoryDraft != memorySaved
+    val dirty = description != original.description || name.trim() != original.name || prompt != original.prompt || avatarFileName != original.avatarFileName ||
+        memoryEnabled != original.memoryEnabled || enabledSkillIds != original.enabledSkillIds.toSet() || memoryDraft != memorySaved
 
     LaunchedEffect(session) {
         val result = withContext(Dispatchers.IO) { runCatching { assets.memory(assistantId) } }
@@ -105,22 +107,12 @@ fun AssistantEditScreen(
         pickerOwner = null
         if (uri != null && owner === session && session.isActive && !saving) cropBitmap = decodeAvatarBitmap(context, uri)
     }
-    fun persistAssistantToggles(nextMemory: Boolean = memoryEnabled, nextSkills: Set<String> = enabledSkillIds) {
-        scope.launch {
-            val result = runCatching { session.toggles(nextMemory, nextSkills) }
-            if (!session.isActive) return@launch
-            if (result.isSuccess) {
-                persistedMemoryEnabled = nextMemory
-                persistedSkillIds = nextSkills
-                onSaved(assistantId)
-            } else android.widget.Toast.makeText(context, result.exceptionOrNull()?.message ?: "技能目录发布失败，请重试", android.widget.Toast.LENGTH_LONG).show()
-        }
-    }
     fun save() {
         if (!session.isActive || !dirty || saving || memoryOverLimit || memoryRevision.isBlank()) return
         val targetMemory = memoryDraft
         val baseRevision = memoryRevision
         val targetName = name
+        val targetDescription = description
         val targetPrompt = prompt
         val targetMemoryEnabled = memoryEnabled
         val targetSkills = enabledSkillIds.toSet()
@@ -128,7 +120,7 @@ fun AssistantEditScreen(
         saving = true
         scope.launch {
             val result = runCatching {
-                session.save(targetName, targetPrompt, targetMemoryEnabled, targetSkills) {
+                session.save(targetName, targetPrompt, targetMemoryEnabled, targetSkills, targetDescription) {
                     if (memoryChanged) assets.saveMemory(assistantId, targetMemory, baseRevision) else null
                 }
             }
@@ -141,6 +133,7 @@ fun AssistantEditScreen(
     }
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
+    val scrollIsolation = remember(session) { EditorScrollIsolation() }
     val close = { session.close(); onBack() }
     BackHandler(onBack = close)
     AssistantPreviewDialog(show = true, title = stringResource(R.string.assistant_editor_title), onDismiss = close, onBack = close,
@@ -151,6 +144,7 @@ fun AssistantEditScreen(
                 enabled = dirty && !saving && !memoryOverLimit && memoryRevision.isNotBlank())
         }) {
         Column(Modifier.fillMaxWidth().weight(1f).testTag("assistant-editor")
+            .editorPageGestures(scrollIsolation)
             .verticalScroll(rememberScrollState()).padding(horizontal = 2.dp * s, vertical = 1.dp * s)) {
             AssistantPreviewField(name, { if (session.isActive && !saving) name = it },
                 stringResource(R.string.assistant_editor_name), enabled = !saving,
@@ -164,13 +158,13 @@ fun AssistantEditScreen(
                             }
                         })
                 })
-            // The production profile has no description field; keep this preview slot read-only.
-            AssistantPreviewField("", {}, stringResource(R.string.assistant_description), readOnly = true,
+            AssistantPreviewField(description, { if (session.isActive && !saving) description = it },
+                stringResource(R.string.assistant_description), enabled = !saving,
                 placeholder = stringResource(R.string.assistant_description_placeholder),
                 fieldModifier = Modifier.testTag("assistant-edit-description"))
             AssistantPreviewField(prompt, { if (session.isActive && !saving) prompt = it },
                 stringResource(R.string.assistant_system_prompt), enabled = !saving, singleLine = false,
-                minHeight = 110.dp, maxHeight = 250.dp, fieldModifier = Modifier.testTag("assistant-edit-prompt"))
+                minHeight = 110.dp, maxHeight = 250.dp, fieldModifier = Modifier.testTag("assistant-edit-prompt").isolateEditorScroll(scrollIsolation))
             AssistantPreviewSection(stringResource(R.string.route_skills), Modifier.testTag("assistant-skills")) {
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
@@ -193,7 +187,6 @@ fun AssistantEditScreen(
                         if (session.isActive && !saving) {
                             val next = if (enabled) enabledSkillIds + skill.id else enabledSkillIds - skill.id
                             enabledSkillIds = next
-                            persistAssistantToggles(nextSkills = next)
                         }
                     }
                 }
@@ -209,14 +202,14 @@ fun AssistantEditScreen(
                     }
                     AssistantPreviewSwitch(memoryEnabled, !saving, stringResource(R.string.assistant_enable),
                         Modifier.testTag("assistant-memory-switch")) {
-                        if (session.isActive && !saving) { memoryEnabled = it; persistAssistantToggles(nextMemory = it) }
+                        if (session.isActive && !saving) { memoryEnabled = it }
                     }
                 }
                 AssistantPreviewField(memoryDraft, {
                     if (session.isActive && !saving) { memoryEditor.edit(it); memoryDraft = it }
                 }, stringResource(R.string.assistant_memory_content), enabled = !saving, singleLine = false,
                     minHeight = 90.dp, maxHeight = 180.dp, bottomSpacing = 0.dp,
-                    fieldModifier = Modifier.testTag("assistant-edit-memory"),
+                    fieldModifier = Modifier.testTag("assistant-edit-memory").isolateEditorScroll(scrollIsolation),
                     placeholder = stringResource(R.string.assistant_memory_placeholder))
                 Text(stringResource(if (memoryEnabled) R.string.assistant_enabled else R.string.assistant_disabled),
                     color = colors.muted, fontSize = (11f * s).sp, lineHeight = (17f * s).sp,

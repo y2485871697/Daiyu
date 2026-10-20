@@ -73,7 +73,7 @@ class SharedPreferencesAssistantStore(private val preferences: SharedPreferences
         items.forEach { profile ->
             array.put(JSONObject().put("id", profile.id).put("name", profile.name).put("prompt", profile.prompt)
                 .put("avatarFileName", profile.avatarFileName ?: JSONObject.NULL).put("createdAt", profile.createdAt)
-                .put("memoryEnabled", profile.memoryEnabled).put("enabledSkillIds", JSONArray(profile.enabledSkillIds)))
+                .put("description", profile.description).put("memoryEnabled", profile.memoryEnabled).put("enabledSkillIds", JSONArray(profile.enabledSkillIds)))
         }
         check(preferences.edit().putString(KEY, JSONObject().put("profiles", array).put("activeId", selected).toString()).commit()) {
             "保存失败，草稿已保留"

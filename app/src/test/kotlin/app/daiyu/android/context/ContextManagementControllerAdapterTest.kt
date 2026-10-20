@@ -51,6 +51,18 @@ class ContextManagementControllerAdapterTest {
         var failure = false
         var profileChanged = false
         var duringCompression: (() -> Unit)? = null
+        var selection: ContextManagementSelection? = null
+        var selected: ContextManagementSnapshot? = null
+        var compressedSnapshot: ContextManagementSnapshot? = null
+        override fun selectCompression(lease: ContextManagementLease, expected: ContextManagementSnapshot,
+            selection: ContextManagementSelection): ContextManagementSnapshot {
+            this.selection = selection
+            lease.cancellation.check()
+            val binding = selection.binding ?: SummaryModelBinding("explicit-conversation", "current-model")
+            return expected.copy(configuration = expected.configuration!!.copy(summaryModel = binding),
+                summaryTarget = SummaryProfileDescriptor(binding, "one-shot", "https://chosen.invalid/v1/responses", "chosen-api"))
+                .also { selected = it }
+        }
         override fun snapshot(lease: ContextManagementLease): ContextManagementSnapshot {
             reads++
             return this@ContextManagementControllerAdapterTest.snapshot()
@@ -62,6 +74,7 @@ class ContextManagementControllerAdapterTest {
         }
         override fun compress(lease: ContextManagementLease, expected: ContextManagementSnapshot): ContextCompressionReceipt {
             compressions++
+            compressedSnapshot = expected
             duringCompression?.invoke()
             lease.cancellation.check()
             if (profileChanged) throw SummaryProfileChangedException()
@@ -77,6 +90,65 @@ class ContextManagementControllerAdapterTest {
         val adapter = ControlledContextManagementAdapter(owner, gate, backend, workerOverride ?: worker, ui)
         fun load() { adapter.refresh(); worker.runOne(); ui.runOne() }
         fun startCompression() { adapter.requestCompression(); adapter.confirmCompression() }
+    }
+
+    @Test fun selectionRetainsSavedBaselineAndRequiresNewExactSnapshotConsent() {
+        val f = Fixture(); f.load()
+        val before = f.adapter.state.value.snapshot!!
+        f.adapter.requestCompression()
+        val selection = ContextManagementSelection(SummaryModelBinding("other", "chosen"),
+            app.daiyu.android.model.ProviderProtocol.RESPONSES)
+        assertTrue(f.adapter.selectCompression(selection))
+        assertFalse(f.adapter.state.value.confirmingCompression)
+        assertEquals(ContextManagementOperation.SELECT, f.adapter.state.value.operation)
+        f.adapter.confirmCompression()
+        assertEquals(1, f.worker.size)
+        f.worker.runOne(); f.ui.runOne()
+        val selected = f.adapter.state.value.snapshot!!
+        assertSame(f.backend.selected, selected)
+        assertSame(before.savedConfiguration, selected.savedConfiguration)
+        assertEquals(selection.binding, selected.configuration!!.summaryModel)
+        assertEquals(selection, f.backend.selection)
+        assertTrue(f.adapter.state.value.confirmingCompression)
+        assertEquals(0, f.backend.compressions)
+        f.adapter.confirmCompression(); f.worker.runOne(); f.ui.runOne()
+        assertSame(selected, f.backend.compressedSnapshot)
+        assertEquals(1, f.backend.compressions)
+    }
+
+    @Test fun cancelledSelectionDrainsOriginalSlotAndCannotPublishOrCompress() {
+        val f = Fixture(); f.load()
+        assertTrue(f.adapter.selectCompression(ContextManagementSelection(null,
+            app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS)))
+        f.adapter.cancel()
+        assertTrue(f.gate.busy)
+        assertTrue(f.gate.last!!.cancellation.isCancelled)
+        f.worker.runOne(); f.ui.runOne()
+        assertFalse(f.gate.busy)
+        assertTrue(f.adapter.state.value.requiresRefresh)
+        assertFalse(f.adapter.state.value.confirmingCompression)
+        assertFalse(f.adapter.selectCompression(ContextManagementSelection(null,
+            app.daiyu.android.model.ProviderProtocol.RESPONSES)))
+        assertNull(f.backend.selection)
+        assertEquals(0, f.backend.compressions)
+    }
+
+    @Test fun selectionCancelledAfterWorkerDrainBeforeUiCannotRearmConfirmation() {
+        val f = Fixture(); f.load()
+        val before = f.adapter.state.value.snapshot
+        assertTrue(f.adapter.selectCompression(ContextManagementSelection(null,
+            app.daiyu.android.model.ProviderProtocol.CHAT_COMPLETIONS)))
+        f.worker.runOne()
+        assertFalse(f.gate.busy)
+        f.adapter.cancel()
+        f.ui.runOne()
+        assertSame(before, f.adapter.state.value.snapshot)
+        assertTrue(f.adapter.state.value.requiresRefresh)
+        assertFalse(f.adapter.state.value.confirmingCompression)
+        assertTrue(f.adapter.state.value.notice!!.contains("已取消"))
+        f.adapter.confirmCompression()
+        assertEquals(0, f.worker.size)
+        assertEquals(0, f.backend.compressions)
     }
 
     @Test fun constructorBrowseAndConfirmationNeverCompressOrSend() {

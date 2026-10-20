@@ -181,6 +181,66 @@ class ControllerContextManagementEntryTest : InstrumentationTestCase() {
         assertEquals(0, f.calls.get())
     }
 
+    fun testOneShotSelectionUsesParentPreparationAndNeedsSeparateConfirmation() {
+        val entered = CountDownLatch(1); val unblock = release()
+        val selections = AtomicInteger(); val compressions = AtomicInteger()
+        val selectedBinding = SummaryModelBinding("selected-summary", "selected-model")
+        val saved = CompressionSettings(automatic = false, contextWindowTokens = 10000,
+            reserveTokens = 1000, keepTurns = 1)
+        val f = fresh { context, service ->
+            val production = ContextManagementWorker.production(context, service)
+            object : ContextManagementBackend by production {
+                override fun snapshot(lease: ContextManagementLease) = production.snapshot(lease)
+                    .copy(configuration = saved, savedConfiguration = saved)
+                override fun selectCompression(lease: ContextManagementLease, expected: ContextManagementSnapshot,
+                    selection: ContextManagementSelection): ContextManagementSnapshot {
+                    assertTrue(Looper.myLooper() != Looper.getMainLooper())
+                    selections.incrementAndGet()
+                    assertEquals(selectedBinding, selection.binding)
+                    entered.countDown(); await(unblock)
+                    lease.checkCurrent()
+                    return expected.copy(configuration = saved.copy(summaryModel = selectedBinding),
+                        summaryTarget = SummaryProfileDescriptor(selectedBinding, "selected-revision",
+                            "https://selected.invalid/v1/responses", "selected-api-model"))
+                }
+                override fun compress(lease: ContextManagementLease, expected: ContextManagementSnapshot): ContextCompressionReceipt {
+                    compressions.incrementAndGet()
+                    error("selection alone must never compress")
+                }
+            }
+        }
+        val before = f.db.exportBackup()
+        val adapter = open(f)
+        controlMain { adapter.refresh() }
+        awaitControl("selection baseline") { adapter.state.value.snapshot != null && adapter.state.value.operation == null }
+        controlMain {
+            assertTrue(adapter.selectCompression(ContextManagementSelection(selectedBinding,
+                app.daiyu.android.model.ProviderProtocol.RESPONSES)))
+        }
+        await(entered)
+        controlMain {
+            assertNotNull(preparation(f))
+            assertEquals(ContextManagementOperation.SELECT, adapter.state.value.operation)
+            assertFalse(adapter.state.value.confirmingCompression)
+            assertFalse(f.controller.sendText(f.conversation, 7, 0, "do not send this draft") {})
+        }
+        unblock.countDown()
+        awaitControl("selected target awaiting new consent") {
+            preparation(f) == null && adapter.state.value.confirmingCompression
+        }
+        assertEquals(saved, adapter.state.value.snapshot!!.savedConfiguration)
+        assertEquals(selectedBinding, adapter.state.value.snapshot!!.configuration!!.summaryModel)
+        assertEquals(1, selections.get())
+        assertEquals(0, compressions.get())
+        assertEquals(0, f.calls.get())
+        assertEquals(before, f.db.exportBackup())
+        controlMain {
+            f.controller.invalidateContextManagement(adapter)
+            adapter.confirmCompression()
+        }
+        assertEquals(0, compressions.get())
+    }
+
     private class Probe(private val delegate: ContextManagementBackend, private val entered: CountDownLatch,
         private val unblock: CountDownLatch, private val cancelled: CountDownLatch) : ContextManagementBackend by delegate {
         val lease = AtomicReference<ContextManagementLease>()

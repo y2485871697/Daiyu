@@ -4564,6 +4564,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        revokeContextManagementEntry()
         dismissChatModels()
         if (retainedPage == "history-search") {
             searchPage = null

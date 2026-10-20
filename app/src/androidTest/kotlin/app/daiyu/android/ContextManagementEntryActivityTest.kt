@@ -135,7 +135,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         assertEquals(conversation.id, next.state.value.owner.conversationId)
         assertEquals(0, fixture.opens.get())
     }
-    fun testCompressionDialogChoicesStayLocalAndPickerBackKeepsTheConversation() {
+    fun testCompressionChoicesStayLocalUntilConfirmationAndPickerBackKeepsConversation() {
         seedAndSelect()
         val before = fixture.database.exportBackup()
         val configuration = fixture.settings.loadForEditing().settings
@@ -149,9 +149,9 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         val protocol = app.daiyu.android.model.ProviderProtocol.RESPONSES
         node("compression-dialog-api:${protocol.wireName}").performClick()
         node("compression-dialog-custom").performClick().assertIsOff()
-        node("context-compress").assertIsEnabled().performClick()
         assertFalse(adapter.state.value.confirmingCompression)
         assertNull(adapter.state.value.operation)
+        assertTrue(adapter.state.value.snapshot != null)
         node("compression-dialog-custom").performClick().assertIsOn()
         node("compression-dialog-model").performClick()
         awaitUniqueTag("settings-model-picker")
@@ -165,6 +165,64 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         assertEquals(savedSelection, preferences.all)
         assertEquals(configuration, fixture.settings.loadForEditing().settings)
         assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testMissingSummaryConfigurationStillAllowsLocalContextAndExplicitRefresh() {
+        seedAndSelect()
+        val before = fixture.database.exportBackup()
+        val adapter = openAndAwait()
+        node("context-view").performScrollTo().performClick()
+        node("context-refresh").assertExists().performClick()
+        awaitControl("explicit local refresh") { adapter.state.value.operation == null }
+        node("context-notice").assertExists()
+        assertFalse(adapter.state.value.confirmingCompression)
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testSelectionFailureCanRefreshAndReturnToTargetWithoutAutomaticRequest() {
+        seedAndSelect()
+        val before = fixture.database.exportBackup()
+        val adapter = openAndAwait()
+        mainThread { offerConfirmationMetadata(adapter) }
+        node("compression-dialog-custom").performClick().assertIsOff()
+        node("context-compress").performClick()
+        awaitControl("failed one-shot selection") {
+            adapter.state.value.operation == null && adapter.state.value.requiresRefresh
+        }
+        assertFalse(adapter.state.value.confirmingCompression)
+        node("context-select-target").assertIsNotEnabled()
+        node("context-refresh").performClick()
+        awaitControl("refresh after selection failure") {
+            adapter.state.value.operation == null && !adapter.state.value.requiresRefresh
+        }
+        node("context-select-target").assertIsEnabled().performClick()
+        awaitControl("return to target reads only") { adapter.state.value.operation == null }
+        mainThread { offerConfirmationMetadata(adapter) }
+        node("compression-dialog-custom").assertIsOn()
+        node("context-compress").performClick()
+        node("context-compression-confirmation").assertExists()
+        assertTrue(adapter.state.value.confirmingCompression)
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPauseWithoutStopRevokesOldCompressionConfirmation() {
+        seedAndSelect()
+        val old = openAndAwait()
+        mainThread {
+            offerConfirmationMetadata(old)
+            old.requestCompression()
+            assertTrue(old.state.value.confirmingCompression)
+            instrumentation.callActivityOnPause(activity)
+            try {
+                assertNoVisit()
+                old.confirmCompression()
+                assertNull(old.state.value.snapshot)
+                assertFalse(old.state.value.confirmingCompression)
+            } finally { instrumentation.callActivityOnResume(activity) }
+        }
         assertEquals(0, fixture.opens.get())
     }
 

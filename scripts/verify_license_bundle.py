@@ -31,6 +31,8 @@ NATIVE_SOURCES = tuple(ASSETS + "native-sources/" + name + ".tgz" for name in (
 COPIES = (
     ("LICENSE", "AGPL-3.0.txt"),
     ("THIRD_PARTY/rikkahub/NOTICE.md", "rikkahub/NOTICE.md"),
+    ("THIRD_PARTY/rikkahub/model-icons/NOTICE.md", "rikkahub/model-icons/NOTICE.md"),
+    ("THIRD_PARTY/rikkahub/model-icons/LICENSE-LobeHub", "rikkahub/model-icons/LICENSE-LobeHub"),
     ("docs/third-party/virtual-display-owner/LICENSE", "virtual-display-owner/LICENSE"),
     ("docs/third-party/virtual-display-owner/NOTICE.md", "virtual-display-owner/NOTICE.md"),
     ("THIRD_PARTY/linux-installer/NOTICE.md", "linux-installer/NOTICE.md"),

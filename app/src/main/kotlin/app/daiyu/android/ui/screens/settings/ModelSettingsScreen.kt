@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
@@ -17,8 +18,7 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
-import app.daiyu.android.ui.icons.DaiyuIcon
-import app.daiyu.android.ui.icons.DaiyuIcons
+import app.daiyu.android.ui.icons.ModelBrandIcon
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -234,8 +234,8 @@ internal fun ModelSettingsScreen(
                             summary = entry.id.takeIf { it != entry.displayName },
                             onClick = { changeDraft(draft.copy(model = entry.id)) },
                             leading = {
-                                DaiyuIcon(DaiyuIcons.Model, contentDescription = null,
-                                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary, size = 24.dp)
+                                ModelBrandIcon(entry.id, Modifier.size(24.dp), displayName = entry.displayName,
+                                    tint = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                             },
                         )
                     }

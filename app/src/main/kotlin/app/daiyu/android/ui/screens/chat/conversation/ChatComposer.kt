@@ -41,16 +41,17 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.unit.dp
+import app.daiyu.android.ui.icons.ModelBrandIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.icons.daiyuIconColor
 import top.yukonga.miuix.kmp.basic.Text
@@ -105,7 +106,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         // Include the transparent 1dp CSS border in the composer box model.
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            ComposerChip(DaiyuIcons.Model, state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
+            ComposerChip(state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
                 Modifier.weight(1f).testTag("chat-model"),
                 onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) })
             Row(Modifier.widthIn(max = 144.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
@@ -246,7 +247,7 @@ private fun Modifier.controlGesture(actions: ChatScreenActions, enabled: Boolean
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun ComposerChip(icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null) {
+internal fun ComposerChip(label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null) {
     val colors = MiuixTheme.colorScheme
     val chrome = chatChromeColors()
     val contentColor = if (enabled) chrome.toolbar else colors.disabledOnSurface
@@ -255,7 +256,7 @@ internal fun ComposerChip(icon: ImageVector, label: String, enabled: Boolean, on
         .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = enabled, role = Role.Button, onClickLabel = "选择模型",
             onClick = onClick, onLongClick = onLongClick),
         horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(13.dp), tint = if (enabled) modelColor else contentColor)
+        ModelBrandIcon(label, Modifier.size(13.dp).alpha(if (enabled) 1f else .45f), tint = if (enabled) modelColor else contentColor)
         Text(label, Modifier.weight(1f, fill = false), style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp),
             color = contentColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Icon(ChatPreviewIcons.Chevron, null, Modifier.size(12.dp), tint = if (enabled) chrome.muted else contentColor)

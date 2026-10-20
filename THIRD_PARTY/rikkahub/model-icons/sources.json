@@ -1,0 +1,57 @@
+{
+  "repository": "rikkahub/rikkahub",
+  "revision": "2b633370f3948eb57b9f907e4fe767b5ff6e4536",
+  "icons": [
+    {
+      "upstream": "app/src/main/assets/icons/claude-color.svg",
+      "local": "svg/claude-color.svg",
+      "sha256": "7473b3ed6919108a75de8f71a3996ea28ff916aadd65decaf81f21e3d1e75df2"
+    },
+    {
+      "upstream": "app/src/main/assets/icons/deepseek-color.svg",
+      "local": "svg/deepseek-color.svg",
+      "sha256": "315469d407c9a4fb13a6a7bb5fea41f4ebf51a63dd0fce8f7dcb17ea3fe4a40e"
+    },
+    {
+      "upstream": "app/src/main/assets/icons/doubao-color.svg",
+      "local": "svg/doubao-color.svg",
+      "sha256": "13939004091598042981b3366611272786d5c0d7d9fe1e9f538509f9e1664d77"
+    },
+    {
+      "upstream": "app/src/main/assets/icons/gemini-color.svg",
+      "local": "svg/gemini-color.svg",
+      "sha256": "d7161ea5a85c51d996bb7611c665e9b531db5a4092d4978ed4d6ddf6c043257d"
+    },
+    {
+      "upstream": "app/src/main/assets/icons/grok.svg",
+      "local": "svg/grok.svg",
+      "sha256": "151c57145a3fdebca04d880b7eb091c32b2104f166b983f0824852decee64978"
+    },
+    {
+      "upstream": "app/src/main/assets/icons/kimi-color.svg",
+      "local": "svg/kimi-color.svg",
+      "sha256": "c1877b878e9358e9618d1dcff9d8b3db44e25a4ec4d773e970446114c00806a9"
+    },
+    {
+      "upstream": "app/src/main/assets/icons/minimax-color.svg",
+      "local": "svg/minimax-color.svg",
+      "sha256": "66961f9517381167fe1c406520d8be8e38a5708841970e0ea2de7766403e6b71"
+    },
+    {
+      "upstream": "app/src/main/assets/icons/openai.svg",
+      "local": "svg/openai.svg",
+      "sha256": "308cf6f9301da0edd8e92a9a948d80a43ca9f635dd3650857e50c749ae3a5a33"
+    },
+    {
+      "upstream": "app/src/main/assets/icons/qwen-color.svg",
+      "local": "svg/qwen-color.svg",
+      "sha256": "5a2e10727f1daa3926743981352c6bde36d33f272d3288d8f9f3948d60f7a783"
+    },
+    {
+      "upstream": "app/src/main/assets/icons/zhipu-color.svg",
+      "local": "svg/zhipu-color.svg",
+      "sha256": "9998774e3f621172c9dd16ff002e53df31f37376733ed8ce0831db2652c28979"
+    }
+  ],
+  "lobe_license_revision": "8a1b2821bb768c484fe8da20c5e1838b6bf551a9"
+}

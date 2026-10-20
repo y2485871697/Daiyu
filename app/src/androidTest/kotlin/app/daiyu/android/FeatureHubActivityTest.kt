@@ -88,10 +88,10 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         setDraft("原草稿"); val before = fixture.settings.loadForEditing().settings
         openHub(); entry("providers").performClick()
         awaitUniqueTag("provider-management")
-        reveal("provider-open-primary", "提供商").assertIsEnabled().performClick()
+        reveal("provider-open-primary", "模型提供商").assertIsEnabled().performClick()
         awaitModelEditor()
         modelField("Base URL").assertEditableText(before.endpoint)
-        modelField("模型名").assertEditableText(before.model)
+        node("settings-field:模型名").assertDoesNotExist()
         backToChat(activity); assertDraft("原草稿")
         assertEquals(0, fixture.opens.get()); assertEquals(before, fixture.settings.loadForEditing().settings)
     }

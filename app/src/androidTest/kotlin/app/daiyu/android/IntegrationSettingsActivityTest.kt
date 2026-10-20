@@ -326,7 +326,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     fun testCatalogImportsCheckedModelsWithoutChangingCurrentDraftOrCredentials() {
         val (_, _, connection) = catalogue(); val before = fixture.settings.load()
         openModels(); editModel("Base URL", "https://catalog.invalid/v1/responses")
-        editModel("API Key", ""); editModel("模型名", "")
+        editModel("API Key", "")
         fetch(); finished(connection)
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("provider-model-option:second").fetchSemanticsNodes().isNotEmpty() }
         node("provider-model-option:second").performClick()
@@ -338,20 +338,20 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         val imported = fixture.settings.modelCatalogSnapshot().models
         assertTrue(imported.any { it.id == "second" }); assertFalse(imported.any { it.id == "first" })
         selectProviderTab("配置")
-        modelField("模型名").assertEditableText("")
-        editModel("模型名", "manual-model"); editModel("API Key", "new-key"); saveModel()
-        awaitControl("model save") { !fixture.controller.dataBusy && fixture.settings.load().model == "manual-model" }
-        assertEquals("manual-model", fixture.settings.load().model); assertEquals("new-key", fixture.settings.load().apiKey)
+        node("settings-field:模型名").assertDoesNotExist()
+        editModel("API Key", "new-key"); saveModel()
+        awaitControl("model save") { !fixture.controller.dataBusy && fixture.settings.load().apiKey == "new-key" }
+        assertEquals(before.model, fixture.settings.load().model); assertEquals("new-key", fixture.settings.load().apiKey)
     }
     fun testCatalogChangedAndRestoredDraftRevokesLateResponseAndCanRetry() {
         val (entered, release, connection) = catalogue(held = true)
-        val before = fixture.settings.load(); val old = before.model
-        openModels(); modelField("模型名").assertEditableText(old)
+        val before = fixture.settings.load(); val old = before.apiKey
+        openModels(); modelField("API Key").assertEditableText(old)
         fetch(); assertTrue(entered.await(5, TimeUnit.SECONDS))
         try {
             selectProviderTab("配置")
-            editModel("模型名", "changed"); modelField("模型名").assertEditableText("changed")
-            editModel("模型名", old); modelField("模型名").assertEditableText(old)
+            editModel("API Key", "changed"); modelField("API Key").assertEditableText("changed")
+            editModel("API Key", old); modelField("API Key").assertEditableText(old)
         } finally { release.countDown() }
         finished(connection); fetchReady(); node("provider-model-selection").assertDoesNotExist()
         val (retryEntered, _, retryConnection) = catalogue()
@@ -360,13 +360,13 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         node("provider-model-option:second").assertExists()
         node("dialog-cancel").assertIsEnabled().performClick(); backToChat(activity)
         node("provider-model-selection").assertDoesNotExist()
-        assertEquals(old, fixture.settings.load().model); assertEquals(before, fixture.settings.load())
+        assertEquals(old, fixture.settings.load().apiKey); assertEquals(before, fixture.settings.load())
     }
     fun testCatalogSaveFailureAndDismissRevokePendingResponse() {
         for (save in listOf(true, false)) {
             val before = fixture.settings.load()
             val (entered, release, connection) = catalogue(held = true)
-            openModels(); if (save) editModel("模型名", "")
+            openModels(); if (save) editModel("API Key", "")
             fetch(); assertTrue(entered.await(5, TimeUnit.SECONDS))
             try {
                 if (save) {

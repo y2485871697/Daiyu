@@ -63,7 +63,7 @@ class ModelConnectionActivityTest : WiredActivityTestCase() {
         openModels(); val catalog = fixture.settings.localModelCatalogSnapshot()
         val (entered, _, last) = connect()
         editModel("Base URL", "https://unsaved.invalid/v1/responses")
-        editModel("API Key", "unsaved-test-key"); editModel("模型名", "")
+        editModel("API Key", "unsaved-test-key")
         testConnection(); assertTrue(entered.await(5, TimeUnit.SECONDS)); awaitStatus("目录连接成功，返回 1 个模型")
         assertEquals("https://unsaved.invalid/v1/models", last.get().url.toString())
         assertEquals("Bearer unsaved-test-key", last.get().getRequestProperty("Authorization"))

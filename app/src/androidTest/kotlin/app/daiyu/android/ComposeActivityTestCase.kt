@@ -243,18 +243,12 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         reveal(tag).assertIsSelected()
     }
     protected fun chooseProviderProtocol(label: String) {
-        reveal("provider-protocol-select").performClick()
-        if (label.startsWith("OpenAI")) {
-            node("provider-family:openai").performClick()
-            reveal("provider-endpoint-select").performClick()
-        }
+        reveal("provider-endpoint-select").performClick()
         node("settings-radio:$label").assertIsEnabled().performClick()
     }
     protected fun assertProviderProtocol(label: String) {
-        val openAi = label.startsWith("OpenAI")
-        reveal(if (openAi) "provider-endpoint-select" else "provider-protocol-select").performClick()
-        node("settings-radio:$label").assertIsSelected()
-        node("settings-radio:$label").performClick()
+        reveal("provider-endpoint-select").performClick()
+        node("settings-radio:$label").assertIsSelected().performClick()
     }
     protected fun openModels() {
         openProviderManagement()
@@ -266,9 +260,9 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
             ui.onAllNodesWithTag("page:主模型服务商").fetchSemanticsNodes().size == 1 ||
                 ui.onAllNodesWithTag("page:模型设置").fetchSemanticsNodes().size == 1
         }
-        reveal("settings-field:模型名")
+        reveal("settings-field:Base URL")
         ui.waitUntil(5_000) {
-            ui.onAllNodesWithTag("settings-field:模型名").fetchSemanticsNodes()
+            ui.onAllNodesWithTag("settings-field:Base URL").fetchSemanticsNodes()
                 .singleOrNull()?.config?.contains(SemanticsProperties.Disabled) == false
         }
     }

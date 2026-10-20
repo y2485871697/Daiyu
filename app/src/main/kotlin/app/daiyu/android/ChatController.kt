@@ -4003,14 +4003,14 @@ class ChatController internal constructor(private val application:Application,
     }
     internal fun saveProviderSettings(editor: ProviderEditorSlot, value: ModelSettings, expected: EditingSettings,
         protocolChangeAuthorized: Boolean, requestOptionsReplacementAuthorized: Boolean, owner: ModelSettingsSaveOwner,
-        headersReplacementAuthorized: Boolean = false, completed: (Boolean) -> Unit,
+        headersReplacementAuthorized: Boolean = false, providerName: String? = null, completed: (Boolean) -> Unit,
     ) {
         check(Looper.myLooper() == Looper.getMainLooper())
         invalidateVideoConfiguration()
-        dataTask(failureNotice = "提供商设置未保存；请重新打开详情", completed = completed, work = {
+        dataTask(failureNotice = "提供商保存未完整确认；请重新打开详情核对名称与配置", completed = completed, work = {
             providers.save(editor, value, expected, protocolChangeAuthorized, requestOptionsReplacementAuthorized,
-                headersReplacementAuthorized = headersReplacementAuthorized, admit = { owner.commit { Unit } })
-            try { providers.catalogSnapshot(editor); "提供商设置已保存" }
+                headersReplacementAuthorized = headersReplacementAuthorized, providerName = providerName, admit = { owner.commit { Unit } })
+            try { providers.catalogSnapshot(providers.editor(editor.slotId)); "提供商设置已保存" }
             catch (_: Exception) { "提供商设置已保存；模型目录尚不可用，请重新打开详情" }
         })
     }

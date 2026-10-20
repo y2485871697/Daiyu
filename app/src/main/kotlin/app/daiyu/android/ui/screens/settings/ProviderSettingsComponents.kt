@@ -54,34 +54,24 @@ internal fun ProviderSettingsTabs(modelTab: Boolean, enabled: Boolean, onSelect:
 @Composable
 internal fun ProviderProtocolFields(draft: ModelSettingsDraftUi, enabled: Boolean,
     onChange: (ModelSettingsDraftUi) -> Unit) {
-    val openAi = draft.protocol == ProviderProtocol.RESPONSES || draft.protocol == ProviderProtocol.CHAT_COMPLETIONS
-    val families = listOf("OpenAI 兼容", "Anthropic Messages")
-    ProviderChoiceRow("服务协议", when (draft.protocol) {
-        ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS -> families[0]
-        ProviderProtocol.MESSAGES -> families[1]
-        else -> "请选择"
-    }, "provider-protocol-select", enabled, families,
-        listOf("provider-family:openai", "settings-radio:Anthropic Messages"),
-        when { openAi -> 0; draft.protocol == ProviderProtocol.MESSAGES -> 1; else -> -1 }) { index ->
-        onChange(draft.selectProtocol(when (index) {
-            0 -> if (openAi) draft.protocol else ProviderProtocol.RESPONSES
-            else -> ProviderProtocol.MESSAGES
-        }))
-    }
-    if (openAi) {
-        val modes = listOf("Chat Completions API", "Responses API")
-        val index = if (draft.protocol == ProviderProtocol.RESPONSES) 1 else 0
-        ProviderChoiceRow("Endpoint 模式", modes[index], "provider-endpoint-select", enabled, modes,
-            listOf("settings-radio:OpenAI Chat Completions", "settings-radio:OpenAI Responses"), index) { choice ->
-            onChange(draft.selectProtocol(if (choice == 0) ProviderProtocol.CHAT_COMPLETIONS else ProviderProtocol.RESPONSES))
-        }
-    }
+    val protocols = listOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES)
+    val modes = listOf("Chat Completions API", "Responses API", "Anthropic Messages")
+    val index = protocols.indexOf(draft.protocol)
+    ProviderChoiceRow("Endpoint 模式", modes.getOrNull(index) ?: "请选择", "provider-endpoint-select", enabled, modes,
+        listOf("settings-radio:OpenAI Chat Completions", "settings-radio:OpenAI Responses", "settings-radio:Anthropic Messages"), index,
+        summary = when (draft.protocol) {
+            ProviderProtocol.RESPONSES -> "使用 Responses API、typed items 与语义化流式事件"
+            ProviderProtocol.CHAT_COMPLETIONS -> "使用 Chat Completions API"
+            ProviderProtocol.MESSAGES -> "使用 Anthropic Messages API"
+            else -> "请选择请求接口"
+        }) { choice -> onChange(draft.selectProtocol(protocols[choice])) }
+
 }
 
 @Composable
 internal fun ProviderChoiceRow(title: String, value: String, tag: String, enabled: Boolean,
-    choices: List<String>, optionTags: List<String>, selectedIndex: Int, onSelect: (Int) -> Unit) {
-    var expanded by remember(value, enabled) { mutableStateOf(false) }
+    choices: List<String>, optionTags: List<String>, selectedIndex: Int, summary: String? = null, onSelect: (Int) -> Unit) {
+    var expanded by remember(value) { mutableStateOf(false) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val colors = MiuixTheme.colorScheme
     val currentEnabled by rememberUpdatedState(enabled)
@@ -96,7 +86,10 @@ internal fun ProviderChoiceRow(title: String, value: String, tag: String, enable
         Row(Modifier.testTag(tag).fillMaxWidth().heightIn(min = 64.dp)
             .clickable(enabled = enabled) { expanded = true }.padding(horizontal = 16.dp, vertical = 14.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(title, style = MiuixTheme.textStyles.body1, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MiuixTheme.textStyles.body1)
+                summary?.let { Text(it, style = MiuixTheme.textStyles.body2, color = colors.onSurfaceVariantSummary) }
+            }
             Text(value, style = MiuixTheme.textStyles.body2, color = colors.onSurfaceVariantSummary,
                 modifier = Modifier.widthIn(max = 164.dp), maxLines = 2, overflow = TextOverflow.Ellipsis)
             Column {

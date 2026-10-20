@@ -34,6 +34,44 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         try { root.deleteRecursively() } finally { super.tearDown() }
     }
 
+    fun testConnectionCanBeSavedWithoutInventingAModelAndRunStillRequiresSelection() {
+        val repository = ProviderRepository(context, primary = store)
+        val before = repository.snapshot()
+        val connection = initial.copy(model = "")
+        val registered = repository.registerConfigured(before.revision, "Connection only", connection, false) {}
+        val added = registered.providers.single { it.slotId != ProviderRegistry.PRIMARY }
+        assertFalse(added.enabled)
+        assertEquals(before.activeSlotId, registered.activeSlotId)
+        val editor = repository.editor(added.slotId)
+        assertEquals(connection, repository.editing(editor).settings)
+        val empty = repository.catalogSnapshot(editor)
+        assertTrue(empty.models.isEmpty())
+        rejectsSelection { connection.validate() }
+        rejectsSelection { repository.activate(registered.revision, added.slotId) }
+        repository.withEditor(editor) { target ->
+            val custom = CatalogModelEdit("manual-id", "My model", "8192", true, false).newRecord()
+            assertEquals(CatalogCommitResult.COMMITTED, target.modelCatalog.compareAndAppend(
+                empty.providerIdentity, empty.revision, listOf(custom)) { false })
+            assertEquals("", target.load().model)
+            target.selectCatalogModel(connection, target.localModelCatalogSnapshot()!!.selectionFor("manual-id")!!)
+            assertEquals("manual-id", target.loadForRun().model)
+            assertEquals(8192, target.loadForRun().contextWindowOverride)
+        }
+    }
+
+    fun testInlineProviderRenameKeepsSlotAndRejectsOldEditor() {
+        store.save(initial)
+        val repository = ProviderRepository(context, primary = store)
+        val editor = repository.editor(ProviderRegistry.PRIMARY)
+        val expected = repository.editing(editor)
+        repository.save(editor, initial, expected, false, false, providerName = "Renamed")
+        assertEquals("Renamed", repository.snapshot().providers.single().name)
+        assertEquals(ProviderRegistry.PRIMARY, repository.snapshot().activeSlotId)
+        assertEquals(initial, store.load())
+        rejectsSelection { repository.save(editor, initial.copy(apiKey = "stale"), expected, false, false) }
+        assertEquals(initial, store.load())
+    }
+
     fun testRuntimeOverridesAreFrozenWithoutPreferenceWritesAndEditsInvalidateOldConfiguration() {
         store.save(initial)
         val ticket = store.modelCatalogSnapshot().selectionFor(initial.model)!!

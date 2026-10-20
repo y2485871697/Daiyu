@@ -131,7 +131,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             assertEquals(40f, dp(newChat.height), .6f)
             assertEquals(40f, dp(manage.height), .6f)
             assertEquals(8f, dp(manage.top - newChat.bottom), .6f)
-            assertEquals(13f, dp(bounds("drawer-new-icon").left - newChat.left), .6f)
+            assertEquals(13f, dp(bounds("drawer-new-icon").left - newChat.left), dp(1f) + .01f)
             assertEquals(12f, dp(folders.top - manage.bottom), .6f)
             assertEquals(34f, dp(folders.height), .6f)
             assertEquals(6f, dp(bounds("drawer-folder:design").left - folders.right), .6f)

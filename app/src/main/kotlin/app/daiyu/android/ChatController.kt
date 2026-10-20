@@ -149,7 +149,9 @@ class ChatController internal constructor(private val application:Application,
     internal var platformSettings: PlatformToolSettings = PlatformToolSettings(application.getSharedPreferences("platform-read-settings", 0)),
     internal var browserSettings: app.daiyu.android.browser.BrowserSettingsStore =
         app.daiyu.android.browser.BrowserSettingsStore(application.getSharedPreferences("browser-settings", 0)),
-    internal val diagnostics: app.daiyu.android.diagnostics.DiagnosticLogStore? = null) {
+    internal val diagnostics: app.daiyu.android.diagnostics.DiagnosticLogStore? = null,
+    private val providerBalanceHost: () -> app.daiyu.android.balance.ProviderBalanceRuntimeHost =
+        { (application as ChatApplication).providerBalanceHost }) {
     // Voice credentials remain independent from chat settings.
     internal val voiceAccounts by lazy { app.daiyu.android.voice.account.VoiceAccountResources.forContext(application) }
     internal val voiceRuntime by lazy {
@@ -4013,7 +4015,7 @@ class ChatController internal constructor(private val application:Application,
             "提供商列表已更新"
         })
     }
-    internal val providerBalances get() = (application as ChatApplication).providerBalanceHost
+    internal val providerBalances get() = providerBalanceHost()
     internal fun saveProviderSettings(editor: ProviderEditorSlot, value: ModelSettings, expected: EditingSettings,
         protocolChangeAuthorized: Boolean, requestOptionsReplacementAuthorized: Boolean, owner: ModelSettingsSaveOwner,
         headersReplacementAuthorized: Boolean = false, providerName: String? = null, providerEnabled: Boolean? = null,

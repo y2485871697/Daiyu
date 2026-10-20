@@ -3,6 +3,7 @@ package app.daiyu.android
 import android.content.Intent
 import android.os.Bundle
 import android.test.InstrumentationTestCase
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -171,11 +172,51 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         val title = if (page == "模型设置" && ui.onAllNodesWithTag("page:主模型服务商").fetchSemanticsNodes().isNotEmpty())
             "主模型服务商" else page
         awaitUniqueTag("page:$title")
-        val pageNode = node("page:$title")
-        android.util.Log.d("DaiyuTestStep", "reveal-scroll:$tag")
-        pageNode.performScrollToNode(hasTestTag(tag))
-        android.util.Log.d("DaiyuTestStep", "reveal-align:$tag")
-        return node(tag).performScrollTo().assertIsDisplayed()
+        val pageTag = "page:$title"
+        val pageNode = ui.onNodeWithTag(pageTag).assert(hasScrollAction())
+        val matcher = hasTestTag(tag) and hasAnyAncestor(hasTestTag(pageTag))
+        val target = ui.onNode(matcher)
+        data class Frame(val viewport: Rect, val target: Rect?, val clipped: Rect?, val scroll: Float)
+        fun rawBounds(node: androidx.compose.ui.semantics.SemanticsNode): Rect {
+            val coordinates = node.layoutInfo.coordinates
+            var root = coordinates
+            while (true) root = root.parentLayoutCoordinates ?: break
+            return root.localBoundingBoxOf(coordinates, clipBounds = false)
+        }
+        fun frame(): Frame {
+            val container = pageNode.fetchSemanticsNode()
+            val matches = ui.onAllNodes(matcher).fetchSemanticsNodes()
+            assertTrue("Duplicate target $tag in $pageTag", matches.size <= 1)
+            val found = matches.singleOrNull()
+            val bounds = container.boundsInRoot
+            val bar = ui.onNodeWithTag("page-topbar:$title").fetchSemanticsNode().boundsInRoot
+            val viewport = Rect(bounds.left, maxOf(bounds.top, bar.bottom), bounds.right, bounds.bottom)
+            assertTrue("Empty reachable viewport for $pageTag: $viewport", viewport.width > 0f && viewport.height > 0f)
+            val axis = checkNotNull(container.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange))
+            return Frame(viewport, found?.let(::rawBounds), found?.boundsInRoot, axis.value())
+        }
+        if (frame().target == null) pageNode.performScrollToIndex(0)
+        ui.waitUntil(timeoutMillis = 5_000) {
+            val before = frame()
+            val raw = before.target
+            val clipped = before.clipped
+            if (raw != null && clipped != null && clipped.width > 0f && clipped.height > 0f &&
+                before.viewport.contains(raw.center) && before.viewport.contains(clipped.center) && target.isDisplayed()) {
+                true
+            } else {
+                val limit = before.viewport.height * 0.5f
+                val dy = if (raw == null) limit else (raw.center.y - before.viewport.center.y).coerceIn(-limit, limit)
+                assertTrue("Target not reachable by scrolling: $tag; $before", kotlin.math.abs(dy) >= 0.5f)
+                val axis = checkNotNull(pageNode.fetchSemanticsNode().config.getOrNull(SemanticsProperties.VerticalScrollAxisRange))
+                pageNode.performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
+                    assertTrue("ScrollBy rejected for $tag", scroll(0f, if (axis.reverseScrolling) -dy else dy))
+                }
+                val after = frame()
+                assertTrue("Scroll made no progress for $tag: before=$before after=$after", after != before)
+                false
+            }
+        }
+        return target.assertIsDisplayed()
     }
     protected fun retainedSettingsEntry(id: String, page: String = "设置"): () -> Unit {
         val entry = app.daiyu.android.ui.screens.settings.SettingsCatalog.entry(id)
@@ -194,7 +235,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         }
     }
     protected fun modelField(label: String) = reveal("settings-field:$label")
-    protected fun inlineBodyControl(tag: String): SemanticsNodeInteraction = reveal(tag).performScrollTo()
+    protected fun inlineBodyControl(tag: String): SemanticsNodeInteraction = reveal(tag)
     protected fun openInlineBodyFields() {
         inlineBodyControl("model-body-fields")
         if (ui.onAllNodesWithTag("model-body-field-add").fetchSemanticsNodes().isEmpty()) {

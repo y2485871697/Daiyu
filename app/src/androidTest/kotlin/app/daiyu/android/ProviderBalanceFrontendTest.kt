@@ -143,6 +143,14 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
             }
         }
         ui.waitForIdle()
+        awaitCoordinator()
+    }
+    private fun awaitCoordinator() {
+        ui.waitUntil(timeoutMillis = 5_000) {
+            var ready = false
+            mainThread { ready = ::latestUi.isInitialized }
+            ready
+        }
     }
     private fun startCoordinator(fake: Fake): Request {
         mainThread { latestUi.start() }; ui.waitForIdle(); assertTrue(latestUi.running)
@@ -174,7 +182,12 @@ class ProviderBalanceFrontendTest : WiredActivityTestCase() {
         val disposed = startCoordinator(fake); val stale = latestUi
         mainThread { mounted = false }; ui.waitForIdle()
         assertTrue(disposed.cancelled())
-        mainThread { mounted = true }; ui.waitForIdle()
+        mainThread { mounted = true }
+        ui.waitUntil(timeoutMillis = 5_000) {
+            var remounted = false
+            mainThread { remounted = latestUi !== stale }
+            remounted
+        }
         val before = fake.requests.size
         mainThread { stale.start() }; assertEquals(before, fake.requests.size)
         deliver(disposed); assertNull(latestUi.status)

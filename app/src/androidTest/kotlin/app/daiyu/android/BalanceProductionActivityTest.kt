@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicReference
  */
 class BalanceProductionActivityTest : WiredActivityTestCase() {
     override val engineeringUi = true
+    internal override fun createFixture() = RunControlFixture(instrumentation.targetContext, providerBalanceHost = testHost)
     private lateinit var originalHost: ProviderBalanceRuntimeHost
     private lateinit var testHost: ProviderBalanceRuntimeHost
     private lateinit var runtime: BalanceRuntime

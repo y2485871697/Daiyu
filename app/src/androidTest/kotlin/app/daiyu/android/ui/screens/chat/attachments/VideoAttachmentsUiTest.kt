@@ -194,6 +194,7 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         show(compact = true)
         node("video_attachments").assertDoesNotExist()
         node("chat-send").assertIsNotEnabled()
+        val empty = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
         ui.onNodeWithContentDescription("附件").performClick()
         node("chat-attachment:ATTACH_VIDEO").performClick()
         assertEquals(1, picker.launches.size)
@@ -202,8 +203,12 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         node("video_attachments_select").assertDoesNotExist()
         node("video_attachments_send").assertDoesNotExist()
         val surface = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
-        val item = node("video_attachments_item:$id").fetchSemanticsNode().boundsInRoot
+        val item = node("video_attachments_item:$id").assertHeightIsEqualTo(44.dp)
+            .assertWidthIsEqualTo(188.dp).fetchSemanticsNode().boundsInRoot
+        val input = node("chat-draft").fetchSemanticsNode().boundsInRoot
         assertTrue(item.left >= surface.left && item.right <= surface.right)
+        assertTrue(item.top >= surface.top && item.bottom <= input.top)
+        assertTrue(surface.height > empty.height)
         node("chat-send").assertIsEnabled().performClick()
         node("video_attachments_confirmation").assertIsDisplayed()
         assertNull(handed)
@@ -211,6 +216,8 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         node("video_attachments_remove:$id").performClick()
         ui.waitUntil(5_000) { host.state.items.isEmpty() && !host.state.recovering }
         node("video_attachments").assertDoesNotExist()
+        val restored = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+        assertTrue(kotlin.math.abs(restored.height - empty.height) <= 1f)
         node("chat-send").assertIsNotEnabled()
     }
 

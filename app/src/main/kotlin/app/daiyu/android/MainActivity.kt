@@ -514,7 +514,6 @@ class MainActivity : ComponentActivity() {
     }
     private val imageHost by lazy { ImageChatHost.obtain(controller, { if (activityUsable()) publishChat() },
         { if (activityUsable()) toast(it) }, ::settleImageReceipt) }
-    private var imagePanelVisible by mutableStateOf(false)
     private var videoComposerControls by mutableStateOf<app.daiyu.android.ui.screens.chat.attachments.VideoComposerControls?>(null)
     private data class VideoPickEntry(val owner: ChatController.TextSendOwner, val epoch: Long)
     private var videoPickEntry by mutableStateOf<VideoPickEntry?>(null)
@@ -1917,7 +1916,10 @@ class MainActivity : ComponentActivity() {
                                     }, dedicatedTool = { step -> DedicatedQuestion(step) },
                                         toolContent = { step -> ToolTrustedContent(step) }, imageLoader = imageHost.historyLoader,
                                         assistant = projectedAssistants.firstOrNull { it.id == (selected?.assistantId ?: activeAssistant) },
-                                        composerAttachments = { if (!sidebarVisible) key(editorGeneration) { VideoComposerPanel() } })
+                                        composerAttachments = { if (!sidebarVisible) key(editorGeneration) {
+                                            ImageComposerPanel()
+                                            VideoComposerPanel()
+                                        } })
                                     Column(Modifier.fillMaxWidth().heightIn(max = extrasMaxHeight)
                                         .verticalScroll(rememberScrollState()).testTag("chat-extra-actions")) {
                                         pendingTextSend?.let { pending ->
@@ -1927,7 +1929,6 @@ class MainActivity : ComponentActivity() {
                                                 onClick = { cancelPendingTextSend(pending) }
                                             )
                                         }
-                                        if (imagePanelVisible) ImageComposerPanel()
                                         DictationComposerEntry()
                                         ShizukuComposerEntry()
                                     }
@@ -2283,14 +2284,13 @@ class MainActivity : ComponentActivity() {
         onMenuAction = { action -> guard { when (action) {
             ChatMenuAction.ATTACH_IMAGE -> {
                 if (editorMatches() && videoHost.state.items.isEmpty() && !videoSending) {
-                    imagePanelVisible = true; pickImages()
+                    pickImages()
                 }
             }
             ChatMenuAction.ATTACH_VIDEO -> {
                 if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch &&
                     !imageHost.hasAttachments && !imageHost.busy && !shizukuWritesBlocked) {
                     cancelShizukuEditor(); cancelBrowserEditor(); cancelGenerationEditor()
-                    imagePanelVisible = false
                     videoPickEntry = VideoPickEntry(ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision),
                         contextManagementEntryEpoch)
                 }
@@ -4110,19 +4110,20 @@ class MainActivity : ComponentActivity() {
         val ownerGeneration = editorGeneration
         val enabled = activityUsable() && retainedPage == "chat" && !sidebarVisible && selectionReady &&
             controller.ready && !controller.dataBusy && controller.active == null && !imageHost.busy
-        Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 12.dp)) {
-            ImageAttachments(images, imageHost.actions(::launchImagePicker), imageHost.draftLoader, enabled = enabled)
-            Row(Modifier.fillMaxWidth()) {
-                top.yukonga.miuix.kmp.basic.TextButton(text = imageHost.authorizationLabel,
-                    enabled = enabled, modifier = Modifier.weight(1f).heightIn(min = 48.dp).testTag("image-host-authorize"),
-                    onClick = { if (imageHost.session === session && editorGeneration == ownerGeneration) declareImageSupport() })
-                top.yukonga.miuix.kmp.basic.TextButton(text = "发送图片", enabled = enabled && images.canSubmit,
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("image-host-send"), onClick = {
-                        if (imageHost.session === session && editorGeneration == ownerGeneration) guard { sendImageDraft(draft) }
-                    })
-                top.yukonga.miuix.kmp.basic.TextButton(text = "收起", modifier = Modifier.heightIn(min = 48.dp),
-                    onClick = { imagePanelVisible = false })
-            }
+        Column(Modifier.fillMaxWidth()) {
+            ImageAttachments(images, imageHost.actions(::launchImagePicker), imageHost.draftLoader,
+                enabled = enabled, compact = true)
+            if (images.items.isNotEmpty() || MessageHistory.expand(shown.map { it.second })
+                    .any { row -> row.blocks.any { it is MessageBlock.Image } }) top.yukonga.miuix.kmp.basic.Text(
+                text = imageHost.authorizationLabel,
+                fontSize = 9.sp, lineHeight = 13.sp, maxLines = 1,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                color = app.daiyu.android.ui.screens.chat.conversation.chatChromeColors().accent,
+                modifier = Modifier.padding(horizontal = 13.dp).testTag("image-host-authorize")
+                    .clickable(interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null, enabled = enabled, role = androidx.compose.ui.semantics.Role.Button,
+                        onClick = { if (imageHost.session === session && editorGeneration == ownerGeneration) declareImageSupport() })
+                    .padding(vertical = 4.dp))
             val attempt = session.attempt
             if (attempt != null && !session.uncertain) top.yukonga.miuix.kmp.basic.TextButton(
                 text = "取消图片准备", modifier = Modifier.heightIn(min = 48.dp).testTag("image-host-cancel"),
@@ -5062,15 +5063,11 @@ class MainActivity : ComponentActivity() {
         imageHost.enter(conversation?.id?.value)
         videoHost.enter(conversation?.id?.value)
         draftRevision = maxOf(draftRevision + 1, imageHost.session.attachments.state.value.draft.revision)
-        imagePanelVisible = false
         selected = conversation; selectionReady = true; draft = targetDraft
         val range = selections[conversation?.id]
         selectionStart = (range?.first ?: draft.length).coerceIn(0, draft.length)
         selectionEnd = (range?.second ?: draft.length).coerceIn(0, draft.length)
         shown = if (conversation == null) mutableListOf() else controller.database.messages(conversation.id).toMutableList()
-        imagePanelVisible = imageHost.hasAttachments || imageHost.fenced ||
-            MessageHistory.expand(shown.map { it.second }).any { row -> row.blocks.any { it is MessageBlock.Image } }
-        if (videoHost.state.items.isNotEmpty() || videoHost.state.fenced) imagePanelVisible = false
         childStatusVisit = null; usageVisit = null; collaborationOwner = null; collaborationVisible = false; publishChat(); jumpToBottom(); refresh()
     }
     private fun sendDraft(text: String, universal: UniversalSend? = null) {

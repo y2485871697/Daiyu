@@ -19,6 +19,10 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextOverflow
+import app.daiyu.android.ui.icons.DaiyuIcons
+import app.daiyu.android.ui.screens.chat.conversation.ChatIconButton
+import app.daiyu.android.ui.screens.chat.conversation.chatChromeColors
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -165,9 +169,11 @@ private fun VideoAttachmentsContent(
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             state.items.forEachIndexed { index, item ->
                 key(state.owner, state.visit, state.revision, item.key) {
-                    Column(Modifier.width(if (compact) 104.dp else 168.dp).clip(RoundedCornerShape(12.dp))
+                    if (compact) CompactVideoAttachment(host, state, item, index, canEdit && !picker.selecting,
+                        onPreview = { if (sameVideoVisit(state, host.state)) cover = item as? VideoChatHost.Item.Ready })
+                    else Column(Modifier.width(168.dp).clip(RoundedCornerShape(12.dp))
                         .background(colors.surfaceContainerHigh).testTag("video_attachments_item:${item.key}")) {
-                        Box(Modifier.fillMaxWidth().height(if (compact) 64.dp else 104.dp).then(
+                        Box(Modifier.fillMaxWidth().height(104.dp).then(
                             if (item is VideoChatHost.Item.Ready && state.visible) Modifier.clickable(
                                 interactionSource = remember { MutableInteractionSource() }, indication = null,
                                 role = Role.Button, onClickLabel = "查看第 ${index + 1} 个视频的封面",
@@ -180,25 +186,14 @@ private fun VideoAttachmentsContent(
                                 is VideoChatHost.Item.Ready -> VideoCover(host, state, item, 256)
                             }
                         }
-                        if (compact) Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 3.dp, top = 3.dp, bottom = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (item is VideoChatHost.Item.Ready) "视频 · ${item.video.durationMs / 1000} 秒" else "视频",
-                                Modifier.weight(1f).then(if (item is VideoChatHost.Item.Ready) Modifier.testTag("video_attachments_ready:${item.key}") else Modifier),
-                                fontSize = 9.sp, lineHeight = 13.sp, maxLines = 1)
-                            app.daiyu.android.ui.screens.chat.conversation.ChatIconButton(
-                                app.daiyu.android.ui.icons.DaiyuIcons.Close, "移除第 ${index + 1} 个视频", { host.remove(item.key, state) },
-                                Modifier.size(22.dp).testTag("video_attachments_remove:${item.key}"),
-                                enabled = canEdit && !picker.selecting, iconSize = 11.dp)
-                        } else {
-                            if (item is VideoChatHost.Item.Ready) {
-                                Text("原视频 · ${item.video.mime}\n${item.video.width} × ${item.video.height} · ${item.video.durationMs / 1000} 秒\n${item.video.bytes} 字节",
-                                    modifier = Modifier.padding(8.dp), style = MiuixTheme.textStyles.footnote1)
-                                VideoStatus("已就绪", "video_attachments_ready:${item.key}")
-                            }
-                            TextButton(text = "移除第 ${index + 1} 项", enabled = canEdit && !picker.selecting,
-                                onClick = { host.remove(item.key, state) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                                    .testTag("video_attachments_remove:${item.key}"))
+                        if (item is VideoChatHost.Item.Ready) {
+                            Text("原视频 · ${item.video.mime}\n${item.video.width} × ${item.video.height} · ${item.video.durationMs / 1000} 秒\n${item.video.bytes} 字节",
+                                modifier = Modifier.padding(8.dp), style = MiuixTheme.textStyles.footnote1)
+                            VideoStatus("已就绪", "video_attachments_ready:${item.key}")
                         }
+                        TextButton(text = "移除第 ${index + 1} 项", enabled = canEdit && !picker.selecting,
+                            onClick = { host.remove(item.key, state) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                                .testTag("video_attachments_remove:${item.key}"))
                     }
                 }
             }
@@ -245,6 +240,44 @@ private fun VideoAttachmentsContent(
     }
 }
 
+@Composable
+private fun CompactVideoAttachment(
+    host: VideoChatHost,
+    state: VideoChatHost.Snapshot,
+    item: VideoChatHost.Item,
+    index: Int,
+    canRemove: Boolean,
+    onPreview: () -> Unit,
+) {
+    val colors = chatChromeColors()
+    Row(Modifier.width(188.dp).clip(RoundedCornerShape(12.dp))
+        .background(colors.accent.copy(alpha = .08f))
+        .testTag("video_attachments_item:${item.key}").padding(4.dp),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).then(
+            if (item is VideoChatHost.Item.Ready && state.visible) Modifier.clickable(
+                interactionSource = remember { MutableInteractionSource() }, indication = null,
+                role = Role.Button, onClickLabel = "查看第 ${index + 1} 个视频的封面", onClick = onPreview,
+            ) else Modifier,
+        ).testTag("video_attachments_thumbnail:${item.key}"), contentAlignment = Alignment.Center) {
+            if (item is VideoChatHost.Item.Ready) VideoCover(host, state, item, 256, compact = true)
+            else androidx.compose.material3.Icon(DaiyuIcons.Video, null, Modifier.size(18.dp), tint = colors.accent)
+        }
+        Text(when (item) {
+            is VideoChatHost.Item.Ready -> "视频 ${index + 1} · ${item.video.durationMs / 1000} 秒"
+            is VideoChatHost.Item.Importing -> "正在导入原视频…"
+            is VideoChatHost.Item.Failed -> videoFailureText(item.failure)
+        }, Modifier.weight(1f).testTag(when (item) {
+            is VideoChatHost.Item.Ready -> "video_attachments_ready:${item.key}"
+            is VideoChatHost.Item.Importing -> "video_attachments_importing:${item.key}"
+            is VideoChatHost.Item.Failed -> "video_attachments_failed:${item.key}"
+        }), fontSize = 10.sp, lineHeight = 14.sp, color = colors.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        ChatIconButton(DaiyuIcons.Close, "移除第 ${index + 1} 个视频", { host.remove(item.key, state) },
+            Modifier.size(24.dp).testTag("video_attachments_remove:${item.key}"),
+            enabled = canRemove, iconSize = 12.dp, tint = colors.muted)
+    }
+}
+
 private fun sameVideoVisit(a: VideoChatHost.Snapshot, b: VideoChatHost.Snapshot): Boolean =
     a.owner == b.owner && a.conversation == b.conversation && a.visit == b.visit && a.revision == b.revision && b.visible
 
@@ -255,7 +288,7 @@ private sealed interface VideoCoverResult {
 }
 
 @Composable
-private fun VideoCover(host: VideoChatHost, state: VideoChatHost.Snapshot, item: VideoChatHost.Item.Ready, edge: Int) {
+private fun VideoCover(host: VideoChatHost, state: VideoChatHost.Snapshot, item: VideoChatHost.Item.Ready, edge: Int, compact: Boolean = false) {
     var retry by remember { mutableStateOf(0) }
     val result by produceState<VideoCoverResult>(VideoCoverResult.Loading, host, state.owner, state.visit, state.revision, item, edge, retry, state.visible) {
         value = VideoCoverResult.Loading
@@ -274,8 +307,13 @@ private fun VideoCover(host: VideoChatHost, state: VideoChatHost.Snapshot, item:
             VideoCoverResult.Loaded(image) else VideoCoverResult.Failed
     }
     when (val current = result) {
-        VideoCoverResult.Loading -> VideoStatus("正在读取封面…", "video_attachments_cover_loading:${item.key}")
-        VideoCoverResult.Failed -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        VideoCoverResult.Loading -> if (compact) androidx.compose.material3.Icon(DaiyuIcons.Video, "正在读取封面…",
+            Modifier.size(18.dp).testTag("video_attachments_cover_loading:${item.key}"), tint = chatChromeColors().muted)
+        else VideoStatus("正在读取封面…", "video_attachments_cover_loading:${item.key}")
+        VideoCoverResult.Failed -> if (compact) ChatIconButton(DaiyuIcons.Retry, "重试封面", { retry++ },
+            Modifier.size(24.dp).testTag("video_attachments_cover_failed:${item.key}"), iconSize = 14.dp,
+            tint = chatChromeColors().muted)
+        else Column(horizontalAlignment = Alignment.CenterHorizontally) {
             VideoStatus("封面不可用，原视频仍保留", "video_attachments_cover_failed:${item.key}")
             TextButton(text = "重试封面", onClick = { retry++ }, modifier = Modifier.heightIn(min = 48.dp))
         }

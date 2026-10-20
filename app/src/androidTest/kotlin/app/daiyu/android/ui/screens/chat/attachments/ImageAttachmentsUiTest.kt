@@ -1,12 +1,24 @@
 package app.daiyu.android.ui.screens.chat.attachments
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.test.assertHeightIsEqualTo
+import androidx.compose.ui.test.assertWidthIsEqualTo
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasAnyAncestor
+import app.daiyu.android.ui.screens.chat.conversation.ChatComposer
+import app.daiyu.android.ui.screens.chat.conversation.ChatMenuLayer
+import app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
+import app.daiyu.android.ui.screens.chat.conversation.ComposerUi
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextContains
@@ -50,6 +62,74 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
             }
         }
         ui.waitForIdle()
+    }
+
+    private fun showComposer(holder: ImageAttachmentsState) {
+        mainThread { activity.setContent {
+            val state by holder.state.collectAsState()
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                ChatMenuLayer { Box(Modifier.fillMaxSize()) {
+                    ChatComposer(ComposerUi(imageSendAvailable = state.canSubmit,
+                        imageSendBlocked = state.items.isNotEmpty() && !state.canSubmit), ChatScreenActions(),
+                        Modifier.requiredWidth(320.dp).align(Alignment.BottomCenter), attachmentContent = {
+                            ImageAttachments(state, ImageAttachmentsActions(
+                                onSelect = { selection = holder.requestSelection(it) },
+                                onPreview = { holder.openPreview(it) }, onRemove = { holder.remove(it) },
+                                onDismissPreview = { holder.closePreview(it) },
+                            ), { _, _ -> ImageBitmap(8, 8) }, compact = true)
+                        })
+                } }
+            }
+        } }
+        ui.waitForIdle()
+    }
+
+    fun testCompactImagesRaiseOnlyComposerTopAndLastRemovalRestoresHeight() {
+        val holder = ImageAttachmentsState(draft)
+        showComposer(holder)
+        node("image_attachments").assertDoesNotExist()
+        val empty = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+        lateinit var key: ImageAttachmentItemKey
+        mainThread {
+            key = holder.beginImport(requireNotNull(holder.requestSelection()), 1).single()
+            holder.importSucceeded(key, image("inline"))
+        }
+        val filled = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+        val item = node("image_attachments_item:${key.id}").assertIsDisplayed()
+            .assertHeightIsEqualTo(44.dp).assertWidthIsEqualTo(188.dp).fetchSemanticsNode().boundsInRoot
+        val input = node("chat-draft").fetchSemanticsNode().boundsInRoot
+        assertTrue("Attachment adds only a compact row", filled.top < empty.top && filled.height > empty.height)
+        assertTrue(kotlin.math.abs(filled.bottom - empty.bottom) <= 1f)
+        assertTrue(item.top >= filled.top && item.bottom <= input.top)
+        ui.onNode(hasTestTag("image_attachments") and hasAnyAncestor(hasTestTag("chat-composer-surface"))).assertExists()
+        node("image_attachments_select").assertDoesNotExist()
+        node("chat-send").assertIsEnabled()
+        node("image_attachments_thumbnail:${key.id}").performClick()
+        node("image_attachments_preview").assertIsDisplayed()
+        node("image_attachments_close_preview").performClick()
+        node("image_attachments_remove:${key.id}").performClick()
+        node("image_attachments").assertDoesNotExist()
+        val restored = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+        assertTrue(kotlin.math.abs(restored.top - empty.top) <= 1f)
+        node("chat-send").assertIsNotEnabled()
+    }
+
+    fun testCompactImportFailureRemainsRemovableAndSelectionCancelHasNoEmptyPanel() {
+        val holder = ImageAttachmentsState(draft)
+        showComposer(holder)
+        lateinit var request: ImageAttachmentSelection
+        mainThread { request = requireNotNull(holder.requestSelection()) }
+        node("image_attachments_selecting").assertIsDisplayed()
+        mainThread { holder.cancelSelection(request) }
+        node("image_attachments").assertDoesNotExist()
+        lateinit var key: ImageAttachmentItemKey
+        mainThread { key = holder.beginImport(requireNotNull(holder.requestSelection()), 1).single() }
+        node("image_attachments_importing:${key.id}").assertIsDisplayed()
+        node("chat-send").assertIsNotEnabled()
+        mainThread { holder.importFailed(key, ImageAttachmentFailure.SOURCE_UNAVAILABLE) }
+        node("image_attachments_failed:${key.id}").assertIsDisplayed()
+        node("image_attachments_remove:${key.id}").performClick()
+        node("image_attachments").assertDoesNotExist()
     }
 
     fun testSelectionImportFailureAndRemovalAreRealBusinessUi() {

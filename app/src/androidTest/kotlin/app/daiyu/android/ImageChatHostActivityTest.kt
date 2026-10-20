@@ -179,7 +179,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         val entered = CountDownLatch(1); val release = CountDownLatch(1)
         beforeFactory = { entered.countDown(); check(release.await(10, TimeUnit.SECONDS)) }
         val session = host().session
-        node("image-host-send").performClick()
+        node("chat-send").performClick()
         assertTrue(entered.await(10, TimeUnit.SECONDS))
         val oldAttempt = checkNotNull(session.attempt)
         try { node("image-host-cancel").assertIsEnabled().performClick() }
@@ -191,7 +191,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         assertEquals(1, session.attachments.state.value.ready.size)
         val nextEntered = CountDownLatch(1); val nextRelease = CountDownLatch(1)
         beforeFactory = { nextEntered.countDown(); check(nextRelease.await(10, TimeUnit.SECONDS)) }
-        node("image-host-send").performClick()
+        node("chat-send").performClick()
         assertTrue(nextEntered.await(10, TimeUnit.SECONDS))
         try {
             mainThread {
@@ -210,12 +210,12 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         val ordered = host().session.attachments.state.value.ready.map { it.attachment.id }
         assertEquals(2, documents.opens.get())
         // Unknown capability never submits, including a plausible model name.
-        node("image-host-send").performClick()
+        node("chat-send").performClick()
         ui.waitUntil(10_000) { !host().sending }
         assertEquals(0, calls.get()); assertEquals(2, host().session.attachments.state.value.ready.size)
         assertDraft("正文在图片之前")
         authorize()
-        node("image-host-send").performClick()
+        node("chat-send").performClick()
         awaitControl("one image request") { calls.get() == 1 && controller.active == null }
         ui.waitUntil(10_000) { !host().sending && host().session.attachments.state.value.items.isEmpty() }
         val conversation = controller.database.conversations().single()
@@ -253,13 +253,12 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         val owner = host().session.owner
         val before = host().session.attachments.state.value.ready.map { it.attachment }
         controller.database.writableDatabase.execSQL("CREATE TRIGGER fail_image_host BEFORE INSERT ON messages WHEN NEW.role='assistant' BEGIN SELECT RAISE(IGNORE); END")
-        node("image-host-send").performClick()
+        node("chat-send").performClick()
         ui.waitUntil(10_000) { host().session.uncertain }
         assertDraft("不能重发")
         assertEquals(before, host().session.attachments.state.value.ready.map { it.attachment })
         assertEquals(before, controller.imageAttachments.store.list(owner))
         assertEquals(0, calls.get())
-        node("image-host-send").assertIsNotEnabled()
         node("chat-send").assertIsNotEnabled()
         mainThread { retainedControls(activity).onSend("不能重发") }
         assertEquals(0, calls.get())
@@ -273,7 +272,6 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         activity = recreateActivity(activity)
         assertEquals(owner, host().session.owner)
         assertTrue(host().session.uncertain)
-        node("image-host-send").assertIsNotEnabled()
         node("chat-send").assertIsNotEnabled()
         mainThread { retainedControls(activity).onSend("不能重发") }
         assertEquals(0, calls.get())
@@ -284,7 +282,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         setDraft("保留")
         pick(1); waitImages(1); authorize()
         settings.save(settings.load().copy(model = "different-exact-model"))
-        node("image-host-send").performClick()
+        node("chat-send").performClick()
         ui.waitUntil(10_000) { !host().sending }
         assertDraft("保留")
         assertEquals(1, host().session.attachments.state.value.ready.size)
@@ -516,7 +514,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         val originalHandler = handlerField.get(controller)
         handlerField.set(controller, queue)
         try {
-            node("image-host-send").performClick()
+            node("chat-send").performClick()
             // The real transaction, including clearing the global draft, precedes recreation.
             ui.waitUntil(10_000) { controller.database.messages(conversationId).size == 2 }
             assertEquals("", controller.database.draft())
@@ -546,7 +544,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             assertEquals(newOwner, host().session.owner)
             val newImages = host().session.attachments.state.value.ready.map { it.attachment }
             assertTrue(newImages.all { it.owner == newOwner })
-            node("image-host-send").performClick()
+            node("chat-send").performClick()
             ui.waitUntil(10_000) { !host().sending && controller.active == null && calls.get() == 2 }
             assertFalse(host().fenced)
             assertDraft("")
@@ -577,7 +575,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         val originalHandler = handlerField.get(controller)
         handlerField.set(controller, queue)
         try {
-            node("image-host-send").performClick()
+            node("chat-send").performClick()
             ui.waitUntil(10_000) { controller.database.messages(conversation.id).size == 2 }
             assertTrue(host().sending)
             node("image-host-cancel").assertIsEnabled().performClick()

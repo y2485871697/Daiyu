@@ -113,7 +113,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         val actions = ChatScreenActions(
             onOpenReasoning = { events.add("reasoning") }, onOpenAssistant = { events.add("assistant") },
             onMore = { events.add("more") }, onMenuAction = { events.add("menu:${it.name}") },
-            onModelClick = { events.add("model") }, onContextClick = { events.add("context") },
+            onModelClick = { events.add("model") },
             onVoice = { events.add("voice") }, onSupplement = { events.add("supplement<$it>") },
             onSend = { error("paused text must not start a new send") },
             onPrimaryTap = { events.add("continue") }, onPrimaryLongPress = { events.add("stop") },
@@ -132,7 +132,10 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         node("chat-menu:AUTO_COMPRESS").assertIsDisplayed()
         touch(ui.onNodeWithText("Token 用量").performScrollTo())
         ui.onNodeWithText("Token 用量").assertDoesNotExist()
-        touch(node("chat-model")); touch(node("chat-context")); touch(button("语音输入"))
+        node("chat-context").assertHasNoClickAction()
+        touch(node("chat-model")); touch(node("chat-context"))
+        node("chat-context").performTouchInput { longClick() }
+        touch(button("语音输入"))
         node("chat-send").assertContentDescriptionEquals("追加消息")
         node("chat-control").assertDoesNotExist()
         touch(node("chat-send"))
@@ -143,7 +146,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         node("chat-control").performTouchInput { longClick() }
         ui.runOnIdle {
             assertEquals(listOf("reasoning", "assistant", "more", "menu:OPEN_TERMINAL", "more", "menu:CONTEXT_STATS",
-                "model", "context", "voice", "supplement<${state.text}>", "continue", "stop"), events.toList())
+                "model", "voice", "supplement<${state.text}>", "continue", "stop"), events.toList())
             assertEquals(3, presses); assertEquals(3, releases)
         }
     }

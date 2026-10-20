@@ -110,8 +110,6 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                 onLongClick = { actions.onMenuAction(ChatMenuAction.COLLABORATION) })
             Row(Modifier.widthIn(max = 144.dp).testTag("chat-context").clip(RoundedCornerShape(12.dp))
                 .border(1.dp, chrome.line, RoundedCornerShape(12.dp))
-                .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = state.enabled, role = Role.Button, onClickLabel = "上下文统计", onClick = actions.onContextClick,
-                    onLongClick = { actions.onMenuAction(ChatMenuAction.CONTEXT_SCOPE) })
                 .padding(1.dp).padding(start = 6.dp, end = 6.dp, top = 3.dp, bottom = 3.dp),
                 horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                 val fraction = state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)

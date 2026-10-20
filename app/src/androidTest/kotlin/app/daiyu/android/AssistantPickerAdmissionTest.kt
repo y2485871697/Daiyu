@@ -51,7 +51,7 @@ class AssistantPickerAdmissionTest : WiredActivityTestCase() {
     fun testStaleCopyDoesNotReachStoreOrAssets() {
         ui.onNodeWithText("Picker A").performTouchInput { longClick() }
         mainThread { admitted = false }
-        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.ui_copy_4edd1d)).performClick()
+        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.ui_copy_assistant)).performClick()
         ui.waitForIdle()
         assertEquals(0, writes.get())
         assertEquals(0, assetsWrites.get())
@@ -60,7 +60,7 @@ class AssistantPickerAdmissionTest : WiredActivityTestCase() {
 
     fun testStaleDeleteConfirmationDoesNotReachStoreOrAssets() {
         ui.onNodeWithText("Picker A").performTouchInput { longClick() }
-        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.action_delete)).performClick()
+        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.ui_delete_assistant)).performClick()
         ui.onNodeWithText(instrumentation.targetContext.getString(R.string.assistant_delete_title)).assertIsDisplayed()
         mainThread { admitted = false }
         ui.onNode(hasText(instrumentation.targetContext.getString(R.string.action_delete)) and hasClickAction())
@@ -71,9 +71,19 @@ class AssistantPickerAdmissionTest : WiredActivityTestCase() {
         assertEquals(2, store.list().size)
     }
 
+    fun testNewAssistantPlaceholderDoesNotMutateProfilesOrSelection() {
+        ui.onNodeWithTag("assistant-new").assertIsDisplayed().performClick()
+        ui.onNodeWithText("Picker A").assertIsDisplayed()
+        ui.onNodeWithText("Picker B").assertIsDisplayed()
+        assertEquals(0, writes.get())
+        assertEquals(0, assetsWrites.get())
+        assertEquals(2, store.list().size)
+        assertEquals("picker-a", store.selectedId.value)
+    }
+
     fun testCurrentCopyStillCopiesProfileAndMemory() {
         ui.onNodeWithText("Picker A").performTouchInput { longClick() }
-        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.ui_copy_4edd1d)).performClick()
+        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.ui_copy_assistant)).performClick()
         ui.waitUntil(5_000) { assetsWrites.get() == 1 }
         assertEquals(1, writes.get())
         assertEquals(3, store.list().size)

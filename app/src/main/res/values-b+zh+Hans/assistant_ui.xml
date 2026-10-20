@@ -10,7 +10,7 @@
   <string name="assistant_list_title">助手</string>
   <string name="assistant_edit_title">人格</string>
   <string name="assistant_search">搜索助手</string>
-  <string name="assistant_current">当前使用</string>
+  <string name="assistant_current">当前</string>
   <string name="assistant_empty">没有匹配的助手</string>
   <string name="assistant_delete_title">删除助手</string>
   <string name="assistant_delete_body">确定删除 %1$s？此操作无法撤销。</string>
@@ -22,4 +22,12 @@
   <string name="assistant_crop_title">裁切头像</string>
   <string name="assistant_memory_summary">只对当前助手生效。MEMORY.md 为所有助手共用。关闭后不注入、不允许读写，已有内容会保留。</string>
   <string name="assistant_skills_summary">只对当前助手生效。三个内置 Skills 默认开启，新安装的需要在这里手动打开。</string>
+  <string name="ui_copy_assistant">复制助手</string>
+  <string name="ui_edit_assistant">编辑助手</string>
+  <string name="ui_delete_assistant">删除助手</string>
+  <string name="assistant_picker_title">选择助手</string>
+  <string name="assistant_new">新建助手</string>
+  <string name="assistant_done">完成</string>
+  <string name="assistant_count">%1$d 位助手</string>
+  <string name="assistant_list_hint">点击切换 · 长按管理</string>
 </resources>

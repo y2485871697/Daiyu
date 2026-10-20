@@ -26,19 +26,30 @@ class SubAgentStatusDialogTest : WiredActivityTestCase() {
         ui.waitForIdle()
     }
 
+    private fun dismissWithBack() {
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        ui.waitForIdle()
+    }
+
     fun testEmptyAndFailedStatesCanCloseWithoutCreatingTasks() {
         for (mode in listOf(AppearanceThemeMode.LIGHT, AppearanceThemeMode.DARK)) {
             var closes = 0
             show(emptyList(), mode, onClose = { closes++ })
-            ui.onNodeWithText("本会话暂无子代理任务").assertIsDisplayed()
+            val emptyText = ui.onNodeWithText("本会话暂无子代理任务").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val body = ui.onNodeWithTag("subagent-status-empty").fetchSemanticsNode().boundsInRoot
+            assertEquals(body.center.x, emptyText.center.x, 1f)
+            assertEquals(body.center.y, emptyText.center.y, 1f)
+            ui.onNodeWithText("当前会话").assertDoesNotExist()
+            ui.onNodeWithText("关闭").assertDoesNotExist()
+            ui.onNodeWithTag("subagent-status-close").assertDoesNotExist()
             ui.onNodeWithTag("subagent-status-list").assertDoesNotExist()
-            ui.onNodeWithTag("subagent-status-close").performClick()
+            dismissWithBack()
             ui.onNodeWithTag("subagent-status").assertDoesNotExist()
             assertEquals(1, closes)
             show(emptyList(), mode, failed = true)
             ui.onNodeWithText("任务状态读取失败；未改变任何任务").assertIsDisplayed()
             ui.onNodeWithText("本会话暂无子代理任务").assertDoesNotExist()
-            ui.onNodeWithTag("subagent-status-close").performClick()
+            dismissWithBack()
         }
     }
 
@@ -59,7 +70,7 @@ class SubAgentStatusDialogTest : WiredActivityTestCase() {
             ui.onNodeWithTag("subagent-status:task-39").performClick()
             ui.onNodeWithText("冻结模型 39").performScrollTo().assertIsDisplayed()
             ui.onNodeWithText("已完成").assertIsDisplayed()
-            ui.onNodeWithTag("subagent-status-close").performClick()
+            dismissWithBack()
             ui.onNodeWithTag("subagent-status").assertDoesNotExist()
         }
     }

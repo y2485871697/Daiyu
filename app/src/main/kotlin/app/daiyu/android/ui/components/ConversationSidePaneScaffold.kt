@@ -563,8 +563,8 @@ private fun PaneSearchRow(
             .heightIn(min = 44.dp * s)
             .testTag("drawer-search")
             .clip(RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
-            .background(colors.search)
-            .border(1.dp, colors.searchBorder, RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
+            .background(colors.action)
+            .border(1.dp, colors.actionBorder, RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
             .clickable(
                 enabled = searchFocusEnabled && !searchActive,
                 interactionSource = remember { MutableInteractionSource() },

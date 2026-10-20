@@ -17,8 +17,6 @@ internal data class ConversationPanePreviewPalette(val dark: Boolean) {
     val bubble = if (dark) Color(0x1CC0ACD7) else Color(0x1E81738E)
     val line = if (dark) Color(0x2BC3B0D9) else Color(0x2881738E)
     val border = if (dark) Color(0x26D7C5FF) else Color(0xDCFFFFFF)
-    val search = if (dark) Color(0x06FFFFFF) else Color(0x7AFFFFFF)
-    val searchBorder = if (dark) Color(0x16C7B4EB) else Color(0x1CA28CBD)
     val action = if (dark) Color(0x17AC93C2) else Color(0x1A81738E)
     val actionBorder = if (dark) Color(0x1FAC93C2) else Color(0x2081738E)
     val folderIdle = if (dark) Color(0x24C0ACD7) else Color(0x2281738E)

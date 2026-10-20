@@ -228,6 +228,43 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
         assertEquals(expected.blue, actual.blue, .015f)
     }
 
+    fun testSearchUsesTheSameGrayPurpleFillAsActionsBeforeAndAfterEditing() {
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            show(scale = scale, dark = dark)
+            val fill = if (dark) Color(0x17AC93C2) else Color(0x1A81738E)
+            fun assertFill(tag: String) {
+                val drawer = bounds("conversation-drawer")
+                val control = bounds(tag)
+                val pixels = node("conversation-drawer").captureToImage().toPixelMap()
+                val x = (control.center.x - drawer.left).toInt()
+                val top = control.top - drawer.top
+                val background = pixels[x, (top - 3 * density.get().density).toInt()]
+                val actual = pixels[x, (top + 4 * density.get().density).toInt()]
+                val expected = fill.compositeOver(background)
+                assertEquals(expected.red, actual.red, .015f)
+                assertEquals(expected.green, actual.green, .015f)
+                assertEquals(expected.blue, actual.blue, .015f)
+            }
+            node("drawer-search").assertHeightIsAtLeast(44.dp)
+            assertEquals(bounds("drawer-new").width, bounds("drawer-search").width, 1f)
+            assertFill("drawer-search")
+            assertFill("drawer-new")
+            assertFill("drawer-manage")
+            node("drawer-search").performClick()
+            node("drawer-search-input").performSemanticsAction(SemanticsActions.SetText) {
+                assertTrue(it(AnnotatedString("Second")))
+            }.assertEditableText("Second")
+            assertFill("drawer-search")
+            dismissIme()
+            assertFill("drawer-search")
+            node("drawer-list").performScrollToNode(hasTestTag("drawer-conversation:second"))
+            node("drawer-conversation:second").assertIsDisplayed()
+            node("drawer-conversation:first").assertDoesNotExist()
+            assertNull(action)
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testFolderAndCreateChipsKeepIdleBackgroundWhenSelectionChanges() {
         for (dark in listOf(false, true)) {
             show(dark = dark)

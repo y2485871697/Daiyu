@@ -8,6 +8,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.AnnotatedString
+import app.daiyu.android.ui.screens.settings.ModelCatalogEntryUi
 import app.daiyu.android.assistants.FileAssistantAssets
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
@@ -44,13 +47,46 @@ class DialogCloseAffordanceTest : WiredActivityTestCase() {
         assertEquals(1, closes)
     }
 
-    fun testModelPickerHasNoCrossAndCancelStillDismisses() {
+    fun testModelPickerHasNoCrossOrFooterAndSystemBackStillDismisses() {
         show { dismiss ->
-            ChatModelPicker(ChatModelPickerState("", emptyList()), {}, {}, {}, dismiss)
+            ChatModelPicker(ChatModelPickerState("", emptyList()), {}, dismiss)
         }
-        ui.onNodeWithText("取消").assertIsDisplayed().performClick()
+        for (text in listOf("模型设置", "刷新", "取消", "当前供应商 · 本地目录", "暂无可选模型")) {
+            ui.onNodeWithText(text).assertDoesNotExist()
+        }
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        ui.waitForIdle()
         node("chat-model-picker").assertDoesNotExist()
         assertEquals(1, closes)
+    }
+
+    fun testModelPickerKeepsCatalogSearchAndSelectionWhenModelsExist() {
+        var selected: String? = null
+        show { dismiss ->
+            ChatModelPicker(ChatModelPickerState("first", listOf(
+                ModelCatalogEntryUi("first", "First model"), ModelCatalogEntryUi("second", "Second model"))),
+                { selected = it }, dismiss)
+        }
+        ui.onNodeWithText("当前供应商 · 本地目录").assertIsDisplayed()
+        node("chat-model-search").performSemanticsAction(SemanticsActions.SetText) {
+            assertTrue(it(AnnotatedString("missing")))
+        }
+        ui.onNodeWithText("没有匹配的模型").assertIsDisplayed()
+        node("chat-model-search").performSemanticsAction(SemanticsActions.SetText) {
+            assertTrue(it(AnnotatedString("second")))
+        }
+        node("chat-model-option:first").assertDoesNotExist()
+        node("chat-model-option:second").performClick()
+        assertEquals("second", selected)
+    }
+
+    fun testEmptyModelPickerKeepsImportGuidanceWithoutDuplicateEmptyLabels() {
+        val message = "本地目录为空，请到模型设置导入"
+        show { dismiss -> ChatModelPicker(ChatModelPickerState("", emptyList(), message = message), {}, dismiss) }
+        ui.onNodeWithText(message).assertIsDisplayed()
+        ui.onNodeWithText("当前供应商 · 本地目录").assertDoesNotExist()
+        ui.onNodeWithText("暂无可选模型").assertDoesNotExist()
+        node("chat-model-refresh").assertDoesNotExist()
     }
 
     fun testSubAgentStatusHasNoCrossAndFooterStillDismisses() {

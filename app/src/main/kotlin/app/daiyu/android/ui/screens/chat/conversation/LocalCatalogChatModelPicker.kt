@@ -26,7 +26,7 @@ internal class LocalCatalogChatModelPickerSession(
     fun selectionFor(id: String): CatalogModelSelection<CatalogModelParameters>? = snapshot.selectionFor(id)
 }
 
-/** Reuses the production searchable radio picker. Refresh means reload LOCAL records, not fetch. */
+/** Reuses the production searchable radio picker with the current local snapshot. */
 @Composable
 internal fun LocalCatalogChatModelPicker(
     session: LocalCatalogChatModelPickerSession,
@@ -34,15 +34,11 @@ internal fun LocalCatalogChatModelPicker(
     loading: Boolean = false,
     message: String? = session.state.message,
     onSelect: (CatalogModelSelection<CatalogModelParameters>) -> Unit,
-    onReload: () -> Unit,
-    onSettings: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     ChatModelPicker(
         state = session.state.copy(enabled = enabled && !loading, loading = loading, message = message),
         onSelect = { id -> if (enabled && !loading) session.selectionFor(id)?.let(onSelect) },
-        onRefresh = onReload,
-        onSettings = onSettings,
         onDismiss = onDismiss,
     )
 }

@@ -19,7 +19,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalConfiguration
+import app.daiyu.android.ui.layout.appWindowSize
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -50,7 +50,7 @@ import kotlin.math.roundToInt
     var selected by remember(show, effort, choices) {
         mutableIntStateOf(if (subagent) choices.indexOf(effort).coerceAtLeast(0) else choices.indexOf(effort))
     }
-    val maxHeight = (LocalConfiguration.current.screenHeightDp - 50).coerceAtLeast(160).dp
+    val maxHeight = (appWindowSize().height - 50.dp).coerceAtLeast(0.dp)
     if (subagent) {
         SubAgentConfigurationWindow("思考深度", onDismiss) {
             Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState())) {

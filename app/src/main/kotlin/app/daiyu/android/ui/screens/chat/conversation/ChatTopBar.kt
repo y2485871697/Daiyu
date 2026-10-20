@@ -48,31 +48,31 @@ internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.B
     automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false, modelLabel: String = "") {
     var expanded by remember { mutableStateOf(false) }
     val chrome = chatChromeColors()
-    Row(modifier.testTag("chat-top-bar").fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 3.dp, bottom = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(11.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.testTag("chat-top-bar").fillMaxWidth().heightIn(min = 64.dp).padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         ChatIconButton(ChatPreviewIcons.Menu, "打开侧边栏", actions.onOpenSidebar,
-            Modifier.size(width = 17.dp, height = 28.dp), tint = chrome.text, iconSize = 17.dp)
-        val titleBlockHeight = with(LocalDensity.current) { 17.3.sp.toDp() + 11.5.sp.toDp() } + 4.dp
+            Modifier.size(40.dp), tint = chrome.text, iconSize = 22.dp)
+        val titleBlockHeight = with(LocalDensity.current) { 22.sp.toDp() + 16.sp.toDp() } + 4.dp
         Column(Modifier.weight(1f).heightIn(min = titleBlockHeight)) {
             Text(title.ifBlank { "新会话" }, Modifier.testTag("chat-title"),
                 color = chrome.text,
-                style = MiuixTheme.textStyles.title3.copy(fontSize = 12.sp, lineHeight = 17.3.sp, fontWeight = FontWeight(650)),
+                style = MiuixTheme.textStyles.title3.copy(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight(650)),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(listOf(assistantLabel, modelLabel).filter { it.isNotBlank() }.joinToString(" · "),
                 modifier = Modifier.testTag("chat-subtitle").padding(top = 4.dp), color = chrome.muted,
-                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 8.sp, lineHeight = 11.5.sp),
+                style = MiuixTheme.textStyles.footnote1.copy(fontSize = 11.sp, lineHeight = 16.sp),
                 maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        ChatIconButton(ChatPreviewIcons.SubAgents, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, modifier = Modifier.size(28.dp), tint = chrome.toolbar, iconSize = 18.dp)
+        ChatIconButton(ChatPreviewIcons.SubAgents, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, modifier = Modifier.size(40.dp), tint = chrome.toolbar, iconSize = 22.dp)
         Box {
             val moreShape = RoundedCornerShape(10.dp)
             val dark = MiuixTheme.colorScheme.background.luminance() < .3f
             val activeBackground = if (dark) Color(0xFF26233D) else Color(0xFFF0ECFC)
             ChatIconButton(ChatPreviewIcons.More, "更多", { actions.onMore(); expanded = true },
-                Modifier.size(28.dp).semantics { selected = expanded }
+                Modifier.size(40.dp).semantics { selected = expanded }
                     .background(if (expanded) activeBackground else Color.Transparent, moreShape)
                     .then(if (expanded) Modifier.border(1.dp, Color(0x0D9980BE), moreShape) else Modifier),
-                tint = if (expanded) chrome.accent else chrome.text, iconSize = 17.dp, shape = moreShape)
+                tint = if (expanded) chrome.accent else chrome.text, iconSize = 22.dp, shape = moreShape)
             ChatOverflowMenu(expanded, { expanded = false }, actions.onMenuAction,
                 interactiveModeEnabled, interactiveModeChangeEnabled, automaticCompression, automaticCompressionPending)
         }

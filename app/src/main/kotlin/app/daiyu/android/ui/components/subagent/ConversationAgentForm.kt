@@ -13,7 +13,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
+import app.daiyu.android.ui.layout.appWindowSize
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -24,18 +24,18 @@ import top.yukonga.miuix.kmp.window.WindowDialog
         WindowDialog(show = true, title = title, onDismissRequest = onDismiss) { Column { content() } }
         return
     }
-    val maximumHeight = (LocalConfiguration.current.screenHeightDp - 32).coerceAtLeast(180).dp
+    val maximumHeight = (appWindowSize().height - 32.dp).coerceAtLeast(0.dp)
     ConversationAgentTypography {
         ConversationAgentSheet(onDismiss, modifier = Modifier.heightIn(max = maximumHeight)) {
             Column(Modifier.fillMaxWidth().padding(start = 15.dp, end = 15.dp, top = 10.dp, bottom = 16.dp)) {
                 ConversationAgentHandle()
                 Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    ConversationAgentIconButton(onClick = onDismiss, modifier = Modifier.size(27.dp,29.dp)) {
-                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(16.dp))
+                    ConversationAgentIconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", Modifier.size(20.dp))
                     }
-                    Text(title, style = MaterialTheme.typography.titleLarge.copy(fontSize = 16.sp, lineHeight = 22.4.sp), modifier = Modifier.weight(1f))
-                    ConversationAgentIconButton(onClick = onDismiss, modifier = Modifier.size(27.dp,29.dp)) {
-                        Icon(Icons.Rounded.Close, "关闭", Modifier.size(16.dp))
+                    Text(title, style = MaterialTheme.typography.titleLarge.copy(fontSize = 18.sp, lineHeight = 26.sp), modifier = Modifier.weight(1f))
+                    ConversationAgentIconButton(onClick = onDismiss, modifier = Modifier.size(40.dp)) {
+                        Icon(Icons.Rounded.Close, "关闭", Modifier.size(20.dp))
                     }
                 }
                 content()
@@ -48,9 +48,9 @@ import top.yukonga.miuix.kmp.window.WindowDialog
     enabled: Boolean, keyboardOptions: KeyboardOptions = KeyboardOptions.Default) {
     val colors = conversationAgentColors()
     Column(Modifier.fillMaxWidth().padding(bottom = 12.dp)) {
-        Text(label, fontSize = 10.sp, lineHeight = 16.sp, color = colors.text, modifier = Modifier.padding(bottom = 5.dp))
+        Text(label, fontSize = 13.sp, lineHeight = 20.sp, color = colors.text, modifier = Modifier.padding(bottom = 5.dp))
         BasicTextField(value, onValueChange, enabled = enabled, singleLine = true, keyboardOptions = keyboardOptions,
-            textStyle = TextStyle(fontSize = 11.sp, lineHeight = 16.5.sp, color = colors.text),
+            textStyle = TextStyle(fontSize = 14.sp, lineHeight = 21.sp, color = colors.text),
             modifier = Modifier.fillMaxWidth().background(androidx.compose.ui.graphics.Color(if (colors.dark) 0x06ffffff else 0x60ffffff), RoundedCornerShape(10.dp))
                 .border(1.dp, colors.line, RoundedCornerShape(10.dp)).padding(horizontal = 10.dp, vertical = 9.dp))
     }

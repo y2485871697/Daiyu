@@ -15,7 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalConfiguration
+import app.daiyu.android.ui.layout.appWindowSize
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ChatController
@@ -51,7 +51,7 @@ internal fun ChatUsageDialog(controller: ChatController, conversationId: String?
         loading = false
     }
     UsageGlassDialog(title = if (scopePicker) "统计对象" else "Token 用量", onDismiss = onDismiss, compact = true) {
-        Column(Modifier.fillMaxWidth().heightIn(max = minOf(540.dp, (LocalConfiguration.current.screenHeightDp * 0.65f).dp)).verticalScroll(rememberScrollState())
+        Column(Modifier.fillMaxWidth().heightIn(max = minOf(540.dp, (appWindowSize().height * 0.65f))).verticalScroll(rememberScrollState())
             .testTag("chat-usage-dialog"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (scopePicker) {
                 UsageAction(text = "本会话", enabled = conversationId != null,

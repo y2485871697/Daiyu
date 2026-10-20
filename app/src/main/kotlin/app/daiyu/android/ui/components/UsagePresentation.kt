@@ -67,7 +67,7 @@ internal fun UsageGlassDialog(
         ) {
             if (!compact) Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 17.dp)
                 .size(29.dp, 3.dp).clip(RoundedCornerShape(4.dp)).background(colors.toolbar.copy(alpha = .24f)))
-            Text(title, fontSize = 17.sp, lineHeight = 23.8.sp, fontWeight = FontWeight.SemiBold, color = colors.text,
+            Text(title, fontSize = 18.sp, lineHeight = 26.sp, fontWeight = FontWeight.SemiBold, color = colors.text,
                 modifier = Modifier.padding(bottom = if (compact) 10.dp else 10.dp))
             content()
         }
@@ -87,10 +87,10 @@ internal fun UsageMetric(label: String, value: String, modifier: Modifier = Modi
     val colors = usagePalette()
     Row(modifier.fillMaxWidth().padding(horizontal = 2.dp), horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically) {
-        Text(label, Modifier.weight(1f), fontSize = if (total) 11.sp else 10.sp,
-            color = if (total) colors.toolbar else colors.text, lineHeight = 16.sp)
-        Text(value, fontSize = if (total) 12.sp else 11.sp, fontWeight = FontWeight.Medium,
-            color = if (total) colors.text else colors.accent, lineHeight = 17.sp)
+        Text(label, Modifier.weight(1f), fontSize = if (total) 14.sp else 13.sp,
+            color = if (total) colors.toolbar else colors.text, lineHeight = 20.sp)
+        Text(value, fontSize = if (total) 16.sp else 14.sp, fontWeight = FontWeight.Medium,
+            color = if (total) colors.text else colors.accent, lineHeight = 22.sp)
     }
 }
 
@@ -110,9 +110,9 @@ internal fun UsageAction(
         .then(if (plain) Modifier else Modifier.border(1.dp, if (primary) colors.accent else colors.line, shape))
         .clickable(enabled = enabled, role = Role.Button, interactionSource = remember { MutableInteractionSource() },
             indication = null, onClick = onClick)
-        .heightIn(min = if (plain) 28.dp else 34.dp).padding(horizontal = if (plain) 0.dp else 10.dp, vertical = 8.dp),
+        .heightIn(min = if (plain) 40.dp else 44.dp).padding(horizontal = if (plain) 0.dp else 10.dp, vertical = 8.dp),
         contentAlignment = if (plain) Alignment.CenterStart else Alignment.Center) {
-        Text(text, fontSize = if (plain) 12.sp else 10.sp, lineHeight = if (plain) 20.4.sp else 16.sp,
+        Text(text, fontSize = if (plain) 13.sp else 14.sp, lineHeight = 20.sp,
             color = if (primary) Color(if (colors.dark) 0xff211735 else 0xffffffff) else if (plain) colors.muted else colors.accent)
     }
 }
@@ -123,7 +123,7 @@ internal fun UsageBody(
     modifier: Modifier = Modifier,
     style: androidx.compose.ui.text.TextStyle = androidx.compose.ui.text.TextStyle.Default,
     color: Color = Color.Unspecified,
-    fontSize: androidx.compose.ui.unit.TextUnit = 10.sp,
+    fontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
     fontWeight: FontWeight? = null,
     textAlign: androidx.compose.ui.text.style.TextAlign? = null,
     maxLines: Int = Int.MAX_VALUE,

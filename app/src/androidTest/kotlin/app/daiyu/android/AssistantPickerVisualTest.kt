@@ -66,7 +66,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
         assertEquals(.9f, input.density.fontScale, .001f)
     }
 
-    fun testPickerMatchesCssBoxModelAndOnlyAppliesFontScaleOnce() {
+    fun testPickerKeepsReadableSpacingAndOnlyAppliesFontScaleOnce() {
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             show(scale, dark)
             val sheet = bounds("assistant-sheet")
@@ -98,7 +98,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             assertEquals(17f, dp(sheet.bottom - done.bottom), .6f)
             assertEquals(dp(search.left), dp(newButton.left), .6f)
             assertType(text(R.string.assistant_picker_title), 16.sp, 22.4.sp)
-            assertEquals(FontWeight(550), layout(text(R.string.assistant_picker_title)).layoutInput.style.fontWeight)
+            assertEquals(FontWeight(650), layout(text(R.string.assistant_picker_title)).layoutInput.style.fontWeight)
             assertType(text(R.string.assistant_search), 11.sp, 16.5.sp)
             assertType(text(R.string.assistant_count, 2), 8.sp, 12.8.sp)
             assertType("Visual A", 11.sp, 16.5.sp)

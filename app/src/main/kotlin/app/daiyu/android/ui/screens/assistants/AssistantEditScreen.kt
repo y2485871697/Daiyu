@@ -175,14 +175,14 @@ fun AssistantEditScreen(
                 Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
                     Text(stringResource(R.string.assistant_skills_caption), color = colors.muted,
-                        fontSize = (9f * s).sp, lineHeight = (14.4f * s).sp, modifier = Modifier.weight(1f))
+                        fontSize = (12f * s).sp, lineHeight = (18f * s).sp, modifier = Modifier.weight(1f))
                     Text(stringResource(R.string.assistant_independent_switches), color = colors.muted,
-                        fontSize = (8f * s).sp, lineHeight = (12.8f * s).sp)
+                        fontSize = (11f * s).sp, lineHeight = (16f * s).sp)
                 }
                 Spacer(Modifier.height(7.dp * s))
                 if (installedSkills.isEmpty()) {
                     Text(stringResource(R.string.ui_no_skills_installed_yet_4e960f), color = colors.muted,
-                        fontSize = (10f * s).sp, lineHeight = (16f * s).sp,
+                        fontSize = (13f * s).sp, lineHeight = (20f * s).sp,
                         modifier = Modifier.padding(vertical = 14.dp * s))
                 } else installedSkills.forEachIndexed { index, skill ->
                     if (index > 0) {
@@ -203,9 +203,9 @@ fun AssistantEditScreen(
                     horizontalArrangement = Arrangement.spacedBy(7.dp * s)) {
                     Column(Modifier.weight(1f)) {
                         Text(stringResource(R.string.ui_memory_b55ff5), color = colors.text,
-                            fontSize = (11f * s).sp, lineHeight = (17.6f * s).sp, fontWeight = FontWeight(550))
+                            fontSize = (14f * s).sp, lineHeight = (21f * s).sp, fontWeight = FontWeight(550))
                         Text(stringResource(R.string.assistant_memory_caption), color = colors.muted,
-                            fontSize = (8f * s).sp, lineHeight = (12.8f * s).sp, modifier = Modifier.padding(top = 4.dp * s))
+                            fontSize = (11f * s).sp, lineHeight = (16f * s).sp, modifier = Modifier.padding(top = 4.dp * s))
                     }
                     AssistantPreviewSwitch(memoryEnabled, !saving, stringResource(R.string.assistant_enable),
                         Modifier.testTag("assistant-memory-switch")) {
@@ -219,14 +219,14 @@ fun AssistantEditScreen(
                     fieldModifier = Modifier.testTag("assistant-edit-memory"),
                     placeholder = stringResource(R.string.assistant_memory_placeholder))
                 Text(stringResource(if (memoryEnabled) R.string.assistant_enabled else R.string.assistant_disabled),
-                    color = colors.muted, fontSize = (8f * s).sp, lineHeight = (13.6f * s).sp,
+                    color = colors.muted, fontSize = (11f * s).sp, lineHeight = (17f * s).sp,
                     modifier = Modifier.padding(start = 2.dp * s, end = 2.dp * s, top = 7.dp * s))
             }
         }
         Box(Modifier.fillMaxWidth().heightIn(min = 15.dp * s).padding(horizontal = 2.dp * s)
             .testTag("assistant-edit-error")) {
             if (memoryOverLimit) Text(stringResource(R.string.memory_over_limit), color = colors.danger,
-                fontSize = (9f * s).sp, lineHeight = (15.3f * s).sp)
+                fontSize = (12f * s).sp, lineHeight = (18f * s).sp)
         }
     }
     cropBitmap?.let { bitmap ->
@@ -262,9 +262,9 @@ private fun AssistantSkillSwitchRow(skill: AssistantSkill, checked: Boolean, ena
     Row(Modifier.fillMaxWidth().padding(vertical = 8.dp * s), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(10.dp * s)) {
         Column(Modifier.weight(1f)) {
-            Text(skill.name, color = colors.text, fontSize = (10f * s).sp, lineHeight = (16f * s).sp)
+            Text(skill.name, color = colors.text, fontSize = (13f * s).sp, lineHeight = (20f * s).sp)
             Text(skill.description.ifBlank { stringResource(R.string.skills_no_description) }, color = colors.muted,
-                fontSize = (8f * s).sp, lineHeight = (12.8f * s).sp, modifier = Modifier.padding(top = 3.dp * s))
+                fontSize = (11f * s).sp, lineHeight = (16f * s).sp, modifier = Modifier.padding(top = 3.dp * s))
         }
         AssistantPreviewSwitch(checked, enabled, stringResource(R.string.assistant_enable),
             Modifier.testTag("assistant-skill-${skill.id}"), onToggle)

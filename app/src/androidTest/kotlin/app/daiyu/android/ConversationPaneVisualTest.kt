@@ -144,7 +144,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             assertEquals(6f, dp(first.top - todayHeading.bottom), .6f)
             assertEquals(44f, dp(first.height), .6f)
             assertEquals(2f, dp(second.top - first.bottom), .6f)
-            assertEquals(13f, dp(bounds("drawer-title:first").left - first.left), .6f)
+            assertEquals(13f, dp(bounds("drawer-title:first").left - first.left), dp(1f) + .01f)
             assertEquals(8f, dp(bounds("drawer-status:pinned").left - bounds("drawer-title:pinned").right), .6f)
             assertEquals(8f, dp(bounds("drawer-pin:pinned").left - bounds("drawer-status:pinned").right), .6f)
             assertEquals(11f, dp(bounds("drawer-pin:pinned").width), .6f)

@@ -8,6 +8,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.runner.Description
 import org.junit.runners.model.Statement
 
@@ -16,7 +17,8 @@ import org.junit.runners.model.Statement
  */
 @Suppress("DEPRECATION")
 abstract class ComposeActivityTestCase : InstrumentationTestCase() {
-    protected val ui = createEmptyComposeRule()
+    @OptIn(ExperimentalTestApi::class)
+    protected val ui = createEmptyComposeRule(effectContext = StandardTestDispatcher())
     private var currentHost: MainActivity? = null
     private var voicePreferenceSnapshot: Pair<Boolean, String?>? = null
     protected open val engineeringUi: Boolean = false

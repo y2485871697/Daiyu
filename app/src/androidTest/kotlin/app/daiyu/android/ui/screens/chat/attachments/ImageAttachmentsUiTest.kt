@@ -109,8 +109,11 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         node("image_attachments_close_preview").performClick()
         node("image_attachments_remove:${key.id}").performClick()
         node("image_attachments").assertDoesNotExist()
-        val restored = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
-        assertTrue(kotlin.math.abs(restored.top - empty.top) <= 1f)
+        ui.waitUntil(5_000) {
+            val restored = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+            kotlin.math.abs(restored.top - empty.top) <= 1f &&
+                kotlin.math.abs(restored.bottom - empty.bottom) <= 1f
+        }
         node("chat-send").assertIsNotEnabled()
     }
 

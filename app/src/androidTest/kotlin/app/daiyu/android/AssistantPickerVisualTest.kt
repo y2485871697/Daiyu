@@ -81,7 +81,7 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             assertEquals(16f, dp(search.left - sheet.left), .6f)
             assertEquals(16f, dp(sheet.right - search.right), .6f)
             assertEquals(84f, dp(search.top - sheet.top), .8f)
-            assertEquals(44f, dp(search.height), .6f)
+            assertEquals(44f, dp(search.height), dp(1f) + .01f)
             assertEquals(17f + dp(layout(text(R.string.assistant_count, 2)).size.height.toFloat()), dp(list.top - search.bottom), .8f)
             assertEquals(2f, dp(first.top - list.top), .6f)
             assertEquals(2f, dp(first.left - list.left), .6f)

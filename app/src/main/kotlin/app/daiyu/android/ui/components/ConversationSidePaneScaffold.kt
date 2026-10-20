@@ -786,11 +786,12 @@ private fun PaneFolderBar(
 private fun FolderNameDialog(title: String, initialName: String, onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
     var name by remember(initialName) { mutableStateOf(initialName) }
     app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet(title, onDismiss, footer = {
-        app.daiyu.android.ui.screens.assistants.AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f))
+        app.daiyu.android.ui.screens.assistants.AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f).testTag("folder-name-cancel"))
         app.daiyu.android.ui.screens.assistants.AssistantPreviewButton(stringResource(R.string.action_save),
-            { onConfirm(name) }, Modifier.weight(1f), primary = true, enabled = name.isNotBlank())
+            { onConfirm(name) }, Modifier.weight(1f).testTag("folder-name-save"), primary = true, enabled = name.isNotBlank())
     }) {
-        app.daiyu.android.ui.screens.assistants.AssistantPreviewField(name, { name = it }, stringResource(R.string.drawer_folder_name))
+        CompactDialogTextField(name, { name = it }, stringResource(R.string.drawer_folder_name),
+            Modifier.testTag("folder-name-input"))
     }
 }
 

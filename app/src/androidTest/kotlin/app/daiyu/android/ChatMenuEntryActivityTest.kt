@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import androidx.compose.ui.unit.dp
+
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.SemanticsActions
 import android.app.Instrumentation
@@ -289,7 +291,12 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         node("chat-attachment-path-toggle").performClick()
         node("chat-attachment:ATTACH_PATH").assertDoesNotExist()
         awaitUniqueTag("prompt-input")
-        node("prompt-input").performTextReplacement("content://not-granted.invalid/never-read")
+        ui.onNodeWithContentDescription("关闭", useUnmergedTree = true).assertDoesNotExist()
+        ui.onNodeWithText("仅将路径文字加入草稿，不读取文件或授予权限；之后点击发送才会交给模型。").assertDoesNotExist()
+        ui.onNode(hasText("输入路径") and hasAnyAncestor(hasTestTag("prompt-input")), useUnmergedTree = true)
+            .assertIsDisplayed()
+        node("prompt-input").assertHeightIsEqualTo(48.dp)
+            .performTextReplacement("content://not-granted.invalid/never-read")
         node("dialog-cancel").performClick()
         node("prompt-input").assertDoesNotExist()
         assertEquals(before, fixture.database.exportBackup())

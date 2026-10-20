@@ -20,6 +20,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
@@ -71,6 +72,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                                 onConversationDelete = { action = "delete:${it.id}" },
                                 onNewConversation = { action = "new" },
                                 onSelectFolder = { action = "folder:$it" },
+                                onCreateFolder = { action = "create-folder:$it" },
                                 assistants = listOf(AssistantDisplay("assistant-a", "Drawer assistant")),
                                 selectedAssistantId = "assistant-a",
                                 onSelectAssistant = {}, onEditAssistant = {},
@@ -88,6 +90,32 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             }
         }
         ui.waitForIdle()
+    }
+
+    fun testFolderNameUsesInsetRoundedFieldAndPlaceholderWithoutChangingSaveOrCancel() {
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            show(scale, dark)
+            node("drawer-folder-new").performScrollTo().performClick()
+            val field = node("folder-name-input").assertHeightIsEqualTo(48.dp)
+            val bounds = field.fetchSemanticsNode().boundsInRoot
+            val cancel = node("folder-name-cancel").fetchSemanticsNode().boundsInRoot
+            val save = node("folder-name-save").assertIsNotEnabled().fetchSemanticsNode().boundsInRoot
+            assertEquals(9f, dp(bounds.left - cancel.left), dp(1f) + .01f)
+            assertEquals(9f, dp(save.right - bounds.right), dp(1f) + .01f)
+            ui.onNode(hasText(text(R.string.drawer_folder_name)) and
+                hasAnyAncestor(hasTestTag("folder-name-input")), useUnmergedTree = true).assertIsDisplayed()
+            field.performSemanticsAction(SemanticsActions.SetText) { assertTrue(it(AnnotatedString("项目资料"))) }
+                .assertEditableText("项目资料")
+            ui.onNodeWithText(text(R.string.drawer_folder_name), useUnmergedTree = true).assertDoesNotExist()
+            node("folder-name-save").assertIsEnabled().performClick()
+            assertEquals("create-folder:项目资料", action)
+            node("folder-name-input").assertDoesNotExist()
+            action = null
+            node("drawer-folder-new").performScrollTo().performClick()
+            node("folder-name-input").assertEditableText("")
+            node("folder-name-cancel").performClick()
+            assertNull(action)
+        }
     }
 
     private fun text(id: Int) = instrumentation.targetContext.getString(id)

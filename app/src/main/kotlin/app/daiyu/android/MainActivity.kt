@@ -1229,7 +1229,8 @@ class MainActivity : ComponentActivity() {
     // Prompts are one-shot capabilities, not saved state. A replaced/dismissed prompt cannot commit.
     private sealed interface Prompt { val backup: Boolean }
     private class InputPrompt(val title: String, val initial: String, val hint: String,
-        val confirm: String, val action: (String) -> Unit, override val backup: Boolean = false) : Prompt
+        val confirm: String, val action: (String) -> Unit, override val backup: Boolean = false,
+        val compactInput: Boolean = false) : Prompt
     private class ChoicePrompt(val title: String, val options: List<String>, val action: (Int) -> Unit,
         override val backup: Boolean = false) : Prompt
     private class ConfirmPrompt(val title: String, val message: String, val confirm: String,
@@ -2145,7 +2146,7 @@ class MainActivity : ComponentActivity() {
             if (!pathReferenceCurrent() || prompt != null) return
             val originalText = draft
             prompt = InputPrompt("输入路径引用", "",
-                "仅将路径文字加入草稿，不读取文件或授予权限；之后点击发送才会交给模型。", "加入草稿", { raw ->
+                "输入路径", "加入草稿", { raw ->
                     if (!pathReferenceCurrent() || draft != originalText) return@InputPrompt
                     if (raw.isBlank() || raw.length > 2048 || raw.any { it.code < 0x20 || it.code == 0x7f }) {
                         toast("请输入不超过2048字符的单行路径引用；未修改草稿")
@@ -2158,7 +2159,7 @@ class MainActivity : ComponentActivity() {
                         selectionStart = next.length; selectionEnd = next.length
                         publishChat(rowsChanged = false)
                     } else toast("路径引用未加入；原草稿保留")
-                })
+                }, compactInput = true)
         }
         fun requestDictation() {
             if (!VoiceSettingsPreferences(applicationContext).enabled("input")) { toast("请先在语音设置中启用语音输入"); return }
@@ -4296,7 +4297,7 @@ class MainActivity : ComponentActivity() {
         fun valid() = activityUsable() && prompt === current
         when (current) {
             is InputPrompt -> DaiyuTextInputDialog(current.title, current.initial, current.hint, current.confirm,
-                preview = retainedPage == "chat",
+                preview = retainedPage == "chat", compactInput = current.compactInput,
                 onConfirm = { value -> confirmInputPrompt(current, value) },
                 onDismiss = { if (valid()) { if (current === mcpInput) cancelMcpEditor() else prompt = null } })
             is ChoicePrompt -> DaiyuChoiceSheet(current.title, current.options, preview = retainedPage == "chat",

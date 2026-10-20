@@ -2,6 +2,8 @@ package app.daiyu.android
 
 import android.content.ContextWrapper
 import androidx.compose.ui.test.*
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import java.io.File
@@ -39,7 +41,11 @@ class SubAgentCatalogActivityTest : WiredActivityTestCase() {
     private fun repository() = ConversationSubAgentPreferences(activity.getSharedPreferences("subagent_configuration", 0))
     private fun openSubAgents() {
         openSettings()
-        node("settings-search").performTextReplacement("子代理")
+        node("settings-search")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString("子代理")))
+            }
+            .assertEditableText("子代理")
         reveal("settings-row:子代理", "设置").performClick()
         awaitDirectory("saved directory published") { source().models.any { it.modelId == "run-control" } }
     }

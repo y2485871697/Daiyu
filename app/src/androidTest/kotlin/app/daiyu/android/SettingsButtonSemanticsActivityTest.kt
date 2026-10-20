@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.SemanticsActions
 import app.daiyu.android.ui.screens.settings.SettingsCatalog
 import app.daiyu.android.voice.offline.OfflineSpeechPack
@@ -8,7 +9,11 @@ import app.daiyu.android.voice.offline.OfflineSpeechPack
 class SettingsButtonSemanticsActivityTest : WiredActivityTestCase() {
     private fun entry(id: String) {
         val title = SettingsCatalog.entry(id).title
-        node("settings-search").performTextReplacement(title)
+        node("settings-search")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString(title)))
+            }
+            .assertEditableText(title)
         reveal("settings-row:$title", "设置").performClick()
     }
     fun testOfflineSpeechIsReachableFromVoiceSettingsWithoutEnablingOrDownloading() {

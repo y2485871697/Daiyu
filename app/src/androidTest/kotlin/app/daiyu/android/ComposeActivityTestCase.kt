@@ -165,8 +165,10 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
     }
     protected fun reveal(tag: String, page: String = "模型设置"): SemanticsNodeInteraction {
         dismissIme()
-        awaitUniqueTag("page:$page")
-        node("page:$page").performScrollToNode(hasTestTag(tag))
+        val title = if (page == "模型设置" && ui.onAllNodesWithTag("page:主模型服务商").fetchSemanticsNodes().isNotEmpty())
+            "主模型服务商" else page
+        awaitUniqueTag("page:$title")
+        node("page:$title").performScrollToNode(hasTestTag(tag))
         return node(tag).assertIsDisplayed()
     }
     protected fun retainedSettingsEntry(id: String, page: String = "设置"): () -> Unit {
@@ -236,13 +238,27 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         }
         reveal(tag).assertIsSelected()
     }
+    protected fun chooseProviderProtocol(label: String) {
+        reveal("provider-protocol-select").performClick()
+        if (label.startsWith("OpenAI")) {
+            node("provider-family:openai").performClick()
+            reveal("provider-endpoint-select").performClick()
+        }
+        node("settings-radio:$label").assertIsEnabled().performClick()
+    }
+    protected fun assertProviderProtocol(label: String) {
+        val openAi = label.startsWith("OpenAI")
+        reveal(if (openAi) "provider-endpoint-select" else "provider-protocol-select").performClick()
+        node("settings-radio:$label").assertIsSelected()
+        node("settings-radio:$label").performClick()
+    }
     protected fun openModels() {
         openProviderManagement()
         reveal("provider-open-primary", "提供商").performClick()
         awaitModelEditor()
     }
     protected fun awaitModelEditor() {
-        awaitUniqueTag("page:模型设置")
+        awaitUniqueTag("page:主模型服务商")
         reveal("settings-field:模型名")
         ui.waitUntil(5_000) {
             ui.onAllNodesWithTag("settings-field:模型名").fetchSemanticsNodes()

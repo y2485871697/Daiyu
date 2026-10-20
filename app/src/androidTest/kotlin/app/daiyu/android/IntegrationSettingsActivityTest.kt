@@ -159,7 +159,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         val catalog = fixture.settings.localModelCatalogSnapshot()
         node("chat-model").performClick()
         awaitChatPickerReady()
-        node("page:模型设置").assertDoesNotExist()
+        node("page:主模型服务商").assertDoesNotExist()
         assertChatPickerOffline(calls)
         node("chat-model-refresh").performClick()
         awaitChatPickerReady()

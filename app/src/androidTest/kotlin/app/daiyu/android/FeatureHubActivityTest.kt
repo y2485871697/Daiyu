@@ -145,7 +145,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         val oldOpen = retainedClick(activity, "settings-row:模型提供商")
         val old = activity; activity = recreateActivity(activity)
         mainThread { oldOpen() }
-        node("page:模型设置").assertDoesNotExist(); node("page:设置").assertDoesNotExist()
+        node("page:主模型服务商").assertDoesNotExist(); node("page:设置").assertDoesNotExist()
         assertDraft("重建保留草稿"); assertTrue(old.isDestroyed)
         openHub(); node("page:设置").assertExists(); backToChat(activity)
         assertEquals(0, fixture.opens.get())
@@ -194,7 +194,7 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         openHub(); entry("providers"); val oldOpen = retainedClick(activity, "settings-row:模型提供商")
         backToChat(activity); openSettings(); entry("backup").performClick()
         mainThread { oldOpen() }
-        node("page:备份与导入").assertExists(); node("page:模型设置").assertDoesNotExist()
+        node("page:备份与导入").assertExists(); node("page:主模型服务商").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
     fun testInPlaceManageAndUsagePagesPreserveRealChatDraft() {

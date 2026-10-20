@@ -71,7 +71,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         assertEquals(saved, fixture.settings.load()); assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
         backToPage(activity, "page:提供商")
-        node("page:模型设置").assertDoesNotExist()
+        node("page:主模型服务商").assertDoesNotExist()
         backToPage(activity, "page:设置")
         backToChat(activity)
         assertDraft("local model edits remain unsent")

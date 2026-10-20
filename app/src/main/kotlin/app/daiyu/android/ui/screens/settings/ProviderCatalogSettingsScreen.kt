@@ -1,8 +1,5 @@
 package app.daiyu.android.ui.screens.settings
 
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.ui.platform.testTag
 import top.yukonga.miuix.kmp.basic.TextButton
@@ -58,6 +55,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     localModelActions: LocalCatalogModelActions<T>? = null,
     pageTitle: String = "模型设置",
     twoTabs: Boolean = false,
+    providerName: String? = null,
     ownerCurrent: () -> Boolean = { true },
 ) {
     val scope = rememberCoroutineScope()
@@ -88,19 +86,8 @@ internal fun <T> ProviderCatalogSettingsScreen(
         }
     val tabs: LazyListScope.() -> Unit = {
         if (twoTabs) item(key = "provider-tabs") {
-            SettingsCard {
-                Row(Modifier.fillMaxWidth().selectableGroup()) {
-                    androidx.compose.foundation.layout.Box(Modifier.weight(1f)) {
-                        SettingsRadioRow("配置", !modelTab, enabled = !state.saving) {
-                            if (ownerCurrent()) { session.invalidate(); modelTab = false }
-                        }
-                    }
-                    androidx.compose.foundation.layout.Box(Modifier.weight(1f)) {
-                        SettingsRadioRow("模型", modelTab, enabled = !state.saving) {
-                            if (ownerCurrent()) { session.invalidate(); modelTab = true }
-                        }
-                    }
-                }
+            ProviderSettingsTabs(modelTab, enabled && !state.saving) { selected ->
+                if (ownerCurrent()) { session.invalidate(); modelTab = selected }
             }
         }
     }
@@ -124,7 +111,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
                 }
             }) }
     } else ModelSettingsScreen(
-        pageTitle = pageTitle, headerContent = tabs, showCatalog = !twoTabs,
+        pageTitle = pageTitle, headerContent = tabs, showCatalog = !twoTabs, providerName = providerName,
         onManageLocalModels = localModelActions?.let { { session.invalidate(); managingLocal = true } },
         engineeringUi = engineeringUi,
         testConnection = testConnection?.let { test -> { value, cancelled, deliver ->

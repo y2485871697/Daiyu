@@ -1,8 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -218,7 +216,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         val cancelled = { !p.live.get() || !d.live.get() }
         val draft = d.draft
         val saved = d.editing.settings
-        val detailTitle = pageTitleOverride ?: if (d.editor.slotId == ProviderRegistry.PRIMARY) "模型设置" else d.name
+        val detailTitle = pageTitleOverride ?: d.name
         val save: (ModelSettingsDraftUi) -> Unit = { submitted ->
             if (live() && enabled && d.draft === submitted) {
                 val value = runCatching {
@@ -306,27 +304,15 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 } else complete(CatalogLocalEditResult.CANCELLED)
             })
         if (d.catalogIdentity == null) {
-            val twoTabs = initialSlot != ProviderRegistry.PRIMARY
             var modelTab by remember { mutableStateOf(false) }
             val tabs: LazyListScope.() -> Unit = {
-                if (twoTabs) item(key = "provider-tabs") {
-                    SettingsCard {
-                        Row {
-                            Column(Modifier.weight(1f)) {
-                                SettingsRadioRow("配置", !modelTab, enabled = enabled) {
-                                    if (live()) modelTab = false
-                                }
-                            }
-                            Column(Modifier.weight(1f)) {
-                                SettingsRadioRow("模型", modelTab, enabled = enabled) {
-                                    if (live()) modelTab = true
-                                }
-                            }
-                        }
+                item(key = "provider-tabs") {
+                    ProviderSettingsTabs(modelTab, enabled) { selected ->
+                        if (live()) modelTab = selected
                     }
                 }
             }
-            if (twoTabs && modelTab) {
+            if (modelTab) {
                 MiuixScaffoldPage(detailTitle, onBack = { back() }) {
                     tabs()
                     item {
@@ -337,8 +323,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     }
                 }
             } else ModelSettingsScreen(draft, change, save, {}, { back() },
-                modifier = connectionModifier, headerContent = tabs, showCatalog = !twoTabs,
-                pageTitle = detailTitle, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
+                modifier = connectionModifier, headerContent = tabs, showCatalog = false,
+                pageTitle = detailTitle, providerName = d.name, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
                 credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
                 headersUnavailable = d.editing.headersUnavailable,
                 catalogEnabled = false, errorText = notice)
@@ -351,9 +337,9 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         if (live() && !requestCancelled() && d.draft === value) deliver(it)
                     }
                 } ?: false
-            }, modifier = connectionModifier, pageTitle = detailTitle,
+            }, modifier = connectionModifier, pageTitle = detailTitle, providerName = d.name,
             // A normal list visit uses the configuration/model split for every provider.
-            twoTabs = initialSlot != ProviderRegistry.PRIMARY, ownerCurrent = live,
+            twoTabs = true, ownerCurrent = live,
             enabled = enabled, engineeringUi = engineeringUi, errorText = notice,
             credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
             headersUnavailable = d.editing.headersUnavailable,

@@ -3,7 +3,6 @@ package app.daiyu.android.title
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.*
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.screens.settings.*
 import androidx.compose.ui.Modifier
 import app.daiyu.android.model.ProviderProtocol
@@ -40,7 +39,7 @@ fun TitleModelSettingsPanel(
     modelLabel: String? = null,
     onChooseModel: () -> Unit = {},
 ) {
-    MiuixScaffoldPage(title = "标题模型", onBack = onBack, modifier = modifier) {
+    SettingsScaffoldPage(title = "标题模型", onBack = onBack, modifier = modifier) {
         item("title-model-intro") { SettingsNote("为新会话自动生成简短标题。") }
         notice?.let { item("title-model-status") { SettingsNote(it) } }
         item("title-model-summary") {

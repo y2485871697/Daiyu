@@ -16,7 +16,6 @@ import app.daiyu.android.browser.BrowserSettings
 import app.daiyu.android.browser.BrowserSettingsSaveOwner
 import app.daiyu.android.browser.BrowserSettingsStore
 import app.daiyu.android.browser.session.BrowserAccess
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -69,7 +68,7 @@ internal fun BrowserSettingsScreen(
             }
         }
     }
-    MiuixScaffoldPage(title = "浏览器", onBack = leavePage, modifier = modifier) {
+    SettingsScaffoldPage(title = "浏览器", onBack = leavePage, modifier = modifier) {
         item(key = "browser_preference") {
             SettingsSectionTitle("能力上限（不是任务授权）")
             SettingsCard {

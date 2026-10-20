@@ -41,7 +41,6 @@ import app.daiyu.android.data.model.AppearanceTopBarBlurStyle
 import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import app.daiyu.android.ui.app.DaiyuPalette
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import kotlin.math.roundToInt
@@ -122,7 +121,7 @@ internal fun AppearanceSettingsScreen(
             TextButton(text = "取消", onClick = { scaleEditor = false })
         }
     }
-    MiuixScaffoldPage(title = "外观与主题", onBack = onBack, modifier = modifier) {
+    SettingsScaffoldPage(title = "外观与主题", onBack = onBack, modifier = modifier) {
         item(key = "appearance_theme") {
             SettingsSectionTitle("主题模式")
             SettingsCard {
@@ -132,9 +131,19 @@ internal fun AppearanceSettingsScreen(
                         ThemeChoice(mode, state.themeMode == mode, { onChange(state.copy(themeMode = mode)) }, Modifier.weight(1f))
                     }
                 }
+            }
+        }
+        item(key = "appearance_colors") {
+            SettingsSectionTitle("色彩与背景")
+            SettingsCard {
                 SettingsRow("色彩风格", onClick = {})
                 SettingsRow("强调色", onClick = {})
                 SettingsSwitchRow("纯黑背景", state.pureBlackEnabled) { onChange(state.copy(pureBlackEnabled = it)) }
+            }
+        }
+        item(key = "appearance_icon") {
+            SettingsSectionTitle("应用图标")
+            SettingsCard {
                 SettingsRow("图标", summary = "浅色、暗色和猫咪颜色", onClick = { iconExpanded = !iconExpanded },
                     modifier = Modifier.semantics { stateDescription = if (iconExpanded) "已展开" else "已收起" },
                     leading = { SettingsIcon(DaiyuIcons.AppIcon) },
@@ -192,12 +201,6 @@ internal fun AppearanceSettingsScreen(
                         SettingsRow("顶栏模糊样式", summary = blurStyles[state.topBarBlurStyle.ordinal], onClick = { choosingBlur = true })
                     }
                 }
-                SettingsSwitchRow("横移返回手势", state.swipeDismissEnabled) {
-                    onChange(state.copy(swipeDismissEnabled = it))
-                }
-                SettingsSwitchRow("预测性返回手势", state.predictiveBackEnabled) {
-                    onChange(state.copy(predictiveBackEnabled = it))
-                }
                 SettingsRow("圆形加载指示器", tag = "settings-switch:圆形加载指示器",
                     onClick = {
                         if (!state.morphLoadingIndicator) {
@@ -211,6 +214,17 @@ internal fun AppearanceSettingsScreen(
                     SettingsSwitchRow("仅消息生成前", state.morphLoadingBeforeResponseOnly) {
                         onChange(state.copy(morphLoadingBeforeResponseOnly = it))
                     }
+                }
+            }
+        }
+        item(key = "appearance_gestures") {
+            SettingsSectionTitle("导航与手势")
+            SettingsCard {
+                SettingsSwitchRow("横移返回手势", state.swipeDismissEnabled) {
+                    onChange(state.copy(swipeDismissEnabled = it))
+                }
+                SettingsSwitchRow("预测性返回手势", state.predictiveBackEnabled) {
+                    onChange(state.copy(predictiveBackEnabled = it))
                 }
             }
         }

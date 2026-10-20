@@ -12,7 +12,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.voice.offline.OfflineSpeechPack
 import app.daiyu.android.voice.offline.SpeechInputPolicy
 import app.daiyu.android.voice.offline.SpeechModelManifest
@@ -53,7 +52,7 @@ internal fun OfflineSpeechPackCard(context: Context, ownerCurrent: () -> Boolean
 internal fun OfflineSpeechSettingsScreen(context: Context, onBack: () -> Unit, ownerCurrent: () -> Boolean) {
     val pack by OfflineSpeechPack.state.collectAsStateWithLifecycle()
     var about by remember { mutableStateOf(false) }
-    MiuixScaffoldPage("离线语音", onBack, modifier = Modifier.testTag("offline-speech-settings")) {
+    SettingsScaffoldPage("离线语音", onBack, modifier = Modifier.testTag("offline-speech-settings")) {
         item { OfflineSpeechPackCard(context, ownerCurrent) }
         item {
             SettingsCard {

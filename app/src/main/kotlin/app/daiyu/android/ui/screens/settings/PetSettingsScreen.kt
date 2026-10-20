@@ -21,7 +21,6 @@ import app.daiyu.android.ui.components.DaiyuChoiceSheet
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import kotlin.math.roundToInt
 
 private enum class PetSettingsPage { HOME, MORE, SCALE, FEED, MEMORY }
@@ -59,7 +58,7 @@ private fun PetSettingsContent(host: PetHost, model: IndependentModelControls, m
         }
     }
     BackHandler(enabled = page != PetSettingsPage.HOME, onBack = back)
-    MiuixScaffoldPage(title = when (page) {
+    SettingsScaffoldPage(title = when (page) {
         PetSettingsPage.HOME -> "鲸鱼女仆"
         PetSettingsPage.MORE -> "更多设置"
         PetSettingsPage.SCALE -> "桌宠大小"

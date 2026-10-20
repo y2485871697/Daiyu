@@ -57,7 +57,6 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import app.daiyu.android.skills.SkillConflict
 import app.daiyu.android.skills.SkillManagement
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import java.util.concurrent.ExecutorService
@@ -98,7 +97,7 @@ internal fun SkillManagementScreen(
     val state = controller.state
     val switchesEnabled = !controller.busy && controller.confirmed
     val colors = MiuixTheme.colorScheme
-    MiuixScaffoldPage(
+    SettingsScaffoldPage(
         title = "技能",
         onBack = onBack,
         modifier = modifier,

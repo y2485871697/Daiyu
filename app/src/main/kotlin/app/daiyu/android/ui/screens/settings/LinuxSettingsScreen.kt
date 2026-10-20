@@ -16,7 +16,6 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.terminal.*
 import app.daiyu.android.terminal.install.LinuxInstallState
 import app.daiyu.android.ui.components.DaiyuConfirmDialog
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.components.WithoutPressRipple
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
@@ -108,7 +107,7 @@ internal fun LinuxSettingsScreen(controller: LinuxSettingsController, page: Linu
             pageTitle = when (files) { LinuxFilesPage.WORKSPACE -> "工作区与文件"; LinuxFilesPage.SHARED -> "共享文件夹"; LinuxFilesPage.BROWSE -> "文件浏览" })
         return
     }
-    MiuixScaffoldPage("Linux 工具环境", leave, modifier.testTag("linux-settings-view")) {
+    SettingsScaffoldPage("Linux 工具环境", leave, modifier.testTag("linux-settings-view")) {
         item("linux-status") {
             SettingsCard(Modifier.padding(top = 12.dp)) {
                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {

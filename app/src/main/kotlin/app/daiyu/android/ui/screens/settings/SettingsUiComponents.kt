@@ -37,6 +37,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -48,6 +49,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import app.daiyu.android.ui.components.usagePalette
 import app.daiyu.android.ui.icons.DaiyuIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import top.yukonga.miuix.kmp.basic.Text
@@ -55,22 +57,28 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun SettingsSectionTitle(title: String) {
+    val grouped = LocalSettingsPageStyle.current
     Text(
         text = title,
-        style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
-        color = MiuixTheme.colorScheme.onSurface,
-        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 28.dp, bottom = 10.dp),
+        style = MiuixTheme.textStyles.body2.copy(fontSize = if (grouped) 13.sp else 14.sp,
+            fontWeight = if (grouped) FontWeight.Medium else FontWeight.SemiBold),
+        color = if (grouped) MiuixTheme.colorScheme.onSurfaceVariantSummary else MiuixTheme.colorScheme.onSurface,
+        modifier = Modifier.padding(start = 24.dp, end = 24.dp,
+            top = if (grouped) 24.dp else 28.dp, bottom = if (grouped) 9.dp else 10.dp),
     )
 }
 
 @Composable
 internal fun SettingsCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Column(
-        modifier = modifier.padding(horizontal = 20.dp).fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(MiuixTheme.colorScheme.surface),
-        content = content,
-    )
+    val grouped = LocalSettingsPageStyle.current
+    val container = if (grouped) {
+        Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth()
+            .clip(RoundedCornerShape(22.dp)).background(Brush.linearGradient(usagePalette().sheet))
+    } else {
+        Modifier.padding(horizontal = 20.dp).fillMaxWidth()
+            .clip(RoundedCornerShape(16.dp)).background(MiuixTheme.colorScheme.surface)
+    }
+    Column(modifier = modifier.then(container), content = content)
 }
 
 @Composable

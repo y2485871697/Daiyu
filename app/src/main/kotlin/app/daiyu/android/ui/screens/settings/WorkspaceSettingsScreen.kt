@@ -20,7 +20,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.withResumed
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.platform.PlatformSettingsAccess
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.workspace.WorkspaceFilesAccess
 import app.daiyu.android.workspace.WorkspaceListing
 import kotlinx.coroutines.CancellationException
@@ -149,7 +148,7 @@ internal fun WorkspaceSettingsScreen(onBack: () -> Unit, modifier: Modifier = Mo
             privateOccupied = it
             if (!it && current() && !loaded) refresh(clearNotice = false)
         })
-    MiuixScaffoldPage(title = pageTitle, onBack = back, modifier = modifier) {
+    SettingsScaffoldPage(title = pageTitle, onBack = back, modifier = modifier) {
         if (section != WorkspaceSettingsSection.SHARED) item(key = "private-workspace") { privatePanel() }
         if (engineeringUi || section == WorkspaceSettingsSection.SHARED) {
         item(key = "sharing") {

@@ -14,7 +14,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.ChatApplication
 import app.daiyu.android.ui.FeatureRoute
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.screens.shizuku.ShizukuScreen
 
 internal const val PROJECT_SOURCE = "https://github.com/y2485871697/Daiyu"
@@ -66,7 +65,7 @@ internal fun SettingsSystemAccessPage(
         SettingsLocalPage.OVERLAY -> "悬浮窗权限"
         else -> error("unsupported_system_access_page")
     }
-    MiuixScaffoldPage(title, onBack = back, modifier = modifier) {
+    SettingsScaffoldPage(title, onBack = back, modifier = modifier) {
         when (page) {
             SettingsLocalPage.ENHANCEMENTS -> {
                 item("notice") { SettingsNote("系统授权与每次任务授权分别控制。进入本页不执行命令、不连接执行后端，也不批准旧任务。") }

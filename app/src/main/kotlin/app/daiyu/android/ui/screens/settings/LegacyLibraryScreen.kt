@@ -17,7 +17,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.LegacyLibraryHost
 import app.daiyu.android.LegacyLibraryState
 import app.daiyu.android.LegacyTextSection
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 import top.yukonga.miuix.kmp.basic.TextButton
 
 /** A read-only compatibility library, never a chat/model/tool surface. Picker ownership stays in Main. */
@@ -63,7 +62,7 @@ private fun LegacyLibraryContent(
     onOpen: (String) -> Unit,
     onSave: (String) -> Unit,
 ) {
-    MiuixScaffoldPage("旧版兼容资料库", onBack) {
+    SettingsScaffoldPage("旧版兼容资料库", onBack) {
         item("scope") {
             SettingsCard {
                 SettingsNote("仅供只读查看旧版 JSON / ZIP。不会写入原生会话、执行历史请求、调用模型或工具。原始引用仅作文字展示，不读取文件或联网。")

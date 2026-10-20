@@ -9,7 +9,6 @@ import app.daiyu.android.platform.DeviceResultPolicy
 import app.daiyu.android.platform.PlatformReadTool
 import app.daiyu.android.platform.PlatformSettingsAccess
 import app.daiyu.android.storage.PlatformToolSettings
-import app.daiyu.android.ui.components.MiuixScaffoldPage
 
 /** No prompt, permission grant, data query or outbound request occurs merely by opening this page. */
 @Composable
@@ -28,7 +27,7 @@ internal fun PlatformToolSettingsScreen(context: Context, settings: PlatformTool
         catch (_: Exception) { error = "操作未确认成功；请重新检查设置或系统授权，未读取数据" }
     }
     val explicitGrants = remember(revision) { grants() }
-    MiuixScaffoldPage(title = "平台只读工具与私密出站", onBack = onBack,
+    SettingsScaffoldPage(title = "平台只读工具与私密出站", onBack = onBack,
         modifier = Modifier.testTag("platform-tool-settings")) {
         item(key = "policy") {
             SettingsNote("${PlatformReadTool.entries.size}项独立选择，默认全部关闭。系统授权、工具选择、发给模型、写入历史是四个不同决定，互不代开。私密工具必须同时同意模型与历史，才会读取并进入同一工具账本/历史/模型通道；不同意则安全拒绝。设置修改仅影响下次run，已运行任务使用冻结值；立即停止请使用聊天的停止按钮。")

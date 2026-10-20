@@ -20,6 +20,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.*
+import androidx.compose.runtime.remember
+import app.daiyu.android.ui.screens.chat.conversation.*
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -157,16 +160,28 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         } finally { super.tearDown() }
     }
 
-    private fun show() {
+    private fun show(compact: Boolean = false) {
         mainThread {
             activity.setContent {
                 CompositionLocalProvider(LocalActivityResultRegistryOwner provides picker) {
                     AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                         Column(Modifier.requiredWidth(360.dp)) {
-                            if (mounted.value) VideoAttachments(host, conversation.value,
-                                VideoDraftText(text.value, 7L, textRevision.value),
-                                onHandoff = { request, editor, settle -> handed = request; frozenEditor = editor; deliver = settle },
-                                parentBusy = busy.value, viewLifecycleOwner = life)
+                            val controls = remember { mutableStateOf<VideoComposerControls?>(null) }
+                            val content: @androidx.compose.runtime.Composable () -> Unit = {
+                                if (mounted.value) VideoAttachments(host, conversation.value,
+                                    VideoDraftText(text.value, 7L, textRevision.value),
+                                    onHandoff = { request, editor, settle -> handed = request; frozenEditor = editor; deliver = settle },
+                                    parentBusy = busy.value, viewLifecycleOwner = life, compact = compact,
+                                    onControls = { controls.value = it })
+                            }
+                            if (compact) ChatMenuLayer {
+                                ChatComposer(ComposerUi(text = text.value,
+                                    videoSendAvailable = controls.value?.canSubmit == true,
+                                    videoSendBlocked = controls.value?.blocked == true),
+                                    ChatScreenActions(onSend = { controls.value?.send?.invoke() },
+                                        onMenuAction = { if (it == ChatMenuAction.ATTACH_VIDEO) controls.value?.select?.invoke() }),
+                                    attachmentContent = content)
+                            } else content()
                         }
                     }
                 }
@@ -174,6 +189,49 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         }
         ui.waitForIdle()
     }
+    fun testCompactComposerHidesEmptyPanelAndUsesOnlyMainSend() {
+        mainThread { text.value = "" }
+        show(compact = true)
+        node("video_attachments").assertDoesNotExist()
+        node("chat-send").assertIsNotEnabled()
+        ui.onNodeWithContentDescription("附件").performClick()
+        node("chat-attachment:ATTACH_VIDEO").performClick()
+        assertEquals(1, picker.launches.size)
+        mainThread { picker.result(picker.launches.single()) }
+        val id = awaitReady()
+        node("video_attachments_select").assertDoesNotExist()
+        node("video_attachments_send").assertDoesNotExist()
+        val surface = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+        val item = node("video_attachments_item:$id").fetchSemanticsNode().boundsInRoot
+        assertTrue(item.left >= surface.left && item.right <= surface.right)
+        node("chat-send").assertIsEnabled().performClick()
+        node("video_attachments_confirmation").assertIsDisplayed()
+        assertNull(handed)
+        node("video_attachments_cancel_confirmation").performClick()
+        node("video_attachments_remove:$id").performClick()
+        ui.waitUntil(5_000) { host.state.items.isEmpty() && !host.state.recovering }
+        node("video_attachments").assertDoesNotExist()
+        node("chat-send").assertIsNotEnabled()
+    }
+
+    fun testCompactComposerBlockedVideoNeverSendsCaptionAndConfirmationFreezesText() {
+        show(compact = true)
+        ui.onNodeWithContentDescription("附件").performClick()
+        node("chat-attachment:ATTACH_VIDEO").performClick()
+        mainThread { picker.result(picker.launches.single()) }
+        awaitReady()
+        mainThread { busy.value = true }
+        node("chat-send").assertIsNotEnabled()
+        assertNull(handed)
+        mainThread { busy.value = false }
+        node("chat-send").performClick()
+        node("video_attachments_confirm_text").assertTextEquals("first exact text")
+        mainThread { text.value = "new caption"; textRevision.value++ }
+        node("video_attachments_confirm").performClick()
+        assertEquals("first exact text", handed?.text)
+        assertEquals("first exact text", frozenEditor?.text)
+    }
+
     private fun pick(count: Int = 1): Int {
         node("video_attachments_select").performClick()
         val code = picker.launches.last()

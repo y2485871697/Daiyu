@@ -20,6 +20,15 @@ class ComposerTextActionTest {
             supplementAvailable = true).textActionEnabled())
         assertFalse(ComposerUi().textActionEnabled()) // no video/file/path capability inference
     }
+    @Test fun videoAvailabilityUsesTheSameIdleActionAndKeepsBlockedDraftsUnsent() {
+        val video = ComposerUi(videoSendAvailable = true)
+        assertTrue(video.textActionEnabled())
+        assertFalse(video.copy(enabled = false).textActionEnabled())
+        assertFalse(video.copy(videoSendBlocked = true, text = "caption").textActionEnabled())
+        assertFalse(video.copy(imageSendBlocked = true).textActionEnabled())
+        assertFalse(video.copy(phase = ComposerPhase.PAUSED, supplementAvailable = true).textActionEnabled())
+        assertFalse(video.copy(phase = ComposerPhase.RUNNING).textActionEnabled())
+    }
     @Test fun idleTextCanSendWithoutSupplementCapability() {
         assertTrue(composer.textActionEnabled())
     }

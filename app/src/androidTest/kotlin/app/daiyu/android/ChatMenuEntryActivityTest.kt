@@ -304,8 +304,9 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         val expected = "menu draft stays unsent\n路径引用（未读取）：$raw"
         val confirm = openPathReference(raw)
         mainThread { confirm(); confirm() }
-        assertDraft(expected)
-        assertSelection(expected.length, expected.length)
+        assertDraft("menu draft stays unsent")
+        node("chat-reference:0").assertIsDisplayed()
+        assertSelection("menu draft stays unsent".length, "menu draft stays unsent".length)
         val reopened = app.daiyu.android.storage.ConversationDatabase(fixture.application)
         try {
             assertEquals(expected, reopened.conversations().single { it.id == conversation.id }.draft)
@@ -315,9 +316,11 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         }
         activity = recreateActivity(activity)
         awaitUniqueTag("chat-draft")
-        assertDraft(expected)
+        assertDraft("menu draft stays unsent")
+        node("chat-reference:0").assertIsDisplayed()
         mainThread { confirm() }
-        assertDraft(expected)
+        assertDraft("menu draft stays unsent")
+        node("chat-reference:0").assertIsDisplayed()
         assertEquals(messages, fixture.database.messages(conversation.id))
         assertEquals(settings, fixture.settings.load())
         assertEquals(grants, PlatformSafGrants(instrumentation.targetContext).grants())
@@ -358,7 +361,10 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         assertEquals(before, fixture.database.exportBackup())
         val fresh = openPathReference("/fresh-after-resume")
         mainThread { fresh() }
-        assertDraft("menu draft stays unsent\n路径引用（未读取）：/fresh-after-resume")
+        assertDraft("menu draft stays unsent")
+        node("chat-reference:0").assertIsDisplayed()
+        assertEquals("menu draft stays unsent\n路径引用（未读取）：/fresh-after-resume",
+            fixture.database.conversations().single().draft)
         assertEquals(0, fixture.opens.get())
     }
 

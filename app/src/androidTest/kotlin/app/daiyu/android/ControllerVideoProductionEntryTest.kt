@@ -14,9 +14,32 @@ import androidx.compose.ui.test.*
 class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
     override val engineeringUi = true
     private fun openVideo() {
-        ui.onNodeWithContentDescription("附件").performClick()
-        ui.onNodeWithText("视频").performClick()
-        ui.waitForIdle()
+        val launches = java.util.concurrent.atomic.AtomicInteger()
+        val monitor = object : android.app.Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: android.content.Intent): android.app.Instrumentation.ActivityResult? {
+                val target = if (intent.action == android.content.Intent.ACTION_CHOOSER)
+                    intent.getParcelableExtra<android.content.Intent>(android.content.Intent.EXTRA_INTENT) else intent
+                if (target?.action !in setOf(android.content.Intent.ACTION_GET_CONTENT,
+                    android.content.Intent.ACTION_OPEN_DOCUMENT, android.content.Intent.ACTION_OPEN_DOCUMENT_TREE)) return null
+                assertEquals(android.content.Intent.ACTION_GET_CONTENT, target?.action)
+                assertEquals("video/*", target?.type)
+                assertTrue(target?.hasCategory(android.content.Intent.CATEGORY_OPENABLE) == true)
+                assertTrue(target?.getBooleanExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, false) == true)
+                launches.incrementAndGet()
+                return android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_CANCELED, null)
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        try {
+            ui.onNodeWithContentDescription("附件").performClick()
+            ui.onNodeWithText("视频").performClick()
+            ui.waitForIdle()
+            assertEquals(1, launches.get())
+        } finally { instrumentation.removeMonitor(monitor) }
+        node("video_attachments").assertDoesNotExist()
+        node("video_attachments_select").assertDoesNotExist()
+        node("video_attachments_send").assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
     }
     fun testProductionConfigurationSaveAdvancesEpochEvenWhenValuesAreRestored() {
         val epoch = ChatController::class.java.getDeclaredField("videoConfigurationEpoch")
@@ -109,7 +132,7 @@ class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
 
     fun testOriginalVideoMenuMountsRealHostAndNavigationRetiresPickerTicket() {
         openVideo()
-        node("video_attachments").assertExists()
+        node("video_attachments").assertDoesNotExist()
         lateinit var before: VideoChatHost.Selection
         var visit = 0L
         mainThread {
@@ -128,13 +151,13 @@ class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
             assertTrue(host.state.items.isEmpty())
         }
         openVideo()
-        node("video_attachments").assertExists()
+        node("video_attachments").assertDoesNotExist()
         mainThread { assertTrue(fixture.controller.videoHost.state.visible) }
     }
 
     fun testSidebarAndRecreationDetachTheProductionVideoMount() {
         openVideo()
-        node("video_attachments").assertExists()
+        node("video_attachments").assertDoesNotExist()
         val host = fixture.controller.videoHost
         lateinit var stale: VideoChatHost.Selection
         mainThread { stale = checkNotNull(host.requestSelection()) }

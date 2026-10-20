@@ -132,6 +132,8 @@ data class ComposerUi(
     val imageSendAvailable: Boolean = false,
     /** A fenced/importing image draft must not silently fall through to text send. Editing is separate. */
     val imageSendBlocked: Boolean = false,
+    val videoSendAvailable: Boolean = false,
+    val videoSendBlocked: Boolean = false,
     /** Actual runtime evidence, independent of pause-request/control-button projection. */
     val executionPhase: app.daiyu.android.domain.runtime.ExecutionPhase? = null,
     /** Null means the current owner's output is not available; never guess from RUNNING. */
@@ -142,8 +144,8 @@ data class ComposerUi(
     val voiceMode: ChatMenuAction = ChatMenuAction.VOICE_INPUT,
 )
 
-internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !imageSendBlocked && !supplementPending && when (phase) {
-    ComposerPhase.IDLE -> text.isNotBlank() || imageSendAvailable
+internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !imageSendBlocked && !videoSendBlocked && !supplementPending && when (phase) {
+    ComposerPhase.IDLE -> text.isNotBlank() || imageSendAvailable || videoSendAvailable
     ComposerPhase.PAUSED -> text.isNotBlank() && supplementAvailable
     ComposerPhase.RUNNING -> false
 }

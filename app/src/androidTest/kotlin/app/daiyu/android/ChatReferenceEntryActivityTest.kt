@@ -37,6 +37,38 @@ class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
     private fun valid(tree: Boolean) = Intent().setData(Uri.parse(
         if (tree) "content://reference-never-read.invalid/tree/selected" else "content://reference-never-read.invalid/document/selected"
     )).addFlags(readFlags)
+    private fun assertReferenceDraft(raw: String, body: String) {
+        assertDraft(body)
+        node("chat-reference:0").assertIsDisplayed()
+        ui.onNodeWithText("content://", substring = true, useUnmergedTree = true).assertDoesNotExist()
+        assertEquals(raw, fixture.database.conversations().single().draft)
+    }
+
+    fun testReferenceBodyEditingAndRemovalPersistWithoutResurrectingOldReferences() {
+        prepare()
+        val first = "文件引用（未读取）：content://reference-never-read.invalid/document/one"
+        val second = "目录引用（未读取）：content://reference-never-read.invalid/tree/two"
+        val raw = "$original\n$first\n$second"
+        mainThread { retainedControls(activity).onTextChange(raw) }
+        assertReferenceDraft(raw, original)
+        val oldEdit = checkNotNull(retainedControls(activity).onProjectedDraftEdit)
+        node("chat-reference-remove:0").performClick()
+        assertReferenceDraft("$original\n$second", original)
+        mainThread { assertFalse(oldEdit(raw, "$original\n$first", 0, 0)) }
+        assertReferenceDraft("$original\n$second", original)
+        node("chat-draft").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetText) {
+            assertTrue(it(androidx.compose.ui.text.AnnotatedString("修改后的正文 😀")))
+        }
+        assertReferenceDraft("修改后的正文 😀\n$second", "修改后的正文 😀")
+        activity = recreateActivity(activity)
+        assertReferenceDraft("修改后的正文 😀\n$second", "修改后的正文 😀")
+        node("chat-reference-remove:0").performClick()
+        assertDraft("修改后的正文 😀")
+        node("chat-reference-chips").assertDoesNotExist()
+        assertEquals("修改后的正文 😀", fixture.database.conversations().single().draft)
+        assertEquals(0, fixture.opens.get())
+    }
+
     private fun picked(tree: Boolean) {
         prepare()
         val conversation = fixture.database.conversations().single()
@@ -51,8 +83,8 @@ class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
         try {
             attach(tree)
             val expected = "$original\n${if (tree) "目录" else "文件"}引用（未读取）：${data.data}"
-            assertDraft(expected)
-            assertSelection(expected.length, expected.length)
+            assertReferenceDraft(expected, original)
+            assertSelection(original.length, original.length)
             assertEquals(1, launches.get())
             val reopened = ConversationDatabase(fixture.application)
             try {
@@ -63,7 +95,7 @@ class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
             }
             activity = recreateActivity(activity)
             awaitUniqueTag("chat-draft")
-            assertDraft(expected)
+            assertReferenceDraft(expected, original)
             assertEquals(settings, fixture.settings.load())
             assertEquals(messages, fixture.database.messages(conversation.id))
             assertEquals(grants, PlatformSafGrants(instrumentation.targetContext).grants())
@@ -145,7 +177,7 @@ class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
         lateinit var request: Any
         mainThread { request = pending(false) }
         realPauseResume(activity, atPause = { returned(request, false) })
-        assertDraft("$original\n文件引用（未读取）：${valid(false).data}")
+        assertReferenceDraft("$original\n文件引用（未读取）：${valid(false).data}", original)
         assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
     }
     fun testLaterPauseRevokesPendingResultAndUnreturnedSlotBlocksNewPicker() {

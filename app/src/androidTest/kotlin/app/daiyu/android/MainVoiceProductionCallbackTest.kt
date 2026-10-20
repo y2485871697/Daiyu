@@ -54,6 +54,44 @@ class MainVoiceProductionCallbackTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testRecognizedTextKeepsReferencesOutOfTheEditableBody() {
+        val reference = "路径引用（未读取）：/workspace/keep.txt"
+        mainThread {
+            retainedControls(activity).onTextChange(reference)
+            val target = app.daiyu.android.voice.DictationDraftTarget(null,
+                value("editorGeneration") as Long, value("draftRevision") as Long)
+            invoke("captureDictationDraft", target)
+            invoke("applyRecognizedDraft", target, "听写正文")
+        }
+        assertDraft("听写正文")
+        assertSelection(4, 4)
+        assertEquals("听写正文\n$reference", fixture.database.draft())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    fun testOfflineCallbackUsesVisibleBodyAndRetainsLiteralReferences() {
+        val reference = "文件引用（未读取）：content://never-read/document/one"
+        mainThread {
+            retainedControls(activity).onTextChange("旧正文\n$reference")
+            val host = (value("offlineHost\$delegate") as Lazy<*>).value!!
+            val current = host.javaClass.getDeclaredField("currentText").apply { isAccessible = true }.get(host) as () -> String
+            assertEquals("旧正文", current())
+            val apply = host.javaClass.getDeclaredField("applyDraft").apply { isAccessible = true }.get(host)
+                as (app.daiyu.android.voice.DictationDraftTarget, String, Int) -> Unit
+            val target = app.daiyu.android.voice.DictationDraftTarget(null,
+                value("editorGeneration") as Long, value("draftRevision") as Long)
+            apply(target, "新正文", 3)
+        }
+        assertDraft("新正文")
+        assertSelection(3, 3)
+        assertEquals("新正文\n$reference", fixture.database.draft())
+        activity = recreateActivity(activity)
+        assertDraft("新正文")
+        assertEquals("新正文\n$reference", fixture.database.draft())
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testNavigationRetiresCascadeAndPreparedSpeechEpochs() {
         var before = 0L
         var cascadeBefore = 0L

@@ -96,6 +96,7 @@ import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.components.*
 import app.daiyu.android.ui.components.subagent.SubAgentThinkingEffortPickerDialog
+import app.daiyu.android.ui.screens.chat.conversation.ComposerReferences
 import app.daiyu.android.ui.model.ConversationPaneUiState
 import app.daiyu.android.ui.model.ConversationSummaryUi
 import app.daiyu.android.ui.model.MessageSearchHit
@@ -383,16 +384,20 @@ class MainActivity : ComponentActivity() {
             target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
     private var dictationDraft: Pair<DictationDraftTarget, app.daiyu.android.voice.offline.SpeechDraft>? = null
     private fun captureDictationDraft(target: DictationDraftTarget) {
-        dictationDraft = target to app.daiyu.android.voice.offline.SpeechDraft(draft, selectionStart, selectionEnd)
+        val projection = ComposerReferences(draft)
+        dictationDraft = target to app.daiyu.android.voice.offline.SpeechDraft(projection.text,
+            projection.toVisible(selectionStart), projection.toVisible(selectionEnd))
     }
     private fun applyRecognizedDraft(target: DictationDraftTarget, recognized: String) {
         val captured = dictationDraft?.takeIf { it.first == target }?.second
         check(voiceEditorCurrent(target) && captured != null) { "dictation_editor_changed" }
-        val next = checkNotNull(captured.accept(draft, recognized)) { "dictation_draft_changed" }
+        val projection = ComposerReferences(draft)
+        val body = checkNotNull(captured.accept(projection.text, recognized)) { "dictation_draft_changed" }
+        val next = projection.edit(body)
         dictationDraft = null
         updateDraft(next)
         check(draft == next) { "dictation_draft_not_saved" }
-        selectionStart = captured.cursor; selectionEnd = captured.cursor
+        selectionStart = ComposerReferences(next).toSource(captured.cursor); selectionEnd = selectionStart
         publishChat()
     }
     private val remoteVoice by lazy {
@@ -491,24 +496,28 @@ class MainActivity : ComponentActivity() {
                     target.conversationId == selected?.id?.value &&
                     target.editorGeneration == editorGeneration && target.draftRevision == draftRevision
             },
-            currentText = { draft },
+            currentText = { ComposerReferences(draft).text },
             applyDraft = { _, text, cursor ->
-                updateDraft(text)
-                check(draft == text) { "offline_dictation_draft_not_saved" }
-                selectionStart = cursor; selectionEnd = cursor
+                val next = ComposerReferences(draft).edit(text)
+                updateDraft(next)
+                check(draft == next) { "offline_dictation_draft_not_saved" }
+                selectionStart = ComposerReferences(next).toSource(cursor); selectionEnd = selectionStart
                 publishChat()
             })
     }
     private fun startOfflineDictation() {
         invalidateConfiguredVoice()
         dictationHost.invalidate()
+        val projection = ComposerReferences(draft)
         offlineHost.start(DictationDraftTarget(selected?.id?.value, editorGeneration, draftRevision),
-            draft, selectionStart, selectionEnd)
+            projection.text, projection.toVisible(selectionStart), projection.toVisible(selectionEnd))
     }
     private val imageHost by lazy { ImageChatHost.obtain(controller, { if (activityUsable()) publishChat() },
         { if (activityUsable()) toast(it) }, ::settleImageReceipt) }
     private var imagePanelVisible by mutableStateOf(false)
-    private var videoPanelVisible by mutableStateOf(false)
+    private var videoComposerControls by mutableStateOf<app.daiyu.android.ui.screens.chat.attachments.VideoComposerControls?>(null)
+    private data class VideoPickEntry(val owner: ChatController.TextSendOwner, val epoch: Long)
+    private var videoPickEntry by mutableStateOf<VideoPickEntry?>(null)
     private var videoSending by mutableStateOf(false)
     private var videoReceiptRequest: VideoDraftRequest? = null
     private var videoReceiptEditor: ControllerVideoEditor? = null
@@ -544,6 +553,7 @@ class MainActivity : ComponentActivity() {
             }
     }
     private fun fenceVideoRoute() {
+        videoPickEntry = null
         controller.invalidateVideo(videoUi) // Gate and real session first; dismiss is not revocation.
         videoDialog?.dismiss(); videoDialog = null
         if (controller.ownsVideoUi(videoUi)) videoHost.detach()
@@ -553,13 +563,23 @@ class MainActivity : ComponentActivity() {
         pendingTextSend == null && controller.textSendState() == null &&
         !imageHost.hasAttachments && !imageHost.busy && !shizukuWritesBlocked
     @Composable private fun VideoComposerPanel() {
+        val pick = videoPickEntry
         app.daiyu.android.ui.screens.chat.attachments.VideoAttachments(videoHost, selected?.id?.value,
             app.daiyu.android.ui.screens.chat.attachments.VideoDraftText(draft, editorGeneration, draftRevision),
             onHandoff = { request, text, settle ->
                 handoffVideo(request, ControllerVideoEditor(request.conversation, text.editorGeneration,
                     text.revision, text.text, true), settle)
             }, enabled = videoComposerAvailable(),
-            parentBusy = videoSending || controller.active != null || !controller.ready || controller.dataBusy)
+            parentBusy = videoSending || controller.active != null || !controller.ready || controller.dataBusy,
+            compact = true, pickRequest = pick, onControls = { controls ->
+                videoComposerControls = controls
+                if (controls != null && pick != null && videoPickEntry === pick) {
+                    videoPickEntry = null
+                    if (activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+                        pick.owner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) &&
+                        pick.epoch == contextManagementEntryEpoch) controls.select()
+                }
+            })
     }
     private fun handoffVideo(request: VideoDraftRequest, original: ControllerVideoEditor,
         settle: (VideoDraftReceipt) -> Boolean) {
@@ -1886,14 +1906,18 @@ class MainActivity : ComponentActivity() {
                                 Column(Modifier.fillMaxSize()) {
                                     DaiyuChatScreen(chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
                                         automaticCompression = automaticCompression, automaticCompressionPending = automaticCompressionPending,
-                                        composer = projectedVoiceComposer().copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel)), chatActions(), modifier = Modifier.weight(1f), turnExtras = { turn ->
+                                        composer = projectedVoiceComposer().copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
+                                            videoSendAvailable = videoComposerControls?.canSubmit == true,
+                                            videoSendBlocked = videoComposerControls?.blocked == true ||
+                                                videoHost.state.items.isNotEmpty() && videoComposerControls?.canSubmit != true)), chatActions(), modifier = Modifier.weight(1f), turnExtras = { turn ->
                                         if (turn.segmentIndex == 0) {
                                             QuestionCleanup(turn.id)
                                             VoiceExtras(turn.id)
                                         }
                                     }, dedicatedTool = { step -> DedicatedQuestion(step) },
                                         toolContent = { step -> ToolTrustedContent(step) }, imageLoader = imageHost.historyLoader,
-                                        assistant = projectedAssistants.firstOrNull { it.id == (selected?.assistantId ?: activeAssistant) })
+                                        assistant = projectedAssistants.firstOrNull { it.id == (selected?.assistantId ?: activeAssistant) },
+                                        composerAttachments = { if (!sidebarVisible) key(editorGeneration) { VideoComposerPanel() } })
                                     Column(Modifier.fillMaxWidth().heightIn(max = extrasMaxHeight)
                                         .verticalScroll(rememberScrollState()).testTag("chat-extra-actions")) {
                                         pendingTextSend?.let { pending ->
@@ -1904,7 +1928,6 @@ class MainActivity : ComponentActivity() {
                                             )
                                         }
                                         if (imagePanelVisible) ImageComposerPanel()
-                                        if (videoPanelVisible && !sidebarVisible) VideoComposerPanel()
                                         DictationComposerEntry()
                                         ShizukuComposerEntry()
                                     }
@@ -2205,6 +2228,18 @@ class MainActivity : ComponentActivity() {
         onBranch = messageCallbacks.onBranch, onEditUser = messageCallbacks.onEditUser,
         onDeleteTurn = messageCallbacks.onDeleteTurn, onRetryStep = messageCallbacks.onRetryStep,
         onOpenSidebar = { openSidebar() }, onTextChange = { if (editorMatches()) updateDraft(it) },
+        onProjectedDraftEdit = { expected, next, start, end ->
+            if (!editorMatches() || renderedDraftRevision != draftRevision || draft != expected) false
+            else {
+                updateDraft(next)
+                if (draft != next) false else {
+                    selectionStart = start.coerceIn(0, next.length)
+                    selectionEnd = end.coerceIn(0, next.length)
+                    publishChat(rowsChanged = false)
+                    true
+                }
+            }
+        },
         onSelectionChange = { start, end ->
             if (editorMatches() && !imageHost.sending && (selectionStart != start || selectionEnd != end)) {
                 offlineHost.invalidate()
@@ -2220,7 +2255,8 @@ class MainActivity : ComponentActivity() {
             offlineHost.invalidate()
             cancelShizukuEditor()
             cancelBrowserEditor()
-            if (videoHost.state.items.isNotEmpty()) { stopCascadeVoice(); videoPanelVisible = true }
+            if (videoHost.state.items.isNotEmpty()) { stopCascadeVoice(); videoComposerControls?.send?.invoke() }
+            else if (videoComposerControls?.blocked == true) return@guard
             else if (imageHost.hasAttachments) { stopCascadeVoice(); sendImageDraft(text) }
             else if (!imageHost.busy && !videoSending) sendDraft(text)
         } },
@@ -2247,13 +2283,16 @@ class MainActivity : ComponentActivity() {
         onMenuAction = { action -> guard { when (action) {
             ChatMenuAction.ATTACH_IMAGE -> {
                 if (editorMatches() && videoHost.state.items.isEmpty() && !videoSending) {
-                    videoPanelVisible = false; imagePanelVisible = true; pickImages()
+                    imagePanelVisible = true; pickImages()
                 }
             }
             ChatMenuAction.ATTACH_VIDEO -> {
-                if (editorMatches() && !imageHost.hasAttachments && !imageHost.busy && !shizukuWritesBlocked) {
+                if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch &&
+                    !imageHost.hasAttachments && !imageHost.busy && !shizukuWritesBlocked) {
                     cancelShizukuEditor(); cancelBrowserEditor(); cancelGenerationEditor()
-                    imagePanelVisible = false; videoPanelVisible = true
+                    imagePanelVisible = false
+                    videoPickEntry = VideoPickEntry(ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision),
+                        contextManagementEntryEpoch)
                 }
             }
             ChatMenuAction.ATTACH_PATH -> openPathReference()
@@ -5022,7 +5061,6 @@ class MainActivity : ComponentActivity() {
         speechHost.enter(conversation?.id?.value)
         imageHost.enter(conversation?.id?.value)
         videoHost.enter(conversation?.id?.value)
-        videoPanelVisible = videoHost.state.items.isNotEmpty() || videoHost.state.fenced
         draftRevision = maxOf(draftRevision + 1, imageHost.session.attachments.state.value.draft.revision)
         imagePanelVisible = false
         selected = conversation; selectionReady = true; draft = targetDraft
@@ -5032,7 +5070,7 @@ class MainActivity : ComponentActivity() {
         shown = if (conversation == null) mutableListOf() else controller.database.messages(conversation.id).toMutableList()
         imagePanelVisible = imageHost.hasAttachments || imageHost.fenced ||
             MessageHistory.expand(shown.map { it.second }).any { row -> row.blocks.any { it is MessageBlock.Image } }
-        if (videoPanelVisible) imagePanelVisible = false
+        if (videoHost.state.items.isNotEmpty() || videoHost.state.fenced) imagePanelVisible = false
         childStatusVisit = null; usageVisit = null; collaborationOwner = null; collaborationVisible = false; publishChat(); jumpToBottom(); refresh()
     }
     private fun sendDraft(text: String, universal: UniversalSend? = null) {

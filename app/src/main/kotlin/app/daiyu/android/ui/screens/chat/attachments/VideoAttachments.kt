@@ -16,6 +16,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -26,6 +29,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -81,6 +85,9 @@ internal fun VideoAttachments(
     enabled: Boolean = true,
     parentBusy: Boolean = false,
     viewLifecycleOwner: LifecycleOwner = LocalLifecycleOwner.current,
+    compact: Boolean = false,
+    pickRequest: Any? = null,
+    onControls: (VideoComposerControls?) -> Unit = {},
 ) {
     val registry = checkNotNull(LocalActivityResultRegistryOwner.current).activityResultRegistry
     val picker = remember(host, registry, conversation, viewLifecycleOwner) { VideoPickerBinding(host, registry) }
@@ -96,9 +103,16 @@ internal fun VideoAttachments(
     // Never display previous route's items before the lifecycle effect has entered the new slot.
     if (state.conversation != conversation) return
     key(host, state.owner, state.visit) {
-        VideoAttachmentsContent(host, state, text, onHandoff, picker, modifier, enabled && !parentBusy)
+        VideoAttachmentsContent(host, state, text, onHandoff, picker, modifier, enabled && !parentBusy, compact, pickRequest, onControls)
     }
 }
+
+internal data class VideoComposerControls(
+    val canSubmit: Boolean,
+    val blocked: Boolean,
+    val select: () -> Unit,
+    val send: () -> Unit,
+)
 
 private data class VideoConfirmation(val snapshot: VideoChatHost.Snapshot, val text: VideoDraftText)
 
@@ -111,34 +125,51 @@ private fun VideoAttachmentsContent(
     picker: VideoPickerBinding,
     modifier: Modifier,
     enabled: Boolean,
+    compact: Boolean,
+    pickRequest: Any?,
+    onControls: (VideoComposerControls?) -> Unit,
 ) {
     var confirmation by remember { mutableStateOf<VideoConfirmation?>(null) }
     var cover by remember { mutableStateOf<VideoChatHost.Item.Ready?>(null) }
     val canEdit = enabled && state.visible && !state.fenced && !state.storageFailed && !state.recovering
+    val controls by rememberUpdatedState(onControls)
+    val canSelect = canEdit && !picker.selecting && state.remaining > 0 && state.items.none { it is VideoChatHost.Item.Importing }
+    val canSubmit = enabled && state.canSubmit && !picker.selecting
+    DisposableEffect(host, picker, state, text, enabled, picker.selecting, pickRequest) {
+        var live = true
+        controls(VideoComposerControls(canSubmit,
+            picker.selecting || state.fenced || state.storageFailed || state.recovering ||
+                state.items.isNotEmpty() && !canSubmit,
+            select = { if (live && canSelect && sameVideoVisit(state, host.state)) picker.launch(state) },
+            send = { if (live && canSubmit && sameVideoVisit(state, host.state)) confirmation = VideoConfirmation(state, text) }))
+        onDispose { live = false; controls(null) }
+    }
     val colors = MiuixTheme.colorScheme
-    Column(modifier.fillMaxWidth().testTag("video_attachments"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    val hasStatus = picker.selecting || picker.notice != null || state.storageFailed || state.recovering || state.fenced
+    if (!compact || state.items.isNotEmpty() || hasStatus) Column(modifier.fillMaxWidth().then(if (compact) Modifier.padding(horizontal = 13.dp, vertical = 6.dp) else Modifier).testTag("video_attachments"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (!compact) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text("原视频附件（${state.items.size}/4）", modifier = Modifier.weight(1f),
                 style = MiuixTheme.textStyles.footnote1, color = colors.onSurfaceVariantSummary)
             TextButton(text = "选择视频", onClick = { picker.launch(state) },
                 enabled = canEdit && !picker.selecting && state.remaining > 0 && state.items.none { it is VideoChatHost.Item.Importing },
                 modifier = Modifier.heightIn(min = 48.dp).testTag("video_attachments_select"))
         }
-        Text("发送的是原视频，不是封面图片；仅上传确认后交给父级处理。",
+        if (!compact) Text("发送的是原视频，不是封面图片；仅上传确认后交给父级处理。",
             style = MiuixTheme.textStyles.footnote1, color = colors.onSurfaceVariantSummary)
         if (picker.selecting) VideoStatus("正在选择视频…", "video_attachments_selecting")
         picker.notice?.let { VideoStatus(it, "video_attachments_notice") }
         if (state.storageFailed) VideoStatus("视频草稿保存失败，已停止操作；请勿重复发送", "video_attachments_storage_failed")
         if (state.recovering) VideoStatus("正在恢复视频草稿或清理已移除的视频…", "video_attachments_recovering")
-        if (state.fenced) VideoStatus("视频已交接，等待父级确认；结果未知时保留原视频且不重复发送", "video_attachments_fenced")
-        if (state.items.isEmpty()) Text("尚未选择视频", style = MiuixTheme.textStyles.footnote1)
+        if (state.fenced) VideoStatus("正在确认视频发送结果，请勿重复发送", "video_attachments_fenced")
+        if (!compact && state.items.isEmpty()) Text("尚未选择视频", style = MiuixTheme.textStyles.footnote1)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             state.items.forEachIndexed { index, item ->
                 key(state.owner, state.visit, state.revision, item.key) {
-                    Column(Modifier.width(168.dp).clip(RoundedCornerShape(12.dp))
+                    Column(Modifier.width(if (compact) 104.dp else 168.dp).clip(RoundedCornerShape(12.dp))
                         .background(colors.surfaceContainerHigh).testTag("video_attachments_item:${item.key}")) {
-                        Box(Modifier.fillMaxWidth().height(104.dp).then(
+                        Box(Modifier.fillMaxWidth().height(if (compact) 64.dp else 104.dp).then(
                             if (item is VideoChatHost.Item.Ready && state.visible) Modifier.clickable(
+                                interactionSource = remember { MutableInteractionSource() }, indication = null,
                                 role = Role.Button, onClickLabel = "查看第 ${index + 1} 个视频的封面",
                                 onClick = { if (sameVideoVisit(state, host.state)) cover = item },
                             ) else Modifier,
@@ -149,19 +180,30 @@ private fun VideoAttachmentsContent(
                                 is VideoChatHost.Item.Ready -> VideoCover(host, state, item, 256)
                             }
                         }
-                        if (item is VideoChatHost.Item.Ready) {
-                            Text("原视频 · ${item.video.mime}\n${item.video.width} × ${item.video.height} · ${item.video.durationMs / 1000} 秒\n${item.video.bytes} 字节",
-                                modifier = Modifier.padding(8.dp), style = MiuixTheme.textStyles.footnote1)
-                            VideoStatus("已就绪", "video_attachments_ready:${item.key}")
+                        if (compact) Row(Modifier.fillMaxWidth().padding(start = 6.dp, end = 3.dp, top = 3.dp, bottom = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text(if (item is VideoChatHost.Item.Ready) "视频 · ${item.video.durationMs / 1000} 秒" else "视频",
+                                Modifier.weight(1f).then(if (item is VideoChatHost.Item.Ready) Modifier.testTag("video_attachments_ready:${item.key}") else Modifier),
+                                fontSize = 9.sp, lineHeight = 13.sp, maxLines = 1)
+                            app.daiyu.android.ui.screens.chat.conversation.ChatIconButton(
+                                app.daiyu.android.ui.icons.DaiyuIcons.Close, "移除第 ${index + 1} 个视频", { host.remove(item.key, state) },
+                                Modifier.size(22.dp).testTag("video_attachments_remove:${item.key}"),
+                                enabled = canEdit && !picker.selecting, iconSize = 11.dp)
+                        } else {
+                            if (item is VideoChatHost.Item.Ready) {
+                                Text("原视频 · ${item.video.mime}\n${item.video.width} × ${item.video.height} · ${item.video.durationMs / 1000} 秒\n${item.video.bytes} 字节",
+                                    modifier = Modifier.padding(8.dp), style = MiuixTheme.textStyles.footnote1)
+                                VideoStatus("已就绪", "video_attachments_ready:${item.key}")
+                            }
+                            TextButton(text = "移除第 ${index + 1} 项", enabled = canEdit && !picker.selecting,
+                                onClick = { host.remove(item.key, state) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                                    .testTag("video_attachments_remove:${item.key}"))
                         }
-                        TextButton(text = "移除第 ${index + 1} 项", enabled = canEdit && !picker.selecting,
-                            onClick = { host.remove(item.key, state) }, modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                                .testTag("video_attachments_remove:${item.key}"))
                     }
                 }
             }
         }
-        TextButton(text = "发送原视频…", enabled = enabled && state.canSubmit && !picker.selecting,
+        if (!compact) TextButton(text = "发送原视频…", enabled = enabled && state.canSubmit && !picker.selecting,
             onClick = { confirmation = VideoConfirmation(state, text) },
             modifier = Modifier.heightIn(min = 48.dp).testTag("video_attachments_send"))
     }
@@ -181,7 +223,7 @@ private fun VideoAttachmentsContent(
         Dialog(onDismissRequest = { confirmation = null }) {
             Column(Modifier.fillMaxWidth().background(colors.background).padding(16.dp).testTag("video_attachments_confirmation")) {
                 Text("确认上传原视频？", style = MiuixTheme.textStyles.title3)
-                Text("将交接 ${frozen.snapshot.items.size} 个原视频（不是封面）及以下文字给父级发送流程。可能产生流量；本操作本身不代表发送成功。")
+                Text("将上传 ${frozen.snapshot.items.size} 个原视频及以下内容，可能产生流量。")
                 // Bound the viewport before scrolling so long frozen captions remain fully readable.
                 Text(frozen.text.text, modifier = Modifier.heightIn(max = 120.dp)
                     .verticalScroll(rememberScrollState()).testTag("video_attachments_confirm_text"))
@@ -245,7 +287,7 @@ private fun VideoCover(host: VideoChatHost, state: VideoChatHost.Snapshot, item:
 @Composable
 private fun VideoStatus(text: String, tag: String) {
     Text(text, modifier = Modifier.padding(4.dp).semantics { liveRegion = LiveRegionMode.Polite }.testTag(tag),
-        style = MiuixTheme.textStyles.footnote1, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 15.sp), color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
 }
 
 /** Limits are deliberately described as a category: TOO_LARGE also covers duration, dimensions,

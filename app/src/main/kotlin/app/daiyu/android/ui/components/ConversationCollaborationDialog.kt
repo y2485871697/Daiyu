@@ -12,7 +12,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -99,6 +98,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
     val latestChoosing by rememberUpdatedState(choosing)
     val latestCanChange by rememberUpdatedState(canChange)
     val directory = editor?.let { rememberSubAgentPresetDirectory(it.repository) }
+    val compactState = editor == null || (choosing && directory?.entries.isNullOrEmpty())
     val providers by modelSource.providers.collectAsState()
     val maximumHeight = (LocalConfiguration.current.screenHeightDp - 48).coerceAtLeast(160).dp
     val view = LocalView.current
@@ -123,7 +123,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
         WithoutPressRipple {
             ConversationAgentTypography {
                 ConversationAgentSheet(onDismiss, modifier = Modifier.heightIn(max = maximumHeight).testTag("subagent-collaboration-card")) {
-                    Column(Modifier.heightIn(min = 360.dp).padding(start = 15.dp, end = 15.dp, top = 10.dp, bottom = 16.dp)) {
+                    Column(Modifier.heightIn(min = if (compactState) 0.dp else 360.dp).padding(start = 15.dp, end = 15.dp, top = 10.dp, bottom = 16.dp)) {
                         ConversationAgentHandle()
                         Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("本会话协作", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
@@ -133,21 +133,29 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                         }
                         Column(Modifier.fillMaxWidth().weight(1f, fill = false).testTag("subagent-collaboration-body")
                             .verticalScroll(key(editor, choosing, current?.presetApplicationToken) { rememberScrollState() })
-                            .padding(bottom = 8.dp).alpha(if (canChange) 1f else 0.38f)) {
+                            .padding(bottom = 8.dp)) {
                             when (state) {
                                 is SubAgentEditorState.Error -> {
                                     Text("子代理配置读取或保存失败：${state.reason}")
                                     ConversationAgentButton("重试恢复配置", onClick = { editor?.retry() })
                                 }
                                 SubAgentEditorState.Loading -> Text("正在读取本会话子代理配置…")
-                                else -> if (editor == null) Text("请先选择会话；未选择会话时不可编辑。")
+                                else -> if (editor == null) CollaborationEmptyState(
+                                    "尚未选择会话", "开始或选择一个会话后，即可配置本会话协作。", "subagent-no-conversation")
                                     else if (!canChange) Text("主代理尚未停止，暂不可编辑本会话配置。")
                             }
                             if (choosing && directory != null && editor != null && chooserPopup != null) {
                                 val (popup, ticket) = chooserPopup
-                                Text("选择子代理组", fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = conversationAgentColors().accent, modifier = Modifier.padding(horizontal = 2.dp, vertical = 8.dp))
-                                Text("应用时复制到本会话；本会话修改不会反写预设。切换会替换当前会话配置。", style = MaterialTheme.typography.bodySmall, color = conversationAgentColors().muted, modifier = Modifier.padding(start = 2.dp, end = 2.dp, bottom = 14.dp))
-                                SubAgentPresetDirectoryStatus(directory)
+                                if (!directory.loading && directory.error == null && directory.entries.isEmpty()) {
+                                    CollaborationEmptyState("还没有子代理组",
+                                        "可在设置中添加子代理组，或使用当前配置。", "subagent-no-presets")
+                                } else {
+                                    if (directory.entries.isNotEmpty()) {
+                                        Text("选择子代理组", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = conversationAgentColors().accent, modifier = Modifier.padding(horizontal = 2.dp, vertical = 8.dp))
+                                        Text("应用后仅修改本会话配置，不影响原子代理组。", style = MaterialTheme.typography.bodySmall, color = conversationAgentColors().muted, modifier = Modifier.padding(start = 2.dp, end = 2.dp, bottom = 14.dp))
+                                    }
+                                    SubAgentPresetDirectoryStatus(directory)
+                                }
                                 directory.entries.forEach { preset ->
                                     key(editor, preset.id) {
                                         SubAgentPresetCard(preset, canChange && directory.error == null && !directory.loading,
@@ -234,7 +242,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                     if (panelEnabled && panelEditor.enabled && latestOwnerMatches() && !latestTaskRunning && !latestChoosing) { TouchHaptics.click(view); chooserOverride = true }
                                 }
                             }
-                            ConversationAgentButton("完成", enabled = !taskRunning, primary = true, modifier = Modifier.weight(1f)) {
+                            ConversationAgentButton(if (editor == null) "关闭" else "完成", enabled = !taskRunning, primary = editor != null, modifier = Modifier.weight(1f)) {
                                 if (latestOwnerMatches() && !latestTaskRunning) { TouchHaptics.click(view); onDismiss() }
                             }
                         }
@@ -242,5 +250,15 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun CollaborationEmptyState(title: String, description: String, tag: String) {
+    val colors = conversationAgentColors()
+    Column(Modifier.fillMaxWidth().testTag(tag).padding(horizontal = 2.dp, vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(title, fontSize = 15.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium, color = colors.text)
+        Text(description, fontSize = 13.sp, lineHeight = 20.sp, color = colors.muted)
     }
 }

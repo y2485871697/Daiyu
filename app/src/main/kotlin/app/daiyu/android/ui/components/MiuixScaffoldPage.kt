@@ -40,9 +40,9 @@ fun MiuixScaffoldPage(
     topBarModifier: Modifier = Modifier,
     listModifier: Modifier = Modifier,
     editorScrollIsolation: EditorScrollIsolation? = null,
+    scrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
     content: LazyListScope.() -> Unit,
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
     val pageScrollConnection = remember(scrollBehavior, editorScrollIsolation) {
         editorScrollIsolation?.gate(scrollBehavior.nestedScrollConnection) ?: scrollBehavior.nestedScrollConnection
     }

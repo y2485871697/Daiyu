@@ -1408,6 +1408,8 @@ class MainActivity : ComponentActivity() {
                 val focus = LocalFocusManager.current
                 val balanceState = balanceRuntime?.state?.collectAsStateWithLifecycle()?.value
                 val chatPageState = rememberSaveableStateHolder()
+                val settingsPageState = rememberSaveableStateHolder()
+                val settingsScrollBehavior = top.yukonga.miuix.kmp.basic.MiuixScrollBehavior()
                 val assistantProfiles by assistantStore.assistants.collectAsState()
                 val activeAssistant by assistantStore.selectedId.collectAsState()
                 var projectedAssistants by remember { mutableStateOf<List<AssistantDisplay>>(emptyList()) }
@@ -1708,12 +1710,13 @@ class MainActivity : ComponentActivity() {
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
-                    "settings" -> {
+                    "settings" -> settingsPageState.SaveableStateProvider("settings-home") {
                         var defaultReasoningResult by remember { mutableStateOf(runCatching { reasoningPreference.snapshot(null) }) }
                         Column(Modifier.fillMaxSize()) {
                         if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "保留会话网关",
                             modifier = Modifier.testTag("open-session-gateway"), onClick = { guard { openSessionGateway() } })
                         Box(Modifier.weight(1f)) { DaiyuSettingsScreen(
+                        scrollBehavior = settingsScrollBehavior,
                         diagnostics = controller.diagnostics,
                         engineeringUi = engineeringUi,
                         onBack = { returnToChat() }, onRoute = { route -> openSettingsFromPage(route) },

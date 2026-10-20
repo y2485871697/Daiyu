@@ -1,6 +1,8 @@
 package app.daiyu.android
 
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.AnnotatedString
 import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 import app.daiyu.android.domain.*
 import java.util.concurrent.TimeUnit
@@ -164,7 +166,11 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         }
         setDraft("分页跳转前草稿")
         openMessages()
-        node("search:query").performTextReplacement("分页UI命中")
+        node("search:query")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString("分页UI命中")))
+            }
+            .assertEditableText("分页UI命中")
         dismissIme(activity.window.decorView)
         ui.waitUntil(5_000) {
             ui.onAllNodesWithText(activity.getString(R.string.search_message_count, 200)).fetchSemanticsNodes().isNotEmpty()

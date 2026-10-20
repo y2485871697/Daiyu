@@ -96,7 +96,7 @@ internal fun ParsedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, m
 
 @Composable
 private fun messageBodyStyle(): TextStyle = MiuixTheme.textStyles.body1.copy(
-    color = conversationColors().text, fontSize = 11.sp, lineHeight = 20.9.sp,
+    color = conversationColors().text, fontSize = 16.sp, lineHeight = 26.sp,
 )
 
 @Composable
@@ -135,11 +135,11 @@ private fun MarkdownBlocks(blocks: List<MarkdownBlock>, openLink: (String) -> Un
             is MarkdownBlock.Code -> Column(Modifier.fillMaxWidth()
                 .background(conversationColors().soft, RoundedCornerShape(8.dp)).padding(9.dp)) {
                 if (block.language.isNotBlank()) BasicText(block.language,
-                    style = messageBodyStyle().copy(fontSize = 8.sp, lineHeight = 13.sp,
+                    style = messageBodyStyle().copy(fontSize = 11.sp, lineHeight = 16.sp,
                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary))
                 // Soft-wrap very long lines instead of imposing an unbounded chat width.
                 BasicText(block.text, style = messageBodyStyle().copy(fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp, lineHeight = 17.sp))
+                    fontSize = 14.sp, lineHeight = 22.sp))
             }
             is MarkdownBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
                 Box(Modifier.width(3.dp).fillMaxHeight().background(MiuixTheme.colorScheme.primary.copy(alpha = 0.5f)))
@@ -216,7 +216,7 @@ private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit
     }
 }
 
-private fun headingSize(level: Int): Int = when (level) { 1 -> 19; 2 -> 17; 3 -> 15; 4 -> 13; else -> 12 }
+private fun headingSize(level: Int): Int = when (level) { 1 -> 24; 2 -> 22; 3 -> 20; 4 -> 18; else -> 17 }
 
 /** Compatibility entry point also used to verify the Android span -> Compose range bridge. */
 internal fun annotateMessageMarkdown(
@@ -240,7 +240,7 @@ private fun annotateMarkdownSpans(
                 fontStyle = if (span.style and Typeface.ITALIC != 0) FontStyle.Italic else null,
             ), start, end)
             is TypefaceSpan -> if (span.family == "monospace") {
-                addStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 10.sp,
+                addStyle(SpanStyle(fontFamily = FontFamily.Monospace, fontSize = 14.sp,
                     background = linkColor.copy(alpha = 0.07f)), start, end)
             }
             is StrikethroughSpan -> addStyle(SpanStyle(textDecoration = TextDecoration.LineThrough), start, end)

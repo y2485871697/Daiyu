@@ -275,13 +275,13 @@ internal fun AssistantTurn(
         // The turn carries a role, not a profile name or avatar. Never invent an identity.
         Row(Modifier.padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            Box(Modifier.size(23.dp).background(conversationColors().surface, CircleShape),
+            Box(Modifier.size(26.dp).background(conversationColors().surface, CircleShape),
                 contentAlignment = Alignment.Center) {
                 Text("助", color = conversationColors().accent,
-                    style = MiuixTheme.textStyles.body2.copy(fontSize = 11.sp, lineHeight = 16.sp))
+                    style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp))
             }
             Text("助手", color = conversationColors().text,
-                style = MiuixTheme.textStyles.body2.copy(fontSize = 10.sp, lineHeight = 15.sp))
+                style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp))
         }
         ReportedReasoningCard(turn.listKey, turn.reportedReasoning)
         if (turn.content.isNotEmpty()) {
@@ -294,7 +294,7 @@ internal fun AssistantTurn(
         }
         if (!turn.error.isNullOrBlank()) {
             Text(turn.error, color = conversationColors().error,
-                style = MiuixTheme.textStyles.body2.copy(fontSize = 11.sp, lineHeight = 19.8.sp),
+                style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 22.sp),
                 maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
         if (turn.status != RunStatus.RUNNING) {
@@ -316,7 +316,7 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreen
         ParsedMessageMarkdown(turn.finalText, projection?.blocks?.get(turn.finalText))
     } else if (turn.status == RunStatus.RUNNING && turn.workProcess == null) {
         Text("正在思考…", color = conversationColors().muted,
-            style = MiuixTheme.textStyles.body2.copy(fontSize = 10.sp, lineHeight = 18.sp))
+            style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 22.sp))
     }
 }
 
@@ -324,6 +324,6 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, actions: ChatScreen
 internal fun UserMessageText(text: String, modifier: Modifier = Modifier) {
     SelectionContainer {
         Text(text, modifier, color = conversationColors().text,
-            style = MiuixTheme.textStyles.body1.copy(fontSize = 11.sp, lineHeight = 18.7.sp))
+            style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 26.sp))
     }
 }

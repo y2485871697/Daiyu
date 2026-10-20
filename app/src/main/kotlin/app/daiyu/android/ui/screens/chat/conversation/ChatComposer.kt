@@ -117,7 +117,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                     Modifier.size(18.dp))
                 Text(if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}",
                     modifier = Modifier,
-                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 15.sp), color = chrome.accent,
+                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 18.sp), color = chrome.accent,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
@@ -165,12 +165,12 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         enabled = state.enabled,
                         modifier = Modifier.testTag("chat-draft").fillMaxWidth().heightIn(min = 53.dp, max = 176.dp)
                             .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 7.dp),
-                        maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = chrome.text, fontSize = 14.sp, lineHeight = 20.sp),
+                        maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = chrome.text, fontSize = 16.sp, lineHeight = 24.sp),
                         cursorBrush = SolidColor(colors.primary),
                         decorationBox = { inner ->
                             Box {
                                 if (references.text.isEmpty()) Text("给代鱼发消息", color = chrome.muted,
-                                    style = MiuixTheme.textStyles.body1.copy(fontSize = 14.sp, lineHeight = 20.sp))
+                                    style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 24.sp))
                                 inner()
                             }
                         },
@@ -197,7 +197,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             app.daiyu.android.balance.ui.ProviderBalanceIndicator(
                                 state = balanceState, modifier = Modifier.testTag("chat-provider-balance")
                                     .widthIn(max = 60.dp), animateChanges = true,
-                                textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 11.sp, lineHeight = 30.sp))
+                                textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 30.sp))
                             ChatIconButton(primaryIcon, primaryLabel, {
                                 if (!textAction) actions.onPrimaryTap()
                                 else if (state.phase == ComposerPhase.IDLE) actions.onSend(state.text)
@@ -256,7 +256,7 @@ internal fun ComposerChip(icon: ImageVector, label: String, enabled: Boolean, on
             onClick = onClick, onLongClick = onLongClick),
         horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, Modifier.size(13.dp), tint = if (enabled) modelColor else contentColor)
-        Text(label, Modifier.weight(1f, fill = false), style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 17.sp),
+        Text(label, Modifier.weight(1f, fill = false), style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp),
             color = contentColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Icon(ChatPreviewIcons.Chevron, null, Modifier.size(12.dp), tint = if (enabled) chrome.muted else contentColor)
     }

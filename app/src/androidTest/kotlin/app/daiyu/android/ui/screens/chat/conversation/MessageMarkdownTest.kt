@@ -1,6 +1,8 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.unit.dp
@@ -301,7 +303,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
     fun testStructuredBlocksAndTableUseSelectableStyledTextAndExplicitLinks() {
         val code = "| a | b |\n| --- | --- |\n| [fake](https://code.test) | **literal** |\n"
         show {
-            Column(Modifier.width(300.dp).testTag("structured")) {
+            Column(Modifier.width(300.dp).verticalScroll(rememberScrollState()).testTag("structured")) {
                 MessageMarkdown("## Heading\n\n> quote **bold**\n\n- [x] done\n- pending\n\n" +
                     "| Name | Value |\n| :--- | ---: |\n| ~~old~~ | [**site**](https://example.test) |\n\n" +
                     "~~~md\n${code}~~~\n\n<div>raw</div> [x](javascript:alert)")
@@ -311,8 +313,8 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         val heading = ui.onNodeWithText("Heading", useUnmergedTree = true)
         val layouts = mutableListOf<TextLayoutResult>()
         heading.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
-        assertEquals(17.sp, layouts.single().layoutInput.style.fontSize)
-        assertEquals(25.sp, layouts.single().layoutInput.style.lineHeight)
+        assertEquals(22.sp, layouts.single().layoutInput.style.fontSize)
+        assertEquals(30.sp, layouts.single().layoutInput.style.lineHeight)
         assertEquals(FontWeight.Bold, layouts.single().layoutInput.style.fontWeight)
         val quote = annotation(ui.onNodeWithText("quote bold", useUnmergedTree = true))
         assertEquals(6, quote.spanStyles.single { it.item.fontWeight == FontWeight.Bold }.start)
@@ -330,6 +332,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         val unsafeText = annotation(ui.onNodeWithText(unsafe, useUnmergedTree = true))
         assertTrue(unsafeText.getLinkAnnotations(0, unsafeText.length).isEmpty())
         assertTrue("rendering must not open links", opened.isEmpty())
+        site.performScrollTo()
         clickCharacter(site, 0)
         assertEquals(listOf("https://example.test"), opened.toList())
     }

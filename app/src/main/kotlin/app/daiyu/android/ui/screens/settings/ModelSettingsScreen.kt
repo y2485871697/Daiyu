@@ -106,13 +106,13 @@ internal fun ModelSettingsScreen(
     pageTitle: String = "模型设置",
     headerContent: LazyListScope.() -> Unit = {},
     showCatalog: Boolean = true,
+    providerName: String? = null,
 ) {
     val latestDraft by rememberUpdatedState(draft)
     val latestEnabled by rememberUpdatedState(enabled)
     val connection = rememberSettingsConnectionTest(draft, enabled, testConnection)
     val submit: () -> Unit = { if (latestEnabled && latestDraft === draft && draft.headerFieldsValid && draft.bodyFieldsValid) { connection.cancel(); onSave(draft) } }
     val changeDraft: (ModelSettingsDraftUi) -> Unit = { if (latestEnabled && latestDraft === draft) { connection.cancel(); onDraftChange(it) } }
-    var responsesPathPicker by remember { mutableStateOf(false) }
     val catalogIsCurrent = catalogForDraft?.let {
         it.endpoint == draft.endpoint && it.responsesPath == draft.responsesPath &&
             it.protocol == draft.protocol && it.apiKey == draft.apiKey && it.model == draft.model &&
@@ -121,61 +121,44 @@ internal fun ModelSettingsScreen(
     } == true
     MiuixScaffoldPage(title = pageTitle, onBack = { connection.cancel(); onBack() }, modifier = modifier) {
         headerContent()
-        item(key = "model_protocol") {
-            SettingsSectionTitle("服务协议")
+        item(key = "model_connection") {
+            SettingsSectionTitle("连接配置")
             SettingsCard {
-                SettingsRadioRow("OpenAI Responses", draft.protocol == ProviderProtocol.RESPONSES, enabled = enabled) {
-                    changeDraft(draft.selectProtocol(ProviderProtocol.RESPONSES))
-                }
-                SettingsRadioRow("Anthropic Messages", draft.protocol == ProviderProtocol.MESSAGES, enabled = enabled) {
-                    changeDraft(draft.selectProtocol(ProviderProtocol.MESSAGES))
-                }
-                SettingsRadioRow("OpenAI Chat Completions", draft.protocol == ProviderProtocol.CHAT_COMPLETIONS, enabled = enabled) {
-                    changeDraft(draft.selectProtocol(ProviderProtocol.CHAT_COMPLETIONS))
-                }
-                SettingsRadioRow("Google Gemini", draft.protocol == ProviderProtocol.GEMINI, enabled = enabled) {
-                    changeDraft(draft.selectProtocol(ProviderProtocol.GEMINI))
-                }
+                if (providerName != null) SettingsRow("名称", summary = providerName, tag = "provider-name")
+                SettingsTextField("Base URL", draft.endpoint, { changeDraft(draft.copy(endpoint = it)) }, enabled = enabled, compact = true)
+                SettingsTextField("API Key", draft.apiKey, { changeDraft(draft.copy(apiKey = it)) }, password = true, enabled = enabled, compact = true)
+                ProviderProtocolFields(draft, enabled, changeDraft)
                 if (draft.protocol != draft.savedProtocol) {
                     SettingsSwitchRow("重输密钥并绑定", draft.protocolChangeAuthorized, enabled = enabled) {
                         changeDraft(draft.copy(protocolChangeAuthorized = it))
                     }
                 }
-            }
-            if (credentialUnavailable) SettingsNote("密钥失效，请重输", error = true)
-            if (draft.savedProtocol == ProviderProtocol.UNKNOWN) SettingsNote("协议无效，请重选", error = true)
-        }
-        item(key = "model_connection") {
-            SettingsSectionTitle("连接与模型")
-            SettingsCard {
-                SettingsTextField("Base URL", draft.endpoint, { changeDraft(draft.copy(endpoint = it)) }, enabled = enabled)
+                if (credentialUnavailable) SettingsNote("密钥失效，请重输", error = true)
+                if (draft.savedProtocol == ProviderProtocol.UNKNOWN) SettingsNote("协议无效，请重选", error = true)
                 if (draft.protocol == ProviderProtocol.RESPONSES) {
-                    val responsePaths = listOf("/v1/responses", "/responses")
-                    SettingsRow(
-                        title = "Responses 路径",
-                        summary = draft.responsesPath.ifBlank { "/v1/responses" },
-                        tag = "responses-path-select",
-                        onClick = if (enabled) ({ responsesPathPicker = true }) else null,
-                    )
-                    if (responsesPathPicker) DaiyuChoiceSheet(
-                        title = "Responses 路径",
-                        options = responsePaths,
-                        onSelect = { index ->
-                            changeDraft(draft.copy(responsesPath = responsePaths[index]))
-                            responsesPathPicker = false
-                        },
-                        onDismiss = { responsesPathPicker = false },
-                        engineeringUi = engineeringUi,
-                    )
+                    ProviderChoiceRow("Responses 路径", draft.responsesPath.ifBlank { "/v1/responses" },
+                        "responses-path-select", enabled, listOf("/v1/responses", "/responses"),
+                        listOf("prompt-choice:0", "prompt-choice:1"),
+                        listOf("/v1/responses", "/responses").indexOf(draft.responsesPath.ifBlank { "/v1/responses" })) { index ->
+                        changeDraft(draft.copy(responsesPath = if (index == 0) "/v1/responses" else "/responses"))
+                    }
                 }
                 if (draft.protocol == ProviderProtocol.MESSAGES) {
                     SettingsTextField("Anthropic 版本", draft.anthropicVersion,
                         { changeDraft(draft.copy(anthropicVersion = it)) },
-                        hint = "留空使用 2023-06-01；格式 YYYY-MM-DD", enabled = enabled)
+                        hint = "留空使用 2023-06-01；格式 YYYY-MM-DD", enabled = enabled, compact = true)
                 }
-                SettingsTextField("模型名", draft.model, { changeDraft(draft.copy(model = it)) }, enabled = enabled)
-                SettingsTextField("API Key", draft.apiKey, { changeDraft(draft.copy(apiKey = it)) }, password = true, enabled = enabled)
-
+                SettingsSwitchRow("Provider 托管网页搜索", draft.openAiWebSearchEnabled,
+                    summary = "允许模型使用供应商提供的网页搜索",
+                    enabled = enabled && draft.protocol == ProviderProtocol.RESPONSES) {
+                    changeDraft(draft.copy(openAiWebSearchEnabled = it))
+                }
+                if (testConnection != null) {
+                    TextButton(text = if (connection.running) "正在测试连接" else "测试连接",
+                        enabled = enabled && !connection.running, onClick = connection.start,
+                        modifier = Modifier.testTag("model-connection-test").fillMaxWidth().padding(12.dp))
+                    connection.status?.let { SettingsNote(it) }
+                }
                 if (requestOptionsUnavailable) {
                     SettingsNote("原请求策略不可用；替换需要明确确认", error = true)
                     SettingsSwitchRow("授权替换策略", draft.requestOptionsReplacementAuthorized, enabled = enabled) {
@@ -190,21 +173,10 @@ internal fun ModelSettingsScreen(
                 }
             }
         }
-        item(key = "model_advanced") {
+        item(key = "model_current") {
+            SettingsSectionTitle("当前模型")
             SettingsCard {
-                SettingsSwitchRow("Provider 托管网页搜索", draft.openAiWebSearchEnabled,
-                    summary = "允许模型调用 Provider 提供的网页搜索",
-                    enabled = enabled && draft.protocol == ProviderProtocol.RESPONSES) {
-                    changeDraft(draft.copy(openAiWebSearchEnabled = it))
-                }
-            }
-        }
-        if (testConnection != null) item(key = "model_connection_test") {
-            SettingsCard {
-                TextButton(text = if (connection.running) "正在测试连接" else "测试连接",
-                    enabled = enabled && !connection.running, onClick = connection.start,
-                    modifier = Modifier.testTag("model-connection-test").fillMaxWidth().padding(12.dp))
-                connection.status?.let { SettingsNote(it) }
+                SettingsTextField("模型名", draft.model, { changeDraft(draft.copy(model = it)) }, enabled = enabled, compact = true)
             }
         }
         item(key = "provider_gateway") {

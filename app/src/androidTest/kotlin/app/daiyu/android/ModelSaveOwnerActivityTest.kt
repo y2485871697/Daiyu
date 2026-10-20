@@ -114,7 +114,7 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
             controlMain { save(); assertTrue(fixture.controller.dataBusy) }
             controlMain { activity.onBackPressedDispatcher.onBackPressed() }
             awaitUniqueTag("provider-management")
-            node("page:模型设置").assertDoesNotExist()
+            node("page:主模型服务商").assertDoesNotExist()
             controlMain { assertTrue(fixture.controller.dataBusy); release() }
             awaitControl("departed save drained") { !fixture.controller.dataBusy }
         }
@@ -134,7 +134,7 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
         awaitControl("stale save rejected") { !fixture.controller.dataBusy }
         assertEquals(changed, fixture.settings.load())
         awaitUniqueTag("provider-management")
-        node("page:模型设置").assertDoesNotExist()
+        node("page:主模型服务商").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
 }

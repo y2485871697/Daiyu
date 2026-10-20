@@ -30,4 +30,20 @@
   <string name="assistant_done">Done</string>
   <string name="assistant_count">%1$d assistants</string>
   <string name="assistant_list_hint">Tap to switch · Hold to manage</string>
+  <string name="assistant_editor_title">Edit assistant</string>
+  <string name="assistant_editor_name">Assistant name</string>
+  <string name="assistant_description">Short introduction</string>
+  <string name="assistant_description_placeholder">What this assistant is good at</string>
+  <string name="assistant_system_prompt">System prompt</string>
+  <string name="assistant_save_changes">Save changes</string>
+  <string name="assistant_skills_caption">Enable skills for this assistant</string>
+  <string name="assistant_independent_switches">Independent toggles</string>
+  <string name="assistant_memory_caption">Keep preferences and context for this assistant</string>
+  <string name="assistant_memory_content">Memory content</string>
+  <string name="assistant_memory_placeholder">For example: use concise answers and lead with the conclusion.</string>
+  <string name="assistant_enable">Enable</string>
+  <string name="assistant_enabled">Enabled</string>
+  <string name="assistant_disabled">Disabled</string>
+  <string name="assistant_actions_title">Assistant actions</string>
+  <string name="assistant_back_to_list">Back to assistant list</string>
 </resources>

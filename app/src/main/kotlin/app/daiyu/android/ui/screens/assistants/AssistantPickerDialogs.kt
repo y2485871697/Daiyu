@@ -226,15 +226,15 @@ internal fun AssistantProfileCard(
 @Composable
 internal fun AssistantActionsDialog(profile: AssistantProfile, assets: AssistantAssets, canDelete: Boolean, onCopy: () -> Unit,
     onEdit: () -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit) {
-    AssistantPreviewDialog(show = true, title = "助手操作", onDismiss = onDismiss, onBack = onDismiss,
-        footer = { AssistantPreviewButton("返回助手列表", onDismiss, Modifier.weight(1f)) }) {
+    AssistantPreviewDialog(show = true, title = stringResource(R.string.assistant_actions_title), onDismiss = onDismiss, onBack = onDismiss,
+        footer = { AssistantPreviewButton(stringResource(R.string.assistant_back_to_list), onDismiss, Modifier.weight(1f)) }) {
         AssistantDialogIdentity(profile, assets)
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            AssistantPreviewButton(stringResource(R.string.ui_copy_assistant), onCopy, Modifier.fillMaxWidth(),
+            AssistantPreviewButton(stringResource(R.string.ui_copy_assistant), onCopy, Modifier.fillMaxWidth().testTag("assistant-action-copy"),
                 icon = AssistantPreviewIcons.Copy, actionRow = true)
-            AssistantPreviewButton(stringResource(R.string.ui_edit_assistant), onEdit, Modifier.fillMaxWidth(),
+            AssistantPreviewButton(stringResource(R.string.ui_edit_assistant), onEdit, Modifier.fillMaxWidth().testTag("assistant-action-edit"),
                 icon = AssistantPreviewIcons.Edit, actionRow = true)
-            AssistantPreviewButton(stringResource(R.string.ui_delete_assistant), onDelete, Modifier.fillMaxWidth(),
+            AssistantPreviewButton(stringResource(R.string.ui_delete_assistant), onDelete, Modifier.fillMaxWidth().testTag("assistant-action-delete"),
                 danger = true, enabled = canDelete, icon = AssistantPreviewIcons.Delete, actionRow = true)
         }
     }
@@ -250,7 +250,8 @@ internal fun AssistantDeleteDialog(profile: AssistantProfile, assets: AssistantA
         }) {
         AssistantDialogIdentity(profile, assets)
         Text(stringResource(R.string.assistant_delete_body, profile.name), color = assistantPreviewPalette().text,
-            fontSize = (11f * s).sp, lineHeight = (19.8f * s).sp, modifier = Modifier.verticalScroll(rememberScrollState()))
+            fontSize = (11f * s).sp, lineHeight = (19.8f * s).sp, modifier = Modifier.padding(start = 2.dp * s, end = 2.dp * s, top = 3.dp * s, bottom = 10.dp * s)
+                .verticalScroll(rememberScrollState()))
     }
 }
 

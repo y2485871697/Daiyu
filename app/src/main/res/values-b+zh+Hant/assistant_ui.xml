@@ -30,4 +30,20 @@
   <string name="assistant_done">完成</string>
   <string name="assistant_count">%1$d 位助手</string>
   <string name="assistant_list_hint">點擊切換 · 長按管理</string>
+  <string name="assistant_editor_title">編輯助手</string>
+  <string name="assistant_editor_name">助手名稱</string>
+  <string name="assistant_description">一句話介紹</string>
+  <string name="assistant_description_placeholder">這個助手擅長什麼</string>
+  <string name="assistant_system_prompt">系統提示詞</string>
+  <string name="assistant_save_changes">儲存修改</string>
+  <string name="assistant_skills_caption">開啟此助手需要的技能</string>
+  <string name="assistant_independent_switches">獨立開關</string>
+  <string name="assistant_memory_caption">為這個助手保留偏好與背景</string>
+  <string name="assistant_memory_content">記憶內容</string>
+  <string name="assistant_memory_placeholder">例如：預設使用繁體中文，回答先給結論。</string>
+  <string name="assistant_enable">啟用</string>
+  <string name="assistant_enabled">已啟用</string>
+  <string name="assistant_disabled">已關閉</string>
+  <string name="assistant_actions_title">助手操作</string>
+  <string name="assistant_back_to_list">返回助手列表</string>
 </resources>

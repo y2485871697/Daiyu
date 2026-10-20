@@ -1,5 +1,15 @@
 package app.daiyu.android.ui.screens.settings
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.ui.unit.dp
@@ -49,6 +59,9 @@ internal fun <T> LocalCatalogModelsScreen(
     onBack: () -> Unit,
     pageTitle: String = "本地模型",
     headerContent: LazyListScope.() -> Unit = {},
+    managementEndpoint: String? = null,
+    fetchingModels: Boolean = false,
+    onFetchModels: (() -> Unit)? = null,
 ) {
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val scope = rememberCoroutineScope()
@@ -153,7 +166,7 @@ internal fun <T> LocalCatalogModelsScreen(
     val back = { if (current()) { visit.set(false); cancel(); onBack() } }
     BackHandler { back() }
     val addVisit = adding
-    if (addVisit != null) CatalogModelEditorDialog(CatalogModelEdit("", ""), isNew = true,
+    if (addVisit != null) CatalogModelEditorDialog(CatalogModelEdit("", "自定义模型"), isNew = true,
         enabled = enabled && request == null, errorText = notice,
         onSave = { if (adding === addVisit) saveForm(it, null) }, onDismiss = { if (request == null && adding === addVisit) adding = null })
     editing?.let { selection ->
@@ -182,14 +195,18 @@ internal fun <T> LocalCatalogModelsScreen(
     MiuixScaffoldPage(pageTitle, onBack = back) {
         headerContent()
         item("catalog-state") {
-            if (actions.add != null) SettingsCard {
+            val add = if (actions.add != null && enabled && request == null && loaded && snapshot != null)
+                ({ notice = null; adding = Any() }) else null
+            if (managementEndpoint != null) ProviderModelManagementCard(managementEndpoint, fetchingModels, onFetchModels, add)
+            else if (actions.add != null) SettingsCard {
                 SettingsRow("添加自定义模型", summary = "手动填写展示名称与 Model ID", tag = "local-model-add",
-                    onClick = if (enabled && request == null && loaded && snapshot != null) ({ notice = null; adding = Any() }) else null)
+                    leading = { DaiyuIcon(DaiyuIcons.Add, null) }, onClick = add)
             }
-            SettingsTextField("搜索模型", query, { query = it }, tag = "local-model-search")
-            TextButton("刷新", enabled = request == null, onClick = { notice = null; reload() }, modifier = Modifier.testTag("local-model-refresh"))
+            SettingsSearch(query, { query = it }, "搜索模型", "local-model-search")
             notice?.let { SettingsNote(it) }
             if (!loaded) SettingsNote("正在读取本地模型")
+            if (loaded && snapshot == null) TextButton("重试", enabled = request == null,
+                onClick = { notice = null; reload() }, modifier = Modifier.testTag("local-model-refresh"))
             SettingsSectionTitle("模型列表（共 ${snapshot?.models?.size ?: 0} 个）")
             if (loaded && snapshot?.models.isNullOrEmpty()) SettingsNote("还没有模型，请从远端拉取或添加自定义模型")
         }
@@ -198,18 +215,33 @@ internal fun <T> LocalCatalogModelsScreen(
                 val selection = snapshot?.selectionFor(model.id)
                 SettingsCard {
                     val form = actions.form?.invoke(model)
-                    val details = listOfNotNull(model.id, form?.let { if (it.contextWindow.isBlank()) "上下文：自动（未知）" else "${it.contextWindow} 上下文（手动）" },
-                        form?.let { "推理：" + when (it.reasoning) { true -> "支持（手动）"; false -> "不支持（手动）"; null -> "自动（未知）" } },
-                        form?.let { "视觉：" + when (it.vision) { true -> "支持（手动）"; false -> "不支持（手动）"; null -> "自动（未知）" } },
-                        if (model.id == actions.currentModelId) "当前" else null).joinToString(" · ")
-                    SettingsRow(model.displayName, summary = details, tag = "local-model:${model.id}",
-                        onClick = if (enabled && request == null && actions.select != null) ({ choose(selection) }) else null,
-                        trailing = {
-                            if (model.id == actions.currentModelId) DaiyuIcon(DaiyuIcons.Check, "当前模型")
-                            TextButton("设置", enabled = enabled && request == null,
-                                modifier = Modifier.testTag("local-model-rename:${model.id}"),
-                                onClick = { if (current() && currentEnabled && selection != null && matches(selection)) { notice = null; editing = selection } })
-                        })
+                    val selected = model.id == actions.currentModelId
+                    Column {
+                        SettingsRow(model.displayName, summary = model.id, tag = "local-model:${model.id}",
+                            onClick = if (enabled && request == null && actions.select != null) ({ choose(selection) }) else null,
+                            trailing = {
+                                if (selected) DaiyuIcon(DaiyuIcons.Check, "当前模型")
+                                Box(Modifier.size(40.dp).testTag("local-model-rename:${model.id}")
+                                    .clickable(enabled = enabled && request == null) {
+                                        if (current() && currentEnabled && selection != null && matches(selection)) {
+                                            notice = null; editing = selection
+                                        }
+                                    }, contentAlignment = Alignment.Center) { DaiyuIcon(Icons.Rounded.Tune, "模型设置") }
+                            })
+                        FlowRow(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            val context = form?.contextWindow?.toIntOrNull()
+                            val labels = listOfNotNull(
+                                if (context == null) "上下文未知" else if (context % 1000 == 0) "${context / 1000}K 上下文" else "$context 上下文",
+                                "支持推理".takeIf { form?.reasoning == true }, "支持视觉".takeIf { form?.vision == true },
+                                "当前".takeIf { selected })
+                            labels.forEach { label ->
+                                Text(label, style = MiuixTheme.textStyles.body2,
+                                    modifier = Modifier.clip(RoundedCornerShape(6.dp))
+                                        .background(MiuixTheme.colorScheme.surfaceVariant).padding(horizontal = 7.dp, vertical = 2.dp))
+                            }
+                        }
+                    }
                 }
             }
         }

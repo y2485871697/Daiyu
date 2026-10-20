@@ -29,6 +29,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  * savedProtocol stays fixed for the editing session (copy() preserves it).
  */
 internal data class ModelSettingsDraftUi(
+    val providerName: String? = null,
     val protocol: ProviderProtocol = ProviderProtocol.RESPONSES,
     val endpoint: String = "",
     val responsesPath: String = "",
@@ -124,7 +125,8 @@ internal fun ModelSettingsScreen(
         item(key = "model_connection") {
             SettingsSectionTitle("连接配置")
             SettingsCard {
-                if (providerName != null) SettingsRow("名称", summary = providerName, tag = "provider-name")
+                if (providerName != null) SettingsTextField("名称", draft.providerName ?: providerName,
+                    { changeDraft(draft.copy(providerName = it)) }, enabled = enabled, compact = true, tag = "provider-name")
                 SettingsTextField("Base URL", draft.endpoint, { changeDraft(draft.copy(endpoint = it)) }, enabled = enabled, compact = true)
                 SettingsTextField("API Key", draft.apiKey, { key ->
                     changeDraft(draft.copy(apiKey = key,
@@ -133,7 +135,7 @@ internal fun ModelSettingsScreen(
                 ProviderProtocolFields(draft, enabled, changeDraft)
                 if (credentialUnavailable) SettingsNote("密钥失效，请重输", error = true)
                 if (draft.savedProtocol == ProviderProtocol.UNKNOWN) SettingsNote("协议无效，请重选", error = true)
-                if (draft.protocol == ProviderProtocol.RESPONSES) {
+                if (providerName == null && draft.protocol == ProviderProtocol.RESPONSES) {
                     ProviderChoiceRow("Responses 路径", draft.responsesPath.ifBlank { "/v1/responses" },
                         "responses-path-select", enabled, listOf("/v1/responses", "/responses"),
                         listOf("prompt-choice:0", "prompt-choice:1"),
@@ -171,7 +173,7 @@ internal fun ModelSettingsScreen(
                 }
             }
         }
-        item(key = "model_current") {
+        if (providerName == null) item(key = "model_current") {
             SettingsSectionTitle("当前模型")
             SettingsCard {
                 SettingsTextField("模型名", draft.model, { changeDraft(draft.copy(model = it)) }, enabled = enabled, compact = true)

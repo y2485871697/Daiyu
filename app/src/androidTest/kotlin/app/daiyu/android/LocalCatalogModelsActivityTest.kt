@@ -23,7 +23,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
     }
     private fun openLocalModelTab() {
         selectProviderTab("模型")
-        awaitUniqueTag("local-model-refresh")
+        awaitUniqueTag("local-model-add")
         ui.waitUntil(5_000) { ui.onAllNodesWithText("正在读取本地模型").fetchSemanticsNodes().isEmpty() }
         reveal("local-model:extra-local").assertExists()
     }
@@ -37,6 +37,35 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         openModels()
         openLocalModelTab()
     }
+    fun testCustomModelDialogMatchesFieldsAndSavesOnlyAnExplicitValidModel() {
+        openLocalModels()
+        val saved = fixture.settings.load()
+        val before = fixture.settings.localModelCatalogSnapshot()!!
+        reveal("local-model-add").performClick()
+        ui.onNodeWithText("添加模型").assertExists()
+        node("settings-field:展示名称").assertEditableText("自定义模型")
+        node("dialog-confirm").assertIsNotEnabled()
+        node("settings-field:Model ID").performTextReplacement("custom-model")
+        node("settings-field:上下文窗口（tokens）").performTextReplacement("8192")
+        node("catalog-model-editor").performScrollToNode(hasTestTag("settings-switch:支持推理"))
+        node("settings-switch:支持推理").performClick()
+        assertEquals(before, fixture.settings.localModelCatalogSnapshot())
+        node("dialog-confirm").assertIsEnabled().performClick()
+        awaitControl("custom record saved") {
+            fixture.settings.localModelCatalogSnapshot()!!.models.any { it.id == "custom-model" }
+        }
+        val record = fixture.settings.localModelCatalogSnapshot()!!.models.single { it.id == "custom-model" }
+        assertEquals("自定义模型", record.displayName)
+        assertEquals(8192, record.settings.contextWindowOverride)
+        assertEquals(true, record.settings.reasoningOverride)
+        assertNull(record.settings.visionOverride)
+        assertEquals(saved, fixture.settings.load())
+        assertEquals(0, fixture.opens.get())
+        reveal("local-model-add").performClick()
+        node("settings-field:Model ID").performTextReplacement("cancelled-model")
+        node("dialog-cancel").performClick()
+        assertFalse(fixture.settings.localModelCatalogSnapshot()!!.models.any { it.id == "cancelled-model" })
+    }
     fun testProductionEntryRenamesAndDeletesOnlyTheNonCurrentCatalogRecord() {
         setDraft("local model edits remain unsent")
         val saved = fixture.settings.load(); val before = fixture.database.exportBackup()
@@ -46,16 +75,14 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         reveal("local-model-rename:${saved.model}").performClick()
         node("catalog-model-editor").performScrollToNode(hasTestTag("local-model-delete:${saved.model}"))
         node("local-model-delete:${saved.model}").assertIsNotEnabled()
-        node("catalog-model-editor").performScrollToNode(hasTestTag("dialog-cancel"))
         node("dialog-cancel").performClick()
         reveal("local-model-rename:extra-local").performClick()
         node("settings-field:展示名称").performTextReplacement("Renamed local model")
-        node("catalog-model-editor").performScrollToNode(hasTestTag("dialog-confirm"))
         node("dialog-confirm").performClick()
         awaitControl("local rename completed") { !fixture.controller.dataBusy }
-        reveal("local-model-refresh")
+        reveal("local-model-add")
         ui.waitUntil(5_000) {
-            ui.onAllNodes(hasTestTag("local-model-refresh") and isEnabled()).fetchSemanticsNodes().size == 1
+            ui.onAllNodes(hasTestTag("local-model-add") and isEnabled()).fetchSemanticsNodes().size == 1
         }
         reveal("local-model:extra-local").assertTextContains("Renamed local model")
         val renamed = checkNotNull(fixture.settings.localModelCatalogSnapshot())
@@ -70,7 +97,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         assertEquals(listOf(current), checkNotNull(fixture.settings.localModelCatalogSnapshot()).models)
         assertEquals(saved, fixture.settings.load()); assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
-        backToPage(activity, "page:提供商")
+        backToPage(activity, "page:模型提供商")
         node("page:主模型服务商").assertDoesNotExist()
         backToPage(activity, "page:设置")
         backToChat(activity)
@@ -82,7 +109,6 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         reveal("local-model-rename:extra-local").performClick()
         for (value in listOf(" ", "x".repeat(201))) {
             node("settings-field:展示名称").performTextReplacement(value)
-            node("catalog-model-editor").performScrollToNode(hasTestTag("dialog-confirm"))
             node("dialog-confirm").assertIsNotEnabled()
             node("catalog-model-editor").performScrollToNode(hasTestTag("settings-field:展示名称"))
             node("settings-field:展示名称").assertExists()

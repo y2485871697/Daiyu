@@ -50,6 +50,10 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
         "ModelSettings(protocol=${protocol.wireName}, endpoint=$endpoint, model=$model, apiKey=<redacted>, batteryEnabled=$batteryEnabled, " +
             "responsesPath=$responsesPath, deviceStatusEnabled=$deviceStatusEnabled, requestOptions=$requestOptions)"
     fun validate() {
+        validateConnection()
+        require(model.isNotBlank()) { "请先在模型页选择模型" }
+    }
+    fun validateConnection() {
         val resolvedEndpoint = requestEndpoint()
         requestOptions.validate(protocol)
         require(contextWindowOverride == null || contextWindowOverride > 0) { "上下文窗口必须为正整数" }
@@ -58,7 +62,7 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
             require(!body.has("model") || body.opt("model") == model) { "自定义请求体 model 与能力声明所选模型冲突" }
         }
         if (requestOptions.openAiWebSearchEnabled) app.daiyu.android.model.ResponsesSearchProtocol.requireEndpoint(resolvedEndpoint)
-        require(model.isNotBlank() && model.length<=200 && apiKey.isNotBlank() && apiKey.length<=8192) {"请填写模型和密钥"}
+        require(model.length<=200 && apiKey.isNotBlank() && apiKey.length<=8192) {"请填写有效密钥"}
         require(!apiKey.contains('\n') && !apiKey.contains('\r')) {"密钥含非法换行"}
     }
 }
@@ -99,9 +103,9 @@ class ModelSettingsStore internal constructor(
             val editing = synchronized(lock) { editingWithoutCredential(includeHeadersState = false) }
             check(!editing.requestOptionsUnavailable) { "请求策略已损坏；请先明确修复再导入模型" }
             val current = editing.settings
-            check(current.endpoint.isNotBlank() && current.model.isNotBlank()) { "请先保存服务商配置" }
+            check(current.endpoint.isNotBlank()) { "请先保存服务商配置" }
             check(current.protocol != ProviderProtocol.UNKNOWN) { "请先修复模型协议" }
-            listOf(CatalogModelParameters.fromCurrent(current))
+            if (current.model.isBlank()) emptyList() else listOf(CatalogModelParameters.fromCurrent(current))
         }
         }
     /** Read-only, network/credential-free. Does not resurrect a deleted provider or migrate defaults. */
@@ -351,8 +355,8 @@ class ModelSettingsStore internal constructor(
             save(CatalogModelParameters().applyTo(expected, model))
         }
     } }
-    fun save(settings:ModelSettings, protocolChangeAuthorized: Boolean = false, requestOptionsReplacementAuthorized: Boolean = false, headersReplacementAuthorized: Boolean = false):Unit=modelCatalog.configurationChange { synchronized(lock) {
-        settings.validate()
+    fun save(settings:ModelSettings, protocolChangeAuthorized: Boolean = false, requestOptionsReplacementAuthorized: Boolean = false, headersReplacementAuthorized: Boolean = false, allowUnselectedModel: Boolean = false):Unit=modelCatalog.configurationChange { synchronized(lock) {
+        if (allowUnselectedModel) settings.validateConnection() else settings.validate()
         val previousEditing = loadForEditing()
         val previousConnection = previousEditing.settings
         val connectionChanged = previousEditing.credentialUnavailable ||
@@ -411,16 +415,16 @@ class ModelSettingsStore internal constructor(
             // Still under catalog -> settings locks. A catalog failure compensates preferences below.
             // A connection/key change starts a fresh identity, even if wire model IDs happen to match.
             if (connectionChanged) {
-                modelCatalog.replaceRegisteredProvider(listOf(CatalogModelParameters.fromCurrent(settings)))
+                modelCatalog.replaceRegisteredProvider(if (settings.model.isBlank()) emptyList() else listOf(CatalogModelParameters.fromCurrent(settings)))
                 catalogReplaced = true
                 check(preferences.edit().remove(CATALOG_PENDING).commit()) { "提供商目录保存未确认" }
             } else {
-                if (previousConnection.model != settings.model && !previousEditing.requestOptionsUnavailable) {
+                if (previousConnection.model.isNotBlank() && previousConnection.model != settings.model && !previousEditing.requestOptionsUnavailable) {
                     modelCatalog.updateRegisteredModel(previousConnection.model) {
                         CatalogModelParameters.updated(previousConnection, it)
                     }
                 }
-                modelCatalog.updateRegisteredModel(settings.model) { CatalogModelParameters.updated(settings, it) }
+                if (settings.model.isNotBlank()) modelCatalog.updateRegisteredModel(settings.model) { CatalogModelParameters.updated(settings, it) }
             }
         } catch (_:Exception) {
             if (catalogReplaced) {

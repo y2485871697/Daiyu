@@ -157,20 +157,20 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         val bar = node("chat-top-bar").fetchSemanticsNode().boundsInRoot
         val density = bar.width / 320f
         val title = layout("测试会话")
-        assertEquals(12.sp, title.layoutInput.style.fontSize)
+        assertEquals(16.sp, title.layoutInput.style.fontSize)
         assertEquals(FontWeight(650), title.layoutInput.style.fontWeight)
         assertEquals(.9f, title.layoutInput.density.fontScale, .001f)
-        assertEquals(8.sp, layout("代码助手 · gpt-6.1-sol").layoutInput.style.fontSize)
+        assertEquals(11.sp, layout("代码助手 · gpt-6.1-sol").layoutInput.style.fontSize)
         val drawer = button("打开侧边栏").fetchSemanticsNode().boundsInRoot
         val more = button("更多").fetchSemanticsNode().boundsInRoot
         val agents = button("本会话协作").fetchSemanticsNode().boundsInRoot
         val titleBounds = node("chat-title").fetchSemanticsNode().boundsInRoot
-        assertEquals(14f, (drawer.left - bar.left) / density, 1f)
-        assertEquals(42f, (titleBounds.left - bar.left) / density, 1f)
-        assertEquals(14f, (bar.right - more.right) / density, 1f)
-        assertEquals(28f, more.width / density, .5f)
-        assertEquals(11f, (more.left - agents.right) / density, .5f)
-        assertEquals(46.9f, bar.height / density, 1.5f)
+        assertEquals(12f, (drawer.left - bar.left) / density, 1f)
+        assertEquals(60f, (titleBounds.left - bar.left) / density, 1f)
+        assertEquals(12f, (bar.right - more.right) / density, 1f)
+        assertEquals(40f, more.width / density, .5f)
+        assertEquals(8f, (more.left - agents.right) / density, .5f)
+        assertEquals(64f, bar.height / density, 1.5f)
     }
 
     fun testComposerKeepsPreviewBoxModelWithoutDoubleScalingText() {
@@ -195,7 +195,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             assertEquals(11f, (surface.bottom - bottom.bottom) / density, .75f)
             assertEquals(28f, send.width / density, .75f)
             assertEquals(13f, (surface.right - send.right) / density, .75f)
-            assertEquals(47f, node("chat-draft").fetchSemanticsNode().boundsInRoot.height / density, .75f)
+            assertEquals(27f, node("chat-draft").fetchSemanticsNode().boundsInRoot.height / density, .75f)
             node("chat-send").assertIsNotEnabled()
             val modelText = layout(state.modelLabel)
             assertEquals(10.sp, modelText.layoutInput.style.fontSize)

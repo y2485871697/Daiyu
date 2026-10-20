@@ -258,7 +258,7 @@ class ActivityLifecycleTest : ComposeActivityTestCase() {
     }
     fun testDestroyedModelSettingsSaveCannotWriteAfterFrameworkRecreation() {
         val current = start(); openModels()
-        editModel("Base URL", "https://fixture.invalid"); editModel("模型名", "fixture-model")
+        editModel("Base URL", "https://fixture.invalid")
         editModel("API Key", "synthetic-lifecycle-key"); reveal("model-save")
         val save = retainedClick(checkNotNull(activity), "model-save")
         val before = HashMap(fixture.getSharedPreferences("model-settings", 0).all)

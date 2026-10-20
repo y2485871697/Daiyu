@@ -26,6 +26,15 @@ internal class ProviderRepository(
         check(old.providers.none { it.slotId == id })
         old.copy(providers = old.providers + RegisteredProvider(id, name, false))
     }
+    fun registerConfigured(expectedRevision: Long, name: String, value: ModelSettings,
+        protocolChangeAuthorized: Boolean, admit: () -> Unit,
+    ) = registry.change(expectedRevision) { old ->
+        admit(); ProviderRegistry.requireValidName(name); value.validateConnection()
+        val id = UUID.randomUUID().toString()
+        check(old.providers.none { it.slotId == id })
+        resolveStore(id).save(value, protocolChangeAuthorized, allowUnselectedModel = true)
+        old.copy(providers = old.providers + RegisteredProvider(id, name, false))
+    }
     fun rename(expectedRevision: Long, slotId: String, name: String, admit: () -> Unit = {}) = registry.change(expectedRevision) { old ->
         admit(); requireProvider(old, slotId); ProviderRegistry.requireValidName(name)
         old.copy(providers = old.providers.map { if (it.slotId == slotId) it.copy(name = name) else it })
@@ -60,12 +69,19 @@ internal class ProviderRepository(
     }
     fun editing(editor: ProviderEditorSlot): EditingSettings = withEditor(editor) { it.loadForEditing() }
     fun save(editor: ProviderEditorSlot, value: ModelSettings, expected: EditingSettings?,
-        protocolChangeAuthorized: Boolean, requestOptionsReplacementAuthorized: Boolean, headersReplacementAuthorized: Boolean = false, admit: () -> Unit = {},
-    ): Unit = withEditor(editor) { store ->
+        protocolChangeAuthorized: Boolean, requestOptionsReplacementAuthorized: Boolean, headersReplacementAuthorized: Boolean = false, providerName: String? = null, admit: () -> Unit = {},
+    ): Unit = registry.access { state ->
+        if (!matches(state, editor)) throw StaleProviderRegistryException()
+        providerName?.let { ProviderRegistry.requireValidName(it) }
+        val store = resolveStore(editor.slotId)
         store.modelCatalog.readConfiguration {
             admit()
             if (expected != null) check(store.loadForEditing() == expected) { "模型配置已变化，请重新打开设置" }
-            store.save(value, protocolChangeAuthorized, requestOptionsReplacementAuthorized, headersReplacementAuthorized)
+            store.save(value, protocolChangeAuthorized, requestOptionsReplacementAuthorized, headersReplacementAuthorized,
+                allowUnselectedModel = true)
+            if (providerName != null && requireProvider(state, editor.slotId).name != providerName) {
+                rename(state.revision, editor.slotId, providerName)
+            }
         }
     }
     fun catalogSnapshot(editor: ProviderEditorSlot): SavedModelCatalogSnapshot<CatalogModelParameters> =

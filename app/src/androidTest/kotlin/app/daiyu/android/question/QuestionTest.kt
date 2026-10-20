@@ -177,6 +177,15 @@ class QuestionTest : InstrumentationTestCase() {
     private fun views(view: View): List<View> = listOf(view) + if (view is ViewGroup) (0 until view.childCount).flatMap { views(view.getChildAt(it)) } else emptyList()
     private fun window(host: QuestionHost): AlertDialog? = QuestionHost::class.java.getDeclaredField("dialog").apply { isAccessible = true }.get(host) as? AlertDialog
 
+    private fun finishQuestionActivity(host: QuestionHost, activity: MainActivity) {
+        instrumentation.runOnMainSync { host.detach(); activity.finish() }
+        val deadline = android.os.SystemClock.uptimeMillis() + 5000
+        while (!activity.isDestroyed && android.os.SystemClock.uptimeMillis() < deadline) {
+            instrumentation.waitForIdleSync()
+            Thread.sleep(20)
+        }
+        assertTrue("Question Activity must be destroyed before another host binds", activity.isDestroyed)
+    }
     fun testNativeDialogRequiresSelectionDetachRetainsQuestionAndTranscript() {
         val context = context(); val registry = QuestionRegistry(context); val host = QuestionHost(registry)
         val activity = instrumentation.startActivitySync(Intent(instrumentation.targetContext, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
@@ -208,7 +217,7 @@ class QuestionTest : InstrumentationTestCase() {
             assertEquals(QuestionAnswer.Selected("a"), registry.records().single().answer)
             assertTrue(summaries.any { it.contains("等待用户回答") }); assertTrue(summaries.any { it.contains("已选择：A") })
         } finally {
-            instrumentation.runOnMainSync { host.detach(); activity.finish() }
+            finishQuestionActivity(host, activity)
             registry.close(); context.deleteDatabase("questions.db")
         }
     }
@@ -272,7 +281,7 @@ class QuestionTest : InstrumentationTestCase() {
             }
             assertNull(store.get(id.storageKey)!!.answer)
             assertEquals(0, store.answerAttempts)
-        } finally { instrumentation.runOnMainSync { host.detach(); activity.finish() }; registry.close() }
+        } finally { finishQuestionActivity(host, activity); registry.close() }
     }
 
     fun testWriteFailureKeepsWindowSelectionAndAllowsExplicitRetry() {
@@ -305,7 +314,7 @@ class QuestionTest : InstrumentationTestCase() {
                 assertEquals(2, store.answerAttempts); assertFalse(dialog.isShowing)
             }
             instrumentation.waitForIdleSync()
-        } finally { instrumentation.runOnMainSync { host.detach(); activity.finish() }; registry.close() }
+        } finally { finishQuestionActivity(host, activity); registry.close() }
     }
 
     fun testCommittedAnswerReadOrTranscriptFailureDoesNotOfferResubmit() {
@@ -343,7 +352,7 @@ class QuestionTest : InstrumentationTestCase() {
                 instrumentation.waitForIdleSync()
                 instrumentation.runOnMainSync { assertNull(window(host)) }
                 assertEquals(QuestionAnswer.Selected("a"), registry.records().single().answer)
-            } finally { instrumentation.runOnMainSync { host.detach(); activity.finish() }; registry.close() }
+            } finally { finishQuestionActivity(host, activity); registry.close() }
         }
     }
 }

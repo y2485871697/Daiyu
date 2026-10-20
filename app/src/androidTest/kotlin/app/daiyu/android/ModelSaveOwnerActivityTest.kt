@@ -46,7 +46,7 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
     }
     fun testPausedQueuedSaveIsRejectedAndOnlyAnExplicitResumedSaveCanPersist() {
         val saved = fixture.settings.load(); setDraft("paused model save draft")
-        openModels(); editModel("模型名", "resumed-explicit-model")
+        openModels(); editModel("API Key", "resumed-explicit-model")
         reveal("model-save").assertIsDisplayed().assertIsEnabled()
         val save = retainedClick(activity, "model-save")
         withHeldCatalog { release ->
@@ -59,16 +59,16 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
         }
         assertEquals(saved, fixture.settings.load())
         awaitModelEditor()
-        modelField("模型名").assertEditableText("resumed-explicit-model")
+        modelField("API Key").assertEditableText("resumed-explicit-model")
         reveal("model-save").performClick()
         awaitControl("explicit save completed") { !fixture.controller.dataBusy }
         awaitUniqueTag("chat-draft"); assertDraft("paused model save draft")
-        assertEquals(saved.copy(model = "resumed-explicit-model"), fixture.settings.load())
+        assertEquals(saved.copy(apiKey = "resumed-explicit-model"), fixture.settings.load())
         assertEquals(0, fixture.opens.get())
     }
     fun testRepeatedPauseWhileQueuedSaveDrainsRetainsDraftWithoutReauthorizingOldSave() {
         val saved = fixture.settings.load()
-        openModels(); editModel("模型名", "twice-paused-model")
+        openModels(); editModel("API Key", "twice-paused-model")
         reveal("model-save").assertIsDisplayed().assertIsEnabled()
         val save = retainedClick(activity, "model-save")
         withHeldCatalog { release ->
@@ -82,16 +82,16 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
         }
         assertEquals(saved, fixture.settings.load())
         awaitModelEditor()
-        modelField("模型名").assertEditableText("twice-paused-model")
+        modelField("API Key").assertEditableText("twice-paused-model")
         reveal("model-save").performClick()
         awaitControl("explicit save after two pauses") { !fixture.controller.dataBusy }
         awaitUniqueTag("chat-draft")
-        assertEquals(saved.copy(model = "twice-paused-model"), fixture.settings.load())
+        assertEquals(saved.copy(apiKey = "twice-paused-model"), fixture.settings.load())
         assertEquals(0, fixture.opens.get())
     }
     fun testPauseDuringRestoreReadKeepsDraftForNextResumedEditor() {
         val saved = fixture.settings.load()
-        openModels(); editModel("模型名", "restore-read-paused-model")
+        openModels(); editModel("API Key", "restore-read-paused-model")
         withHeldCatalog { release ->
             realPauseResume(activity)
             ui.waitUntil(5_000) {
@@ -102,12 +102,12 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
         }
         assertEquals(saved, fixture.settings.load())
         awaitModelEditor()
-        modelField("模型名").assertEditableText("restore-read-paused-model")
+        modelField("API Key").assertEditableText("restore-read-paused-model")
         assertEquals(0, fixture.opens.get())
     }
     fun testLeavingPageRevokesAQueuedSaveWithoutChangingTheStoredConnection() {
         val saved = fixture.settings.load(); setDraft("departing model save draft")
-        openModels(); editModel("模型名", "must-not-be-written")
+        openModels(); editModel("API Key", "must-not-be-written")
         reveal("model-save").assertIsDisplayed().assertIsEnabled()
         val save = retainedClick(activity, "model-save")
         withHeldCatalog { release ->
@@ -126,10 +126,10 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
     }
     fun testAStaleModelEditorCannotOverwriteAChangedStoredConfiguration() {
         val original = fixture.settings.load(); openModels()
-        modelField("模型名").assertEditableText(original.model)
+        modelField("API Key").assertEditableText(original.apiKey)
         val changed = original.copy(model = "concurrent-saved-model")
         fixture.settings.save(changed)
-        editModel("模型名", "stale-editor-model")
+        editModel("API Key", "stale-editor-model")
         reveal("model-save").performClick()
         awaitControl("stale save rejected") { !fixture.controller.dataBusy }
         assertEquals(changed, fixture.settings.load())

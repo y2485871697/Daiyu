@@ -137,6 +137,7 @@ fun AssistantEditScreen(
     val close = { session.close(); onBack() }
     BackHandler(onBack = close)
     AssistantPreviewDialog(show = true, title = stringResource(R.string.assistant_editor_title), onDismiss = close, onBack = close,
+        showCloseButton = false,
         footer = {
             AssistantPreviewButton(stringResource(R.string.action_cancel), close, Modifier.weight(1f).testTag("assistant-edit-cancel"))
             AssistantPreviewButton(stringResource(R.string.assistant_save_changes), ::save,

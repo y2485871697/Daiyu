@@ -117,6 +117,8 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             show(scale, dark)
             ui.onNodeWithTag("assistant-item-visual-a").performTouchInput { longClick() }
+            ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
+            ui.onNodeWithContentDescription("返回").assertHasClickAction()
             val copy = bounds("assistant-action-copy")
             val edit = bounds("assistant-action-edit")
             val delete = bounds("assistant-action-delete")

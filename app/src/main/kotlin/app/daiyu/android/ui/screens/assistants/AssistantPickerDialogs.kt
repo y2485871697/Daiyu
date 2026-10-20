@@ -67,22 +67,25 @@ fun AssistantPickerDialog(
     onCopy: (String) -> Unit,
     onDelete: (String) -> Unit,
     assets: AssistantAssets,
+    editing: Boolean = false,
 ) {
     var searchFocused by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
-    var actionProfile by remember { mutableStateOf<AssistantProfile?>(null) }
+    var actionProfileId by remember { mutableStateOf<String?>(null) }
     var deleteProfile by remember { mutableStateOf<AssistantProfile?>(null) }
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
     LaunchedEffect(show) {
-        if (!show) { searchQuery = ""; actionProfile = null; deleteProfile = null }
+        if (!show) { searchQuery = ""; actionProfileId = null; deleteProfile = null }
     }
+    if (!show || editing) return
     val filtered = remember(assistants, searchQuery) {
         val query = searchQuery.trim()
         assistants.filter { query.isBlank() || it.name.contains(query, ignoreCase = true) }
     }
+    val actionProfile = assistants.firstOrNull { it.id == actionProfileId }
     // Management is a view within the same glass sheet, not a stack of stock dialogs.
-    AssistantPreviewDialog(show = show && actionProfile == null && deleteProfile == null,
+    AssistantPreviewDialog(show = actionProfile == null && deleteProfile == null,
         title = stringResource(R.string.assistant_picker_title), onDismiss = onDismiss,
         showCloseButton = false,
         footer = {
@@ -124,7 +127,7 @@ fun AssistantPickerDialog(
             verticalArrangement = Arrangement.spacedBy(5.dp * s)) {
             items(filtered, key = { it.id }) { profile ->
                 AssistantProfileCard(profile, profile.id == selectedId,
-                    onClick = { onSelect(profile.id); onDismiss() }, onLongClick = { actionProfile = profile }, assets = assets,
+                    onClick = { onSelect(profile.id); onDismiss() }, onLongClick = { actionProfileId = profile.id }, assets = assets,
                     modifier = Modifier.testTag("assistant-item-${profile.id}"))
             }
             if (filtered.isEmpty()) item {
@@ -136,9 +139,9 @@ fun AssistantPickerDialog(
     }
     actionProfile?.let { profile ->
         AssistantActionsDialog(profile, assets = assets, canDelete = assistants.size > 1,
-            onCopy = { actionProfile = null; onCopy(profile.id) },
-            onEdit = { actionProfile = null; onEdit(profile.id); onDismiss() },
-            onDelete = { actionProfile = null; deleteProfile = profile }, onDismiss = { actionProfile = null })
+            onCopy = { actionProfileId = null; onCopy(profile.id) },
+            onEdit = { onEdit(profile.id) },
+            onDelete = { actionProfileId = null; deleteProfile = profile }, onDismiss = { actionProfileId = null })
     }
     deleteProfile?.let { profile ->
         AssistantDeleteDialog(profile, assets = assets, canDelete = assistants.size > 1, onDismiss = { deleteProfile = null },
@@ -158,6 +161,7 @@ fun AssistantPickerDialog(
     selectedId: String? = null,
     useGlobalSelection: Boolean = true,
     canMutate: () -> Boolean = { true },
+    editing: Boolean = false,
 ) {
     val profiles by store.assistants.collectAsState()
     val active by store.selectedId.collectAsState()
@@ -183,7 +187,7 @@ fun AssistantPickerDialog(
             store.delete(id)
             assets.deleteMemory(id)
             assets.deleteAvatar(avatar)
-        } }, assets = assets)
+        } }, assets = assets, editing = editing)
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -227,6 +231,7 @@ internal fun AssistantProfileCard(
 internal fun AssistantActionsDialog(profile: AssistantProfile, assets: AssistantAssets, canDelete: Boolean, onCopy: () -> Unit,
     onEdit: () -> Unit, onDelete: () -> Unit, onDismiss: () -> Unit) {
     AssistantPreviewDialog(show = true, title = stringResource(R.string.assistant_actions_title), onDismiss = onDismiss, onBack = onDismiss,
+        showCloseButton = false,
         footer = { AssistantPreviewButton(stringResource(R.string.assistant_back_to_list), onDismiss, Modifier.weight(1f)) }) {
         AssistantDialogIdentity(profile, assets)
         Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {

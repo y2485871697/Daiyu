@@ -43,6 +43,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
@@ -63,6 +65,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val colors = MiuixTheme.colorScheme
     val appearance = chatActionColors()
     val chrome = chatChromeColors()
+    val dark = colors.background.luminance() < .3f
+    val dividerColor = if (dark) Color(0xFFC8B5EB).copy(alpha = .12f) else Color(0xFF9280B5).copy(alpha = .14f)
     val currentEditorGeneration by rememberUpdatedState(state.editorGeneration)
     val currentDraft by rememberUpdatedState(state.text)
     var composingSource by remember(state.editorGeneration) { mutableStateOf<Pair<String, TextRange>?>(null) }
@@ -98,7 +102,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     }
     Column(modifier.fillMaxWidth().padding(start = 9.dp, end = 9.dp, top = 10.dp, bottom = 12.dp)) {
         ChatComposerSurface(backdrop) {
-        Row(Modifier.fillMaxWidth().padding(start = 13.dp, end = 13.dp, top = 11.dp, bottom = 4.dp),
+        // Include the transparent 1dp CSS border in the composer box model.
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             ComposerChip(DaiyuIcons.Model, state.modelLabel.ifBlank { "模型" }, state.enabled, actions.onModelClick,
                 Modifier.weight(1f).testTag("chat-model"),
@@ -107,19 +112,19 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                 .border(1.dp, chrome.line, RoundedCornerShape(12.dp))
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = state.enabled, role = Role.Button, onClickLabel = "上下文统计", onClick = actions.onContextClick,
                     onLongClick = { actions.onMenuAction(ChatMenuAction.CONTEXT_SCOPE) })
-                .padding(start = 6.dp, end = 6.dp, top = 3.dp, bottom = 3.dp),
+                .padding(1.dp).padding(start = 6.dp, end = 6.dp, top = 3.dp, bottom = 3.dp),
                 horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
                 val fraction = state.contextFraction?.takeIf { it.isFinite() }?.coerceIn(0f, 1f)
                 ChatContextMark(fraction, if (state.enabled) chrome.accent else colors.disabledOnSurface,
                     Modifier.size(15.dp))
                 Text(if (fraction == null) state.contextLabel else "${(fraction * 100).toInt()}% ${state.contextLabel}",
                     modifier = Modifier,
-                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 9.sp), color = chrome.accent,
+                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 9.sp, lineHeight = 13.sp), color = chrome.accent,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
                 Box(Modifier.fillMaxWidth().padding(horizontal = 13.dp).height(1.dp)
-                    .background(chrome.line))
+                    .testTag("chat-composer-divider").background(dividerColor))
                 ComposerReferenceChips(references.references, state.enabled) { reference ->
                     if (state.editorGeneration == currentEditorGeneration && references.source == currentDraft) {
                         val next = references.remove(reference)
@@ -161,8 +166,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         },
                         enabled = state.enabled,
                         modifier = Modifier.testTag("chat-draft").fillMaxWidth().heightIn(min = 47.dp, max = 160.dp)
-                            .padding(start = 13.dp, end = 13.dp, top = 13.dp, bottom = 7.dp),
-                        maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = colors.onSurface, fontSize = 12.sp, lineHeight = 18.sp),
+                            .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 7.dp),
+                        maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = chrome.text, fontSize = 12.sp, lineHeight = 18.sp),
                         cursorBrush = SolidColor(colors.primary),
                         decorationBox = { inner ->
                             Box {
@@ -173,7 +178,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         },
                     )
                 }
-                Box(Modifier.fillMaxWidth().padding(start = 13.dp, end = 13.dp, bottom = 10.dp).height(30.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.fillMaxWidth().padding(start = 13.dp, end = 13.dp, bottom = 11.dp).height(30.dp).testTag("chat-composer-bottom"), contentAlignment = Alignment.Center) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -190,10 +195,10 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             }
                         }
                         key(state.controlOwnerKey) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                             app.daiyu.android.balance.ui.ProviderBalanceIndicator(
                                 state = balanceState, modifier = Modifier.testTag("chat-provider-balance")
-                                    .widthIn(max = 60.dp).padding(horizontal = 2.dp), animateChanges = true,
+                                    .widthIn(max = 60.dp), animateChanges = true,
                                 textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 28.sp))
                             ChatIconButton(primaryIcon, primaryLabel, {
                                 if (!textAction) actions.onPrimaryTap()
@@ -201,8 +206,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 else actions.onSupplement(state.text)
                             }, Modifier.size(28.dp).testTag(if (textAction || state.phase == ComposerPhase.IDLE) "chat-send" else "chat-control")
                                 .controlGesture(actions, primaryEnabled),
-                                containerColor = if (!primaryEnabled) colors.disabledPrimaryButton
-                                    else if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer,
+                                containerColor = (if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
+                                    .copy(alpha = if (primaryEnabled) 1f else .4f),
                                 enabled = primaryEnabled, containerSize = 20.dp,
                                 tint = if (textAction && state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
                                 iconSize = if (state.phase == ComposerPhase.RUNNING || state.phase == ComposerPhase.PAUSED && !hasText) 10.dp else 12.dp,
@@ -245,14 +250,16 @@ private fun Modifier.controlGesture(actions: ChatScreenActions, enabled: Boolean
 @Composable
 internal fun ComposerChip(icon: ImageVector, label: String, enabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier, onLongClick: (() -> Unit)? = null) {
     val colors = MiuixTheme.colorScheme
-    val contentColor = if (enabled) colors.onSurfaceVariantSummary else colors.disabledOnSurface
+    val chrome = chatChromeColors()
+    val contentColor = if (enabled) chrome.toolbar else colors.disabledOnSurface
+    val modelColor = if (colors.background.luminance() < .3f) Color(0xFFA491F1) else Color(0xFF9384D2)
     Row(modifier.clip(RoundedCornerShape(12.dp))
         .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, enabled = enabled, role = Role.Button, onClickLabel = "选择模型",
-            onClick = onClick, onLongClick = onLongClick).padding(horizontal = 0.dp, vertical = 3.dp),
+            onClick = onClick, onLongClick = onLongClick),
         horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
-        Icon(icon, null, Modifier.size(11.dp), tint = contentColor)
-        Text(label, Modifier.weight(1f, fill = false), style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp),
+        Icon(icon, null, Modifier.size(11.dp), tint = if (enabled) modelColor else contentColor)
+        Text(label, Modifier.weight(1f, fill = false), style = MiuixTheme.textStyles.footnote1.copy(fontSize = 10.sp, lineHeight = 14.5.sp),
             color = contentColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Icon(ChatPreviewIcons.Chevron, null, Modifier.size(10.dp), tint = contentColor)
+        Icon(ChatPreviewIcons.Chevron, null, Modifier.size(10.dp), tint = if (enabled) chrome.muted else contentColor)
     }
 }

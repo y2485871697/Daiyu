@@ -23,7 +23,6 @@ internal object SettingsCatalog {
         SettingsGroup("llm", "LLM 提供商", "服务商连接与默认推理", listOf(
             SettingsEntry("providers", "模型提供商", DaiyuIcons.Provider, SettingControl.PAGE, FeatureRoute.MODEL_SETTINGS),
             SettingsEntry("balance", "供应商余额", DaiyuIcons.Balance, SettingControl.PAGE, FeatureRoute.BALANCE_SETTINGS),
-            SettingsEntry("default_reasoning", "默认启用推理", DaiyuIcons.Reasoning, SettingControl.TOGGLE),
         )),
         SettingsGroup("models", "模型功能", "压缩、视觉、子代理与标题模型", listOf(
             SettingsEntry("compression", "上下文压缩", DaiyuIcons.Compress, SettingControl.PAGE, FeatureRoute.COMPRESSION_SETTINGS),
@@ -79,7 +78,6 @@ internal object SettingsCatalog {
     )
     private val hiddenEntryIds = setOf(
         "balance", "generation", "platform_tools", "browser", "overlay", "enhancements", "accessibility",
-        "default_reasoning",
     )
 
     // Retain underlying routes; remove only product entry points.

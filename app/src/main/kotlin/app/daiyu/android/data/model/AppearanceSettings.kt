@@ -7,6 +7,7 @@ const val DEFAULT_INTERFACE_SCALE = 1f
 
 data class AppearanceSettings(
     val themeMode: AppearanceThemeMode = AppearanceThemeMode.LIGHT,
+    // Retained preference data; the current theme does not apply these three color options.
     val monetEnabled: Boolean = false,
     val paletteStyle: AppearancePaletteStyle = AppearancePaletteStyle.NEUTRAL,
     val accentColor: AppearanceAccentColor = AppearanceAccentColor.SYSTEM,

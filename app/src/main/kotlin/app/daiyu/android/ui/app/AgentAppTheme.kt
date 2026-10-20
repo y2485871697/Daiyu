@@ -16,16 +16,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Density
 import app.daiyu.android.ui.components.PreviewBackdropHost
 import app.daiyu.android.ui.components.WithoutPressRipple
-import app.daiyu.android.data.model.AppearanceAccentColor
-import app.daiyu.android.data.model.AppearancePaletteStyle
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
-import top.yukonga.miuix.kmp.theme.ColorSchemeMode
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.theme.ThemeColorSpec
-import top.yukonga.miuix.kmp.theme.ThemeController
-import top.yukonga.miuix.kmp.theme.ThemePaletteStyle
-import top.yukonga.miuix.kmp.theme.platformDynamicColors
 
 @Composable
 fun AgentAppTheme(
@@ -40,33 +33,7 @@ fun AgentAppTheme(
         AppearanceThemeMode.LIGHT -> false
         AppearanceThemeMode.DARK -> true
     }
-    val colorSchemeMode = when (appearance.themeMode) {
-        AppearanceThemeMode.LIGHT -> if (appearance.monetEnabled) ColorSchemeMode.MonetLight else ColorSchemeMode.Light
-        AppearanceThemeMode.DARK -> if (appearance.monetEnabled) ColorSchemeMode.MonetDark else ColorSchemeMode.Dark
-        AppearanceThemeMode.SYSTEM -> if (appearance.monetEnabled) ColorSchemeMode.MonetSystem else ColorSchemeMode.System
-    }
-    val keyColor = if (appearance.accentColor == AppearanceAccentColor.SYSTEM) {
-        platformDynamicColors(isDark).primary
-    } else {
-        appearance.accentColor.seedColor()
-    }
-    val controller = remember(
-        colorSchemeMode,
-        keyColor.value,
-        appearance.paletteStyle,
-        isDark,
-    ) {
-        ThemeController(
-            colorSchemeMode = colorSchemeMode,
-            lightColors = DaiyuPalette.light,
-            darkColors = DaiyuPalette.dark,
-            keyColor = keyColor,
-            colorSpec = ThemeColorSpec.Spec2025,
-            paletteStyle = appearance.paletteStyle.toMiuixPaletteStyle(),
-            isDark = isDark,
-        )
-    }
-    val colors = controller.currentColors()
+    val colors = if (isDark) DaiyuPalette.dark else DaiyuPalette.light
     val themedColors = remember(colors, isDark, appearance.pureBlackEnabled) {
         if (appearance.pureBlackEnabled && isDark) {
             colors.copy(
@@ -175,27 +142,4 @@ fun AgentAppTheme(
             }
         }
     }
-}
-
-private fun AppearancePaletteStyle.toMiuixPaletteStyle(): ThemePaletteStyle = when (this) {
-    AppearancePaletteStyle.TONAL_SPOT -> ThemePaletteStyle.TonalSpot
-    AppearancePaletteStyle.NEUTRAL -> ThemePaletteStyle.Neutral
-    AppearancePaletteStyle.VIBRANT -> ThemePaletteStyle.Vibrant
-    AppearancePaletteStyle.EXPRESSIVE -> ThemePaletteStyle.Expressive
-    AppearancePaletteStyle.RAINBOW -> ThemePaletteStyle.Rainbow
-    AppearancePaletteStyle.FRUIT_SALAD -> ThemePaletteStyle.FruitSalad
-    AppearancePaletteStyle.MONOCHROME -> ThemePaletteStyle.Monochrome
-    AppearancePaletteStyle.FIDELITY -> ThemePaletteStyle.Fidelity
-    AppearancePaletteStyle.CONTENT -> ThemePaletteStyle.Content
-}
-
-private fun AppearanceAccentColor.seedColor(): Color = when (this) {
-    AppearanceAccentColor.SYSTEM, AppearanceAccentColor.BLUE -> Color(0xFF3482FF)
-    AppearanceAccentColor.PURPLE -> Color(0xFF6750A4)
-    AppearanceAccentColor.PINK -> Color(0xFFB0006D)
-    AppearanceAccentColor.RED -> Color(0xFFBA1A1A)
-    AppearanceAccentColor.ORANGE -> Color(0xFFB65D00)
-    AppearanceAccentColor.YELLOW -> Color(0xFF7D5700)
-    AppearanceAccentColor.GREEN -> Color(0xFF006D3B)
-    AppearanceAccentColor.TEAL -> Color(0xFF006A6A)
 }

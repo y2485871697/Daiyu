@@ -1699,7 +1699,6 @@ class MainActivity : ComponentActivity() {
                         modifier = Modifier.fillMaxSize(),
                     )
                     "settings" -> settingsPageState.SaveableStateProvider("settings-home") {
-                        var defaultReasoningResult by remember { mutableStateOf(runCatching { reasoningPreference.snapshot(null) }) }
                         Column(Modifier.fillMaxSize()) {
                         if (engineeringUi) top.yukonga.miuix.kmp.basic.TextButton(text = "保留会话网关",
                             modifier = Modifier.testTag("open-session-gateway"), onClick = { guard { openSessionGateway() } })
@@ -1716,18 +1715,6 @@ class MainActivity : ComponentActivity() {
                         },
                         onOpenVoice = {
                             if (activityUsable() && retainedPage == "settings") retainedPage = "voice-settings"
-                        },
-                        defaultReasoning = defaultReasoningResult.getOrDefault(ReasoningEffort.DEFAULT),
-                        defaultReasoningError = if (defaultReasoningResult.isFailure) "默认推理未确认；请重新选择并保存" else null,
-                        onDefaultReasoningChange = { effort ->
-                            if (activityUsable() && voiceForeground && retainedPage == "settings") {
-                                defaultReasoningResult = runCatching {
-                                    reasoningPreference.set(null, effort)
-                                    reasoningPreference.snapshot(null)
-                                }
-                                if (defaultReasoningResult.isSuccess) publishChat()
-                                else toast("默认推理保存未确认；请重新保存")
-                            }
                         },
                         onOpenPlatformTools = {
                             if (activityUsable() && retainedPage == "settings") retainedPage = "platform-settings"

@@ -14,7 +14,8 @@ class AppearanceSettingsPersistenceTest : android.test.AndroidTestCase() {
             assertFalse(store.load().morphLoadingBeforeResponseOnly)
             val saved = store.save(store.load().copy(morphLoadingIndicator = false,
                 morphLoadingBeforeResponseOnly = true, messageTimestampsEnabled = true,
-                themeMode = AppearanceThemeMode.DARK, paletteStyle = AppearancePaletteStyle.EXPRESSIVE))
+                themeMode = AppearanceThemeMode.DARK, monetEnabled = true,
+                paletteStyle = AppearancePaletteStyle.EXPRESSIVE, accentColor = AppearanceAccentColor.RED))
             assertEquals(saved, AppearanceSettingsStore(preferences).load())
             val updated = store.save(saved.copy(morphLoadingIndicator = true))
             assertTrue(updated.morphLoadingBeforeResponseOnly)

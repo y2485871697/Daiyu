@@ -36,27 +36,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.shape.AbsoluteRoundedCornerShape
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.HealthAndSafety
-import androidx.compose.material.icons.rounded.CreateNewFolder
-import androidx.compose.material.icons.rounded.Folder
-import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.automirrored.rounded.Chat
-import androidx.compose.material.icons.rounded.BarChart
-import androidx.compose.material.icons.rounded.Delete
-import androidx.compose.material.icons.rounded.Download
-import androidx.compose.material.icons.rounded.Edit
-import androidx.compose.material.icons.rounded.Extension
-import androidx.compose.material.icons.rounded.Memory
-import androidx.compose.material.icons.outlined.PushPin
-import androidx.compose.material.icons.rounded.PushPin
-import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material3.DrawerState
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ModalNavigationDrawer
@@ -84,6 +69,11 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.dropShadow
+import androidx.compose.ui.graphics.shadow.Shadow
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawOutline
 import androidx.compose.ui.draw.blur
 import top.yukonga.miuix.kmp.blur.LayerBackdrop
 import top.yukonga.miuix.kmp.blur.BlurColors
@@ -105,6 +95,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -116,20 +107,16 @@ import app.daiyu.android.ui.model.ConversationFolderUi
 import app.daiyu.android.ui.model.searchResults
 import app.daiyu.android.ui.model.ConversationPaneUiState
 import app.daiyu.android.ui.haptics.TouchHaptics
-import app.daiyu.android.ui.icons.daiyuIconColor
 import app.daiyu.android.ui.model.ConversationSummaryUi
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.ui.unit.DpOffset
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Surface
 import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextField
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
-import top.yukonga.miuix.kmp.window.WindowDialog
 
 private val DrawerMenuItemModifier = Modifier.height(40.dp)
 private val DrawerMenuItemPadding = PaddingValues(horizontal = 12.dp)
@@ -144,17 +131,14 @@ private object DrawerMetrics {
     val AfterSearch @Composable get() = 12.dp * conversationPanePreviewScale()
     val SearchIconSize @Composable get() = 18.dp * conversationPanePreviewScale()
     val SearchCornerRadius @Composable get() = 13.dp * conversationPanePreviewScale()
-    val SearchVerticalPadding @Composable get() = 10.dp * conversationPanePreviewScale()
     val ChipGap @Composable get() = 6.dp * conversationPanePreviewScale()
     val AfterChips @Composable get() = 12.dp * conversationPanePreviewScale()
     val ListBottomPadding @Composable get() = 8.dp * conversationPanePreviewScale()
     val BottomInset @Composable get() = 14.dp * conversationPanePreviewScale()
     val ActionIconSize @Composable get() = 20.dp * conversationPanePreviewScale()
-    val CircleButtonPadding @Composable get() = 10.dp * conversationPanePreviewScale()
     val SectionTopPadding @Composable get() = 12.dp * conversationPanePreviewScale()
     val SectionBottomPadding @Composable get() = 6.dp * conversationPanePreviewScale()
     val RowMinHeight @Composable get() = 44.dp * conversationPanePreviewScale()
-    val RowGap @Composable get() = 4.dp * conversationPanePreviewScale()
     val RowCornerRadius @Composable get() = 18.dp * conversationPanePreviewScale()
     val RowHorizontalPadding @Composable get() = 12.dp * conversationPanePreviewScale()
     val RowVerticalPadding @Composable get() = 10.dp * conversationPanePreviewScale()
@@ -402,6 +386,8 @@ private fun ConversationPanePanel(
         modifier = modifier
             .width(width).testTag("conversation-drawer")
             .fillMaxHeight()
+            .dropShadow(drawerShape, Shadow(radius = 32.dp, offset = DpOffset(8.dp, 0.dp),
+                color = if (colors.dark) Color(0x55000000) else Color(0x16372444)))
             .graphicsLayer { clip = true; shape = drawerShape }
             .then(if (backdrop != null) Modifier.textureBlur(backdrop = backdrop, shape = drawerShape,
                 blurRadius = 28f * scale, colors = BlurColors(blendColors = emptyList(), saturation = 1.3f))
@@ -415,7 +401,17 @@ private fun ConversationPanePanel(
                     start = center - delta, end = center + delta)
                 onDrawBehind { drawRect(brush) }
             }
-            .border(1.dp, colors.border, drawerShape),
+            .drawWithCache {
+                val border = drawerShape.createOutline(size, layoutDirection, this)
+                // The outer clip leaves a 1dp border; CSS omits its left edge.
+                val stroke = 2.dp.toPx()
+                onDrawWithContent {
+                    drawContent()
+                    clipRect(left = 1.dp.toPx()) {
+                        drawOutline(border, colors.border, style = Stroke(stroke))
+                    }
+                }
+            },
         shape = drawerShape,
         color = Color.Transparent,
         contentColor = colors.text,
@@ -429,8 +425,8 @@ private fun ConversationPanePanel(
                 .consumeWindowInsets(WindowInsets.ime)
                 .padding(start = DrawerMetrics.PaneHorizontalPadding, end = DrawerMetrics.PaneHorizontalPadding + 1.dp),
         ) {
-            // The HTML drawer's 30px top padding includes the status area.
-            Spacer(modifier = Modifier.height((30.dp * scale - safeTop).coerceAtLeast(0.dp)))
+            // CSS: top border 1 + padding 30 + .drawer-top margin 1, including the status area.
+            Spacer(modifier = Modifier.height((32.dp * scale - safeTop).coerceAtLeast(0.dp)))
             PaneSearchRow(
                 query = state.searchQuery,
                 onSearchChange = onSearchChange,
@@ -458,10 +454,11 @@ private fun ConversationPanePanel(
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
+                    .testTag("drawer-list")
                     .scrollEndHaptic()
                     .overScrollVertical(),
-                contentPadding = PaddingValues(bottom = DrawerMetrics.ListBottomPadding),
-                verticalArrangement = Arrangement.spacedBy(DrawerMetrics.RowGap),
+                // CSS adjoining chat margins collapse to 2dp; headers keep their own margins.
+                contentPadding = PaddingValues(bottom = DrawerMetrics.ListBottomPadding + if (visibleConversations.isEmpty()) 0.dp else 2.dp),
                 overscrollEffect = null,
             ) {
                 if (visibleConversations.isEmpty()) {
@@ -473,12 +470,13 @@ private fun ConversationPanePanel(
                         item(key = group.key, contentType = "drawer-section") {
                             ConversationSectionHeader(group = group, first = groupIndex == 0)
                         }
-                        items(
+                        itemsIndexed(
                             items = group.items,
-                            key = { it.id },
-                            contentType = { "drawer-conversation" },
-                        ) { conversation ->
+                            key = { _, conversation -> conversation.id },
+                            contentType = { _, _ -> "drawer-conversation" },
+                        ) { index, conversation ->
                             ConversationTextRow(
+                                modifier = Modifier.padding(top = if (index == 0) 0.dp else 2.dp),
                                 conversation = conversation,
                                 selected = conversation.id == state.selectedConversationId,
                                 managing = managing,
@@ -499,7 +497,7 @@ private fun ConversationPanePanel(
                     }
                 }
             }
-            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.footerBorder))
+            Box(Modifier.fillMaxWidth().height(1.dp).background(colors.footerBorder).testTag("drawer-footer-border"))
             Spacer(Modifier.height(11.dp * scale))
             PaneAssistantBar(
                 name = activeAssistant?.name?.ifBlank { stringResource(R.string.app_name) }
@@ -509,6 +507,7 @@ private fun ConversationPanePanel(
                     AssistantAvatar(
                         assistant = activeAssistant,
                         size = 32.dp * scale,
+                        modifier = Modifier.testTag("drawer-assistant-avatar"),
                     )
                 },
             )
@@ -520,7 +519,7 @@ private fun ConversationPanePanel(
                 onOpenUsageStats = onOpenUsageStats,
                 onOpenSkills = onOpenSkills,
             )
-            Spacer(modifier = Modifier.height(DrawerMetrics.BottomInset))
+            Spacer(modifier = Modifier.height(DrawerMetrics.BottomInset + 1.dp))
         }
     }
 
@@ -561,7 +560,8 @@ private fun PaneSearchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 38.dp * s)
+            .height(38.dp * s)
+            .testTag("drawer-search")
             .clip(RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
             .background(colors.search)
             .border(1.dp, colors.searchBorder, RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
@@ -572,14 +572,15 @@ private fun PaneSearchRow(
             ) {
                 searchActive = true
             }
-            .padding(horizontal = 12.dp * s, vertical = 8.dp * s),
+            .padding(1.dp)
+            .padding(horizontal = 12.dp * s),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp * s),
     ) {
         Icon(
-            imageVector = Icons.Rounded.Search,
+            imageVector = ConversationPanePreviewIcons.Search,
             contentDescription = null,
-            modifier = Modifier.size(DrawerMetrics.SearchIconSize),
+            modifier = Modifier.size(DrawerMetrics.SearchIconSize).testTag("drawer-search-icon"),
             tint = colors.muted,
         )
         Box(modifier = Modifier.weight(1f)) {
@@ -598,6 +599,7 @@ private fun PaneSearchRow(
                 enabled = searchFocusEnabled && searchActive,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .testTag("drawer-search-input")
                     .focusRequester(searchFocusRequester)
                     .focusProperties { canFocus = searchFocusEnabled && searchActive },
                 singleLine = true,
@@ -619,13 +621,15 @@ private fun PaneDrawerActions(
         verticalArrangement = Arrangement.spacedBy(8.dp * conversationPanePreviewScale()),
     ) {
         DrawerActionRow(
+            tag = "drawer-new",
             label = stringResource(R.string.drawer_new_conversation),
-            icon = Icons.AutoMirrored.Rounded.Chat,
+            icon = ConversationPanePreviewIcons.Chat,
             onClick = onNewConversation,
         )
         DrawerActionRow(
+            tag = "drawer-manage",
             label = if (managing) "完成管理" else stringResource(R.string.drawer_manage_chats),
-            icon = Icons.Rounded.History,
+            icon = ConversationPanePreviewIcons.History,
             onClick = onOpenManageChats,
         )
     }
@@ -633,6 +637,7 @@ private fun PaneDrawerActions(
 
 @Composable
 private fun DrawerActionRow(
+    tag: String,
     label: String,
     icon: ImageVector,
     onClick: () -> Unit,
@@ -640,14 +645,14 @@ private fun DrawerActionRow(
     val view = LocalView.current
     val colors = conversationPanePreviewPalette()
     val s = conversationPanePreviewScale()
-    Row(Modifier.fillMaxWidth().heightIn(min = 40.dp * s)
+    Row(Modifier.fillMaxWidth().heightIn(min = 38.dp * s).testTag(tag)
         .clip(RoundedCornerShape(13.dp * s)).background(colors.action)
         .border(1.dp, colors.actionBorder, RoundedCornerShape(13.dp * s))
         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
             TouchHaptics.click(view); onClick()
-        }.padding(horizontal = 12.dp * s, vertical = 10.dp * s),
+        }.padding(1.dp).padding(horizontal = 12.dp * s, vertical = 10.dp * s),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp * s)) {
-        Icon(icon, null, Modifier.size(18.dp * s), tint = colors.toolbar)
+        Icon(icon, null, Modifier.size(18.dp * s).testTag("$tag-icon"), tint = colors.toolbar)
         Text(label, color = colors.accent, fontSize = (11f * s).sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
@@ -673,6 +678,7 @@ private fun PaneFolderBar(
     ) {
         item(key = "unfiled") {
             DrawerChip(
+                tag = "drawer-folder-unfiled",
                 label = stringResource(R.string.drawer_chats_chip),
                 selected = selectedFolderId == null,
                 icon = null,
@@ -683,9 +689,10 @@ private fun PaneFolderBar(
             var showMenu by remember(folder.id) { mutableStateOf(false) }
             Box {
                 DrawerChip(
+                    tag = "drawer-folder:${folder.id}",
                     label = folder.name,
                     selected = selectedFolderId == folder.id,
-                    icon = Icons.Rounded.Folder,
+                    icon = ConversationPanePreviewIcons.Folder,
                     onClick = { onSelectFolder(folder.id) },
                     onLongClick = { showMenu = true },
                 )
@@ -699,7 +706,7 @@ private fun PaneFolderBar(
                         text = { Text(stringResource(R.string.action_rename)) },
                         leadingIcon = {
                             Icon(
-                                imageVector = Icons.Rounded.Edit,
+                                imageVector = ConversationPanePreviewIcons.Edit,
                                 contentDescription = null,
                                 modifier = Modifier.size(DrawerMetrics.ActionIconSize),
                             )
@@ -720,7 +727,7 @@ private fun PaneFolderBar(
                         },
                         leadingIcon = {
                             Icon(
-                                imageVector = Icons.Rounded.Delete,
+                                imageVector = ConversationPanePreviewIcons.Trash,
                                 contentDescription = null,
                                 modifier = Modifier.size(DrawerMetrics.ActionIconSize),
                                 tint = conversationPanePreviewPalette().danger,
@@ -736,9 +743,10 @@ private fun PaneFolderBar(
         }
         item(key = "new-folder") {
             DrawerChip(
+                tag = "drawer-folder-new",
                 label = stringResource(R.string.drawer_new_folder),
                 selected = false,
-                icon = Icons.Rounded.CreateNewFolder,
+                icon = ConversationPanePreviewIcons.FolderAdd,
                 onClick = { createFolder = true },
             )
         }
@@ -788,6 +796,7 @@ private fun FolderNameDialog(title: String, initialName: String, onDismiss: () -
 
 @Composable
 private fun DrawerChip(
+    tag: String,
     label: String,
     selected: Boolean,
     icon: ImageVector?,
@@ -808,10 +817,11 @@ private fun DrawerChip(
     val view = LocalView.current
     Row(
         modifier = Modifier
+            .testTag(tag)
             .heightIn(min = 34.dp * s)
             .clip(RoundedCornerShape(18.dp * s))
             .background(background)
-            .border(1.dp, if (selected) background else Color.Transparent, RoundedCornerShape(18.dp * s))
+            .border(1.dp, if (selected) conversationPanePreviewPalette().folderBorder else Color.Transparent, RoundedCornerShape(18.dp * s))
             .pointerInput(onClick, onLongClick) {
                 detectTapGestures(
                     onTap = {
@@ -826,6 +836,7 @@ private fun DrawerChip(
                     },
                 )
             }
+            .padding(1.dp)
             .padding(horizontal = 11.dp * s, vertical = 6.dp * s),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp * s),
@@ -834,7 +845,7 @@ private fun DrawerChip(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                modifier = Modifier.size(13.dp * s),
+                modifier = Modifier.size(13.dp * s).testTag("$tag-icon"),
                 tint = contentColor,
             )
         }
@@ -867,8 +878,10 @@ private fun ConversationSectionHeader(
             .padding(
                 start = DrawerMetrics.RowHorizontalPadding,
                 top = if (first) 5.dp else DrawerMetrics.SectionTopPadding,
+                end = DrawerMetrics.RowHorizontalPadding,
                 bottom = DrawerMetrics.SectionBottomPadding,
-            ),
+            )
+            .testTag("drawer-heading:${group.key}"),
     )
 }
 
@@ -886,11 +899,12 @@ private fun ConversationTextRow(
     onTogglePin: () -> Unit,
     onExport: () -> Unit,
     onTasks: (() -> Unit)?,
+    modifier: Modifier = Modifier,
 ) {
     var showActionMenu by remember(managing) { mutableStateOf(false) }
     val view = LocalView.current
 
-    Box(modifier = Modifier.fillMaxWidth()) {
+    Box(modifier = modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -919,6 +933,7 @@ private fun ConversationTextRow(
                         if (!managing) showActionMenu = true
                     },
                 )
+                .padding(1.dp)
                 .padding(
                     horizontal = DrawerMetrics.RowHorizontalPadding,
                     vertical = DrawerMetrics.RowVerticalPadding,
@@ -928,9 +943,10 @@ private fun ConversationTextRow(
             if (managing) {
                 Box(Modifier.padding(end = 8.dp).size(13.dp).clip(RoundedCornerShape(4.dp))
                     .background(if (checked) conversationPanePreviewPalette().accent else Color.Transparent)
-                    .border(1.dp, conversationPanePreviewPalette().accent, RoundedCornerShape(4.dp)),
+                    .border(1.dp, if (checked) conversationPanePreviewPalette().accent else conversationPanePreviewPalette().line, RoundedCornerShape(4.dp))
+                    .testTag("drawer-select:${conversation.id}"),
                     contentAlignment = Alignment.Center) {
-                    if (checked) Box(Modifier.size(6.dp).background(conversationPanePreviewPalette().folderText, RoundedCornerShape(1.dp)))
+                    if (checked) Box(Modifier.size(5.dp).background(conversationPanePreviewPalette().surface, RoundedCornerShape(1.dp)))
                 }
             }
             Text(
@@ -941,13 +957,14 @@ private fun ConversationTextRow(
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).testTag("drawer-title:${conversation.id}"),
             )
             if (conversation.isActiveRun || conversation.hasCompletionMarker) {
                 Box(
                     modifier = Modifier
-                        .padding(start = if (conversation.isPinned) 0.dp else DrawerMetrics.ActiveDotGap)
+                        .padding(start = DrawerMetrics.ActiveDotGap)
                         .size(DrawerMetrics.ActiveDotSize)
+                        .testTag("drawer-status:${conversation.id}")
                         .clip(CircleShape)
                         .then(
                             if (conversation.isActiveRun) {
@@ -960,11 +977,11 @@ private fun ConversationTextRow(
             }
             if (conversation.isPinned) {
                 Icon(
-                    imageVector = Icons.Rounded.PushPin,
+                    imageVector = ConversationPanePreviewIcons.Pin,
                     contentDescription = null,
                     modifier = Modifier.padding(
-                        start = if (conversation.isActiveRun || conversation.hasCompletionMarker) DrawerMetrics.ActiveDotGap else 0.dp,
-                    ).size(11.dp * conversationPanePreviewScale()),
+                        start = DrawerMetrics.ActiveDotGap,
+                    ).size(11.dp * conversationPanePreviewScale()).testTag("drawer-pin:${conversation.id}"),
                     tint = conversationPanePreviewPalette().accent.copy(alpha = .8f),
                 )
             }
@@ -980,7 +997,7 @@ private fun ConversationTextRow(
                 text = { Text(stringResource(R.string.action_rename)) },
                 leadingIcon = {
                     Icon(
-                        imageVector = Icons.Rounded.Edit,
+                        imageVector = ConversationPanePreviewIcons.Edit,
                         contentDescription = null,
                         modifier = Modifier.size(DrawerMetrics.ActionIconSize),
                     )
@@ -1003,7 +1020,7 @@ private fun ConversationTextRow(
                 },
                 leadingIcon = {
                     Icon(
-                        imageVector = if (conversation.isPinned) Icons.Outlined.PushPin else Icons.Rounded.PushPin,
+                        imageVector = ConversationPanePreviewIcons.Pin,
                         contentDescription = null,
                         modifier = Modifier.size(DrawerMetrics.ActionIconSize),
                     )
@@ -1019,7 +1036,7 @@ private fun ConversationTextRow(
                 text = { Text(stringResource(R.string.conversation_export)) },
                 leadingIcon = {
                     Icon(
-                        imageVector = Icons.Rounded.Download,
+                        imageVector = ConversationPanePreviewIcons.Export,
                         contentDescription = null,
                         modifier = Modifier.size(DrawerMetrics.ActionIconSize),
                     )
@@ -1043,7 +1060,7 @@ private fun ConversationTextRow(
                 text = { Text(stringResource(R.string.drawer_move_to_folder)) },
                 leadingIcon = {
                     Icon(
-                        imageVector = Icons.Rounded.Folder,
+                        imageVector = ConversationPanePreviewIcons.Folder,
                         contentDescription = null,
                         modifier = Modifier.size(DrawerMetrics.ActionIconSize),
                     )
@@ -1059,7 +1076,7 @@ private fun ConversationTextRow(
                 text = { Text(text = stringResource(R.string.action_delete), color = conversationPanePreviewPalette().danger) },
                 leadingIcon = {
                     Icon(
-                        imageVector = Icons.Rounded.Delete,
+                        imageVector = ConversationPanePreviewIcons.Trash,
                         contentDescription = null,
                         modifier = Modifier.size(DrawerMetrics.ActionIconSize),
                         tint = conversationPanePreviewPalette().danger,
@@ -1084,8 +1101,8 @@ private fun EmptyConversations(isSearching: Boolean) {
         fontSize = (11f * conversationPanePreviewScale()).sp,
         textAlign = TextAlign.Center,
         fontWeight = FontWeight.Normal,
-        modifier = Modifier.padding(
-            horizontal = DrawerMetrics.RowHorizontalPadding,
+        modifier = Modifier.fillMaxWidth().padding(
+            horizontal = 10.dp,
             vertical = DrawerMetrics.EmptyVerticalPadding,
         ),
     )
@@ -1101,9 +1118,10 @@ private fun PaneAssistantBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .testTag("drawer-assistant")
             .heightIn(min = DrawerMetrics.AssistantBarHeight)
             .clip(RoundedCornerShape(16.dp))
-            .clickable {
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                 TouchHaptics.click(view)
                 onClick()
             }
@@ -1135,53 +1153,59 @@ private fun PaneDock(
     onOpenUsageStats: () -> Unit,
     onOpenSkills: () -> Unit,
 ) {
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
-    val buttonSize = maxWidth * .15625f
-    val gap = maxWidth * .0390625f
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        DrawerCircleButton(
-            size = buttonSize,
-            icon = Icons.Rounded.HealthAndSafety,
-            label = stringResource(R.string.ui_permission_health_3048bb),
-            onClick = onOpenPermissions,
-        )
-        Spacer(modifier = Modifier.width(gap))
-        DrawerCircleButton(
-            size = buttonSize,
-            icon = Icons.Rounded.Memory,
-            label = stringResource(R.string.conversation_dock_models),
-            onClick = onOpenModelProviders,
-        )
-        Spacer(modifier = Modifier.width(gap))
-        DrawerCircleButton(
-            size = buttonSize,
-            icon = Icons.Rounded.Extension,
-            label = stringResource(R.string.route_skills),
-            onClick = onOpenSkills,
-        )
-        Spacer(modifier = Modifier.width(gap))
-        DrawerCircleButton(
-            size = buttonSize,
-            icon = Icons.Rounded.BarChart,
-            label = stringResource(R.string.stats_page_title),
-            onClick = onOpenUsageStats,
-        )
-        Spacer(modifier = Modifier.weight(1f))
-        DrawerCircleButton(
-            size = buttonSize,
-            icon = Icons.Rounded.Settings,
-            label = stringResource(R.string.route_settings),
-            onClick = onOpenSettings,
-        )
-    }
+    BoxWithConstraints(Modifier.fillMaxWidth().testTag("drawer-dock")) {
+        val buttonSize = maxWidth * .15625f
+        val gap = maxWidth * .0390625f
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            DrawerCircleButton(
+                tag = "drawer-dock-permissions",
+                size = buttonSize,
+                icon = ConversationPanePreviewIcons.Shield,
+                label = stringResource(R.string.ui_permission_health_3048bb),
+                onClick = onOpenPermissions,
+            )
+            Spacer(modifier = Modifier.width(gap))
+            DrawerCircleButton(
+                tag = "drawer-dock-models",
+                size = buttonSize,
+                icon = ConversationPanePreviewIcons.Memory,
+                label = stringResource(R.string.conversation_dock_models),
+                onClick = onOpenModelProviders,
+            )
+            Spacer(modifier = Modifier.width(gap))
+            DrawerCircleButton(
+                tag = "drawer-dock-skills",
+                size = buttonSize,
+                icon = ConversationPanePreviewIcons.Puzzle,
+                label = stringResource(R.string.route_skills),
+                onClick = onOpenSkills,
+            )
+            Spacer(modifier = Modifier.width(gap))
+            DrawerCircleButton(
+                tag = "drawer-dock-usage",
+                size = buttonSize,
+                icon = ConversationPanePreviewIcons.Bars,
+                label = stringResource(R.string.stats_page_title),
+                onClick = onOpenUsageStats,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            DrawerCircleButton(
+                tag = "drawer-dock-settings",
+                size = buttonSize,
+                icon = ConversationPanePreviewIcons.Settings,
+                label = stringResource(R.string.route_settings),
+                onClick = onOpenSettings,
+            )
+        }
     }
 }
 
 @Composable
 private fun DrawerCircleButton(
+    tag: String,
     size: androidx.compose.ui.unit.Dp,
     icon: ImageVector,
     label: String,
@@ -1191,6 +1215,7 @@ private fun DrawerCircleButton(
     Box(
         modifier = Modifier
             .size(size)
+            .testTag(tag)
             .clip(CircleShape)
             .background(conversationPanePreviewPalette().bubble)
             .clickable(
@@ -1205,7 +1230,7 @@ private fun DrawerCircleButton(
         Icon(
             imageVector = icon,
             contentDescription = label,
-            modifier = Modifier.size(size * .5f),
+            modifier = Modifier.size(size * .5f).testTag("$tag-icon"),
             tint = conversationPanePreviewPalette().toolbar,
         )
     }

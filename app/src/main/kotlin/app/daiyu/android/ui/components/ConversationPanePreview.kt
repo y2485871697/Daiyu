@@ -23,6 +23,8 @@ internal data class ConversationPanePreviewPalette(val dark: Boolean) {
     val actionBorder = if (dark) Color(0x1FAC93C2) else Color(0x2081738E)
     val folder = if (dark) Color(0xFF786A89) else Color(0xFF786C83)
     val folderText = if (dark) Color(0xFFF5EFFA) else Color.White
+    val folderBorder = if (dark) Color(0x2BD4BEDE) else folder
+    val surface = if (dark) Color(0xFF1A1926) else Color(0xFFFAF8FF)
     val footerBorder = if (dark) Color(0x1AC8B5EB) else Color(0x1C9C84BF)
     val scrim = if (dark) Color(0x66000000) else Color(0x26241B35)
     val danger = Color(0xFFBC6575)

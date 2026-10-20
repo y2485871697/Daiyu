@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.settings
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -33,6 +34,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import app.daiyu.android.BuildConfig
+import app.daiyu.android.update.GithubReleaseChecker
+import app.daiyu.android.update.ReleaseCheck
 import app.daiyu.android.delegation.ReasoningEffort
 import app.daiyu.android.ui.components.subagent.SubAgentThinkingEffortPickerDialog
 import app.daiyu.android.ui.FeatureRoute
@@ -85,7 +89,14 @@ internal fun SettingsSearch(query: String, onQueryChange: (String) -> Unit,
 
 @Composable
 private fun OriginalSettingsRow(entry: SettingsEntry, defaultReasoning: ReasoningEffort, defaultReasoningError: String?,
-    onDefaultReasoningToggle: ((Boolean) -> Unit)?, diagnostics: SettingsDiagnosticsUi, onClick: () -> Unit) {
+    onDefaultReasoningToggle: ((Boolean) -> Unit)?, diagnostics: SettingsDiagnosticsUi,
+    release: SettingsReleaseUi, onClick: () -> Unit) {
+    if (entry.id == "updates") {
+        SettingsRow(entry.title, onClick = if (release.checking) null else onClick,
+            summary = if (release.checking) "正在检查更新…" else "当前版本：${BuildConfig.VERSION_NAME}",
+            leading = { SettingsIcon(entry.icon) })
+        return
+    }
     if (entry.id in setOf("logging", "export_logs", "clear_logs")) {
         SettingsDiagnosticRow(entry, diagnostics)
         return
@@ -129,6 +140,8 @@ internal fun DaiyuSettingsScreen(
     engineeringUi: Boolean = false,
     diagnostics: app.daiyu.android.diagnostics.DiagnosticLogStore? = null,
     scrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
+    releaseChecker: ReleaseCheck = remember { GithubReleaseChecker() },
+    onReleaseNotice: ((String) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val focus = LocalFocusManager.current
@@ -137,6 +150,9 @@ internal fun DaiyuSettingsScreen(
     DisposableEffect(visit) { onDispose { visit.active = false } }
     var localPage by remember { mutableStateOf<SettingsLocalPage?>(null) }
     val diagnosticsUi = rememberSettingsDiagnostics(diagnostics) { visit.active && localPage == null }
+    val release = rememberSettingsReleaseCheck(releaseChecker, BuildConfig.VERSION_NAME,
+        ownerCurrent = { visit.active && localPage == null },
+        onNotice = onReleaseNotice ?: { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() })
     var query by rememberSaveable { mutableStateOf("") }
     var relayExpanded by rememberSaveable { mutableStateOf(false) }
     var choosingDefaultReasoning by remember { mutableStateOf(false) }
@@ -171,9 +187,6 @@ internal fun DaiyuSettingsScreen(
             TaskSurfaceSettingsPanel(onBack = localBack, modifier = modifier)
         } else if (openedPage == SettingsLocalPage.WORKSPACE) {
             WorkspaceSettingsScreen(onBack = localBack, modifier = modifier)
-        } else if (openedPage == SettingsLocalPage.UPDATES) {
-            SettingsReleasePage(remember { app.daiyu.android.update.GithubReleaseChecker() },
-                currentVersion = app.daiyu.android.BuildConfig.VERSION_NAME, onBack = localBack, modifier = modifier)
         } else {
             SettingsSystemAccessPage(openedPage, onBack = localBack,
                 onOpenShizuku = {
@@ -193,6 +206,7 @@ internal fun DaiyuSettingsScreen(
             return@open
         }
         when (entry.id) {
+            "updates" -> release.check()
             "assistants" -> onOpenAssistants?.invoke()
             "subagents" -> onOpenSubAgents?.invoke()
             "appearance" -> onOpenAppearance?.invoke()
@@ -243,7 +257,7 @@ internal fun DaiyuSettingsScreen(
                                 }
                             }
                             else -> OriginalSettingsRow(entry, defaultReasoning, defaultReasoningError,
-                                defaultReasoningToggle, diagnosticsUi) { open(entry) }
+                                defaultReasoningToggle, diagnosticsUi, release) { open(entry) }
                         }
                     }
                 }

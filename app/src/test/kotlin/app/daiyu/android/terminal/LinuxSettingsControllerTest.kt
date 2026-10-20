@@ -63,7 +63,7 @@ class LinuxSettingsControllerTest : TestCase() {
     fun testChrootApprovalRequiresRootModeAndOldPreviewCannotBypassIt() = runTest {
         val catalog = Catalog()
         var rootMode = false
-        val controller = LinuxSettingsController(catalog, LinuxSettingsAdmission(emptySet()), this,
+        val controller = LinuxSettingsController(catalog, LinuxSettingsAdmission(emptySet()), backgroundScope,
             allowChroot = { rootMode })
         val page = controller.enterPage()
         runCurrent()

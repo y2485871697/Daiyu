@@ -88,6 +88,16 @@
       "sha256": "daad4386d288edb084c54340284a42810da451f9bc19bb0049a0fb9d52a86a08"
     },
     {
+      "path": "app/src/main/assets/licenses/rikkahub/model-icons/LICENSE-LobeHub",
+      "bytes": 1064,
+      "sha256": "add9d7531d1b21646317a8958e38fc727506fa39d24bdecb44154d943c82753a"
+    },
+    {
+      "path": "app/src/main/assets/licenses/rikkahub/model-icons/NOTICE.md",
+      "bytes": 1841,
+      "sha256": "c55e48ec9640284253caab6660f6cba8af74f15f40fc0b6cc238ac774f2ce7de"
+    },
+    {
       "path": "app/src/main/assets/licenses/sherpa-ncnn/KISSFFT-COPYING",
       "bytes": 246,
       "sha256": "a2840585f8411be8e6826a31ef15ae65c950bd74a2437a73b013398a934ad0c6"
@@ -124,8 +134,8 @@
     },
     {
       "path": "app/src/main/assets/licenses/source-index.md",
-      "bytes": 14613,
-      "sha256": "50d86f0f449d48ace90b3f7f0712b0008a705c4bcab62ff45ec48498315091da"
+      "bytes": 14992,
+      "sha256": "18bc91e7bbb730873c686acb7ed5e7c80912a83c4c176dda3277c54835e3a051"
     },
     {
       "path": "app/src/main/assets/licenses/talloc-2.4.3.txt",

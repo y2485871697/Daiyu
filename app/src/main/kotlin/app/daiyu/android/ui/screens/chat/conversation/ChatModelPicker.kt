@@ -36,6 +36,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.components.usagePalette
+import app.daiyu.android.ui.icons.ModelBrandIcon
 import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.ui.screens.settings.ModelCatalogEntryUi
 import top.yukonga.miuix.kmp.basic.Text
@@ -157,7 +158,7 @@ internal fun ChatModelPicker(
                                     })
                                 .heightIn(min = 44.dp).padding(horizontal = 9.dp, vertical = 9.dp),
                                 verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-                                Icon(DaiyuIcons.Model, null, Modifier.size(17.dp), tint = colors.accent)
+                                ModelBrandIcon(model.id, Modifier.size(17.dp), displayName = model.displayName, tint = colors.accent)
                                 Column(Modifier.weight(1f)) {
                                     Text(model.displayName, color = if (selected) colors.accent else colors.text,
                                         fontSize = 11.sp, lineHeight = 16.5.sp,

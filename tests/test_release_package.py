@@ -136,7 +136,7 @@ class ReleasePackageTests(unittest.TestCase):
         self.assertIn('scripts/verify_license_bundle.py', release)
         self.assertIn('name: 代鱼正式候选包', release)
         self.assertLess(release.index('scripts/verify_release_package.py'), release.index('name: 上传生产Release候选包'))
-        self.assertIn('needs: [build, release]', smoke)
+        self.assertIn('needs: [build, release, candidate]', smoke)
         self.assertIn("inputs.mode == 'release' && needs.release.result == 'success'", smoke)
         self.assertIn("(inputs.mode == 'release' || (inputs.mode == 'smoke' && inputs.source_variant == 'release')) && '代鱼正式候选包' || '代鱼开发包'", smoke)
         self.assertIn('test -z "$SMOKE_TEST_CLASSES" || test "$SMOKE_MODE" = smoke', release)
@@ -147,7 +147,7 @@ class ReleasePackageTests(unittest.TestCase):
 
     def test_focused_window_requires_exact_activity_ownership_and_cross_checks_available_tokens(self):
         harness = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
-        focus = harness.split('protected fun focusedWindowRoot()', 1)[1].split('protected fun dismissIme()', 1)[0]
+        focus = harness.split('protected fun focusedWindowRoot()', 1)[1].split('protected fun dismissIme(', 1)[0]
         for fragment in ('candidate.windowLayoutParams.orNull() ?: return false',
                          'windowContext === host || decor === hostDecor',
                          'windowContext = windowContext.baseContext',

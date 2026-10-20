@@ -53,7 +53,7 @@ enum class ChatMenuAction {
     NEW_CHAT, RENAME, INTERACTIVE_MODE, CONVERSATION_ID, EXPORT, CONTEXT_STATS,
     COMPRESS_CONTEXT, AUTO_COMPRESS, SUB_AGENT, OPEN_TERMINAL, OPEN_BROWSER, OPEN_WORKSPACE,
     ATTACH_IMAGE, ATTACH_VIDEO, ATTACH_FILE, ATTACH_FOLDER, ATTACH_PATH, GENERATE_IMAGE, GENERATE_VIDEO,
-    VOICE_INPUT, VOICE_CHAT, VOICE_DOUBAO, CONTEXT_SCOPE, COLLABORATION,
+    VOICE_INPUT, VOICE_CHAT, VOICE_DOUBAO, CONTEXT_SCOPE, COLLABORATION, DECLARE_IMAGE_SUPPORT,
 }
 
 private data class MenuEntry(val title: String, val icon: ImageVector, val action: ChatMenuAction)
@@ -175,6 +175,13 @@ internal fun ChatAttachmentSheet(onDismiss: () -> Unit, onAction: (ChatMenuActio
                 }
             }
             HorizontalDivider(Modifier.padding(top = 12.dp), color = colors.line)
+            Row(Modifier.fillMaxWidth().testTag("image-host-authorize")
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
+                    role = Role.Button) { onDismiss(); onAction(ChatMenuAction.DECLARE_IMAGE_SUPPORT) }
+                .padding(vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("声明图片能力", Modifier.weight(1f), fontSize = 11.sp, color = colors.muted)
+                Icon(ChatPreviewIcons.ChevronRight, null, Modifier.size(11.dp).alpha(.4f), tint = colors.muted)
+            }
             Row(Modifier.fillMaxWidth().testTag("chat-attachment-path-toggle")
                 .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                     role = Role.Button) { onDismiss(); onAction(ChatMenuAction.ATTACH_PATH) }.padding(vertical = 12.dp),

@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -62,6 +63,9 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             try {
                 show {
                     CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                        SideEffect {
+                            assertSame(android.os.Looper.getMainLooper().thread, Thread.currentThread())
+                        }
                         Column(Modifier.testTag("race")) {
                             AssistantTurn(ChatTurnUi.Assistant("race-$mixed", status = RunStatus.RUNNING,
                                 finalText = if (mixed) "" else current,

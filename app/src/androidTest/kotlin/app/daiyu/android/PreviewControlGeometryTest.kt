@@ -40,9 +40,9 @@ class PreviewControlGeometryTest : WiredActivityTestCase() {
                 }
             }
         }
-        node("assistant-button").assertHeightIsEqualTo(33.dp)
-        node("agent-button").assertHeightIsEqualTo(31.dp)
-        node("usage-button").assertHeightIsEqualTo(34.dp)
+        node("assistant-button").assertHeightIsEqualTo(44.dp)
+        node("agent-button").assertHeightIsEqualTo(44.dp)
+        node("usage-button").assertHeightIsEqualTo(44.dp)
     }
     fun testPlatformFontScaleIsAppliedOnlyOnceAndTextareasKeepCssMinimums() {
         val promptHeight = AtomicInteger()
@@ -71,8 +71,8 @@ class PreviewControlGeometryTest : WiredActivityTestCase() {
                 }
             }
         }
-        for ((text, size) in listOf("助手确认" to 10.sp, "代理确认" to 10.sp,
-            "用量确认" to 10.sp, "工具确认" to 8.sp, "用户正文" to 11.sp)) {
+        for ((text, size) in listOf("助手确认" to 14.sp, "代理确认" to 14.sp,
+            "用量确认" to 14.sp, "工具确认" to 8.sp, "用户正文" to 11.sp)) {
             val results = mutableListOf<TextLayoutResult>()
             ui.onNodeWithText(text, useUnmergedTree = true)
                 .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(results)) }

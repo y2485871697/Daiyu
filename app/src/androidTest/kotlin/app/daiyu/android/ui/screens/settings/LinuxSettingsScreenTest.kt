@@ -40,7 +40,7 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
     fun testOriginalGroupsHaveNoTechnicalPreviewAndUnavailableToolsAreNotMarkedInstalled() {
         show()
         node("linux-distribution-choice").assertIsDisplayed()
-        node("linux-execution-choice").assertIsDisplayed()
+        revealLinux("linux-execution-choice").assertIsDisplayed()
         revealLinux("linux-workspace").assertHasClickAction()
         revealLinux("linux-shared-folders").assertHasClickAction()
         revealLinux("linux-file-browser").assertHasClickAction()
@@ -56,9 +56,9 @@ class LinuxSettingsScreenTest : WiredActivityTestCase() {
         node("linux-distribution-choice").performClick()
         ui.onNodeWithText("软件兼容性更好的 glibc 环境").performClick()
         node("linux-distribution-choice").assertTextContains("Debian")
-        node("linux-execution-choice").performClick()
+        revealLinux("linux-execution-choice").performClick()
         ui.onNodeWithText("使用 Root 与独立挂载空间，保留已有环境").performClick()
-        node("linux-execution-choice").assertTextContains("Root 模式 · chroot")
+        revealLinux("linux-execution-choice").assertTextContains("Root 模式 · chroot")
         assertEquals(0, writes.get())
         assertEquals(0, fixture.opens.get())
     }

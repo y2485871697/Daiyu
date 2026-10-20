@@ -7,7 +7,6 @@ import androidx.activity.compose.setContent
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextReplacement
@@ -71,9 +70,8 @@ class GenerationSettingsHostActivityTest : WiredActivityTestCase() {
                 }
             }
         }
-        ui.waitUntil(5_000) {
-            ui.onAllNodesWithTag("settings-field:显示名称").fetchSemanticsNodes().isNotEmpty()
-        }
+        awaitUniqueTag("generation-settings-reload")
+        reveal("settings-field:显示名称", pageTitle).assertExists()
     }
 
     override fun tearDown() {
@@ -107,8 +105,10 @@ class GenerationSettingsHostActivityTest : WiredActivityTestCase() {
         prefs.edit().clear().commit()
         node("generation-settings-reload").performClick()
         ui.waitUntil(5_000) {
-            ui.onAllNodesWithTag("settings-field:显示名称").fetchSemanticsNodes().isNotEmpty()
+            ui.onAllNodesWithText("生成配置已损坏；未加载默认模型，请显式处理存储故障").fetchSemanticsNodes().isEmpty()
         }
+        awaitUniqueTag("generation-settings-reload")
+        reveal("settings-field:显示名称", pageTitle).assertExists()
         reveal("settings-field:生成模型名", pageTitle).assertEditableText("")
         assertTrue(prefs.all.isEmpty()) // reopening a missing editor never persists defaults
     }

@@ -46,7 +46,12 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         assertEquals(connection, repository.editing(editor).settings)
         val empty = repository.catalogSnapshot(editor)
         assertTrue(empty.models.isEmpty())
-        rejectsSelection { connection.validate() }
+        try {
+            connection.validate()
+            fail("connection without a model must not run")
+        } catch (expected: IllegalArgumentException) {
+            assertEquals("请先在模型页选择模型", expected.message)
+        }
         rejectsSelection { repository.activate(registered.revision, added.slotId) }
         repository.withEditor(editor) { target ->
             val custom = CatalogModelEdit("manual-id", "My model", "8192", true, false).newRecord()

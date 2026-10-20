@@ -346,10 +346,13 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     fun testCatalogChangedAndRestoredDraftRevokesLateResponseAndCanRetry() {
         val (entered, release, connection) = catalogue(held = true)
         val before = fixture.settings.load(); val old = before.apiKey
-        openModels(); modelField("API Key").assertEditableText(old)
+        openModels()
+        reveal("settings-secret-visibility:API Key").performClick()
+        modelField("API Key").assertEditableText(old)
         fetch(); assertTrue(entered.await(5, TimeUnit.SECONDS))
         try {
             selectProviderTab("配置")
+            reveal("settings-secret-visibility:API Key").performClick()
             editModel("API Key", "changed"); modelField("API Key").assertEditableText("changed")
             editModel("API Key", old); modelField("API Key").assertEditableText(old)
         } finally { release.countDown() }

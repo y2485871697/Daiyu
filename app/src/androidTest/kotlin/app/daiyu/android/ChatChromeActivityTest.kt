@@ -129,7 +129,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         touch(button("更多"))
         val menu = node("chat-overflow-menu").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
         assertTrue(menu.height > 336 * activity.resources.displayMetrics.density)
-        node("chat-menu:AUTO_COMPRESS").assertIsDisplayed()
+        node("chat-menu:AUTO_COMPRESS").performScrollTo().assertIsDisplayed()
         touch(ui.onNodeWithText("Token 用量").performScrollTo())
         ui.onNodeWithText("Token 用量").assertDoesNotExist()
         node("chat-context").assertHasNoClickAction()
@@ -209,16 +209,16 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         }
     }
 
-    fun testExpandedMoreStateAndFullMenuKeepBothCompressionRowsVisible() {
+    fun testExpandedMoreStateAndFullMenuKeepBothCompressionRowsReachable() {
         show(composer())
         button("更多").assertIsNotSelected()
         touch(button("更多"))
         button("更多").assertIsSelected()
         node("chat-menu:COMPRESS_CONTEXT").assertIsDisplayed()
-        node("chat-menu:AUTO_COMPRESS").assertIsDisplayed().assertIsNotEnabled()
+        node("chat-menu:AUTO_COMPRESS").performScrollTo().assertIsDisplayed().assertIsNotEnabled()
         ui.onNodeWithTag("chat-menu-switch:AUTO_COMPRESS", useUnmergedTree = true)
             .assertExists().assertWidthIsEqualTo(25.dp).assertHeightIsEqualTo(15.dp)
-        touch(node("chat-menu:NEW_CHAT"))
+        touch(node("chat-menu:NEW_CHAT").performScrollTo())
         button("更多").assertIsNotSelected()
         node("chat-overflow-menu").assertDoesNotExist()
     }

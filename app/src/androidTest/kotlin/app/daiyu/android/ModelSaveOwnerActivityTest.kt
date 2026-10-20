@@ -59,6 +59,7 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
         }
         assertEquals(saved, fixture.settings.load())
         awaitModelEditor()
+        reveal("settings-secret-visibility:API Key").performClick()
         modelField("API Key").assertEditableText("resumed-explicit-model")
         reveal("model-save").performClick()
         awaitControl("explicit save completed") { !fixture.controller.dataBusy }
@@ -82,6 +83,7 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
         }
         assertEquals(saved, fixture.settings.load())
         awaitModelEditor()
+        reveal("settings-secret-visibility:API Key").performClick()
         modelField("API Key").assertEditableText("twice-paused-model")
         reveal("model-save").performClick()
         awaitControl("explicit save after two pauses") { !fixture.controller.dataBusy }
@@ -102,6 +104,7 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
         }
         assertEquals(saved, fixture.settings.load())
         awaitModelEditor()
+        reveal("settings-secret-visibility:API Key").performClick()
         modelField("API Key").assertEditableText("restore-read-paused-model")
         assertEquals(0, fixture.opens.get())
     }
@@ -126,6 +129,7 @@ class ModelSaveOwnerActivityTest : WiredActivityTestCase() {
     }
     fun testAStaleModelEditorCannotOverwriteAChangedStoredConfiguration() {
         val original = fixture.settings.load(); openModels()
+        reveal("settings-secret-visibility:API Key").performClick()
         modelField("API Key").assertEditableText(original.apiKey)
         val changed = original.copy(model = "concurrent-saved-model")
         fixture.settings.save(changed)

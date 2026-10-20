@@ -185,6 +185,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
             val bottom = node("chat-composer-bottom").fetchSemanticsNode().boundsInRoot
             val send = node("chat-send").fetchSemanticsNode().boundsInRoot
             assertEquals(9f, (surface.left - host.left) / density, .5f)
+            assertEquals(16f, (host.bottom - surface.bottom) / density, .75f)
             assertEquals(128f, surface.height / density, 1.5f)
             assertEquals(23f, context.height / density, .75f)
             assertEquals(12f, (context.top - surface.top) / density, .75f)

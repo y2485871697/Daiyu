@@ -100,7 +100,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         state.phase == ComposerPhase.RUNNING -> "暂停"
         else -> "发送"
     }
-    Column(modifier.fillMaxWidth().padding(start = 9.dp, end = 9.dp, top = 10.dp, bottom = 12.dp)) {
+    Column(modifier.fillMaxWidth().padding(start = 9.dp, end = 9.dp, top = 10.dp, bottom = 16.dp)) {
         ChatComposerSurface(backdrop) {
         // Include the transparent 1dp CSS border in the composer box model.
         Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 4.dp),

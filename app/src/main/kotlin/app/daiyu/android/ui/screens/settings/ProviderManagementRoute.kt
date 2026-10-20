@@ -35,14 +35,14 @@ private class ProviderPagePermit {
     fun revoke() { live.set(false); save.revoke() }
 }
 private class ProviderDetail(
-    val editor: ProviderEditorSlot, val name: String, val editing: EditingSettings,
+    val editor: ProviderEditorSlot, val name: String, val providerEnabled: Boolean, val editing: EditingSettings,
     val configurationRevision: Long,
     val persistence: SavedModelCatalogPersistence<CatalogModelParameters>, val catalogIdentity: String?,
 ) {
     val live = AtomicBoolean(true)
     val saveOwner = ModelSettingsSaveOwner()
     fun revoke() { live.set(false); saveOwner.revoke() }
-    var draft by mutableStateOf(editing.settings.providerDraft().copy(providerName = name))
+    var draft by mutableStateOf(editing.settings.providerDraft().copy(providerName = name, providerEnabled = providerEnabled))
 }
 private class PausedProviderDraft(
     val editor: ProviderEditorSlot, val editing: EditingSettings, val configurationRevision: Long,
@@ -154,7 +154,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     store.modelCatalog.readConfiguration { revision -> revision to store.loadForEditing() }
                 }
                 val identity = repo.withEditor(editor) { it.localModelCatalogSnapshot()?.providerIdentity }
-                ProviderDetail(editor, registration.name, editing, configurationRevision, repo.catalogPersistence(editor), identity)
+                ProviderDetail(editor, registration.name, registration.enabled, editing, configurationRevision, repo.catalogPersistence(editor), identity)
             } }
             if (!current(p) || serial != request) return@launch
             loading = false

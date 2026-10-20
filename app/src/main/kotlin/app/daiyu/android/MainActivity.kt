@@ -106,6 +106,7 @@ import app.daiyu.android.ui.screens.chat.ManageChatsScreen
 import app.daiyu.android.ui.screens.chat.conversation.*
 import app.daiyu.android.ui.screens.settings.*
 import app.daiyu.android.ui.screens.search.ConversationSearchScreen
+import app.daiyu.android.ui.app.SearchHistoryDialog
 import app.daiyu.android.ui.screens.search.MessageSearchScreen
 import app.daiyu.android.ui.screens.stats.UsageStatsScreen
 import app.daiyu.android.vdapproval.R08PlanEditorHost
@@ -1439,7 +1440,7 @@ class MainActivity : ComponentActivity() {
                         "offline-speech" -> retainedPage = offlineSpeechReturnPage
                         "pet-model-settings" -> retainedPage = "pet-settings"
                         "assistant-edit" -> closeAssistantEditor()
-                        "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
+                        "conversation-search", "message-search", "history-search" -> searchPage?.let(::closeSearch)
                         else -> returnToChat()
                     }
                 }
@@ -1926,6 +1927,25 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                if (retainedPage == "history-search") searchPage?.let { page ->
+                    key(page) {
+                        SearchHistoryDialog(conversationId = page.conversationId,
+                            onSearchPage = { request, cursor, signal ->
+                                check(page.conversationId != null && request.conversationId == page.conversationId)
+                                retainedData.searchPage(request.query, page.conversationId, cursor,
+                                    cancellationSignal = signal)
+                            }, ownerCurrent = {
+                                activityUsable() && searchPage === page && retainedPage == page.route &&
+                                    selected?.id?.value == page.conversationId
+                            }, onOpenHit = { hit ->
+                                if (activityUsable() && searchPage === page && retainedPage == page.route &&
+                                    selected?.id?.value == page.conversationId && hit.conversationId == page.conversationId &&
+                                    lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+                                    guard { openHistoryHit(hit) }
+                                }
+                            }, onDismiss = { closeSearch(page) })
+                    }
+                }
                 if (retainedPage == "context-management") {
                     val visit = contextManagementVisit
                     if (visit != null) key(visit) {
@@ -2319,7 +2339,7 @@ class MainActivity : ComponentActivity() {
             ChatMenuAction.LOAD_EARLIER -> loadEarlier()
             ChatMenuAction.LOCATE_USER -> chooseUserMessage()
             ChatMenuAction.BOTTOM -> jumpToBottom()
-            ChatMenuAction.SEARCH -> if (currentChat()) openSearch("message-search")
+            ChatMenuAction.SEARCH -> if (currentChat()) openSearch("history-search")
             ChatMenuAction.SETTINGS -> retainedPage = "settings"
             ChatMenuAction.OPEN_TERMINAL -> openTerminal()
             ChatMenuAction.OPEN_BROWSER -> if (currentChat() && renderedContextEntryEpoch == contextManagementEntryEpoch) openBrowserVisualPage()
@@ -4537,6 +4557,10 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        if (retainedPage == "history-search") {
+            searchPage = null
+            retainedPage = "chat"
+        }
         val mediaPicker = pendingGenerationMediaOriginal
         val preserveMedia = mediaPicker != null && mediaPicker.pickerHopPending && mediaPicker.active.get() &&
             generationMediaVisit === mediaPicker.active && pendingBackupRequest == mediaPicker.requestCode &&
@@ -4940,7 +4964,7 @@ class MainActivity : ComponentActivity() {
     private fun openSearch(route: String) {
         requireActivityUsable()
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
-        require(route == "conversation-search" || route == "message-search")
+        require(route in setOf("conversation-search", "message-search", "history-search"))
         val origin = if (retainedPage == "manage") "manage" else "chat"
         updatePane()
         prompt = null
@@ -5020,6 +5044,10 @@ class MainActivity : ComponentActivity() {
         requireActivityUsable()
         check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null)) { "请等待本次发送结果" }
         check(controller.ready && !controller.dataBusy && controller.problem?.startsWith("会话恢复失败") != true)
+        if (retainedPage == "history-search") {
+            searchPage = null
+            retainedPage = "chat"
+        }
         if (revokeContextManagementEntry()) editorGeneration++
         voiceConversationDialogOwner = null
         fenceVideoRoute()

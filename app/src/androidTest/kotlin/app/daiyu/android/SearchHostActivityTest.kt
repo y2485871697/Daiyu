@@ -35,7 +35,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
 
     private fun openMessages() {
         mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.SEARCH) }
-        awaitPage(R.string.search_messages_title)
+        awaitTag("search-history-dialog")
     }
     private fun seed(title: String, key: String, body: String, later: Int = 0): Pair<Conversation, Message> {
         lateinit var conversation: Conversation
@@ -91,17 +91,51 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         setDraft("当前会话草稿")
         openMessages()
         replaceSearchQuery("独特旧记录关键词")
-        awaitTag("search:message:${other.id.value}:${otherMessage.id.value}")
-        ui.onNodeWithText(text(R.string.search_current)).assertIsEnabled().performClick()
-        val tag = "search:message:${target.id.value}:${older.id.value}"
+        val tag = "search:message:${target.id.value}:${older.id.value}:0"
         awaitTag(tag)
-        node("search:message:${other.id.value}:${otherMessage.id.value}").assertDoesNotExist()
-        page(R.string.search_messages_title).performScrollToNode(hasTestTag(tag))
+        node("search:message:${other.id.value}:${otherMessage.id.value}:0").assertDoesNotExist()
+        node("search-history-results").performScrollToNode(hasTestTag(tag))
         node(tag).performClick()
         node("chat-title").assertTextEquals("较早命中所在会话")
         awaitTag("chat-turn:${older.id.value}")
-        node("chat-turn:${older.id.value}").assertExists()
+        node("chat-turn:${older.id.value}").assertIsDisplayed()
+        node("search-history-dialog").assertDoesNotExist()
         assertDraft("当前会话草稿")
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testSearchHitOpensSupplementAndLaterRepeatedAssistantSegment() {
+        val (conversation, _) = seed("分段检索", "segments", "普通提问", later = 30)
+        val ownerId = MessageId("segments-answer-0")
+        val owner = fixture.database.messages(conversation.id, Long.MAX_VALUE, 100)
+            .single { it.second.id == ownerId }.second
+        mainThread {
+            fixture.database.save(owner.copy(historySegments = listOf(
+                MessageHistorySegment(owner.id, "assistant", listOf(MessageBlock.Text("first", "相同词前段"))),
+                MessageHistorySegment(MessageId("supplement"), "user", listOf(MessageBlock.Text("supplement", "补充定位词"))),
+                MessageHistorySegment(owner.id, "assistant", listOf(MessageBlock.Text("last", "相同词后段"))),
+            )))
+            activity.select(conversation)
+        }
+        setDraft("分段检索草稿")
+        openMessages()
+        replaceSearchQuery("补充定位词")
+        val supplementTag = "search:message:${conversation.id.value}:supplement:0"
+        awaitTag(supplementTag)
+        node(supplementTag).performClick()
+        awaitTag("chat-turn:supplement")
+        node("chat-turn:supplement").assertIsDisplayed()
+        openMessages()
+        replaceSearchQuery("相同词")
+        val lastTag = "search:message:${conversation.id.value}:${ownerId.value}:1"
+        awaitTag(lastTag)
+        node(lastTag).performClick()
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithText("相同词后段", substring = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        ui.onNodeWithText("相同词后段", substring = true).assertIsDisplayed()
+        node("search-history-dialog").assertDoesNotExist()
+        assertDraft("分段检索草稿")
         assertEquals(0, fixture.opens.get())
     }
 
@@ -132,8 +166,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         node("search:empty").assertDoesNotExist()
         fixture.database.writableDatabase.execSQL("UPDATE messages SET blocks=? WHERE id=?", arrayOf(originalBlocks, first.id.value))
         node("search:retry").performClick()
-        awaitTag("search:message:${conversation.id.value}:${first.id.value}")
-        ui.onNodeWithText(activity.getString(R.string.search_message_count, 1)).assertExists()
+        awaitTag("search:message:${conversation.id.value}:${first.id.value}:0")
         node("search:error").assertDoesNotExist()
         ui.onNodeWithText(activity.getString(R.string.search_limited_results, 200)).assertDoesNotExist()
         replaceSearchQuery("不存在的正文")
@@ -173,19 +206,17 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         setDraft("分页跳转前草稿")
         openMessages()
         replaceSearchQuery("分页UI命中")
+        awaitTag("search:message:${conversation.id.value}:paging-ui-user-0:0")
+        val lastTag = "search:message:${conversation.id.value}:${last.id.value}:0"
+        node("search-history-results").performScrollToNode(hasTestTag("search:more"))
+        node("search:more").performClick()
         ui.waitUntil(5_000) {
-            ui.onAllNodesWithText(activity.getString(R.string.search_message_count, 200)).fetchSemanticsNodes().isNotEmpty()
+            ui.onAllNodesWithTag("search:more").fetchSemanticsNodes().isEmpty() &&
+                ui.onAllNodesWithTag("search:loading").fetchSemanticsNodes().isEmpty()
         }
-        val lastTag = "search:message:${conversation.id.value}:${last.id.value}"
-        page(R.string.search_messages_title).performScrollToNode(hasText(text(R.string.search_load_more)))
-        ui.onNodeWithText(text(R.string.search_load_more)).performClick()
-        page(R.string.search_messages_title).performScrollToIndex(0)
-        ui.waitUntil(5_000) {
-            ui.onAllNodesWithText(activity.getString(R.string.search_message_count, 201)).fetchSemanticsNodes().isNotEmpty()
-        }
-        page(R.string.search_messages_title).performScrollToNode(hasTestTag(lastTag))
+        node("search-history-results").performScrollToNode(hasTestTag(lastTag))
         node(lastTag).performClick()
-        page(R.string.search_messages_title).assertDoesNotExist()
+        node("search-history-dialog").assertDoesNotExist()
         awaitTag("chat-turn:${last.id.value}")
         node("chat-turn:${last.id.value}").assertIsDisplayed()
         assertDraft("分页跳转前草稿")
@@ -194,16 +225,61 @@ class SearchHostActivityTest : WiredActivityTestCase() {
 
     fun testDeletedHitCannotNavigateToAnotherConversation() {
         val (conversation, message) = seed("将被删除的命中", "deleted", "删除前关键词")
+        mainThread { activity.select(conversation) }
         openMessages()
         replaceSearchQuery("删除前关键词")
-        val tag = "search:message:${conversation.id.value}:${message.id.value}"
+        val tag = "search:message:${conversation.id.value}:${message.id.value}:0"
         awaitTag(tag)
         mainThread { fixture.database.delete(conversation.id) }
         node(tag).performClick()
-        page(R.string.search_messages_title).assertExists()
-        node("chat-draft").assertDoesNotExist()
+        node("search-history-dialog").assertExists()
+        node("chat-draft").assertExists()
         backToChat(activity)
         node("chat-draft").assertExists()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testEmptyDraftSearchDoesNotSearchOtherConversations() {
+        seed("其他会话", "not-current", "不应跨会话展示")
+        mainThread { activity.select(null) }
+        setDraft("未发送草稿")
+        openMessages()
+        replaceSearchQuery("不应跨会话展示")
+        node("search:empty").assertExists()
+        node("search:loading").assertDoesNotExist()
+        backToChat(activity)
+        assertDraft("未发送草稿")
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testManageGlobalSearchStillOpensAnotherConversation() {
+        val (conversation, message) = seed("全局入口会话", "global", "全局正文词")
+        openManage()
+        ui.onNodeWithContentDescription(text(R.string.action_search_history)).performClick()
+        awaitPage(R.string.search_messages_title)
+        replaceSearchQuery("全局正文词")
+        val tag = "search:message:${conversation.id.value}:${message.id.value}"
+        awaitTag(tag)
+        node(tag).performClick()
+        awaitTag("chat-turn:${message.id.value}")
+        node("chat-turn:${message.id.value}").assertIsDisplayed()
+        node("chat-title").assertTextEquals("全局入口会话")
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPauseDismissesDialogAndOldHitCannotNavigateAfterResume() {
+        val (conversation, message) = seed("暂停检索", "pause", "暂停前搜索词")
+        mainThread { activity.select(conversation) }
+        setDraft("暂停保留草稿")
+        openMessages()
+        replaceSearchQuery("暂停前搜索词")
+        val tag = "search:message:${conversation.id.value}:${message.id.value}:0"
+        awaitTag(tag)
+        val oldClick = checkNotNull(node(tag).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+        realPauseResume(activity, atPause = { oldClick() })
+        node("search-history-dialog").assertDoesNotExist()
+        mainThread { oldClick() }
+        assertDraft("暂停保留草稿")
         assertEquals(0, fixture.opens.get())
     }
 
@@ -213,7 +289,7 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         replaceSearchQuery("不会发送的检索词")
         val old = activity
         activity = recreateActivity(old)
-        page(R.string.search_messages_title).assertDoesNotExist()
+        node("search-history-dialog").assertDoesNotExist()
         assertDraft("重建时保留的搜索草稿")
         assertTrue(old.isDestroyed)
         assertEquals(0, fixture.opens.get())

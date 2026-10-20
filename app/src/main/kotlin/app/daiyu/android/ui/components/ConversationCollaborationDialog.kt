@@ -25,10 +25,10 @@ import androidx.compose.ui.window.DialogProperties
 import app.daiyu.android.delegation.*
 import app.daiyu.android.ui.haptics.TouchHaptics
 import app.daiyu.android.ui.components.subagent.*
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.VerifiedUser
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.font.FontWeight
+import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 
 internal class OwnerBoundPopup<Owner>(val owner: Owner) {
     private var active: Any? = null
@@ -102,6 +102,7 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
     val providers by modelSource.providers.collectAsState()
     val maximumHeight = (appWindowSize().height - 48.dp).coerceAtLeast(0.dp)
     val view = LocalView.current
+    val footerColors = assistantPreviewPalette()
     val chooserPopup = if (choosing && directory != null && editor != null) {
         val popup = remember(editor) { OwnerBoundPopup(editor.owner) }
         val ticket = remember(popup) { popup.open() }
@@ -126,11 +127,8 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                     Column(Modifier.then(if (emptyState) Modifier.height(360.dp) else Modifier.heightIn(min = 360.dp))
                         .padding(start = 15.dp, end = 15.dp, top = 10.dp, bottom = 16.dp)) {
                         ConversationAgentHandle()
-                        Row(Modifier.fillMaxWidth().padding(bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().padding(bottom = 12.dp).heightIn(min = 29.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("本会话协作", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                            ConversationAgentIconButton(onClick = onDismiss, modifier = Modifier.size(27.dp, 29.dp)) {
-                                Icon(Icons.Rounded.Close, "关闭子代理设置", Modifier.size(16.dp))
-                            }
                         }
                         Column(Modifier.fillMaxWidth().weight(1f, fill = emptyState).testTag("subagent-collaboration-body")
                             .verticalScroll(key(editor, choosing, current?.presetApplicationToken) { rememberScrollState() })
@@ -243,7 +241,9 @@ private fun BoundConversationCollaborationDialog(show: Boolean, enabled: Boolean
                                     if (panelEnabled && panelEditor.enabled && latestOwnerMatches() && !latestTaskRunning && !latestChoosing) { TouchHaptics.click(view); chooserOverride = true }
                                 }
                             }
-                            ConversationAgentButton(if (editor == null) "关闭" else "完成", enabled = !taskRunning, primary = editor != null, modifier = Modifier.weight(1f)) {
+                            ConversationAgentButton(if (editor == null) "关闭" else "完成", enabled = !taskRunning, primary = true,
+                                modifier = Modifier.weight(1f).testTag("subagent-collaboration-done"),
+                                primaryColor = footerColors.primary, onPrimaryColor = footerColors.onPrimary) {
                                 if (latestOwnerMatches() && !latestTaskRunning) { TouchHaptics.click(view); onDismiss() }
                             }
                         }

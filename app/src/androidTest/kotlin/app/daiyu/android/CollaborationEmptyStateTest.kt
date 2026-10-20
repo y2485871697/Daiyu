@@ -6,6 +6,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.dp
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewPalette
 import androidx.compose.ui.test.*
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
@@ -39,6 +44,22 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
         assertTrue("No unused area after footer", (card.bottom - footer.bottom) / density < 32f)
     }
 
+    private fun assertPrimaryFooterWithoutCross(dark: Boolean, label: String) {
+        ui.onNodeWithContentDescription("关闭子代理设置", useUnmergedTree = true).assertDoesNotExist()
+        val button = node("subagent-collaboration-done").assertIsEnabled().assertHeightIsEqualTo(44.dp)
+        val pixels = button.captureToImage().toPixelMap()
+        val expected = AssistantPreviewPalette(dark)
+        val background = pixels[(12 * density).toInt(), pixels.height / 2]
+        assertEquals(expected.primary.red, background.red, .01f)
+        assertEquals(expected.primary.green, background.green, .01f)
+        assertEquals(expected.primary.blue, background.blue, .01f)
+        val layouts = mutableListOf<TextLayoutResult>()
+        ui.onNodeWithText(label, useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) {
+            assertTrue(it(layouts))
+        }
+        assertEquals(expected.onPrimary, layouts.single().layoutInput.style.color)
+    }
+
     fun testNoConversationKeepsWhitespaceAndBottomFooterWithoutWritingConfiguration() {
         for (dark in listOf(false, true)) {
             val prefs = instrumentation.targetContext.getSharedPreferences("collaboration-empty-${UUID.randomUUID()}", 0)
@@ -49,6 +70,7 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
                 assertSpaciousWithBottomFooter("subagent-no-conversation")
                 ui.onNodeWithText("尚未选择会话").assertIsDisplayed()
                 ui.onNodeWithText("使用当前配置").assertDoesNotExist()
+                assertPrimaryFooterWithoutCross(dark, "关闭")
                 ui.onNodeWithText("关闭").performClick()
                 node("subagent-collaboration-card").assertDoesNotExist()
                 assertEquals(before, prefs.all)
@@ -68,6 +90,7 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
                 assertSpaciousWithBottomFooter("subagent-no-presets")
                 ui.onNodeWithText("还没有子代理组").assertIsDisplayed()
                 ui.onNodeWithText("使用当前配置").assertIsEnabled()
+                assertPrimaryFooterWithoutCross(dark, "完成")
                 ui.onNodeWithText("完成").performClick()
                 node("subagent-collaboration-card").assertDoesNotExist()
                 assertEquals(before, prefs.all)

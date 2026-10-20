@@ -35,13 +35,22 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.dropShadow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.shadow.Shadow
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
@@ -145,7 +154,7 @@ internal fun ChatAnchoredMenu(
 }
 
 @Composable
-private fun ChatGlassMenuSurface(backdrop: LayerBackdrop?, modifier: Modifier, content: @Composable () -> Unit) {
+internal fun ChatGlassMenuSurface(backdrop: LayerBackdrop?, modifier: Modifier, content: @Composable () -> Unit) {
     val dark = MiuixTheme.colorScheme.background.luminance() < .3f
     val shape = RoundedCornerShape(19.dp)
     val blur = if (backdrop == null) Modifier else Modifier.textureBlur(
@@ -155,9 +164,35 @@ private fun ChatGlassMenuSurface(backdrop: LayerBackdrop?, modifier: Modifier, c
     val shades = if (dark) listOf(Color(0xE62C2739), Color(0xDB1B1924))
         else listOf(Color(0xE6FFFFFF), Color(0xD4FAF7FF))
     Column(modifier.width(IntrinsicSize.Max)
-        .shadow(12.dp, shape, clip = false, ambientColor = Color(0x164C3A6B), spotColor = Color(0x164C3A6B)).clip(shape).then(blur)
+        .dropShadow(shape, Shadow(radius = if (dark) 35.dp else 34.dp,
+            offset = DpOffset(0.dp, if (dark) 14.dp else 12.dp),
+            color = if (dark) Color(0x55000000) else Color(0x164C3A6B)))
+        .dropShadow(shape, Shadow(radius = 6.dp, offset = DpOffset(0.dp, 2.dp),
+            color = if (dark) Color(0x22000000) else Color(0x05342048)))
+        .clip(shape).then(blur)
         .pointerInput(Unit) { detectTapGestures(onTap = {}) }
         .background(Brush.linearGradient(shades))
         .border(1.dp, if (dark) Color(0x26DCCDFF) else Color(0xF0FFFFFF), shape)
+        .drawWithCache {
+            val edge = 1.dp.toPx()
+            val innerBounds = Rect(edge, edge, size.width - edge, size.height - edge)
+            val innerRadius = CornerRadius(18.dp.toPx())
+            val inner = Path().apply { addRoundRect(RoundRect(innerBounds, innerRadius)) }
+            val shifted = Path().apply {
+                addRoundRect(RoundRect(innerBounds.translate(0f, edge), innerRadius))
+            }
+            // CSS inset 0 1px 0: only the top-facing part of the inner rounded edge.
+            val highlight = Path.combine(PathOperation.Difference, inner, shifted)
+            onDrawWithContent {
+                drawContent()
+                drawRoundRect(
+                    color = if (dark) Color(0x06D7C5FF) else Color(0x0E9581B3),
+                    topLeft = Offset(edge * 1.5f, edge * 1.5f),
+                    size = Size(size.width - edge * 3, size.height - edge * 3),
+                    cornerRadius = CornerRadius(17.5.dp.toPx()), style = Stroke(edge),
+                )
+                drawPath(highlight, if (dark) Color(0x14F5EBFF) else Color.White)
+            }
+        }
         .verticalScroll(rememberScrollState()).padding(6.dp)) { content() }
 }

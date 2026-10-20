@@ -15,10 +15,14 @@ import app.daiyu.android.ui.screens.settings.ModelCatalogEntryUi
 internal class LocalCatalogChatModelPickerSession(
     snapshot: SavedModelCatalogSnapshot<CatalogModelParameters>,
     currentModel: String,
+    providerId: String = "current",
+    providers: List<ChatModelProviderUi> = emptyList(),
 ) {
     private val snapshot = snapshot.copy(models = snapshot.models.toList())
     val state = ChatModelPickerState(
         current = currentModel,
+        providerId = providerId,
+        providers = providers,
         models = snapshot.models.map { ModelCatalogEntryUi(it.id, it.displayName) },
         message = if (snapshot.models.isEmpty()) "本地目录为空，请到模型设置导入" else null,
     )

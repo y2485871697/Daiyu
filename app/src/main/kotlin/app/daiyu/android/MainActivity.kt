@@ -5501,18 +5501,32 @@ class MainActivity : ComponentActivity() {
                 val editor = controller.providers.activeEditor()
                 val catalog = runCatching { controller.providers.withEditor(editor) { it.localModelCatalogSnapshot() } }
                 val settings = runCatching { controller.providers.withEditor(editor) { it.load() } }
-                Triple(editor, catalog, settings)
+                val registry = controller.providers.snapshot()
+                check(registry.revision == editor.registryRevision)
+                val groups = registry.providers.filter { it.enabled }.map { provider ->
+                    val models = if (provider.slotId == editor.slotId) catalog.getOrNull()?.models.orEmpty()
+                        else runCatching {
+                            controller.providers.withEditor(app.daiyu.android.storage.ProviderEditorSlot(provider.slotId, registry.revision)) {
+                                it.localModelCatalogSnapshot()?.models.orEmpty()
+                            }
+                        }.getOrDefault(emptyList())
+                    ChatModelProviderUi(provider.slotId, provider.name,
+                        models.map { ModelCatalogEntryUi(it.id, it.displayName) })
+                }
+                Triple(editor, catalog, settings) to groups
             } }
-            val catalog = loaded.getOrNull()?.second ?: Result.failure(IllegalStateException("未选择可用提供商"))
-            val settings = loaded.getOrNull()?.third ?: Result.failure(IllegalStateException("未选择可用提供商"))
+            val catalog = loaded.getOrNull()?.first?.second ?: Result.failure(IllegalStateException("未选择可用提供商"))
+            val settings = loaded.getOrNull()?.first?.third ?: Result.failure(IllegalStateException("未选择可用提供商"))
             if (!activityUsable() || retainedPage != "chat" || chatModelOwner !== owner ||
                 cancelled.get() || chatModelCancelled !== cancelled) return@launch
             val saved = settings.getOrNull()
             chatModelSettings = saved
             confirmedModelLabel = saved?.model?.ifBlank { "模型" } ?: "模型"
-            chatModelProviderEditor = loaded.getOrNull()?.first
+            chatModelProviderEditor = loaded.getOrNull()?.first?.first
             val snapshot = catalog.getOrNull()
-            val session = snapshot?.let { LocalCatalogChatModelPickerSession(it, saved?.model.orEmpty()) }
+            val session = snapshot?.let { LocalCatalogChatModelPickerSession(it, saved?.model.orEmpty(),
+                providerId = checkNotNull(chatModelProviderEditor).slotId,
+                providers = loaded.getOrNull()?.second.orEmpty()) }
             chatModelSession = session
             val message = when {
                 catalog.isFailure -> "本地模型目录读取失败，请刷新或到模型设置核对"

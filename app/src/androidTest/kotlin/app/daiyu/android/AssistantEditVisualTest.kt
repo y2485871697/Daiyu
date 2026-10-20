@@ -109,6 +109,8 @@ class AssistantEditVisualTest : WiredActivityTestCase() {
     fun testEditorMatchesPreviewTypographyAndKeepsFooterOutsideScrollingContent() {
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             show(scale, dark)
+            ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
+            ui.onNodeWithContentDescription("返回").assertHasClickAction()
             tagged("assistant-edit-name").performScrollTo()
             assertType(text(R.string.assistant_editor_title), 18.sp, 26.sp)
             assertType(text(R.string.assistant_editor_name), 13.sp, 20.sp)

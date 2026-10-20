@@ -1305,6 +1305,14 @@ class MainActivity : ComponentActivity() {
     private fun assistantOwnerMatches(owner: AssistantSelectionOwner): Boolean = activityUsable() &&
         owner.accepts(assistantSelectionOwner,selected?.id?.value,editorGeneration,assistantPicker)
     private var assistantEditingId by mutableStateOf<String?>(null)
+    private var assistantEditReturnPage = "chat"
+    private var assistantEditReturnToSidebar = false
+    private fun closeAssistantEditor() {
+        assistantEditingId = null
+        retainedPage = assistantEditReturnPage
+        if (assistantEditReturnToSidebar) openSidebar()
+        assistantEditReturnToSidebar = false
+    }
     private var assistantAvatarRevision by mutableStateOf(0L)
     private var childModelSaveOwner: ModelSettingsSaveOwner? = null
     private var childAuthorizationEpoch = 0L
@@ -1429,6 +1437,7 @@ class MainActivity : ComponentActivity() {
                         "offline-speech" -> retainedPage = offlineSpeechReturnPage
                         "pet-model-settings" -> retainedPage = "pet-settings"
                         "app-icon" -> retainedPage = "appearance"
+                        "assistant-edit" -> closeAssistantEditor()
                         "conversation-search", "message-search" -> searchPage?.let(::closeSearch)
                         else -> returnToChat()
                     }
@@ -1854,7 +1863,7 @@ class MainActivity : ComponentActivity() {
                                 } } catch (_: Exception) { emptyList() }
                             }
                         }
-                        AssistantEditScreen(assistantId = id, onBack = { returnToChat() },
+                        AssistantEditScreen(assistantId = id, onBack = { closeAssistantEditor() },
                             store = assistantStore, assets = assistantAssets, installedSkills = skills,
                             onSaved = { savedId ->
                                 if (activityUsable()) {
@@ -1891,6 +1900,8 @@ class MainActivity : ComponentActivity() {
                         onSelectAssistant = { id -> guard { assistantStore.select(id) } },
                         onEditAssistant = { id -> guard {
                             checkNotNull(assistantStore.read(id)) { "助手已不存在" }
+                            assistantEditReturnPage = retainedPage
+                            assistantEditReturnToSidebar = true
                             dismissSidebar(); assistantEditingId = id; retainedPage = "assistant-edit"
                         } },
                         onOpenAssistants = { dismissSidebar(); openAssistantPicker(global = true) },
@@ -1995,6 +2006,7 @@ class MainActivity : ComponentActivity() {
                 assistantSelectionOwner?.let { owner -> key(owner) {
                     AssistantPickerDialog(show = assistantPicker, store = assistantStore, assets = assistantAssets,
                         selectedId = owner.expectedAssistantId, useGlobalSelection = false,
+                        editing = retainedPage == "assistant-edit",
                         canMutate = { assistantOwnerMatches(owner) && !controller.dataBusy },
                         onSelect = { id -> guard {
                             check(assistantOwnerMatches(owner)) { "选择器所属页面已变化；未改变绑定" }
@@ -2007,7 +2019,9 @@ class MainActivity : ComponentActivity() {
                             refresh()
                         } },
                         onEdit = { id -> if(assistantOwnerMatches(owner)) {
-                            assistantPicker = false; assistantEditingId = id; retainedPage = "assistant-edit"
+                            assistantEditReturnPage = retainedPage
+                            assistantEditReturnToSidebar = false
+                            assistantEditingId = id; retainedPage = "assistant-edit"
                         } },
                         onDismiss = { if(assistantSelectionOwner===owner) assistantPicker = false })
                 } }

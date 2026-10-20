@@ -194,9 +194,12 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
         node("drawer-manage").performClick()
         node("drawer-selection-count").assertDoesNotExist()
         node("drawer-search").performClick()
-        node("drawer-search-input").performSemanticsAction(SemanticsActions.SetText) { it(AnnotatedString("Second")) }
+        node("drawer-search-input").performSemanticsAction(SemanticsActions.SetText) { assertTrue(it(AnnotatedString("Second"))) }
+        node("drawer-search-input").assertEditableText("Second")
+        dismissIme()
+        node("drawer-list").performScrollToNode(hasTestTag("drawer-conversation:second"))
         node("drawer-conversation:first").assertDoesNotExist()
-        node("drawer-conversation:second").performClick()
+        node("drawer-conversation:second").assertIsDisplayed().performClick()
         assertEquals("conversation:second", action)
     }
 

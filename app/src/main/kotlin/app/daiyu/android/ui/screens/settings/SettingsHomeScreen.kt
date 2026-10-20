@@ -37,8 +37,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.BuildConfig
 import app.daiyu.android.update.GithubReleaseChecker
 import app.daiyu.android.update.ReleaseCheck
-import app.daiyu.android.delegation.ReasoningEffort
-import app.daiyu.android.ui.components.subagent.SubAgentThinkingEffortPickerDialog
 import app.daiyu.android.ui.FeatureRoute
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.icons.DaiyuIcon
@@ -88,8 +86,7 @@ internal fun SettingsSearch(query: String, onQueryChange: (String) -> Unit,
 }
 
 @Composable
-private fun OriginalSettingsRow(entry: SettingsEntry, defaultReasoning: ReasoningEffort, defaultReasoningError: String?,
-    onDefaultReasoningToggle: ((Boolean) -> Unit)?, diagnostics: SettingsDiagnosticsUi,
+private fun OriginalSettingsRow(entry: SettingsEntry, diagnostics: SettingsDiagnosticsUi,
     release: SettingsReleaseUi, onClick: () -> Unit) {
     if (entry.id == "updates") {
         SettingsRow(entry.title, onClick = if (release.checking) null else onClick,
@@ -99,13 +96,6 @@ private fun OriginalSettingsRow(entry: SettingsEntry, defaultReasoning: Reasonin
     }
     if (entry.id in setOf("logging", "export_logs", "clear_logs")) {
         SettingsDiagnosticRow(entry, diagnostics)
-        return
-    }
-    if (entry.id == "default_reasoning" && onDefaultReasoningToggle != null) {
-        SettingsSwitchRow(entry.title, defaultReasoning !in setOf(ReasoningEffort.DEFAULT, ReasoningEffort.OFF),
-            enabled = defaultReasoningError == null, tag = "settings-row:${entry.title}",
-            summary = "与独立草稿共用；不改既有会话。关闭时由模型配置决定", onCheckedChange = onDefaultReasoningToggle)
-        if (defaultReasoningError != null) SettingsNote(defaultReasoningError, error = true)
         return
     }
     SettingsRow(entry.title, onClick = if (entry.id == "donate") null else onClick,
@@ -134,9 +124,6 @@ internal fun DaiyuSettingsScreen(
     onOpenHaptics: (() -> Unit)? = null,
     onOpenPlatformTools: (() -> Unit)? = null,
     onOpenVoice: (() -> Unit)? = null,
-    defaultReasoning: ReasoningEffort = ReasoningEffort.DEFAULT,
-    defaultReasoningError: String? = null,
-    onDefaultReasoningChange: ((ReasoningEffort) -> Unit)? = null,
     engineeringUi: Boolean = false,
     diagnostics: app.daiyu.android.diagnostics.DiagnosticLogStore? = null,
     scrollBehavior: ScrollBehavior = MiuixScrollBehavior(),
@@ -155,22 +142,6 @@ internal fun DaiyuSettingsScreen(
         onNotice = onReleaseNotice ?: { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() })
     var query by rememberSaveable { mutableStateOf("") }
     var relayExpanded by rememberSaveable { mutableStateOf(false) }
-    var choosingDefaultReasoning by remember { mutableStateOf(false) }
-    val defaultReasoningToggle: ((Boolean) -> Unit)? = onDefaultReasoningChange?.let { change -> { enabled ->
-        if (visit.active && localPage == null && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-            if (enabled) { focus.clearFocus(); choosingDefaultReasoning = true } else change(ReasoningEffort.DEFAULT)
-        }
-    } }
-    SubAgentThinkingEffortPickerDialog(show = choosingDefaultReasoning, effort = defaultReasoning,
-        options = ReasoningEffort.entries.filter { it !in setOf(ReasoningEffort.DEFAULT, ReasoningEffort.OFF) },
-        description = "为新会话显式选择默认强度；不修改既有会话或运行中的请求。关闭开关仅取消额外指定，不强制关闭模型推理。",
-        onDismiss = { choosingDefaultReasoning = false }, onEffortChange = { effort ->
-            if (visit.active && choosingDefaultReasoning && localPage == null &&
-                lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-                onDefaultReasoningChange?.invoke(effort)
-                choosingDefaultReasoning = false
-            }
-        })
     val catalogGroups = remember(engineeringUi) { SettingsCatalog.visibleGroups(engineeringUi) }
     val groups = remember(query, catalogGroups) { filterSettingsGroups(query, catalogGroups) }
     val listState = rememberLazyListState()
@@ -256,8 +227,7 @@ internal fun DaiyuSettingsScreen(
                                     }
                                 }
                             }
-                            else -> OriginalSettingsRow(entry, defaultReasoning, defaultReasoningError,
-                                defaultReasoningToggle, diagnosticsUi, release) { open(entry) }
+                            else -> OriginalSettingsRow(entry, diagnosticsUi, release) { open(entry) }
                         }
                     }
                 }

@@ -5,7 +5,7 @@ import top.yukonga.miuix.kmp.theme.Colors
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
 
-/** Lavender and charcoal surfaces shared by native and retained screens; Monet remains opt-in. */
+/** Fixed lavender and charcoal surfaces shared by native and retained screens. */
 internal object DaiyuPalette {
     val light: Colors = lightColorScheme(
         primary = Color(0xFF7563B4),

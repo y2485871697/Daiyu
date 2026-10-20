@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.semantics.SemanticsActions
 import android.content.ContextWrapper
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
@@ -47,7 +49,12 @@ class SecretVisibilityActivityTest : WiredActivityTestCase() {
         val saved = fixture.settings.load().copy(apiKey = "independent-secret-canary")
         fixture.controller.independentModels.save(slot, saved, null, true, true)
         val binding = fixture.controller.independentModels.record(slot)
-        openSettings(); node("settings-search").performTextReplacement("辅助视觉模型")
+        openSettings()
+        node("settings-search")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString("辅助视觉模型")))
+            }
+            .assertEditableText("辅助视觉模型")
         reveal("settings-row:辅助视觉模型", "设置").performClick()
         awaitUniqueTag("independent-model-vision")
         node("independent-model-configure").assertIsDisplayed()

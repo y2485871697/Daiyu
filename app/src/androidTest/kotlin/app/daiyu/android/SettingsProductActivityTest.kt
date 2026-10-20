@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.semantics.SemanticsActions
 import android.app.Activity
 import android.app.Instrumentation
 import android.content.Intent
@@ -11,7 +13,11 @@ class SettingsProductActivityTest : WiredActivityTestCase() {
         setDraft("product backup unsent")
         val before = fixture.database.exportBackup()
         openSettings()
-        node("settings-search").performTextReplacement("数据备份")
+        node("settings-search")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString("数据备份")))
+            }
+            .assertEditableText("数据备份")
         reveal("settings-row:数据备份", "设置").performClick()
         reveal("backup-export", "备份与导入").assertExists().assertIsEnabled()
         reveal("backup-import", "备份与导入").assertExists().assertIsEnabled()

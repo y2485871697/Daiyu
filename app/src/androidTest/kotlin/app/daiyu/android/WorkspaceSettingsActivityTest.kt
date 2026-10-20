@@ -1,5 +1,6 @@
 package app.daiyu.android
 
+import androidx.compose.ui.text.AnnotatedString
 import android.app.Activity
 import android.app.Instrumentation
 import android.content.Context
@@ -37,7 +38,11 @@ class WorkspaceSettingsActivityTest : WiredActivityTestCase() {
     }
     private fun openWorkspace() {
         openSettings()
-        node("settings-search").performTextReplacement("工作区与文件")
+        node("settings-search")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString("工作区与文件")))
+            }
+            .assertEditableText("工作区与文件")
         reveal("settings-row:工作区与文件", "设置").performClick()
         awaitUniqueTag("page:工作区")
     }

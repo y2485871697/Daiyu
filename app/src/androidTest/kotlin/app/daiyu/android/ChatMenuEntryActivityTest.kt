@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.semantics.SemanticsActions
 import android.app.Instrumentation
 import android.content.Intent
 import androidx.compose.ui.test.*
@@ -396,7 +398,11 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
     fun testSettingsVoiceRowEntersExistingConfiguration() {
         selectDraft()
         openSettings()
-        node("settings-search").performTextReplacement("语音")
+        node("settings-search")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString("语音")))
+            }
+            .assertEditableText("语音")
         reveal("settings-row:语音", "设置").performClick()
         node("voice-settings").assertExists()
         node("voice-universal-control").assertDoesNotExist()

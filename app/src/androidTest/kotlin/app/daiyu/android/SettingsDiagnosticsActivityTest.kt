@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.semantics.SemanticsActions
 import android.app.Activity
 import android.app.Instrumentation
 import android.content.Intent
@@ -17,11 +19,19 @@ import org.junit.Assert.assertArrayEquals
 class SettingsDiagnosticsActivityTest : WiredActivityTestCase() {
     private fun openDiagnostics() {
         openSettings()
-        node("settings-search").performTextReplacement("诊断")
+        node("settings-search")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString("诊断")))
+            }
+            .assertEditableText("诊断")
         awaitControl("diagnostic load") { fixture.diagnostics.state.value.loaded }
     }
     private fun row(title: String): SemanticsNodeInteraction {
-        node("settings-search").performTextReplacement(title)
+        node("settings-search")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString(title)))
+            }
+            .assertEditableText(title)
         return reveal("settings-row:$title", "设置")
     }
     private fun enable() {

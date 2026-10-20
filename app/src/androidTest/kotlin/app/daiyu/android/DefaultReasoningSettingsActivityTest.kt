@@ -1,5 +1,6 @@
 package app.daiyu.android
 
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
@@ -7,7 +8,11 @@ import app.daiyu.android.delegation.ReasoningEffort
 
 class DefaultReasoningSettingsActivityTest : WiredActivityTestCase() {
     private fun revealDefault(): SemanticsNodeInteraction {
-        node("settings-search").performTextReplacement("默认启用推理")
+        node("settings-search")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString("默认启用推理")))
+            }
+            .assertEditableText("默认启用推理")
         return reveal("settings-row:默认启用推理", "设置")
     }
 

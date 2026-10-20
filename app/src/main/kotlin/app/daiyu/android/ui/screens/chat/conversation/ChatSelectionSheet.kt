@@ -34,6 +34,7 @@ internal fun ChatSelectionSheet(
     onDismiss: () -> Unit,
     height: Dp? = null,
     subtitle: String? = null,
+    showCloseButton: Boolean = true,
     footer: @Composable RowScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -50,13 +51,13 @@ internal fun ChatSelectionSheet(
             .padding(start = 15.dp, end = 15.dp, top = 11.dp, bottom = 15.dp)) {
             Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 17.dp)
                 .size(29.dp, 3.dp).background(colors.toolbar.copy(alpha = .24f), CircleShape))
-            Row(Modifier.fillMaxWidth().padding(bottom = 13.dp), verticalAlignment = Alignment.Top) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 13.dp).heightIn(min = 28.dp), verticalAlignment = Alignment.Top) {
                 Column(Modifier.weight(1f)) {
                     Text(title, color = colors.text, fontSize = 17.sp, lineHeight = 23.8.sp, fontWeight = FontWeight.SemiBold)
                     subtitle?.let { Text(it, color = colors.muted, fontSize = 10.sp, lineHeight = 16.sp,
                         modifier = Modifier.padding(top = 4.dp)) }
                 }
-                Box(Modifier.size(28.dp).clip(RoundedCornerShape(9.dp))
+                if (showCloseButton) Box(Modifier.size(28.dp).clip(RoundedCornerShape(9.dp))
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
                     contentAlignment = Alignment.Center) {
                     Icon(DaiyuIcons.Close, "关闭", Modifier.size(15.dp), tint = colors.muted)

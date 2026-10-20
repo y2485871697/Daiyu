@@ -34,11 +34,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 import androidx.compose.material3.Text
-import androidx.compose.material3.Icon
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
-import app.daiyu.android.ui.icons.DaiyuIcons
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
@@ -85,14 +83,9 @@ internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolea
     ConversationAgentSheet(onDismiss, radius = 26, modifier = Modifier.heightIn(max = maximumHeight)) {
         Column(Modifier.fillMaxWidth().heightIn(min = 180.dp).padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 12.dp).testTag("subagent-status")) {
             ConversationAgentHandle()
-            Row(Modifier.fillMaxWidth().padding(bottom = 10.dp), verticalAlignment = Alignment.Top) {
+            Row(Modifier.fillMaxWidth().padding(bottom = 10.dp).heightIn(min = 28.dp), verticalAlignment = Alignment.Top) {
                 Text("子代理状态", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = colors.text,
                     modifier = Modifier.weight(1f))
-                Box(Modifier.size(28.dp).clip(RoundedCornerShape(9.dp))
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss),
-                    contentAlignment = Alignment.Center) {
-                    Icon(DaiyuIcons.Close, "关闭", Modifier.size(15.dp), tint = colors.taskMuted)
-                }
             }
             Text("当前会话", fontSize = 10.sp, color = colors.taskMuted, modifier = Modifier.padding(bottom = 10.dp))
             when {

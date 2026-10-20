@@ -90,6 +90,7 @@ internal fun ChatModelPicker(
     ChatSelectionSheet(
         height = 500.dp,
         title = "选择模型",
+        showCloseButton = false,
         onDismiss = onDismiss,
         footer = {
             ConversationAgentButton("模型设置", enabled = !state.loading, modifier = Modifier.weight(1f), onClick = onSettings)

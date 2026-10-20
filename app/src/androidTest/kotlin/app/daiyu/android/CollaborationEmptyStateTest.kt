@@ -20,7 +20,7 @@ class CollaborationEmptyStateTest : WiredActivityTestCase() {
 
     private fun show(id: String?, repository: ConversationSubAgentPreferences, dark: Boolean) {
         mainThread { activity.setContent {
-            AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT)) {
+            AgentAppTheme(AppearanceSettings(themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
                 density = LocalDensity.current.density
                 var open by remember(id, dark) { mutableStateOf(true) }
                 ConversationCollaborationDialog(open, id, { open = false }, repositoryFactory = { repository })

@@ -2464,10 +2464,7 @@ class MainActivity : ComponentActivity() {
             })
         }
         val state by dictationHost.state.collectAsStateWithLifecycle()
-        if (state.status.isNotEmpty()) {
-            top.yukonga.miuix.kmp.basic.Text(text = state.status,
-                modifier = Modifier.testTag("dictation-status").semantics { liveRegion = LiveRegionMode.Polite })
-        }
+        app.daiyu.android.ui.components.DictationStatusNotice(state, engineeringUi)
         if (state.preview.isNotEmpty()) {
             top.yukonga.miuix.kmp.basic.Text(text = "识别预览（非最终草稿）：${state.preview}",
                 modifier = Modifier.testTag("dictation-partial"))

@@ -7,7 +7,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** Scoped final preview tokens: .glass-drawer and .drawer-* (style-00.css 234–300).
  * CSS #RRGGBBAA is deliberately converted to Compose #AARRGGBB, not made opaque.
- * Fixed CSS geometry stays in dp; only percentage widths follow the container.
+ * Typography and control sizes are tuned separately for device readability.
  */
 internal data class ConversationPanePreviewPalette(val dark: Boolean) {
     val text = if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
@@ -21,6 +21,7 @@ internal data class ConversationPanePreviewPalette(val dark: Boolean) {
     val searchBorder = if (dark) Color(0x16C7B4EB) else Color(0x1CA28CBD)
     val action = if (dark) Color(0x17AC93C2) else Color(0x1A81738E)
     val actionBorder = if (dark) Color(0x1FAC93C2) else Color(0x2081738E)
+    val folderIdle = if (dark) Color(0x24C0ACD7) else Color(0x2281738E)
     val folder = if (dark) Color(0xFF786A89) else Color(0xFF786C83)
     val folderText = if (dark) Color(0xFFF5EFFA) else Color.White
     val folderBorder = if (dark) Color(0x2BD4BEDE) else folder

@@ -129,7 +129,7 @@ private object DrawerMetrics {
     const val CloseDurationMs = 200
     val PaneHorizontalPadding @Composable get() = 14.dp * conversationPanePreviewScale()
     val AfterSearch @Composable get() = 12.dp * conversationPanePreviewScale()
-    val SearchIconSize @Composable get() = 18.dp * conversationPanePreviewScale()
+    val SearchIconSize @Composable get() = 20.dp * conversationPanePreviewScale()
     val SearchCornerRadius @Composable get() = 13.dp * conversationPanePreviewScale()
     val ChipGap @Composable get() = 6.dp * conversationPanePreviewScale()
     val AfterChips @Composable get() = 12.dp * conversationPanePreviewScale()
@@ -449,7 +449,7 @@ private fun ConversationPanePanel(
             )
             Spacer(modifier = Modifier.height(DrawerMetrics.AfterChips))
             if (managing) Text("已选择 ${selectedIds.size} 项", color = colors.accent,
-                fontSize = 9.sp, lineHeight = 12.sp,
+                fontSize = 12.sp, lineHeight = 17.sp,
                 modifier = Modifier.testTag("drawer-selection-count").padding(start = 8.dp, end = 8.dp, bottom = 8.dp))
             LazyColumn(
                 modifier = Modifier
@@ -537,8 +537,8 @@ private fun PaneSearchRow(
     val textStyle = MiuixTheme.textStyles.body2.merge(
         TextStyle(
             color = conversationPanePreviewPalette().text,
-            fontSize = (12f * s).sp,
-            lineHeight = 16.sp,
+            fontSize = (14f * s).sp,
+            lineHeight = 20.sp,
         ),
     )
     val searchFocusRequester = remember { FocusRequester() }
@@ -560,7 +560,7 @@ private fun PaneSearchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(38.dp * s)
+            .heightIn(min = 44.dp * s)
             .testTag("drawer-search")
             .clip(RoundedCornerShape(DrawerMetrics.SearchCornerRadius))
             .background(colors.search)
@@ -573,7 +573,7 @@ private fun PaneSearchRow(
                 searchActive = true
             }
             .padding(1.dp)
-            .padding(horizontal = 12.dp * s),
+            .padding(horizontal = 12.dp * s, vertical = 8.dp * s),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp * s),
     ) {
@@ -645,15 +645,15 @@ private fun DrawerActionRow(
     val view = LocalView.current
     val colors = conversationPanePreviewPalette()
     val s = conversationPanePreviewScale()
-    Row(Modifier.fillMaxWidth().heightIn(min = 38.dp * s).testTag(tag)
+    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp * s).testTag(tag)
         .clip(RoundedCornerShape(13.dp * s)).background(colors.action)
         .border(1.dp, colors.actionBorder, RoundedCornerShape(13.dp * s))
         .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
             TouchHaptics.click(view); onClick()
         }.padding(1.dp).padding(horizontal = 12.dp * s, vertical = 10.dp * s),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp * s)) {
-        Icon(icon, null, Modifier.size(18.dp * s).testTag("$tag-icon"), tint = colors.toolbar)
-        Text(label, color = colors.accent, fontSize = (11f * s).sp, lineHeight = 14.sp, fontWeight = FontWeight.Medium,
+        Icon(icon, null, Modifier.size(20.dp * s).testTag("$tag-icon"), tint = colors.toolbar)
+        Text(label, color = colors.accent, fontSize = (14f * s).sp, lineHeight = 20.sp, fontWeight = FontWeight.Medium,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
@@ -808,7 +808,7 @@ private fun DrawerChip(
     val background = if (selected) {
         conversationPanePreviewPalette().folder
     } else {
-        Color.Transparent
+        conversationPanePreviewPalette().folderIdle
     }
     val contentColor = if (selected) {
         conversationPanePreviewPalette().folderText
@@ -819,7 +819,7 @@ private fun DrawerChip(
     Row(
         modifier = Modifier
             .testTag(tag)
-            .heightIn(min = 34.dp * s)
+            .heightIn(min = 36.dp * s)
             .clip(RoundedCornerShape(18.dp * s))
             .background(background)
             .border(1.dp, if (selected) conversationPanePreviewPalette().folderBorder else Color.Transparent, RoundedCornerShape(18.dp * s))
@@ -846,15 +846,15 @@ private fun DrawerChip(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                modifier = Modifier.size(13.dp * s).testTag("$tag-icon"),
+                modifier = Modifier.size(15.dp * s).testTag("$tag-icon"),
                 tint = contentColor,
             )
         }
         Text(
             text = label,
             color = contentColor,
-            fontSize = (10f * s).sp,
-            lineHeight = 13.sp,
+            fontSize = (12f * s).sp,
+            lineHeight = 16.sp,
             fontWeight = FontWeight.Normal,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -870,8 +870,8 @@ private fun ConversationSectionHeader(
     Text(
         text = group.localizedLabel(),
         color = conversationPanePreviewPalette().muted,
-        fontSize = (10f * conversationPanePreviewScale()).sp,
-        lineHeight = 14.5.sp,
+        fontSize = (12f * conversationPanePreviewScale()).sp,
+        lineHeight = 17.sp,
         letterSpacing = (.2f * conversationPanePreviewScale()).sp,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier
@@ -953,8 +953,8 @@ private fun ConversationTextRow(
             Text(
                 text = conversation.title.ifBlank { conversation.preview },
                 color = conversationPanePreviewPalette().text,
-                fontSize = (12f * conversationPanePreviewScale()).sp,
-                lineHeight = (17.4f * conversationPanePreviewScale()).sp,
+                fontSize = (14f * conversationPanePreviewScale()).sp,
+                lineHeight = (20f * conversationPanePreviewScale()).sp,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -1099,7 +1099,8 @@ private fun EmptyConversations(isSearching: Boolean) {
             if (isSearching) R.string.conversation_no_results else R.string.conversation_empty,
         ),
         color = conversationPanePreviewPalette().muted,
-        fontSize = (11f * conversationPanePreviewScale()).sp,
+        fontSize = (13f * conversationPanePreviewScale()).sp,
+        lineHeight = 18.sp,
         textAlign = TextAlign.Center,
         fontWeight = FontWeight.Normal,
         modifier = Modifier.fillMaxWidth().padding(
@@ -1132,8 +1133,8 @@ private fun PaneAssistantBar(
         Text(
             text = name,
             color = conversationPanePreviewPalette().text,
-            fontSize = (12f * conversationPanePreviewScale()).sp,
-            lineHeight = (18f * conversationPanePreviewScale()).sp,
+            fontSize = (14f * conversationPanePreviewScale()).sp,
+            lineHeight = (20f * conversationPanePreviewScale()).sp,
             fontWeight = FontWeight.Normal,
             textAlign = TextAlign.End,
             maxLines = 1,

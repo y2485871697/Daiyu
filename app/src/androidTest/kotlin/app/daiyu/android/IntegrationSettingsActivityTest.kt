@@ -35,6 +35,23 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     private lateinit var original: ChatController
     private lateinit var directory: File
     private lateinit var activity: MainActivity
+    override fun runBare() {
+        val finished = CountDownLatch(1)
+        val testThread = Thread.currentThread()
+        Thread({
+            if (!finished.await(60, TimeUnit.SECONDS)) {
+                val threads = listOf(testThread, android.os.Looper.getMainLooper().thread)
+                val trace = threads.joinToString("\n") { thread ->
+                    "${thread.name} (${thread.state}):\n" + thread.stackTrace.joinToString("\n") { "  at $it" }
+                }
+                android.util.Log.e("DaiyuTestStall", "$name\n$trace")
+                instrumentation.sendStatus(2, android.os.Bundle().apply {
+                    putString("stream", "\nStall diagnostics: $name\n$trace\n")
+                })
+            }
+        }, "integration-settings-stall-diagnostics").apply { isDaemon = true; start() }
+        try { super.runBare() } finally { finished.countDown() }
+    }
     override fun setUp() {
         super.setUp()
         val base = instrumentation.targetContext

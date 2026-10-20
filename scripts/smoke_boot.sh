@@ -141,7 +141,11 @@ fi
 adb_stage install-app 120 install "$APK" 2>&1 | tee smoke/install.txt
 adb_stage install-tests 120 install delivery/tests/platform-test.apk 2>&1 | tee smoke/test-install.txt
 if test "$expected" -gt 0; then
-  adb_stage instrumentation 2400 shell am instrument -w -r -e class "$test_classes" app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee smoke/platform-tests.txt
+  instrumentation_options=()
+  if test "${SMOKE_MODE:-}" = candidate; then
+    instrumentation_options=(-e timeout_msec 180000)
+  fi
+  adb_stage instrumentation 2400 shell am instrument -w -r "${instrumentation_options[@]}" -e class "$test_classes" app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee smoke/platform-tests.txt
   python3 "$SCRIPT_DIR/acceptance/instrumentation_result.py" \
     --output smoke/platform-tests.txt --expected-tests "$expected" \
     > smoke/instrumentation-result.json

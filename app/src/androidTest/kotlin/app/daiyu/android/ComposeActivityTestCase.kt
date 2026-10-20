@@ -51,6 +51,7 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         val interaction = ui.onNodeWithTag(tag)
         val found = ui.onAllNodesWithTag(tag)
             .fetchSemanticsNodes(atLeastOneRootRequired = false).singleOrNull()
+        android.util.Log.d("DaiyuTestStep", "node-ancestors:$tag")
         if (found != null && generateSequence(found.parent) { it.parent }.any {
                 it.config.getOrNull(SemanticsProperties.TestTag) == "chat-extra-actions"
             }) interaction.performScrollTo()
@@ -170,7 +171,10 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         val title = if (page == "模型设置" && ui.onAllNodesWithTag("page:主模型服务商").fetchSemanticsNodes().isNotEmpty())
             "主模型服务商" else page
         awaitUniqueTag("page:$title")
-        node("page:$title").performScrollToNode(hasTestTag(tag))
+        val pageNode = node("page:$title")
+        android.util.Log.d("DaiyuTestStep", "reveal-scroll:$tag")
+        pageNode.performScrollToNode(hasTestTag(tag))
+        android.util.Log.d("DaiyuTestStep", "reveal-align:$tag")
         return node(tag).performScrollTo().assertIsDisplayed()
     }
     protected fun retainedSettingsEntry(id: String, page: String = "设置"): () -> Unit {

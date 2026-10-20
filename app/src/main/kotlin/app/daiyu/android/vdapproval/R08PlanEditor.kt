@@ -3,7 +3,6 @@ package app.daiyu.android.vdapproval
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -37,25 +36,32 @@ internal fun R08PlanEditor(
     DisposableEffect(host) { onDispose { if (host.cancel()) cancel() } }
     Column(modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("R08 副屏动作计划", style = MaterialTheme.typography.headlineSmall)
-        Text("编辑仅生成有限计划，不启动 root、不接受消息、不授予权限。冻结后请在原运行审批中核对每项规范参数和 effect。" +
-            "Launch 必填 package 和显式 component（包名/.Activity 或 包名/完整类名），不会在执行时解析或替换。" +
-            "启动任务后的正常退出请在同一计划添加 HANDOFF → RELEASE；Handoff 明确不保留任务（taskIds=[]），由原 owner 验证并清理 owned 任务。" +
-            "写步骤按下列顺序规划；执行仍经过现有中央目录，读取独立可用且绝不初始化。")
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("r08-plan-rows"),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            itemsIndexed(rows) { index, row ->
-                Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("${index + 1}. ${row.action.name}", style = MaterialTheme.typography.titleMedium)
-                    row.action.fields.forEachIndexed { fieldIndex, name ->
+            item {
+                Text("编辑仅生成有限计划，不启动 root、不接受消息、不授予权限。冻结后请在原运行审批中核对每项规范参数和 effect。" +
+                    "Launch 必填 package 和显式 component（包名/.Activity 或 包名/完整类名），不会在执行时解析或替换。" +
+                    "启动任务后的正常退出请在同一计划添加 HANDOFF → RELEASE；Handoff 明确不保留任务（taskIds=[]），由原 owner 验证并清理 owned 任务。" +
+                    "写步骤按下列顺序规划；执行仍经过现有中央目录，读取独立可用且绝不初始化。")
+            }
+            rows.forEachIndexed { index, row ->
+                item {
+                    Text("${index + 1}. ${row.action.name}", style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.padding(horizontal = 8.dp))
+                }
+                row.action.fields.forEachIndexed { fieldIndex, name ->
+                    item {
                         OutlinedTextField(value = row.values[fieldIndex], onValueChange = { value ->
                             rows = rows.toMutableList().also { updated ->
                                 updated[index] = row.copy(values = row.values.toMutableList().also { it[fieldIndex] = value })
                             }
                             error = null
                         }, enabled = !answered, label = { Text(name) }, singleLine = true,
-                            modifier = Modifier.fillMaxWidth().testTag("r08-plan-$index-$name"))
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).testTag("r08-plan-$index-$name"))
                     }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                }
+                item {
+                    Row(Modifier.padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         TextButton(onClick = { rows = rows.filterIndexed { i, _ -> i != index } }, enabled = !answered,
                             modifier = Modifier.testTag("r08-remove-$index")) { Text("删除") }
                         TextButton(onClick = {
@@ -71,9 +77,9 @@ internal fun R08PlanEditor(
                     }
                 }
             }
-            item {
-                Text("添加有限动作 / 读取（最多 64 项）")
-                R08PlanAction.entries.chunked(2).forEach { pair ->
+            item { Text("添加有限动作 / 读取（最多 64 项）") }
+            R08PlanAction.entries.chunked(2).forEach { pair ->
+                item {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         pair.forEach { action ->
                             OutlinedButton(onClick = { rows = rows + R08PlanEditorRow(action); error = null },

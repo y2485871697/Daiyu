@@ -112,10 +112,17 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         activity = startMain()
     }
 
+    private fun finishHost() {
+        val finishing = activity
+        mainThread { finishing.finish() }
+        awaitControl("image Activity destroyed before replacing controller") { finishing.isDestroyed }
+        ui.waitForIdle()
+    }
+
     override fun tearDown() {
         try {
             documents.release?.countDown()
-            mainThread { activity.finish() }
+            finishHost()
             mainThread { (instrumentation.targetContext.applicationContext as ChatApplication).controller = original }
             controller.close()
             app.deleteDatabase("conversations.db")
@@ -342,7 +349,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             ui.waitUntil(10_000) { oldController.database.messages(conversationId).size == 2 && calls.get() == 1 && oldController.active == null }
             val originalIdentity = checkNotNull(oldHost.session.frozen).identity
             val rows = oldController.database.messages(conversationId)
-            mainThread { activity.finish() }
+            finishHost()
             instrumentation.waitForIdleSync()
             oldController.close()
             queue.discard() // The old callback is lost, not delivered to the replacement host.
@@ -362,7 +369,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             assertTrue(host().session.editorReplaced)
             assertTrue(ImageHostDraftStore(controller.preferences).read().single { it.owner == owner }.editorReplaced)
             val firstRebuiltHost = host()
-            mainThread { activity.finish() }
+            finishHost()
             controller.close()
             controller = ChatController(app, ConversationDatabase(app), settings,
                 app.getSharedPreferences("conversation-ui", 0),
@@ -431,7 +438,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             val frozen = checkNotNull(oldHost.session.frozen)
             val originalRows = oldController.database.messages(conversation.id)
             assertEquals("", oldController.database.conversations().single().draft)
-            mainThread { activity.finish() }
+            finishHost()
             oldController.close()
             queue.discard()
             handlerField.set(oldController, originalHandler)
@@ -467,7 +474,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
 
             // Another real process-boundary equivalent proves that the successor is durable,
             // not an Activity-only workaround. Do not edit the empty text before sending.
-            mainThread { activity.finish() }
+            finishHost()
             controller.close()
             beforeFactory = {}
             controller = ChatController(app, ConversationDatabase(app), settings,

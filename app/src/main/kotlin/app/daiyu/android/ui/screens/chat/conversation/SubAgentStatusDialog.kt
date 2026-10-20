@@ -23,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import app.daiyu.android.ui.layout.appWindowSize
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -34,8 +35,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withContext
 import androidx.compose.material3.Text
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -87,11 +86,16 @@ internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolea
                 Text("子代理状态", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = colors.text,
                     modifier = Modifier.weight(1f))
             }
-            Text("当前会话", fontSize = 10.sp, color = colors.taskMuted, modifier = Modifier.padding(bottom = 10.dp))
             when {
                 loading -> Text("正在读取任务状态…", color = colors.taskMuted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 32.dp))
                 failed -> Text("任务状态读取失败；未改变任何任务", color = Color(if (colors.dark) 0xffe5a8b7 else 0xffa15468), fontSize = 13.sp, modifier = Modifier.padding(vertical = 32.dp))
-                rows.isEmpty() -> Text("本会话暂无子代理任务", color = colors.taskMuted, fontSize = 13.sp, modifier = Modifier.padding(vertical = 32.dp))
+                rows.isEmpty() -> Box(
+                    Modifier.fillMaxWidth().testTag("subagent-status-empty").padding(vertical = 32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text("本会话暂无子代理任务", color = colors.taskMuted, fontSize = 13.sp,
+                        textAlign = TextAlign.Center)
+                }
                 else -> LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).testTag("subagent-status-list")) {
                     items(rows, key = { subAgentStatusItemKey(it.owner) }) { row ->
                         var expanded by remember(subAgentStatusItemKey(row.owner)) { mutableStateOf(false) }
@@ -122,13 +126,6 @@ internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolea
                         if (row != rows.lastOrNull()) HorizontalDivider(color = colors.taskLine)
                         }
                     }
-                }
-            }
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
-                Box(Modifier.testTag("subagent-status-close").heightIn(min = 36.dp).clip(RoundedCornerShape(12.dp))
-                    .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onDismiss)
-                    .padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
-                    Text("关闭", fontSize = 12.sp, color = colors.strong)
                 }
             }
         }

@@ -89,9 +89,12 @@ class DialogCloseAffordanceTest : WiredActivityTestCase() {
         node("chat-model-refresh").assertDoesNotExist()
     }
 
-    fun testSubAgentStatusHasNoCrossAndFooterStillDismisses() {
+    fun testSubAgentStatusHasNoCrossOrFooterAndSystemBackStillDismisses() {
         show { dismiss -> SubAgentStatusDialog(emptyList(), false, false, dismiss) }
-        node("subagent-status-close").assertIsDisplayed().performClick()
+        node("subagent-status-close").assertDoesNotExist()
+        ui.onNodeWithText("当前会话").assertDoesNotExist()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
+        ui.waitForIdle()
         node("subagent-status").assertDoesNotExist()
         assertEquals(1, closes)
     }

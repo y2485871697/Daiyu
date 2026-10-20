@@ -3,10 +3,6 @@ package app.daiyu.android.ui.screens.settings
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import app.daiyu.android.context.ProductionCompressionSettings
 import app.daiyu.android.context.SummaryModelBinding
@@ -74,9 +70,7 @@ internal fun CompressionSettingsForm(
     modifier: Modifier = Modifier,
     modelLabel: String? = null,
     onChooseModel: () -> Unit = {},
-    onChooseProtocol: (ProviderProtocol) -> Unit = {},
 ) {
-    var showProtocol by remember { mutableStateOf(false) }
     MiuixScaffoldPage(title = "上下文压缩", onBack = onBack, modifier = modifier) {
         notice?.let { item("compression-notice") { SettingsNote(it, error = error) } }
         item("compression-automatic") {
@@ -89,14 +83,18 @@ internal fun CompressionSettingsForm(
         }
         item("compression-protocol") {
             SettingsCard(Modifier.padding(top = 12.dp)) {
-                SettingsRow("请求接口", summary = protocolLabel(draft.provider.protocol),
-                    tag = "compression-protocol", onClick = if (enabled) ({ showProtocol = true }) else null)
+                // Endpoint preference is not wired yet; never reuse the provider/model selection action.
+                ProviderChoiceRow("请求接口", "Chat Completions API", "compression-protocol", enabled,
+                    listOf("Chat Completions API", "Responses API"),
+                    listOf("compression-endpoint:chat-completions", "compression-endpoint:responses"),
+                    selectedIndex = -1, onSelect = {})
+                SettingsNote("仅用于摘要。默认 Chat Completions；模型需要时选 Responses。Anthropic / Codex 不受此项影响。")
             }
         }
         item("compression-profile") {
             SettingsCard(Modifier.padding(top = 12.dp)) {
                 SettingsSwitchRow("自定义压缩模型", draft.configureSummary, enabled,
-                    tag = "settings-switch:使用独立摘要配置") {
+                    tag = "settings-switch:使用独立摘要配置", summary = "关闭时沿用对话模型。") {
                     if (it && modelLabel == null) onChooseModel() else onSave(draft.copy(configureSummary = it))
                 }
                 SettingsRow("压缩模型", summary = modelLabel ?: "选择模型", tag = "compression-summary-config",
@@ -104,16 +102,4 @@ internal fun CompressionSettingsForm(
             }
         }
     }
-    if (showProtocol) app.daiyu.android.ui.components.DaiyuChoiceSheet("请求接口",
-        listOf("OpenAI Responses", "Anthropic Messages"), onSelect = { index ->
-            val selected = if (index == 0) ProviderProtocol.RESPONSES else ProviderProtocol.MESSAGES
-            if (selected != draft.provider.protocol) onChooseProtocol(selected)
-            showProtocol = false
-        }, onDismiss = { showProtocol = false })
-}
-
-private fun protocolLabel(protocol: ProviderProtocol): String = when (protocol) {
-    ProviderProtocol.RESPONSES -> "OpenAI Responses"
-    ProviderProtocol.MESSAGES -> "Anthropic Messages"
-    else -> protocol.wireName
 }

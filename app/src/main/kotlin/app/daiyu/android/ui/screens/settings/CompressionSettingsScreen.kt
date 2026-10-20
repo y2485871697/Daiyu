@@ -26,7 +26,6 @@ internal fun CompressionSettingsScreen(
     var busy by remember(editor) { mutableStateOf(true) }
     var notice by remember(editor) { mutableStateOf<String?>(null) }
     var error by remember(editor) { mutableStateOf(false) }
-    var protocolFilter by remember(editor) { mutableStateOf<app.daiyu.android.model.ProviderProtocol?>(null) }
     var choosingModel by remember(editor) { mutableStateOf(false) }
     var modelLabel by remember(editor) { mutableStateOf(source.label("compression")) }
     var selectedKey by remember(editor) { mutableStateOf(source.key("compression")) }
@@ -112,12 +111,10 @@ internal fun CompressionSettingsScreen(
             }
         }, onBack = leave, enabled = !busy, notice = notice, error = error, modifier = modifier,
         modelLabel = modelLabel, onChooseModel = {
-            if (!busy && page.active && currentOwner()) { protocolFilter = null; choosingModel = true }
-        }, onChooseProtocol = { protocol ->
-            if (!busy && page.active && currentOwner()) { protocolFilter = protocol; choosingModel = true }
+            if (!busy && page.active && currentOwner()) choosingModel = true
         })
     if (choosingModel) SettingsModelPicker("压缩模型", source, selectedKey,
-        protocols = protocolFilter?.let { setOf(it) } ?: setOf(app.daiyu.android.model.ProviderProtocol.RESPONSES, app.daiyu.android.model.ProviderProtocol.MESSAGES),
+        protocols = setOf(app.daiyu.android.model.ProviderProtocol.RESPONSES, app.daiyu.android.model.ProviderProtocol.MESSAGES),
         onSelect = { choice ->
             if (!busy && page.active && currentOwner()) {
                 choosingModel = false

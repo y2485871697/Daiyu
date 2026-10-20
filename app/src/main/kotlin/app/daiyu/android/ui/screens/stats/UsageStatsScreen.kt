@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.stats
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -15,11 +16,13 @@ import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
@@ -42,10 +45,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -62,7 +65,6 @@ import app.daiyu.android.data.repository.heatmapAlpha
 import app.daiyu.android.data.repository.heatmapQuartiles
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.haptics.TouchHaptics
-import app.daiyu.android.ui.icons.daiyuIconColor
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -72,14 +74,9 @@ import java.time.temporal.TemporalAdjusters
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import app.daiyu.android.ui.components.UsageSurface as Card
-import app.daiyu.android.ui.components.UsageGlassDialog
 import app.daiyu.android.ui.components.UsageAction
 import app.daiyu.android.ui.components.UsageMetric
-import app.daiyu.android.ui.components.UsageDivider
 import app.daiyu.android.ui.components.usagePalette
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyListScope
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import top.yukonga.miuix.kmp.basic.InfiniteProgressIndicator
@@ -90,7 +87,7 @@ private enum class UsageStatsTab { Overview, Models }
 
 @Composable
 internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStatsSnapshot) {
-    val context = LocalContext.current
+    BackHandler(onBack = onBack)
     var stats by remember { mutableStateOf(UsageStatsSnapshot(isLoading = true)) }
     var selectedTab by remember { mutableStateOf(UsageStatsTab.Overview) }
     var loadFailed by remember { mutableStateOf(false) }
@@ -108,9 +105,10 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
         stats = loaded.getOrDefault(UsageStatsSnapshot())
     }
 
-    UsageStatsSheet(
+    MiuixScaffoldPage(
         title = stringResource(R.string.stats_page_title),
         onBack = onBack,
+        modifier = Modifier.testTag("usage-stats-screen"),
     ) {
         if (loadFailed) item(key = "load_error") {
             Column(Modifier.padding(16.dp)) {
@@ -118,7 +116,7 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
                 UsageAction(text = "重试", modifier = Modifier.testTag("usage-retry"), onClick = { loadAttempt++ })
             }
         }
-        if (loadFailed) return@UsageStatsSheet
+        if (loadFailed) return@MiuixScaffoldPage
         item(key = "tabs") {
             UsageStatsTabs(
                 selected = selectedTab,
@@ -141,6 +139,14 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
             }
         } else if (selectedTab == UsageStatsTab.Models) {
             item(key = "model-usage") {
+                ModelUsagePane(
+                    usage = stats.modelUsage,
+                    accountingAvailable = stats.tokenAccountingAvailable,
+                    modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)
+                        .testTag("usage-model-pane"),
+                )
+            }
+            item(key = "recorded-model-usage") {
                 RecordedUsagePane(
                     projection = stats.recordedProjection,
                     modelView = true,
@@ -148,15 +154,15 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
                 )
             }
         } else {
-            if (stats.heatmapAvailable) item(key = "heatmap") {
-                Card(modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp)) {
+            item(key = "heatmap") {
+                Card(modifier = Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp).testTag("usage-heatmap")) {
                     Column(
-                        modifier = Modifier.padding(16.dp),
+                        modifier = Modifier.padding(7.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
                         Text(
                             text = stringResource(R.string.stats_page_heatmap_title),
-                            style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                            style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
                         )
                         ChatHeatmap(conversationsPerDay = stats.conversationsPerDay, available = stats.heatmapAvailable)
                         Row(
@@ -166,7 +172,7 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
                         ) {
                             Text(
                                 text = stringResource(R.string.stats_page_heatmap_less),
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 color = usagePalette().muted,
                             )
                             listOf(0f, 0.25f, 0.5f, 0.75f, 1f).forEach { alpha ->
@@ -174,7 +180,7 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
                             }
                             Text(
                                 text = stringResource(R.string.stats_page_heatmap_more),
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 color = usagePalette().muted,
                             )
                         }
@@ -184,20 +190,17 @@ internal fun UsageStatsScreen(onBack: () -> Unit, load: suspend () -> UsageStats
             item(key = "grid") {
                 StatsGrid(
                     stats = stats,
-                    modifier = Modifier.padding(horizontal = 12.dp),
+                    modifier = Modifier.padding(horizontal = 12.dp).testTag("usage-overview-grid"),
+                )
+            }
+            item(key = "recorded-usage") {
+                RecordedUsagePane(
+                    projection = stats.recordedProjection,
+                    modelView = false,
+                    modifier = Modifier.padding(horizontal = 12.dp).padding(top = 12.dp, bottom = 12.dp),
                 )
             }
         }
-    }
-}
-
-@Composable
-private fun UsageStatsSheet(title: String, onBack: () -> Unit, content: LazyListScope.() -> Unit) {
-    UsageGlassDialog(title, onBack) {
-        LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 430.dp).testTag("page:$title"),
-            verticalArrangement = Arrangement.spacedBy(8.dp), content = content)
-        UsageDivider(Modifier.padding(top = 9.dp))
-        UsageAction("关闭", onBack, Modifier.fillMaxWidth().padding(top = 10.dp))
     }
 }
 
@@ -236,18 +239,25 @@ private fun RowScope.UsageTabButton(
     Box(
         modifier = Modifier
             .weight(1f)
-            .height(44.dp)
+            .heightIn(min = 44.dp)
+            .testTag("usage-tab:$label")
             .clip(RoundedCornerShape(12.dp))
             .background(if (selected) colors.accent else colors.bubble)
-            .clickableNoRipple {
+            .selectable(
+                selected = selected,
+                role = Role.Tab,
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+            ) {
                 TouchHaptics.click(view)
                 onClick()
-            },
+            }
+            .padding(horizontal = 8.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = label,
-            style = TextStyle(fontSize = 11.sp),
+            style = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
             color = if (selected) androidx.compose.ui.graphics.Color(if (colors.dark) 0xff211735 else 0xffffffff) else colors.muted,
         )
     }
@@ -290,12 +300,12 @@ private fun ModelUsagePane(
         )
         Card {
             Column(
-                modifier = Modifier.padding(16.dp),
+                modifier = Modifier.padding(7.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 Text(
                     text = stringResource(R.string.stats_model_total_title),
-                    style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                    style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_page_token_total),
@@ -321,7 +331,7 @@ private fun ModelUsagePane(
                 )
                 ModelMetricRow(
                     label = stringResource(R.string.stats_model_cache_hit_rate),
-                    value = formatCacheHitRate(filtered.totalCachedTokens, filtered.totalInputTokens),
+                    value = if (accountingAvailable) formatCacheHitRate(filtered.totalCachedTokens, filtered.totalInputTokens) else "—",
                 )
             }
         }
@@ -334,7 +344,7 @@ private fun ModelUsagePane(
                         R.string.stats_model_empty
                     },
                 ),
-                style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp),
+                style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
                 color = usagePalette().muted,
                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 8.dp),
             )
@@ -350,7 +360,7 @@ private fun ModelUsagePane(
                         ) {
                             Text(
                                 text = provider.name,
-                                style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                                style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
                                 modifier = Modifier.weight(1f),
                             )
                         }
@@ -395,7 +405,7 @@ private fun ModelUsageFilterCard(
     }
     val summary = filterSummaryText(start, end, matchedPreset)
         ?: stringResource(R.string.stats_model_filter_collapsed)
-    Card {
+    Card(Modifier.testTag("usage-model-filter")) {
         Column {
             Row(
                 modifier = Modifier
@@ -409,11 +419,11 @@ private fun ModelUsageFilterCard(
             ) {
                 Text(
                     text = stringResource(R.string.stats_model_filter_title),
-                    style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                    style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
                 )
                 Text(
                     text = summary,
-                    style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp),
+                    style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
                     color = usagePalette().muted,
                     maxLines = 1,
                     textAlign = TextAlign.End,
@@ -462,7 +472,7 @@ private fun ModelUsageFilterCard(
                     if (start.isSet || end.isSet) {
                         Text(
                             text = stringResource(R.string.stats_model_filter_clear),
-                            style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp),
+                            style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
                             color = usagePalette().accent,
                             modifier = Modifier
                                 .clickableNoRipple {
@@ -505,7 +515,7 @@ private fun UsageBoundRow(
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             text = label,
-            style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp),
+            style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
             color = usagePalette().muted,
         )
         UsageBoundChip(
@@ -559,13 +569,14 @@ private fun UsageBoundChip(
         modifier = modifier
             .clip(RoundedCornerShape(12.dp))
             .background(if (selected) colors.accent else colors.bubble)
+            .heightIn(min = 44.dp)
             .clickableNoRipple(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         contentAlignment = contentAlignment,
     ) {
         Text(
             text = text,
-            style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp),
+            style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
             color = if (selected) androidx.compose.ui.graphics.Color(if (colors.dark) 0xff211735 else 0xffffffff) else colors.muted,
             maxLines = 1,
         )
@@ -622,7 +633,7 @@ private fun ModelUsageRow(
         ) {
             Text(
                 text = model.displayName,
-                style = TextStyle(fontSize = 11.sp),
+                style = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
                 modifier = Modifier.weight(1f),
             )
             androidx.compose.material3.Icon(
@@ -693,12 +704,12 @@ private fun ModelMetricRow(label: String, value: String) {
     ) {
         Text(
             text = label,
-            style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp),
+            style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
             color = usagePalette().muted,
         )
         Text(
             text = value,
-            style = TextStyle(fontSize = 11.sp),
+            style = TextStyle(fontSize = 14.sp, lineHeight = 20.sp),
         )
     }
 }
@@ -821,18 +832,6 @@ private fun HeatmapCell(alpha: Float, sizeDp: Int, unknown: Boolean = false) {
 }
 
 @Composable
-private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Card {
-            UsageMetric("当前保留会话", if (stats.currentDataAvailable) formatStatCount(stats.currentConversations.toLong()) else "—")
-            UsageMetric("当前保留消息", if (stats.currentDataAvailable) formatStatCount(stats.currentMessages.toLong()) else "—")
-        }
-        RecordedUsagePane(stats.recordedProjection, modelView = false,
-            modifier = Modifier.padding(bottom = 12.dp))
-    }
-}
-
-@Composable
 internal fun RecordedUsagePane(
     projection: RecordedUsageProjection?,
     modelView: Boolean,
@@ -843,16 +842,16 @@ internal fun RecordedUsagePane(
         Card {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(if (modelView) "未归属模型的用量" else "用量统计",
-                    style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium))
+                    style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium))
                 Text(when {
                     projection == null -> "暂时无法读取用量"
                     projection.combined.requestSnapshotCount == 0L -> "暂无已报告用量"
                     else -> "仅统计已记录用量，未报告的数据以 — 显示。"
-                }, style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp))
+                }, style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp))
                 if (projection != null && !projection.attributed.scanComplete)
-                    Text("部分记录尚未读取，仅显示已读取的用量。", style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp))
+                    Text("部分记录尚未读取，仅显示已读取的用量。", style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp))
                 if (modelView && projection != null && projection.combined.requestSnapshotCount > 0L)
-                    Text("历史记录未包含模型信息", style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp))
+                    Text("历史记录未包含模型信息", style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp))
             }
         }
         if (projection != null && projection.combined.requestSnapshotCount > 0L) {
@@ -875,7 +874,7 @@ internal fun RecordedUsagePane(
 private fun RecordedSummaryCard(title: String, summary: RecordedUsageSummary) {
     var cacheExpanded by remember(title) { mutableStateOf(false) }
     Card {
-        Text(title, style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium))
+        Text(title, style = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium))
         UsageMetric("已记录请求", formatStatCount(summary.requestSnapshotCount), total = true)
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             // Coverage is retained per field; never manufacture a total from partial reports.
@@ -886,15 +885,13 @@ private fun RecordedSummaryCard(title: String, summary: RecordedUsageSummary) {
             plain = true, modifier = Modifier.fillMaxWidth())
         if (cacheExpanded) {
             UsageMetric("缓存读取", formatReportedUsage(summary.cached))
-            Text("缓存写入 / 独立推理 / 费用：—（未记录）", color = usagePalette().muted, fontSize = 8.sp)
+            Text("缓存写入 / 独立推理 / 费用：—（未记录）", color = usagePalette().muted, fontSize = 12.sp)
         }
     }
 }
 
-// Retain the previous projection/UI algorithm for an explicitly attributed future source.
-// Production must not consume its zero-default fields as historical provider observations.
 @Composable
-private fun LegacyStatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) {
+private fun StatsGrid(stats: UsageStatsSnapshot, modifier: Modifier = Modifier) {
     Column(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -984,24 +981,24 @@ private fun StatCard(
     label: String,
     value: String,
 ) {
-    Card(modifier = modifier) {
+    Card(modifier = modifier.testTag("usage-stat:$label")) {
         Column(
-            modifier = Modifier.padding(16.dp),
+            modifier = Modifier.padding(7.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             androidx.compose.material3.Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = daiyuIconColor(icon),
+                tint = usagePalette().toolbar,
                 modifier = Modifier.size(20.dp),
             )
             Text(
                 text = value,
-                style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Medium),
+                style = TextStyle(fontSize = 16.sp, lineHeight = 22.sp, fontWeight = FontWeight.Medium),
             )
             Text(
                 text = label,
-                style = TextStyle(fontSize = 10.sp, lineHeight = 16.sp),
+                style = TextStyle(fontSize = 12.sp, lineHeight = 18.sp),
                 color = usagePalette().muted,
             )
         }

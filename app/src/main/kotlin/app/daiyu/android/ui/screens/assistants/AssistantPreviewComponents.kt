@@ -10,9 +10,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.Close
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,9 +24,9 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalView
 import app.daiyu.android.ui.components.PreviewDialog
 import app.daiyu.android.ui.components.previewGlassBlur
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -48,6 +45,7 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
  */
 internal data class AssistantPreviewPalette(val dark: Boolean) {
     val text = if (dark) Color(0xFFE0DCE8) else Color(0xFF36333F)
+    val toolbar = if (dark) Color(0xFFB2A9C7) else Color(0xFF716A82)
     val muted = if (dark) Color(0xFF9C92A8) else Color(0xFF968B9F)
     val accent = if (dark) Color(0xFFC6B6D5) else Color(0xFF82718F)
     val line = if (dark) Color(0x29C5B1DB) else Color(0x299B89AA)
@@ -78,9 +76,11 @@ internal fun AssistantPreviewDialog(
 ) {
     if (!show) return
     PreviewDialog(onDismiss) {
+        val availableHeight = (maxHeight - 20.dp).coerceAtLeast(0.dp)
+        val sheetHeight = minOf((maxHeight - 48.dp).coerceIn(300.dp, 520.dp), availableHeight)
         AssistantPreviewSheet(title, onDismiss, onBack, footer,
             modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp)
-                .fillMaxWidth().height(minOf(520.dp, (maxHeight - 48.dp).coerceAtLeast(0.dp))),
+                .fillMaxWidth().height(sheetHeight),
             content = content)
     }
 }
@@ -97,7 +97,7 @@ internal fun AssistantPreviewSheet(
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
     val shape = RoundedCornerShape(25.dp * s)
-    Column(modifier.clip(shape).previewGlassBlur(shape = shape, radius = 28f * s, saturation = 1.3f)
+    Column(modifier.testTag("assistant-sheet").clip(shape).previewGlassBlur(shape = shape, radius = 28f * s, saturation = 1.3f)
         .drawWithCache {
             val length = size.width * .642788f + size.height * .766044f
             val delta = Offset(length * .642788f / 2, length * .766044f / 2)
@@ -106,21 +106,22 @@ internal fun AssistantPreviewSheet(
             onDrawBehind { drawRect(brush) }
         }.border(1.dp, colors.border, shape)
         .pointerInput(Unit) { detectTapGestures(onTap = {}) }
-        .padding(start = 15.dp * s, end = 15.dp * s, top = 10.dp * s, bottom = 16.dp * s)) {
+        .padding(1.dp).padding(start = 15.dp * s, end = 15.dp * s, top = 10.dp * s, bottom = 16.dp * s)) {
         Box(Modifier.align(Alignment.CenterHorizontally).width(29.dp * s).height(3.dp * s)
-            .clip(CircleShape).background(colors.accent.copy(alpha = .24f)))
+            .clip(CircleShape).background(colors.toolbar.copy(alpha = .24f)))
         Spacer(Modifier.height(17.dp * s))
-        Row(Modifier.fillMaxWidth().padding(bottom = 13.dp * s), verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.fillMaxWidth().testTag("assistant-sheet-heading").padding(bottom = 13.dp * s), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
-            if (onBack != null) AssistantPreviewIcon(Icons.AutoMirrored.Rounded.ArrowBack, "返回", onBack)
+            if (onBack != null) AssistantPreviewIcon(AssistantPreviewIcons.Back, "返回", onBack)
             Text(title, modifier = Modifier.weight(1f), color = colors.text,
-                fontSize = (16f * s).sp, fontWeight = FontWeight.Medium)
-            AssistantPreviewIcon(Icons.Rounded.Close, "关闭", onClose)
+                fontSize = (16f * s).sp, lineHeight = (22.4f * s).sp,
+                fontWeight = FontWeight(550), letterSpacing = (-.3f * s).sp)
+            AssistantPreviewIcon(AssistantPreviewIcons.Close, "关闭", onClose)
         }
         Column(Modifier.fillMaxWidth().weight(1f), content = content)
         Spacer(Modifier.height(10.dp * s))
         Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
-        Row(Modifier.fillMaxWidth().padding(top = 10.dp * s), horizontalArrangement = Arrangement.spacedBy(8.dp * s), content = footer)
+        Row(Modifier.fillMaxWidth().testTag("assistant-sheet-footer").padding(top = 10.dp * s), horizontalArrangement = Arrangement.spacedBy(8.dp * s), content = footer)
     }
 }
 
@@ -154,11 +155,14 @@ internal fun AssistantPreviewButton(
             danger -> Color(0x0BAE687A); else -> colors.soft })
         .border(1.dp, when { actionRow -> Color.Transparent; primary -> colors.primary; danger -> Color(0x40AE687A); else -> colors.line }, shape)
         .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
-        .padding(horizontal = 10.dp * s, vertical = 8.dp * s),
+        .padding(1.dp).padding(horizontal = 10.dp * s, vertical = 8.dp * s),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = if (actionRow) Arrangement.Start else Arrangement.Center) {
-        if (icon != null) { Icon(icon, null, Modifier.size(13.dp * s), tint = foreground); Spacer(Modifier.width(8.dp * s)) }
-        Text(text, color = foreground, fontSize = (10f * s).sp, lineHeight = 15.sp)
+        if (icon != null) { Icon(icon, null, Modifier.size(13.dp * s), tint = foreground); Spacer(Modifier.width(6.dp * s)) }
+        Text(text, color = foreground, fontSize = (10f * s).sp, lineHeight = (15f * s).sp,
+            modifier = if (actionRow) Modifier.weight(1f) else Modifier)
+        // .ap-actions .ap-button svg:last-child { margin-left:auto; width:10px; opacity:.5 }
+        if (actionRow) Icon(AssistantPreviewIcons.Chevron, null, Modifier.size(10.dp * s).alpha(.5f), tint = foreground)
     }
 }
 

@@ -22,4 +22,12 @@
   <string name="assistant_crop_title">Crop avatar</string>
   <string name="assistant_memory_summary">Only affects this assistant. MEMORY.md is shared. Turning this off skips injection and memory tools, but keeps existing notes.</string>
   <string name="assistant_skills_summary">Only affects this assistant. The three built-in skills start on; newly installed skills stay off until you enable them here.</string>
+  <string name="ui_copy_assistant">Copy assistant</string>
+  <string name="ui_edit_assistant">Edit assistant</string>
+  <string name="ui_delete_assistant">Delete assistant</string>
+  <string name="assistant_picker_title">Select assistant</string>
+  <string name="assistant_new">New assistant</string>
+  <string name="assistant_done">Done</string>
+  <string name="assistant_count">%1$d assistants</string>
+  <string name="assistant_list_hint">Tap to switch · Hold to manage</string>
 </resources>

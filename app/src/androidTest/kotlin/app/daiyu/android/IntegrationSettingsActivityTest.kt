@@ -127,10 +127,20 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         awaitUniqueTag("chat-model-picker")
         awaitUniqueTag("chat-model-list")
         ui.waitUntil(5_000) {
-            ui.onAllNodesWithTag("chat-model-refresh").fetchSemanticsNodes().singleOrNull()?.config?.let {
-                it.getOrNull(SemanticsProperties.Disabled) == null
+            ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().singleOrNull()?.config?.let {
+                it.getOrNull(SemanticsProperties.StateDescription) == "模型目录读取完成"
             } == true
         }
+    }
+    private fun closeChatPicker() {
+        dismissIme()
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().isEmpty() }
+    }
+    private fun reopenChatPicker() {
+        closeChatPicker()
+        node("chat-model").performClick()
+        awaitChatPickerLoaded()
     }
     private fun awaitChatPickerReady() {
         awaitChatPickerLoaded()
@@ -161,7 +171,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         awaitChatPickerReady()
         node("page:主模型服务商").assertDoesNotExist()
         assertChatPickerOffline(calls)
-        node("chat-model-refresh").performClick()
+        reopenChatPicker()
         awaitChatPickerReady()
         assertEquals(catalog, fixture.settings.localModelCatalogSnapshot())
         assertEquals(before, fixture.settings.load())
@@ -191,7 +201,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         node("chat-model").performClick(); awaitChatPickerReady()
         lateinit var stale: () -> Unit
         mainThread { stale = retainedChatPickerSelection() }
-        ui.onNodeWithText("取消").performClick()
+        closeChatPicker()
         mainThread { stale() }
         node("chat-model-picker").assertDoesNotExist()
         assertEquals(before, fixture.settings.load())
@@ -234,7 +244,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
                 pending.invokeOnCompletion { completed.countDown() }
             }
             ui.onNodeWithText("正在读取模型目录…").assertExists()
-            ui.onNodeWithText("取消").performClick()
+            closeChatPicker()
             release.countDown()
             holder.join(5_000)
             assertFalse("local catalog lease released", holder.isAlive)
@@ -245,7 +255,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             assertEquals(before, fixture.settings.load())
             node("chat-model").performClick(); awaitChatPickerReady()
             node("chat-model-option:second").assertExists()
-            ui.onNodeWithText("取消").performClick()
+            closeChatPicker()
             assertEquals(before, fixture.settings.load())
             assertEquals(database, fixture.database.exportBackup())
             assertDraft("本地目录读取取消后保留草稿")
@@ -264,16 +274,16 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         fixture.settings.save(changed)
         node("chat-model-option:second").performClick()
         awaitControl("chat model rejected") { !fixture.controller.dataBusy }
-        val rejected = "切换未保存，请刷新本地目录后重新选择"
+        val rejected = "切换未保存，请关闭后重新打开选择模型"
         ui.waitUntil(5_000) { ui.onAllNodesWithText(rejected).fetchSemanticsNodes().isNotEmpty() }
         assertEquals(changed, fixture.settings.load())
         ui.onNodeWithText(rejected).assertExists()
         node("chat-model-option:second").assertIsNotEnabled()
-        node("chat-model-refresh").performClick(); awaitChatPickerReady()
+        reopenChatPicker(); awaitChatPickerReady()
         ui.onNodeWithText(rejected).assertDoesNotExist()
         node("chat-model-list").performScrollToNode(hasTestTag("chat-model-option:external-change"))
         node("chat-model-option:external-change").assertIsEnabled()
-        ui.onNodeWithText("取消").performClick()
+        closeChatPicker()
         assertEquals(changed, fixture.settings.load())
         assertEquals(database, fixture.database.exportBackup())
         assertDraft("拒绝过期选择时保留草稿")
@@ -296,7 +306,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
                 .apply { isAccessible = true }
             var previousSession: Any? = null
             mainThread { previousSession = sessionField.get(activity) }
-            node("chat-model-refresh").assertIsEnabled().performClick()
+            reopenChatPicker()
             ui.waitUntil(5_000) {
                 var replaced = false
                 mainThread { replaced = sessionField.get(activity)?.let { it !== previousSession } == true }
@@ -304,13 +314,13 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             }
             node("chat-model-list").performScrollToNode(hasTestTag("chat-model-option:external-change"))
             node("chat-model-option:external-change").assertIsNotEnabled()
-            node("chat-model-refresh").assertIsEnabled()
+            node("chat-model-refresh").assertDoesNotExist()
             assertEquals(changed, fixture.settings.load())
             assertEquals(owner, fixture.controller.active)
             assertEquals(runningDatabase, fixture.database.exportBackup())
             assertEquals(runningOpens, fixture.opens.get())
             assertChatPickerOffline(calls)
-            ui.onNodeWithText("取消").performClick()
+            closeChatPicker()
         } finally { fixture.controller.stop(owner) }
     }
     fun testCatalogImportsCheckedModelsWithoutChangingCurrentDraftOrCredentials() {

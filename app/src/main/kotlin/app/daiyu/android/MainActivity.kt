@@ -1987,17 +1987,11 @@ class MainActivity : ComponentActivity() {
                 chatModelPicker?.let { picker ->
                     val owner = chatModelOwner
                     val session = chatModelSession
-                    val reload = { if (chatModelOwner === owner && owner != null) reloadChatModels(owner) }
-                    val settings = { if (chatModelOwner === owner && owner != null) {
-                        dismissChatModels(); guard { modelSettings() }
-                    } }
                     val dismiss = { if (chatModelOwner === owner) dismissChatModels() }
-                    if (session == null) ChatModelPicker(picker, onSelect = {}, onRefresh = reload,
-                        onSettings = settings, onDismiss = dismiss)
+                    if (session == null) ChatModelPicker(picker, onSelect = {}, onDismiss = dismiss)
                     else LocalCatalogChatModelPicker(session, enabled = picker.enabled,
                         loading = picker.loading, message = picker.message,
-                        onSelect = { selectChatModel(it, owner, session) }, onReload = reload,
-                        onSettings = settings, onDismiss = dismiss)
+                        onSelect = { selectChatModel(it, owner, session) }, onDismiss = dismiss)
                 }
                 assistantSelectionOwner?.let { owner -> key(owner) {
                     AssistantPickerDialog(show = assistantPicker, store = assistantStore, assets = assistantAssets,
@@ -5523,7 +5517,7 @@ class MainActivity : ComponentActivity() {
                         else {
                             chatModelSelectionFailed = true
                             chatModelPicker = chatModelPicker?.copy(enabled = false,
-                                message = "切换未保存，请刷新本地目录后重新选择")
+                                message = "切换未保存，请关闭后重新打开选择模型")
                         }
                     }
                 }
@@ -5531,7 +5525,7 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) {
             if (chatModelOwner === owner && chatModelSession === session) {
                 chatModelSelectionFailed = true
-                chatModelPicker = picker.copy(enabled = false, message = "切换未保存，请刷新本地目录后重新选择")
+                chatModelPicker = picker.copy(enabled = false, message = "切换未保存，请关闭后重新打开选择模型")
             }
         }
     }

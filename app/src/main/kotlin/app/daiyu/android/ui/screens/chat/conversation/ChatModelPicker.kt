@@ -38,14 +38,13 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.icons.DaiyuIcons
-import app.daiyu.android.ui.components.subagent.ConversationAgentButton
-import androidx.compose.material3.HorizontalDivider
 import app.daiyu.android.ui.components.usagePalette
 import app.daiyu.android.ui.screens.settings.ModelCatalogEntryUi
 import top.yukonga.miuix.kmp.basic.Text
@@ -62,8 +61,6 @@ internal data class ChatModelPickerState(
 internal fun ChatModelPicker(
     state: ChatModelPickerState,
     onSelect: (String) -> Unit,
-    onRefresh: () -> Unit,
-    onSettings: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     var query by remember { mutableStateOf("") }
@@ -92,14 +89,10 @@ internal fun ChatModelPicker(
         title = "选择模型",
         showCloseButton = false,
         onDismiss = onDismiss,
-        footer = {
-            ConversationAgentButton("模型设置", enabled = !state.loading, modifier = Modifier.weight(1f), onClick = onSettings)
-            ConversationAgentButton("刷新", enabled = !state.loading,
-                modifier = Modifier.weight(1f).testTag("chat-model-refresh"), onClick = onRefresh)
-            ConversationAgentButton("取消", modifier = Modifier.weight(1f), onClick = onDismiss)
-        },
     ) {
-        Column(Modifier.testTag("chat-model-picker").fillMaxSize()) {
+        Column(Modifier.testTag("chat-model-picker").semantics {
+            stateDescription = if (state.loading) "正在读取模型目录" else "模型目录读取完成"
+        }.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp))
                 .background(colors.bubble).border(1.dp, colors.line, RoundedCornerShape(14.dp))
                 .padding(horizontal = 11.dp, vertical = 10.dp),
@@ -158,7 +151,7 @@ internal fun ChatModelPicker(
             ) {
                 // The production entry point supplies only the active provider's local catalog.
                 // Do not invent the other providers/groups shown in the HTML fixture.
-                item(key = "catalog-heading") {
+                if (state.models.isNotEmpty()) item(key = "catalog-heading") {
                     Row(Modifier.fillMaxWidth().padding(top = 2.dp, bottom = 5.dp)
                         .semantics { heading() }, verticalAlignment = Alignment.CenterVertically) {
                         Text("当前供应商 · 本地目录", color = colors.muted,
@@ -205,16 +198,12 @@ internal fun ChatModelPicker(
                         }
                     }
                 }
-                if (visible.isEmpty() && !state.loading) item(key = "empty") {
-                    Text(if (query.isBlank()) "暂无可选模型" else "没有匹配的模型",
+                if (state.models.isNotEmpty() && visible.isEmpty() && !state.loading) item(key = "empty") {
+                    Text("没有匹配的模型",
                         color = colors.muted, fontSize = 11.sp,
                         modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp))
                 }
             }
-            HorizontalDivider(Modifier.padding(top = 10.dp), color = colors.line)
-            Text("仅显示当前供应商的本地目录 · 刷新不会联网", color = colors.muted,
-                fontSize = 9.sp, modifier = Modifier.fillMaxWidth().padding(top = 9.dp, bottom = 8.dp),
-                maxLines = 2, overflow = TextOverflow.Ellipsis)
         }
     }
 }

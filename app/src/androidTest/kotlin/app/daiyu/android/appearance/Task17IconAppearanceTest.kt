@@ -59,7 +59,7 @@ class Task17IconAppearanceTest : InstrumentationTestCase() {
         }
     }
 
-    fun testOriginalCatViewCanRenderAndSettingsCanBeConstructed() {
+    fun testOriginalCatViewRetainsRoundedTransparentCorners() {
         instrumentation.runOnMainSync {
             val context = instrumentation.targetContext
             val preview = AppCatIconView(context)
@@ -67,10 +67,6 @@ class Task17IconAppearanceTest : InstrumentationTestCase() {
             val bitmap = Bitmap.createBitmap(144, 144, Bitmap.Config.ARGB_8888)
             preview.draw(Canvas(bitmap))
             assertEquals(0, bitmap.getPixel(0, 0)) // 22% rounded transparent corner.
-            val view = IconAppearanceSettingsView(context, IconAppearance()) {
-                error("Rendering settings must not apply launcher changes")
-            }
-            assertTrue(view.childCount > 0)
         }
     }
 

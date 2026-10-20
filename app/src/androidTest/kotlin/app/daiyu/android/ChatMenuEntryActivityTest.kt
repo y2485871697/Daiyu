@@ -282,7 +282,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("附件").performClick()
         node("chat-attachment:ATTACH_PATH").assertDoesNotExist()
         node("chat-attachment-path-toggle").performClick()
-        node("chat-attachment:ATTACH_PATH").performClick()
+        node("chat-attachment:ATTACH_PATH").assertDoesNotExist()
         awaitUniqueTag("prompt-input")
         node("prompt-input").performTextReplacement("content://not-granted.invalid/never-read")
         node("dialog-cancel").performClick()

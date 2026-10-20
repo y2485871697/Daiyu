@@ -13,6 +13,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -50,7 +52,8 @@ internal fun ChatTopBar(title: String, balanceState: app.daiyu.android.balance.B
         horizontalArrangement = Arrangement.spacedBy(11.dp), verticalAlignment = Alignment.CenterVertically) {
         ChatIconButton(ChatPreviewIcons.Menu, "打开侧边栏", actions.onOpenSidebar,
             Modifier.size(width = 17.dp, height = 28.dp), tint = chrome.text, iconSize = 17.dp)
-        Column(Modifier.weight(1f)) {
+        val titleBlockHeight = with(LocalDensity.current) { 17.3.sp.toDp() + 11.5.sp.toDp() } + 4.dp
+        Column(Modifier.weight(1f).heightIn(min = titleBlockHeight)) {
             Text(title.ifBlank { "新会话" }, Modifier.testTag("chat-title"),
                 color = chrome.text,
                 style = MiuixTheme.textStyles.title3.copy(fontSize = 12.sp, lineHeight = 17.3.sp, fontWeight = FontWeight(650)),

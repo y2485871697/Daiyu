@@ -83,13 +83,16 @@ internal fun AssistantPreviewDialog(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     if (!show) return
+    val density = LocalDensity.current
     PreviewDialog(onDismiss) {
         val availableHeight = (maxHeight - 20.dp).coerceAtLeast(0.dp)
         val sheetHeight = minOf((maxHeight - 48.dp).coerceIn(300.dp, 520.dp), availableHeight)
-        AssistantPreviewSheet(title, onDismiss, onBack, showCloseButton, footer,
-            modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp)
-                .fillMaxWidth().height(sheetHeight),
-            content = content)
+        CompositionLocalProvider(LocalDensity provides density) {
+            AssistantPreviewSheet(title, onDismiss, onBack, showCloseButton, footer,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp)
+                    .fillMaxWidth().height(sheetHeight),
+                content = content)
+        }
     }
 }
 

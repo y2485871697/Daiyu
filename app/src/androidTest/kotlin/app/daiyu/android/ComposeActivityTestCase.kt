@@ -182,7 +182,11 @@ abstract class ComposeActivityTestCase : InstrumentationTestCase() {
         mainThread { open() }
         awaitUniqueTag(expectedTag)
     }
-    protected fun editModel(label: String, text: String) { reveal("settings-field:$label").performTextReplacement(text) }
+    protected fun editModel(label: String, text: String) {
+        reveal("settings-field:$label").performSemanticsAction(SemanticsActions.SetText) {
+            assertTrue(it(androidx.compose.ui.text.AnnotatedString(text)))
+        }
+    }
     protected fun modelField(label: String) = reveal("settings-field:$label")
     protected fun inlineBodyControl(tag: String): SemanticsNodeInteraction = reveal(tag).performScrollTo()
     protected fun openInlineBodyFields() {

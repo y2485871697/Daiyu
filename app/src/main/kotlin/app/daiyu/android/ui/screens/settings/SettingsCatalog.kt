@@ -9,7 +9,7 @@ internal val RetainedSettingsEntryAction =
 
 internal enum class SettingControl { PAGE, TOGGLE, CHOICE, ACTION }
 /** Pages hosted by the retained settings home, not an Activity-level FeatureRoute. */
-internal enum class SettingsLocalPage { TASK_SURFACE, RUNNING_MODE, ENHANCEMENTS, SHIZUKU_ACCESS, OVERLAY, WORKSPACE }
+internal enum class SettingsLocalPage { TASK_SURFACE, ENHANCEMENTS, SHIZUKU_ACCESS, OVERLAY, WORKSPACE }
 internal data class SettingsEntry(
     val id: String, val title: String, val icon: ImageVector,
     val control: SettingControl = SettingControl.PAGE, val route: FeatureRoute? = null,
@@ -44,7 +44,6 @@ internal object SettingsCatalog {
         )),
         SettingsGroup("tools", "工具与环境", "工作区、Linux 与任务执行偏好", listOf(
             SettingsEntry("platform_tools", "平台只读工具与私密出站", DaiyuIcons.Shield, SettingControl.PAGE),
-            SettingsEntry("running_mode", "运行模式", DaiyuIcons.Device, localPage = SettingsLocalPage.RUNNING_MODE),
             SettingsEntry("workspace", "工作区与文件", DaiyuIcons.Folder, SettingControl.PAGE, localPage = SettingsLocalPage.WORKSPACE, summary = "文件、目录与共享访问"),
             SettingsEntry("browser", "浏览器", DaiyuIcons.Browser, SettingControl.PAGE, FeatureRoute.BROWSER_SETTINGS),
             SettingsEntry("linux", "Linux 工具环境", DaiyuIcons.Terminal, SettingControl.PAGE, FeatureRoute.LINUX_SETTINGS, summary = "运行环境与可选工具"),

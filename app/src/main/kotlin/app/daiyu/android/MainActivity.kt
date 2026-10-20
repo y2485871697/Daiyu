@@ -1538,6 +1538,9 @@ class MainActivity : ComponentActivity() {
                             onStop = { record -> controller.stopChildTask(record) },
                             onBack = { returnToChat() })
                     }
+                    "permission-check" -> app.daiyu.android.ui.screens.settings.PermissionCheckScreen(
+                        onBack = { returnToChat() },
+                    )
                     "shizuku-settings" -> ShizukuScreen(
                         authorization = (application as ChatApplication).shizuku, session = null,
                         onBack = { returnToChat() },
@@ -1887,7 +1890,7 @@ class MainActivity : ComponentActivity() {
                         onOpenModelProviders = { dismissSidebar(); guard { modelSettings() } },
                         onOpenUsageStats = { dismissSidebar(); openUsagePage("chat") },
                         onOpenSkills = { dismissSidebar(); guard { openSkillManagement() } },
-                        onOpenPermissions = { dismissSidebar(); retainedPage = "settings" },
+                        onOpenPermissions = { dismissSidebar(); retainedPage = "permission-check" },
                     ) {
                         chatPageState.SaveableStateProvider(chatState.conversationKey ?: "new-chat") {
                             BoxWithConstraints(Modifier.fillMaxSize().imePadding()) {

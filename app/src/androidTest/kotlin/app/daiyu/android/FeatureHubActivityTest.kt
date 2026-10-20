@@ -117,16 +117,27 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         assertEquals(before, fixture.database.exportBackup()); assertEquals(0, fixture.opens.get())
     }
 
-    fun testRunningModeEntryShowsOnlyThreeChoicesAndReturnsToSettings() {
+    fun testSidebarShieldOpensPermissionCheckAndModeReturnsToItsNewParent() {
         setDraft("运行模式入口草稿")
-        openHub()
-        entry("running_mode").performClick()
+        val before = fixture.database.exportBackup()
+        dismissIme()
+        ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction()).performClick()
+        node("drawer-dock-permissions").performClick()
+        node("page:权限检查").assertExists()
+        node("page:设置").assertDoesNotExist()
+        reveal("permission-check:running-mode", "权限检查").assertHasClickAction().performClick()
         node("page:运行模式").assertExists()
         for (mode in listOf("normal", "root", "shizuku")) node("running-mode:$mode").assertHasClickAction()
-        backToPage(activity, "page:设置")
+        backToPage(activity, "page:权限检查")
+        ui.onNodeWithText("Root 与系统增强").assertDoesNotExist()
         backToChat(activity)
         assertDraft("运行模式入口草稿")
+        assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
+        openHub()
+        reveal("settings-search", "设置").performTextReplacement("运行模式")
+        ui.onNodeWithText("没有匹配的设置").assertExists()
+        node("settings-row:运行模式").assertDoesNotExist()
     }
 
     fun testOriginalSettingsAppearOutsideExistingChatTreeWithoutStateLabels() {
@@ -135,11 +146,11 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
             "appearance", "assistants", "voice", "haptics",
             "providers", "compression", "vision", "subagents", "title_model", "reconnect",
             "pet", "skills", "mcp",
-            "running_mode", "workspace", "linux", "task_surface",
+            "workspace", "linux", "task_surface",
             "usage", "backup", "logging", "export_logs", "clear_logs",
             "updates", "telegram", "qq", "source", "relay", "relay_st", "relay_moyu", "donate",
         )
-        assertEquals(30, entries.size)
+        assertEquals(29, entries.size)
         for (engineering in listOf(false, true)) {
             assertEquals(expectedIds, SettingsCatalog.visibleGroups(engineering).flatMap { it.entries }.map { it.id })
         }

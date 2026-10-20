@@ -1,5 +1,6 @@
 package app.daiyu.android
 
+import androidx.compose.ui.text.AnnotatedString
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -105,15 +106,27 @@ class SettingsChromeActivityTest : WiredActivityTestCase() {
     fun testSearchUsesOriginalButtonsAndMcpHasARealIndependentRoute() {
         val events = mutableListOf<String>()
         showHome(events)
-        node("settings-search").performTextReplacement("MCP")
+        node("settings-search")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString("MCP")))
+            }
+            .assertEditableText("MCP")
         val mcp = reveal("settings-row:MCP 服务器", "设置").assertIsEnabled().assertHasClickAction()
         mcp.performClick()
         ui.runOnIdle { assertEquals(listOf("MCP_SETTINGS"), events) }
         ui.onNodeWithText("待接入").assertDoesNotExist()
         node("settings-search-clear").performClick()
-        node("settings-search").performTextReplacement("发送消息")
+        node("settings-search")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString("发送消息")))
+            }
+            .assertEditableText("发送消息")
         ui.onNodeWithText("没有匹配的设置").assertExists()
-        node("settings-search").performTextReplacement("Skills")
+        node("settings-search")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString("Skills")))
+            }
+            .assertEditableText("Skills")
         reveal("settings-row:Skills", "设置").performClick()
         ui.runOnIdle { assertEquals(listOf("MCP_SETTINGS", "SKILLS"), events) }
     }

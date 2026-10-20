@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
 import app.daiyu.android.data.model.AppearanceSettings
@@ -62,7 +64,11 @@ class SettingsReleaseActivityTest : WiredActivityTestCase() {
         val before = fixture.database.exportBackup()
         assertEquals(SettingsLocalPage.UPDATES, SettingsCatalog.entry("updates").localPage)
         openSettings()
-        node("settings-search").performTextReplacement("检查更新")
+        node("settings-search")
+            .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                assertTrue(setText(AnnotatedString("检查更新")))
+            }
+            .assertEditableText("检查更新")
         reveal("settings-row:检查更新", "设置").performClick()
         node("page:检查更新").assertExists()
         node("release-check").assertTextContains("检查稳定版更新")

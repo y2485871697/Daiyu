@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
 import app.daiyu.android.data.model.AppearanceSettings
@@ -19,7 +21,11 @@ class PlatformToolSettingsActivityTest : WiredActivityTestCase() {
         } } }
         ui.waitForIdle()
         for (title in listOf("平台只读工具与私密出站", "权限检查", "浏览器")) {
-            node("settings-search").performTextReplacement(title)
+            node("settings-search")
+                .performSemanticsAction(SemanticsActions.SetText) { setText ->
+                    assertTrue(setText(AnnotatedString(title)))
+                }
+                .assertEditableText(title)
             node("settings-row:$title").assertDoesNotExist()
         }
         ui.runOnIdle { assertTrue(events.isEmpty()) }

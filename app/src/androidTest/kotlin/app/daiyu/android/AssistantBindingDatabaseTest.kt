@@ -63,7 +63,7 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         prefs(source)
         val db = database()
         val store = SqliteAssistantStore(db).also { it.requireReady() }
-        assertEquals(21, db.readableDatabase.version)
+        assertEquals(22, db.readableDatabase.version)
         assertEquals(listOf(second, first), store.list())
         assertEquals(first.id, store.selectedId.value)
         assertEquals(source, raw())
@@ -82,6 +82,47 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         assertEquals("changed", restored.read(first.id)?.prompt)
         assertEquals(first.id, reopened.assistantId(created.id))
         assertNull(reopened.assistantId(ConversationId("old")))
+    }
+
+    fun testV21AddsDescriptionWithoutChangingProfilesSelectionOrConversationBinding() {
+        val helper = database()
+        val store = SqliteAssistantStore(helper)
+        val profile = store.save(AssistantProfile("described", "助手", "提示词", "avatar.png", 42,
+            false, listOf("skill-one")))
+        store.select(profile.id)
+        val conversation = helper.create(profile.id)
+        val sql = helper.writableDatabase
+        sql.execSQL("ALTER TABLE assistants RENAME TO assistants_new")
+        sql.execSQL("CREATE TABLE assistants(id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,prompt TEXT NOT NULL,avatar_file_name TEXT,created_at INTEGER NOT NULL,memory_enabled INTEGER NOT NULL CHECK(memory_enabled IN (0,1)),enabled_skill_ids TEXT NOT NULL,position INTEGER NOT NULL UNIQUE)")
+        sql.execSQL("INSERT INTO assistants SELECT id,name,prompt,avatar_file_name,created_at,memory_enabled,enabled_skill_ids,position FROM assistants_new")
+        sql.execSQL("DROP TABLE assistants_new")
+        sql.version = 21
+        helper.close()
+        val upgraded = database()
+        val restored = SqliteAssistantStore(upgraded).also { it.requireReady() }
+        assertEquals(22, upgraded.readableDatabase.version)
+        assertEquals(profile, restored.read(profile.id))
+        assertEquals(profile.id, restored.selectedId.value)
+        assertEquals(profile.id, upgraded.assistantId(conversation.id))
+        val edited = restored.compareAndSet(profile, profile.copy(description = "整理文档与资料"))
+        rejected { restored.compareAndSet(profile, profile.copy(description = "stale")) }
+        val duplicate = restored.duplicate(profile.id)
+        assertEquals(edited.description, duplicate.description)
+        upgraded.close()
+        assertEquals(edited, SqliteAssistantStore(database()).read(profile.id))
+    }
+
+    fun testDescriptionCodecAndPreferenceRoundTripIncludingOldMissingField() {
+        val profile = AssistantProfile("intro", "介绍", "prompt", description = "一句话介绍")
+        val snapshot = LegacyAssistantCodec.Snapshot(listOf(profile), profile.id)
+        assertEquals(snapshot, LegacyAssistantCodec.decode(LegacyAssistantCodec.encode(snapshot)))
+        val old = JSONObject(LegacyAssistantCodec.encode(snapshot))
+        old.getJSONArray("profiles").getJSONObject(0).remove("description")
+        assertEquals("", LegacyAssistantCodec.decode(old.toString()).profiles.single().description)
+        val preferences = context.getSharedPreferences("daiyu-assistants", 0)
+        val legacy = SharedPreferencesAssistantStore(preferences)
+        legacy.save(profile)
+        assertEquals(profile, SharedPreferencesAssistantStore(preferences).read(profile.id))
     }
 
     fun testCorruptLegacyRollsBackSchemaAndVersionThenCanRetry() {

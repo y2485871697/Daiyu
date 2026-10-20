@@ -47,12 +47,13 @@ class AssistantEditSession(private val store: AssistantStore, original: Assistan
      * back over someone else's profile. The caller retains all drafts on any failure.
      */
     suspend fun save(name: String, prompt: String, memory: Boolean, skills: Set<String>,
+        description: String = expected.description,
         saveMemory: () -> AssistantMemorySnapshot?): AssistantEditReceipt = writes.withLock {
         requireActive()
         withContext(Dispatchers.IO) {
             requireActive()
             expected = store.compareAndSet(expected, expected.copy(name = name, prompt = prompt,
-                memoryEnabled = memory, enabledSkillIds = skills.toList()))
+                memoryEnabled = memory, enabledSkillIds = skills.toList(), description = description))
             requireActive()
             AssistantEditReceipt(expected, saveMemory())
         }

@@ -212,8 +212,7 @@ internal fun AssistantProfileCard(
         Column(Modifier.weight(1f)) {
             Text(profile.name, color = colors.text, fontSize = (15f * s).sp,
                 fontWeight = FontWeight(550), lineHeight = (21f * s).sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            // There is no description field in the production profile; do not create a shadow model.
-            Text(profile.prompt.lineSequence().firstOrNull { it.isNotBlank() } ?: "自定义助手",
+            Text(profile.description.ifBlank { profile.prompt.lineSequence().firstOrNull { it.isNotBlank() } ?: "自定义助手" },
                 color = colors.muted, fontSize = (12f * s).sp, lineHeight = (18f * s).sp,
                 maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp * s))
         }
@@ -267,7 +266,7 @@ private fun AssistantDialogIdentity(profile: AssistantProfile, assets: Assistant
         Column(Modifier.weight(1f)) {
             Text(profile.name, color = colors.text, fontSize = (15f * s).sp, lineHeight = (22f * s).sp,
                 fontWeight = FontWeight(550))
-            Text(profile.prompt.lineSequence().firstOrNull { it.isNotBlank() } ?: "自定义助手",
+            Text(profile.description.ifBlank { profile.prompt.lineSequence().firstOrNull { it.isNotBlank() } ?: "自定义助手" },
                 color = colors.muted, fontSize = (12f * s).sp, lineHeight = (18f * s).sp,
                 maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp * s))
         }

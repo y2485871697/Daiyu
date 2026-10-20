@@ -109,7 +109,7 @@ class SqliteAssistantStore(private val database: ConversationDatabase) : Assista
         internal fun install(db: SQLiteDatabase, legacy: String?) {
             val seed = legacy?.let(LegacyAssistantCodec::decode) ?: LegacyAssistantCodec.Snapshot(
                 listOf(SharedPreferencesAssistantStore.defaultProfile()), AssistantPrompt.DEFAULT_ID)
-            db.execSQL("CREATE TABLE assistants(id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,prompt TEXT NOT NULL,avatar_file_name TEXT,created_at INTEGER NOT NULL,memory_enabled INTEGER NOT NULL CHECK(memory_enabled IN (0,1)),enabled_skill_ids TEXT NOT NULL,position INTEGER NOT NULL UNIQUE)")
+            db.execSQL("CREATE TABLE assistants(id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,prompt TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',avatar_file_name TEXT,created_at INTEGER NOT NULL,memory_enabled INTEGER NOT NULL CHECK(memory_enabled IN (0,1)),enabled_skill_ids TEXT NOT NULL,position INTEGER NOT NULL UNIQUE)")
             db.execSQL("CREATE TABLE assistant_selection(id INTEGER PRIMARY KEY CHECK(id=1),selected_id TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0)")
             seed.profiles.forEachIndexed { index, profile -> check(db.insertOrThrow("assistants", null, values(profile, index.toLong())) != -1L) }
             check(db.insertOrThrow("assistant_selection", null, ContentValues().apply { put("id", 1); put("selected_id", seed.selectedId) }) != -1L)
@@ -117,17 +117,17 @@ class SqliteAssistantStore(private val database: ConversationDatabase) : Assista
         }
 
         private fun values(p: AssistantProfile, position: Long) = ContentValues().apply {
-            put("id", p.id); put("name", p.name); put("prompt", p.prompt); put("avatar_file_name", p.avatarFileName)
+            put("id", p.id); put("name", p.name); put("prompt", p.prompt); put("description", p.description); put("avatar_file_name", p.avatarFileName)
             put("created_at", p.createdAt); put("memory_enabled", if (p.memoryEnabled) 1 else 0)
             put("enabled_skill_ids", JSONArray(p.enabledSkillIds).toString()); put("position", position)
         }
 
         private fun readSnapshot(db: SQLiteDatabase): LegacyAssistantCodec.Snapshot {
-            val profiles = db.rawQuery("SELECT id,name,prompt,avatar_file_name,created_at,memory_enabled,enabled_skill_ids FROM assistants ORDER BY position", null).use { c ->
+            val profiles = db.rawQuery("SELECT id,name,prompt,avatar_file_name,created_at,memory_enabled,enabled_skill_ids,description FROM assistants ORDER BY position", null).use { c ->
                 buildList { while (c.moveToNext()) {
                     val skills = JSONArray(c.getString(6))
                     add(AssistantProfile(AssistantStorage.id(c.getString(0)), c.getString(1), c.getString(2), c.getString(3),
-                        c.getLong(4), c.getInt(5) == 1, (0 until skills.length()).map { skills.getString(it) }))
+                        c.getLong(4), c.getInt(5) == 1, (0 until skills.length()).map { skills.getString(it) }, c.getString(7)))
                 } }
             }
             val selected = db.rawQuery("SELECT selected_id FROM assistant_selection WHERE id=1", null).use { check(it.moveToFirst()); it.getString(0) }

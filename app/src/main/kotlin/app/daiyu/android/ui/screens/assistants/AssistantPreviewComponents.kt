@@ -279,7 +279,7 @@ internal fun AssistantPreviewSection(
         }.padding(1.dp).padding(horizontal = 10.dp * s, vertical = 12.dp * s), content = content)
         if (title != null) Text(title, color = colors.text, fontSize = (11f * s).sp,
             lineHeight = (17.6f * s).sp, fontWeight = FontWeight(550),
-            modifier = Modifier.offset(x = 10.dp * s, y = legendOffset * s)
+            modifier = Modifier.testTag("assistant-section-legend:$title").offset(x = 10.dp * s, y = legendOffset * s)
                 .onSizeChanged { legendWidth = it.width }.padding(horizontal = 5.dp * s))
     }
 }

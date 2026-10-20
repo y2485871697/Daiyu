@@ -4,6 +4,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.text.AnnotatedString
 import app.daiyu.android.integration.tools.R08VirtualDisplayAction
 import app.daiyu.android.vdapproval.*
 
@@ -34,7 +36,9 @@ class R08PlanEditorScreenTest : WiredActivityTestCase() {
     private fun edit(index: Int, field: String, value: String) {
         val tag = "r08-plan-$index-$field"
         reveal(tag)
-        node(tag).performTextReplacement(value)
+        node(tag).performSemanticsAction(SemanticsActions.SetText) { setText ->
+            assertTrue(setText(AnnotatedString(value)))
+        }.assertEditableText(value)
     }
 
     fun testActualFieldsFreezeLaunchTapSwipeTextKeyAndReadParameters() {

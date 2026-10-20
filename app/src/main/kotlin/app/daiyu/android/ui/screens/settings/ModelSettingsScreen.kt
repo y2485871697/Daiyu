@@ -54,6 +54,8 @@ internal data class ModelSettingsDraftUi(
     val bodyFieldRows: List<ProviderFieldRow>? = null,
     val headerFieldsError: String? = null,
     val bodyFieldsError: String? = null,
+    val providerEnabled: Boolean = false,
+    val balanceOption: app.daiyu.android.balance.BalanceOption = app.daiyu.android.balance.BalanceOption(),
 ) {
     override fun toString(): String = "ModelSettingsDraftUi(protocol=$protocol, model=$model, apiKey=<redacted>, customBody=<redacted>)"
 }
@@ -192,6 +194,19 @@ internal fun ModelSettingsScreen(
         item(key = "provider_body") {
             SettingsSectionTitle("自定义请求体")
             SettingsCard { RequestBodyFieldsEditor(draft, enabled, engineeringUi, changeDraft) }
+        }
+        if (providerName != null) {
+            item(key = "provider_enabled") {
+                SettingsSectionTitle("偏好与策略")
+                SettingsCard {
+                    SettingsSwitchRow("启用此 Provider", draft.providerEnabled, enabled = enabled) {
+                        changeDraft(draft.copy(providerEnabled = it))
+                    }
+                }
+            }
+            item(key = "provider_balance") {
+                ProviderBalanceFields(draft, enabled, changeDraft)
+            }
         }
         if (showCatalog && onManageLocalModels != null) item(key = "local_models") {
             SettingsCard { SettingsRow("本地模型", onClick = { if (enabled) { connection.cancel(); onManageLocalModels() } },

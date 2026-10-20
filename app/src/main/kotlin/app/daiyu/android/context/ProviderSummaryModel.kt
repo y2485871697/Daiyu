@@ -253,7 +253,13 @@ private class TerminalSession(
                         if (block.optString("type") == "text") add(block.getString("text"))
                     }
                 }
-                ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI -> throw IllegalArgumentException("摘要模型尚不支持 ${protocol.wireName}")
+                ProviderProtocol.CHAT_COMPLETIONS -> {
+                    require(item.getString("role") == "assistant")
+                    check(!item.has("tool_calls") || item.getJSONArray("tool_calls").length() == 0) { "摘要禁止工具" }
+                    val text = item.opt("content") as? String ?: throw ModelRequestException(ModelFailure.PROTOCOL)
+                    if (text.isNotBlank()) add(text)
+                }
+                ProviderProtocol.GEMINI -> throw IllegalArgumentException("摘要模型尚不支持 ${protocol.wireName}")
                 ProviderProtocol.UNKNOWN -> throw ModelRequestException(ModelFailure.PROTOCOL)
             }
         }

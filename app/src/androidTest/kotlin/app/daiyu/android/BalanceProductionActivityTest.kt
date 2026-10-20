@@ -4,11 +4,13 @@ import android.content.Intent
 import androidx.compose.ui.test.*
 import androidx.lifecycle.Lifecycle
 import app.daiyu.android.balance.*
+import app.daiyu.android.storage.ProviderRegistry
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /** Real MainActivity/settings/back/top-bar wiring with a process-owned, isolated in-memory P05
  * host. No user balance namespace, Keystore, real network or paid model API is used by this fixture.
@@ -16,9 +18,11 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class BalanceProductionActivityTest : WiredActivityTestCase() {
     override val engineeringUi = true
-    private lateinit var originalHost: BalanceRuntimeHost
-    private lateinit var testHost: BalanceRuntimeHost
+    private lateinit var originalHost: ProviderBalanceRuntimeHost
+    private lateinit var testHost: ProviderBalanceRuntimeHost
     private lateinit var runtime: BalanceRuntime
+    private val draftCalls = AtomicInteger()
+    private val draftConfiguration = AtomicReference<BalanceConfiguration>()
     private val calls = AtomicInteger()
     private val hold = AtomicBoolean()
     private val fail = AtomicBoolean()
@@ -34,8 +38,9 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
     override fun setUp() {
         try {
             val app = instrumentation.targetContext.applicationContext as ChatApplication
-            originalHost = app.balanceHost
-            testHost = BalanceRuntimeHost(factory = {
+            originalHost = app.providerBalanceHost
+            testHost = ProviderBalanceRuntimeHost(factory = { slotId ->
+                check(slotId == ProviderRegistry.PRIMARY)
                 BalanceRuntime(ProviderBalanceStore(Memory()), BalanceQuery {
                     calls.incrementAndGet()
                     if (hold.get()) try {
@@ -45,15 +50,19 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
                     if (fail.get()) BalanceResult.Failed(BalanceFailure.NETWORK)
                     else BalanceResult.Available(BalanceMoney("12.34".toBigDecimal(), "CNY"), 1234L)
                 })
+            }, draftQuery = BalanceQuery { configuration ->
+                draftCalls.incrementAndGet(); draftConfiguration.set(configuration)
+                BalanceResult.Available(BalanceMoney("56.78".toBigDecimal(), "CNY"), 5678L)
             })
             runtime = runBlocking {
-                testHost.get().also {
+                testHost.get(ProviderRegistry.PRIMARY).also {
                     it.save(BalanceConfiguration("test-balance-account", "https://example.test", "balance-only-key",
                         "", "CNY", BalanceOption(enabled = true, apiPath = "/balance", resultPath = "balance")))
                 }
             }
-            mainThread { app.balanceHost = testHost }
+            mainThread { app.providerBalanceHost = testHost }
             super.setUp()
+            assertEquals(ProviderRegistry.PRIMARY, fixture.controller.providers.activeEditor().slotId)
             ui.waitUntil(timeoutMillis = 5000) { runtime.state.value.successful != null }
         } catch (failure: Throwable) {
             try { cleanupFixture() } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
@@ -64,7 +73,7 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
     private fun restoreHost() {
         try {
             if (::originalHost.isInitialized) mainThread {
-                (instrumentation.targetContext.applicationContext as ChatApplication).balanceHost = originalHost
+                (instrumentation.targetContext.applicationContext as ChatApplication).providerBalanceHost = originalHost
             }
         } finally { if (::testHost.isInitialized) testHost.close() }
     }
@@ -101,12 +110,41 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
         val revision = runtime.state.value.revision
         activity = recreateActivity(activity)
         ui.onNodeWithText("独立余额设置").assertIsDisplayed()
-        assertSame(runtime, runBlocking { testHost.get() })
+        assertSame(runtime, runBlocking { testHost.get(ProviderRegistry.PRIMARY) })
         assertEquals(revision, runtime.state.value.revision)
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
         node("page:设置").assertIsDisplayed()
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
         assertTopBarMoney()
+    }
+
+    fun testProviderDraftUsesIndependentInjectedQueryWithoutSavingOrReplacingTopBar() {
+        val savedBalance = runtime.store.configurationForEditing()
+        val revision = runtime.state.value.revision
+        val savedChat = fixture.settings.load()
+        openModels()
+        reveal("provider-balance-account").performTextReplacement("unsaved-balance-account")
+        reveal("provider-balance-endpoint").performTextReplacement("https://unsaved-balance.invalid")
+        reveal("provider-balance-key").performTextReplacement("unsaved-independent-key")
+        reveal("provider-balance-header-add").performClick()
+        reveal("provider-balance-header-name:0").performTextReplacement("X-Draft-Balance")
+        reveal("provider-balance-header-value:0").performTextReplacement("unsaved-header")
+        reveal("provider-balance-test").assertIsEnabled().performClick()
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithText("余额测试成功：CNY 56.78（仅本次测试，未保存）").fetchSemanticsNodes().isNotEmpty()
+        }
+        assertEquals(1, draftCalls.get())
+        val seen = checkNotNull(draftConfiguration.get())
+        assertEquals("unsaved-balance-account", seen.accountId)
+        assertEquals("https://unsaved-balance.invalid", seen.endpoint)
+        assertEquals("unsaved-independent-key", seen.apiKey)
+        assertEquals("unsaved-independent-key", seen.resolvedToken())
+        assertEquals(mapOf("X-Draft-Balance" to "unsaved-header"), seen.customHeaders)
+        assertEquals(savedBalance, runtime.store.configurationForEditing())
+        assertEquals(revision, runtime.state.value.revision)
+        assertEquals("CNY 12.34", runtime.state.value.project().balanceText)
+        assertEquals(savedChat, fixture.settings.load())
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testFailureKeepsActualTopBarAmountAndControllerErrorUsesSeparateStatus() {

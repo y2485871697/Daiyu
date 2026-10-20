@@ -39,6 +39,37 @@ class ProviderSummaryModelTest {
         deadline: ManualDeadline = ManualDeadline()): String = ModelContextSummarizer(
         resolver(config, connection, deadline).resolve(binding)!!, cancellation).summarize(input())
 
+    private fun chatSummary(reason: String = "stop", done: Boolean = true): String {
+        fun chunk(delta: JSONObject, finish: Any) = "data: " + JSONObject().put("id", "chat-summary")
+            .put("choices", JSONArray().put(JSONObject().put("index", 0).put("delta", delta)
+                .put("finish_reason", finish))) + "\n\n"
+        return chunk(JSONObject().put("role", "assistant").put("content", "最终事实摘要"), JSONObject.NULL) +
+            chunk(JSONObject(), reason) + if (done) "data: [DONE]\n\n" else ""
+    }
+
+    @Test fun chatCompletionsSummaryUsesNativeSystemAndBoundedToolFreeSingleRequest() {
+        val config = configuration(ProviderProtocol.CHAT_COMPLETIONS)
+        val wire = Connection(chatSummary())
+        assertEquals("最终事实摘要", summarize(config, wire))
+        assertEquals(1, wire.posts)
+        val body = wire.json()
+        assertEquals(binding.modelId, body.getString("model"))
+        assertEquals(256, body.getInt("max_tokens"))
+        assertEquals("system", body.getJSONArray("messages").getJSONObject(0).getString("role"))
+        assertTrue(body.getJSONArray("messages").getJSONObject(0).getString("content").contains("不调用任何工具"))
+        assertFalse(body.has("tools"))
+        assertFalse(body.has("tool_choice"))
+        assertEquals("Bearer synthetic-summary-key", wire.getRequestProperty("Authorization"))
+    }
+
+    @Test fun chatSummaryTruncationOrMissingAuthoritativeDoneNeverPublishesProse() {
+        for (stream in listOf(chatSummary("length"), chatSummary(done = false))) {
+            val wire = Connection(stream)
+            assertThrows(ModelRequestException::class.java) { summarize(configuration(ProviderProtocol.CHAT_COMPLETIONS), wire) }
+            assertEquals(1, wire.posts)
+        }
+    }
+
     @Test fun bothProtocolsUseFrozenExplicitModelBudgetNativeInstructionsAndNoTools() {
         for (protocol in protocols) {
             val original = configuration(protocol, """{"temperature":0.25}""")

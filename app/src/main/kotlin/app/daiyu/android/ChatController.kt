@@ -69,6 +69,7 @@ class ChatApplication:Application() {
         app.daiyu.android.balance.BalanceRuntime(app.daiyu.android.balance.ProviderBalanceStore(
             app.daiyu.android.balance.EncryptedBalancePersistence(applicationContext)))
     })
+    internal var providerBalanceHost = app.daiyu.android.balance.ProviderBalanceRuntimeHost(this)
     private val terminalProviderDelegate = lazy { app.daiyu.android.terminal.TerminalApplicationProvider(this) }
     internal val terminalProvider by terminalProviderDelegate
     internal val terminalOwner get() = checkNotNull(
@@ -114,6 +115,7 @@ class ChatApplication:Application() {
     override fun onTerminate() {
         // Android normally kills the process without this callback; useful for hosted runtimes.
         balanceHost.close()
+        providerBalanceHost.close()
         if (terminalProviderDelegate.isInitialized()) terminalProvider.close()
         pets.close() // Hosted-runtime cleanup; an Activity never closes the application host.
         touchHaptics?.close(); touchHaptics = null
@@ -3997,20 +3999,40 @@ class ChatController internal constructor(private val application:Application,
         invalidateVideoConfiguration()
         var result: ProviderRegistrySnapshot? = null
         dataTask(failureNotice = "提供商操作未确认；请刷新核对", completed = { completed(if (it) result else null) }, work = {
+            val before = providers.snapshot()
             result = change(providers, expectedRevision) { owner.commit { Unit } }
+            val remaining = checkNotNull(result).providers.map { it.slotId }.toSet()
+            for (removed in before.providers.filter { it.slotId !in remaining })
+                kotlinx.coroutines.runBlocking { providerBalances.remove(removed.slotId) }
             "提供商列表已更新"
         })
     }
+    internal val providerBalances get() = (application as ChatApplication).providerBalanceHost
     internal fun saveProviderSettings(editor: ProviderEditorSlot, value: ModelSettings, expected: EditingSettings,
         protocolChangeAuthorized: Boolean, requestOptionsReplacementAuthorized: Boolean, owner: ModelSettingsSaveOwner,
-        headersReplacementAuthorized: Boolean = false, providerName: String? = null, providerEnabled: Boolean? = null, completed: (Boolean) -> Unit,
+        headersReplacementAuthorized: Boolean = false, providerName: String? = null, providerEnabled: Boolean? = null,
+        replaceBalanceConfiguration: Boolean = false,
+        balanceConfiguration: app.daiyu.android.balance.BalanceConfiguration? = null,
+        expectedBalanceConfiguration: app.daiyu.android.balance.BalanceConfiguration? = null,
+        completed: (Boolean) -> Unit,
     ) {
         check(Looper.myLooper() == Looper.getMainLooper())
         invalidateVideoConfiguration()
-        dataTask(failureNotice = "提供商保存未完整确认；请重新打开详情核对名称与配置", completed = completed, work = {
+        dataTask(failureNotice = "提供商或余额保存未完整确认；请重新打开详情核对", completed = completed, work = {
+            val balance = if (replaceBalanceConfiguration) kotlinx.coroutines.runBlocking { providerBalances.get(editor.slotId) } else null
+            if (balance != null) check(balance.store.configurationForEditing() == expectedBalanceConfiguration) {
+                "余额配置已变化，请重新打开详情"
+            }
+            balanceConfiguration?.validate()
             providers.save(editor, value, expected, protocolChangeAuthorized, requestOptionsReplacementAuthorized,
                 headersReplacementAuthorized = headersReplacementAuthorized, providerName = providerName,
                 providerEnabled = providerEnabled, admit = { owner.commit { Unit } })
+            if (balance != null) providers.withEditor(providers.editor(editor.slotId)) {
+                owner.commit {
+                    check(balance.store.configurationForEditing() == expectedBalanceConfiguration) { "余额配置已变化" }
+                    if (balanceConfiguration != null) balance.store.save(balanceConfiguration) else balance.store.clear()
+                }
+            }
             try { providers.catalogSnapshot(providers.editor(editor.slotId)); "提供商设置已保存" }
             catch (_: Exception) { "提供商设置已保存；模型目录尚不可用，请重新打开详情" }
         })

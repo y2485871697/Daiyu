@@ -183,11 +183,13 @@ internal class ContextManagementWorker(
                 profiles = object : ContextManagementSummaryProfiles {
                     override fun describe(binding: SummaryModelBinding): SummaryProfileDescriptor {
                         requireWorker()
-                        return SummaryProfileStore(app).descriptor(binding)
+                        return if (CatalogSummaryBindings.decode(binding) == null) SummaryProfileStore(app).descriptor(binding)
+                        else catalogSummaryDescriptor(app, binding)
                     }
                     override fun freeze(expected: SummaryProfileDescriptor, usagePort: BoundSummaryUsagePort): BoundSummaryModel? {
                         requireWorker()
-                        val configuration = SummaryProfileStore(app).configuration(expected)
+                        val configuration = if (CatalogSummaryBindings.decode(expected.binding) == null)
+                            SummaryProfileStore(app).configuration(expected) else catalogSummaryConfiguration(app, expected)
                         return ProviderSummaryModelResolver(lookup = { binding ->
                             require(binding == expected.binding)
                             configuration // Retain the exact descriptor revision; do not resolve again.

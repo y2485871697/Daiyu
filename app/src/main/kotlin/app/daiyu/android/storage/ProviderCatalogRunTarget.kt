@@ -16,6 +16,6 @@ internal data class ProviderCatalogRunTarget(
         require(UUID.fromString(catalogIdentity).toString() == catalogIdentity && catalogRevision >= 0)
         require(UUID.fromString(localIdentity).toString() == localIdentity)
         require(apiModel.isNotBlank() && apiModel.length <= 200)
-        require(protocol == ProviderProtocol.RESPONSES || protocol == ProviderProtocol.MESSAGES)
+        require(protocol in setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS))
     }
 }

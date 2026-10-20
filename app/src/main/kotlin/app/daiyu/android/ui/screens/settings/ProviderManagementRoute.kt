@@ -37,18 +37,24 @@ private class ProviderDetail(
     val editor: ProviderEditorSlot, val name: String, val providerEnabled: Boolean, val editing: EditingSettings,
     val configurationRevision: Long,
     val persistence: SavedModelCatalogPersistence<CatalogModelParameters>, val catalogIdentity: String?,
+    val balanceConfiguration: app.daiyu.android.balance.BalanceConfiguration?,
 ) {
     val live = AtomicBoolean(true)
     val saveOwner = ModelSettingsSaveOwner()
-    fun revoke() { live.set(false); saveOwner.revoke() }
-    var draft by mutableStateOf(editing.settings.providerDraft().copy(providerName = name, providerEnabled = providerEnabled))
+    var balanceTestJob: kotlinx.coroutines.Job? = null
+    fun revoke() { live.set(false); saveOwner.revoke(); balanceTestJob?.cancel(); balanceTestJob = null }
+    var draft by mutableStateOf(editing.settings.providerDraft().copy(providerName = name, providerEnabled = providerEnabled,
+        balanceConfiguration = balanceConfiguration,
+        balanceOption = balanceConfiguration?.option ?: app.daiyu.android.balance.BalanceOption(enabled = balanceConfiguration != null)))
 }
 private class PausedProviderDraft(
     val editor: ProviderEditorSlot, val editing: EditingSettings, val configurationRevision: Long,
-    val draft: ModelSettingsDraftUi,
+    val draft: ModelSettingsDraftUi, val balanceConfiguration: app.daiyu.android.balance.BalanceConfiguration?,
 )
 private class NewProviderDraft(protocol: ProviderProtocol) {
     var draft by mutableStateOf(ModelSettingsDraftUi(providerName = "").selectProtocol(protocol))
+    var balanceTestJob: kotlinx.coroutines.Job? = null
+    fun revoke() { balanceTestJob?.cancel(); balanceTestJob = null }
 }
 private class ProviderConfirm(val title: String, val message: String, val destructive: Boolean, val action: () -> Unit)
 private fun ModelSettings.providerDraft() = ModelSettingsDraftUi(protocol = protocol, endpoint = endpoint,
@@ -96,7 +102,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
     var version by remember { mutableStateOf(0L) }
     fun current(p: ProviderPagePermit) = visit.get() && p.live.get() && permit === p && resumed &&
         lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) && ownerCheck()
-    fun clearPrompts() { creating = null; confirmation = null; managing = null }
+    fun clearPrompts() { creating?.revoke(); creating = null; confirmation = null; managing = null }
     fun closeDetail() { serial++; loading = false; detail?.revoke(); detail = null; clearPrompts() }
     fun refresh() {
         val p = permit
@@ -153,13 +159,16 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     store.modelCatalog.readConfiguration { revision -> revision to store.loadForEditing() }
                 }
                 val identity = repo.withEditor(editor) { it.localModelCatalogSnapshot()?.providerIdentity }
-                ProviderDetail(editor, registration.name, registration.enabled, editing, configurationRevision, repo.catalogPersistence(editor), identity)
+                val balance = controller.providerBalances.get(slot).store.configurationForEditing()
+                repo.withEditor(editor) { }
+                ProviderDetail(editor, registration.name, registration.enabled, editing, configurationRevision,
+                    repo.catalogPersistence(editor), identity, balance)
             } }
             if (!current(p) || serial != request) return@launch
             loading = false
             result.fold(onSuccess = { loaded ->
                 if (restore != null && restore.editor == loaded.editor && restore.editing == loaded.editing &&
-                    restore.configurationRevision == loaded.configurationRevision) {
+                    restore.configurationRevision == loaded.configurationRevision && restore.balanceConfiguration == loaded.balanceConfiguration) {
                     loaded.draft = restore.draft.copy(protocolChangeAuthorized = false, requestOptionsReplacementAuthorized = false, headersReplacementAuthorized = false)
                 }
                 if (newProtocol != null) loaded.draft = loaded.draft.selectProtocol(newProtocol)
@@ -199,7 +208,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_PAUSE) {
                 detail?.let {
-                    pausedDraft = PausedProviderDraft(it.editor, it.editing, it.configurationRevision, it.draft)
+                    pausedDraft = PausedProviderDraft(it.editor, it.editing, it.configurationRevision, it.draft, it.balanceConfiguration)
                 }
                 authentication = false
                 resumed = false; permit.revoke(); closeDetail(); checkingRegistry = false
@@ -209,7 +218,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             }
         }
         lifecycle.addObserver(observer)
-        onDispose { pausedDraft = null; visit.set(false); permit.revoke(); detail?.revoke(); lifecycle.removeObserver(observer) }
+        onDispose { pausedDraft = null; visit.set(false); permit.revoke(); detail?.revoke(); creating?.revoke(); lifecycle.removeObserver(observer) }
     }
     LaunchedEffect(resumed, permit, busy, initialSlot, pendingOpen) {
         if (pendingOpen && current(permit) && busy == null) {
@@ -252,12 +261,16 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
         }
         if (modelTab) ProviderEmptyModelsPage("添加提供商", { back() }, tabs,
             "请先在配置页保存名称、Base URL 和 API Key，再添加或拉取模型。")
-        else ModelSettingsScreen(draft, { if (enabled && creating === newProvider) newProvider.draft = it },
+        else ModelSettingsScreen(draft, { if (enabled && creating === newProvider) {
+            newProvider.revoke(); newProvider.draft = it
+        } },
             onSave = { submitted ->
                 val expected = registry
                 if (enabled && creating === newProvider && newProvider.draft === submitted && expected != null) {
                     val value = runCatching {
                         ProviderRegistry.requireValidName(submitted.providerName.orEmpty().trim())
+                        submitted.balanceConfiguration?.validate()
+                        require(!submitted.balanceOption.enabled || submitted.balanceConfiguration != null)
                         require(submitted.headerFieldsValid && submitted.bodyFieldsValid)
                         require(submitted.protocol == submitted.savedProtocol || submitted.protocolChangeAuthorized)
                         submitted.providerSettings(ModelSettings("", "", "", false)).also { it.validateConnection() }
@@ -267,13 +280,34 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         val added = result.providers.single { candidate -> expected.providers.none { it.slotId == candidate.slotId } }
                         open(added.slotId)
                     }) { repo, revision, admit ->
-                        repo.registerConfigured(revision, submitted.providerName.orEmpty().trim(), value.getOrThrow(),
+                        val created = repo.registerConfigured(revision, submitted.providerName.orEmpty().trim(), value.getOrThrow(),
                             submitted.protocolChangeAuthorized, enabled = submitted.providerEnabled, admit = admit)
+                        submitted.balanceConfiguration?.let { configuration ->
+                            val added = created.providers.single { candidate -> expected.providers.none { it.slotId == candidate.slotId } }
+                            val runtime = kotlinx.coroutines.runBlocking { controller.providerBalances.get(added.slotId) }
+                            repo.withEditor(repo.editor(added.slotId)) { admit(); runtime.store.save(configuration) }
+                        }
+                        created
                     }
                 }
             }, onFetchCatalog = {}, onBack = { back() }, pageTitle = "添加提供商", providerName = "",
             headerContent = tabs, showCatalog = false, enabled = enabled, errorText = notice,
-            testConnection = { value, cancelled, deliver ->
+            testBalance = { value, requestCancelled, deliver ->
+                val configuration = value.balanceConfiguration
+                if (!current(p) || !enabled || creating !== newProvider || newProvider.draft !== value ||
+                    requestCancelled() || configuration == null || !configuration.queryEnabled ||
+                    runCatching { configuration.validate() }.isFailure) false
+                else {
+                    newProvider.revoke()
+                    newProvider.balanceTestJob = scope.launch {
+                        val result = try { controller.providerBalances.queryDraft(configuration) }
+                        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                        catch (_: Exception) { app.daiyu.android.balance.BalanceResult.Failed(app.daiyu.android.balance.BalanceFailure.NETWORK) }
+                        if (current(p) && creating === newProvider && newProvider.draft === value && !requestCancelled()) deliver(result)
+                    }
+                    true
+                }
+            }, testConnection = { value, cancelled, deliver ->
                 if (!enabled || creating !== newProvider || newProvider.draft !== value || cancelled()) false
                 else runCatching { value.providerSettings(ModelSettings("", "", "", false)) }.getOrNull()?.let { settings ->
                     controller.testModelConnection(settings,
@@ -301,6 +335,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         "原请求头不可用；替换或清除需要明确确认"
                     }
                     ProviderRegistry.requireValidName(submitted.providerName.orEmpty().trim())
+                    submitted.balanceConfiguration?.validate()
+                    require(!submitted.balanceOption.enabled || submitted.balanceConfiguration != null) { "请填写独立余额配置" }
                     submitted.providerSettings(saved).also { it.validateConnection() }
                 }
                 if (value.isFailure) {
@@ -312,7 +348,9 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                             submitted.protocolChangeAuthorized, submitted.requestOptionsReplacementAuthorized, d.saveOwner,
                             headersReplacementAuthorized = submitted.headersReplacementAuthorized,
                             providerName = submitted.providerName.orEmpty().trim(),
-                            providerEnabled = submitted.providerEnabled) { success ->
+                            providerEnabled = submitted.providerEnabled,
+                            replaceBalanceConfiguration = submitted.balanceConfiguration != d.balanceConfiguration,
+                            balanceConfiguration = submitted.balanceConfiguration, expectedBalanceConfiguration = d.balanceConfiguration) { success ->
                             if (busy === ticket) busy = null
                             if (live()) {
                                 if (success && d.editor.slotId == ProviderRegistry.PRIMARY) {
@@ -325,7 +363,35 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 }
             }
         }
-        val change: (ModelSettingsDraftUi) -> Unit = { if (live() && enabled && d.draft === draft) d.draft = it }
+        val change: (ModelSettingsDraftUi) -> Unit = { if (live() && enabled && d.draft === draft) {
+            d.balanceTestJob?.cancel(); d.balanceTestJob = null; d.draft = it
+        } }
+        val balanceTest: ProviderBalanceTester = { value, requestCancelled, deliver ->
+            val configuration = value.balanceConfiguration?.takeIf { runCatching { it.validate(); it.queryEnabled }.getOrDefault(false) }
+            if (!live() || !enabled || d.draft !== value || requestCancelled() || configuration == null) false
+            else {
+                d.balanceTestJob?.cancel()
+                d.balanceTestJob = scope.launch {
+                    val result = try {
+                        withContext(Dispatchers.IO) {
+                            repo.withEditor(d.editor) { store -> store.modelCatalog.readConfiguration { revision ->
+                                check(revision == d.configurationRevision && !cancelled() && !requestCancelled())
+                            } }
+                        }
+                        controller.providerBalances.queryDraft(configuration)
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                    catch (_: Exception) { app.daiyu.android.balance.BalanceResult.Failed(app.daiyu.android.balance.BalanceFailure.NETWORK) }
+                    val stillCurrent = withContext(Dispatchers.IO) { runCatching {
+                        repo.withEditor(d.editor) { store -> store.modelCatalog.readConfiguration { it == d.configurationRevision } }
+                    }.getOrDefault(false) }
+                    if (live() && !requestCancelled() && d.draft === value) {
+                        if (stillCurrent) deliver(result)
+                        else { closeDetail(); notice = "提供商配置已变化，请重新打开详情。"; refresh() }
+                    }
+                }
+                true
+            }
+        }
         fun connectionSettings(value: ModelSettingsDraftUi): ModelSettings? = try { value.providerSettings(saved) }
             catch (_: IllegalArgumentException) { notice = "自定义请求头无效，请检查后重试。"; null }
         val connection: ModelConnectionTester = { value, requestCancelled, deliver ->
@@ -392,7 +458,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 pageTitle = detailTitle, providerName = d.name, enabled = enabled, engineeringUi = engineeringUi, testConnection = connection,
                 credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
                 headersUnavailable = d.editing.headersUnavailable,
-                catalogEnabled = false, errorText = notice)
+                catalogEnabled = false, errorText = notice, testBalance = balanceTest)
         } else ProviderCatalogSettingsScreen(draft, change, save, { back() }, d.catalogIdentity, d.persistence,
             createModel = { CatalogModelParameters.newModel(it) }, fetchCatalog = { value, requestCancelled, deliver ->
                 if (!live() || !enabled || !value.headerFieldsValid || !value.bodyFieldsValid || requestCancelled() || d.draft !== value) false
@@ -408,7 +474,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             enabled = enabled, engineeringUi = engineeringUi, errorText = notice,
             credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
             headersUnavailable = d.editing.headersUnavailable,
-            testConnection = connection, localModelActions = actions)
+            testConnection = connection, localModelActions = actions, testBalance = balanceTest)
     } else if (loading) {
         SettingsScaffoldPage("模型提供商", { back() }) { item { SettingsNote("正在读取提供商详情") } }
     } else if (authentication) {

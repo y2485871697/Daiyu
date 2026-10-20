@@ -29,3 +29,21 @@ internal fun catalogSummaryConfiguration(context: Context, binding: SummaryModel
     val target = requireNotNull(CatalogSummaryBindings.decode(binding))
     return CatalogSummaryExecutionPolicy.configuration(binding, ProviderRepository(context).freezeCatalog(target).settings)
 }
+
+internal fun catalogSummaryDescriptor(context: Context, binding: SummaryModelBinding): SummaryProfileDescriptor {
+    val target = requireNotNull(CatalogSummaryBindings.decode(binding))
+    return catalogSummaryDescriptor(binding, ProviderRepository(context).catalogEndpoint(target))
+}
+
+private fun catalogSummaryDescriptor(binding: SummaryModelBinding, endpoint: String): SummaryProfileDescriptor {
+    val target = requireNotNull(CatalogSummaryBindings.decode(binding))
+    return SummaryProfileDescriptor(binding, binding.providerId, endpoint, target.apiModel)
+}
+
+internal fun catalogSummaryConfiguration(context: Context, expected: SummaryProfileDescriptor): SummaryProviderConfiguration {
+    val target = requireNotNull(CatalogSummaryBindings.decode(expected.binding))
+    val frozen = ProviderRepository(context).freezeCatalog(target) { endpoint ->
+        if (catalogSummaryDescriptor(expected.binding, endpoint) != expected) throw SummaryProfileChangedException()
+    }
+    return CatalogSummaryExecutionPolicy.configuration(expected.binding, frozen.settings)
+}

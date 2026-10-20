@@ -131,7 +131,15 @@ internal class ProviderRepository(
                 }
             } catch (_: StaleProviderRegistryException) { CatalogCommitResult.STALE }
         }
-    fun freezeCatalog(target: ProviderCatalogRunTarget): ProviderRunConfiguration = registry.access { state ->
+    fun catalogEndpoint(target: ProviderCatalogRunTarget): String = withCatalogTarget(target) { store, _ ->
+        store.catalogRequestEndpoint(target.apiModel)
+    }
+    fun freezeCatalog(target: ProviderCatalogRunTarget, checkDescriptor: (String) -> Unit = {}): ProviderRunConfiguration =
+        withCatalogTarget(target) { store, revision ->
+            checkDescriptor(store.catalogRequestEndpoint(target.apiModel))
+            ProviderRunConfiguration(target.editor, store.loadForRun(target.apiModel).also { it.validate() }, revision)
+        }
+    private fun <T> withCatalogTarget(target: ProviderCatalogRunTarget, block: (ModelSettingsStore, Long) -> T): T = registry.access { state ->
         if (!matches(state, target.editor)) throw StaleProviderRegistryException()
         check(requireProvider(state, target.editor.slotId).enabled) { "提供商未启用" }
         val store = resolveStore(target.editor.slotId)
@@ -142,7 +150,7 @@ internal class ProviderRepository(
             check(catalog.providerIdentity == target.catalogIdentity) { "提供商连接已变化" }
             val record = checkNotNull(catalog.models.singleOrNull { it.id == target.apiModel }) { "摘要模型已删除" }
             check(record.settings.localIdentity == target.localIdentity) { "摘要模型记录已变化" }
-            ProviderRunConfiguration(target.editor, store.loadForRun(target.apiModel).also { it.validate() }, revision)
+            block(store, revision)
         }
     }
     fun freezeActive(): ProviderRunConfiguration = registry.access { state ->

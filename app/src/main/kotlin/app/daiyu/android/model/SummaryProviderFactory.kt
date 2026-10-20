@@ -17,8 +17,8 @@ internal object SummaryProviderFactory {
 
     private fun validatedCustomBody(snapshot: ProviderSnapshot): JSONObject {
         snapshot.asModelSettings().validate()
-        require(snapshot.protocol in setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES)) {
-            "摘要模型尚不支持 ${snapshot.protocol.wireName}；仅支持 Responses/Messages"
+        require(snapshot.protocol in setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS)) {
+            "摘要模型尚不支持 ${snapshot.protocol.wireName}；仅支持 Responses/Messages/Chat Completions"
         }
         val options = snapshot.requestOptions
         options.validate(snapshot.protocol)
@@ -50,7 +50,8 @@ internal object SummaryProviderFactory {
         return when (snapshot.protocol) {
             ProviderProtocol.RESPONSES -> ResponsesModel(settings, connect, null, instructions)
             ProviderProtocol.MESSAGES -> MessagesModel(settings, maxOutputTokens, connect, null, instructions)
-            ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.GEMINI -> throw IllegalArgumentException("摘要模型尚不支持 ${snapshot.protocol.wireName}")
+            ProviderProtocol.CHAT_COMPLETIONS -> NativeCompletionModel(settings, connect, instructions, null)
+            ProviderProtocol.GEMINI -> throw IllegalArgumentException("摘要模型尚不支持 ${snapshot.protocol.wireName}")
             ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(snapshot.protocol.wireName)
         }
     }

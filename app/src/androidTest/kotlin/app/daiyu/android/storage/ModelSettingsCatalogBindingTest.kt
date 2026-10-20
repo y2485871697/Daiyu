@@ -421,4 +421,57 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         assertEquals(before, raw.all)
     }
 
+    fun testCatalogSummaryConsentUsesMetadataAndRejectsChangedDescriptorBeforeCredentials() {
+        store.save(initial)
+        val repository = ProviderRepository(context, primary = store)
+        val editor = repository.activeEditor()
+        val catalog = repository.catalogSnapshot(editor)
+        val record = catalog.models.single()
+        val target = ProviderCatalogRunTarget(editor, catalog.providerIdentity, catalog.revision,
+            record.settings.localIdentity, record.id, initial.protocol)
+        val binding = app.daiyu.android.context.CatalogSummaryBindings.encode(target)
+        raw.edit().putString("key", "malformed-private-ciphertext").commit()
+        val descriptor = app.daiyu.android.context.catalogSummaryDescriptor(context, binding)
+        assertEquals(initial.requestEndpoint(), descriptor.endpoint)
+        assertEquals(initial.model, descriptor.apiModel)
+        for (changed in listOf(descriptor.copy(revision = "stale"),
+            descriptor.copy(endpoint = "https://wrong.invalid/v1/responses"), descriptor.copy(apiModel = "wrong"))) {
+            try {
+                app.daiyu.android.context.catalogSummaryConfiguration(context, changed)
+                fail("changed consent must be rejected before reading malformed credentials")
+            } catch (_: app.daiyu.android.context.SummaryProfileChangedException) { }
+        }
+        assertEquals(descriptor, app.daiyu.android.context.catalogSummaryDescriptor(context, binding))
+        rejectsSelection { app.daiyu.android.context.catalogSummaryConfiguration(context, descriptor) }
+    }
+
+    fun testCatalogSummaryFreezesOnlySelectedAccountAndRejectsDisabledProvider() {
+        store.save(initial)
+        val repository = ProviderRepository(context, primary = store)
+        val other = initial.copy(endpoint = "https://summary-other.invalid", apiKey = "summary-other-key")
+        val registered = repository.registerConfigured(repository.snapshot().revision, "Summary other", other,
+            false, enabled = true, admit = {})
+        val editor = repository.editor(registered.providers.single { it.name == "Summary other" }.slotId)
+        repository.withEditor(editor) { targetStore ->
+            val catalog = targetStore.modelCatalogSnapshot()
+            assertEquals(CatalogCommitResult.COMMITTED, targetStore.modelCatalog.compareAndAppend(
+                catalog.providerIdentity, catalog.revision,
+                listOf(CatalogModelEdit("summary-local", "Summary local", "32768", true, false).newRecord())) { false })
+        }
+        val catalog = repository.withEditor(editor) { checkNotNull(it.localModelCatalogSnapshot()) }
+        val record = catalog.models.single { it.id == "summary-local" }
+        val target = ProviderCatalogRunTarget(editor, catalog.providerIdentity, catalog.revision,
+            record.settings.localIdentity, record.id, other.protocol)
+        val binding = app.daiyu.android.context.CatalogSummaryBindings.encode(target)
+        val descriptor = app.daiyu.android.context.catalogSummaryDescriptor(context, binding)
+        val frozen = app.daiyu.android.context.catalogSummaryConfiguration(context, descriptor)
+        assertEquals("summary-local", frozen.apiModel)
+        assertEquals(other.apiKey, frozen.provider.apiKey)
+        assertEquals(other.copy(model = "summary-local").requestEndpoint(), descriptor.endpoint)
+        assertEquals(initial, store.load())
+        repository.setEnabled(repository.snapshot().revision, editor.slotId, false)
+        rejectsSelection { app.daiyu.android.context.catalogSummaryConfiguration(context, descriptor) }
+        assertEquals(initial, store.load())
+    }
+
 }

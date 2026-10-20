@@ -310,4 +310,28 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         val missing = Lease(ContextManagementOwner(ConversationId("deleted-owner"), 19))
         failure { worker.snapshot(missing) }
     }
+    fun testProductionWorkerDescribesCatalogSelectionWithoutReadingCredentials() {
+        val appContext = object : ContextWrapper(context) { override fun getApplicationContext(): Context = this }
+        val store = app.daiyu.android.storage.ModelSettingsStore(appContext)
+        val settings = ModelSettings("https://catalog-summary.invalid", "summary", "catalog-summary-key", false)
+        store.save(settings)
+        val repository = app.daiyu.android.storage.ProviderRepository(appContext, primary = store)
+        val editor = repository.activeEditor()
+        val catalog = repository.catalogSnapshot(editor)
+        val record = catalog.models.single()
+        val selected = CatalogSummaryBindings.encode(app.daiyu.android.storage.ProviderCatalogRunTarget(
+            editor, catalog.providerIdentity, catalog.revision, record.settings.localIdentity, record.id, settings.protocol))
+        ProductionCompressionSettingsStore(appContext).save(ProductionCompressionSettings(automatic = false,
+            contextWindowTokens = 1_000_000, reserveTokens = 1000, keepTurns = 1, summaryModel = selected))
+        appContext.getSharedPreferences("model-settings", Context.MODE_PRIVATE).edit()
+            .putString("key", "malformed-private-ciphertext").commit()
+        val lease = seed()
+        val snapshot = ContextManagementWorker.production(appContext, service).snapshot(lease)
+        assertTrue(snapshot.canCompress)
+        assertEquals(selected, snapshot.summaryTarget!!.binding)
+        assertEquals(settings.requestEndpoint(), snapshot.summaryTarget!!.endpoint)
+        assertEquals(settings.model, snapshot.summaryTarget!!.apiModel)
+        assertEquals(0, requests)
+    }
+
 }

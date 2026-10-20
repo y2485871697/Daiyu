@@ -78,6 +78,7 @@ internal fun AssistantPreviewDialog(
     title: String,
     onDismiss: () -> Unit,
     onBack: (() -> Unit)? = null,
+    showCloseButton: Boolean = true,
     footer: @Composable RowScope.() -> Unit = {},
     content: @Composable ColumnScope.() -> Unit,
 ) {
@@ -85,7 +86,7 @@ internal fun AssistantPreviewDialog(
     PreviewDialog(onDismiss) {
         val availableHeight = (maxHeight - 20.dp).coerceAtLeast(0.dp)
         val sheetHeight = minOf((maxHeight - 48.dp).coerceIn(300.dp, 520.dp), availableHeight)
-        AssistantPreviewSheet(title, onDismiss, onBack, footer,
+        AssistantPreviewSheet(title, onDismiss, onBack, showCloseButton, footer,
             modifier = Modifier.align(Alignment.BottomCenter).padding(10.dp)
                 .fillMaxWidth().height(sheetHeight),
             content = content)
@@ -97,6 +98,7 @@ internal fun AssistantPreviewSheet(
     title: String,
     onClose: () -> Unit,
     onBack: (() -> Unit)? = null,
+    showCloseButton: Boolean = true,
     footer: @Composable RowScope.() -> Unit = {},
     modifier: Modifier = Modifier,
     content: @Composable ColumnScope.() -> Unit,
@@ -117,13 +119,13 @@ internal fun AssistantPreviewSheet(
         Box(Modifier.align(Alignment.CenterHorizontally).width(29.dp * s).height(3.dp * s)
             .clip(CircleShape).background(colors.toolbar.copy(alpha = .24f)))
         Spacer(Modifier.height(17.dp * s))
-        Row(Modifier.fillMaxWidth().testTag("assistant-sheet-heading").padding(bottom = 13.dp * s), verticalAlignment = Alignment.CenterVertically,
+        Row(Modifier.fillMaxWidth().testTag("assistant-sheet-heading").padding(bottom = 13.dp * s).heightIn(min = 28.dp * s), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp * s)) {
             if (onBack != null) AssistantPreviewIcon(AssistantPreviewIcons.Back, "返回", onBack)
             Text(title, modifier = Modifier.weight(1f), color = colors.text,
                 fontSize = (16f * s).sp, lineHeight = (22.4f * s).sp,
                 fontWeight = FontWeight(550), letterSpacing = (-.3f * s).sp)
-            AssistantPreviewIcon(AssistantPreviewIcons.Close, "关闭", onClose)
+            if (showCloseButton) AssistantPreviewIcon(AssistantPreviewIcons.Close, "关闭", onClose)
         }
         Column(Modifier.fillMaxWidth().weight(1f), content = content)
         Spacer(Modifier.height(10.dp * s))

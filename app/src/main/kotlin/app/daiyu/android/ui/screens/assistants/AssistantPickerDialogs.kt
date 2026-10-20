@@ -84,6 +84,7 @@ fun AssistantPickerDialog(
     // Management is a view within the same glass sheet, not a stack of stock dialogs.
     AssistantPreviewDialog(show = show && actionProfile == null && deleteProfile == null,
         title = stringResource(R.string.assistant_picker_title), onDismiss = onDismiss,
+        showCloseButton = false,
         footer = {
             // Creation remains a visual placeholder until its editor flow is connected.
             AssistantPreviewButton(stringResource(R.string.assistant_new), {},
